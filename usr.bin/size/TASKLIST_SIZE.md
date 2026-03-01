@@ -61,15 +61,15 @@ Goal: implement `size` using section accounting from `libelfobj`.
 
 ## 6. Flags
 
-- [ ] `-A` / `--format=sysv`: SysV format.
-- [ ] `-B` / `--format=berkeley`: Berkeley format (default).
-- [ ] `--format=gnu`: GNU format.
-- [ ] `-d` / `-o` / `-x` / `--radix={8,10,16}`: number radix.
-- [ ] `-t` / `--totals`: print grand total row.
-- [ ] `--common`: include `SHN_COMMON` symbols in BSS total.
-- [ ] `--target=<bfdname>`: ignored (compat with GNU size).
-- [ ] `-V` / `--version`: version string.
-- [ ] `-h` / `--help`: usage.
+- [x] `-A` / `--format=sysv`: SysV format.
+- [x] `-B` / `--format=berkeley`: Berkeley format (default).
+- [x] `--format=gnu`: GNU format.
+- [x] `-d` / `-o` / `-x` / `--radix={8,10,16}`: number radix.
+- [x] `-t` / `--totals`: print grand total row.
+- [x] `--common`: include `SHN_COMMON` symbols in BSS total.
+- [x] `--target=<bfdname>`: ignored (compat with GNU size).
+- [x] `-V` / `--version`: version string.
+- [x] `-h` / `--help`: usage.
 
 ## 7. Error Handling
 

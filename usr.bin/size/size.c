@@ -61,8 +61,13 @@ static const char *progname = "size";
 static void usage(FILE *out) {
     fprintf(out,
             "usage: %s [-A|-B|--format={sysv,berkeley,gnu}] "
-            "[-d|-o|-x|--radix={8,10,16}] [-t|--totals] <file>...\n",
+            "[-d|-o|-x|--radix={8,10,16}] [-t|--totals] [--common] "
+            "[--target=bfdname] [-V|--version] [-h|--help] <file>...\n",
             progname);
+}
+
+static void print_version(void) {
+    printf("%s %s\n", progname, SIZE_VERSION);
 }
 
 static char *xstrdup(const char *s) {
@@ -417,7 +422,7 @@ static void classify_section(const elf_section_t *sec, size_totals_t *totals,
 }
 
 static int analyze_obj(elfobj_t *obj, size_report_t *report, size_classify_mode_t mode,
-                       int keep_rows) {
+                       int keep_rows, int include_common) {
     size_t i;
     size_t nsec;
     size_totals_t *totals;
@@ -450,11 +455,23 @@ static int analyze_obj(elfobj_t *obj, size_report_t *report, size_classify_mode_
             return -1;
         }
     }
+
+    if (include_common) {
+        size_t nsym = elf_symbol_count(obj);
+        for (i = 0; i < nsym; ++i) {
+            elf_symbol_t *sym = elf_symbol_at(obj, i);
+            if (sym != NULL && elf_symbol_shndx(sym) == SHN_COMMON) {
+                totals->bss += elf_symbol_size(sym);
+            }
+        }
+    }
+
     return 0;
 }
 
 static elf_err_t analyze_elf_path(const char *path, size_report_t *report,
-                                  size_classify_mode_t mode, int keep_rows) {
+                                  size_classify_mode_t mode, int keep_rows,
+                                  int include_common) {
     elfobj_t *obj = NULL;
     elf_err_t err;
     int rc;
@@ -463,7 +480,7 @@ static elf_err_t analyze_elf_path(const char *path, size_report_t *report,
     if (err != ELF_OK || obj == NULL) {
         return err;
     }
-    rc = analyze_obj(obj, report, mode, keep_rows);
+    rc = analyze_obj(obj, report, mode, keep_rows, include_common);
     elf_close(obj);
     if (rc != 0) {
         return ELF_ERR_OOM;
@@ -472,7 +489,8 @@ static elf_err_t analyze_elf_path(const char *path, size_report_t *report,
 }
 
 static elf_err_t analyze_elf_memory(const uint8_t *buf, size_t size, size_report_t *report,
-                                    size_classify_mode_t mode, int keep_rows) {
+                                    size_classify_mode_t mode, int keep_rows,
+                                    int include_common) {
     elfobj_t *obj = NULL;
     elf_err_t err;
     int rc;
@@ -481,7 +499,7 @@ static elf_err_t analyze_elf_memory(const uint8_t *buf, size_t size, size_report
     if (err != ELF_OK || obj == NULL) {
         return err;
     }
-    rc = analyze_obj(obj, report, mode, keep_rows);
+    rc = analyze_obj(obj, report, mode, keep_rows, include_common);
     elf_close(obj);
     if (rc != 0) {
         return ELF_ERR_OOM;
@@ -637,8 +655,8 @@ static void print_member_diag(const char *archive_path, const char *member_name,
 
 static int process_archive(const char *archive_path, const uint8_t *buf, size_t size, int is_thin,
                            size_format_t format, size_classify_mode_t classify_mode, int radix,
-                           int radix_explicit, size_totals_t *grand, int *printed, int *first_file,
-                           int *any_fail) {
+                           int radix_explicit, int include_common, size_totals_t *grand,
+                           int *printed, int *first_file, int *any_fail) {
     size_t off = AR_MAGIC_LEN;
     const uint8_t *gnu_name_table = NULL;
     size_t gnu_name_table_size = 0;
@@ -877,11 +895,12 @@ static int process_archive(const char *archive_path, const uint8_t *buf, size_t 
                     free(archive_dir);
                     return -1;
                 }
-                err = analyze_elf_path(resolved, &report, classify_mode, format == SIZE_FORMAT_SYSV);
+                err = analyze_elf_path(resolved, &report, classify_mode,
+                                       format == SIZE_FORMAT_SYSV, include_common);
                 free(resolved);
             } else {
                 err = analyze_elf_memory(member_data, member_size, &report, classify_mode,
-                                         format == SIZE_FORMAT_SYSV);
+                                         format == SIZE_FORMAT_SYSV, include_common);
             }
 
             if (err == ELF_OK) {
@@ -910,8 +929,8 @@ static int process_archive(const char *archive_path, const uint8_t *buf, size_t 
 }
 
 static int process_operand(const char *path, size_format_t format, size_classify_mode_t classify_mode,
-                           int radix, int radix_explicit, size_totals_t *grand, int *printed,
-                           int *first_file, int *any_fail) {
+                           int radix, int radix_explicit, int include_common, size_totals_t *grand,
+                           int *printed, int *first_file, int *any_fail) {
     uint8_t *buf = NULL;
     size_t sz = 0;
     int is_thin = 0;
@@ -920,6 +939,7 @@ static int process_operand(const char *path, size_format_t format, size_classify
 
     if (read_file_bytes(path, &buf, &sz) == 0 && is_archive_buffer(buf, sz, &is_thin)) {
         int rc = process_archive(path, buf, sz, is_thin, format, classify_mode, radix, radix_explicit,
+                                 include_common,
                                  grand, printed, first_file, any_fail);
         free(buf);
         return rc;
@@ -928,7 +948,8 @@ static int process_operand(const char *path, size_format_t format, size_classify
 
     memset(&report, 0, sizeof(report));
     report.totals.cls = ELFOBJ_CLASS_32;
-    err = analyze_elf_path(path, &report, classify_mode, format == SIZE_FORMAT_SYSV);
+    err = analyze_elf_path(path, &report, classify_mode, format == SIZE_FORMAT_SYSV,
+                           include_common);
     if (err != ELF_OK) {
         if (err == ELF_ERR_FORMAT) {
             fprintf(stderr, "%s: %s: file format not recognized\n", progname, path);
@@ -960,6 +981,7 @@ int main(int argc, char **argv) {
     int radix = 10;
     int radix_explicit = 0;
     int totals_forced = 0;
+    int include_common = 0;
     size_format_t format = SIZE_FORMAT_BERKELEY;
     size_classify_mode_t classify_mode = SIZE_CLASSIFY_BERKELEY;
     size_totals_t grand;
@@ -972,6 +994,14 @@ int main(int argc, char **argv) {
     }
 
     for (i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            usage(stdout);
+            return 0;
+        }
+        if (strcmp(argv[i], "-V") == 0 || strcmp(argv[i], "--version") == 0) {
+            print_version();
+            return 0;
+        }
         if (strcmp(argv[i], "-A") == 0 || strcmp(argv[i], "--format=sysv") == 0) {
             format = SIZE_FORMAT_SYSV;
             classify_mode = SIZE_CLASSIFY_SYSV;
@@ -1016,6 +1046,21 @@ int main(int argc, char **argv) {
             totals_forced = 1;
             continue;
         }
+        if (strcmp(argv[i], "--common") == 0) {
+            include_common = 1;
+            continue;
+        }
+        if (strncmp(argv[i], "--target=", 9) == 0) {
+            continue;
+        }
+        if (strcmp(argv[i], "--target") == 0) {
+            if (i + 1 < argc) {
+                i++;
+                continue;
+            }
+            usage(stderr);
+            return 1;
+        }
         if (argv[i][0] == '-') {
             usage(stderr);
             return 1;
@@ -1043,6 +1088,7 @@ int main(int argc, char **argv) {
             continue;
         }
         (void)process_operand(argv[i], format, classify_mode, radix, radix_explicit,
+                              include_common,
                               &grand, &printed, &first_file, &any_fail);
     }
 
