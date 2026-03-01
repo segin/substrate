@@ -121,6 +121,67 @@
 #define SHN_XINDEX 0xffff
 #endif
 
+#ifndef DT_SONAME
+#define DT_SONAME 14
+#define DT_RPATH 15
+#define DT_SYMBOLIC 16
+#define DT_REL 17
+#define DT_RELSZ 18
+#define DT_RELENT 19
+#define DT_PLTREL 20
+#define DT_DEBUG 21
+#define DT_TEXTREL 22
+#define DT_JMPREL 23
+#define DT_BIND_NOW 24
+#define DT_INIT_ARRAY 25
+#define DT_FINI_ARRAY 26
+#define DT_INIT_ARRAYSZ 27
+#define DT_FINI_ARRAYSZ 28
+#define DT_RUNPATH 29
+#define DT_FLAGS 30
+#define DT_PREINIT_ARRAY 32
+#define DT_PREINIT_ARRAYSZ 33
+#define DT_GNU_HASH 0x6ffffef5
+#define DT_FLAGS_1 0x6ffffffb
+#define DT_VERDEF 0x6ffffffc
+#define DT_VERDEFNUM 0x6ffffffd
+#define DT_VERNEED 0x6ffffffe
+#define DT_VERNEEDNUM 0x6fffffff
+#define DT_VERSYM 0x6ffffff0
+#define DT_RELA 7
+#define DT_RELASZ 8
+#define DT_RELAENT 9
+#define DT_STRSZ 10
+#define DT_SYMENT 11
+#define DT_INIT 12
+#define DT_FINI 13
+#define DT_PLTGOT 3
+#define DT_PLTRELSZ 2
+#define DT_HASH 4
+#endif
+
+#ifndef DF_ORIGIN
+#define DF_ORIGIN 0x00000001u
+#define DF_SYMBOLIC 0x00000002u
+#define DF_TEXTREL 0x00000004u
+#define DF_BIND_NOW 0x00000008u
+#define DF_STATIC_TLS 0x00000010u
+#endif
+
+#ifndef DF_1_NOW
+#define DF_1_NOW 0x00000001u
+#define DF_1_GLOBAL 0x00000002u
+#define DF_1_NODELETE 0x00000008u
+#define DF_1_LOADFLTR 0x00000010u
+#define DF_1_INITFIRST 0x00000020u
+#define DF_1_NOOPEN 0x00000040u
+#define DF_1_ORIGIN 0x00000080u
+#define DF_1_INTERPOSE 0x00000400u
+#define DF_1_NODEFLIB 0x00000800u
+#define DF_1_NODUMP 0x00001000u
+#define DF_1_PIE 0x08000000u
+#endif
+
 typedef struct {
     int wide;
     int show_file_header;
@@ -129,6 +190,7 @@ typedef struct {
     int show_symbols;
     int only_dynsyms;
     int show_relocs;
+    int show_dynamic;
 } readelf_opts_t;
 
 typedef struct {
@@ -1340,6 +1402,183 @@ static void print_relocations(const elf_view_t *view, const elf_header_t *hdr) {
     }
 }
 
+static const char *dynamic_tag_name(uint64_t tag) {
+    switch ((int64_t)tag) {
+        case DT_NULL: return "NULL";
+        case DT_NEEDED: return "NEEDED";
+        case DT_SONAME: return "SONAME";
+        case DT_RPATH: return "RPATH";
+        case DT_RUNPATH: return "RUNPATH";
+        case DT_INIT: return "INIT";
+        case DT_FINI: return "FINI";
+        case DT_INIT_ARRAY: return "INIT_ARRAY";
+        case DT_FINI_ARRAY: return "FINI_ARRAY";
+        case DT_HASH: return "HASH";
+        case DT_GNU_HASH: return "GNU_HASH";
+        case DT_STRTAB: return "STRTAB";
+        case DT_SYMTAB: return "SYMTAB";
+        case DT_STRSZ: return "STRSZ";
+        case DT_SYMENT: return "SYMENT";
+        case DT_PLTGOT: return "PLTGOT";
+        case DT_PLTRELSZ: return "PLTRELSZ";
+        case DT_PLTREL: return "PLTREL";
+        case DT_JMPREL: return "JMPREL";
+        case DT_REL: return "REL";
+        case DT_RELA: return "RELA";
+        case DT_RELSZ: return "RELSZ";
+        case DT_RELASZ: return "RELASZ";
+        case DT_RELENT: return "RELENT";
+        case DT_RELAENT: return "RELAENT";
+        case DT_TEXTREL: return "TEXTREL";
+        case DT_BIND_NOW: return "BIND_NOW";
+        case DT_FLAGS: return "FLAGS";
+        case DT_FLAGS_1: return "FLAGS_1";
+        case DT_VERNEED: return "VERNEED";
+        case DT_VERNEEDNUM: return "VERNEEDNUM";
+        case DT_VERDEF: return "VERDEF";
+        case DT_VERDEFNUM: return "VERDEFNUM";
+        case DT_VERSYM: return "VERSYM";
+        case DT_DEBUG: return "DEBUG";
+        default: return NULL;
+    }
+}
+
+static void decode_df_flags(uint64_t value, char *buf, size_t buflen) {
+    int first = 1;
+    buf[0] = '\0';
+#define APPEND_FLAG(cond, name) \
+    do { \
+        if (cond) { \
+            snprintf(buf + strlen(buf), buflen - strlen(buf), "%s%s", first ? "" : ",", name); \
+            first = 0; \
+        } \
+    } while (0)
+    APPEND_FLAG(value & DF_ORIGIN, "ORIGIN");
+    APPEND_FLAG(value & DF_SYMBOLIC, "SYMBOLIC");
+    APPEND_FLAG(value & DF_TEXTREL, "TEXTREL");
+    APPEND_FLAG(value & DF_BIND_NOW, "BIND_NOW");
+    APPEND_FLAG(value & DF_STATIC_TLS, "STATIC_TLS");
+#undef APPEND_FLAG
+    if (first) {
+        snprintf(buf, buflen, "0");
+    }
+}
+
+static void decode_df1_flags(uint64_t value, char *buf, size_t buflen) {
+    int first = 1;
+    buf[0] = '\0';
+#define APPEND_FLAG(cond, name) \
+    do { \
+        if (cond) { \
+            snprintf(buf + strlen(buf), buflen - strlen(buf), "%s%s", first ? "" : ",", name); \
+            first = 0; \
+        } \
+    } while (0)
+    APPEND_FLAG(value & DF_1_NOW, "NOW");
+    APPEND_FLAG(value & DF_1_GLOBAL, "GLOBAL");
+    APPEND_FLAG(value & DF_1_NODELETE, "NODELETE");
+    APPEND_FLAG(value & DF_1_LOADFLTR, "LOADFLTR");
+    APPEND_FLAG(value & DF_1_INITFIRST, "INITFIRST");
+    APPEND_FLAG(value & DF_1_NOOPEN, "NOOPEN");
+    APPEND_FLAG(value & DF_1_ORIGIN, "ORIGIN");
+    APPEND_FLAG(value & DF_1_INTERPOSE, "INTERPOSE");
+    APPEND_FLAG(value & DF_1_NODEFLIB, "NODEFLIB");
+    APPEND_FLAG(value & DF_1_NODUMP, "NODUMP");
+    APPEND_FLAG(value & DF_1_PIE, "PIE");
+#undef APPEND_FLAG
+    if (first) {
+        snprintf(buf, buflen, "0");
+    }
+}
+
+static void print_dynamic(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    uint64_t i;
+
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        section_header_t strsec;
+        const uint8_t *strtab = NULL;
+        size_t strsz = 0;
+        uint64_t count;
+        uint64_t j;
+
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) {
+            break;
+        }
+        if (sh.type != SHT_DYNAMIC || sh.entsize == 0 || sh.off + sh.size > view->size) {
+            continue;
+        }
+        if (sh.link < shnum && read_shdr(view, hdr, sh.link, &strsec) == 0 &&
+            strsec.off + strsec.size <= view->size) {
+            strtab = view->data + strsec.off;
+            strsz = (size_t)strsec.size;
+        }
+
+        count = sh.size / sh.entsize;
+        printf("\nDynamic section at offset 0x%" PRIx64 " contains %" PRIu64 " entries:\n",
+               sh.off, count);
+        printf("  Tag                Type                 Name/Value\n");
+        for (j = 0; j < count; ++j) {
+            uint64_t base = sh.off + (j * sh.entsize);
+            uint64_t d_tag_u = 0;
+            int64_t d_tag = 0;
+            uint64_t d_val = 0;
+            const char *name;
+            char tagbuf[32];
+            char flagbuf[128];
+
+            if (view->cls == ELFOBJ_CLASS_64) {
+                if (view_u64(view, (size_t)base, &d_tag_u) != 0 ||
+                    view_u64(view, (size_t)(base + 8), &d_val) != 0) {
+                    break;
+                }
+                d_tag = (int64_t)d_tag_u;
+            } else {
+                uint32_t t32 = 0, v32 = 0;
+                if (view_u32(view, (size_t)base, &t32) != 0 ||
+                    view_u32(view, (size_t)(base + 4), &v32) != 0) {
+                    break;
+                }
+                d_tag = (int32_t)t32;
+                d_val = v32;
+            }
+
+            name = dynamic_tag_name((uint64_t)d_tag);
+            if (name == NULL) {
+                snprintf(tagbuf, sizeof(tagbuf), "<0x%llx>", (unsigned long long)d_tag_u);
+                name = tagbuf;
+            }
+
+            printf(" 0x%016llx %-20s ", (unsigned long long)d_tag_u, name);
+            if (d_tag == DT_NEEDED || d_tag == DT_SONAME || d_tag == DT_RPATH || d_tag == DT_RUNPATH) {
+                if (strtab != NULL && d_val < strsz) {
+                    printf("[%s]", (const char *)(strtab + d_val));
+                } else {
+                    printf("<corrupt>");
+                }
+            } else if (d_tag == DT_FLAGS) {
+                decode_df_flags(d_val, flagbuf, sizeof(flagbuf));
+                printf("0x%llx (%s)", (unsigned long long)d_val, flagbuf);
+            } else if (d_tag == DT_FLAGS_1) {
+                decode_df1_flags(d_val, flagbuf, sizeof(flagbuf));
+                printf("0x%llx (%s)", (unsigned long long)d_val, flagbuf);
+            } else if (d_tag == DT_PLTREL) {
+                if (d_val == DT_REL) {
+                    printf("REL");
+                } else if (d_val == DT_RELA) {
+                    printf("RELA");
+                } else {
+                    printf("0x%llx", (unsigned long long)d_val);
+                }
+            } else {
+                printf("0x%llx", (unsigned long long)d_val);
+            }
+            printf("\n");
+        }
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -1526,6 +1765,7 @@ static void usage(FILE *out) {
             "  -S, --section-headers   Display section headers\n"
             "  -s, --syms,--symbols    Display symbol table entries\n"
             "  -r, --relocs            Display relocations\n"
+            "  -d, --dynamic           Display dynamic section\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
@@ -1549,6 +1789,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"syms", no_argument, NULL, 's'},
         {"symbols", no_argument, NULL, 's'},
         {"relocs", no_argument, NULL, 'r'},
+        {"dynamic", no_argument, NULL, 'd'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
@@ -1565,7 +1806,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlsrSeaW", longopts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "hlsrdSeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -1582,6 +1823,9 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 'r':
                 opts->show_relocs = 1;
                 break;
+            case 'd':
+                opts->show_dynamic = 1;
+                break;
             case 'e':
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
@@ -1593,6 +1837,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 opts->show_section_headers = 1;
                 opts->show_symbols = 1;
                 opts->show_relocs = 1;
+                opts->show_dynamic = 1;
                 break;
             case 'W':
                 opts->wide = 1;
@@ -1658,7 +1903,8 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
         !opts->show_program_headers &&
         !opts->show_section_headers &&
         !opts->show_symbols &&
-        !opts->show_relocs) {
+        !opts->show_relocs &&
+        !opts->show_dynamic) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -1725,6 +1971,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_relocs) {
         print_relocations(&view, &hdr);
+    }
+    if (opts->show_dynamic) {
+        print_dynamic(&view, &hdr);
     }
 
 out:

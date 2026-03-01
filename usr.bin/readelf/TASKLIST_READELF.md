@@ -98,11 +98,11 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 7. Dynamic Section (`-d` / `--dynamic`)
 
-- [ ] Display all `DT_*` tags from `.dynamic` section.
-- [ ] Decode tag names: `DT_NEEDED`, `DT_SONAME`, `DT_RPATH`, `DT_RUNPATH`, `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_HASH`, `DT_GNU_HASH`, `DT_STRTAB`, `DT_SYMTAB`, `DT_STRSZ`, `DT_SYMENT`, `DT_PLTGOT`, `DT_PLTRELSZ`, `DT_PLTREL`, `DT_JMPREL`, `DT_REL`/`DT_RELA`, `DT_RELSZ`/`DT_RELASZ`, `DT_RELENT`/`DT_RELAENT`, `DT_TEXTREL`, `DT_BIND_NOW`, `DT_FLAGS`, `DT_FLAGS_1`, `DT_VERNEED`, `DT_VERNEEDNUM`, `DT_VERDEF`, `DT_VERDEFNUM`, `DT_VERSYM`, `DT_DEBUG`, `DT_NULL`.
-- [ ] Decode `DT_FLAGS` bits: `DF_ORIGIN`, `DF_SYMBOLIC`, `DF_TEXTREL`, `DF_BIND_NOW`, `DF_STATIC_TLS`.
-- [ ] Decode `DT_FLAGS_1` bits: `DF_1_NOW`, `DF_1_GLOBAL`, `DF_1_NODELETE`, `DF_1_LOADFLTR`, `DF_1_INITFIRST`, `DF_1_NOOPEN`, `DF_1_ORIGIN`, `DF_1_INTERPOSE`, `DF_1_NODEFLIB`, `DF_1_NODUMP`, `DF_1_PIE`.
-- [ ] Resolve string values for `DT_NEEDED`, `DT_SONAME`, `DT_RPATH`, `DT_RUNPATH` from `.dynstr`.
+- [x] Display all `DT_*` tags from `.dynamic` section.
+- [x] Decode tag names: `DT_NEEDED`, `DT_SONAME`, `DT_RPATH`, `DT_RUNPATH`, `DT_INIT`, `DT_FINI`, `DT_INIT_ARRAY`, `DT_FINI_ARRAY`, `DT_HASH`, `DT_GNU_HASH`, `DT_STRTAB`, `DT_SYMTAB`, `DT_STRSZ`, `DT_SYMENT`, `DT_PLTGOT`, `DT_PLTRELSZ`, `DT_PLTREL`, `DT_JMPREL`, `DT_REL`/`DT_RELA`, `DT_RELSZ`/`DT_RELASZ`, `DT_RELENT`/`DT_RELAENT`, `DT_TEXTREL`, `DT_BIND_NOW`, `DT_FLAGS`, `DT_FLAGS_1`, `DT_VERNEED`, `DT_VERNEEDNUM`, `DT_VERDEF`, `DT_VERDEFNUM`, `DT_VERSYM`, `DT_DEBUG`, `DT_NULL`.
+- [x] Decode `DT_FLAGS` bits: `DF_ORIGIN`, `DF_SYMBOLIC`, `DF_TEXTREL`, `DF_BIND_NOW`, `DF_STATIC_TLS`.
+- [x] Decode `DT_FLAGS_1` bits: `DF_1_NOW`, `DF_1_GLOBAL`, `DF_1_NODELETE`, `DF_1_LOADFLTR`, `DF_1_INITFIRST`, `DF_1_NOOPEN`, `DF_1_ORIGIN`, `DF_1_INTERPOSE`, `DF_1_NODEFLIB`, `DF_1_NODUMP`, `DF_1_PIE`.
+- [x] Resolve string values for `DT_NEEDED`, `DT_SONAME`, `DT_RPATH`, `DT_RUNPATH` from `.dynstr`.
 
 ## 8. Notes Display (`-n` / `--notes`)
 
