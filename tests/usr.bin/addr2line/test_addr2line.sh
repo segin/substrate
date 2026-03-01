@@ -93,6 +93,32 @@ SRC
     cc -g -gdwarf-4 -fPIC -shared -Wl,-soname,libfixture.so -o "$out" "$TMP/so.c"
 }
 
+build_fixture_many_cus() {
+    out=$1
+    count=$2
+    objs=
+    i=0
+    while [ "$i" -lt "$count" ]; do
+        src="$TMP/unit_$i.c"
+        obj="$TMP/unit_$i.o"
+        cat > "$src" <<SRC
+int unit_func_$i(void) { return $i; }
+SRC
+        cc -g -gdwarf-4 -c -o "$obj" "$src"
+        objs="$objs $obj"
+        i=$((i + 1))
+    done
+    last=$((count - 1))
+    cat > "$TMP/unit_main.c" <<SRC
+extern int unit_func_0(void);
+extern int unit_func_$last(void);
+int main(void) { return unit_func_0() + unit_func_$last(); }
+SRC
+    cc -g -gdwarf-4 -c -o "$TMP/unit_main.o" "$TMP/unit_main.c"
+    # shellcheck disable=SC2086
+    cc -g -gdwarf-4 -no-pie -o "$out" $objs "$TMP/unit_main.o"
+}
+
 first_line() {
     printf '%s\n' "$1" | sed -n '1p'
 }
@@ -253,6 +279,48 @@ SRC
     [ -n "$SO_SYM" ] || fail "10e-2 so_func symbol not found"
     OUT_SO=$($BIN -f -e "$TMP/libfixture.so" 0x$SO_SYM)
     expect_eq "10e-2" "$(first_line "$OUT_SO")" "so_func"
+
+    # 10f-1: stripped binary with no DWARF/symbols -> unresolved output
+    require_cmd strip
+    cp "$TMP/exec64_v5" "$TMP/exec64_stripped"
+    strip --strip-all "$TMP/exec64_stripped"
+    OUT_STRIP=$($BIN -f -e "$TMP/exec64_stripped" 0x$A5)
+    [ "$(printf '%s\n' "$OUT_STRIP" | sed -n '1p')" = "??" ] || \
+        fail "10f-1 expected unresolved function"
+    [ "$(printf '%s\n' "$OUT_STRIP" | sed -n '2p')" = "??:0" ] || \
+        fail "10f-1 expected unresolved file:line"
+    pass "10f-1"
+
+    # 10f-2: address 0x0 is accepted as a valid query
+    OUT_ZERO=$($BIN -e "$TMP/exec64_v5" 0x0 2>"$TMP/err_10f2")
+    [ -n "$OUT_ZERO" ] || fail "10f-2 expected output for address 0x0"
+    if grep -E 'invalid address' "$TMP/err_10f2" >/dev/null 2>&1; then
+        fail "10f-2 0x0 should not be treated as invalid input"
+    fi
+    pass "10f-2"
+
+    # 10f-3: address beyond .text end -> unresolved
+    TEXT_FIELDS=$(readelf -SW "$TMP/exec64_v5" | \
+        awk '$2==".text" {print $4" "$6; exit} $3==".text" {print $5" "$7; exit}')
+    TEXT_BASE=$(printf '%s\n' "$TEXT_FIELDS" | awk '{print $1}')
+    TEXT_SIZE=$(printf '%s\n' "$TEXT_FIELDS" | awk '{print $2}')
+    [ -n "$TEXT_BASE" ] || fail "10f-3 missing .text base"
+    [ -n "$TEXT_SIZE" ] || fail "10f-3 missing .text size"
+    BEYOND_HEX=$(printf '%x' $((0x$TEXT_BASE + 0x$TEXT_SIZE + 0x200)))
+    OUT_BEYOND=$($BIN -e "$TMP/exec64_v5" 0x$BEYOND_HEX)
+    expect_eq "10f-3" "$OUT_BEYOND" "??:0"
+
+    # 10f-4: empty stdin input produces no output
+    OUT_EMPTY=$(printf '' | "$BIN" -e "$TMP/exec64_v5")
+    [ -z "$OUT_EMPTY" ] || fail "10f-4 expected no output for empty stdin"
+    pass "10f-4"
+
+    # 10f-5: large DWARF with many CUs resolves without crashing
+    build_fixture_many_cus "$TMP/many_cu" 48
+    MANY_ADDR=$(addr_of "$TMP/many_cu" unit_func_37)
+    [ -n "$MANY_ADDR" ] || fail "10f-5 unit_func_37 symbol not found"
+    OUT_MANY=$($BIN -e "$TMP/many_cu" 0x$MANY_ADDR)
+    expect_nonempty_match "10f-5" "$OUT_MANY" 'unit_37\.c:[0-9]+'
 
     pass "all"
 }

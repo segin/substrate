@@ -284,11 +284,11 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] `ET_DYN` shared library: verify symbol lookup.
 
 ### 10f. Edge Cases **(NF‑01 – NF‑07)**
-- [ ] Stripped binary (no DWARF): all addresses return `??:0`, `??` for function.
-- [ ] Address 0x0: valid lookup, return whatever is at address 0.
-- [ ] Address beyond `.text` end: return `??:0`.
-- [ ] Empty input (no addresses): no output.
-- [ ] Very large DWARF (many CUs): no crash, correct lookup.
+- [x] Stripped binary (no DWARF): all addresses return `??:0`, `??` for function.
+- [x] Address 0x0: valid lookup, return whatever is at address 0.
+- [x] Address beyond `.text` end: return `??:0`.
+- [x] Empty input (no addresses): no output.
+- [x] Very large DWARF (many CUs): no crash, correct lookup.
 
 ### 10g. Flag Combination Tests **(FR‑50 – FR‑55)**
 - [ ] `-f -s`: function + basename only.
