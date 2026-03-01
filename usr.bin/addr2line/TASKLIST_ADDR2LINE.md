@@ -211,10 +211,10 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 
 ## 6. Address Adjustment
 
-- [ ] Default: treat addresses as absolute virtual addresses.
-- [ ] `-j <section>` / `--section=<section>`: treat addresses as offsets within named section; add section's `sh_addr` before lookup. **(FR‑40)**
-- [ ] Auto‑detect PIE (`ET_DYN`): if input is `ET_DYN` and addresses look load‑relative, apply load bias. **(FR‑41)**
-- [ ] `--basenames`: strip directory prefix, print only filename. **(FR‑52)**
+- [x] Default: treat addresses as absolute virtual addresses.
+- [x] `-j <section>` / `--section=<section>`: treat addresses as offsets within named section; add section's `sh_addr` before lookup. **(FR‑40)**
+- [x] Auto‑detect PIE (`ET_DYN`): if input is `ET_DYN` and addresses look load‑relative, apply load bias. **(FR‑41)**
+- [x] `--basenames`: strip directory prefix, print only filename. **(FR‑52)**
 
 ---
 

@@ -14,6 +14,13 @@
 
 #define ADDR2LINE_VERSION "0.1.0"
 
+#define EI_CLASS_IDX 4
+#define EI_DATA_IDX 5
+#define ELFCLASS32 1
+#define ELFCLASS64 2
+#define ELFDATA2LSB 1
+#define ELFDATA2MSB 2
+
 #define DW_FORM_addr 0x01u
 #define DW_FORM_data2 0x05u
 #define DW_FORM_data4 0x06u
@@ -97,6 +104,8 @@ typedef struct {
     int show_column;
     int show_functions;
     int show_inlines;
+    const char *section_name;
+    int basenames;
 } addr2line_opts_t;
 
 typedef struct {
@@ -236,6 +245,11 @@ typedef struct {
 } dwarf_inline_t;
 
 typedef struct {
+    char *name;
+    uint64_t addr;
+} elf_section_meta_t;
+
+typedef struct {
     elfobj_t *elf;
     char *path;
     elfobj_class_t elf_class;
@@ -279,17 +293,24 @@ typedef struct {
     dwarf_inline_t *inlines;
     size_t inline_count;
     size_t inline_cap;
+
+    elf_section_meta_t *sections;
+    size_t section_count;
+    size_t section_cap;
+    uint64_t min_load_vaddr;
+    int has_min_load_vaddr;
 } addr2line_image_t;
 
 static const char *g_progname = "addr2line";
 static char *line_path_for_unit_file(const addr2line_image_t *img,
                                      size_t unit_index,
                                      uint32_t file_index);
+static const char *path_basename_view(const char *path);
 static void output_unresolved(void);
 
 static void usage(FILE *out) {
     fprintf(out,
-            "usage: %s [-e file] [-f] [-i] [-c] [addr ...]\n"
+            "usage: %s [-e file] [-f] [-i] [-c] [-s] [-j section] [addr ...]\n"
             "       %s --help\n"
             "       %s --version\n",
             g_progname, g_progname, g_progname);
@@ -312,6 +333,13 @@ static uint32_t rd_u32(const uint8_t *p, elfobj_endian_t e) {
     }
     return ((uint32_t)p[0]) | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) |
            ((uint32_t)p[3] << 24);
+}
+
+static uint16_t rd_u16(const uint8_t *p, elfobj_endian_t e) {
+    if (e == ELFOBJ_ENDIAN_BE) {
+        return (uint16_t)(((uint16_t)p[0] << 8) | p[1]);
+    }
+    return (uint16_t)(((uint16_t)p[1] << 8) | p[0]);
 }
 
 static uint64_t rd_u64(const uint8_t *p, elfobj_endian_t e) {
@@ -1868,6 +1896,10 @@ static void image_reset(addr2line_image_t *img) {
         free(img->die_names[i].linkage_name);
     }
     free(img->die_names);
+    for (i = 0; i < img->section_count; ++i) {
+        free(img->sections[i].name);
+    }
+    free(img->sections);
     for (i = 0; i < img->line_unit_count; ++i) {
         line_unit_free(&img->line_units[i]);
     }
@@ -1938,6 +1970,213 @@ static int image_collect_symbols(addr2line_image_t *img) {
     }
 
     return 0;
+}
+
+static int image_append_section_meta(addr2line_image_t *img, const char *name, uint64_t addr) {
+    elf_section_meta_t *next;
+    if (name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    if (img->section_count == img->section_cap) {
+        size_t new_cap = img->section_cap == 0 ? 32u : img->section_cap * 2u;
+        next = (elf_section_meta_t *)realloc(img->sections, new_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        img->sections = next;
+        img->section_cap = new_cap;
+    }
+    img->sections[img->section_count].name = strdup(name);
+    if (img->sections[img->section_count].name == NULL) {
+        return -1;
+    }
+    img->sections[img->section_count].addr = addr;
+    img->section_count++;
+    return 0;
+}
+
+static int parse_elf_metadata(addr2line_image_t *img, const char *path) {
+    FILE *fp;
+    uint8_t ident[16];
+    uint8_t *data = NULL;
+    size_t file_size;
+    size_t nread;
+    elfobj_endian_t e;
+    int cls;
+    uint64_t shoff = 0;
+    uint16_t shentsize = 0;
+    uint16_t shnum = 0;
+    uint16_t shstrndx = 0;
+    uint64_t phoff = 0;
+    uint16_t phentsize = 0;
+    uint16_t phnum = 0;
+    const uint8_t *shstr = NULL;
+    size_t shstr_size = 0;
+    size_t i;
+
+    fp = fopen(path, "rb");
+    if (fp == NULL) {
+        return -1;
+    }
+    if (fread(ident, 1, sizeof(ident), fp) != sizeof(ident)) {
+        fclose(fp);
+        return -1;
+    }
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    file_size = (size_t)ftell(fp);
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
+        return -1;
+    }
+    data = (uint8_t *)malloc(file_size);
+    if (data == NULL) {
+        fclose(fp);
+        return -1;
+    }
+    nread = fread(data, 1, file_size, fp);
+    fclose(fp);
+    if (nread != file_size || file_size < 64u) {
+        free(data);
+        return -1;
+    }
+
+    cls = data[EI_CLASS_IDX];
+    if (data[EI_DATA_IDX] == ELFDATA2MSB) {
+        e = ELFOBJ_ENDIAN_BE;
+    } else if (data[EI_DATA_IDX] == ELFDATA2LSB) {
+        e = ELFOBJ_ENDIAN_LE;
+    } else {
+        free(data);
+        return -1;
+    }
+
+    if (cls == ELFCLASS32) {
+        if (file_size < 52u) {
+            free(data);
+            return -1;
+        }
+        phoff = rd_u32(data + 28, e);
+        shoff = rd_u32(data + 32, e);
+        phentsize = (uint16_t)rd_u16(data + 42, e);
+        phnum = (uint16_t)rd_u16(data + 44, e);
+        shentsize = (uint16_t)rd_u16(data + 46, e);
+        shnum = (uint16_t)rd_u16(data + 48, e);
+        shstrndx = (uint16_t)rd_u16(data + 50, e);
+    } else if (cls == ELFCLASS64) {
+        if (file_size < 64u) {
+            free(data);
+            return -1;
+        }
+        phoff = rd_u64(data + 32, e);
+        shoff = rd_u64(data + 40, e);
+        phentsize = (uint16_t)rd_u16(data + 54, e);
+        phnum = (uint16_t)rd_u16(data + 56, e);
+        shentsize = (uint16_t)rd_u16(data + 58, e);
+        shnum = (uint16_t)rd_u16(data + 60, e);
+        shstrndx = (uint16_t)rd_u16(data + 62, e);
+    } else {
+        free(data);
+        return -1;
+    }
+
+    if (phoff > 0 && phentsize > 0) {
+        for (i = 0; i < phnum; ++i) {
+            uint64_t off = phoff + (uint64_t)i * phentsize;
+            uint32_t ptype;
+            uint64_t vaddr;
+            if (off + (uint64_t)phentsize > file_size) {
+                break;
+            }
+            if (cls == ELFCLASS32) {
+                ptype = rd_u32(data + off, e);
+                vaddr = rd_u32(data + off + 8, e);
+            } else {
+                ptype = rd_u32(data + off, e);
+                vaddr = rd_u64(data + off + 16, e);
+            }
+            if (ptype == PT_LOAD) {
+                if (!img->has_min_load_vaddr || vaddr < img->min_load_vaddr) {
+                    img->min_load_vaddr = vaddr;
+                    img->has_min_load_vaddr = 1;
+                }
+            }
+        }
+    }
+
+    if (shoff == 0 || shentsize == 0 || shnum == 0 || shstrndx >= shnum) {
+        free(data);
+        return 0;
+    }
+
+    if (shoff + (uint64_t)shentsize * shnum > file_size) {
+        free(data);
+        return -1;
+    }
+
+    {
+        uint64_t shstr_off = shoff + (uint64_t)shstrndx * shentsize;
+        uint64_t strtab_off;
+        uint64_t strtab_size;
+        if (cls == ELFCLASS32) {
+            strtab_off = rd_u32(data + shstr_off + 16, e);
+            strtab_size = rd_u32(data + shstr_off + 20, e);
+        } else {
+            strtab_off = rd_u64(data + shstr_off + 24, e);
+            strtab_size = rd_u64(data + shstr_off + 32, e);
+        }
+        if (strtab_off + strtab_size <= file_size) {
+            shstr = data + strtab_off;
+            shstr_size = (size_t)strtab_size;
+        }
+    }
+
+    for (i = 0; i < shnum; ++i) {
+        uint64_t off = shoff + (uint64_t)i * shentsize;
+        uint32_t name_off;
+        uint64_t addr;
+        const char *name = NULL;
+        if (cls == ELFCLASS32) {
+            name_off = rd_u32(data + off, e);
+            addr = rd_u32(data + off + 12, e);
+        } else {
+            name_off = rd_u32(data + off, e);
+            addr = rd_u64(data + off + 16, e);
+        }
+        if (shstr != NULL && name_off < shstr_size) {
+            const uint8_t *s = shstr + name_off;
+            size_t remain = shstr_size - name_off;
+            size_t j;
+            for (j = 0; j < remain; ++j) {
+                if (s[j] == 0) {
+                    name = (const char *)s;
+                    break;
+                }
+            }
+        }
+        if (name != NULL && image_append_section_meta(img, name, addr) != 0) {
+            free(data);
+            return -1;
+        }
+    }
+
+    free(data);
+    return 0;
+}
+
+static int find_section_addr(const addr2line_image_t *img,
+                             const char *name,
+                             uint64_t *out_addr) {
+    size_t i;
+    for (i = 0; i < img->section_count; ++i) {
+        if (strcmp(img->sections[i].name, name) == 0) {
+            *out_addr = img->sections[i].addr;
+            return 0;
+        }
+    }
+    return -1;
 }
 
 static void dwarf_abbrev_table_free(dwarf_abbrev_table_t *tab) {
@@ -3095,10 +3334,11 @@ static void output_inline_chain(const addr2line_image_t *img,
             puts(name);
         }
         if (path != NULL && path[0] != '\0') {
+            const char *out_path = opts->basenames ? path_basename_view(path) : path;
             if (opts->show_column) {
-                printf("%s:%" PRIu32 ":%" PRIu32 "\n", path, inl->call_line, inl->call_column);
+                printf("%s:%" PRIu32 ":%" PRIu32 "\n", out_path, inl->call_line, inl->call_column);
             } else {
-                printf("%s:%" PRIu32 "\n", path, inl->call_line);
+                printf("%s:%" PRIu32 "\n", out_path, inl->call_line);
             }
         } else {
             output_unresolved();
@@ -3136,6 +3376,9 @@ static int image_open(addr2line_image_t *img, const char *path) {
     img->elf_class = elf_class(img->elf);
     img->elf_endian = elf_endian(img->elf);
     img->elf_type = elf_type(img->elf);
+    if (parse_elf_metadata(img, path) != 0) {
+        warnf("failed to parse ELF metadata for %s", path);
+    }
 
     if (load_debug_blob(img, ".debug_line", &img->debug_line) != 0 ||
         load_debug_blob(img, ".debug_info", &img->debug_info) != 0 ||
@@ -3211,6 +3454,54 @@ static void output_unresolved(void) {
     puts("??:0");
 }
 
+static const char *path_basename_view(const char *path) {
+    const char *slash;
+    if (path == NULL) {
+        return "??";
+    }
+    slash = strrchr(path, '/');
+    if (slash != NULL && slash[1] != '\0') {
+        return slash + 1;
+    }
+    return path;
+}
+
+static uint64_t adjust_query_address(const addr2line_image_t *img,
+                                     const addr2line_opts_t *opts,
+                                     uint64_t query) {
+    uint64_t addr = query;
+
+    if (opts->section_name != NULL) {
+        uint64_t sec_addr = 0;
+        if (find_section_addr(img, opts->section_name, &sec_addr) == 0) {
+            addr += sec_addr;
+        }
+    }
+
+    if (img->elf_type == ET_DYN) {
+        const line_entry_t *direct = lookup_line_entry(img, addr);
+        const char *fn = lookup_function_name(img, addr);
+        if (direct == NULL && strcmp(fn, "??") == 0) {
+            uint64_t page_mask = ~0xfffull;
+            uint64_t ref_addr = img->min_load_vaddr;
+            uint64_t text_addr = 0;
+            if (find_section_addr(img, ".text", &text_addr) == 0 && text_addr != 0) {
+                ref_addr = text_addr;
+            }
+            uint64_t base = (addr & page_mask) - (ref_addr & page_mask);
+            if (base <= addr) {
+                uint64_t cand = addr - base;
+                if (lookup_line_entry(img, cand) != NULL ||
+                    strcmp(lookup_function_name(img, cand), "??") != 0) {
+                    addr = cand;
+                }
+            }
+        }
+    }
+
+    return addr;
+}
+
 static char *line_path_for_unit_file(const addr2line_image_t *img,
                                      size_t unit_index,
                                      uint32_t file_index) {
@@ -3284,10 +3575,13 @@ static void output_lookup(const addr2line_image_t *img,
         output_unresolved();
         return;
     }
-    if (opts->show_column) {
-        printf("%s:%" PRIu32 ":%" PRIu32 "\n", path, entry->line, entry->column);
-    } else {
-        printf("%s:%" PRIu32 "\n", path, entry->line);
+    {
+        const char *out_path = opts->basenames ? path_basename_view(path) : path;
+        if (opts->show_column) {
+            printf("%s:%" PRIu32 ":%" PRIu32 "\n", out_path, entry->line, entry->column);
+        } else {
+            printf("%s:%" PRIu32 "\n", out_path, entry->line);
+        }
     }
     free(path);
 }
@@ -3302,7 +3596,7 @@ static int resolve_stdin(const addr2line_image_t *img, const addr2line_opts_t *o
             output_unresolved();
             continue;
         }
-        output_lookup(img, query, opts);
+        output_lookup(img, adjust_query_address(img, opts, query), opts);
     }
 
     return 0;
@@ -3321,7 +3615,7 @@ static int resolve_argv(const addr2line_image_t *img,
             output_unresolved();
             continue;
         }
-        output_lookup(img, query, opts);
+        output_lookup(img, adjust_query_address(img, opts, query), opts);
     }
 
     return 0;
@@ -3375,6 +3669,32 @@ static int parse_options(int argc, char **argv, addr2line_opts_t *opts) {
             opts->show_inlines = 1;
             continue;
         }
+        if (strcmp(arg, "-s") == 0 || strcmp(arg, "--basenames") == 0) {
+            opts->basenames = 1;
+            continue;
+        }
+        if (strcmp(arg, "-j") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "%s: -j requires a section name\n", g_progname);
+                return -1;
+            }
+            i++;
+            opts->section_name = argv[i];
+            continue;
+        }
+        if (strcmp(arg, "--section") == 0) {
+            if (i + 1 >= argc) {
+                fprintf(stderr, "%s: --section requires a section name\n", g_progname);
+                return -1;
+            }
+            i++;
+            opts->section_name = argv[i];
+            continue;
+        }
+        if (strncmp(arg, "--section=", 10) == 0) {
+            opts->section_name = arg + 10;
+            continue;
+        }
 
         if (arg[0] == '-') {
             fprintf(stderr, "%s: unknown option: %s\n", g_progname, arg);
@@ -3405,6 +3725,14 @@ int main(int argc, char **argv) {
 
     if (image_open(&img, opts.exe_path) != 0) {
         return 1;
+    }
+    if (opts.section_name != NULL) {
+        uint64_t sec_addr = 0;
+        if (find_section_addr(&img, opts.section_name, &sec_addr) != 0) {
+            fprintf(stderr, "%s: unknown section: %s\n", g_progname, opts.section_name);
+            image_reset(&img);
+            return 1;
+        }
     }
 
     if (opts.addr_argc == 0) {
