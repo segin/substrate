@@ -93,9 +93,9 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `SYSCALL`/`SYSRET`, `SWAPGS`, `CMPXCHG16B`.
 
 ### 2c. VEX Prefix Encoding (AVX/AVX2/BMI/FMA/F16C)
-- [ ] 2-byte VEX (`C5`), 3-byte VEX (`C4`) selection.
-- [ ] VEX.L (128 vs 256), VEX.vvvv (3rd operand), VEX.W, VEX.pp.
-- [ ] Non-destructive 3-operand form for all VEX instructions.
+- [x] 2-byte VEX (`C5`), 3-byte VEX (`C4`) selection.
+- [x] VEX.L (128 vs 256), VEX.vvvv (3rd operand), VEX.W, VEX.pp.
+- [x] Non-destructive 3-operand form for all VEX instructions.
 
 ### 2d. EVEX Prefix Encoding (AVX-512)
 - [ ] 4-byte EVEX prefix: P0 (R/X/B/R'/mm), P1 (W/vvvv/pp), P2 (z/L'L/b/V'/aaa).
