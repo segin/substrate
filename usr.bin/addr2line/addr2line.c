@@ -513,7 +513,7 @@ static int read_sleb128(const uint8_t **pp, const uint8_t *end, int64_t *out) {
         return -1;
     }
     *pp = p;
-    *out = (int64_t)(int64_t)value;
+    *out = (int64_t)value;
     return 0;
 }
 
@@ -3479,7 +3479,7 @@ static int image_open(addr2line_image_t *img, const char *path) {
 
 static int parse_hex_address(const char *text, uint64_t *out) {
     char *end = NULL;
-    long v;
+    unsigned long long v;
 
     if (text == NULL || out == NULL) {
         return -1;
@@ -3494,11 +3494,8 @@ static int parse_hex_address(const char *text, uint64_t *out) {
     }
 
     errno = 0;
-    v = strtol(text, &end, 16);
+    v = strtoull(text, &end, 16);
     if (errno != 0 || end == text) {
-        return -1;
-    }
-    if (v < 0) {
         return -1;
     }
     while (*end != '\0') {
@@ -3508,7 +3505,7 @@ static int parse_hex_address(const char *text, uint64_t *out) {
         end++;
     }
 
-    *out = (uint64_t)(unsigned long)v;
+    *out = (uint64_t)v;
     return 0;
 }
 

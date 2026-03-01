@@ -28,5 +28,5 @@ $(PROG): ../../usr.lib/elfobj/libelfobj.a ../../usr.lib/demangle/libdemangle.a
 install: install-man
 
 install-man:
-	mkdir -p $(DESTDIR)/usr/share/man/man1
-	install -m 0644 addr2line.1 $(DESTDIR)/usr/share/man/man1/addr2line.1
+	mkdir -p $(DESTDIR)/usr/man/man1
+	install -m 0644 addr2line.1 $(DESTDIR)/usr/man/man1/addr2line.1
