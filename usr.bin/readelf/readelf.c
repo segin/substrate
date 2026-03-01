@@ -209,6 +209,7 @@ typedef struct {
     int show_relocs;
     int show_dynamic;
     int show_notes;
+    int show_version_info;
 } readelf_opts_t;
 
 typedef struct {
@@ -1772,6 +1773,175 @@ static void print_notes(const elf_view_t *view, const elf_header_t *hdr) {
     }
 }
 
+static const section_header_t *find_section_by_type(const section_header_t *secs, size_t n, uint32_t type) {
+    size_t i;
+    for (i = 0; i < n; ++i) {
+        if (secs[i].type == type) {
+            return &secs[i];
+        }
+    }
+    return NULL;
+}
+
+static const char *version_name_from_index(const elf_view_t *view, const elf_header_t *hdr,
+                                           const section_header_t *secs, size_t nsecs,
+                                           uint16_t idx, char *tmp, size_t tmpsz) {
+    const section_header_t *verdef = find_section_by_type(secs, nsecs, SHT_GNU_verdef);
+    const section_header_t *verneed = find_section_by_type(secs, nsecs, SHT_GNU_verneed);
+    const section_header_t *dynstr = NULL;
+    elf_view_t sv;
+    size_t off;
+    (void)hdr;
+
+    if (idx == 0) return "local";
+    if (idx == 1) return "global";
+
+    if (verdef != NULL && verdef->link < nsecs) {
+        dynstr = &secs[verdef->link];
+        if (verdef->off + verdef->size <= view->size && dynstr->off + dynstr->size <= view->size) {
+            sv = (elf_view_t){ .data = view->data + verdef->off, .size = (size_t)verdef->size, .endian = view->endian };
+            for (off = 0; off + 20 <= sv.size;) {
+                uint16_t vd_ndx = 0;
+                uint32_t vd_aux = 0;
+                uint32_t vd_next = 0;
+                uint32_t vda_name = 0;
+                if (view_u16(&sv, off + 4, &vd_ndx) != 0 ||
+                    view_u32(&sv, off + 12, &vd_aux) != 0 ||
+                    view_u32(&sv, off + 16, &vd_next) != 0) break;
+                if (vd_ndx == idx && off + vd_aux + 8 <= sv.size &&
+                    view_u32(&sv, off + vd_aux, &vda_name) == 0 &&
+                    vda_name < dynstr->size) {
+                    return (const char *)(view->data + dynstr->off + vda_name);
+                }
+                if (vd_next == 0) break;
+                off += vd_next;
+            }
+        }
+    }
+
+    if (verneed != NULL && verneed->link < nsecs) {
+        dynstr = &secs[verneed->link];
+        if (verneed->off + verneed->size <= view->size && dynstr->off + dynstr->size <= view->size) {
+            sv = (elf_view_t){ .data = view->data + verneed->off, .size = (size_t)verneed->size, .endian = view->endian };
+            for (off = 0; off + 16 <= sv.size;) {
+                uint16_t vn_cnt = 0;
+                uint32_t vn_aux = 0;
+                uint32_t vn_next = 0;
+                size_t aoff;
+                int c;
+                if (view_u16(&sv, off + 2, &vn_cnt) != 0 ||
+                    view_u32(&sv, off + 8, &vn_aux) != 0 ||
+                    view_u32(&sv, off + 12, &vn_next) != 0) break;
+                aoff = off + vn_aux;
+                for (c = 0; c < vn_cnt && aoff + 16 <= sv.size; ++c) {
+                    uint16_t vna_other = 0;
+                    uint32_t vna_name = 0;
+                    uint32_t vna_next = 0;
+                    if (view_u16(&sv, aoff + 6, &vna_other) != 0 ||
+                        view_u32(&sv, aoff + 8, &vna_name) != 0 ||
+                        view_u32(&sv, aoff + 12, &vna_next) != 0) break;
+                    if ((vna_other & 0x7fff) == idx && vna_name < dynstr->size) {
+                        return (const char *)(view->data + dynstr->off + vna_name);
+                    }
+                    if (vna_next == 0) break;
+                    aoff += vna_next;
+                }
+                if (vn_next == 0) break;
+                off += vn_next;
+            }
+        }
+    }
+
+    snprintf(tmp, tmpsz, "%u", idx);
+    return tmp;
+}
+
+static void print_version_info(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    section_header_t *secs;
+    uint64_t i;
+
+    secs = (section_header_t *)calloc((size_t)shnum, sizeof(*secs));
+    if (secs == NULL) {
+        return;
+    }
+    for (i = 0; i < shnum; ++i) {
+        if (read_shdr(view, hdr, (size_t)i, &secs[i]) != 0) {
+            break;
+        }
+    }
+
+    for (i = 0; i < shnum; ++i) {
+        if (secs[i].type == SHT_GNU_versym && secs[i].off + secs[i].size <= view->size) {
+            elf_view_t sv = {.data = view->data + secs[i].off, .size = (size_t)secs[i].size, .endian = view->endian};
+            size_t cnt = sv.size / 2;
+            size_t k;
+            char tmp[32];
+            printf("\nVersion symbols section '.gnu.version' contains %zu entries:\n", cnt);
+            for (k = 0; k < cnt; ++k) {
+                uint16_t v = 0;
+                if (view_u16(&sv, k * 2, &v) != 0) break;
+                printf("  %4zu: %u (%s)\n", k, v & 0x7fff,
+                       version_name_from_index(view, hdr, secs, (size_t)shnum, (uint16_t)(v & 0x7fff), tmp, sizeof(tmp)));
+            }
+        } else if (secs[i].type == SHT_GNU_verdef && secs[i].off + secs[i].size <= view->size) {
+            elf_view_t sv = {.data = view->data + secs[i].off, .size = (size_t)secs[i].size, .endian = view->endian};
+            const section_header_t *dynstr = (secs[i].link < shnum) ? &secs[secs[i].link] : NULL;
+            size_t off = 0;
+            printf("\nVersion definition section '.gnu.version_d':\n");
+            while (off + 20 <= sv.size) {
+                uint16_t vd_ndx = 0, vd_flags = 0;
+                uint32_t vd_aux = 0, vd_next = 0, vda_name = 0;
+                const char *name = "<corrupt>";
+                if (view_u16(&sv, off + 2, &vd_flags) != 0 || view_u16(&sv, off + 4, &vd_ndx) != 0 ||
+                    view_u32(&sv, off + 12, &vd_aux) != 0 || view_u32(&sv, off + 16, &vd_next) != 0) break;
+                if (off + vd_aux + 8 <= sv.size && view_u32(&sv, off + vd_aux, &vda_name) == 0 &&
+                    dynstr != NULL && dynstr->off + dynstr->size <= view->size && vda_name < dynstr->size) {
+                    name = (const char *)(view->data + dynstr->off + vda_name);
+                }
+                printf("  Index: %u Flags: 0x%x Name: %s\n", vd_ndx, vd_flags, name);
+                if (vd_next == 0) break;
+                off += vd_next;
+            }
+        } else if (secs[i].type == SHT_GNU_verneed && secs[i].off + secs[i].size <= view->size) {
+            elf_view_t sv = {.data = view->data + secs[i].off, .size = (size_t)secs[i].size, .endian = view->endian};
+            const section_header_t *dynstr = (secs[i].link < shnum) ? &secs[secs[i].link] : NULL;
+            size_t off = 0;
+            printf("\nVersion needs section '.gnu.version_r':\n");
+            while (off + 16 <= sv.size) {
+                uint16_t vn_cnt = 0;
+                uint32_t vn_file = 0, vn_aux = 0, vn_next = 0;
+                const char *file = "<corrupt>";
+                size_t aoff;
+                int c;
+                if (view_u16(&sv, off + 2, &vn_cnt) != 0 || view_u32(&sv, off + 4, &vn_file) != 0 ||
+                    view_u32(&sv, off + 8, &vn_aux) != 0 || view_u32(&sv, off + 12, &vn_next) != 0) break;
+                if (dynstr != NULL && dynstr->off + dynstr->size <= view->size && vn_file < dynstr->size) {
+                    file = (const char *)(view->data + dynstr->off + vn_file);
+                }
+                printf("  File: %s\n", file);
+                aoff = off + vn_aux;
+                for (c = 0; c < vn_cnt && aoff + 16 <= sv.size; ++c) {
+                    uint16_t vna_flags = 0, vna_other = 0;
+                    uint32_t vna_name = 0, vna_next = 0;
+                    const char *name = "<corrupt>";
+                    if (view_u16(&sv, aoff + 4, &vna_flags) != 0 || view_u16(&sv, aoff + 6, &vna_other) != 0 ||
+                        view_u32(&sv, aoff + 8, &vna_name) != 0 || view_u32(&sv, aoff + 12, &vna_next) != 0) break;
+                    if (dynstr != NULL && dynstr->off + dynstr->size <= view->size && vna_name < dynstr->size) {
+                        name = (const char *)(view->data + dynstr->off + vna_name);
+                    }
+                    printf("    Name: %s Index: %u Flags: 0x%x\n", name, (unsigned)(vna_other & 0x7fff), vna_flags);
+                    if (vna_next == 0) break;
+                    aoff += vna_next;
+                }
+                if (vn_next == 0) break;
+                off += vn_next;
+            }
+        }
+    }
+    free(secs);
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -1960,6 +2130,7 @@ static void usage(FILE *out) {
             "  -r, --relocs            Display relocations\n"
             "  -d, --dynamic           Display dynamic section\n"
             "  -n, --notes             Display notes\n"
+            "  -V, --version-info      Display version sections\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
@@ -1985,6 +2156,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"relocs", no_argument, NULL, 'r'},
         {"dynamic", no_argument, NULL, 'd'},
         {"notes", no_argument, NULL, 'n'},
+        {"version-info", no_argument, NULL, 'V'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
@@ -2001,7 +2173,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlsrdnSeaW", longopts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "hlsrdnVSeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -2024,6 +2196,9 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 'n':
                 opts->show_notes = 1;
                 break;
+            case 'V':
+                opts->show_version_info = 1;
+                break;
             case 'e':
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
@@ -2037,6 +2212,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 opts->show_relocs = 1;
                 opts->show_dynamic = 1;
                 opts->show_notes = 1;
+                opts->show_version_info = 1;
                 break;
             case 'W':
                 opts->wide = 1;
@@ -2104,7 +2280,8 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
         !opts->show_symbols &&
         !opts->show_relocs &&
         !opts->show_dynamic &&
-        !opts->show_notes) {
+        !opts->show_notes &&
+        !opts->show_version_info) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -2177,6 +2354,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_notes) {
         print_notes(&view, &hdr);
+    }
+    if (opts->show_version_info) {
+        print_version_info(&view, &hdr);
     }
 
 out:

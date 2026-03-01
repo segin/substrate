@@ -124,10 +124,10 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 9. Version Information (`-V` / `--version-info`)
 
-- [ ] Display `.gnu.version` (version symbol indices per dynsym entry).
-- [ ] Display `.gnu.version_d` (version definitions): index, flags, version name, predecessors.
-- [ ] Display `.gnu.version_r` (version requirements): file, version name, flags.
-- [ ] Cross-reference version indices to definition/requirement names.
+- [x] Display `.gnu.version` (version symbol indices per dynsym entry).
+- [x] Display `.gnu.version_d` (version definitions): index, flags, version name, predecessors.
+- [x] Display `.gnu.version_r` (version requirements): file, version name, flags.
+- [x] Cross-reference version indices to definition/requirement names.
 
 ## 10. Hash Tables (`--histogram` / `-I`)
 
