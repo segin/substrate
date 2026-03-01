@@ -5113,11 +5113,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] SS3 sequences: `ESC O A`/`B`/`C`/`D` (alternate arrow encoding).
         - [x] Extended CSI: `ESC [ 1 ; <mod> <final>` (Shift/Ctrl/Alt + arrow/Home/End).
         - [x] Timeout on incomplete escape (avoid blocking on bare ESC).
-    - [ ] **Kill Ring:**
-        - [ ] Circular buffer (8 entries default).
-        - [ ] `kill-line`, `kill-word`, `backward-kill-word`, `backward-kill-line` all push to ring.
-        - [ ] Consecutive kills append to the same ring entry.
-        - [ ] `yank` inserts most recent; `yank-pop` rotates.
+    - [x] **Kill Ring:**
+        - [x] Circular buffer (8 entries default).
+        - [x] `kill-line`, `kill-word`, `backward-kill-word`, `backward-kill-line` all push to ring.
+        - [x] Consecutive kills append to the same ring entry.
+        - [x] `yank` inserts most recent; `yank-pop` rotates.
     - [ ] **Undo System:**
         - [ ] Record each editing operation (insert, delete, cursor move) as an undo entry.
         - [ ] `^_` pops the undo stack and reverts the operation.
