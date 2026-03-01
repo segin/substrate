@@ -104,10 +104,10 @@ Goal: implement `size` using section accounting from `libelfobj`.
 - [x] Mock ELF64 object with `.bss` size > 4 GiB — total does not wrap.
 
 ### 9e. ELF Variant Tests
-- [ ] ELF32 LE ET_REL.
-- [ ] ELF64 LE ET_REL.
-- [ ] ET_EXEC and ET_DYN — segment‑based vs section‑based accounting matches.
-- [ ] Stripped ELF (no `.symtab`): sections still countable.
+- [x] ELF32 LE ET_REL.
+- [x] ELF64 LE ET_REL.
+- [x] ET_EXEC and ET_DYN — segment‑based vs section‑based accounting matches.
+- [x] Stripped ELF (no `.symtab`): sections still countable.
 
 ### 9f. Integration Tests
 - [ ] `cc -c foo.c` → `size foo.o` — verify text ≥ compiled code size.
