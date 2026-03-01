@@ -101,7 +101,7 @@ Goal: implement `size` using section accounting from `libelfobj`.
 - [x] Archive with 3 `.o` members: 3 rows with `archive(member)` names.
 
 ### 9d. Overflow Tests
-- [ ] Mock ELF64 object with `.bss` size > 4 GiB — total does not wrap.
+- [x] Mock ELF64 object with `.bss` size > 4 GiB — total does not wrap.
 
 ### 9e. ELF Variant Tests
 - [ ] ELF32 LE ET_REL.
