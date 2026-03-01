@@ -91,10 +91,10 @@ Goal: implement `size` using section accounting from `libelfobj`.
 - [x] ET_REL with no `SHF_ALLOC` sections — all zeros.
 
 ### 9b. Format Tests
-- [ ] Berkeley output matches expected column layout.
-- [ ] SysV output matches per‑section table layout.
-- [ ] `-x` radix: all numbers in hex.
-- [ ] `-o` radix: all numbers in octal.
+- [x] Berkeley output matches expected column layout.
+- [x] SysV output matches per‑section table layout.
+- [x] `-x` radix: all numbers in hex.
+- [x] `-o` radix: all numbers in octal.
 
 ### 9c. Multi‑File Tests
 - [ ] Two files: two rows + total row.
