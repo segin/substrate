@@ -100,16 +100,16 @@ Execution policy:
 - [x] COMDAT/group directive handling.
 
 ## 8) GNU and Toolchain Compatibility Surface
-- [ ] GNU local label conventions used by compiler output.
-- [ ] Compiler-emitted `.cfi_*` directive set compatibility.
-- [ ] Compiler-emitted `.section` flag syntaxes compatibility.
-- [ ] GCC/Clang generated inline-asm patterns compatibility.
-- [ ] `.intel_syntax` and `.att_syntax` transitions.
-- [ ] Relaxation behavior compatibility expectations.
-- [ ] Feature-guarded compatibility matrix by `-march`.
-- [ ] Compatibility tests against known GNU as output patterns.
-- [ ] Intentional incompatibilities documented and tested.
-- [ ] Driver output compatibility with `ld` and `objdump`.
+- [x] GNU local label conventions used by compiler output.
+- [x] Compiler-emitted `.cfi_*` directive set compatibility.
+- [x] Compiler-emitted `.section` flag syntaxes compatibility.
+- [x] GCC/Clang generated inline-asm patterns compatibility.
+- [x] `.intel_syntax` and `.att_syntax` transitions.
+- [x] Relaxation behavior compatibility expectations.
+- [x] Feature-guarded compatibility matrix by `-march`.
+- [x] Compatibility tests against known GNU as output patterns.
+- [x] Intentional incompatibilities documented and tested.
+- [x] Driver output compatibility with `ld` and `objdump`.
 
 ## 9) Diagnostics, Safety, and Determinism
 - [ ] `file:line:col` diagnostics for parse/encode errors.

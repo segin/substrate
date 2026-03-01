@@ -182,3 +182,8 @@ Verification tools:
 - Treat backend forwarding and libelfobj validation as the compatibility contract.
 - Add ABI-facing behavior changes only with explicit compatibility notes.
 - Treat output object reproducibility as a regression gate.
+
+## 16. Intentional Incompatibilities (Documented)
+- Multi-input invocations are intentionally rejected; phase-1 driver accepts one source file per invocation.
+- `-mtune` is accepted for driver compatibility but has no direct encoding effect in the wrapper.
+- Native standalone parser/encoder parity with historical GNU as extensions is not a phase-1 goal; backend delegation remains the contract.
