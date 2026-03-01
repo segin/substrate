@@ -88,8 +88,8 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] `R_X86_64_GOTPCRELX`, `R_X86_64_REX_GOTPCRELX`, `R_X86_64_IRELATIVE`.
 
 ### 6c. ARM Relocation Names
-- [ ] All `R_ARM_*` types (0–111, 160, 249–255) with human-readable names.
-- [ ] Key types: `R_ARM_ABS32`, `R_ARM_REL32`, `R_ARM_CALL`, `R_ARM_JUMP24`, `R_ARM_THM_CALL`, `R_ARM_THM_JUMP24`, `R_ARM_MOVW_ABS_NC`, `R_ARM_MOVT_ABS`, `R_ARM_PREL31`, `R_ARM_GOT_BREL`, `R_ARM_PLT32`, `R_ARM_TLS_GD32`, `R_ARM_TLS_IE32`, `R_ARM_V4BX`, `R_ARM_TARGET1`, `R_ARM_TARGET2`.
+- [x] All `R_ARM_*` types (0–111, 160, 249–255) with human-readable names.
+- [x] Key types: `R_ARM_ABS32`, `R_ARM_REL32`, `R_ARM_CALL`, `R_ARM_JUMP24`, `R_ARM_THM_CALL`, `R_ARM_THM_JUMP24`, `R_ARM_MOVW_ABS_NC`, `R_ARM_MOVT_ABS`, `R_ARM_PREL31`, `R_ARM_GOT_BREL`, `R_ARM_PLT32`, `R_ARM_TLS_GD32`, `R_ARM_TLS_IE32`, `R_ARM_V4BX`, `R_ARM_TARGET1`, `R_ARM_TARGET2`.
 
 ### 6d. AArch64 Relocation Names
 - [ ] All `R_AARCH64_*` types with human-readable names.
