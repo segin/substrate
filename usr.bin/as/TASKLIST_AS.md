@@ -171,7 +171,7 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `ANDN`, `BEXTR`, `BLSI`, `BLSMSK`, `BLSR`, `TZCNT` (r32/r64)
 
 ### 4d. BMI2
-- [ ] `BZHI`, `MULX`, `PDEP`, `PEXT`, `RORX`, `SARX`, `SHLX`, `SHRX` (r32/r64)
+- [x] `BZHI`, `MULX`, `PDEP`, `PEXT`, `RORX`, `SARX`, `SHLX`, `SHRX` (r32/r64)
 
 ### 4e. F16C
 - [ ] `VCVTPH2PS`, `VCVTPS2PH`
