@@ -106,21 +106,21 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 8. Notes Display (`-n` / `--notes`)
 
-- [ ] Display all `PT_NOTE` segments and `SHT_NOTE` sections.
-- [ ] Decode note name + type combinations:
-    - [ ] `GNU` + `NT_GNU_ABI_TAG` (1): display OS/ABI and version.
-    - [ ] `GNU` + `NT_GNU_HWCAP` (2): display hardware capabilities.
-    - [ ] `GNU` + `NT_GNU_BUILD_ID` (3): display build ID as hex.
-    - [ ] `GNU` + `NT_GNU_GOLD_VERSION` (4): display gold version string.
-    - [ ] `GNU` + `NT_GNU_PROPERTY_TYPE_0` (5): decode `.note.gnu.property`.
-- [ ] Decode GNU property types:
-    - [ ] `GNU_PROPERTY_STACK_SIZE`.
-    - [ ] `GNU_PROPERTY_NO_COPY_ON_PROTECTED`.
-    - [ ] `GNU_PROPERTY_X86_ISA_1_NEEDED` / `_USED`: decode ISA level bits (BASELINE, V2, V3, V4).
-    - [ ] `GNU_PROPERTY_X86_FEATURE_1_AND`: decode IBT, SHSTK bits.
-    - [ ] `GNU_PROPERTY_AARCH64_FEATURE_1_AND`: decode BTI, PAC bits.
-- [ ] Display unknown note types with hex dump.
-- [ ] Handle alignment (4-byte for 32-bit, 8-byte for 64-bit) correctly.
+- [x] Display all `PT_NOTE` segments and `SHT_NOTE` sections.
+- [x] Decode note name + type combinations:
+    - [x] `GNU` + `NT_GNU_ABI_TAG` (1): display OS/ABI and version.
+    - [x] `GNU` + `NT_GNU_HWCAP` (2): display hardware capabilities.
+    - [x] `GNU` + `NT_GNU_BUILD_ID` (3): display build ID as hex.
+    - [x] `GNU` + `NT_GNU_GOLD_VERSION` (4): display gold version string.
+    - [x] `GNU` + `NT_GNU_PROPERTY_TYPE_0` (5): decode `.note.gnu.property`.
+- [x] Decode GNU property types:
+    - [x] `GNU_PROPERTY_STACK_SIZE`.
+    - [x] `GNU_PROPERTY_NO_COPY_ON_PROTECTED`.
+    - [x] `GNU_PROPERTY_X86_ISA_1_NEEDED` / `_USED`: decode ISA level bits (BASELINE, V2, V3, V4).
+    - [x] `GNU_PROPERTY_X86_FEATURE_1_AND`: decode IBT, SHSTK bits.
+    - [x] `GNU_PROPERTY_AARCH64_FEATURE_1_AND`: decode BTI, PAC bits.
+- [x] Display unknown note types with hex dump.
+- [x] Handle alignment (4-byte for 32-bit, 8-byte for 64-bit) correctly.
 
 ## 9. Version Information (`-V` / `--version-info`)
 

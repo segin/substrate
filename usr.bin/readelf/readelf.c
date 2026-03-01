@@ -182,6 +182,23 @@
 #define DF_1_PIE 0x08000000u
 #endif
 
+#ifndef NT_GNU_ABI_TAG
+#define NT_GNU_ABI_TAG 1
+#define NT_GNU_HWCAP 2
+#define NT_GNU_BUILD_ID 3
+#define NT_GNU_GOLD_VERSION 4
+#define NT_GNU_PROPERTY_TYPE_0 5
+#endif
+
+#ifndef GNU_PROPERTY_STACK_SIZE
+#define GNU_PROPERTY_STACK_SIZE 1u
+#define GNU_PROPERTY_NO_COPY_ON_PROTECTED 2u
+#define GNU_PROPERTY_X86_ISA_1_USED 0xc0010002u
+#define GNU_PROPERTY_X86_ISA_1_NEEDED 0xc0008002u
+#define GNU_PROPERTY_X86_FEATURE_1_AND 0xc0000002u
+#define GNU_PROPERTY_AARCH64_FEATURE_1_AND 0xc0000000u
+#endif
+
 typedef struct {
     int wide;
     int show_file_header;
@@ -191,6 +208,7 @@ typedef struct {
     int only_dynsyms;
     int show_relocs;
     int show_dynamic;
+    int show_notes;
 } readelf_opts_t;
 
 typedef struct {
@@ -1579,6 +1597,181 @@ static void print_dynamic(const elf_view_t *view, const elf_header_t *hdr) {
     }
 }
 
+static size_t align_up_size(size_t v, size_t align) {
+    size_t mask;
+
+    if (align == 0) {
+        return v;
+    }
+    mask = align - 1;
+    return (v + mask) & ~mask;
+}
+
+static void print_hex_dump(const uint8_t *p, size_t n) {
+    size_t i;
+    size_t max = n > 32 ? 32 : n;
+
+    for (i = 0; i < max; ++i) {
+        printf("%02x%s", p[i], i + 1 == max ? "" : " ");
+    }
+    if (n > max) {
+        printf(" ...");
+    }
+}
+
+static void decode_gnu_property(uint32_t ptype, const uint8_t *pdata, size_t psz) {
+    uint32_t v = 0;
+
+    if (psz >= 4) {
+        v = (uint32_t)pdata[0] |
+            ((uint32_t)pdata[1] << 8) |
+            ((uint32_t)pdata[2] << 16) |
+            ((uint32_t)pdata[3] << 24);
+    }
+
+    if (ptype == GNU_PROPERTY_STACK_SIZE) {
+        printf("stack size = %u", v);
+    } else if (ptype == GNU_PROPERTY_NO_COPY_ON_PROTECTED) {
+        printf("no-copy-on-protected");
+    } else if (ptype == GNU_PROPERTY_X86_ISA_1_USED || ptype == GNU_PROPERTY_X86_ISA_1_NEEDED) {
+        printf("%s ", ptype == GNU_PROPERTY_X86_ISA_1_USED ? "x86 ISA used:" : "x86 ISA needed:");
+        if (v & 0x1) printf(" BASELINE");
+        if (v & 0x2) printf(" V2");
+        if (v & 0x4) printf(" V3");
+        if (v & 0x8) printf(" V4");
+    } else if (ptype == GNU_PROPERTY_X86_FEATURE_1_AND) {
+        printf("x86 feature_1_and:");
+        if (v & 0x1) printf(" IBT");
+        if (v & 0x2) printf(" SHSTK");
+    } else if (ptype == GNU_PROPERTY_AARCH64_FEATURE_1_AND) {
+        printf("aarch64 feature_1_and:");
+        if (v & 0x1) printf(" BTI");
+        if (v & 0x2) printf(" PAC");
+    } else {
+        printf("unknown property (0x%x): ", ptype);
+        print_hex_dump(pdata, psz);
+    }
+}
+
+static void decode_gnu_note(uint32_t type, const uint8_t *desc, size_t descsz, size_t align) {
+    if (type == NT_GNU_ABI_TAG && descsz >= 16) {
+        uint32_t os = desc[0] | (desc[1] << 8) | (desc[2] << 16) | (desc[3] << 24);
+        uint32_t major = desc[4] | (desc[5] << 8) | (desc[6] << 16) | (desc[7] << 24);
+        uint32_t minor = desc[8] | (desc[9] << 8) | (desc[10] << 16) | (desc[11] << 24);
+        uint32_t sub = desc[12] | (desc[13] << 8) | (desc[14] << 16) | (desc[15] << 24);
+        const char *osn = (os == 0) ? "Linux" : (os == 1) ? "GNU" : (os == 2) ? "Solaris" :
+                          (os == 3) ? "FreeBSD" : "<unknown>";
+        printf("      OS: %s, ABI: %u.%u.%u\n", osn, major, minor, sub);
+    } else if (type == NT_GNU_HWCAP) {
+        printf("      HWCAP: ");
+        print_hex_dump(desc, descsz);
+        printf("\n");
+    } else if (type == NT_GNU_BUILD_ID) {
+        size_t i;
+        printf("      Build ID: ");
+        for (i = 0; i < descsz; ++i) {
+            printf("%02x", desc[i]);
+        }
+        printf("\n");
+    } else if (type == NT_GNU_GOLD_VERSION) {
+        printf("      Gold Version: %.*s\n", (int)descsz, (const char *)desc);
+    } else if (type == NT_GNU_PROPERTY_TYPE_0) {
+        size_t off = 0;
+        printf("      GNU Property:\n");
+        while (off + 8 <= descsz) {
+            uint32_t ptype = desc[off + 0] | (desc[off + 1] << 8) |
+                             (desc[off + 2] << 16) | (desc[off + 3] << 24);
+            uint32_t psz = desc[off + 4] | (desc[off + 5] << 8) |
+                           (desc[off + 6] << 16) | (desc[off + 7] << 24);
+            size_t poff = off + 8;
+            size_t nnext;
+            if (poff + psz > descsz) {
+                break;
+            }
+            printf("        0x%x: ", ptype);
+            decode_gnu_property(ptype, desc + poff, psz);
+            printf("\n");
+            nnext = poff + psz;
+            off = align_up_size(nnext, align);
+        }
+    } else {
+        printf("      Unknown GNU note type %u: ", type);
+        print_hex_dump(desc, descsz);
+        printf("\n");
+    }
+}
+
+static void parse_note_blob(const elf_view_t *view, uint64_t off, uint64_t size,
+                            const char *label, size_t align) {
+    size_t cur = 0;
+
+    if (off + size > view->size) {
+        return;
+    }
+    printf("\nDisplaying notes found in: %s\n", label);
+    while (cur + 12 <= size) {
+        uint32_t namesz = 0;
+        uint32_t descsz = 0;
+        uint32_t type = 0;
+        size_t nh_off = (size_t)off + cur;
+        size_t name_off;
+        size_t desc_off;
+        const uint8_t *name;
+        const uint8_t *desc;
+
+        if (view_u32(view, nh_off + 0, &namesz) != 0 ||
+            view_u32(view, nh_off + 4, &descsz) != 0 ||
+            view_u32(view, nh_off + 8, &type) != 0) {
+            break;
+        }
+        name_off = nh_off + 12;
+        desc_off = align_up_size(name_off + namesz, align);
+        if (desc_off + descsz > off + size || name_off + namesz > off + size) {
+            break;
+        }
+
+        name = view->data + name_off;
+        desc = view->data + desc_off;
+        printf("  Owner                Data size  Type\n");
+        printf("  %-20.*s %-10u 0x%x\n", (int)(namesz ? namesz - 1 : 0), (const char *)name, descsz, type);
+
+        if (namesz >= 4 && memcmp(name, "GNU", 3) == 0) {
+            decode_gnu_note(type, desc, descsz, align);
+        } else {
+            printf("      Unknown note payload: ");
+            print_hex_dump(desc, descsz);
+            printf("\n");
+        }
+
+        cur = align_up_size((desc_off + descsz) - off, align);
+    }
+}
+
+static void print_notes(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    uint64_t i;
+    size_t align = (view->cls == ELFOBJ_CLASS_64) ? 8 : 4;
+
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) {
+            break;
+        }
+        if (sh.type == SHT_NOTE) {
+            parse_note_blob(view, sh.off, sh.size, "SHT_NOTE", align);
+        }
+    }
+    for (i = 0; i < hdr->phnum; ++i) {
+        program_header_t ph;
+        if (read_phdr(view, hdr, (size_t)i, &ph) != 0) {
+            break;
+        }
+        if (ph.type == PT_NOTE) {
+            parse_note_blob(view, ph.off, ph.filesz, "PT_NOTE", align);
+        }
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -1766,6 +1959,7 @@ static void usage(FILE *out) {
             "  -s, --syms,--symbols    Display symbol table entries\n"
             "  -r, --relocs            Display relocations\n"
             "  -d, --dynamic           Display dynamic section\n"
+            "  -n, --notes             Display notes\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
@@ -1790,6 +1984,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"symbols", no_argument, NULL, 's'},
         {"relocs", no_argument, NULL, 'r'},
         {"dynamic", no_argument, NULL, 'd'},
+        {"notes", no_argument, NULL, 'n'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
@@ -1806,7 +2001,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlsrdSeaW", longopts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "hlsrdnSeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -1826,6 +2021,9 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 'd':
                 opts->show_dynamic = 1;
                 break;
+            case 'n':
+                opts->show_notes = 1;
+                break;
             case 'e':
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
@@ -1838,6 +2036,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 opts->show_symbols = 1;
                 opts->show_relocs = 1;
                 opts->show_dynamic = 1;
+                opts->show_notes = 1;
                 break;
             case 'W':
                 opts->wide = 1;
@@ -1904,7 +2103,8 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
         !opts->show_section_headers &&
         !opts->show_symbols &&
         !opts->show_relocs &&
-        !opts->show_dynamic) {
+        !opts->show_dynamic &&
+        !opts->show_notes) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -1974,6 +2174,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_dynamic) {
         print_dynamic(&view, &hdr);
+    }
+    if (opts->show_notes) {
+        print_notes(&view, &hdr);
     }
 
 out:
