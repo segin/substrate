@@ -179,3 +179,4 @@ bin/sh/sh_ourobj_gcclink
 bin/sh/sh_ourobj_ourlink
 usr.bin/yacc/test_minimal_parser
 usr.bin/yacc/test_minimal.output
+usr.bin/size/size
