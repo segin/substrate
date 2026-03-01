@@ -271,9 +271,9 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] Fallback to `.symtab` when `.debug_info` absent: verify function name.
 
 ### 10c. Inline Frame Tests **(FR‑30, FR‑31)**
-- [ ] `-i`: verify multiple frames for inlined call site.
-- [ ] Verify ordering: innermost frame first.
-- [ ] Verify `DW_AT_call_file` / `DW_AT_call_line` values.
+- [x] `-i`: verify multiple frames for inlined call site.
+- [x] Verify ordering: innermost frame first.
+- [x] Verify `DW_AT_call_file` / `DW_AT_call_line` values.
 
 ### 10d. Section Offset Tests **(FR‑40)**
 - [ ] `-j .text`: addresses treated as section offsets.

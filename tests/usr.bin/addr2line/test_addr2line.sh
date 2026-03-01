@@ -63,6 +63,19 @@ SRC
     c++ -g $dwarf -no-pie -o "$out" "$TMP/sample.cpp"
 }
 
+build_fixture_rust_inline() {
+    out=$1
+    cat > "$TMP/inline.rs" <<'SRC'
+#[inline(always)]
+fn leaf(x: i32) -> i32 { x + 1 }
+#[inline(always)]
+fn mid(x: i32) -> i32 { leaf(x) + 2 }
+fn top(x: i32) -> i32 { mid(x) + 3 }
+fn main() { let _ = top(5); }
+SRC
+    rustc -C debuginfo=2 -C opt-level=2 -o "$out" "$TMP/inline.rs"
+}
+
 first_line() {
     printf '%s\n' "$1" | sed -n '1p'
 }
@@ -145,6 +158,51 @@ SRC
     OUT_SYM=$($BIN -f -e "$TMP/exec64_symtab_only" 0x$A5)
     SYM_FN=$(first_line "$OUT_SYM")
     expect_eq "10b-4" "$SYM_FN" "f1"
+
+    # 10c: inline frames
+    require_cmd rustc
+    require_cmd readelf
+    require_cmd addr2line
+    build_fixture_rust_inline "$TMP/rust_inline"
+
+    INLINE_ADDR=
+    OUT_INLINE=
+    HOST_INLINE=
+    for CAND in $(readelf --debug-dump=info "$TMP/rust_inline" | \
+        awk '/DW_TAG_inlined_subroutine/ {want=1; next}
+             want && /DW_AT_low_pc/ {gsub("0x", "", $NF); print $NF; want=0}' | \
+        head -n 64); do
+        OUT_CAND=$($BIN -f -i -e "$TMP/rust_inline" 0x$CAND 2>/dev/null || true)
+        HOST_CAND=$(addr2line -f -i -e "$TMP/rust_inline" 0x$CAND 2>/dev/null || true)
+        OLINES=$(printf '%s\n' "$OUT_CAND" | wc -l | tr -d ' ')
+        HLINES=$(printf '%s\n' "$HOST_CAND" | wc -l | tr -d ' ')
+        if [ "$OLINES" -ge 4 ] && [ "$HLINES" -ge 4 ]; then
+            INLINE_ADDR=$CAND
+            OUT_INLINE=$OUT_CAND
+            HOST_INLINE=$HOST_CAND
+            break
+        fi
+    done
+    [ -n "$INLINE_ADDR" ] || fail "10c no inline-frame probe address found"
+
+    # 10c-1: -i returns multiple frames
+    INLINE_LINES=$(printf '%s\n' "$OUT_INLINE" | wc -l | tr -d ' ')
+    [ "$INLINE_LINES" -ge 4 ] || fail "10c-1 expected >=4 lines, got $INLINE_LINES"
+    pass "10c-1"
+
+    # 10c-2: ordering matches host innermost frame first
+    expect_eq "10c-2" "$(first_line "$OUT_INLINE")" "$(first_line "$HOST_INLINE")"
+
+    # 10c-3: call_file/call_line locations are carried through output
+    HOST_LOC1=$(printf '%s\n' "$HOST_INLINE" | sed -n '2p')
+    HOST_LOC2=$(printf '%s\n' "$HOST_INLINE" | sed -n '4p')
+    [ -n "$HOST_LOC1" ] || fail "10c-3 host location #1 missing"
+    [ -n "$HOST_LOC2" ] || fail "10c-3 host location #2 missing"
+    printf '%s\n' "$OUT_INLINE" | grep -F "$HOST_LOC1" >/dev/null 2>&1 || \
+        fail "10c-3 missing call location: $HOST_LOC1"
+    printf '%s\n' "$OUT_INLINE" | grep -F "$HOST_LOC2" >/dev/null 2>&1 || \
+        fail "10c-3 missing call location: $HOST_LOC2"
+    pass "10c-3"
 
     pass "all"
 }
