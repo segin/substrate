@@ -245,10 +245,10 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] IT blocks (Thumb-2): `IT{T,E}{T,E}{T,E}` (up to 4 conditional instructions).
 
 ### 6b. Thumb / Thumb-2 Encoding
-- [ ] 16-bit narrow Thumb encoding for basic operations.
-- [ ] 32-bit wide Thumb-2 encoding for extended operations.
-- [ ] Automatic narrow/wide selection based on operand range.
-- [ ] `.syntax unified` (default): single mnemonic for ARM/Thumb with `.w`/`.n` suffixes.
+- [x] 16-bit narrow Thumb encoding for basic operations.
+- [x] 32-bit wide Thumb-2 encoding for extended operations.
+- [x] Automatic narrow/wide selection based on operand range.
+- [x] `.syntax unified` (default): single mnemonic for ARM/Thumb with `.w`/`.n` suffixes.
 
 ### 6c. Data Processing Instructions
 - [ ] `ADD`, `ADC`, `SUB`, `SBC`, `RSB`, `RSC` (immediate, register, shifted register)

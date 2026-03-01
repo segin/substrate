@@ -32,6 +32,38 @@ static int streq_ci(const char *a, const char *b) {
     return a[i] == '\0' && b[i] == '\0';
 }
 
+static int strcase_has_suffix(const char *s, const char *suffix) {
+    size_t ls;
+    size_t lf;
+    size_t i;
+
+    if (s == NULL || suffix == NULL) {
+        return 0;
+    }
+
+    ls = strlen(s);
+    lf = strlen(suffix);
+    if (ls < lf) {
+        return 0;
+    }
+
+    for (i = 0; i < lf; ++i) {
+        char a = s[ls - lf + i];
+        char b = suffix[i];
+        if (a >= 'A' && a <= 'Z') {
+            a = (char)(a + ('a' - 'A'));
+        }
+        if (b >= 'A' && b <= 'Z') {
+            b = (char)(b + ('a' - 'A'));
+        }
+        if (a != b) {
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
 static uint32_t rol32(uint32_t v, unsigned n) {
     n &= 31u;
     return (v << n) | (v >> ((32u - n) & 31u));
@@ -271,6 +303,105 @@ int as_arm_encode_operand2_imm(uint32_t imm32, uint32_t *out_bits) {
     return -1;
 }
 
+int as_arm_thumb_parse_unified(const char *mnemonic, char *base_out, size_t base_out_sz,
+                               as_arm_thumb_width_t *out_width) {
+    size_t len;
+    size_t end;
+    size_t i;
+    as_arm_thumb_width_t width = AS_ARM_THUMB_WIDTH_AUTO;
+
+    if (mnemonic == NULL || base_out == NULL || base_out_sz == 0 || out_width == NULL) {
+        return -1;
+    }
+
+    len = strlen(mnemonic);
+    end = len;
+    if (strcase_has_suffix(mnemonic, ".w")) {
+        width = AS_ARM_THUMB_WIDTH_WIDE;
+        end -= 2;
+    } else if (strcase_has_suffix(mnemonic, ".n")) {
+        width = AS_ARM_THUMB_WIDTH_NARROW;
+        end -= 2;
+    }
+
+    if (end == 0 || end + 1 > base_out_sz) {
+        return -1;
+    }
+
+    for (i = 0; i < end; ++i) {
+        char c = mnemonic[i];
+        if (c >= 'A' && c <= 'Z') {
+            c = (char)(c + ('a' - 'A'));
+        }
+        base_out[i] = c;
+    }
+    base_out[end] = '\0';
+    *out_width = width;
+    return 0;
+}
+
+int as_arm_thumb_encode_add_imm(uint8_t rd, uint8_t rn, uint16_t imm12, as_arm_thumb_width_t width,
+                                uint32_t *out_word, int *out_is_wide) {
+    int can_narrow;
+    int can_wide;
+    int use_wide;
+    uint16_t hi;
+    uint16_t lo;
+    uint32_t imm;
+    uint32_t i;
+    uint32_t imm3;
+    uint32_t imm8;
+
+    if (out_word == NULL || out_is_wide == NULL || rd > 15 || rn > 15) {
+        return -1;
+    }
+
+    can_narrow = (rd == rn && rd < 8 && imm12 <= 0xffu);
+    can_wide = (imm12 <= 0xfffu);
+
+    switch (width) {
+    case AS_ARM_THUMB_WIDTH_NARROW:
+        if (!can_narrow) {
+            return -1;
+        }
+        use_wide = 0;
+        break;
+    case AS_ARM_THUMB_WIDTH_WIDE:
+        if (!can_wide) {
+            return -1;
+        }
+        use_wide = 1;
+        break;
+    case AS_ARM_THUMB_WIDTH_AUTO:
+        if (can_narrow) {
+            use_wide = 0;
+        } else if (can_wide) {
+            use_wide = 1;
+        } else {
+            return -1;
+        }
+        break;
+    default:
+        return -1;
+    }
+
+    if (!use_wide) {
+        *out_word = 0x3000u | (((uint32_t)rd & 0x7u) << 8) | (uint32_t)(imm12 & 0xffu);
+        *out_is_wide = 0;
+        return 0;
+    }
+
+    imm = imm12;
+    i = (imm >> 11) & 1u;
+    imm3 = (imm >> 8) & 0x7u;
+    imm8 = imm & 0xffu;
+    hi = (uint16_t)(0xf200u | (i << 10) | ((uint32_t)rn & 0xfu));
+    lo = (uint16_t)((imm3 << 12) | (((uint32_t)rd & 0xfu) << 8) | imm8);
+    *out_word = ((uint32_t)hi << 16) | (uint32_t)lo;
+    *out_is_wide = 1;
+    return 0;
+}
+
 int as_arm_encode_addr_mode2(const as_arm_addr_mode2_t *mode, uint32_t *out_bits) {
     uint32_t bits;
     uint32_t off;
@@ -350,6 +481,7 @@ void as_arm_state_init(as_arm_state_ctx_t *ctx) {
 
     memset(ctx, 0, sizeof(*ctx));
     ctx->mode = AS_ARM_MODE_ARM;
+    ctx->unified_syntax = 1;
 }
 
 int as_arm_apply_directive(as_arm_state_ctx_t *ctx, const char *directive) {
@@ -373,6 +505,14 @@ int as_arm_apply_directive(as_arm_state_ctx_t *ctx, const char *directive) {
     if (streq_ci(directive, ".thumb_func")) {
         ctx->mode = AS_ARM_MODE_THUMB;
         ctx->thumb_func = 1;
+        return 0;
+    }
+    if (streq_ci(directive, ".syntax unified")) {
+        ctx->unified_syntax = 1;
+        return 0;
+    }
+    if (streq_ci(directive, ".syntax divided")) {
+        ctx->unified_syntax = 0;
         return 0;
     }
 

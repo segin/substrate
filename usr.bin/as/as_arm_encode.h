@@ -14,6 +14,12 @@ typedef enum {
 } as_arm_mode_t;
 
 typedef enum {
+    AS_ARM_THUMB_WIDTH_AUTO = 0,
+    AS_ARM_THUMB_WIDTH_NARROW,
+    AS_ARM_THUMB_WIDTH_WIDE,
+} as_arm_thumb_width_t;
+
+typedef enum {
     AS_ARM_COND_EQ = 0x0,
     AS_ARM_COND_NE = 0x1,
     AS_ARM_COND_CS = 0x2,
@@ -71,6 +77,7 @@ typedef enum {
 
 typedef struct {
     as_arm_mode_t mode;
+    int unified_syntax;
     int thumb_func;
     int it_active;
     as_arm_cond_t it_cond;
@@ -90,6 +97,11 @@ int as_arm_pack_cond_class(as_arm_cond_t cond, uint8_t class_bits, uint32_t payl
 
 int as_arm_encode_operand2_reg(uint8_t rm, const as_arm_shift_spec_t *shift, uint32_t *out_bits);
 int as_arm_encode_operand2_imm(uint32_t imm32, uint32_t *out_bits);
+
+int as_arm_thumb_parse_unified(const char *mnemonic, char *base_out, size_t base_out_sz,
+                               as_arm_thumb_width_t *out_width);
+int as_arm_thumb_encode_add_imm(uint8_t rd, uint8_t rn, uint16_t imm12, as_arm_thumb_width_t width,
+                                uint32_t *out_word, int *out_is_wide);
 
 int as_arm_encode_addr_mode2(const as_arm_addr_mode2_t *mode, uint32_t *out_bits);
 int as_arm_ldm_mode_to_pu(as_arm_ldm_mode_t mode, uint8_t *out_p, uint8_t *out_u);
