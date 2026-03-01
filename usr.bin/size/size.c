@@ -159,9 +159,9 @@ static void format_value(uint64_t value, int radix, char *buf, size_t buflen) {
 
 static int parse_decimal_field(const char *field, size_t len, uint64_t *out) {
     char tmp[32];
-    char *end = NULL;
-    unsigned long long v;
+    uint64_t v = 0;
     size_t n = 0;
+    size_t i;
 
     if (field == NULL || out == NULL || len == 0 || len >= sizeof(tmp)) {
         return -1;
@@ -181,12 +181,18 @@ static int parse_decimal_field(const char *field, size_t len, uint64_t *out) {
         *out = 0;
         return 0;
     }
-    errno = 0;
-    v = strtoull(tmp, &end, 10);
-    if (errno != 0 || end == tmp || *end != '\0') {
-        return -1;
+    for (i = 0; tmp[i] != '\0'; ++i) {
+        uint8_t digit;
+        if (tmp[i] < '0' || tmp[i] > '9') {
+            return -1;
+        }
+        digit = (uint8_t)(tmp[i] - '0');
+        if (v > (UINT64_MAX - (uint64_t)digit) / 10u) {
+            return -1;
+        }
+        v = v * 10u + (uint64_t)digit;
     }
-    *out = (uint64_t)v;
+    *out = v;
     return 0;
 }
 
