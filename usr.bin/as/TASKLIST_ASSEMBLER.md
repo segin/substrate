@@ -88,16 +88,16 @@ Execution policy:
 - [x] Section header layout/alignment correctness.
 
 ## 7) Directives and Data Emission
-- [ ] Data directives (`.byte/.short/.long/.quad`) endianness/width correctness.
-- [ ] String directives (`.ascii/.asciz/.string`) behavior.
-- [ ] Space/zero-fill directives (`.space/.fill/.zero`) behavior.
-- [ ] Org/location-counter directives where supported.
-- [ ] `.type` / `.size` semantics for functions/objects.
-- [ ] `.file` / `.loc` integration points for debug info.
-- [ ] `.cfi_*` directive parsing and frame info emission.
-- [ ] Note section directives where needed.
-- [ ] TLS section directives.
-- [ ] COMDAT/group directive handling.
+- [x] Data directives (`.byte/.short/.long/.quad`) endianness/width correctness.
+- [x] String directives (`.ascii/.asciz/.string`) behavior.
+- [x] Space/zero-fill directives (`.space/.fill/.zero`) behavior.
+- [x] Org/location-counter directives where supported.
+- [x] `.type` / `.size` semantics for functions/objects.
+- [x] `.file` / `.loc` integration points for debug info.
+- [x] `.cfi_*` directive parsing and frame info emission.
+- [x] Note section directives where needed.
+- [x] TLS section directives.
+- [x] COMDAT/group directive handling.
 
 ## 8) GNU and Toolchain Compatibility Surface
 - [ ] GNU local label conventions used by compiler output.
