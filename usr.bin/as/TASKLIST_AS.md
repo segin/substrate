@@ -32,12 +32,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] Forward reference resolution (two-pass or relaxation).
 
 ### 1d. Section Management
-- [ ] `.text`, `.data`, `.bss`, `.rodata` built-in sections.
-- [ ] `.section name, "flags", @type` with SHF_*/SHT_* mapping.
-- [ ] `.pushsection`/`.popsection`, `.previous`.
-- [ ] `.subsection` ordering.
-- [ ] `.group` / COMDAT support.
-- [ ] Section alignment via `.balign`/`.p2align`/`.align`.
+- [x] `.text`, `.data`, `.bss`, `.rodata` built-in sections.
+- [x] `.section name, "flags", @type` with SHF_*/SHT_* mapping.
+- [x] `.pushsection`/`.popsection`, `.previous`.
+- [x] `.subsection` ordering.
+- [x] `.group` / COMDAT support.
+- [x] Section alignment via `.balign`/`.p2align`/`.align`.
 
 ### 1e. Data Directives
 - [ ] `.byte`, `.short`/`.hword`, `.long`/`.int`, `.quad`/`.8byte`.
