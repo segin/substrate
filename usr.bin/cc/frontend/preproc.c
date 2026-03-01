@@ -1079,6 +1079,171 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__UINTPTR_MAX__", 0, 0, NULL, 0, uintptr_max) != 0) {
         return -1;
     }
+    if (macro_set(&st->macros, "__SCHAR_WIDTH__", 0, 0, NULL, 0, "8") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SHRT_WIDTH__", 0, 0, NULL, 0, "16") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__INT_WIDTH__", 0, 0, NULL, 0, "32") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LONG_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LONG_LONG_WIDTH__", 0, 0, NULL, 0, "64") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__PTRDIFF_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__SIZE_WIDTH__", 0, 0, NULL, 0, st->target_bits == 32 ? "32" : "64") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__WCHAR_WIDTH__", 0, 0, NULL, 0, "32") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_RADIX__", 0, 0, NULL, 0, "2") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_MANT_DIG__", 0, 0, NULL, 0, "24") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_DIG__", 0, 0, NULL, 0, "6") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_DECIMAL_DIG__", 0, 0, NULL, 0, "9") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_MIN_EXP__", 0, 0, NULL, 0, "(-125)") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_MAX_EXP__", 0, 0, NULL, 0, "128") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_MIN_10_EXP__", 0, 0, NULL, 0, "(-37)") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_MAX_10_EXP__", 0, 0, NULL, 0, "38") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_EPSILON__", 0, 0, NULL, 0, "1.19209290e-7F") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_MIN__", 0, 0, NULL, 0, "1.17549435e-38F") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_DENORM_MIN__", 0, 0, NULL, 0, "1.40129846e-45F") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_MAX__", 0, 0, NULL, 0, "3.40282347e+38F") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_MANT_DIG__", 0, 0, NULL, 0, "53") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_DIG__", 0, 0, NULL, 0, "15") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_DECIMAL_DIG__", 0, 0, NULL, 0, "17") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_MIN_EXP__", 0, 0, NULL, 0, "(-1021)") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_MAX_EXP__", 0, 0, NULL, 0, "1024") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_MIN_10_EXP__", 0, 0, NULL, 0, "(-307)") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_MAX_10_EXP__", 0, 0, NULL, 0, "308") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_EPSILON__", 0, 0, NULL, 0, "2.2204460492503131e-16") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_MIN__", 0, 0, NULL, 0, "2.2250738585072014e-308") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_DENORM_MIN__", 0, 0, NULL, 0, "4.9406564584124654e-324") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_MAX__", 0, 0, NULL, 0, "1.7976931348623157e+308") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_MANT_DIG__", 0, 0, NULL, 0, "64") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_DIG__", 0, 0, NULL, 0, "18") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_DECIMAL_DIG__", 0, 0, NULL, 0, "21") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_MIN_EXP__", 0, 0, NULL, 0, "(-16381)") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_MAX_EXP__", 0, 0, NULL, 0, "16384") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_MIN_10_EXP__", 0, 0, NULL, 0, "(-4931)") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_MAX_10_EXP__", 0, 0, NULL, 0, "4932") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_HAS_DENORM__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_HAS_DENORM__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_HAS_DENORM__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_HAS_INFINITY__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_HAS_INFINITY__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_HAS_INFINITY__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_HAS_QUIET_NAN__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_HAS_QUIET_NAN__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_HAS_QUIET_NAN__", 0, 0, NULL, 0, "1") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__FLT_IS_IEC_60559__", 0, 0, NULL, 0, "2") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DBL_IS_IEC_60559__", 0, 0, NULL, 0, "2") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_IS_IEC_60559__", 0, 0, NULL, 0, "2") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_EPSILON__", 0, 0, NULL, 0, "1.08420217248550443401e-19L") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_MIN__", 0, 0, NULL, 0, "3.36210314311209350626e-4932L") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_DENORM_MIN__", 0, 0, NULL, 0, "3.64519953188247460253e-4951L") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__LDBL_MAX__", 0, 0, NULL, 0, "1.18973149535723176502e+4932L") != 0) {
+        return -1;
+    }
+    if (macro_set(&st->macros, "__DECIMAL_DIG__", 0, 0, NULL, 0, "21") != 0) {
+        return -1;
+    }
     if (macro_set(&st->macros, "__ATOMIC_RELAXED", 0, 0, NULL, 0, "0") != 0) {
         return -1;
     }
@@ -1830,12 +1995,49 @@ static int dir_exists(const char *path) {
     return S_ISDIR(st.st_mode);
 }
 
+static void path_make_key(const char *path, char out[PATH_MAX]) {
+    char real_buf[PATH_MAX];
+    size_t n;
+    if (out == NULL) {
+        return;
+    }
+    if (path == NULL || path[0] == '\0') {
+        out[0] = '\0';
+        return;
+    }
+    if (realpath(path, real_buf) != NULL) {
+        snprintf(out, PATH_MAX, "%s", real_buf);
+        return;
+    }
+    while (path[0] == '.' && path[1] == '/') {
+        path += 2;
+    }
+    if (path[0] == '\0') {
+        snprintf(out, PATH_MAX, ".");
+        return;
+    }
+    snprintf(out, PATH_MAX, "%s", path);
+    n = strlen(out);
+    while (n > 1 && out[n - 1] == '/') {
+        out[n - 1] = '\0';
+        n--;
+    }
+}
+
+static int path_keys_equal(const char *a, const char *b) {
+    char ka[PATH_MAX];
+    char kb[PATH_MAX];
+    path_make_key(a, ka);
+    path_make_key(b, kb);
+    return strcmp(ka, kb) == 0;
+}
+
 static int resolve_include(pp_state_t *st, const char *cur_file, const char *spec, int quoted, char out[PATH_MAX],
                            int *out_is_system) {
     size_t i;
     char cand[PATH_MAX];
     if (spec[0] == '/' && path_exists(spec)) {
-        snprintf(out, PATH_MAX, "%s", spec);
+        path_make_key(spec, out);
         if (out_is_system != NULL) {
             *out_is_system = 0;
         }
@@ -1847,7 +2049,7 @@ static int resolve_include(pp_state_t *st, const char *cur_file, const char *spe
             return -1;
         }
         if (snprintf(cand, sizeof(cand), "%s/%s", dir, spec) < (int)sizeof(cand) && path_exists(cand)) {
-            snprintf(out, PATH_MAX, "%s", cand);
+            path_make_key(cand, out);
             if (out_is_system != NULL) {
                 *out_is_system = 0;
             }
@@ -1861,7 +2063,7 @@ static int resolve_include(pp_state_t *st, const char *cur_file, const char *spe
             if (snprintf(cand, sizeof(cand), "%s/%s", st->quote_paths.items[i], spec) >= (int)sizeof(cand))
                 continue;
             if (path_exists(cand)) {
-                snprintf(out, PATH_MAX, "%s", cand);
+                path_make_key(cand, out);
                 if (out_is_system != NULL) {
                     *out_is_system = 0;
                 }
@@ -1874,7 +2076,7 @@ static int resolve_include(pp_state_t *st, const char *cur_file, const char *spe
             continue;
         }
         if (path_exists(cand)) {
-            snprintf(out, PATH_MAX, "%s", cand);
+            path_make_key(cand, out);
             if (out_is_system != NULL) {
                 *out_is_system = 0;
             }
@@ -1885,7 +2087,7 @@ static int resolve_include(pp_state_t *st, const char *cur_file, const char *spe
         if (snprintf(cand, sizeof(cand), "%s/%s", st->system_include_paths.items[i], spec) >= (int)sizeof(cand))
             continue;
         if (path_exists(cand)) {
-            snprintf(out, PATH_MAX, "%s", cand);
+            path_make_key(cand, out);
             if (out_is_system != NULL) {
                 *out_is_system = 1;
             }
@@ -1899,77 +2101,102 @@ static int resolve_include_next(pp_state_t *st, const char *cur_file, const char
                                 int *out_is_system) {
     size_t i;
     char cand[PATH_MAX];
-    char *cur_dir = NULL;
-    int have_cur = 0;
-
-    if (cur_file != NULL) {
-        cur_dir = dirname_dup(cur_file);
-        if (cur_dir != NULL && cur_dir[0] != '\0') {
-            have_cur = 1;
-        }
-    }
+    char fallback[PATH_MAX];
+    int fallback_is_system = 0;
+    int have_fallback = 0;
+    int found_current = 0;
 
     if (quoted) {
         for (i = 0; i < st->quote_paths.count; ++i) {
-            if (have_cur && strcmp(st->quote_paths.items[i], cur_dir) == 0) {
-                continue;
-            }
             if (snprintf(cand, sizeof(cand), "%s/%s", st->quote_paths.items[i], spec) >= (int)sizeof(cand)) {
                 continue;
             }
-            if (path_exists(cand)) {
-                snprintf(out, PATH_MAX, "%s", cand);
+            if (!path_exists(cand)) {
+                continue;
+            }
+            if (cur_file != NULL && path_keys_equal(cand, cur_file)) {
+                found_current = 1;
+                continue;
+            }
+            if (found_current) {
+                path_make_key(cand, out);
                 if (out_is_system != NULL) {
                     *out_is_system = 0;
                 }
-                free(cur_dir);
                 return 0;
+            }
+            if (!have_fallback) {
+                path_make_key(cand, fallback);
+                fallback_is_system = 0;
+                have_fallback = 1;
             }
         }
     }
 
     for (i = 0; i < st->user_include_paths.count; ++i) {
-        if (have_cur && strcmp(st->user_include_paths.items[i], cur_dir) == 0) {
-            continue;
-        }
         if (snprintf(cand, sizeof(cand), "%s/%s", st->user_include_paths.items[i], spec) >= (int)sizeof(cand)) {
             continue;
         }
-        if (path_exists(cand)) {
-            snprintf(out, PATH_MAX, "%s", cand);
+        if (!path_exists(cand)) {
+            continue;
+        }
+        if (cur_file != NULL && path_keys_equal(cand, cur_file)) {
+            found_current = 1;
+            continue;
+        }
+        if (found_current) {
+            path_make_key(cand, out);
             if (out_is_system != NULL) {
                 *out_is_system = 0;
             }
-            free(cur_dir);
             return 0;
+        }
+        if (!have_fallback) {
+            path_make_key(cand, fallback);
+            fallback_is_system = 0;
+            have_fallback = 1;
         }
     }
 
     for (i = 0; i < st->system_include_paths.count; ++i) {
-        if (have_cur && strcmp(st->system_include_paths.items[i], cur_dir) == 0) {
-            continue;
-        }
         if (snprintf(cand, sizeof(cand), "%s/%s", st->system_include_paths.items[i], spec) >= (int)sizeof(cand)) {
             continue;
         }
-        if (path_exists(cand)) {
-            snprintf(out, PATH_MAX, "%s", cand);
+        if (!path_exists(cand)) {
+            continue;
+        }
+        if (cur_file != NULL && path_keys_equal(cand, cur_file)) {
+            found_current = 1;
+            continue;
+        }
+        if (found_current) {
+            path_make_key(cand, out);
             if (out_is_system != NULL) {
                 *out_is_system = 1;
             }
-            free(cur_dir);
             return 0;
+        }
+        if (!have_fallback) {
+            path_make_key(cand, fallback);
+            fallback_is_system = 1;
+            have_fallback = 1;
         }
     }
 
-    free(cur_dir);
+    if (have_fallback) {
+        snprintf(out, PATH_MAX, "%s", fallback);
+        if (out_is_system != NULL) {
+            *out_is_system = fallback_is_system;
+        }
+        return 0;
+    }
     return -1;
 }
 
 static int resolve_forced_include(pp_state_t *st, const char *main_file, const char *spec, char out[PATH_MAX],
                                   int *out_is_system) {
     if (path_exists(spec)) {
-        snprintf(out, PATH_MAX, "%s", spec);
+        path_make_key(spec, out);
         if (out_is_system != NULL) {
             *out_is_system = 0;
         }
@@ -1980,8 +2207,10 @@ static int resolve_forced_include(pp_state_t *st, const char *main_file, const c
 
 static int once_contains(pp_state_t *st, const char *path) {
     size_t i;
+    char key[PATH_MAX];
+    path_make_key(path, key);
     for (i = 0; i < st->include_once.count; ++i) {
-        if (strcmp(st->include_once.items[i], path) == 0) {
+        if (strcmp(st->include_once.items[i], key) == 0) {
             return 1;
         }
     }
@@ -1989,15 +2218,12 @@ static int once_contains(pp_state_t *st, const char *path) {
 }
 
 static int once_add(pp_state_t *st, const char *path) {
-    char real_buf[PATH_MAX];
-    const char *norm = path;
-    if (realpath(path, real_buf) != NULL) {
-        norm = real_buf;
-    }
-    if (once_contains(st, norm)) {
+    char key[PATH_MAX];
+    path_make_key(path, key);
+    if (once_contains(st, key)) {
         return 0;
     }
-    return strvec_push(&st->include_once, norm);
+    return strvec_push(&st->include_once, key);
 }
 
 static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_counter, int enable_trigraphs) {
@@ -2750,6 +2976,35 @@ static int is_va_args_token(const char *s, size_t n) {
     return token_matches(s, n, "__VA_ARGS__");
 }
 
+static int macro_body_uses_hash_ops(const char *body) {
+    size_t i = 0;
+    if (body == NULL) {
+        return 0;
+    }
+    while (body[i] != '\0') {
+        if (body[i] == '"' || body[i] == '\'') {
+            char q = body[i++];
+            while (body[i] != '\0') {
+                if (body[i] == '\\' && body[i + 1] != '\0') {
+                    i += 2;
+                    continue;
+                }
+                if (body[i] == q) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (body[i] == '#') {
+            return 1;
+        }
+        i++;
+    }
+    return 0;
+}
+
 static char *replace_ident_token(const char *text, const char *from, const char *to) {
     sb_t out;
     size_t i = 0;
@@ -3458,6 +3713,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     char **args = NULL;
                     size_t arg_count = 0;
                     char **exp_args = NULL;
+                    int disable_arg_prescan = 0;
                     size_t ai;
                     char *subst = NULL;
                     char *exp_subst = NULL;
@@ -3518,8 +3774,13 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         sb_free(&out);
                         return NULL;
                     }
+                    disable_arg_prescan = macro_body_uses_hash_ops(m->body);
                     for (ai = 0; ai < arg_count; ++ai) {
-                        exp_args[ai] = expand_text(st, args[ai], file, line, depth + 1, disabled, diag);
+                        if (disable_arg_prescan) {
+                            exp_args[ai] = xstrdup(args[ai] != NULL ? args[ai] : "");
+                        } else {
+                            exp_args[ai] = expand_text(st, args[ai], file, line, depth + 1, disabled, diag);
+                        }
                         if (exp_args[ai] == NULL) {
                             if (diag != NULL && diag->message[0] == '\0') {
                                 char msg[160];

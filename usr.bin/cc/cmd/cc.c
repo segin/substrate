@@ -51,6 +51,7 @@ typedef struct {
     int i386_supports_sse2;
     int i386_supports_mmx;
     int i386_fp_math_mode;
+    int implicit_funcdecl_override;
     int i386_arch_explicit;
     cc_target_t target;
 
@@ -505,6 +506,16 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
             strvec_push(&o->c_flags, a);
             continue;
         }
+        if (strcmp(a, "-Werror=implicit-function-declaration") == 0) {
+            o->implicit_funcdecl_override = 0;
+            strvec_push(&o->c_flags, a);
+            continue;
+        }
+        if (strcmp(a, "-Wno-implicit-function-declaration") == 0) {
+            o->implicit_funcdecl_override = 1;
+            strvec_push(&o->c_flags, a);
+            continue;
+        }
         if (strcmp(a, "-pedantic") == 0) {
             o->pedantic = 1;
             strvec_push(&o->c_flags, a);
@@ -956,7 +967,7 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
 
 static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
     cc_diag_t diag;
-    const char *std_mode = o->std != NULL ? o->std : "gnu89";
+    const char *std_mode = o->std != NULL ? o->std : "gnu17";
     const char *const *pp_flags = (const char *const *)o->cpp_flags.items;
     size_t pp_count = o->cpp_flags.count;
     const char *pp_in = in;
@@ -1037,7 +1048,7 @@ static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c, const ch
     /* Force C language mode so bootstrap .i with #line markers is accepted. */
     argv[at++] = "-x";
     argv[at++] = "c";
-    snprintf(stdflag, sizeof(stdflag), "-std=%s", o->std != NULL ? o->std : "gnu99");
+    snprintf(stdflag, sizeof(stdflag), "-std=%s", o->std != NULL ? o->std : "gnu17");
     argv[at++] = stdflag;
     if (want_trigraphs) {
         argv[at++] = "-trigraphs";
@@ -1263,6 +1274,7 @@ int cc_main(int argc, char **argv) {
     o.i386_supports_sse2 = 1;
     o.i386_supports_mmx = 1;
     o.i386_fp_math_mode = I386_FPMATH_AUTO;
+    o.implicit_funcdecl_override = -1;
     o.target = CC_TARGET_X86_64;
     if (strcmp(prog_basename(argv[0]), "cpp") == 0) {
         o.invoked_as_cpp = 1;
@@ -1446,11 +1458,11 @@ int cc_main(int argc, char **argv) {
                 } else {
                     unsetenv("CC_FREESTANDING");
                 }
-                if (cc_compile_c_to_s(out_pp, in, out_s, o.std != NULL ? o.std : "gnu89", o.debug, o.target,
+                if (cc_compile_c_to_s(out_pp, in, out_s, o.std != NULL ? o.std : "gnu17", o.debug, o.target,
                                       opt_level_num(&o), o.wall,
                                       o.werror, o.pedantic, o.pedantic_errors, o.gnu89_inline_mode,
                                       o.gnu89_inline_override, o.i386_isa_level, o.i386_has_sse2, o.i386_has_mmx,
-                                      o.i386_fp_math_mode, &diag) != 0) {
+                                      o.i386_fp_math_mode, o.implicit_funcdecl_override, &diag) != 0) {
                     if (diag.error_count > 0) {
                         if (diag.message[0] != '\0') {
                             fprintf(stderr, "cc: error: %s\n", diag.message);

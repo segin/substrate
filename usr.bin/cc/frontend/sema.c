@@ -11,6 +11,7 @@ void cc_parser_set_gnu89_inline(int enabled);
 
 static int g_pointer_size_bytes = 8;
 static int g_allow_implicit_funcdecl = 0;
+static int g_implicit_funcdecl_override = -1;
 static int g_warn_all = 0;
 static int g_warn_error = 0;
 static int g_pedantic = 0;
@@ -23,6 +24,9 @@ static size_t g_diag_ctx_col = 0;
 static int std_mode_allows_implicit_function_decls(const char *std_mode) {
     if (std_mode == NULL || std_mode[0] == '\0') {
         return 0;
+    }
+    if (strncmp(std_mode, "gnu", 3) == 0) {
+        return 1;
     }
     if (strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 || strcmp(std_mode, "c95") == 0 ||
         strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0) {
@@ -801,6 +805,89 @@ static const cc_struct_def_t *find_struct_def(const cc_translation_unit_t *tu, i
         return NULL;
     }
     return &tu->structs[struct_id];
+}
+
+static int type_carries_struct_id(cc_type_t t) {
+    if (t == CC_TYPE_VOID) {
+        return 1;
+    }
+    if (t < CC_TYPE_PTR_VOID || t > CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE) {
+        return 0;
+    }
+    return ((int)t - (int)CC_TYPE_PTR_VOID) % 12 == 0;
+}
+
+static int struct_ids_compatible_depth(const cc_translation_unit_t *tu, int lhs, int rhs, int depth);
+
+static int struct_members_compatible(const cc_translation_unit_t *tu, const cc_struct_def_t *lsd,
+                                     const cc_struct_def_t *rsd, int depth) {
+    size_t i;
+
+    if (lsd == NULL || rsd == NULL) {
+        return 0;
+    }
+    if (lsd->member_count != rsd->member_count) {
+        return 0;
+    }
+    for (i = 0; i < lsd->member_count; ++i) {
+        const cc_struct_member_t *lm = &lsd->members[i];
+        const cc_struct_member_t *rm = &rsd->members[i];
+        if (lm->name == NULL || rm->name == NULL) {
+            return 0;
+        }
+        if (strcmp(lm->name, rm->name) != 0) {
+            return 0;
+        }
+        if (lm->type != rm->type || lm->array_len != rm->array_len || lm->array_ndim != rm->array_ndim ||
+            lm->offset != rm->offset || lm->size != rm->size) {
+            return 0;
+        }
+        if (memcmp(lm->array_dims, rm->array_dims, sizeof(lm->array_dims)) != 0) {
+            return 0;
+        }
+        if (type_carries_struct_id(lm->type)) {
+            if (!struct_ids_compatible_depth(tu, lm->type_struct_id, rm->type_struct_id, depth + 1)) {
+                return 0;
+            }
+        } else if (lm->type_struct_id != rm->type_struct_id) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int struct_ids_compatible_depth(const cc_translation_unit_t *tu, int lhs, int rhs, int depth) {
+    const cc_struct_def_t *lsd;
+    const cc_struct_def_t *rsd;
+
+    if (lhs == rhs) {
+        return 1;
+    }
+    if (lhs < 0 || rhs < 0 || depth > 32) {
+        return 0;
+    }
+    lsd = find_struct_def(tu, lhs);
+    rsd = find_struct_def(tu, rhs);
+    if (lsd == NULL || rsd == NULL) {
+        return 0;
+    }
+    if (lsd->is_union != rsd->is_union) {
+        return 0;
+    }
+    if (lsd->tag != NULL && rsd->tag != NULL && strcmp(lsd->tag, rsd->tag) == 0 && lsd->depth == rsd->depth) {
+        return 1;
+    }
+    if (!lsd->complete || !rsd->complete) {
+        return 0;
+    }
+    if (lsd->size != rsd->size || lsd->align != rsd->align) {
+        return 0;
+    }
+    return struct_members_compatible(tu, lsd, rsd, depth);
+}
+
+static int struct_ids_compatible(const cc_translation_unit_t *tu, int lhs, int rhs) {
+    return struct_ids_compatible_depth(tu, lhs, rhs, 0);
 }
 
 static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t *tu, int struct_id, const char *name) {
@@ -2064,23 +2151,22 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             sid = e->lhs->struct_id;
             if (sid < 0) {
-                e->value_type = CC_TYPE_INT;
-                e->struct_id = -1;
-                return 0;
+                set_diag(diag, "-> requires pointer to struct or union");
+                return -1;
             }
         } else {
             sid = e->lhs->struct_id;
             if (sid < 0) {
-                e->value_type = CC_TYPE_INT;
-                e->struct_id = -1;
-                return 0;
+                set_diag(diag, ". requires struct or union operand");
+                return -1;
             }
         }
         m = find_struct_member(tu, sid, e->ident);
         if (m == NULL) {
-            e->value_type = CC_TYPE_INT;
-            e->struct_id = -1;
-            return 0;
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "no member named %s", e->ident);
+            }
+            return -1;
         }
         e->value_type = m->type;
         e->struct_id = m->type_struct_id;
@@ -2819,9 +2905,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (callee != NULL && callee->has_prototype && (callee->attr_flags & CC_ATTR_NONNULL) != 0) {
             /*
              * We currently record only the presence of nonnull, not its index list.
-             * Be conservative and validate only the first prototype argument.
+             * Avoid false positives (e.g. strtok uses nonnull(2)) by checking
+             * only unambiguous single-parameter prototypes.
              */
-            if (e->arg_count > 0 && callee->param_count > 0 && is_pointer_type(callee->params[0].type) &&
+            if (e->arg_count > 0 && callee->param_count == 1 && is_pointer_type(callee->params[0].type) &&
                 is_null_ptr_constant(e->args[0])) {
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "nonnull argument 1 in call to %s is null",
@@ -2946,7 +3033,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         assign_ok = can_convert(dst_type, e->rhs->value_type) ||
                     (is_pointer_type(dst_type) && is_integral_type(e->rhs->value_type) && is_null_ptr_constant(e->rhs));
         if (!assign_ok && dst_type == CC_TYPE_VOID && dst_struct_id >= 0 && e->rhs->value_type == CC_TYPE_VOID &&
-            e->rhs->struct_id == dst_struct_id) {
+            struct_ids_compatible(tu, dst_struct_id, e->rhs->struct_id)) {
             assign_ok = 1;
         }
         if (!assign_ok && dst_type == CC_TYPE_VOID && dst_struct_id >= 0 && is_integral_type(e->rhs->value_type) &&
@@ -4535,24 +4622,6 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             }
             goto fail_global_item;
         }
-        if ((g->attr_flags & CC_ATTR_NORETURN) != 0) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "noreturn attribute is invalid for object '%s'",
-                         g->name);
-            }
-            goto fail_global_item;
-        }
-        if ((g->attr_flags & CC_ATTR_ALWAYS_INLINE) != 0 || (g->attr_flags & CC_ATTR_NOINLINE) != 0 ||
-            (g->attr_flags & CC_ATTR_HOT) != 0 || (g->attr_flags & CC_ATTR_COLD) != 0 ||
-            (g->attr_flags & CC_ATTR_FORMAT) != 0 || (g->attr_flags & CC_ATTR_NONNULL) != 0 ||
-            (g->attr_flags & CC_ATTR_MALLOC_FN) != 0 || (g->attr_flags & CC_ATTR_FLATTEN) != 0 ||
-            (g->attr_flags & CC_ATTR_TARGET) != 0) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message), "function-only attribute is invalid for object '%s'",
-                         g->name);
-            }
-            goto fail_global_item;
-        }
         if (has_multiple_visibility_attrs(g->attr_flags)) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "conflicting visibility attributes for object '%s'",
@@ -4732,7 +4801,7 @@ fail_global_item:
     }
 
     for (i = 0; i < tu->func_count; ++i) {
-        const cc_function_t *f = &tu->funcs[i];
+        cc_function_t *f = &tu->funcs[i];
         int f_sc_count = storage_class_count(f->storage);
         size_t j;
         set_diag_context(f->line, f->col);
@@ -4840,7 +4909,7 @@ fail_global_item:
             }
         }
         for (j = 0; j < i; ++j) {
-            const cc_function_t *prev = &tu->funcs[j];
+            cc_function_t *prev = &tu->funcs[j];
             if (strcmp(prev->name, f->name) != 0) {
                 continue;
             }
@@ -4852,6 +4921,18 @@ fail_global_item:
                 goto fail_decl;
             }
             if (prev->has_body && f->has_body) {
+                int prev_inline = ((prev->storage & CC_STORAGE_INLINE) != 0);
+                int cur_inline = ((f->storage & CC_STORAGE_INLINE) != 0);
+                if (prev_inline || cur_inline) {
+                    if (!prev_inline && cur_inline) {
+                        f->has_body = 0;
+                    } else if (prev_inline && !cur_inline) {
+                        prev->has_body = 0;
+                    } else {
+                        f->has_body = 0;
+                    }
+                    continue;
+                }
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "duplicate function definition: %s", f->name);
                 }
@@ -4989,6 +5070,9 @@ void cc_frontend_set_pointer_size(int bytes) {
 
 void cc_frontend_set_std_mode(const char *std_mode) {
     g_allow_implicit_funcdecl = std_mode_allows_implicit_function_decls(std_mode);
+    if (g_implicit_funcdecl_override >= 0) {
+        g_allow_implicit_funcdecl = g_implicit_funcdecl_override ? 1 : 0;
+    }
     g_std_c23 = std_mode_is_c23_or_newer(std_mode);
     cc_parser_set_std_mode(std_mode);
     if (g_gnu89_inline_override >= 0) {
@@ -5003,6 +5087,15 @@ void cc_frontend_set_gnu89_inline_mode(int enabled, int override_set) {
     }
     g_gnu89_inline_override = enabled ? 1 : 0;
     cc_parser_set_gnu89_inline(g_gnu89_inline_override);
+}
+
+void cc_frontend_set_implicit_funcdecl_policy(int allow, int override_set) {
+    if (!override_set) {
+        g_implicit_funcdecl_override = -1;
+        return;
+    }
+    g_implicit_funcdecl_override = allow ? 1 : 0;
+    g_allow_implicit_funcdecl = g_implicit_funcdecl_override;
 }
 
 void cc_frontend_set_diag_flags(int wall, int werror, int pedantic, int pedantic_errors) {

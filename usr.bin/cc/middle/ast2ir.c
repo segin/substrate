@@ -9188,8 +9188,34 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         return -1;
                     }
                 }
-                if (out->globals[i].array_len <= 0) {
-                    out->globals[i].array_len = (long)init->arg_count;
+                {
+                    cc_type_t base_t = ptr_base_type(tu->globals[i].type);
+                    if (tu->globals[i].array_ndim == 1 && (base_t == CC_TYPE_CHAR || base_t == CC_TYPE_UCHAR)) {
+                        long inferred_len = 0;
+                        for (j = 0; j < init->arg_count; ++j) {
+                            const cc_expr_t *it = init->args[j];
+                            if (it != NULL && it->kind == CC_EXPR_STR) {
+                                unsigned long *units = NULL;
+                                size_t unit_count = 0;
+                                if (decode_string_units(it, 0, &units, &unit_count) == 0) {
+                                    inferred_len += (long)(unit_count + 1);
+                                } else {
+                                    inferred_len += 1;
+                                }
+                                free(units);
+                            } else {
+                                inferred_len += 1;
+                            }
+                        }
+                        if (inferred_len <= 0) {
+                            inferred_len = (long)init->arg_count;
+                        }
+                        if (out->globals[i].array_len <= 0 || inferred_len > out->globals[i].array_len) {
+                            out->globals[i].array_len = inferred_len;
+                        }
+                    } else if (out->globals[i].array_len <= 0) {
+                        out->globals[i].array_len = (long)init->arg_count;
+                    }
                 }
             } else if (init != NULL && init->kind == CC_EXPR_STR) {
                 init_is_string = 1;

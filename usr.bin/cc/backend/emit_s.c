@@ -1149,13 +1149,42 @@ static int emit_globals(FILE *fp, const cc_ssa_module_t *m, int pointer_size, cc
                 return -1;
             }
             arr_elems = g->array_len > 0 ? g->array_len : (long)g->init_item_count;
+            if (elem_size == 1 && (elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+                long emitted_bytes = 0;
+                for (j = 0; j < g->init_item_count; ++j) {
+                    const cc_ssa_global_init_item_t *it = &g->init_items[j];
+                    if (it->init_is_string) {
+                        size_t slen = decoded_c_string_len(it->init_str);
+                        fprintf(fp, "\t.asciz %s\n", it->init_str != NULL ? it->init_str : "\"\"");
+                        emitted_bytes += (long)(slen + 1);
+                    } else {
+                        emit_integer_data(fp, elem_size, it->init_i);
+                        emitted_bytes += elem_size;
+                    }
+                }
+                if (emitted_bytes < sz) {
+                    fprintf(fp, "\t.zero %ld\n", sz - emitted_bytes);
+                } else if (emitted_bytes > sz) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "string/byte initializer list for %s exceeds array size",
+                                 g->name != NULL ? g->name : "<anon>");
+                    }
+                    return -1;
+                }
+                continue;
+            }
             for (j = 0; j < g->init_item_count; ++j) {
                 const cc_ssa_global_init_item_t *it = &g->init_items[j];
                 if (!it->init_is_string) {
                     continue;
                 }
                 if (!is_pointer_type(elem_type)) {
-                    set_diag(diag, "string element in initializer list requires pointer element type");
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "string element in initializer list for %s requires pointer element type",
+                                 g->name != NULL ? g->name : "<anon>");
+                    }
                     return -1;
                 }
                 fprintf(fp, "\t.section .rodata\n");
