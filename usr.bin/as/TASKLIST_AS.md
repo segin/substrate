@@ -181,9 +181,9 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `VFMADDSUB`, `VFMSUBADD` (all 6 forms each)
 
 ### 4g. LZCNT / MOVBE / XSAVE
-- [ ] `LZCNT r16/32/64, r/m16/32/64`
-- [ ] `MOVBE r16/32/64, m` and `MOVBE m, r16/32/64`
-- [ ] `XSAVE/XRSTOR/XGETBV/XSETBV/XSAVEOPT/XSAVEC/XSAVES` + 64-bit forms
+- [x] `LZCNT r16/32/64, r/m16/32/64`
+- [x] `MOVBE r16/32/64, m` and `MOVBE m, r16/32/64`
+- [x] `XSAVE/XRSTOR/XGETBV/XSETBV/XSAVEOPT/XSAVEC/XSAVES` + 64-bit forms
 
 ---
 
