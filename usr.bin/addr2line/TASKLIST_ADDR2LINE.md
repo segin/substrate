@@ -191,11 +191,11 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 
 ## 4. Function Name Lookup
 
-- [ ] Scan `.debug_info` for `DW_TAG_subprogram` entries with `DW_AT_low_pc` / `DW_AT_high_pc` or `DW_AT_ranges`. **(FR‑24)**
-- [ ] Match query address to enclosing subprogram range. **(FR‑24)**
-- [ ] Read `DW_AT_name` (or `DW_AT_linkage_name`) for function name. **(FR‑24)**
-- [ ] Fallback: if no DWARF info, use `.symtab` symbols — find nearest `STT_FUNC` with `value ≤ query < value + size`. **(FR‑25)**
-- [ ] If no function found: output `??`. **(FR‑26)**
+- [x] Scan `.debug_info` for `DW_TAG_subprogram` entries with `DW_AT_low_pc` / `DW_AT_high_pc` or `DW_AT_ranges`. **(FR‑24)**
+- [x] Match query address to enclosing subprogram range. **(FR‑24)**
+- [x] Read `DW_AT_name` (or `DW_AT_linkage_name`) for function name. **(FR‑24)**
+- [x] Fallback: if no DWARF info, use `.symtab` symbols — find nearest `STT_FUNC` with `value ≤ query < value + size`. **(FR‑25)**
+- [x] If no function found: output `??`. **(FR‑26)**
 
 ---
 

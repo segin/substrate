@@ -15,15 +15,53 @@
 #define ADDR2LINE_VERSION "0.1.0"
 
 #define DW_FORM_addr 0x01u
-#define DW_FORM_data1 0x0bu
 #define DW_FORM_data2 0x05u
 #define DW_FORM_data4 0x06u
 #define DW_FORM_data8 0x07u
 #define DW_FORM_string 0x08u
+#define DW_FORM_block 0x09u
+#define DW_FORM_block1 0x0au
+#define DW_FORM_data1 0x0bu
+#define DW_FORM_flag 0x0cu
+#define DW_FORM_sdata 0x0du
 #define DW_FORM_strp 0x0eu
 #define DW_FORM_udata 0x0fu
+#define DW_FORM_ref_addr 0x10u
+#define DW_FORM_ref1 0x11u
+#define DW_FORM_ref2 0x12u
+#define DW_FORM_ref4 0x13u
+#define DW_FORM_ref8 0x14u
+#define DW_FORM_ref_udata 0x15u
+#define DW_FORM_indirect 0x16u
 #define DW_FORM_sec_offset 0x17u
+#define DW_FORM_exprloc 0x18u
+#define DW_FORM_flag_present 0x19u
+#define DW_FORM_strx 0x1au
+#define DW_FORM_addrx 0x1bu
+#define DW_FORM_data16 0x1eu
 #define DW_FORM_line_strp 0x1fu
+#define DW_FORM_implicit_const 0x21u
+#define DW_FORM_loclistx 0x22u
+#define DW_FORM_rnglistx 0x23u
+#define DW_FORM_strx1 0x25u
+#define DW_FORM_strx2 0x26u
+#define DW_FORM_strx3 0x27u
+#define DW_FORM_strx4 0x28u
+#define DW_FORM_addrx1 0x29u
+#define DW_FORM_addrx2 0x2au
+#define DW_FORM_addrx3 0x2bu
+#define DW_FORM_addrx4 0x2cu
+
+#define DW_TAG_compile_unit 0x11u
+#define DW_TAG_subprogram 0x2eu
+
+#define DW_AT_name 0x03u
+#define DW_AT_stmt_list 0x10u
+#define DW_AT_low_pc 0x11u
+#define DW_AT_high_pc 0x12u
+#define DW_AT_ranges 0x55u
+#define DW_AT_linkage_name 0x6eu
+#define DW_AT_MIPS_linkage_name 0x2007u
 
 #define DW_LNCT_path 0x1u
 #define DW_LNCT_directory_index 0x2u
@@ -51,6 +89,7 @@ typedef struct {
     const char **addr_args;
     size_t addr_argc;
     int show_column;
+    int show_functions;
 } addr2line_opts_t;
 
 typedef struct {
@@ -133,6 +172,39 @@ typedef struct {
 } line_entry_t;
 
 typedef struct {
+    uint64_t name;
+    uint64_t form;
+    int64_t implicit_const;
+    uint8_t has_implicit_const;
+} dwarf_attr_spec_t;
+
+typedef struct {
+    uint64_t code;
+    uint64_t tag;
+    uint8_t has_children;
+    dwarf_attr_spec_t *attrs;
+    size_t attr_count;
+} dwarf_abbrev_t;
+
+typedef struct {
+    dwarf_abbrev_t *items;
+    size_t count;
+} dwarf_abbrev_table_t;
+
+typedef struct {
+    uint64_t low;
+    uint64_t high;
+} addr_range_t;
+
+typedef struct {
+    char *name;
+    char *linkage_name;
+    addr_range_t *ranges;
+    size_t range_count;
+    size_t range_cap;
+} dwarf_subprogram_t;
+
+typedef struct {
     elfobj_t *elf;
     char *path;
     elfobj_class_t elf_class;
@@ -164,13 +236,17 @@ typedef struct {
     line_entry_t *line_entries;
     size_t line_entry_count;
     size_t line_entry_cap;
+
+    dwarf_subprogram_t *subprograms;
+    size_t subprogram_count;
+    size_t subprogram_cap;
 } addr2line_image_t;
 
 static const char *g_progname = "addr2line";
 
 static void usage(FILE *out) {
     fprintf(out,
-            "usage: %s [-e file] [-c] [addr ...]\n"
+            "usage: %s [-e file] [-f] [-c] [addr ...]\n"
             "       %s --help\n"
             "       %s --version\n",
             g_progname, g_progname, g_progname);
@@ -423,6 +499,52 @@ static void line_unit_free(line_unit_t *u) {
     }
     free(u->files);
     memset(u, 0, sizeof(*u));
+}
+
+static void dwarf_subprogram_free(dwarf_subprogram_t *sp) {
+    if (sp == NULL) {
+        return;
+    }
+    free(sp->name);
+    free(sp->linkage_name);
+    free(sp->ranges);
+    memset(sp, 0, sizeof(*sp));
+}
+
+static int subprogram_add_range(dwarf_subprogram_t *sp, uint64_t low, uint64_t high) {
+    addr_range_t *next;
+    if (high <= low) {
+        return 0;
+    }
+    if (sp->range_count == sp->range_cap) {
+        size_t new_cap = sp->range_cap == 0 ? 4u : sp->range_cap * 2u;
+        next = (addr_range_t *)realloc(sp->ranges, new_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        sp->ranges = next;
+        sp->range_cap = new_cap;
+    }
+    sp->ranges[sp->range_count].low = low;
+    sp->ranges[sp->range_count].high = high;
+    sp->range_count++;
+    return 0;
+}
+
+static int image_append_subprogram(addr2line_image_t *img, dwarf_subprogram_t *sp) {
+    dwarf_subprogram_t *next;
+    if (img->subprogram_count == img->subprogram_cap) {
+        size_t new_cap = img->subprogram_cap == 0 ? 128u : img->subprogram_cap * 2u;
+        next = (dwarf_subprogram_t *)realloc(img->subprograms, new_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        img->subprograms = next;
+        img->subprogram_cap = new_cap;
+    }
+    img->subprograms[img->subprogram_count++] = *sp;
+    memset(sp, 0, sizeof(*sp));
+    return 0;
 }
 
 static int image_append_line_unit(addr2line_image_t *img, line_unit_t *u) {
@@ -1537,6 +1659,10 @@ static void image_reset(addr2line_image_t *img) {
     free(img->func_syms);
     free(img->line_entries);
     free(img->line_rows);
+    for (i = 0; i < img->subprogram_count; ++i) {
+        dwarf_subprogram_free(&img->subprograms[i]);
+    }
+    free(img->subprograms);
     for (i = 0; i < img->line_unit_count; ++i) {
         line_unit_free(&img->line_units[i]);
     }
@@ -1609,6 +1735,733 @@ static int image_collect_symbols(addr2line_image_t *img) {
     return 0;
 }
 
+static void dwarf_abbrev_table_free(dwarf_abbrev_table_t *tab) {
+    size_t i;
+    if (tab == NULL) {
+        return;
+    }
+    for (i = 0; i < tab->count; ++i) {
+        free(tab->items[i].attrs);
+    }
+    free(tab->items);
+    memset(tab, 0, sizeof(*tab));
+}
+
+static const dwarf_abbrev_t *dwarf_abbrev_lookup(const dwarf_abbrev_table_t *tab,
+                                                 uint64_t code) {
+    size_t i;
+    if (tab == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < tab->count; ++i) {
+        if (tab->items[i].code == code) {
+            return &tab->items[i];
+        }
+    }
+    return NULL;
+}
+
+static int dwarf_abbrev_append(dwarf_abbrev_table_t *tab, dwarf_abbrev_t *ab) {
+    dwarf_abbrev_t *next =
+        (dwarf_abbrev_t *)realloc(tab->items, (tab->count + 1u) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    tab->items = next;
+    tab->items[tab->count++] = *ab;
+    memset(ab, 0, sizeof(*ab));
+    return 0;
+}
+
+static int dwarf_abbrev_add_attr(dwarf_abbrev_t *ab,
+                                 uint64_t name,
+                                 uint64_t form,
+                                 int has_implicit_const,
+                                 int64_t implicit_const) {
+    dwarf_attr_spec_t *next =
+        (dwarf_attr_spec_t *)realloc(ab->attrs, (ab->attr_count + 1u) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    ab->attrs = next;
+    ab->attrs[ab->attr_count].name = name;
+    ab->attrs[ab->attr_count].form = form;
+    ab->attrs[ab->attr_count].has_implicit_const = (uint8_t)(has_implicit_const ? 1 : 0);
+    ab->attrs[ab->attr_count].implicit_const = implicit_const;
+    ab->attr_count++;
+    return 0;
+}
+
+static int parse_dwarf_abbrev_table(const addr2line_image_t *img,
+                                    uint64_t offset,
+                                    dwarf_abbrev_table_t *tab) {
+    const uint8_t *p;
+    const uint8_t *end;
+
+    memset(tab, 0, sizeof(*tab));
+
+    if (!img->debug_abbrev.present || img->debug_abbrev.data == NULL ||
+        offset >= img->debug_abbrev.size) {
+        return -1;
+    }
+
+    p = img->debug_abbrev.data + offset;
+    end = img->debug_abbrev.data + img->debug_abbrev.size;
+
+    while (p < end) {
+        uint64_t code = 0;
+        dwarf_abbrev_t ab;
+
+        memset(&ab, 0, sizeof(ab));
+
+        if (read_uleb128(&p, end, &code) != 0) {
+            dwarf_abbrev_table_free(tab);
+            return -1;
+        }
+        if (code == 0) {
+            break;
+        }
+        ab.code = code;
+        if (read_uleb128(&p, end, &ab.tag) != 0 ||
+            read_u8_cursor(&p, end, &ab.has_children) != 0) {
+            dwarf_abbrev_table_free(tab);
+            return -1;
+        }
+        while (1) {
+            uint64_t name = 0;
+            uint64_t form = 0;
+            int64_t implicit_const = 0;
+            if (read_uleb128(&p, end, &name) != 0 || read_uleb128(&p, end, &form) != 0) {
+                free(ab.attrs);
+                dwarf_abbrev_table_free(tab);
+                return -1;
+            }
+            if (name == 0 && form == 0) {
+                break;
+            }
+            if (form == DW_FORM_implicit_const &&
+                read_sleb128(&p, end, &implicit_const) != 0) {
+                free(ab.attrs);
+                dwarf_abbrev_table_free(tab);
+                return -1;
+            }
+            if (dwarf_abbrev_add_attr(&ab,
+                                      name,
+                                      form,
+                                      form == DW_FORM_implicit_const,
+                                      implicit_const) != 0) {
+                free(ab.attrs);
+                dwarf_abbrev_table_free(tab);
+                return -1;
+            }
+        }
+        if (dwarf_abbrev_append(tab, &ab) != 0) {
+            free(ab.attrs);
+            dwarf_abbrev_table_free(tab);
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int read_addr_sized(const uint8_t **pp,
+                           const uint8_t *end,
+                           elfobj_endian_t e,
+                           uint8_t addr_size,
+                           uint64_t *out) {
+    if (addr_size == 8u) {
+        return read_u64_cursor(pp, end, e, out);
+    }
+    if (addr_size == 4u) {
+        uint32_t v = 0;
+        if (read_u32_cursor(pp, end, e, &v) != 0) {
+            return -1;
+        }
+        *out = v;
+        return 0;
+    }
+    return -1;
+}
+
+static int skip_form_value(const addr2line_image_t *img,
+                           const uint8_t **pp,
+                           const uint8_t *end,
+                           size_t offset_size,
+                           uint8_t addr_size,
+                           uint16_t version,
+                           uint64_t form);
+
+static int skip_form_value(const addr2line_image_t *img,
+                           const uint8_t **pp,
+                           const uint8_t *end,
+                           size_t offset_size,
+                           uint8_t addr_size,
+                           uint16_t version,
+                           uint64_t form) {
+    uint64_t len = 0;
+    uint16_t unused16 = 0;
+    uint32_t unused32 = 0;
+    uint64_t unused64 = 0;
+    const uint8_t *tmp;
+
+    while (form == DW_FORM_indirect) {
+        if (read_uleb128(pp, end, &form) != 0) {
+            return -1;
+        }
+    }
+
+    switch (form) {
+    case DW_FORM_addr:
+        return read_addr_sized(pp, end, img->elf_endian, addr_size, &unused64);
+    case DW_FORM_data1:
+    case DW_FORM_flag:
+    case DW_FORM_ref1:
+    case DW_FORM_strx1:
+        return read_exact(pp, end, 1u, NULL);
+    case DW_FORM_data2:
+    case DW_FORM_ref2:
+    case DW_FORM_strx2:
+        return read_u16_cursor(pp, end, img->elf_endian, &unused16);
+    case DW_FORM_data4:
+    case DW_FORM_ref4:
+    case DW_FORM_strx4:
+        return read_u32_cursor(pp, end, img->elf_endian, &unused32);
+    case DW_FORM_data8:
+    case DW_FORM_ref8:
+        return read_u64_cursor(pp, end, img->elf_endian, &unused64);
+    case DW_FORM_data16:
+        return read_exact(pp, end, 16u, NULL);
+    case DW_FORM_udata:
+    case DW_FORM_sdata:
+    case DW_FORM_ref_udata:
+    case DW_FORM_strx:
+    case DW_FORM_addrx:
+    case DW_FORM_loclistx:
+    case DW_FORM_rnglistx:
+        return read_uleb128(pp, end, &unused64);
+    case DW_FORM_string: {
+        char *s = NULL;
+        int rc = read_cstring_dup(pp, end, &s);
+        free(s);
+        return rc;
+    }
+    case DW_FORM_strp:
+    case DW_FORM_sec_offset:
+    case DW_FORM_line_strp:
+        return read_offset(pp, end, img->elf_endian, offset_size, &unused64);
+    case DW_FORM_ref_addr:
+        if (version <= 2u) {
+            return read_addr_sized(pp, end, img->elf_endian, addr_size, &unused64);
+        }
+        return read_offset(pp, end, img->elf_endian, offset_size, &unused64);
+    case DW_FORM_exprloc:
+    case DW_FORM_block:
+        if (read_uleb128(pp, end, &len) != 0) {
+            return -1;
+        }
+        return read_exact(pp, end, (size_t)len, &tmp);
+    case DW_FORM_block1: {
+        uint8_t l = 0;
+        if (read_u8_cursor(pp, end, &l) != 0) {
+            return -1;
+        }
+        return read_exact(pp, end, l, &tmp);
+    }
+    case DW_FORM_flag_present:
+    case DW_FORM_implicit_const:
+        return 0;
+    case DW_FORM_strx3:
+        return read_exact(pp, end, 3u, NULL);
+    case DW_FORM_addrx1:
+        return read_exact(pp, end, 1u, NULL);
+    case DW_FORM_addrx2:
+        return read_exact(pp, end, 2u, NULL);
+    case DW_FORM_addrx3:
+        return read_exact(pp, end, 3u, NULL);
+    case DW_FORM_addrx4:
+        return read_exact(pp, end, 4u, NULL);
+    default:
+        return -1;
+    }
+}
+
+static int parse_legacy_ranges(const addr2line_image_t *img,
+                               uint64_t offset,
+                               uint8_t addr_size,
+                               uint64_t base,
+                               dwarf_subprogram_t *sp) {
+    const uint8_t *p;
+    const uint8_t *end;
+    uint64_t max_addr = addr_size == 8u ? UINT64_MAX : 0xffffffffu;
+
+    if (!img->debug_ranges.present || offset >= img->debug_ranges.size) {
+        return -1;
+    }
+    p = img->debug_ranges.data + offset;
+    end = img->debug_ranges.data + img->debug_ranges.size;
+
+    while (p < end) {
+        uint64_t start = 0;
+        uint64_t stop = 0;
+        if (read_addr_sized(&p, end, img->elf_endian, addr_size, &start) != 0 ||
+            read_addr_sized(&p, end, img->elf_endian, addr_size, &stop) != 0) {
+            return -1;
+        }
+        if (start == 0 && stop == 0) {
+            break;
+        }
+        if (start == max_addr) {
+            base = stop;
+            continue;
+        }
+        if (subprogram_add_range(sp, base + start, base + stop) != 0) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int parse_rnglists_ranges(const addr2line_image_t *img,
+                                 uint64_t offset,
+                                 uint8_t addr_size,
+                                 uint64_t base,
+                                 dwarf_subprogram_t *sp) {
+    const uint8_t *p;
+    const uint8_t *end;
+
+    if (!img->debug_rnglists.present || offset >= img->debug_rnglists.size) {
+        return -1;
+    }
+    p = img->debug_rnglists.data + offset;
+    end = img->debug_rnglists.data + img->debug_rnglists.size;
+
+    while (p < end) {
+        uint8_t kind = 0;
+        if (read_u8_cursor(&p, end, &kind) != 0) {
+            return -1;
+        }
+        if (kind == 0u) {
+            break;
+        }
+        if (kind == 4u) {
+            uint64_t a = 0;
+            uint64_t b = 0;
+            if (read_uleb128(&p, end, &a) != 0 || read_uleb128(&p, end, &b) != 0) {
+                return -1;
+            }
+            if (subprogram_add_range(sp, base + a, base + b) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (kind == 5u) {
+            if (read_addr_sized(&p, end, img->elf_endian, addr_size, &base) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (kind == 6u) {
+            uint64_t a = 0;
+            uint64_t b = 0;
+            if (read_addr_sized(&p, end, img->elf_endian, addr_size, &a) != 0 ||
+                read_addr_sized(&p, end, img->elf_endian, addr_size, &b) != 0) {
+                return -1;
+            }
+            if (subprogram_add_range(sp, a, b) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (kind == 7u) {
+            uint64_t a = 0;
+            uint64_t len = 0;
+            if (read_addr_sized(&p, end, img->elf_endian, addr_size, &a) != 0 ||
+                read_uleb128(&p, end, &len) != 0) {
+                return -1;
+            }
+            if (subprogram_add_range(sp, a, a + len) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        return -1;
+    }
+
+    return 0;
+}
+
+static int parse_debug_info_subprograms(addr2line_image_t *img) {
+    const uint8_t *p;
+    const uint8_t *end;
+
+    if (!img->debug_info.present || !img->debug_abbrev.present || img->debug_info.data == NULL) {
+        return 0;
+    }
+
+    p = img->debug_info.data;
+    end = img->debug_info.data + img->debug_info.size;
+
+    while (p < end) {
+        const uint8_t *unit_payload;
+        const uint8_t *unit_end;
+        uint32_t len32 = 0;
+        uint64_t unit_length = 0;
+        size_t offset_size = 4u;
+        uint16_t version = 0;
+        uint64_t abbrev_off = 0;
+        uint8_t addr_size = (img->elf_class == ELFOBJ_CLASS_64) ? 8u : 4u;
+        uint8_t unit_type = 0;
+        dwarf_abbrev_table_t abbrev;
+        uint64_t cu_low_pc = 0;
+        int cu_has_low_pc = 0;
+
+        memset(&abbrev, 0, sizeof(abbrev));
+
+        if ((size_t)(end - p) < 4u || read_u32_cursor(&p, end, img->elf_endian, &len32) != 0) {
+            return -1;
+        }
+        if (len32 == 0u) {
+            break;
+        }
+        if (len32 == 0xffffffffu) {
+            offset_size = 8u;
+            if (read_u64_cursor(&p, end, img->elf_endian, &unit_length) != 0) {
+                return -1;
+            }
+        } else {
+            unit_length = len32;
+        }
+        if ((uint64_t)(end - p) < unit_length) {
+            return -1;
+        }
+        unit_end = p + (size_t)unit_length;
+        if (read_u16_cursor(&p, unit_end, img->elf_endian, &version) != 0) {
+            return -1;
+        }
+
+        if (version >= 5u) {
+            if (read_u8_cursor(&p, unit_end, &unit_type) != 0 ||
+                read_u8_cursor(&p, unit_end, &addr_size) != 0 ||
+                read_offset(&p, unit_end, img->elf_endian, offset_size, &abbrev_off) != 0) {
+                return -1;
+            }
+        } else {
+            (void)unit_type;
+            if (read_offset(&p, unit_end, img->elf_endian, offset_size, &abbrev_off) != 0 ||
+                read_u8_cursor(&p, unit_end, &addr_size) != 0) {
+                return -1;
+            }
+        }
+
+        if (parse_dwarf_abbrev_table(img, abbrev_off, &abbrev) != 0) {
+            return -1;
+        }
+
+        unit_payload = p;
+        while (p < unit_end) {
+            uint64_t code = 0;
+            const dwarf_abbrev_t *ab;
+            size_t ai;
+            uint64_t low_pc = 0;
+            uint64_t high_pc = 0;
+            uint64_t ranges_off = 0;
+            uint64_t high_form = 0;
+            int has_low_pc = 0;
+            int has_high_pc = 0;
+            int has_ranges = 0;
+            char *name = NULL;
+            char *linkage_name = NULL;
+
+            (void)unit_payload;
+
+            if (read_uleb128(&p, unit_end, &code) != 0) {
+                dwarf_abbrev_table_free(&abbrev);
+                return -1;
+            }
+            if (code == 0) {
+                continue;
+            }
+
+            ab = dwarf_abbrev_lookup(&abbrev, code);
+            if (ab == NULL) {
+                dwarf_abbrev_table_free(&abbrev);
+                return -1;
+            }
+
+            for (ai = 0; ai < ab->attr_count; ++ai) {
+                uint64_t attr_name = ab->attrs[ai].name;
+                uint64_t form = ab->attrs[ai].form;
+                int implicit = ab->attrs[ai].has_implicit_const;
+                int64_t implicit_value = ab->attrs[ai].implicit_const;
+
+                while (form == DW_FORM_indirect) {
+                    if (read_uleb128(&p, unit_end, &form) != 0) {
+                        free(name);
+                        free(linkage_name);
+                        dwarf_abbrev_table_free(&abbrev);
+                        return -1;
+                    }
+                }
+
+                if (attr_name == DW_AT_name || attr_name == DW_AT_linkage_name ||
+                    attr_name == DW_AT_MIPS_linkage_name) {
+                    char *tmp = NULL;
+                    uint64_t off = 0;
+                    if (implicit) {
+                        continue;
+                    }
+                    if (parse_line_form_value(img,
+                                              &p,
+                                              unit_end,
+                                              offset_size,
+                                              addr_size,
+                                              form,
+                                              &tmp,
+                                              &off) != 0) {
+                        if (skip_form_value(img,
+                                            &p,
+                                            unit_end,
+                                            offset_size,
+                                            addr_size,
+                                            version,
+                                            form) != 0) {
+                            free(name);
+                            free(linkage_name);
+                            dwarf_abbrev_table_free(&abbrev);
+                            return -1;
+                        }
+                        free(tmp);
+                        continue;
+                    }
+                    if (tmp != NULL) {
+                        if (attr_name == DW_AT_name) {
+                            free(name);
+                            name = tmp;
+                        } else {
+                            free(linkage_name);
+                            linkage_name = tmp;
+                        }
+                    }
+                    continue;
+                }
+
+                if (attr_name == DW_AT_low_pc) {
+                    char *tmp_str = NULL;
+                    if (implicit) {
+                        low_pc = (uint64_t)implicit_value;
+                        has_low_pc = 1;
+                        continue;
+                    }
+                    if (parse_line_form_value(img,
+                                              &p,
+                                              unit_end,
+                                              offset_size,
+                                              addr_size,
+                                              form,
+                                              &tmp_str,
+                                              &low_pc) != 0) {
+                        free(tmp_str);
+                        if (skip_form_value(img,
+                                            &p,
+                                            unit_end,
+                                            offset_size,
+                                            addr_size,
+                                            version,
+                                            form) != 0) {
+                            free(linkage_name);
+                            dwarf_abbrev_table_free(&abbrev);
+                            return -1;
+                        }
+                        continue;
+                    }
+                    free(tmp_str);
+                    has_low_pc = 1;
+                    continue;
+                }
+                if (attr_name == DW_AT_high_pc) {
+                    char *tmp_str = NULL;
+                    if (implicit) {
+                        high_pc = (uint64_t)implicit_value;
+                        high_form = DW_FORM_udata;
+                        has_high_pc = 1;
+                        continue;
+                    }
+                    if (parse_line_form_value(img,
+                                              &p,
+                                              unit_end,
+                                              offset_size,
+                                              addr_size,
+                                              form,
+                                              &tmp_str,
+                                              &high_pc) != 0) {
+                        free(tmp_str);
+                        if (skip_form_value(img,
+                                            &p,
+                                            unit_end,
+                                            offset_size,
+                                            addr_size,
+                                            version,
+                                            form) != 0) {
+                            free(linkage_name);
+                            dwarf_abbrev_table_free(&abbrev);
+                            return -1;
+                        }
+                        continue;
+                    }
+                    free(tmp_str);
+                    high_form = form;
+                    has_high_pc = 1;
+                    continue;
+                }
+                if (attr_name == DW_AT_ranges) {
+                    char *tmp_str = NULL;
+                    if (implicit) {
+                        ranges_off = (uint64_t)implicit_value;
+                        has_ranges = 1;
+                        continue;
+                    }
+                    if (parse_line_form_value(img,
+                                              &p,
+                                              unit_end,
+                                              offset_size,
+                                              addr_size,
+                                              form,
+                                              &tmp_str,
+                                              &ranges_off) != 0) {
+                        free(tmp_str);
+                        if (skip_form_value(img,
+                                            &p,
+                                            unit_end,
+                                            offset_size,
+                                            addr_size,
+                                            version,
+                                            form) != 0) {
+                            free(linkage_name);
+                            dwarf_abbrev_table_free(&abbrev);
+                            return -1;
+                        }
+                        continue;
+                    }
+                    free(tmp_str);
+                    has_ranges = 1;
+                    continue;
+                }
+
+                if (implicit) {
+                    continue;
+                }
+
+                if (skip_form_value(img, &p, unit_end, offset_size, addr_size, version, form) !=
+                    0) {
+                    free(name);
+                    free(linkage_name);
+                    dwarf_abbrev_table_free(&abbrev);
+                    return -1;
+                }
+            }
+
+            if (ab->tag == DW_TAG_compile_unit && has_low_pc) {
+                cu_low_pc = low_pc;
+                cu_has_low_pc = 1;
+            }
+
+            if (ab->tag == DW_TAG_subprogram) {
+                dwarf_subprogram_t sp;
+                memset(&sp, 0, sizeof(sp));
+                sp.name = name;
+                sp.linkage_name = linkage_name;
+                name = NULL;
+                linkage_name = NULL;
+
+                if (has_ranges) {
+                    uint64_t base = has_low_pc ? low_pc : (cu_has_low_pc ? cu_low_pc : 0);
+                    if (version >= 5u) {
+                        (void)parse_rnglists_ranges(img, ranges_off, addr_size, base, &sp);
+                    } else {
+                        (void)parse_legacy_ranges(img, ranges_off, addr_size, base, &sp);
+                    }
+                } else if (has_low_pc && has_high_pc) {
+                    uint64_t high = high_pc;
+                    if (high_form != DW_FORM_addr) {
+                        high = low_pc + high_pc;
+                    }
+                    if (subprogram_add_range(&sp, low_pc, high) != 0) {
+                        dwarf_subprogram_free(&sp);
+                        dwarf_abbrev_table_free(&abbrev);
+                        return -1;
+                    }
+                }
+
+                if (sp.range_count > 0u && image_append_subprogram(img, &sp) != 0) {
+                    dwarf_subprogram_free(&sp);
+                    dwarf_abbrev_table_free(&abbrev);
+                    return -1;
+                }
+                dwarf_subprogram_free(&sp);
+            } else {
+                free(name);
+                free(linkage_name);
+            }
+        }
+
+        dwarf_abbrev_table_free(&abbrev);
+        p = unit_end;
+    }
+
+    return 0;
+}
+
+static const char *lookup_function_name(const addr2line_image_t *img, uint64_t addr) {
+    size_t i;
+    const char *best_name = NULL;
+    uint64_t best_span = UINT64_MAX;
+
+    for (i = 0; i < img->subprogram_count; ++i) {
+        const dwarf_subprogram_t *sp = &img->subprograms[i];
+        size_t r;
+        for (r = 0; r < sp->range_count; ++r) {
+            uint64_t low = sp->ranges[r].low;
+            uint64_t high = sp->ranges[r].high;
+            if (addr >= low && addr < high) {
+                uint64_t span = high - low;
+                const char *name = sp->linkage_name != NULL && sp->linkage_name[0] != '\0'
+                                       ? sp->linkage_name
+                                       : sp->name;
+                if (name != NULL && name[0] != '\0' && span <= best_span) {
+                    best_span = span;
+                    best_name = name;
+                }
+            }
+        }
+    }
+    if (best_name != NULL) {
+        return best_name;
+    }
+
+    if (img->func_count > 0u) {
+        size_t lo = 0;
+        size_t hi = img->func_count;
+        while (lo < hi) {
+            size_t mid = lo + ((hi - lo) / 2u);
+            if (img->func_syms[mid].value <= addr) {
+                lo = mid + 1u;
+            } else {
+                hi = mid;
+            }
+        }
+        if (lo > 0u) {
+            const func_symbol_t *sym = &img->func_syms[lo - 1u];
+            if (sym->size > 0u && addr >= sym->value && addr < sym->value + sym->size) {
+                return sym->name;
+            }
+        }
+    }
+
+    return "??";
+}
+
 static void print_open_error(const char *path, elf_err_t err) {
     if (err == ELF_ERR_FORMAT) {
         fprintf(stderr, "%s: %s: file format not recognized\n", g_progname, path);
@@ -1665,6 +2518,13 @@ static int image_open(addr2line_image_t *img, const char *path) {
         fprintf(stderr, "%s: out of memory\n", g_progname);
         image_reset(img);
         return -1;
+    }
+    if (img->debug_info.present && parse_debug_info_subprograms(img) != 0) {
+        warnf("malformed .debug_info section in %s", path);
+        while (img->subprogram_count > 0u) {
+            img->subprogram_count--;
+            dwarf_subprogram_free(&img->subprograms[img->subprogram_count]);
+        }
     }
 
     return 0;
@@ -1749,9 +2609,14 @@ static char *line_entry_path(const addr2line_image_t *img, const line_entry_t *e
     return full;
 }
 
-static void output_lookup(const addr2line_image_t *img, uint64_t query, int show_column) {
+static void output_lookup(const addr2line_image_t *img,
+                          uint64_t query,
+                          const addr2line_opts_t *opts) {
     const line_entry_t *entry = lookup_line_entry(img, query);
     char *path;
+    if (opts->show_functions) {
+        puts(lookup_function_name(img, query));
+    }
     if (entry == NULL) {
         output_unresolved();
         return;
@@ -1762,7 +2627,7 @@ static void output_lookup(const addr2line_image_t *img, uint64_t query, int show
         output_unresolved();
         return;
     }
-    if (show_column) {
+    if (opts->show_column) {
         printf("%s:%" PRIu32 ":%" PRIu32 "\n", path, entry->line, entry->column);
     } else {
         printf("%s:%" PRIu32 "\n", path, entry->line);
@@ -1780,7 +2645,7 @@ static int resolve_stdin(const addr2line_image_t *img, const addr2line_opts_t *o
             output_unresolved();
             continue;
         }
-        output_lookup(img, query, opts->show_column);
+        output_lookup(img, query, opts);
     }
 
     return 0;
@@ -1799,7 +2664,7 @@ static int resolve_argv(const addr2line_image_t *img,
             output_unresolved();
             continue;
         }
-        output_lookup(img, query, opts->show_column);
+        output_lookup(img, query, opts);
     }
 
     return 0;
@@ -1843,6 +2708,10 @@ static int parse_options(int argc, char **argv, addr2line_opts_t *opts) {
         }
         if (strcmp(arg, "-c") == 0) {
             opts->show_column = 1;
+            continue;
+        }
+        if (strcmp(arg, "-f") == 0) {
+            opts->show_functions = 1;
             continue;
         }
 
