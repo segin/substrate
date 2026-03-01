@@ -775,6 +775,37 @@ elf_err_t elf_eh_frame_stats(const elf_section_t *section, size_t *cie_count_out
 elf_err_t elf_debug_validate(elfobj_t *obj, char **diagnostics);
 elf_err_t elf_debug_sort_sections(elfobj_t *obj);
 
+size_t elf_arm_attribute_count(const elfobj_t *obj);
+uint32_t elf_arm_attribute_tag_at(const elfobj_t *obj, size_t index);
+uint64_t elf_arm_attribute_value_at(const elfobj_t *obj, size_t index);
+const char *elf_arm_attribute_string_at(const elfobj_t *obj, size_t index);
+
+typedef struct {
+    const char *name;
+    uint32_t type;
+    const void *desc_data;
+    size_t desc_size;
+} elf_note_info_t;
+
+typedef struct {
+    uint32_t type;
+    const void *data;
+    size_t data_size;
+} elf_gnu_property_info_t;
+
+size_t elf_note_count(const elfobj_t *obj);
+int elf_note_at(const elfobj_t *obj, size_t index, elf_note_info_t *out);
+size_t elf_gnu_property_count(const elfobj_t *obj);
+int elf_gnu_property_at(const elfobj_t *obj, size_t index, elf_gnu_property_info_t *out);
+uint32_t elf_x86_isa_level(const elfobj_t *obj);
+uint32_t elf_x86_feature_flags(const elfobj_t *obj);
+uint32_t elf_aarch64_feature_flags(const elfobj_t *obj);
+elf_err_t elf_add_gnu_property_x86(elfobj_t *obj, uint32_t isa_needed, uint32_t isa_used,
+                                   uint32_t feature_1);
+int elf_build_id(const elfobj_t *obj, const uint8_t **out_data, size_t *out_size);
+
+const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type);
+
 #ifdef __cplusplus
 }
 #endif
