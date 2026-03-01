@@ -633,6 +633,18 @@ const char *elf_symbol_name(const elf_symbol_t *symbol) {
     return symbol == NULL ? NULL : symbol->name;
 }
 
+uint8_t elf_symbol_bind(const elf_symbol_t *symbol) {
+    return symbol == NULL ? STB_LOCAL : symbol->bind;
+}
+
+uint8_t elf_symbol_type(const elf_symbol_t *symbol) {
+    return symbol == NULL ? STT_NOTYPE : symbol->type;
+}
+
+uint16_t elf_symbol_shndx(const elf_symbol_t *symbol) {
+    return symbol == NULL ? SHN_UNDEF : symbol->shndx;
+}
+
 uint64_t elf_symbol_value(const elf_symbol_t *symbol) {
     return symbol == NULL ? 0 : symbol->value;
 }

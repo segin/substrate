@@ -6,12 +6,12 @@ Goal: implement a production `ar` where ELF member inspection/parsing comes from
 
 ## 1. `libelfobj` Integration
 
-- [ ] Add `-lelfobj` to `Makefile` link flags and `-I` for `include/elfobj.h`.
-- [ ] Replace inline `Elf32_Ehdr`/`Elf32_Shdr`/`Elf32_Sym` parsing in `get_elf_symbols()` with `elf_open_memory()` + `elf_symbol_count()`/`elf_symbol_get()`.
-- [ ] Use `elf_symbol_bind()`, `elf_symbol_shndx()`, `elf_symbol_name()` instead of raw `ELF32_ST_BIND` / field access.
-- [ ] Remove hardcoded `#ifndef _ELF_H_SHDR` Shdr typedef and all local ELF constant guards (`STB_GLOBAL`, `STB_WEAK`, `SHN_UNDEF`, `ELFMAG`, `SELFMAG`).
-- [ ] Handle `elf_open_memory()` failures gracefully (non‑ELF members are legal in archives; skip symbol extraction, do not abort).
-- [ ] Call `elf_close()` after symbol extraction to avoid leaking `elfobj_t` handles.
+- [x] Add `-lelfobj` to `Makefile` link flags and `-I` for `include/elfobj.h`.
+- [x] Replace inline `Elf32_Ehdr`/`Elf32_Shdr`/`Elf32_Sym` parsing in `get_elf_symbols()` with `elf_open_memory()` + `elf_symbol_count()`/`elf_symbol_get()`.
+- [x] Use `elf_symbol_bind()`, `elf_symbol_shndx()`, `elf_symbol_name()` instead of raw `ELF32_ST_BIND` / field access.
+- [x] Remove hardcoded `#ifndef _ELF_H_SHDR` Shdr typedef and all local ELF constant guards (`STB_GLOBAL`, `STB_WEAK`, `SHN_UNDEF`, `ELFMAG`, `SELFMAG`).
+- [x] Handle `elf_open_memory()` failures gracefully (non‑ELF members are legal in archives; skip symbol extraction, do not abort).
+- [x] Call `elf_close()` after symbol extraction to avoid leaking `elfobj_t` handles.
 
 ## 2. ELF32/ELF64 and Cross‑Endian Support
 

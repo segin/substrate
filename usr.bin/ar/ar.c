@@ -14,47 +14,12 @@
 #include <string.h>
 #include <errno.h>
 #include <time.h>
-#include <utime.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdarg.h>
-#include <elf.h>
+#include "elfobj.h"
 
 #include "ar.h"
-
-#ifndef ELFMAG
-#define ELFMAG      "\177ELF"
-#endif
-#ifndef SELFMAG
-#define SELFMAG     4
-#endif
-
-#ifndef STB_GLOBAL
-#define STB_GLOBAL  1
-#endif
-#ifndef STB_WEAK
-#define STB_WEAK    2
-#endif
-#ifndef SHN_UNDEF
-#define SHN_UNDEF   0
-#endif
-
-#ifndef _ELF_H_SHDR
-#define _ELF_H_SHDR
-/* Section header might be missing from minimal elf.h */
-typedef struct {
-    uint32_t sh_name;
-    uint32_t sh_type;
-    uint32_t sh_flags;
-    uint32_t sh_addr;
-    uint32_t sh_offset;
-    uint32_t sh_size;
-    uint32_t sh_link;
-    uint32_t sh_info;
-    uint32_t sh_addralign;
-    uint32_t sh_entsize;
-} Elf32_Shdr;
-#endif
 
 /* Mode flags */
 #define AR_APPEND       0x0001
@@ -541,44 +506,68 @@ static void list_members(char **members, int count) {
 }
 
 static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
-    if (m->size < sizeof(Elf32_Ehdr)) return;
-    Elf32_Ehdr *eh = (Elf32_Ehdr *)m->data;
-    if (memcmp(eh->e_ident, ELFMAG, SELFMAG) != 0) return;
+    elfobj_t *obj = NULL;
+    elf_err_t open_err;
+    size_t symbol_count;
 
-    Elf32_Shdr *sh = (Elf32_Shdr *)((char *)m->data + eh->e_shoff);
-    Elf32_Shdr *symtab = NULL;
-    Elf32_Shdr *strtab = NULL;
-
-    for (int i = 0; i < eh->e_shnum; i++) {
-        if (sh[i].sh_type == SHT_SYMTAB) {
-            symtab = &sh[i];
-            if (sh[i].sh_link < eh->e_shnum) strtab = &sh[sh[i].sh_link];
-            break;
-        }
+    if (m == NULL || m->data == NULL || m->size == 0) {
+        return;
     }
 
-    if (!symtab || !strtab) return;
-
-    Elf32_Sym *syms = (Elf32_Sym *)((char *)m->data + symtab->sh_offset);
-    char *strs = (char *)m->data + strtab->sh_offset;
-    int num_syms = symtab->sh_size / sizeof(Elf32_Sym);
-
-    for (int i = 0; i < num_syms; i++) {
-        unsigned char bind = ELF32_ST_BIND(syms[i].st_info);
-        if (bind == STB_GLOBAL || bind == STB_WEAK) {
-            if (syms[i].st_shndx != SHN_UNDEF) {
-                char *name = strs + syms[i].st_name;
-                if (*name) {
-                    struct sym_entry *s = malloc(sizeof(struct sym_entry));
-                    s->name = strdup(name);
-                    s->offset = 0;
-                    s->member = m;
-                    s->next = *sym_head;
-                    *sym_head = s;
-                }
-            }
-        }
+    /*
+     * Non-ELF archive members are legal. If parsing fails, skip symbol
+     * extraction without failing the archive operation.
+     */
+    open_err = elf_open_memory(m->data, m->size, &obj);
+    if (open_err != ELF_OK || obj == NULL) {
+        return;
     }
+
+    symbol_count = elf_symbol_count(obj);
+    for (size_t i = 0; i < symbol_count; i++) {
+        elf_symbol_t *symbol;
+        const char *name;
+        uint8_t bind;
+        uint16_t shndx;
+
+        symbol = elf_symbol_at(obj, i);
+        if (symbol == NULL) {
+            continue;
+        }
+
+        bind = elf_symbol_bind(symbol);
+        if (bind != STB_GLOBAL && bind != STB_WEAK) {
+            continue;
+        }
+
+        shndx = elf_symbol_shndx(symbol);
+        if (shndx == SHN_UNDEF) {
+            continue;
+        }
+
+        name = elf_symbol_name(symbol);
+        if (name == NULL || name[0] == '\0') {
+            continue;
+        }
+
+        struct sym_entry *s = malloc(sizeof(struct sym_entry));
+        if (s == NULL) {
+            continue;
+        }
+
+        s->name = strdup(name);
+        if (s->name == NULL) {
+            free(s);
+            continue;
+        }
+
+        s->offset = 0;
+        s->member = m;
+        s->next = *sym_head;
+        *sym_head = s;
+    }
+
+    elf_close(obj);
 }
 
 static int compare_syms(const void *a, const void *b) {
