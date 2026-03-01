@@ -3217,6 +3217,278 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_diag(diag, "unsupported __builtin_va_arg type size");
                 return -1;
             }
+
+            if (g_pointer_size_bytes == 8) {
+                int ap_ptr;
+                int gp_off_ptr;
+                int fp_off_ptr;
+                int overflow_ptr_ptr;
+                int regsave_ptr_ptr;
+                int gp_off;
+                int fp_off;
+                int overflow_ptr;
+                int regsave_ptr;
+                int use_fp = (e->aux_type == CC_TYPE_DOUBLE || e->aux_type == CC_TYPE_FLOAT) ? 1 : 0;
+                int off_ptr;
+                int offv;
+                int off_limit;
+                int cmpv;
+                int dstv;
+                int addrv;
+                int reg_incv;
+                int stack_incv;
+                int next_off;
+                int next_overflow;
+                int reg_loaded;
+                int stack_loaded;
+                int l_reg;
+                int l_stack;
+                int l_end;
+                int ap_idx_const;
+                int field_off_const;
+                long load_size = mem_size;
+                long stack_step;
+                int is_agg = (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) ? 1 : 0;
+                cc_value_type_t dst_ty = is_agg ? CC_VAL_I64 : type_to_val(e->aux_type);
+
+                ap_ptr = cast_value(sf, vars[ap_idx].value, CC_VAL_I64, diag);
+                if (ap_ptr < 0) {
+                    return -1;
+                }
+
+                ap_idx_const = emit_const_i64_instr(sf, 8);
+                if (ap_idx_const < 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_ADD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = ap_ptr;
+                in.rhs = ap_idx_const;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory computing va_list overflow_arg_area field pointer");
+                    return -1;
+                }
+                overflow_ptr_ptr = in.dst;
+
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_LOAD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = overflow_ptr_ptr;
+                in.imm = 8;
+                in.is_unsigned = 1;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory loading va_list overflow_arg_area");
+                    return -1;
+                }
+                overflow_ptr = in.dst;
+
+                regsave_ptr_ptr = emit_const_i64_instr(sf, 16);
+                if (regsave_ptr_ptr < 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_ADD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = ap_ptr;
+                in.rhs = regsave_ptr_ptr;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory computing va_list reg_save_area field pointer");
+                    return -1;
+                }
+                regsave_ptr_ptr = in.dst;
+
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_LOAD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = regsave_ptr_ptr;
+                in.imm = 8;
+                in.is_unsigned = 1;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory loading va_list reg_save_area");
+                    return -1;
+                }
+                regsave_ptr = in.dst;
+
+                field_off_const = emit_const_i64_instr(sf, use_fp ? 4 : 0);
+                if (field_off_const < 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_ADD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = ap_ptr;
+                in.rhs = field_off_const;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory computing va_list offset field pointer");
+                    return -1;
+                }
+                if (use_fp) {
+                    fp_off_ptr = in.dst;
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_LOAD;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = fp_off_ptr;
+                    in.imm = 4;
+                    in.is_unsigned = 1;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory loading va_list fp_offset");
+                        return -1;
+                    }
+                    fp_off = in.dst;
+                    off_ptr = fp_off_ptr;
+                    offv = fp_off;
+                    off_limit = emit_const_i64_instr(sf, 160);
+                    reg_incv = emit_const_i64_instr(sf, 16);
+                } else {
+                    gp_off_ptr = in.dst;
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_LOAD;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = gp_off_ptr;
+                    in.imm = 4;
+                    in.is_unsigned = 1;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory loading va_list gp_offset");
+                        return -1;
+                    }
+                    gp_off = in.dst;
+                    off_ptr = gp_off_ptr;
+                    offv = gp_off;
+                    off_limit = emit_const_i64_instr(sf, 40);
+                    reg_incv = emit_const_i64_instr(sf, 8);
+                }
+                if (off_limit < 0 || reg_incv < 0) {
+                    return -1;
+                }
+
+                stack_step = use_fp ? 8 : align_up_long(mem_size, 8);
+                stack_incv = emit_const_i64_instr(sf, stack_step);
+                if (stack_incv < 0) {
+                    return -1;
+                }
+
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_CMP;
+                in.cmp_kind = CC_CMP_LE;
+                in.is_unsigned = 1;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = offv;
+                in.rhs = off_limit;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory appending va_arg register-availability compare");
+                    return -1;
+                }
+                cmpv = in.dst;
+
+                dstv = new_value(sf, dst_ty);
+                addrv = new_value(sf, CC_VAL_I64);
+                if (dstv < 0 || addrv < 0) {
+                    set_diag(diag, "out of memory creating va_arg temporaries");
+                    return -1;
+                }
+                l_reg = new_label(sf);
+                l_stack = new_label(sf);
+                l_end = new_label(sf);
+                if (emit_br_cond_instr(sf, cmpv, l_reg, l_stack) != 0) {
+                    return -1;
+                }
+
+                if (emit_label_instr(sf, l_reg) != 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_ADD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = regsave_ptr;
+                in.rhs = offv;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory computing va_arg register-slot address");
+                    return -1;
+                }
+                if (emit_mov_instr(sf, addrv, in.dst) != 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_ADD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = offv;
+                in.rhs = reg_incv;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory incrementing va_arg register offset");
+                    return -1;
+                }
+                next_off = in.dst;
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_STORE;
+                in.lhs = off_ptr;
+                in.rhs = next_off;
+                in.imm = 4;
+                if (push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory storing va_arg offset update");
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_LOAD;
+                in.dst = new_value(sf, dst_ty);
+                in.lhs = addrv;
+                in.imm = is_agg ? g_pointer_size_bytes : load_size;
+                in.is_unsigned = is_agg ? 1 : (is_unsigned_load_type(e->aux_type) ? 1 : 0);
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory loading va_arg register value");
+                    return -1;
+                }
+                reg_loaded = in.dst;
+                if (emit_mov_instr(sf, dstv, reg_loaded) != 0 || emit_br_instr(sf, l_end) != 0) {
+                    return -1;
+                }
+
+                if (emit_label_instr(sf, l_stack) != 0) {
+                    return -1;
+                }
+                if (emit_mov_instr(sf, addrv, overflow_ptr) != 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_ADD;
+                in.dst = new_value(sf, CC_VAL_I64);
+                in.lhs = overflow_ptr;
+                in.rhs = stack_incv;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory incrementing va_arg overflow pointer");
+                    return -1;
+                }
+                next_overflow = in.dst;
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_STORE;
+                in.lhs = overflow_ptr_ptr;
+                in.rhs = next_overflow;
+                in.imm = 8;
+                if (push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory storing va_arg overflow pointer update");
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_LOAD;
+                in.dst = new_value(sf, dst_ty);
+                in.lhs = addrv;
+                in.imm = is_agg ? g_pointer_size_bytes : load_size;
+                in.is_unsigned = is_agg ? 1 : (is_unsigned_load_type(e->aux_type) ? 1 : 0);
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    set_diag(diag, "out of memory loading va_arg stack value");
+                    return -1;
+                }
+                stack_loaded = in.dst;
+                if (emit_mov_instr(sf, dstv, stack_loaded) != 0 || emit_br_instr(sf, l_end) != 0) {
+                    return -1;
+                }
+
+                if (emit_label_instr(sf, l_end) != 0) {
+                    return -1;
+                }
+                return dstv;
+            }
+
             cur_ap = cast_value(sf, vars[ap_idx].value, CC_VAL_I64, diag);
             if (cur_ap < 0) {
                 return -1;
@@ -9091,6 +9363,15 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
     size_t i;
     (void)tu;
     if (f == NULL || !f->has_body) {
+        return 1;
+    }
+    /*
+     * Treat extern inline definitions as inline-only provider bodies.
+     * This matches common GNU header usage (e.g. gmp.h) where an external
+     * implementation exists and the header definition should not emit a TU-local
+     * out-of-line symbol.
+     */
+    if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & CC_STORAGE_EXTERN) != 0) {
         return 1;
     }
     for (i = 0; i < f->stmt_count; ++i) {

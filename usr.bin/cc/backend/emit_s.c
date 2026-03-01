@@ -2066,6 +2066,39 @@ static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_in
     *out_xmm_regs = xmm;
 }
 
+static void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_t *out_gpr, size_t *out_xmm,
+                              size_t *out_stack) {
+    size_t gpr = 0;
+    size_t xmm = 0;
+    size_t stack = 0;
+    int i;
+    if (fixed_count < 0) {
+        fixed_count = 0;
+    }
+    if ((size_t)fixed_count > f->param_count) {
+        fixed_count = (int)f->param_count;
+    }
+    for (i = 0; i < fixed_count; ++i) {
+        abi_loc_t loc = abi64_param_loc(f, i);
+        if (loc.kind == ABI_LOC_GPR) {
+            gpr++;
+        } else if (loc.kind == ABI_LOC_XMM) {
+            xmm++;
+        } else {
+            stack++;
+        }
+    }
+    if (out_gpr != NULL) {
+        *out_gpr = gpr;
+    }
+    if (out_xmm != NULL) {
+        *out_xmm = xmm;
+    }
+    if (out_stack != NULL) {
+        *out_stack = stack;
+    }
+}
+
 static const char *x86_64_fp_tmp_reg(void) {
     return "%xmm15";
 }
@@ -2141,15 +2174,29 @@ static void emit_x86_64_fround32(FILE *fp, const slot_layout_t *lay, const cc_ss
 }
 
 static void emit_x86_64_va_start(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                                 const cc_ssa_instr_t *in, int va_copy_off) {
+                                 const cc_ssa_instr_t *in, int va_state_off, int va_regsave_off) {
+    size_t gpr_used = 0;
+    size_t xmm_used = 0;
+    size_t stack_used = 0;
+    long gp_offset;
+    long fp_offset;
+    long overflow_off;
     int rd;
     int_regs_flush(fp, f, lay, ist);
     rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
     if (f->is_variadic) {
-        fprintf(fp, "\tmovq %d(%%rbp), %s\n", va_copy_off, ist->regs[rd]);
-        if (in->imm != 0) {
-            fprintf(fp, "\taddq $%ld, %s\n", in->imm * 8, ist->regs[rd]);
-        }
+        abi64_fixed_usage(f, (int)in->imm, &gpr_used, &xmm_used, &stack_used);
+        gp_offset = (long)(gpr_used * 8);
+        fp_offset = 48 + (long)(xmm_used * 16);
+        overflow_off = 16 + (long)(stack_used * 8);
+
+        fprintf(fp, "\tmovl $%ld, %d(%%rbp)\n", gp_offset, va_state_off);
+        fprintf(fp, "\tmovl $%ld, %d(%%rbp)\n", fp_offset, va_state_off + 4);
+        fprintf(fp, "\tleaq %ld(%%rbp), %%rax\n", overflow_off);
+        fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", va_state_off + 8);
+        fprintf(fp, "\tleaq %d(%%rbp), %%rax\n", va_regsave_off);
+        fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", va_state_off + 16);
+        fprintf(fp, "\tleaq %d(%%rbp), %s\n", va_state_off, ist->regs[rd]);
     } else {
         int poff = 16 + (int)(in->imm * 8);
         fprintf(fp, "\tleaq %d(%%rbp), %s\n", poff, ist->regs[rd]);
@@ -2292,8 +2339,6 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     size_t a;
     size_t abi_stack_count = 0;
     size_t xmm_regs = 0;
-    size_t copy_bytes = 0;
-    size_t copy_base = 0;
     size_t stack_bytes;
     size_t stack_pad;
     size_t stack_total;
@@ -2310,9 +2355,7 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
         abi64_classify_call_args(f, in, locs, &abi_stack_count, &xmm_regs);
     }
 
-    copy_bytes = in->call_is_variadic ? in->arg_count * 8 : 0;
-    copy_base = abi_stack_count * 8;
-    stack_bytes = copy_base + copy_bytes;
+    stack_bytes = abi_stack_count * 8;
     stack_pad = (stack_bytes & 0xF) == 0 ? 0 : 8;
     stack_total = stack_bytes + stack_pad;
 
@@ -2321,20 +2364,12 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     }
     for (a = 0; a < in->arg_count; ++a) {
         int arg_value = in->args[a];
-        if (in->call_is_variadic) {
-            size_t copy_off = copy_base + a * 8;
-            if (emit_x86_64_store_value_to_rsp(fp, f, lay, arg_value, copy_off, diag) != 0) {
-                free(locs);
-                return -1;
-            }
-        }
         if (emit_x86_64_move_value_to_abi_loc(fp, f, lay, arg_value, &locs[a], diag) != 0) {
             free(locs);
             return -1;
         }
     }
     if (in->call_is_variadic) {
-        fprintf(fp, "\tleaq %zu(%%rsp), %%r10\n", copy_base);
         fprintf(fp, "\tmovb $%zu, %%al\n", xmm_regs);
     }
     if (in->op == CC_SSA_CALLI) {
@@ -2375,7 +2410,8 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         size_t j;
         int frame;
         int raw_frame;
-        int va_copy_off = 0;
+        int va_state_off = 0;
+        int va_regsave_off = 0;
 
         if (build_slot_layout(f, 8, &lay, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
@@ -2385,8 +2421,10 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         }
         raw_frame = lay.frame_bytes;
         if (f->is_variadic) {
-            va_copy_off = -(raw_frame + 8);
-            raw_frame += 8;
+            va_state_off = -(raw_frame + 24);
+            raw_frame += 24;
+            va_regsave_off = -(raw_frame + 176);
+            raw_frame += 176;
         }
         frame = (raw_frame + 15) & ~15;
 
@@ -2424,7 +2462,20 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             fprintf(fp, "\tsubq $%d, %%rsp\n", frame);
         }
         if (f->is_variadic) {
-            fprintf(fp, "\tmovq %%r10, %d(%%rbp)\n", va_copy_off);
+            fprintf(fp, "\tmovq %%rdi, %d(%%rbp)\n", va_regsave_off + 0);
+            fprintf(fp, "\tmovq %%rsi, %d(%%rbp)\n", va_regsave_off + 8);
+            fprintf(fp, "\tmovq %%rdx, %d(%%rbp)\n", va_regsave_off + 16);
+            fprintf(fp, "\tmovq %%rcx, %d(%%rbp)\n", va_regsave_off + 24);
+            fprintf(fp, "\tmovq %%r8, %d(%%rbp)\n", va_regsave_off + 32);
+            fprintf(fp, "\tmovq %%r9, %d(%%rbp)\n", va_regsave_off + 40);
+            fprintf(fp, "\tmovdqu %%xmm0, %d(%%rbp)\n", va_regsave_off + 48);
+            fprintf(fp, "\tmovdqu %%xmm1, %d(%%rbp)\n", va_regsave_off + 64);
+            fprintf(fp, "\tmovdqu %%xmm2, %d(%%rbp)\n", va_regsave_off + 80);
+            fprintf(fp, "\tmovdqu %%xmm3, %d(%%rbp)\n", va_regsave_off + 96);
+            fprintf(fp, "\tmovdqu %%xmm4, %d(%%rbp)\n", va_regsave_off + 112);
+            fprintf(fp, "\tmovdqu %%xmm5, %d(%%rbp)\n", va_regsave_off + 128);
+            fprintf(fp, "\tmovdqu %%xmm6, %d(%%rbp)\n", va_regsave_off + 144);
+            fprintf(fp, "\tmovdqu %%xmm7, %d(%%rbp)\n", va_regsave_off + 160);
         }
         if (int_regs_init(&ist, f, emit_regs64, (int)(sizeof(emit_regs64) / sizeof(emit_regs64[0])), 1, diag) != 0) {
             slot_layout_free(&lay);
@@ -2833,7 +2884,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
 
             case CC_SSA_VA_START: {
-                emit_x86_64_va_start(fp, f, &lay, &ist, in, va_copy_off);
+                emit_x86_64_va_start(fp, f, &lay, &ist, in, va_state_off, va_regsave_off);
                 break;
             }
 
