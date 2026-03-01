@@ -83,7 +83,23 @@ static int i386_reloc_size(uint32_t type) {
         case R_386_TLS_GD:
         case R_386_TLS_LDM:
         case R_386_TLS_LDO_32:
+        case R_386_COPY:
+        case R_386_GLOB_DAT:
+        case R_386_JMP_SLOT:
+        case R_386_TLS_DTPMOD32:
+        case R_386_TLS_DTPOFF32:
+        case R_386_TLS_LE_32:
+        case R_386_TLS_TPOFF32:
+        case R_386_SIZE32:
+        case R_386_GOT32X:
+        case R_386_IRELATIVE:
             return 4;
+        case R_386_16:
+        case R_386_PC16:
+            return 2;
+        case R_386_8:
+        case R_386_PC8:
+            return 1;
         default:
             return -1;
     }
@@ -94,6 +110,27 @@ static int i386_is_pc_relative(uint32_t type) {
         case R_386_PC32:
         case R_386_PLT32:
         case R_386_GOTPC:
+        case R_386_PC16:
+        case R_386_PC8:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int i386_is_tls(uint32_t type) {
+    switch (type) {
+        case R_386_TLS_TPOFF:
+        case R_386_TLS_IE:
+        case R_386_TLS_GOTIE:
+        case R_386_TLS_LE:
+        case R_386_TLS_GD:
+        case R_386_TLS_LDM:
+        case R_386_TLS_LDO_32:
+        case R_386_TLS_DTPMOD32:
+        case R_386_TLS_DTPOFF32:
+        case R_386_TLS_LE_32:
+        case R_386_TLS_TPOFF32:
             return 1;
         default:
             return 0;
@@ -115,6 +152,16 @@ static int i386_apply(const elfobj_reloc_ctx_t *ctx,
             return 0;
         case R_386_32:
         case R_386_RELATIVE:
+        case R_386_COPY:
+        case R_386_GLOB_DAT:
+        case R_386_JMP_SLOT:
+        case R_386_SIZE32:
+        case R_386_GOT32X:
+        case R_386_IRELATIVE:
+        case R_386_TLS_DTPMOD32:
+        case R_386_TLS_DTPOFF32:
+        case R_386_TLS_LE_32:
+        case R_386_TLS_TPOFF32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
             if (!swide_in_unsigned_bits(v, 32)) {
                 return -2;
@@ -151,6 +198,34 @@ static int i386_apply(const elfobj_reloc_ctx_t *ctx,
             }
             *out_value = swide_to_width(v, 32);
             return 0;
+        case R_386_16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_386_PC16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if (!swide_in_signed_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_386_8:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 8)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 8);
+            return 0;
+        case R_386_PC8:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if (!swide_in_signed_bits(v, 8)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 8);
+            return 0;
         default:
             return -1;
     }
@@ -171,7 +246,33 @@ static int x64_reloc_size(uint32_t type) {
         case R_X86_64_TLSGD:
         case R_X86_64_GOTTPOFF:
         case R_X86_64_TPOFF32:
+        case R_X86_64_COPY:
+        case R_X86_64_GLOB_DAT:
+        case R_X86_64_JUMP_SLOT:
+        case R_X86_64_RELATIVE:
+        case R_X86_64_DTPOFF32:
+        case R_X86_64_GOTPC32:
+        case R_X86_64_SIZE32:
+        case R_X86_64_GOTPC32_TLSDESC:
+        case R_X86_64_TLSDESC_CALL:
+        case R_X86_64_TLSDESC:
+        case R_X86_64_GOTPCRELX:
+        case R_X86_64_REX_GOTPCRELX:
             return 4;
+        case R_X86_64_DTPMOD64:
+        case R_X86_64_DTPOFF64:
+        case R_X86_64_TPOFF64:
+        case R_X86_64_PC64:
+        case R_X86_64_GOTOFF64:
+        case R_X86_64_SIZE64:
+        case R_X86_64_IRELATIVE:
+            return 8;
+        case R_X86_64_16:
+        case R_X86_64_PC16:
+            return 2;
+        case R_X86_64_8:
+        case R_X86_64_PC8:
+            return 1;
         default:
             return -1;
     }
@@ -182,6 +283,28 @@ static int x64_is_pc_relative(uint32_t type) {
         case R_X86_64_PC32:
         case R_X86_64_PLT32:
         case R_X86_64_GOTPCREL:
+        case R_X86_64_PC64:
+        case R_X86_64_PC16:
+        case R_X86_64_PC8:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int x64_is_tls(uint32_t type) {
+    switch (type) {
+        case R_X86_64_TLSGD:
+        case R_X86_64_GOTTPOFF:
+        case R_X86_64_TPOFF32:
+        case R_X86_64_DTPMOD64:
+        case R_X86_64_DTPOFF64:
+        case R_X86_64_TPOFF64:
+        case R_X86_64_TLSLD:
+        case R_X86_64_DTPOFF32:
+        case R_X86_64_GOTPC32_TLSDESC:
+        case R_X86_64_TLSDESC_CALL:
+        case R_X86_64_TLSDESC:
             return 1;
         default:
             return 0;
@@ -202,6 +325,12 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
             *out_value = 0;
             return 0;
         case R_X86_64_64:
+        case R_X86_64_DTPMOD64:
+        case R_X86_64_DTPOFF64:
+        case R_X86_64_TPOFF64:
+        case R_X86_64_GOTOFF64:
+        case R_X86_64_SIZE64:
+        case R_X86_64_IRELATIVE:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
             if (!swide_in_unsigned_bits(v, 64)) {
                 return -2;
@@ -211,6 +340,9 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
         case R_X86_64_PC32:
         case R_X86_64_PLT32:
         case R_X86_64_GOTPCREL:
+        case R_X86_64_GOTPCRELX:
+        case R_X86_64_REX_GOTPCRELX:
+        case R_X86_64_GOTPC32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
             if (!swide_in_signed_bits(v, 32)) {
                 return -2;
@@ -219,6 +351,14 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
             return 0;
         case R_X86_64_32:
         case R_X86_64_GOT32:
+        case R_X86_64_COPY:
+        case R_X86_64_GLOB_DAT:
+        case R_X86_64_JUMP_SLOT:
+        case R_X86_64_RELATIVE:
+        case R_X86_64_SIZE32:
+        case R_X86_64_GOTPC32_TLSDESC:
+        case R_X86_64_TLSDESC_CALL:
+        case R_X86_64_TLSDESC:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
             if (!swide_in_unsigned_bits(v, 32)) {
                 return -2;
@@ -229,11 +369,45 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
         case R_X86_64_TLSGD:
         case R_X86_64_GOTTPOFF:
         case R_X86_64_TPOFF32:
+        case R_X86_64_TLSLD:
+        case R_X86_64_DTPOFF32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
             if (!swide_in_signed_bits(v, 32)) {
                 return -2;
             }
             *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_X86_64_PC64:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        case R_X86_64_16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_X86_64_PC16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if (!swide_in_signed_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_X86_64_8:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 8)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 8);
+            return 0;
+        case R_X86_64_PC8:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if (!swide_in_signed_bits(v, 8)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 8);
             return 0;
         default:
             return -1;
@@ -1165,12 +1339,10 @@ int elf_reloc_is_pc_relative_for_machine(uint16_t machine, uint32_t type) {
 
 int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type) {
     if (machine == EM_386) {
-        return type == R_386_TLS_TPOFF || type == R_386_TLS_IE || type == R_386_TLS_GOTIE ||
-               type == R_386_TLS_LE || type == R_386_TLS_GD || type == R_386_TLS_LDM ||
-               type == R_386_TLS_LDO_32;
+        return i386_is_tls(type);
     }
     if (machine == EM_X86_64) {
-        return type == R_X86_64_TLSGD || type == R_X86_64_GOTTPOFF || type == R_X86_64_TPOFF32;
+        return x64_is_tls(type);
     }
     if (machine == EM_ARM) {
         return arm_is_tls(type);
@@ -1179,6 +1351,100 @@ int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type) {
         return aarch64_is_tls(type);
     }
     return 0;
+}
+
+const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
+    static char unknown[32];
+    switch (machine) {
+        case EM_386:
+            switch (type) {
+                case R_386_NONE: return "R_386_NONE";
+                case R_386_32: return "R_386_32";
+                case R_386_PC32: return "R_386_PC32";
+                case R_386_GOT32: return "R_386_GOT32";
+                case R_386_PLT32: return "R_386_PLT32";
+                case R_386_COPY: return "R_386_COPY";
+                case R_386_GLOB_DAT: return "R_386_GLOB_DAT";
+                case R_386_JMP_SLOT: return "R_386_JMP_SLOT";
+                case R_386_RELATIVE: return "R_386_RELATIVE";
+                case R_386_GOTOFF: return "R_386_GOTOFF";
+                case R_386_GOTPC: return "R_386_GOTPC";
+                case R_386_16: return "R_386_16";
+                case R_386_PC16: return "R_386_PC16";
+                case R_386_8: return "R_386_8";
+                case R_386_PC8: return "R_386_PC8";
+                case R_386_TLS_TPOFF: return "R_386_TLS_TPOFF";
+                case R_386_TLS_IE: return "R_386_TLS_IE";
+                case R_386_TLS_GOTIE: return "R_386_TLS_GOTIE";
+                case R_386_TLS_LE: return "R_386_TLS_LE";
+                case R_386_TLS_GD: return "R_386_TLS_GD";
+                case R_386_TLS_LDM: return "R_386_TLS_LDM";
+                case R_386_TLS_LDO_32: return "R_386_TLS_LDO_32";
+                case R_386_TLS_LE_32: return "R_386_TLS_LE_32";
+                case R_386_TLS_DTPMOD32: return "R_386_TLS_DTPMOD32";
+                case R_386_TLS_DTPOFF32: return "R_386_TLS_DTPOFF32";
+                case R_386_TLS_TPOFF32: return "R_386_TLS_TPOFF32";
+                case R_386_SIZE32: return "R_386_SIZE32";
+                case R_386_IRELATIVE: return "R_386_IRELATIVE";
+                case R_386_GOT32X: return "R_386_GOT32X";
+                default: break;
+            }
+            break;
+        case EM_X86_64:
+            switch (type) {
+                case R_X86_64_NONE: return "R_X86_64_NONE";
+                case R_X86_64_64: return "R_X86_64_64";
+                case R_X86_64_PC32: return "R_X86_64_PC32";
+                case R_X86_64_GOT32: return "R_X86_64_GOT32";
+                case R_X86_64_PLT32: return "R_X86_64_PLT32";
+                case R_X86_64_COPY: return "R_X86_64_COPY";
+                case R_X86_64_GLOB_DAT: return "R_X86_64_GLOB_DAT";
+                case R_X86_64_JUMP_SLOT: return "R_X86_64_JUMP_SLOT";
+                case R_X86_64_RELATIVE: return "R_X86_64_RELATIVE";
+                case R_X86_64_GOTPCREL: return "R_X86_64_GOTPCREL";
+                case R_X86_64_32: return "R_X86_64_32";
+                case R_X86_64_32S: return "R_X86_64_32S";
+                case R_X86_64_16: return "R_X86_64_16";
+                case R_X86_64_PC16: return "R_X86_64_PC16";
+                case R_X86_64_8: return "R_X86_64_8";
+                case R_X86_64_PC8: return "R_X86_64_PC8";
+                case R_X86_64_DTPMOD64: return "R_X86_64_DTPMOD64";
+                case R_X86_64_DTPOFF64: return "R_X86_64_DTPOFF64";
+                case R_X86_64_TPOFF64: return "R_X86_64_TPOFF64";
+                case R_X86_64_TLSGD: return "R_X86_64_TLSGD";
+                case R_X86_64_TLSLD: return "R_X86_64_TLSLD";
+                case R_X86_64_DTPOFF32: return "R_X86_64_DTPOFF32";
+                case R_X86_64_GOTTPOFF: return "R_X86_64_GOTTPOFF";
+                case R_X86_64_TPOFF32: return "R_X86_64_TPOFF32";
+                case R_X86_64_PC64: return "R_X86_64_PC64";
+                case R_X86_64_GOTOFF64: return "R_X86_64_GOTOFF64";
+                case R_X86_64_GOTPC32: return "R_X86_64_GOTPC32";
+                case R_X86_64_SIZE32: return "R_X86_64_SIZE32";
+                case R_X86_64_SIZE64: return "R_X86_64_SIZE64";
+                case R_X86_64_GOTPC32_TLSDESC: return "R_X86_64_GOTPC32_TLSDESC";
+                case R_X86_64_TLSDESC_CALL: return "R_X86_64_TLSDESC_CALL";
+                case R_X86_64_TLSDESC: return "R_X86_64_TLSDESC";
+                case R_X86_64_IRELATIVE: return "R_X86_64_IRELATIVE";
+                case R_X86_64_GOTPCRELX: return "R_X86_64_GOTPCRELX";
+                case R_X86_64_REX_GOTPCRELX: return "R_X86_64_REX_GOTPCRELX";
+                default: break;
+            }
+            break;
+        case EM_ARM:
+            if (type <= 255) {
+                return "R_ARM_*";
+            }
+            break;
+        case EM_AARCH64:
+            if (type >= 257 && type <= 1032) {
+                return "R_AARCH64_*";
+            }
+            break;
+        default:
+            break;
+    }
+    (void)snprintf(unknown, sizeof(unknown), "UNKNOWN(%u)", type);
+    return unknown;
 }
 
 elf_err_t elf_apply_relocation_value(const elfobj_t *obj, uint32_t type, uint64_t place,
