@@ -414,6 +414,12 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
         if (sec->type != SHT_REL && sec->type != SHT_RELA) {
             continue;
         }
+        if (obj->machine == EM_ARM && sec->type != SHT_REL) {
+            return ELF_ERR_FORMAT;
+        }
+        if (obj->machine == EM_AARCH64 && sec->type != SHT_RELA) {
+            return ELF_ERR_FORMAT;
+        }
         if (sec->data == NULL) {
             continue;
         }
@@ -585,6 +591,11 @@ static elf_err_t parse_object(elfobj_t *obj) {
         obj->shstrndx = elf__rd16(b + 62, obj->endian);
     }
 
+    if (obj->machine != EM_386 && obj->machine != EM_X86_64 &&
+        obj->machine != EM_ARM && obj->machine != EM_AARCH64) {
+        return ELF_ERR_UNSUPPORTED;
+    }
+
     err = parse_program_headers(obj, phoff, phentsize, phnum);
     if (err != ELF_OK) {
         return err;
@@ -599,6 +610,16 @@ static elf_err_t parse_object(elfobj_t *obj) {
         err = resolve_section_names(obj);
         if (err != ELF_OK) {
             return err;
+        }
+        if (obj->machine == EM_ARM) {
+            size_t i;
+            for (i = 0; i < obj->section_count; ++i) {
+                struct elf_section *s = obj->sections[i];
+                if (s != NULL && s->type == SHT_ARM_EXIDX &&
+                    s->link >= obj->section_count && s->link != 0) {
+                    return ELF_ERR_FORMAT;
+                }
+            }
         }
     }
 

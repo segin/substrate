@@ -407,14 +407,14 @@ Beyond the currently-implemented core set, add the full x86 relocation roster:
 
 ## 5. ELF Read (`elf_read.c`)
 
-- [ ] Recognize `EM_ARM` and `EM_AARCH64` as valid machine types.
-- [ ] ARM: parse REL relocations (no addend in struct; addend encoded in instruction).
-- [ ] AArch64: parse RELA relocations (explicit addend).
-- [ ] Parse `SHT_ARM_EXIDX` sections with proper `sh_link` interpretation.
-- [ ] Parse `SHT_ARM_ATTRIBUTES` / `SHT_AARCH64_ATTRIBUTES` build attribute sections.
-- [ ] Handle ARM `SHF_ARM_PURECODE` flag in section flags.
-- [ ] Read `PT_ARM_EXIDX` and `PT_AARCH64_MEMTAG_MTE` segment types.
-- [ ] Endian-aware reads: ARM objects can be big-endian (BE32 or BE8).
+- [x] Recognize `EM_ARM` and `EM_AARCH64` as valid machine types.
+- [x] ARM: parse REL relocations (no addend in struct; addend encoded in instruction).
+- [x] AArch64: parse RELA relocations (explicit addend).
+- [x] Parse `SHT_ARM_EXIDX` sections with proper `sh_link` interpretation.
+- [x] Parse `SHT_ARM_ATTRIBUTES` / `SHT_AARCH64_ATTRIBUTES` build attribute sections.
+- [x] Handle ARM `SHF_ARM_PURECODE` flag in section flags.
+- [x] Read `PT_ARM_EXIDX` and `PT_AARCH64_MEMTAG_MTE` segment types.
+- [x] Endian-aware reads: ARM objects can be big-endian (BE32 or BE8).
 
 ---
 
