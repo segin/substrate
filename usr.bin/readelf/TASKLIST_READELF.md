@@ -6,12 +6,12 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 1. `libelfobj` Integration
 
-- [ ] Open input with `elf_open()` / `elf_open_file()`.
-- [ ] Handle ELF32 and ELF64 transparently.
-- [ ] Handle both little-endian and big-endian objects.
-- [ ] Accept multiple input files on command line.
-- [ ] Report errors for non-ELF input without crashing.
-- [ ] Handle truncated/malformed ELF with bounds-safe reads.
+- [x] Open input with `elf_open()` / `elf_open_file()`.
+- [x] Handle ELF32 and ELF64 transparently.
+- [x] Handle both little-endian and big-endian objects.
+- [x] Accept multiple input files on command line.
+- [x] Report errors for non-ELF input without crashing.
+- [x] Handle truncated/malformed ELF with bounds-safe reads.
 
 ## 2. ELF Header Display (`-h` / `--file-header`)
 
