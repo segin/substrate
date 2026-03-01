@@ -9,6 +9,83 @@ static int is_internal_section_name(const char *name) {
            strncmp(name, ".rela", 5) == 0;
 }
 
+static int arm_float_conflict(uint32_t a, uint32_t b) {
+    uint32_t ah = a & EF_ARM_ABI_FLOAT_HARD;
+    uint32_t as = a & EF_ARM_ABI_FLOAT_SOFT;
+    uint32_t bh = b & EF_ARM_ABI_FLOAT_HARD;
+    uint32_t bs = b & EF_ARM_ABI_FLOAT_SOFT;
+    return (ah && bs) || (as && bh);
+}
+
+static int parse_aarch64_feature_bits(const struct elf_section *sec, uint32_t *out_bits) {
+    const uint8_t *p;
+    size_t off;
+    uint32_t namesz, descsz;
+
+    if (sec == NULL || sec->data == NULL || sec->data_size < 16 || out_bits == NULL) {
+        return 0;
+    }
+    p = sec->data;
+    namesz = elf__rd32(p + 0, sec->obj->endian);
+    descsz = elf__rd32(p + 4, sec->obj->endian);
+    off = 12;
+    off = (off + namesz + 3u) & ~3u;
+    if (off + descsz > sec->data_size) {
+        return 0;
+    }
+    while (off + 8 <= sec->data_size && descsz >= 8) {
+        uint32_t t = elf__rd32(p + off, sec->obj->endian);
+        uint32_t sz = elf__rd32(p + off + 4, sec->obj->endian);
+        off += 8;
+        if (off + sz > sec->data_size) {
+            return 0;
+        }
+        if (t == GNU_PROPERTY_AARCH64_FEATURE_1_AND && sz >= 4) {
+            *out_bits = elf__rd32(p + off, sec->obj->endian);
+            return 1;
+        }
+        off += sz;
+        off = (off + 7u) & ~7u;
+        if (descsz < 8 + sz) {
+            break;
+        }
+        descsz -= 8 + sz;
+    }
+    return 0;
+}
+
+static elf_err_t merge_arch_metadata(elfobj_t *out, const elfobj_t *in) {
+    if (out->machine == EM_ARM) {
+        if (arm_float_conflict(out->flags, in->flags)) {
+            elf__set_err(out, ELF_ERR_FORMAT, "ARM hard/soft-float ABI conflict");
+            return ELF_ERR_FORMAT;
+        }
+        out->flags |= in->flags & (EF_ARM_ABI_FLOAT_HARD | EF_ARM_ABI_FLOAT_SOFT | EF_ARM_INTERWORK);
+        if ((in->flags & 0xFF000000u) > (out->flags & 0xFF000000u)) {
+            out->flags = (out->flags & ~0xFF000000u) | (in->flags & 0xFF000000u);
+        }
+        return ELF_OK;
+    }
+    if (out->machine == EM_AARCH64) {
+        struct elf_section *dst = elf_find_section(out, ".note.gnu.property");
+        struct elf_section *src = elf_find_section((elfobj_t *)in, ".note.gnu.property");
+        uint32_t out_bits = GNU_PROPERTY_AARCH64_FEATURE_1_BTI | GNU_PROPERTY_AARCH64_FEATURE_1_PAC;
+        uint32_t in_bits = out_bits;
+        if (src == NULL) {
+            return ELF_OK;
+        }
+        if (dst != NULL) {
+            (void)parse_aarch64_feature_bits(dst, &out_bits);
+        }
+        (void)parse_aarch64_feature_bits(src, &in_bits);
+        out_bits &= in_bits;
+        if (elf_add_gnu_property_aarch64(out, out_bits) != ELF_OK) {
+            return ELF_ERR_OOM;
+        }
+    }
+    return ELF_OK;
+}
+
 static elf_err_t append_section_data(struct elf_section *dst, const uint8_t *src, size_t src_sz,
                                      uint64_t *base_out) {
     uint8_t *buf;
@@ -192,6 +269,12 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                 return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
             }
             dst->addralign = src->addralign;
+        } else if (strcmp(src->name, ".ARM.attributes") == 0 && src->data_size != 0 &&
+                   dst->data_size != 0 &&
+                   (src->data_size != dst->data_size ||
+                    memcmp(src->data, dst->data, src->data_size) != 0)) {
+            elf__set_err(out, ELF_ERR_FORMAT, ".ARM.attributes mismatch across inputs");
+            return ELF_ERR_FORMAT;
         }
 
         if (action == ELF_LINK_MERGE_REPLACE) {
@@ -487,6 +570,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
     }
 
     free_map_entries(plan);
+    out->flags = plan->inputs[0].obj->flags;
 
     for (i = 0; i < plan->input_count; ++i) {
         const struct elf_link_input *in = &plan->inputs[i];
@@ -502,6 +586,11 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
             in->obj->endian != out->endian) {
             elf_close(out);
             return ELF_ERR_UNSUPPORTED;
+        }
+        err = merge_arch_metadata(out, in->obj);
+        if (err != ELF_OK) {
+            elf_close(out);
+            return err;
         }
 
         sec_bases = (uint64_t *)elf__calloc(in->obj->section_count, sizeof(sec_bases[0]));
