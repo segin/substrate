@@ -1,4 +1,4 @@
-.Dd February 19, 2026
+.Dd February 28, 2026
 .Dt ELF_SYMBOL 3
 .Os Substrate
 .Sh NAME
@@ -18,6 +18,9 @@
 .Nm elf_symbol_lookup_gnu ,
 .Nm elf_symbol_count ,
 .Nm elf_symbol_name ,
+.Nm elf_symbol_bind ,
+.Nm elf_symbol_type ,
+.Nm elf_symbol_shndx ,
 .Nm elf_symbol_value ,
 .Nm elf_symbol_size ,
 .Nm elf_hash_sysv ,
@@ -106,6 +109,18 @@
 .Fc
 .Ft const char *
 .Fo elf_symbol_name
+.Fa "const elf_symbol_t *symbol"
+.Fc
+.Ft uint8_t
+.Fo elf_symbol_bind
+.Fa "const elf_symbol_t *symbol"
+.Fc
+.Ft uint8_t
+.Fo elf_symbol_type
+.Fa "const elf_symbol_t *symbol"
+.Fc
+.Ft uint16_t
+.Fo elf_symbol_shndx
 .Fa "const elf_symbol_t *symbol"
 .Fc
 .Ft uint64_t
@@ -252,6 +267,26 @@ Returns the number of symbols in the object's symbol table.
 Returns the symbol name.
 The returned string is owned by the object and must not be freed.
 May return an empty string for unnamed symbols (e.g., section symbols).
+.It Fn elf_symbol_bind "symbol"
+Returns the symbol binding value (for example
+.Dv STB_LOCAL ,
+.Dv STB_GLOBAL ,
+or
+.Dv STB_WEAK ) .
+.It Fn elf_symbol_type "symbol"
+Returns the symbol type value (for example
+.Dv STT_NOTYPE ,
+.Dv STT_OBJECT ,
+.Dv STT_FUNC ,
+.Dv STT_SECTION ,
+or
+.Dv STT_FILE ) .
+.It Fn elf_symbol_shndx "symbol"
+Returns the symbol section index (for example
+.Dv SHN_UNDEF ,
+.Dv SHN_ABS ,
+or
+.Dv SHN_COMMON ) .
 .It Fn elf_symbol_value "symbol"
 Returns the symbol value.
 For defined symbols, this is typically the virtual address or offset.
@@ -346,11 +381,26 @@ return a pointer to a symbol handle on success, or NULL on failure.
 returns the number of symbols (may be 0 for an empty object).
 .Pp
 .Fn elf_symbol_name ,
+.Fn elf_symbol_bind ,
+.Fn elf_symbol_type ,
+.Fn elf_symbol_shndx ,
 .Fn elf_symbol_value ,
 and
 .Fn elf_symbol_size
 return the requested attribute.
-For NULL symbol pointers, the behavior is undefined.
+For NULL symbol pointers,
+.Fn elf_symbol_name
+returns NULL,
+.Fn elf_symbol_bind
+returns
+.Dv STB_LOCAL ,
+.Fn elf_symbol_type
+returns
+.Dv STT_NOTYPE ,
+.Fn elf_symbol_shndx
+returns
+.Dv SHN_UNDEF ,
+and numeric accessors return 0.
 .Pp
 .Fn elf_hash_sysv
 and
