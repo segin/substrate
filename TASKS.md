@@ -3226,7 +3226,82 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [ ] Update `man/man2/sysctl.2` to align kernel syscall semantics with libc helper behavior.
         - [ ] Add `SEE ALSO` cross-links between `sysctl(2)` and `sysctl(3)` pages.
 - [ ] **Stdio:**
-    - [ ] Implement Buffered I/O logic (`fflush`, buffer management).
+    - [ ] **`FILE` Structure & Buffer Management (`lib/c/src/stdio/`):**
+        - [ ] Define internal `FILE` structure (`_flags`, `_buf`, `_bufsiz`, `_cnt`, `_ptr`, `_fd`, `_lbfsize`, `_close`/`_read`/`_write`/`_seek` function pointers).
+        - [ ] Implement three buffer modes:
+            - [ ] `_IOFBF` (fully buffered): flush on buffer full or explicit `fflush()`.
+            - [ ] `_IOLBF` (line buffered): flush on newline or buffer full.
+            - [ ] `_IONBF` (unbuffered): every `fputc()`/`fwrite()` calls `write()` immediately.
+        - [ ] Implement `setvbuf(FILE *stream, char *buf, int mode, size_t size)`:
+            - [ ] Validate `mode` is `_IOFBF`, `_IOLBF`, or `_IONBF`.
+            - [ ] Allow user-supplied buffer or `NULL` for auto-allocation.
+            - [ ] Must be called after `fopen()` but before any I/O.
+            - [ ] Return 0 on success, non-zero on failure.
+        - [ ] Implement `setbuf(FILE *stream, char *buf)` as wrapper for `setvbuf()`.
+        - [ ] Implement `setlinebuf(FILE *stream)` (BSD extension).
+        - [ ] Implement `fflush(FILE *stream)`:
+            - [ ] Write buffered output data via `write()` syscall.
+            - [ ] Handle partial writes (retry loop).
+            - [ ] If `stream == NULL`, flush all open output streams.
+            - [ ] Return 0 on success, `EOF` on error (set `errno`).
+        - [ ] Pre-allocate `stdin`, `stdout`, `stderr` `FILE` objects:
+            - [ ] `stdin`: fd 0, `_IOLBF` default.
+            - [ ] `stdout`: fd 1, `_IOLBF` if `isatty()`, else `_IOFBF`.
+            - [ ] `stderr`: fd 2, `_IONBF` always.
+        - [ ] Implement `__sinit()` / stream initialization on first use (lazy init pattern).
+    - [ ] **File Open/Close Operations:**
+        - [ ] `fopen(const char *path, const char *mode)`:
+            - [ ] Parse mode string: `"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, with `"b"` (binary, no-op on POSIX) and `"x"` (C11 exclusive create).
+            - [ ] Map to `open()` flags: `O_RDONLY`, `O_WRONLY|O_CREAT|O_TRUNC`, `O_WRONLY|O_CREAT|O_APPEND`, etc.
+            - [ ] Allocate `FILE`, assign fd, set default buffer.
+            - [ ] Return `NULL` on failure (set `errno`).
+        - [ ] `fdopen(int fd, const char *mode)`: wrap existing fd in `FILE`.
+        - [ ] `freopen(const char *path, const char *mode, FILE *stream)`:
+            - [ ] Flush and close existing fd.
+            - [ ] Re-open with new path/mode, reuse `FILE` object.
+            - [ ] If `path == NULL`, change mode of existing fd (C99 extension).
+        - [ ] `fclose(FILE *stream)`:
+            - [ ] Flush output buffer via `fflush()`.
+            - [ ] Free allocated buffer (if library-allocated).
+            - [ ] `close()` underlying fd.
+            - [ ] Free `FILE` structure.
+            - [ ] Return 0 on success, `EOF` on error.
+        - [ ] `fcloseall()` (extension): close all open streams.
+    - [ ] **Character & Line I/O:**
+        - [ ] `fgetc(FILE *stream)` / `getc()` macro: read one byte from buffer or refill.
+        - [ ] `fputc(int c, FILE *stream)` / `putc()` macro: write one byte to buffer or flush.
+        - [ ] `getchar()` / `putchar()`: wrappers for `stdin`/`stdout`.
+        - [ ] `ungetc(int c, FILE *stream)`: push back one character (at least 1 byte guaranteed).
+        - [ ] `fgets(char *s, int n, FILE *stream)`: read line up to `n-1` chars or newline.
+        - [ ] `fputs(const char *s, FILE *stream)`: write string (no trailing newline).
+        - [ ] `gets_s()` (C11 bounds-checked, optional) — or `gets()` removed per C11.
+        - [ ] `puts(const char *s)`: write string + newline to `stdout`.
+    - [ ] **Block I/O:**
+        - [ ] `fread(void *ptr, size_t size, size_t nmemb, FILE *stream)`:
+            - [ ] Read `size * nmemb` bytes, buffered.
+            - [ ] Handle partial reads, return number of complete elements.
+            - [ ] Set EOF/error indicators on short read.
+        - [ ] `fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)`:
+            - [ ] Write `size * nmemb` bytes through buffer.
+            - [ ] Return number of complete elements written.
+    - [ ] **File Positioning:**
+        - [ ] `fseek(FILE *stream, long offset, int whence)`:
+            - [ ] Flush output buffer before seeking.
+            - [ ] Discard input buffer on seek.
+            - [ ] `whence`: `SEEK_SET`, `SEEK_CUR`, `SEEK_END`.
+            - [ ] Return 0 on success, -1 on error.
+        - [ ] `ftell(FILE *stream)`: return current position (accounting for buffer offset).
+        - [ ] `rewind(FILE *stream)`: `fseek(stream, 0, SEEK_SET)` + clear error indicator.
+        - [ ] `fgetpos(FILE *stream, fpos_t *pos)` / `fsetpos(FILE *stream, const fpos_t *pos)`: opaque position save/restore.
+        - [ ] `fseeko()` / `ftello()` (POSIX): `off_t` variants for large file support.
+    - [ ] **Error & EOF Handling:**
+        - [ ] `feof(FILE *stream)`: return non-zero if EOF indicator set.
+        - [ ] `ferror(FILE *stream)`: return non-zero if error indicator set.
+        - [ ] `clearerr(FILE *stream)`: clear both EOF and error indicators.
+        - [ ] `perror(const char *s)`: print `s: strerror(errno)\n` to `stderr`.
+    - [ ] **Temporary Files:**
+        - [ ] `tmpfile()`: create anonymous temporary `FILE` (deleted on close).
+        - [ ] `tmpnam(char *s)` (deprecated) / `mkstemp()` integration.
     - [ ] **Complete `printf` Family Implementation (User & Kernel):**
         - [x] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
         - [x] **User:** `lib/c` implementation.
@@ -3271,6 +3346,119 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] "0" flag ignored if "-" is present.
             - [x] "0" flag ignored if precision is specified for integers.
             - [x] Space ignored if "+" is present.
+        - [ ] **`printf` Family Wrappers:**
+            - [ ] `fprintf(FILE *stream, const char *fmt, ...)`: output to `FILE` via buffer.
+            - [ ] `printf(const char *fmt, ...)`: wrapper for `fprintf(stdout, ...)`.
+            - [ ] `sprintf(char *str, const char *fmt, ...)`: output to string (no bounds check).
+            - [ ] `snprintf(char *str, size_t size, const char *fmt, ...)`: bounded output to string.
+            - [ ] `dprintf(int fd, const char *fmt, ...)` (POSIX): output to fd directly.
+            - [ ] `asprintf(char **ret, const char *fmt, ...)` (BSD extension): auto-allocating sprintf.
+            - [ ] `vfprintf()`, `vprintf()`, `vsprintf()`, `vsnprintf()`, `vdprintf()`, `vasprintf()`: `va_list` variants.
+    - [ ] **Complete `scanf` Family Implementation:**
+        - [ ] **Core `vfscanf()` Engine:**
+            - [ ] Literal character matching (non-`%` characters, whitespace collapsing).
+            - [ ] `%%` literal percent matching.
+            - [ ] Assignment suppression (`*` flag).
+            - [ ] Maximum field width.
+            - [ ] **Length Modifiers:** `hh`, `h`, `l`, `ll`, `j`, `z`, `t`, `L`.
+            - [ ] **Conversion Specifiers:**
+                - [ ] `d` (decimal integer), `i` (auto-detect base: 0x/0/decimal).
+                - [ ] `u` (unsigned decimal), `o` (octal), `x`/`X` (hex).
+                - [ ] `f`, `e`, `g`, `a` (floating-point input parsing).
+                - [ ] `c` (character, no whitespace skip), `s` (string, whitespace-delimited).
+                - [ ] `[` (scanset): character class matching, `^` negation, `]` as first char.
+                - [ ] `p` (pointer), `n` (store chars consumed).
+            - [ ] Return number of successfully assigned items, or `EOF`.
+            - [ ] Handle input exhaustion mid-conversion.
+        - [ ] **`scanf` Family Wrappers:**
+            - [ ] `fscanf(FILE *stream, const char *fmt, ...)`.
+            - [ ] `scanf(const char *fmt, ...)`: wrapper for `fscanf(stdin, ...)`.
+            - [ ] `sscanf(const char *str, const char *fmt, ...)`: scan from string.
+            - [ ] `vfscanf()`, `vscanf()`, `vsscanf()`: `va_list` variants.
+    - [ ] **Testing:**
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_stdio.c`):**
+            - [ ] Test `fopen()`/`fclose()` for all mode strings (`"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, `"wx"`).
+            - [ ] Test `fopen()` returns `NULL` for non-existent file in `"r"` mode.
+            - [ ] Test `fdopen()` wraps existing fd correctly.
+            - [ ] Test `freopen()` changes mode and reuses `FILE`.
+            - [ ] Test `fread()`/`fwrite()` round-trip: write data, rewind, read back, compare.
+            - [ ] Test `fread()` partial read at EOF returns correct element count.
+            - [ ] Test `fwrite()` returns correct element count on success.
+            - [ ] Test `fgetc()`/`fputc()` byte-by-byte I/O.
+            - [ ] Test `ungetc()`: push back one char, re-read it.
+            - [ ] Test `ungetc(EOF)` is a no-op.
+            - [ ] Test `fgets()` reads up to newline, NUL-terminates.
+            - [ ] Test `fgets()` with buffer smaller than line.
+            - [ ] Test `fputs()`/`puts()` output correctness.
+            - [ ] Test `fseek()`/`ftell()` positioning in all `SEEK_*` modes.
+            - [ ] Test `rewind()` resets position and clears error.
+            - [ ] Test `fgetpos()`/`fsetpos()` round-trip.
+            - [ ] Test `feof()` returns non-zero only after read past end.
+            - [ ] Test `ferror()`/`clearerr()` flag management.
+            - [ ] Test `fflush(stdout)` forces write.
+            - [ ] Test `fflush(NULL)` flushes all streams.
+            - [ ] Test `setvbuf()` with `_IONBF` causes immediate writes.
+            - [ ] Test `setvbuf()` with `_IOLBF` flushes on newline.
+            - [ ] Test `setvbuf()` with `_IOFBF` accumulates until buffer full.
+            - [ ] Test `tmpfile()` returns valid `FILE` that is auto-deleted.
+            - [ ] Test `perror()` output format.
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_printf.c`):**
+            - [ ] Test `sprintf()` all integer conversions with all length modifiers.
+            - [ ] Test `sprintf()` all floating-point conversions: `%f`, `%e`, `%g`, `%a`.
+            - [ ] Test `snprintf()` truncation: verify NUL-termination and returned count.
+            - [ ] Test `snprintf()` with `size == 0` returns required length without writing.
+            - [ ] Test `fprintf()` to file, then read back and compare.
+            - [ ] Test `dprintf()` to pipe fd.
+            - [ ] Test `asprintf()` allocates correct buffer size.
+            - [ ] Test `%n` conversion stores correct count.
+            - [ ] Test width, precision, flag combinations exhaustively.
+            - [ ] Test `%%` literal output.
+            - [ ] Test `NULL` string argument to `%s` (implementation-defined, should not crash).
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_scanf.c`):**
+            - [ ] Test `sscanf()` integer conversions: `%d`, `%i`, `%u`, `%o`, `%x`.
+            - [ ] Test `sscanf()` `%i` auto-base detection: `0x` (hex), `0` (octal), decimal.
+            - [ ] Test `sscanf()` floating-point: `%f`, `%e`, `%g`.
+            - [ ] Test `sscanf()` `%c` reads exact count (no whitespace skip).
+            - [ ] Test `sscanf()` `%s` reads whitespace-delimited token.
+            - [ ] Test `sscanf()` `%[` scanset: `%[a-z]`, `%[^0-9]`, `%[]abc]`.
+            - [ ] Test `sscanf()` `%n` stores chars consumed.
+            - [ ] Test `sscanf()` assignment suppression: `%*d` skips but doesn't assign.
+            - [ ] Test `sscanf()` field width limits.
+            - [ ] Test `sscanf()` return value: count of successful assignments.
+            - [ ] Test `sscanf()` returns `EOF` on immediate input failure.
+            - [ ] Test `fscanf()` from file.
+            - [ ] Test `scanf()` length modifiers: `%hhd`, `%hd`, `%ld`, `%lld`, `%jd`, `%zd`, `%td`.
+        - [ ] **Property Tests (`tests/lib/c/property/prop_stdio.c`):**
+            - [ ] Property: `sprintf(buf, "%d", x); sscanf(buf, "%d", &y)` ⇒ `x == y` for all `int x`.
+            - [ ] Property: `sprintf(buf, "%u", x); sscanf(buf, "%u", &y)` ⇒ `x == y` for all `unsigned x`.
+            - [ ] Property: `snprintf(buf, n, fmt, ...)` return value ≥ 0 and ≤ what `sprintf` would produce.
+            - [ ] Property: `snprintf(buf, n, ...)` always NUL-terminates if `n > 0`.
+            - [ ] Property: `fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f)` ⇒ `memcmp(data, out, n) == 0`.
+            - [ ] Property: `ftell()` after `fseek(f, off, SEEK_SET)` returns `off`.
+            - [ ] Property: `ungetc(c, f); fgetc(f)` returns `c` for any valid `c` ≠ `EOF`.
+        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_printf.c`):**
+            - [ ] Fuzz `snprintf()` with random format strings and random arguments.
+            - [ ] Verify no buffer overflows (write to bounded buffer, check sentinel bytes).
+            - [ ] Verify return value consistency (re-call with larger buffer, compare output).
+            - [ ] Fuzz `vsnprintf()` with extreme widths/precisions.
+        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_scanf.c`):**
+            - [ ] Fuzz `sscanf()` with random format strings and random input strings.
+            - [ ] Verify no crashes, no buffer overflows, return value ≥ 0 or `EOF`.
+            - [ ] Fuzz scanset patterns (`%[...]`) with adversarial character classes.
+    - [ ] **Man Pages:**
+        - [ ] `man/man3/fopen.3` — File open. Covers `fopen()`, `fdopen()`, `freopen()`. Mode string parsing, `"x"` flag. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/fclose.3` — File close. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/fread.3` — Block I/O. Covers `fread()` and `fwrite()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/fgets.3` — Line input. Covers `fgets()`, `fputs()`, `gets()` removal note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/fgetc.3` — Character I/O. Covers `fgetc()`, `getc()`, `getchar()`, `fputc()`, `putc()`, `putchar()`, `ungetc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [ ] `man/man3/fseek.3` — File positioning. Covers `fseek()`, `ftell()`, `rewind()`, `fgetpos()`, `fsetpos()`, `fseeko()`, `ftello()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/fflush.3` — Flush stream. Document `NULL` argument behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/setvbuf.3` — Set stream buffering. Covers `setvbuf()`, `setbuf()`, `setlinebuf()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/feof.3` — Stream status. Covers `feof()`, `ferror()`, `clearerr()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [ ] `man/man3/perror.3` — Print error message. SYNOPSIS, DESCRIPTION, SEE ALSO.
+        - [ ] `man/man3/tmpfile.3` — Temporary files. Covers `tmpfile()` and `tmpnam()` deprecation note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/printf.3` — Formatted output. Covers `printf()`, `fprintf()`, `sprintf()`, `snprintf()`, `dprintf()`, `asprintf()` and `v*` variants. Full format specification. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/scanf.3` — Formatted input. Covers `scanf()`, `fscanf()`, `sscanf()` and `v*` variants. Full format specification including scansets. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
 - [x] **String/Mem:**
     - [x] Optimize `memcpy`, `memset`, `memmove`.
     - [/] **Math Library (`lib/m/`):**
@@ -3279,15 +3467,190 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `math_errhandling` (errno support).
             - [x] `__fpclassify` internal helper.
             - [ ] **FENV (Floating-Point Environment):**
-                - [ ] `fenv.h` header definition (C99/POSIX).
-                - [ ] `feclearexcept()`, `fegetexceptflag()`, `feraiseexcept()`, `fesetexceptflag()`, `fetestexcept()`.
-                - [ ] `fegetround()`, `fesetround()`.
-                - [ ] `fegetenv()`, `feholdexcept()`, `fesetenv()`, `feupdateenv()`.
+                - [ ] **Header (`include/fenv.h`) Definition (C99/POSIX):**
+                    - [ ] Define `fenv_t` type (full x87 environment: CW, SW, TW, FIP, FCS, FDP, FDS, MXCSR on SSE-capable).
+                    - [ ] Define `fexcept_t` type (exception status word snapshot).
+                    - [ ] Define exception flag macros:
+                        - [ ] `FE_INVALID` (bit 0, x87 IE).
+                        - [ ] `FE_DENORMAL` (bit 1, x87 DE — non-standard extension, guard with `#ifdef`).
+                        - [ ] `FE_DIVBYZERO` (bit 2, x87 ZE).
+                        - [ ] `FE_OVERFLOW` (bit 3, x87 OE).
+                        - [ ] `FE_UNDERFLOW` (bit 4, x87 UE).
+                        - [ ] `FE_INEXACT` (bit 5, x87 PE).
+                        - [ ] `FE_ALL_EXCEPT` (bitwise OR of all supported exception flags).
+                    - [ ] Define rounding mode macros:
+                        - [ ] `FE_TONEAREST` (CW bits 10-11 = 00).
+                        - [ ] `FE_DOWNWARD` (CW bits 10-11 = 01).
+                        - [ ] `FE_UPWARD` (CW bits 10-11 = 10).
+                        - [ ] `FE_TOWARDZERO` (CW bits 10-11 = 11).
+                    - [ ] Define `FE_DFL_ENV` macro (pointer to default environment, `((const fenv_t *)-1)` or static).
+                    - [ ] Provide function prototypes for all `fe*` functions.
+                    - [ ] Include guard (`_FENV_H`) and C++ `extern "C"` wrapper.
+                - [ ] **Exception Handling Functions:**
+                    - [ ] `feclearexcept(int excepts)`:
+                        - [ ] Read x87 status word via `fnstsw`.
+                        - [ ] Clear requested exception bits.
+                        - [ ] Restore via `fldenv` (requires full env save/modify/restore cycle).
+                        - [ ] If SSE present, also clear bits in MXCSR via `ldmxcsr`.
+                        - [ ] Return 0 on success, non-zero on failure.
+                    - [ ] `fegetexceptflag(fexcept_t *flagp, int excepts)`:
+                        - [ ] Read x87 status word via `fnstsw`.
+                        - [ ] Mask with `excepts`, store into `*flagp`.
+                        - [ ] If SSE present, OR in MXCSR exception bits.
+                        - [ ] Return 0 on success.
+                    - [ ] `feraiseexcept(int excepts)`:
+                        - [ ] Raise specified exceptions by performing operations that trigger them (e.g., divide-by-zero for `FE_DIVBYZERO`, 0.0/0.0 for `FE_INVALID`).
+                        - [ ] Alternatively: save env, set SW bits, load env, then `fwait` to trigger trap.
+                        - [ ] Ensure `FE_OVERFLOW` and `FE_UNDERFLOW` also set `FE_INEXACT` per C99 7.6.2.3.
+                        - [ ] Return 0 on success.
+                    - [ ] `fesetexceptflag(const fexcept_t *flagp, int excepts)`:
+                        - [ ] Save full x87 environment via `fnstenv`.
+                        - [ ] Replace status word exception bits (masked by `excepts`) from `*flagp`.
+                        - [ ] Restore via `fldenv` — must NOT raise exceptions (set bits only).
+                        - [ ] If SSE present, update MXCSR accordingly.
+                        - [ ] Return 0 on success.
+                    - [ ] `fetestexcept(int excepts)`:
+                        - [ ] Read x87 status word via `fnstsw`.
+                        - [ ] If SSE present, OR in MXCSR sticky bits.
+                        - [ ] Return bitwise AND of current exceptions with `excepts`.
+                - [ ] **Rounding Mode Functions:**
+                    - [ ] `fegetround()`:
+                        - [ ] Read x87 control word via `fnstcw`.
+                        - [ ] Extract rounding mode bits (bits 10-11).
+                        - [ ] Return corresponding `FE_*` rounding constant.
+                    - [ ] `fesetround(int rdir)`:
+                        - [ ] Validate `rdir` is one of `FE_TONEAREST`, `FE_DOWNWARD`, `FE_UPWARD`, `FE_TOWARDZERO`.
+                        - [ ] Read x87 control word via `fnstcw`.
+                        - [ ] Modify rounding mode bits (bits 10-11).
+                        - [ ] Write back via `fldcw`.
+                        - [ ] If SSE present, also update MXCSR rounding bits (bits 13-14).
+                        - [ ] Return 0 on success, non-zero for invalid `rdir`.
+                - [ ] **Environment Save/Restore Functions:**
+                    - [ ] `fegetenv(fenv_t *envp)`:
+                        - [ ] Save full x87 environment via `fnstenv` into `*envp`.
+                        - [ ] Restore control word afterwards (x87 `fnstenv` masks all exceptions as side effect, so re-load CW).
+                        - [ ] If SSE present, also save MXCSR into `*envp`.
+                        - [ ] Return 0 on success.
+                    - [ ] `feholdexcept(fenv_t *envp)`:
+                        - [ ] Save current environment into `*envp` via `fnstenv`.
+                        - [ ] Clear all exception flags in status word.
+                        - [ ] Mask all exceptions in control word (set exception mask bits 0-5).
+                        - [ ] Install this non-stop environment via `fldenv`.
+                        - [ ] If SSE present, save and mask MXCSR similarly.
+                        - [ ] Return 0 on success.
+                        - [ ] This enables non-stop (non-trapping) FP mode for temporary computation.
+                    - [ ] `fesetenv(const fenv_t *envp)`:
+                        - [ ] If `envp == FE_DFL_ENV`, load default environment (e.g., `fninit` then adjust, or load a static default).
+                        - [ ] Else, load full x87 environment from `*envp` via `fldenv`.
+                        - [ ] If SSE present, also restore MXCSR from `*envp`.
+                        - [ ] Must NOT raise exceptions — install state silently.
+                        - [ ] Return 0 on success.
+                    - [ ] `feupdateenv(const fenv_t *envp)`:
+                        - [ ] Read currently raised exceptions via `fetestexcept(FE_ALL_EXCEPT)`.
+                        - [ ] Install `*envp` (or default) via `fesetenv(envp)`.
+                        - [ ] Re-raise the previously pending exceptions via `feraiseexcept()`.
+                        - [ ] Return 0 on success.
+                        - [ ] This is the "merge exceptions then restore" primitive.
+                - [ ] **`FENV_ACCESS` Pragma Support:**
+                    - [ ] Document compiler interaction: `#pragma STDC FENV_ACCESS ON` advisory.
+                    - [ ] Ensure `fenv.h` includes comment noting GCC `#pragma GCC optimize ("no-fast-math")` equivalent.
+                    - [ ] Add `FENV_ACCESS` documentation in header and man pages.
+                - [ ] **Implementation Details (i386/x87 Backend — `lib/m/src/fenv.c`):**
+                    - [ ] All functions implemented as i386 inline assembly or `.S` file for x87 `fnstcw`/`fldcw`/`fnstsw`/`fnstenv`/`fldenv`/`fnclex`/`fwait`.
+                    - [ ] SSE/MXCSR path gated by runtime or compile-time `__SSE__` check.
+                    - [ ] `fenv_t` layout must match x87 `fnstenv`/`fldenv` 28-byte block (+ optional MXCSR field).
+                    - [ ] Ensure `fninit` is used (not `finit`) to avoid waiting for pending exceptions during default-env setup.
+                    - [ ] All functions are `__attribute__((noinline))` to prevent optimizer from reordering FP state access.
+                - [ ] **Testing:**
+                    - [ ] **Unit Tests (`tests/lib/m/unit/test_fenv.c`):**
+                        - [ ] Test `feclearexcept()`: raise each exception, clear it, verify via `fetestexcept()`.
+                        - [ ] Test `feclearexcept(FE_ALL_EXCEPT)`: clear all, verify none pending.
+                        - [ ] Test `feclearexcept(0)`: no-op, verify no side effects.
+                        - [ ] Test `fegetexceptflag()` / `fesetexceptflag()`: round-trip flag save/restore.
+                        - [ ] Test `fesetexceptflag()` does NOT raise exceptions (just sets sticky bits).
+                        - [ ] Test `feraiseexcept()`: raise individual exceptions, verify via `fetestexcept()`.
+                        - [ ] Test `feraiseexcept(FE_OVERFLOW)` also sets `FE_INEXACT` (C99 requirement).
+                        - [ ] Test `feraiseexcept(FE_UNDERFLOW)` also sets `FE_INEXACT`.
+                        - [ ] Test `feraiseexcept()` with multiple flags ORed together.
+                        - [ ] Test `fetestexcept()`: verify returns only requested bits.
+                        - [ ] Test `fegetround()` default is `FE_TONEAREST`.
+                        - [ ] Test `fesetround()` / `fegetround()` round-trip for all four modes.
+                        - [ ] Test `fesetround()` with invalid argument returns non-zero.
+                        - [ ] Test `fesetround()` actually affects rounding: add 1.0 + tiny value and check direction.
+                        - [ ] Test `fegetenv()` / `fesetenv()` round-trip preserves full state.
+                        - [ ] Test `fesetenv(FE_DFL_ENV)` resets to default (no exceptions, `FE_TONEAREST`).
+                        - [ ] Test `feholdexcept()`: saves state, clears exceptions, masks all traps.
+                        - [ ] Test `feholdexcept()` followed by exception-raising operations don't trap.
+                        - [ ] Test `feupdateenv()`: merges pending exceptions from non-stop region back after restore.
+                        - [ ] Test `feupdateenv()` re-raises exceptions from before `feholdexcept()` was called.
+                        - [ ] Test interaction: `feholdexcept()` → compute with exceptions → `feupdateenv()` → verify merged.
+                    - [ ] **Property Tests (`tests/lib/m/property/prop_fenv.c`):**
+                        - [ ] Property: `fesetround(m); fegetround() == m` for all valid `m`.
+                        - [ ] Property: `fesetround(invalid)` returns non-zero and does not change mode.
+                        - [ ] Property: `feclearexcept(e); fetestexcept(e) == 0` for any valid exception mask `e`.
+                        - [ ] Property: `feraiseexcept(e); (fetestexcept(e) & e) == e` for any valid `e`.
+                        - [ ] Property: `fegetexceptflag(&f, e); feclearexcept(FE_ALL_EXCEPT); fesetexceptflag(&f, e); fetestexcept(e)` equals original.
+                        - [ ] Property: `fegetenv(&env); /* modify state */; fesetenv(&env)` restores original rounding and exceptions.
+                        - [ ] Property: `fesetenv(FE_DFL_ENV); fegetround() == FE_TONEAREST && fetestexcept(FE_ALL_EXCEPT) == 0`.
+                        - [ ] Property: `feholdexcept()` results in `fetestexcept(FE_ALL_EXCEPT) == 0` and non-stop mode.
+                        - [ ] Property: `feupdateenv()` preserves exceptions raised during non-stop region.
+                        - [ ] Property: exception flags are sticky — `feraiseexcept(e)` followed by unrelated FP ops retains `e`.
+                    - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_fenv.c`):**
+                        - [ ] Fuzz random combinations of exception flag bits to `feclearexcept()` / `feraiseexcept()` / `fetestexcept()`.
+                        - [ ] Fuzz random rounding mode values to `fesetround()` (including invalid values).
+                        - [ ] Fuzz random sequences of `fegetenv()`/`fesetenv()`/`feholdexcept()`/`feupdateenv()` interleaved with FP operations.
+                        - [ ] Fuzz random `fexcept_t` values through `fegetexceptflag()`/`fesetexceptflag()` round-trips.
+                        - [ ] Verify no crashes, no undefined behavior, status word consistency after each fuzzed sequence.
+                - [ ] **Man Pages:**
+                    - [ ] `man/man7/fenv.7` — Overview of floating-point environment, x87/SSE interaction, `FENV_ACCESS` pragma, and usage patterns.
+                    - [ ] `man/man3/feclearexcept.3` — Clear floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fegetexceptflag.3` — Get floating-point exception flags. Covers `fegetexceptflag()` and `fesetexceptflag()` together (paired save/restore API). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/feraiseexcept.3` — Raise floating-point exceptions. Document `FE_OVERFLOW`/`FE_UNDERFLOW` implying `FE_INEXACT`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fetestexcept.3` — Test floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fegetround.3` — Get/set floating-point rounding mode. Covers `fegetround()` and `fesetround()` together. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fegetenv.3` — Get/set floating-point environment. Covers `fegetenv()` and `fesetenv()`. SYNOPSIS, DESCRIPTION (document `FE_DFL_ENV`), RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/feholdexcept.3` — Save environment and enter non-stop mode. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES (show `feholdexcept()` → compute → `feupdateenv()` pattern), SEE ALSO.
+                    - [ ] `man/man3/feupdateenv.3` — Restore environment and re-raise saved exceptions. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
             - [ ] **Type Variants (f, l suffixes):**
-                - [ ] Implement `float` variants (e.g., `sinf`, `cosf`).
-                - [ ] Implement `long double` variants (e.g., `sinl`, `cosl`).
+                - [ ] **Float Variants (`f` suffix — `lib/m/src/mathf.c`):**
+                    - [ ] Implement `sinf()`, `cosf()`, `tanf()`, `asinf()`, `acosf()`, `atanf()`, `atan2f()`.
+                    - [ ] Implement `sinhf()`, `coshf()`, `tanhf()`, `asinhf()`, `acoshf()`, `atanhf()`.
+                    - [ ] Implement `expf()`, `exp2f()`, `expm1f()`, `logf()`, `log2f()`, `log10f()`, `log1pf()`.
+                    - [ ] Implement `powf()`, `sqrtf()`, `cbrtf()`, `hypotf()`.
+                    - [ ] Implement `fabsf()`, `fmodf()`, `remainderf()`, `remquof()`, `fmaf()`.
+                    - [ ] Implement `fmaxf()`, `fminf()`, `fdimf()`.
+                    - [ ] Implement `ceilf()`, `floorf()`, `truncf()`, `roundf()`, `rintf()`, `nearbyintf()`.
+                    - [ ] Implement `lroundf()`, `llroundf()`, `lrintf()`, `llrintf()`.
+                    - [ ] Implement `frexpf()`, `ldexpf()`, `modff()`, `scalbnf()`, `scalblnf()`.
+                    - [ ] Implement `ilogbf()`, `logbf()`, `nextafterf()`, `nexttowardf()`, `copysignf()`, `nanf()`.
+                    - [ ] Implement `erff()`, `erfcf()`, `tgammaf()`, `lgammaf()`.
+                    - [ ] Implement `sincosf()`.
+                - [ ] **Long Double Variants (`l` suffix — `lib/m/src/mathl.c`):**
+                    - [ ] Implement `sinl()`, `cosl()`, `tanl()`, `asinl()`, `acosl()`, `atanl()`, `atan2l()`.
+                    - [ ] Implement `sinhl()`, `coshl()`, `tanhl()`, `asinhl()`, `acoshl()`, `atanhl()`.
+                    - [ ] Implement `expl()`, `exp2l()`, `expm1l()`, `logl()`, `log2l()`, `log10l()`, `log1pl()`.
+                    - [ ] Implement `powl()`, `sqrtl()`, `cbrtl()`, `hypotl()`.
+                    - [ ] Implement `fabsl()`, `fmodl()`, `remainderl()`, `remquol()`, `fmal()`.
+                    - [ ] Implement `fmaxl()`, `fminl()`, `fdiml()`.
+                    - [ ] Implement `ceill()`, `floorl()`, `truncl()`, `roundl()`, `rintl()`, `nearbyintl()`.
+                    - [ ] Implement `lroundl()`, `llroundl()`, `lrintl()`, `llrintl()`.
+                    - [ ] Implement `frexpl()`, `ldexpl()`, `modfl()`, `scalbnl()`, `scalblnl()`.
+                    - [ ] Implement `ilogbl()`, `logbl()`, `nextafterl()`, `nexttowardl()`, `copysignl()`, `nanl()`.
+                    - [ ] Implement `erfl()`, `erfcl()`, `tgammal()`, `lgammal()`.
+                    - [ ] Implement `sincosl()`.
+                - [ ] **i386 Note:** On x87, `long double` is 80-bit extended precision (native FPU format). `float`/`double` variants should use x87 internally and truncate on return.
             - [ ] **Generic Math (`<tgmath.h>`):**
-                - [ ] Implement C99/C11 `<tgmath.h>` type-generic macros.
+                - [ ] Implement C99/C11 `<tgmath.h>` type-generic macros:
+                    - [ ] Dispatch to `f`, ` `, or `l` suffix based on argument type via `_Generic` (C11) or `__builtin_choose_expr` + `__builtin_types_compatible_p` (GCC extension).
+                    - [ ] Cover all math functions with type-generic wrappers: trig, hyperbolic, exp/log, pow/sqrt, rounding, manipulation, fenv-interacting.
+                    - [ ] Include complex variants dispatch (if/when `<complex.h>` is implemented).
+                    - [ ] Ensure macro expansion does not evaluate arguments multiple times (use statement expressions if needed).
+                - [ ] **Testing (`tests/lib/m/unit/test_tgmath.c`):**
+                    - [ ] Test type dispatch: `sin((float)x)` calls `sinf()`, `sin((double)x)` calls `sin()`, `sin((long double)x)` calls `sinl()`.
+                    - [ ] Test all covered function families dispatch correctly.
+                    - [ ] Test no double-evaluation of arguments with side effects.
+                - [ ] **Man Pages:**
+                    - [ ] `man/man7/tgmath.7` — Type-generic math macros overview, dispatch rules, C11 `_Generic` usage. SYNOPSIS, DESCRIPTION, EXAMPLES, SEE ALSO.
         - [/] **Classification & Comparison (C99/C23/POSIX):**
             - [x] `fpclassify()`
             - [x] `isfinite()`
@@ -3295,46 +3658,182 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `isnan()`
             - [x] `isnormal()`
             - [x] `signbit()`
-            - [ ] `isgreater()`, `isgreaterequal()`, `isless()`, `islessequal()`, `islessgreater()`, `isunordered()`
-            - [ ] `iseqsig()`, `issignaling()` (C23)
-            - [ ] `iscanonical()`, `issubnormal()`, `iszero()` (C23)
+            - [ ] `isgreater()`, `isgreaterequal()`, `isless()`, `islessequal()`, `islessgreater()`, `isunordered()`:
+                - [ ] Implement as macros using `__builtin_isgreater` etc. (GCC) or manual quiet-NaN-safe comparisons.
+                - [ ] Must not raise `FE_INVALID` on unordered operands (unlike plain `<`/`>`).
+            - [ ] `iseqsig()`, `issignaling()` (C23):
+                - [ ] `iseqsig()`: equality comparison that DOES raise `FE_INVALID` on NaN.
+                - [ ] `issignaling()`: detect signaling NaN via bit pattern inspection.
+            - [ ] `iscanonical()`, `issubnormal()`, `iszero()` (C23):
+                - [ ] `iscanonical()`: always 1 for IEEE 754 binary formats (all values canonical).
+                - [ ] `issubnormal()`: `fpclassify(x) == FP_SUBNORMAL`.
+                - [ ] `iszero()`: `fpclassify(x) == FP_ZERO`.
+            - [ ] **Testing (`tests/lib/m/unit/test_classify.c`):**
+                - [ ] Test `fpclassify()` returns correct category for: `+0.0`, `-0.0`, `1.0`, `-1.0`, `INFINITY`, `-INFINITY`, `NAN`, `DBL_MIN/2` (denorm), `DBL_MAX`.
+                - [ ] Test `isfinite()` true for normals/denormals/zeros, false for inf/nan.
+                - [ ] Test `isinf()` true for `±INFINITY` only.
+                - [ ] Test `isnan()` true for `NAN`, quiet NaN, signaling NaN.
+                - [ ] Test `isnormal()` false for zero, denormal, inf, nan.
+                - [ ] Test `signbit()` for `+0.0`, `-0.0`, `+1.0`, `-1.0`, `+INFINITY`, `-INFINITY`, `NAN`, `-NAN`.
+                - [ ] Test `isgreater()` etc. do NOT raise `FE_INVALID` when one operand is NaN.
+                - [ ] Test `isunordered()` true iff either operand is NaN.
+                - [ ] Test `iseqsig()` raises `FE_INVALID` on NaN operand.
+                - [ ] Test `issignaling()` detects sNaN bit pattern.
+                - [ ] Test float, double, and long double variants.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_classify.c`):**
+                - [ ] Property: exactly one of `isinf(x)`, `isnan(x)`, `isfinite(x)` is true for any `x`.
+                - [ ] Property: `isnormal(x)` implies `isfinite(x)`.
+                - [ ] Property: `issubnormal(x)` implies `isfinite(x) && !isnormal(x) && !iszero(x)`.
+                - [ ] Property: `signbit(-x) != signbit(x)` for all non-NaN `x`.
+                - [ ] Property: `isunordered(x, y)` iff `isnan(x) || isnan(y)`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/fpclassify.3` — Floating-point classification. Covers `fpclassify()`, `isfinite()`, `isinf()`, `isnan()`, `isnormal()`, `signbit()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/isgreater.3` — Quiet comparison macros. Covers `isgreater()` through `isunordered()`. Document non-signaling NaN behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
         - [/] **Basic Arithmetic:**
             - [x] `fabs()`
             - [x] `fmod()`
             - [x] `remainder()`
-            - [ ] `remquo()`
+            - [ ] `remquo()`:
+                - [ ] Compute remainder AND store low-order bits of quotient in `*quo`.
+                - [ ] Sign of `*quo` is sign of `x/y`.
+                - [ ] At least 3 bits of quotient stored.
             - [x] `fmax()`
             - [x] `fmin()`
             - [x] `fdim()`
-            - [ ] `fma()` (Fused Multiply-Add)
-            - [ ] `fmaximum()`, `fminimum()`, `fmaximum_num()`, `fminimum_num()`, `fmaximum_mag()`, `fminimum_mag()` (C23)
+            - [ ] `fma()` (Fused Multiply-Add):
+                - [ ] Compute `(x * y) + z` with single rounding (as if infinite precision intermediate).
+                - [ ] Critical for numerical accuracy in dot-products, compensated summation.
+                - [ ] On x87: no hardware FMA — use software double-double decomposition or Dekker's algorithm.
+                - [ ] Raise `FE_INEXACT`/`FE_OVERFLOW`/`FE_UNDERFLOW` appropriately.
+            - [ ] `fmaximum()`, `fminimum()`, `fmaximum_num()`, `fminimum_num()`, `fmaximum_mag()`, `fminimum_mag()` (C23):
+                - [ ] `fmaximum()`/`fminimum()`: NaN-propagating (NaN if either operand is NaN).
+                - [ ] `fmaximum_num()`/`fminimum_num()`: NaN-ignoring (return the non-NaN operand).
+                - [ ] `fmaximum_mag()`/`fminimum_mag()`: Compare absolute values, NaN-propagating.
+                - [ ] All distinguish `+0.0` from `-0.0`: `fmaximum(+0.0, -0.0) == +0.0`.
+            - [ ] **Testing (`tests/lib/m/unit/test_arith.c`):**
+                - [ ] Test `fabs()`: positive, negative, zero, -0.0, ∞, -∞, NaN.
+                - [ ] Test `fmod()`: basic cases, sign of result matches dividend, zero dividend, NaN propagation.
+                - [ ] Test `remainder()`: IEEE remainder (can be negative), ties to even quotient.
+                - [ ] Test `remquo()`: remainder matches `remainder()`, quotient low bits correct.
+                - [ ] Test `fma()`: `fma(a, b, c)` vs naive `a*b+c` — detect cases where single rounding differs.
+                - [ ] Test `fma()` special values: 0×∞+NaN, ∞×finite±∞.
+                - [ ] Test `fmax()`/`fmin()`: NaN handling (return non-NaN), ±0.0 distinction.
+                - [ ] Test `fdim()`: positive difference, zero when x ≤ y, NaN propagation.
+                - [ ] Test C23 `fmaximum()`/`fminimum()` NaN propagation vs `fmax()`/`fmin()` NaN-ignoring.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_arith.c`):**
+                - [ ] Property: `fabs(x) >= 0` for all `x` (including `-0.0` → `+0.0`).
+                - [ ] Property: `fmod(x, y)` has same sign as `x` and `|fmod(x,y)| < |y|`.
+                - [ ] Property: `fma(x, y, 0.0) == x * y` for exact products (no rounding needed).
+                - [ ] Property: `fmax(x, y) >= x && fmax(x, y) >= y` for non-NaN inputs.
+                - [ ] Property: `fdim(x, y) + y >= x` for finite non-NaN inputs.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/fabs.3` — Absolute value. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/fmod.3` — Floating-point remainder. Covers `fmod()` and `remainder()` with IEEE semantics differences. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/remquo.3` — Remainder with quotient. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/fma.3` — Fused multiply-add. Document precision advantage. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/fmax.3` — Maximum/minimum. Covers `fmax()`, `fmin()`, `fdim()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
         - [/] **Rounding:**
             - [x] `ceil()`
             - [x] `floor()`
             - [x] `trunc()`
             - [x] `round()`
             - [x] `rint()`
-            - [ ] `nearbyint()`
-            - [ ] `lround()`, `llround()`
-            - [ ] `lrint()`, `llrint()`
-            - [ ] `roundeven()` (C23)
-            - [ ] `fromfp()`, `fromfpx()`, `ufromfp()`, `ufromfpx()` (C23)
+            - [ ] `nearbyint()`:
+                - [ ] Same as `rint()` but does NOT raise `FE_INEXACT`.
+                - [ ] On x87: save/mask inexact exception, call `frndint`, restore flags.
+            - [ ] `lround()`, `llround()`:
+                - [ ] Round to nearest, ties away from zero (like `round()`), return `long`/`long long`.
+                - [ ] Raise `FE_INVALID` and return `LONG_MIN`/`LONG_MAX` on overflow or NaN.
+            - [ ] `lrint()`, `llrint()`:
+                - [ ] Round using current rounding mode (like `rint()`), return `long`/`long long`.
+                - [ ] On x87: `fistp` stores directly to integer.
+                - [ ] Raise `FE_INVALID` on overflow/NaN, `FE_INEXACT` if value was not integer.
+            - [ ] `roundeven()` (C23):
+                - [ ] Round to nearest, ties to even (same as default `FE_TONEAREST` `rint()`).
+                - [ ] Explicit function — does not depend on current rounding mode.
+            - [ ] `fromfp()`, `fromfpx()`, `ufromfp()`, `ufromfpx()` (C23):
+                - [ ] Convert to integer type with explicit rounding mode and width.
+                - [ ] `fromfp()`: signed, `ufromfp()`: unsigned.
+                - [ ] `*x` variants raise `FE_INEXACT` on non-integer input; non-`x` variants do not.
+            - [ ] **Testing (`tests/lib/m/unit/test_round.c`):**
+                - [ ] Test `ceil()`: `ceil(1.1)==2.0`, `ceil(-1.1)==-1.0`, `ceil(0.0)==0.0`, `ceil(-0.0)==-0.0`.
+                - [ ] Test `floor()`: `floor(1.9)==1.0`, `floor(-1.1)==-2.0`.
+                - [ ] Test `trunc()`: `trunc(1.9)==1.0`, `trunc(-1.9)==-1.0`.
+                - [ ] Test `round()`: ties away from zero: `round(0.5)==1.0`, `round(-0.5)==-1.0`.
+                - [ ] Test `rint()`: honors current rounding mode (test with `fesetround()`).
+                - [ ] Test `nearbyint()`: same as `rint()` but does NOT raise `FE_INEXACT` (verify via `fetestexcept()`).
+                - [ ] Test `lround()`/`llround()`: overflow → `LONG_MAX`/`LONG_MIN` + `FE_INVALID`.
+                - [ ] Test `lrint()`/`llrint()`: current rounding mode, `FE_INEXACT` on non-integer.
+                - [ ] Test `roundeven()`: `roundeven(0.5)==0.0`, `roundeven(1.5)==2.0` (ties to even).
+                - [ ] Test all rounding functions with: ±0.0, ±∞, NaN, ±0.5, ±1.5, large values.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_round.c`):**
+                - [ ] Property: `ceil(x) >= x` for all finite `x`.
+                - [ ] Property: `floor(x) <= x` for all finite `x`.
+                - [ ] Property: `|trunc(x)| <= |x|` for all finite `x`.
+                - [ ] Property: `floor(x) <= round(x) <= ceil(x)` for all `x` where the three are defined.
+                - [ ] Property: `rint(x) == x` for integer values of `x`.
+                - [ ] Property: rounding functions are idempotent: `ceil(ceil(x)) == ceil(x)`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/ceil.3` — Round upward. Covers `ceil()`, `ceilf()`, `ceill()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/floor.3` — Round downward. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/round.3` — Round to nearest, ties away from zero. Covers `round()`, `lround()`, `llround()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/rint.3` — Round to nearest integer using current mode. Covers `rint()`, `nearbyint()`, `lrint()`, `llrint()`. Document `FE_INEXACT` difference. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/trunc.3` — Round toward zero. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
         - [/] **Exponential, Logarithmic & Power:**
             - [x] `exp()`
             - [x] `exp2()`
             - [x] `expm1()`
-            - [ ] `exp10()`, `exp10m1()`, `exp2m1()` (C23)
+            - [ ] `exp10()`, `exp10m1()`, `exp2m1()` (C23):
+                - [ ] `exp10(x)`: compute `10^x`. On x87: `x * log2(10)` → `f2xm1`/`fscale`.
+                - [ ] `exp10m1(x)`: compute `10^x - 1` accurately for small `x`.
+                - [ ] `exp2m1(x)`: compute `2^x - 1` accurately for small `x` (direct `f2xm1` for |x| < 1).
             - [x] `log()`
             - [x] `log2()`
             - [x] `log10()`
             - [x] `log1p()`
-            - [ ] `log10p1()`, `log2p1()`, `logp1()` (C23)
+            - [ ] `log10p1()`, `log2p1()`, `logp1()` (C23):
+                - [ ] `logp1(x)`: alias for `log1p(x)` — compute `ln(1+x)` accurately for small `x`.
+                - [ ] `log2p1(x)`: compute `log2(1+x)` accurately. On x87: use `fyl2xp1` for |x| < 1-√2/2.
+                - [ ] `log10p1(x)`: compute `log10(1+x)` accurately.
             - [x] `pow()`
-            - [ ] `pown()`, `powr()`, `rootn()`, `compound()` (C23)
+            - [ ] `pown()`, `powr()`, `rootn()`, `compound()` (C23):
+                - [ ] `pown(x, n)`: `x` raised to integer power `n` (`intmax_t`). Binary exponentiation.
+                - [ ] `powr(x, y)`: `e^(y * ln(x))`, domain x ≥ 0. Different NaN/±0 semantics from `pow()`.
+                - [ ] `rootn(x, n)`: n-th root of `x`. `rootn(x, 2) == sqrt(x)`, `rootn(x, 3) == cbrt(x)`.
+                - [ ] `compound(x, n)`: `(1+x)^n` computed stably for small `x`.
             - [x] `sqrt()`
-            - [ ] `rsqrt()` (C23)
+            - [ ] `rsqrt()` (C23):
+                - [ ] Reciprocal square root: `1/sqrt(x)`.
+                - [ ] On x87: `fsqrt` then `fdivr` with 1.0.
             - [x] `cbrt()`
             - [x] `hypot()`
+            - [ ] **Testing (`tests/lib/m/unit/test_explog.c`):**
+                - [ ] Test `exp(0)==1`, `exp(1)≈M_E`, `exp(-∞)==0`, `exp(+∞)==+∞`, `exp(NaN)==NaN`.
+                - [ ] Test `exp2(0)==1`, `exp2(10)==1024`.
+                - [ ] Test `expm1(0)==0`, `expm1(tiny)≈tiny` (accuracy for small x vs naive `exp(x)-1`).
+                - [ ] Test `log(1)==0`, `log(M_E)≈1`, `log(0)==-∞`, `log(-1)==NaN` + `FE_INVALID`, `log(+∞)==+∞`.
+                - [ ] Test `log2(1)==0`, `log2(1024)==10`.
+                - [ ] Test `log10(1)==0`, `log10(1000)==3`.
+                - [ ] Test `log1p(0)==0`, `log1p(tiny)≈tiny` (accuracy for small x).
+                - [ ] Test `pow(2,10)==1024`, `pow(-1,2)==1`, `pow(0,0)==1` (C99 convention).
+                - [ ] Test `pow(x, 0)==1` for all x (including ∞, NaN per C99 F.9.4.4).
+                - [ ] Test `sqrt(4)==2`, `sqrt(0)==0`, `sqrt(-1)==NaN`, `sqrt(+∞)==+∞`.
+                - [ ] Test `cbrt(-8)==-2`, `cbrt(0)==0`.
+                - [ ] Test `hypot(3,4)==5`, `hypot(x,0)==fabs(x)`, `hypot(∞,NaN)==∞`.
+                - [ ] Test `rsqrt(4)==0.5`, `rsqrt(0)==+∞`, `rsqrt(-1)==NaN`.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_explog.c`):**
+                - [ ] Property: `exp(log(x)) ≈ x` for positive finite `x` (within ULP tolerance).
+                - [ ] Property: `log(exp(x)) ≈ x` for moderate `x` (no overflow/underflow).
+                - [ ] Property: `exp2(log2(x)) ≈ x` for positive finite `x`.
+                - [ ] Property: `sqrt(x) * sqrt(x) ≈ x` for positive `x`.
+                - [ ] Property: `hypot(x,y) >= fabs(x) && hypot(x,y) >= fabs(y)`.
+                - [ ] Property: `pow(x, 1.0) == x` for all `x`.
+                - [ ] Property: `expm1(x) + 1 ≈ exp(x)` for all `x` (accuracy comparison, not equality).
+                - [ ] Property: `log1p(expm1(x)) ≈ x` for moderate `x`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/exp.3` — Exponential functions. Covers `exp()`, `exp2()`, `expm1()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/log.3` — Logarithmic functions. Covers `log()`, `log2()`, `log10()`, `log1p()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/pow.3` — Power functions. Covers `pow()`, `sqrt()`, `cbrt()`, `hypot()`. Document special value semantics extensively (C99 Annex F). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
         - [/] **Trigonometric:**
             - [x] `sin()`
             - [x] `cos()`
@@ -3343,8 +3842,37 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `acos()`
             - [x] `atan()`
             - [x] `atan2()`
-            - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23)
-            - [ ] `asinpi()`, `acospi()`, `atanpi()`, `atan2pi()` (C23)
+            - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23):
+                - [ ] `sinpi(x)`: compute `sin(π·x)` exactly at integer and half-integer points.
+                - [ ] `cospi(x)`: compute `cos(π·x)` exactly at integer and half-integer points.
+                - [ ] `tanpi(x)`: compute `tan(π·x)` exactly, including singularity at half-integers.
+                - [ ] Key benefit: exact values without `M_PI` multiplication error.
+            - [ ] `asinpi()`, `acospi()`, `atanpi()`, `atan2pi()` (C23):
+                - [ ] Inverse functions returning result in units of π (i.e., divided by π).
+                - [ ] `asinpi(x)` ∈ [-0.5, 0.5], `acospi(x)` ∈ [0, 1], `atanpi(x)` ∈ [-0.5, 0.5].
+                - [ ] `atan2pi(y, x)` ∈ [-1, 1].
+            - [ ] **Testing (`tests/lib/m/unit/test_trig.c`):**
+                - [ ] Test `sin(0)==0`, `sin(π/2)≈1`, `sin(π)≈0`, `sin(NaN)==NaN`.
+                - [ ] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`.
+                - [ ] Test `tan(0)==0`, `tan(π/4)≈1`.
+                - [ ] Test `asin(0)==0`, `asin(1)≈π/2`, `asin(2)==NaN` (domain error).
+                - [ ] Test `acos(1)==0`, `acos(0)≈π/2`, `acos(-1)≈π`.
+                - [ ] Test `atan(0)==0`, `atan(1)≈π/4`, `atan(+∞)≈π/2`.
+                - [ ] Test `atan2(0,1)==0`, `atan2(1,0)≈π/2`, `atan2(0,-1)≈π`, `atan2(-1,0)≈-π/2`.
+                - [ ] Test `sinpi(0.5)==1`, `sinpi(1)==0`, `sinpi(0)==0` (exact).
+                - [ ] Test `cospi(0)==1`, `cospi(0.5)==0`, `cospi(1)==-1` (exact).
+                - [ ] Test large argument accuracy: `sin(1e15)` — verify range reduction correctness.
+                - [ ] Test `sincos()` agrees with individual `sin()` and `cos()` calls.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_trig.c`):**
+                - [ ] Property: `sin(x)² + cos(x)² ≈ 1` (Pythagorean identity) for all finite `x`.
+                - [ ] Property: `sin(-x) == -sin(x)` (odd function).
+                - [ ] Property: `cos(-x) == cos(x)` (even function).
+                - [ ] Property: `asin(sin(x)) ≈ x` for `x ∈ [-π/2, π/2]`.
+                - [ ] Property: `|sin(x)| <= 1` and `|cos(x)| <= 1` for all finite `x`.
+                - [ ] Property: `atan2(sin(x), cos(x)) ≈ x` for `x ∈ (-π, π]`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/sin.3` — Trigonometric functions. Covers `sin()`, `cos()`, `tan()`, `sincos()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/asin.3` — Inverse trigonometric functions. Covers `asin()`, `acos()`, `atan()`, `atan2()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
         - [x] **Hyperbolic:**
             - [x] `sinh()`
             - [x] `cosh()`
@@ -3352,24 +3880,136 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `asinh()`
             - [x] `acosh()`
             - [x] `atanh()`
+            - [ ] **Testing (`tests/lib/m/unit/test_hyper.c`):**
+                - [ ] Test `sinh(0)==0`, `cosh(0)==1`, `tanh(0)==0`.
+                - [ ] Test `sinh(1)≈1.1752`, `cosh(1)≈1.5431`, `tanh(1)≈0.7616`.
+                - [ ] Test `sinh(+∞)==+∞`, `cosh(+∞)==+∞`, `tanh(+∞)==1`.
+                - [ ] Test `asinh(0)==0`, `acosh(1)==0`, `atanh(0)==0`.
+                - [ ] Test `acosh(x)` domain: `acosh(0.5)` → NaN/domain error.
+                - [ ] Test `atanh(±1)` → ±∞ (pole error).
+                - [ ] Test NaN propagation for all hyperbolic functions.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_hyper.c`):**
+                - [ ] Property: `cosh(x)² - sinh(x)² ≈ 1` (hyperbolic Pythagorean identity).
+                - [ ] Property: `sinh(-x) == -sinh(x)` (odd).
+                - [ ] Property: `cosh(-x) == cosh(x)` (even).
+                - [ ] Property: `tanh(x) == sinh(x)/cosh(x)` for moderate `x`.
+                - [ ] Property: `asinh(sinh(x)) ≈ x` for all `x`.
+                - [ ] Property: `|tanh(x)| < 1` for all finite `x`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/sinh.3` — Hyperbolic functions. Covers `sinh()`, `cosh()`, `tanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/asinh.3` — Inverse hyperbolic functions. Covers `asinh()`, `acosh()`, `atanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
         - [/] **Manipulation:**
             - [x] `frexp()`
             - [x] `ldexp()`
             - [x] `modf()`
             - [x] `scalbn()`
-            - [ ] `scalbln()`
-            - [ ] `ilogb()`, `logb()`
+            - [ ] `scalbln()`:
+                - [ ] Same as `scalbn()` but exponent is `long` instead of `int`.
+            - [ ] `ilogb()`, `logb()`:
+                - [ ] `ilogb(x)`: extract unbiased exponent as `int`. `ilogb(0)` → `FP_ILOGB0`, `ilogb(∞)` → `INT_MAX`, `ilogb(NaN)` → `FP_ILOGBNAN`.
+                - [ ] `logb(x)`: extract unbiased exponent as `double`. `logb(0)` → `-∞` (pole), `logb(±∞)` → `+∞`.
             - [x] `nextafter()`
-            - [ ] `nexttoward()`
-            - [ ] `nextup()`, `nextdown()` (C23)
+            - [ ] `nexttoward()`:
+                - [ ] Like `nextafter()` but second argument is `long double` for direction.
+            - [ ] `nextup()`, `nextdown()` (C23):
+                - [ ] `nextup(x)`: next representable value toward +∞.
+                - [ ] `nextdown(x)`: next representable value toward -∞.
             - [x] `copysign()`
-            - [ ] `nan()`
+            - [ ] `nan()`:
+                - [ ] `nan(tagp)`: convert string tag to quiet NaN. `nan("") == NAN`, `nan("123")` → NaN with tag payload.
+            - [ ] **Testing (`tests/lib/m/unit/test_manip.c`):**
+                - [ ] Test `frexp()` / `ldexp()` round-trip: `ldexp(frexp(x, &e), e) == x`.
+                - [ ] Test `frexp()` result ∈ [0.5, 1.0) for positive normals.
+                - [ ] Test `frexp(0.0)` returns 0.0 with exponent 0.
+                - [ ] Test `modf()`: integer + fractional parts sum to original.
+                - [ ] Test `scalbn(x, n) == x * 2^n` for moderate `n`.
+                - [ ] Test `ilogb()`: `ilogb(1.0)==0`, `ilogb(2.0)==1`, `ilogb(0.5)==-1`.
+                - [ ] Test `ilogb(0)` returns `FP_ILOGB0`, `ilogb(NaN)` returns `FP_ILOGBNAN`.
+                - [ ] Test `logb()`: `logb(1.0)==0`, `logb(0)==-∞`.
+                - [ ] Test `nextafter(1.0, 2.0)` returns next representable above 1.0.
+                - [ ] Test `nextafter(0.0, 1.0)` returns smallest denormal.
+                - [ ] Test `nextafter(x, x) == x` for all `x`.
+                - [ ] Test `copysign(1.0, -1.0) == -1.0`.
+                - [ ] Test `nan("")` returns NaN, `isnan(nan("tag"))` is true.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_manip.c`):**
+                - [ ] Property: `ldexp(frexp(x, &e), e) == x` for all finite non-zero `x`.
+                - [ ] Property: `modf(x, &i); (i + frac) == x` for finite `x`.
+                - [ ] Property: `copysign(fabs(x), y)` has sign of `y` and magnitude of `x`.
+                - [ ] Property: `nextafter(x, y) != x` when `x != y` (for finite `x`, `y`).
+                - [ ] Property: `scalbn(x, 0) == x`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/frexp.3` — Extract mantissa and exponent. Covers `frexp()` and `ldexp()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/modf.3` — Decompose to integer and fractional parts. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/scalbn.3` — Scale by power of radix. Covers `scalbn()` and `scalbln()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/ilogb.3` — Extract exponent. Covers `ilogb()` and `logb()`. Document special return values. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/nextafter.3` — Next representable value. Covers `nextafter()`, `nexttoward()`, `nextup()`, `nextdown()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/copysign.3` — Copy sign of a number. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/nan.3` — Generate quiet NaN. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
         - [ ] **Error & Gamma Functions (POSIX/C11):**
-            - [ ] `erf()`, `erfc()`
-            - [ ] `tgamma()`, `lgamma()` (with `signgam`)
+            - [ ] `erf()`, `erfc()`:
+                - [ ] `erf(x)`: error function, `2/√π · ∫₀ˣ e^{-t²} dt`. Range: [-1, 1].
+                - [ ] `erfc(x)`: complementary error function, `1 - erf(x)`. More accurate than `1 - erf(x)` for large `x`.
+                - [ ] Implementation: rational polynomial approximation (Cody's or Abramowitz & Stegun).
+                - [ ] `erf(0)==0`, `erf(+∞)==1`, `erf(-∞)==-1`, `erfc(0)==1`, `erfc(+∞)==0`.
+            - [ ] `tgamma()`, `lgamma()` (with `signgam`):
+                - [ ] `tgamma(x)`: true Gamma function, `Γ(x)`.
+                - [ ] `tgamma(n) == (n-1)!` for positive integers.
+                - [ ] Poles at non-positive integers: `tgamma(0)` → ±∞, `tgamma(-1)` → NaN + `FE_INVALID`.
+                - [ ] `lgamma(x)`: natural log of absolute value of Gamma: `ln|Γ(x)|`.
+                - [ ] Set external `signgam` to sign of `Γ(x)` (+1 or -1).
+                - [ ] `lgamma_r(x, &signp)`: reentrant variant (BSD extension).
+                - [ ] Implementation: Stirling's approximation for large x, Lanczos or rational approximation for small x.
+            - [ ] **Testing (`tests/lib/m/unit/test_gamma.c`):**
+                - [ ] Test `erf(0)==0`, `erf(1)≈0.8427`, `erf(+∞)==1`, `erf(-∞)==-1`.
+                - [ ] Test `erfc(0)==1`, `erfc(+∞)==0`, `erfc(x) + erf(x) ≈ 1`.
+                - [ ] Test `tgamma(1)==1`, `tgamma(2)==1`, `tgamma(5)==24`, `tgamma(0.5)≈√π`.
+                - [ ] Test `tgamma(0)` → ±∞ (pole), `tgamma(-1)` → NaN.
+                - [ ] Test `lgamma(1)==0`, `lgamma(2)==0`, `lgamma(5)≈ln(24)`.
+                - [ ] Test `signgam` is set correctly after `lgamma()` calls.
+                - [ ] Test NaN propagation for all error/gamma functions.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_gamma.c`):**
+                - [ ] Property: `erfc(x) + erf(x) ≈ 1.0` for all finite `x`.
+                - [ ] Property: `erf(-x) == -erf(x)` (odd function).
+                - [ ] Property: `exp(lgamma(x)) ≈ |tgamma(x)|` for `x` where `tgamma(x)` is finite.
+                - [ ] Property: `tgamma(x+1) ≈ x * tgamma(x)` for positive `x` (recurrence relation).
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/erf.3` — Error functions. Covers `erf()` and `erfc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/tgamma.3` — Gamma functions. Covers `tgamma()`, `lgamma()`, `lgamma_r()`, `signgam`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
         - [ ] **Bessel Functions (POSIX/XSI):**
-            - [ ] `j0()`, `j1()`, `jn()`
-            - [ ] `y0()`, `y1()`, `yn()`
+            - [ ] `j0()`, `j1()`, `jn()`:
+                - [ ] Bessel functions of the first kind: `J₀(x)`, `J₁(x)`, `Jₙ(x)`.
+                - [ ] `j0(0)==1`, `j1(0)==0`, `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`.
+                - [ ] Implementation: polynomial/rational approximation for small x, asymptotic expansion for large x, Miller's backward recurrence for `jn()`.
+            - [ ] `y0()`, `y1()`, `yn()`:
+                - [ ] Bessel functions of the second kind: `Y₀(x)`, `Y₁(x)`, `Yₙ(x)`.
+                - [ ] Singular at `x=0`: `y0(0)==-∞`, `y1(0)==-∞`.
+                - [ ] Domain: `x > 0` only. `y0(-1)` → NaN + `FE_INVALID`.
+            - [ ] **Testing (`tests/lib/m/unit/test_bessel.c`):**
+                - [ ] Test `j0(0)==1`, `j1(0)==0`.
+                - [ ] Test `j0(x)` known values: `j0(2.4048...)≈0` (first zero).
+                - [ ] Test `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`.
+                - [ ] Test `y0(x)`, `y1(x)` known values.
+                - [ ] Test `y0(0)==-∞`, `y1(0)==-∞`.
+                - [ ] Test domain: `y0(-1)` → NaN, `y1(-1)` → NaN.
+                - [ ] Test NaN propagation.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_bessel.c`):**
+                - [ ] Property: `jn(n, x)` satisfies Bessel recurrence: `J_{n-1}(x) + J_{n+1}(x) = (2n/x) * J_n(x)`.
+                - [ ] Property: `|j0(x)| <= 1` for all `x >= 0`.
+                - [ ] Property: `yn(n, x)` satisfies same recurrence.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/j0.3` — Bessel functions. Covers `j0()`, `j1()`, `jn()`, `y0()`, `y1()`, `yn()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+    - [ ] **Comprehensive Math Library Tests (Cross-Cutting):**
+        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_math.c`):**
+            - [ ] Fuzz all implemented math functions with random `double` inputs (including denormals, ±0, ±∞, NaN, max/min values).
+            - [ ] Verify no crashes, no SIGFPE (unless expected), consistent NaN propagation.
+            - [ ] Verify errno is set correctly for domain/range errors.
+            - [ ] Verify `fetestexcept()` flags raised appropriately.
+        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_mathf.c`):**
+            - [ ] Same as above but for all `float` variant functions.
+        - [ ] **Accuracy Tests (`tests/lib/m/unit/test_accuracy.c`):**
+            - [ ] Compare all math functions against known high-precision reference values (MPFR or hardcoded tables).
+            - [ ] Verify results within 1 ULP for correctly-rounded functions, 2-3 ULP for faithfully-rounded.
+            - [ ] Test at boundary values: smallest/largest normal, smallest denormal, values near singularities.
     - [ ] **Optimizations (i386/x87 Inline Assembly):**
         - [ ] **Trigonometric Functions:**
             - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.
@@ -3395,6 +4035,15 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [ ] `nearbyint()`: `frndint` (without raising inexact exception).
             - [ ] `scalbn(x, n)`: Load x, load n, `fscale`.
             - [ ] `lrint()` / `llrint()`: `fistp` (store integer).
+        - [ ] **Testing (`tests/lib/m/unit/test_x87_opt.c`):**
+            - [ ] Verify x87-optimized functions produce identical results to generic C implementations.
+            - [ ] Test x87 range reduction: `sin(x)` for `x > 2^63` matches software range reduction.
+            - [ ] Test `fprem` loop termination (C1 flag check).
+            - [ ] Benchmark x87 vs generic: verify speedup for core functions.
+            - [ ] Test `nearbyint()` x87 path does NOT raise `FE_INEXACT` (vs `rint()` which does).
+            - [ ] Test `fistp` path for `lrint()`/`llrint()` matches current rounding mode.
+        - [ ] **Man Pages:**
+            - [ ] `man/man7/math_x87.7` — i386/x87 math optimizations overview. Document which functions use hardware instructions, range reduction strategy, accuracy guarantees, and when generic fallback is used. SYNOPSIS, DESCRIPTION, NOTES, SEE ALSO.
 - [ ] **Dynamic Linker (`/libexec/ld.so`) - Production Quality BSD-Style Implementation:**
     - [ ] **Implementation Checklist (Commit-Atomic, Production Gate):**
         - **1. Specification & Design**
