@@ -227,9 +227,9 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `VBROADCASTF32X2/F32X8/I32X2/I32X8`
 
 ### 5e. AVX-512VL (Vector Length)
-- [ ] All 512-bit instructions also available at EVEX.128 (xmm) and EVEX.256 (ymm)
-- [ ] Opmask + zeroing on 128/256-bit forms
-- [ ] Embedded broadcast on 128/256-bit memory operands
+- [x] All 512-bit instructions also available at EVEX.128 (xmm) and EVEX.256 (ymm)
+- [x] Opmask + zeroing on 128/256-bit forms
+- [x] Embedded broadcast on 128/256-bit memory operands
 
 ---
 

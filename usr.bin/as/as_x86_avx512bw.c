@@ -63,6 +63,22 @@ static int set_err(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
     return -1;
 }
 
+static int l2_from_vector_bits(unsigned vector_bits, uint8_t *l2) {
+    if (vector_bits == 128) {
+        *l2 = 0;
+        return 0;
+    }
+    if (vector_bits == 256) {
+        *l2 = 1;
+        return 0;
+    }
+    if (vector_bits == 512) {
+        *l2 = 2;
+        return 0;
+    }
+    return -1;
+}
+
 static int append_imm8(uint8_t *out, size_t out_cap, size_t *out_len, uint8_t imm8,
                        char *errbuf, size_t errbuf_sz) {
     if (out_len == NULL || *out_len >= out_cap) {
@@ -76,6 +92,7 @@ static int encode_desc(const bw_desc_t *desc, const as_x86_avx512bw_insn_t *insn
                        uint8_t *out, size_t out_cap, size_t *out_len,
                        char *errbuf, size_t errbuf_sz) {
     as_x86_evex_insn_t ev;
+    unsigned vb;
 
     if (!!insn->has_imm8 != !!desc->require_imm8) {
         return -1;
@@ -98,7 +115,14 @@ static int encode_desc(const bw_desc_t *desc, const as_x86_avx512bw_insn_t *insn
         return -1;
     }
     ev.rounding_mode = (insn->rounding_mode == 0 && !insn->sae) ? -1 : insn->rounding_mode;
-    ev.evex_l2 = (uint8_t)desc->fixed_l2;
+    if (desc->fixed_l2 >= 0) {
+        ev.evex_l2 = (uint8_t)desc->fixed_l2;
+    } else {
+        vb = (insn->vector_bits == 0) ? 512 : insn->vector_bits;
+        if (l2_from_vector_bits(vb, &ev.evex_l2) != 0) {
+            return -1;
+        }
+    }
 
     switch (desc->form) {
     case BW_FORM_RRR:
@@ -159,35 +183,35 @@ static int encode_desc(const bw_desc_t *desc, const as_x86_avx512bw_insn_t *insn
 int as_x86_encode_avx512bw(const as_x86_avx512bw_insn_t *insn, uint8_t *out, size_t out_cap,
                            size_t *out_len, char *errbuf, size_t errbuf_sz) {
     static const bw_desc_t descs[] = {
-        {"vpaddb", BW_FORM_RRR, 0xfc, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, 2, 0, 0},
-        {"vpaddw", BW_FORM_RRR, 0xfd, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, 2, 0, 0},
-        {"vpackuswb", BW_FORM_RRR, 0x67, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, 2, 0, 0},
-        {"vpunpcklbw", BW_FORM_RRR, 0x60, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, 2, 0, 0},
-        {"vpshufb", BW_FORM_RRR, 0x00, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 0, 2, 0, 0},
+        {"vpaddb", BW_FORM_RRR, 0xfc, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 0, 0},
+        {"vpaddw", BW_FORM_RRR, 0xfd, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 0, 0},
+        {"vpackuswb", BW_FORM_RRR, 0x67, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 0, 0},
+        {"vpunpcklbw", BW_FORM_RRR, 0x60, AS_EVEX_MAP_0F, AS_EVEX_PP_66, 0, -1, 0, 0},
+        {"vpshufb", BW_FORM_RRR, 0x00, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 0, -1, 0, 0},
 
-        {"vpsllvw", BW_FORM_RRR, 0x12, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, 2, 0, 0},
-        {"vpsrlvw", BW_FORM_RRR, 0x10, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, 2, 0, 0},
-        {"vpsravw", BW_FORM_RRR, 0x11, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, 2, 0, 0},
-        {"vdbpsadbw", BW_FORM_RRRI, 0x42, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, 2, 1, 0},
+        {"vpsllvw", BW_FORM_RRR, 0x12, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
+        {"vpsrlvw", BW_FORM_RRR, 0x10, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
+        {"vpsravw", BW_FORM_RRR, 0x11, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
+        {"vdbpsadbw", BW_FORM_RRRI, 0x42, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0},
 
-        {"vpcmpb", BW_FORM_KCMP_IMM, 0x3f, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, 2, 1, 0},
-        {"vpcmpw", BW_FORM_KCMP_IMM, 0x3f, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, 2, 1, 0},
-        {"vpcmpub", BW_FORM_KCMP_IMM, 0x3e, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, 2, 1, 0},
-        {"vpcmpuw", BW_FORM_KCMP_IMM, 0x3e, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, 2, 1, 0},
+        {"vpcmpb", BW_FORM_KCMP_IMM, 0x3f, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0},
+        {"vpcmpw", BW_FORM_KCMP_IMM, 0x3f, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0},
+        {"vpcmpub", BW_FORM_KCMP_IMM, 0x3e, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 0, -1, 1, 0},
+        {"vpcmpuw", BW_FORM_KCMP_IMM, 0x3e, AS_EVEX_MAP_0F3A, AS_EVEX_PP_66, 1, -1, 1, 0},
 
-        {"vpmovb2m", BW_FORM_RR, 0x29, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 0, 2, 0, 0},
-        {"vpmovw2m", BW_FORM_RR, 0x29, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 1, 2, 0, 0},
-        {"vpmovm2b", BW_FORM_RR, 0x28, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 0, 2, 0, 0},
-        {"vpmovm2w", BW_FORM_RR, 0x28, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 1, 2, 0, 0},
+        {"vpmovb2m", BW_FORM_RR, 0x29, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 0, -1, 0, 0},
+        {"vpmovw2m", BW_FORM_RR, 0x29, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 1, -1, 0, 0},
+        {"vpmovm2b", BW_FORM_RR, 0x28, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 0, -1, 0, 0},
+        {"vpmovm2w", BW_FORM_RR, 0x28, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 1, -1, 0, 0},
 
-        {"vpermw", BW_FORM_RRR, 0x8d, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, 2, 0, 0},
-        {"vpermi2w", BW_FORM_RRR, 0x75, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, 2, 0, 0},
-        {"vpermt2w", BW_FORM_RRR, 0x7d, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, 2, 0, 0},
-        {"vpblendmb", BW_FORM_RRR, 0x66, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 0, 2, 0, 1},
-        {"vpblendmw", BW_FORM_RRR, 0x66, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, 2, 0, 1},
+        {"vpermw", BW_FORM_RRR, 0x8d, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
+        {"vpermi2w", BW_FORM_RRR, 0x75, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
+        {"vpermt2w", BW_FORM_RRR, 0x7d, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 0},
+        {"vpblendmb", BW_FORM_RRR, 0x66, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 0, -1, 0, 1},
+        {"vpblendmw", BW_FORM_RRR, 0x66, AS_EVEX_MAP_0F38, AS_EVEX_PP_66, 1, -1, 0, 1},
 
-        {"vptestnmb", BW_FORM_KCMP, 0x26, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 0, 2, 0, 0},
-        {"vptestnmw", BW_FORM_KCMP, 0x26, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 1, 2, 0, 0},
+        {"vptestnmb", BW_FORM_KCMP, 0x26, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 0, -1, 0, 0},
+        {"vptestnmw", BW_FORM_KCMP, 0x26, AS_EVEX_MAP_0F38, AS_EVEX_PP_F3, 1, -1, 0, 0},
     };
     size_t i;
 

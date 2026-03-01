@@ -17,6 +17,7 @@ typedef struct {
     as_x86_operand_t op3;
     int has_imm8;
     uint8_t imm8;
+    unsigned vector_bits;
     uint8_t opmask;
     int zeroing;
     int broadcast;

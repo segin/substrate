@@ -48,6 +48,22 @@ static int set_err(char *errbuf, size_t errbuf_sz, const char *fmt, ...) {
     return -1;
 }
 
+static int l2_from_vector_bits(unsigned vector_bits, uint8_t *l2) {
+    if (vector_bits == 128) {
+        *l2 = 0;
+        return 0;
+    }
+    if (vector_bits == 256) {
+        *l2 = 1;
+        return 0;
+    }
+    if (vector_bits == 512) {
+        *l2 = 2;
+        return 0;
+    }
+    return -1;
+}
+
 int as_x86_encode_avx512cd(const as_x86_avx512cd_insn_t *insn, uint8_t *out, size_t out_cap,
                            size_t *out_len, char *errbuf, size_t errbuf_sz) {
     static const cd_desc_t descs[] = {
@@ -59,6 +75,7 @@ int as_x86_encode_avx512cd(const as_x86_avx512cd_insn_t *insn, uint8_t *out, siz
         {"vpbroadcastmw2d", 0x3a, AS_EVEX_PP_F3, 0},
     };
     as_x86_evex_insn_t ev;
+    unsigned vb;
     size_t i;
 
     if (out_len != NULL) {
@@ -84,9 +101,13 @@ int as_x86_encode_avx512cd(const as_x86_avx512cd_insn_t *insn, uint8_t *out, siz
             ev.dst = insn->op1.u.reg;
             ev.src1 = AS_X86_REG_RAX;
             ev.src2 = insn->op2;
-            ev.opmask = 0;
+            ev.opmask = insn->opmask;
+            ev.zeroing = insn->zeroing;
             ev.rounding_mode = -1;
-            ev.evex_l2 = 2;
+            vb = (insn->vector_bits == 0) ? 512 : insn->vector_bits;
+            if (l2_from_vector_bits(vb, &ev.evex_l2) != 0) {
+                return -1;
+            }
             return as_x86_encode_evex_3op(&ev, out, out_cap, out_len, errbuf, errbuf_sz);
         }
     }

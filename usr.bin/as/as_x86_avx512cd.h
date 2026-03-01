@@ -14,6 +14,9 @@ typedef struct {
     const char *mnemonic;
     as_x86_operand_t op1;
     as_x86_operand_t op2;
+    unsigned vector_bits;
+    uint8_t opmask;
+    int zeroing;
     size_t op_count;
 } as_x86_avx512cd_insn_t;
 

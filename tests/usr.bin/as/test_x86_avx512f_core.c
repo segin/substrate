@@ -167,7 +167,7 @@ int main(void) {
     in.mnemonic = "vcvtpd2dq";
     in.vector_bits = 256;
     {
-        const uint8_t exp[] = {0x62, 0xf1, 0xff, 0x48, 0xe6, 0xca};
+        const uint8_t exp[] = {0x62, 0xf1, 0xff, 0x28, 0xe6, 0xca};
         run_case(&in, exp, sizeof(exp), "vcvtpd2dq");
     }
 
