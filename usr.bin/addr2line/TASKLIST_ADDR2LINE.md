@@ -180,12 +180,12 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 
 ## 3. Address‑to‑Line Lookup
 
-- [ ] Build sorted line‑table from decoded rows (address → file:line pairs). **(FR‑20)**
-- [ ] Binary search for the closest row with `address ≤ query ≤ next_address`. **(FR‑20)**
-- [ ] Handle multiple compilation units: iterate all `.debug_line` unit headers. **(FR‑21)**
-- [ ] Resolve file index to directory + filename string. **(FR‑22)**
-- [ ] Output format: `filename:line` (or `filename:line:column` with `-c`). **(FR‑22)**
-- [ ] If no line entry found: output `??:0`. **(FR‑23)**
+- [x] Build sorted line‑table from decoded rows (address → file:line pairs). **(FR‑20)**
+- [x] Binary search for the closest row with `address ≤ query ≤ next_address`. **(FR‑20)**
+- [x] Handle multiple compilation units: iterate all `.debug_line` unit headers. **(FR‑21)**
+- [x] Resolve file index to directory + filename string. **(FR‑22)**
+- [x] Output format: `filename:line` (or `filename:line:column` with `-c`). **(FR‑22)**
+- [x] If no line entry found: output `??:0`. **(FR‑23)**
 
 ---
 

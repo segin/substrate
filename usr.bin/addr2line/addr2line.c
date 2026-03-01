@@ -50,6 +50,7 @@ typedef struct {
     const char *exe_path;
     const char **addr_args;
     size_t addr_argc;
+    int show_column;
 } addr2line_opts_t;
 
 typedef struct {
@@ -123,6 +124,15 @@ typedef struct {
 } line_row_t;
 
 typedef struct {
+    uint64_t low;
+    uint64_t high;
+    uint32_t file;
+    uint32_t line;
+    uint32_t column;
+    size_t unit_index;
+} line_entry_t;
+
+typedef struct {
     elfobj_t *elf;
     char *path;
     elfobj_class_t elf_class;
@@ -150,13 +160,17 @@ typedef struct {
     line_row_t *line_rows;
     size_t line_row_count;
     size_t line_row_cap;
+
+    line_entry_t *line_entries;
+    size_t line_entry_count;
+    size_t line_entry_cap;
 } addr2line_image_t;
 
 static const char *g_progname = "addr2line";
 
 static void usage(FILE *out) {
     fprintf(out,
-            "usage: %s [-e file] [addr ...]\n"
+            "usage: %s [-e file] [-c] [addr ...]\n"
             "       %s --help\n"
             "       %s --version\n",
             g_progname, g_progname, g_progname);
@@ -998,6 +1012,119 @@ static int decode_line_program_standard_ops(addr2line_image_t *img,
     return 0;
 }
 
+static int line_entry_cmp(const void *lhs, const void *rhs) {
+    const line_entry_t *a = (const line_entry_t *)lhs;
+    const line_entry_t *b = (const line_entry_t *)rhs;
+    if (a->low < b->low) {
+        return -1;
+    }
+    if (a->low > b->low) {
+        return 1;
+    }
+    if (a->high < b->high) {
+        return -1;
+    }
+    if (a->high > b->high) {
+        return 1;
+    }
+    if (a->unit_index < b->unit_index) {
+        return -1;
+    }
+    if (a->unit_index > b->unit_index) {
+        return 1;
+    }
+    return 0;
+}
+
+static int image_append_line_entry(addr2line_image_t *img, const line_entry_t *entry) {
+    line_entry_t *next;
+    if (img->line_entry_count == img->line_entry_cap) {
+        size_t new_cap = img->line_entry_cap == 0 ? 256u : img->line_entry_cap * 2u;
+        next = (line_entry_t *)realloc(img->line_entries, new_cap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        img->line_entries = next;
+        img->line_entry_cap = new_cap;
+    }
+    img->line_entries[img->line_entry_count++] = *entry;
+    return 0;
+}
+
+static int build_line_entries(addr2line_image_t *img) {
+    size_t i;
+    for (i = 0; i < img->line_row_count; ++i) {
+        const line_row_t *row = &img->line_rows[i];
+        line_entry_t entry;
+        if (row->end_sequence) {
+            continue;
+        }
+        entry.low = row->address;
+        if (i + 1u < img->line_row_count &&
+            img->line_rows[i + 1u].unit_index == row->unit_index) {
+            entry.high = img->line_rows[i + 1u].address;
+            if (entry.high <= entry.low) {
+                entry.high = entry.low + 1u;
+            }
+        } else {
+            entry.high = UINT64_MAX;
+        }
+        entry.file = row->file;
+        entry.line = row->line;
+        entry.column = row->column;
+        entry.unit_index = row->unit_index;
+        if (image_append_line_entry(img, &entry) != 0) {
+            return -1;
+        }
+    }
+
+    if (img->line_entry_count > 1u) {
+        qsort(img->line_entries,
+              img->line_entry_count,
+              sizeof(img->line_entries[0]),
+              line_entry_cmp);
+    }
+    return 0;
+}
+
+static const line_entry_t *lookup_line_entry(const addr2line_image_t *img, uint64_t addr) {
+    size_t lo = 0;
+    size_t hi = img->line_entry_count;
+    size_t pos;
+
+    if (img->line_entry_count == 0u) {
+        return NULL;
+    }
+
+    while (lo < hi) {
+        size_t mid = lo + ((hi - lo) / 2u);
+        if (img->line_entries[mid].low <= addr) {
+            lo = mid + 1u;
+        } else {
+            hi = mid;
+        }
+    }
+    if (lo == 0u) {
+        return NULL;
+    }
+    pos = lo - 1u;
+
+    while (1) {
+        const line_entry_t *e = &img->line_entries[pos];
+        if (addr >= e->low && addr < e->high) {
+            return e;
+        }
+        if (pos == 0u) {
+            break;
+        }
+        if (img->line_entries[pos - 1u].low < e->low) {
+            break;
+        }
+        pos--;
+    }
+    return NULL;
+}
+
 static int parse_debug_line_units(addr2line_image_t *img) {
     const uint8_t *p = img->debug_line.data;
     const uint8_t *end = img->debug_line.data + img->debug_line.size;
@@ -1408,6 +1535,7 @@ static void image_reset(addr2line_image_t *img) {
     }
 
     free(img->func_syms);
+    free(img->line_entries);
     free(img->line_rows);
     for (i = 0; i < img->line_unit_count; ++i) {
         line_unit_free(&img->line_units[i]);
@@ -1533,6 +1661,11 @@ static int image_open(addr2line_image_t *img, const char *path) {
         image_reset(img);
         return -1;
     }
+    if (img->debug_line.present && build_line_entries(img) != 0) {
+        fprintf(stderr, "%s: out of memory\n", g_progname);
+        image_reset(img);
+        return -1;
+    }
 
     return 0;
 }
@@ -1573,7 +1706,71 @@ static void output_unresolved(void) {
     puts("??:0");
 }
 
-static int resolve_stdin(void) {
+static char *line_entry_path(const addr2line_image_t *img, const line_entry_t *entry) {
+    const line_unit_t *u;
+    const line_file_t *f;
+    const char *dir = NULL;
+    size_t dir_len = 0;
+    size_t file_len;
+    char *full;
+
+    if (entry == NULL || entry->unit_index >= img->line_unit_count) {
+        return NULL;
+    }
+    u = &img->line_units[entry->unit_index];
+    if (entry->file == 0u || (size_t)entry->file > u->file_count) {
+        return NULL;
+    }
+    f = &u->files[entry->file - 1u];
+    if (f->name == NULL) {
+        return NULL;
+    }
+    file_len = strlen(f->name);
+
+    if (f->dir_index > 0u && (size_t)f->dir_index <= u->include_dir_count &&
+        f->name[0] != '/') {
+        dir = u->include_dirs[f->dir_index - 1u];
+        if (dir != NULL && dir[0] != '\0') {
+            dir_len = strlen(dir);
+        }
+    }
+
+    if (dir_len == 0u) {
+        return strdup(f->name);
+    }
+
+    full = (char *)malloc(dir_len + 1u + file_len + 1u);
+    if (full == NULL) {
+        return NULL;
+    }
+    memcpy(full, dir, dir_len);
+    full[dir_len] = '/';
+    memcpy(full + dir_len + 1u, f->name, file_len + 1u);
+    return full;
+}
+
+static void output_lookup(const addr2line_image_t *img, uint64_t query, int show_column) {
+    const line_entry_t *entry = lookup_line_entry(img, query);
+    char *path;
+    if (entry == NULL) {
+        output_unresolved();
+        return;
+    }
+    path = line_entry_path(img, entry);
+    if (path == NULL || path[0] == '\0') {
+        free(path);
+        output_unresolved();
+        return;
+    }
+    if (show_column) {
+        printf("%s:%" PRIu32 ":%" PRIu32 "\n", path, entry->line, entry->column);
+    } else {
+        printf("%s:%" PRIu32 "\n", path, entry->line);
+    }
+    free(path);
+}
+
+static int resolve_stdin(const addr2line_image_t *img, const addr2line_opts_t *opts) {
     char line[256];
 
     while (fgets(line, sizeof(line), stdin) != NULL) {
@@ -1583,14 +1780,16 @@ static int resolve_stdin(void) {
             output_unresolved();
             continue;
         }
-        (void)query;
-        output_unresolved();
+        output_lookup(img, query, opts->show_column);
     }
 
     return 0;
 }
 
-static int resolve_argv(const char **args, size_t n) {
+static int resolve_argv(const addr2line_image_t *img,
+                        const addr2line_opts_t *opts,
+                        const char **args,
+                        size_t n) {
     size_t i;
 
     for (i = 0; i < n; ++i) {
@@ -1600,8 +1799,7 @@ static int resolve_argv(const char **args, size_t n) {
             output_unresolved();
             continue;
         }
-        (void)query;
-        output_unresolved();
+        output_lookup(img, query, opts->show_column);
     }
 
     return 0;
@@ -1643,6 +1841,10 @@ static int parse_options(int argc, char **argv, addr2line_opts_t *opts) {
             opts->exe_path = arg + 6;
             continue;
         }
+        if (strcmp(arg, "-c") == 0) {
+            opts->show_column = 1;
+            continue;
+        }
 
         if (arg[0] == '-') {
             fprintf(stderr, "%s: unknown option: %s\n", g_progname, arg);
@@ -1676,9 +1878,9 @@ int main(int argc, char **argv) {
     }
 
     if (opts.addr_argc == 0) {
-        rc = resolve_stdin();
+        rc = resolve_stdin(&img, &opts);
     } else {
-        rc = resolve_argv(opts.addr_args, opts.addr_argc);
+        rc = resolve_argv(&img, &opts, opts.addr_args, opts.addr_argc);
     }
 
     image_reset(&img);
