@@ -247,6 +247,150 @@ static int validate_note_gnu_property_aarch64(validate_ctx_t *ctx, const struct 
     return 0;
 }
 
+static uint64_t read_uleb_local(const uint8_t *p, size_t sz, size_t *off, int *ok) {
+    uint64_t v = 0;
+    unsigned shift = 0;
+    *ok = 0;
+    while (*off < sz && shift < 64) {
+        uint8_t b = p[*off];
+        (*off)++;
+        v |= (uint64_t)(b & 0x7f) << shift;
+        if ((b & 0x80u) == 0) {
+            *ok = 1;
+            return v;
+        }
+        shift += 7;
+    }
+    return 0;
+}
+
+static int validate_x86_gnu_property(validate_ctx_t *ctx, const struct elf_section *s, size_t index) {
+    uint32_t namesz;
+    uint32_t descsz;
+    uint32_t ntype;
+    size_t align = s->obj->cls == ELFOBJ_CLASS_64 ? 8 : 4;
+    size_t off;
+
+    if (s->data == NULL || s->data_size < 16) {
+        return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                           ".note.gnu.property payload too small");
+    }
+    if ((s->addralign % align) != 0) {
+        if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                        ".note.gnu.property alignment mismatch")) {
+            return 1;
+        }
+    }
+    namesz = elf__rd32(s->data + 0, s->obj->endian);
+    descsz = elf__rd32(s->data + 4, s->obj->endian);
+    ntype = elf__rd32(s->data + 8, s->obj->endian);
+    if (ntype != 5u) {
+        if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                        ".note.gnu.property unexpected note type")) {
+            return 1;
+        }
+    }
+    off = 12;
+    off = (off + namesz + 3u) & ~3u;
+    if (off + descsz > s->data_size) {
+        return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
+                           ".note.gnu.property desc out of bounds");
+    }
+    while (descsz >= 8 && off + 8 <= s->data_size) {
+        uint32_t t = elf__rd32(s->data + off, s->obj->endian);
+        uint32_t sz = elf__rd32(s->data + off + 4, s->obj->endian);
+        uint32_t bits = 0;
+        off += 8;
+        if (off + sz > s->data_size) {
+            return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
+                               ".note.gnu.property item out of bounds");
+        }
+        if (sz >= 4) {
+            bits = elf__rd32(s->data + off, s->obj->endian);
+        }
+        if (t == GNU_PROPERTY_X86_ISA_1_NEEDED || t == GNU_PROPERTY_X86_ISA_1_USED) {
+            if ((bits & ~(GNU_PROPERTY_X86_ISA_1_BASELINE | GNU_PROPERTY_X86_ISA_1_V2 |
+                          GNU_PROPERTY_X86_ISA_1_V3 | GNU_PROPERTY_X86_ISA_1_V4)) != 0) {
+                if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                                "x86 GNU ISA property has unknown bits")) {
+                    return 1;
+                }
+            }
+        } else if (t == GNU_PROPERTY_X86_FEATURE_1_AND) {
+            if ((bits & ~(GNU_PROPERTY_X86_FEATURE_1_IBT | GNU_PROPERTY_X86_FEATURE_1_SHSTK)) !=
+                0) {
+                if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                                "x86 GNU FEATURE_1 property has unknown bits")) {
+                    return 1;
+                }
+            }
+        } else {
+            if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                            "unknown GNU property type")) {
+                return 1;
+            }
+        }
+        off += sz;
+        off = (off + align - 1) & ~(align - 1);
+        if (descsz < 8 + sz) {
+            break;
+        }
+        descsz -= 8 + sz;
+    }
+    return 0;
+}
+
+static int validate_eh_frame_ra(validate_ctx_t *ctx, const struct elf_section *s, size_t index) {
+    size_t off = 0;
+    uint32_t len;
+    uint32_t cie_id;
+    size_t p;
+    int ok;
+    uint64_t ra_reg;
+    uint64_t expected = s->obj->machine == EM_386 ? 8u : 16u;
+
+    if (s->data == NULL || s->data_size < 16) {
+        return 0;
+    }
+    len = elf__rd32(s->data + off, s->obj->endian);
+    if (len == 0 || off + 4 + len > s->data_size) {
+        return 0;
+    }
+    cie_id = elf__rd32(s->data + off + 4, s->obj->endian);
+    if (cie_id != 0) {
+        return 0;
+    }
+    p = off + 8;
+    if (p >= s->data_size) {
+        return 0;
+    }
+    p++; /* version */
+    while (p < s->data_size && s->data[p] != '\0') {
+        p++;
+    }
+    if (p >= s->data_size) {
+        return 0;
+    }
+    p++;
+    (void)read_uleb_local(s->data, s->data_size, &p, &ok);
+    if (!ok) {
+        return 0;
+    }
+    (void)read_uleb_local(s->data, s->data_size, &p, &ok);
+    if (!ok) {
+        return 0;
+    }
+    ra_reg = read_uleb_local(s->data, s->data_size, &p, &ok);
+    if (!ok) {
+        return 0;
+    }
+    if (ra_reg != expected) {
+        return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                           ".eh_frame CIE return-address register mismatch");
+    }
+    return 0;
+}
+
 static int validate_aarch64_specific(validate_ctx_t *ctx, const elfobj_t *obj) {
     size_t i;
     int have_exec = 0;
@@ -415,6 +559,30 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
         if (s->type == SHT_STRTAB && (s->flags & SHF_EXECINSTR) != 0) {
             if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
                                 "string table has executable flag index=", i)) goto done;
+        }
+        if (obj->machine == EM_386 && s->type == SHT_RELA) {
+            if (report_diag(&ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
+                            "i386 should use SHT_REL relocations")) {
+                goto done;
+            }
+        }
+        if (obj->machine == EM_X86_64 && s->type == SHT_REL) {
+            if (report_diag(&ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
+                            "x86-64 should use SHT_RELA relocations")) {
+                goto done;
+            }
+        }
+        if ((obj->machine == EM_386 || obj->machine == EM_X86_64) &&
+            s->name != NULL && strcmp(s->name, ".note.gnu.property") == 0) {
+            if (validate_x86_gnu_property(&ctx, s, i)) {
+                goto done;
+            }
+        }
+        if ((obj->machine == EM_386 || obj->machine == EM_X86_64) &&
+            s->name != NULL && strcmp(s->name, ".eh_frame") == 0) {
+            if (validate_eh_frame_ra(&ctx, s, i)) {
+                goto done;
+            }
         }
     }
 
