@@ -4900,11 +4900,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] `delete-char-or-list` (configurable `^D` variant): list completions if at end, else delete.
     - [x] **Cursor Navigation:**
         - [x] Left/Right arrow keys (ESC `[D` / ESC `[C`).
-        - [ ] `beginning-of-line` (`^A`): move to column 0.
-        - [ ] `end-of-line` (`^E`): move to `lastchar`.
-        - [ ] `forward-word` (`M-f`): skip to next word boundary.
-        - [ ] `backward-word` (`M-b`): skip to previous word boundary.
-        - [ ] Home / End keys (ESC `[H`, ESC `[F`, and alternate sequences ESC `[1~` / ESC `[4~`).
+        - [x] `beginning-of-line` (`^A`): move to column 0.
+        - [x] `end-of-line` (`^E`): move to `lastchar`.
+        - [x] `forward-word` (`M-f`): skip to next word boundary.
+        - [x] `backward-word` (`M-b`): skip to previous word boundary.
+        - [x] Home / End keys (ESC `[H`, ESC `[F`, and alternate sequences ESC `[1~` / ESC `[4~`).
     - [x] **Screen Refresh (`refresh_line`):**
         - [x] `\\r` + `CSI K` + prompt + buffer + cursor reposition via `CSI %dD`.
         - [ ] Handle multi‑line buffers: track physical rows, scroll window.

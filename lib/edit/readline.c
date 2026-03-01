@@ -126,6 +126,26 @@ static int backward_kill_word(EditLine *el) {
     return 1;
 }
 
+static void move_forward_word(EditLine *el) {
+    size_t i;
+
+    if (!el) return;
+    i = el->line.cursor;
+    while (i < el->line.len && !is_word_char((unsigned char)el->line.buffer[i])) i++;
+    while (i < el->line.len && is_word_char((unsigned char)el->line.buffer[i])) i++;
+    el->line.cursor = i;
+}
+
+static void move_backward_word(EditLine *el) {
+    size_t i;
+
+    if (!el) return;
+    i = el->line.cursor;
+    while (i > 0 && !is_word_char((unsigned char)el->line.buffer[i - 1])) i--;
+    while (i > 0 && is_word_char((unsigned char)el->line.buffer[i - 1])) i--;
+    el->line.cursor = i;
+}
+
 static void refresh_line(EditLine *el) {
     /* Move cursor to start of line, clear to end of line, print prompt and buffer */
     fprintf(el->fout, "\r\033[K%s%s", el->prompt ? el->prompt : "", el->line.buffer);
@@ -213,6 +233,14 @@ const char *el_gets(EditLine *el, int *count) {
             el->last_cmd_was_kill = 0;
             fprintf(el->fout, "\033[H\033[2J");
             refresh_line(el);
+        } else if (c == 0x01) { /* ^A */
+            el->last_cmd_was_kill = 0;
+            el->line.cursor = 0;
+            refresh_line(el);
+        } else if (c == 0x05) { /* ^E */
+            el->last_cmd_was_kill = 0;
+            el->line.cursor = el->line.len;
+            refresh_line(el);
         } else if (c == 0x0B) { /* ^K kill-line */
             if (kill_line(el)) refresh_line(el);
         } else if (c == 0x15) { /* ^U backward-kill-line */
@@ -235,6 +263,14 @@ const char *el_gets(EditLine *el, int *count) {
                             el->line.cursor--;
                             refresh_line(el);
                         }
+                    } else if (seq1 == 'H') { /* Home */
+                        el->last_cmd_was_kill = 0;
+                        el->line.cursor = 0;
+                        refresh_line(el);
+                    } else if (seq1 == 'F') { /* End */
+                        el->last_cmd_was_kill = 0;
+                        el->line.cursor = el->line.len;
+                        refresh_line(el);
                     } else if (seq1 == 'A') { /* Up (History) */
                         el->last_cmd_was_kill = 0;
                         if (el->history) {
@@ -262,11 +298,25 @@ const char *el_gets(EditLine *el, int *count) {
                             el->last_cmd_was_kill = 0;
                             if (seq1 == '2') {
                                 el->overwrite_mode = !el->overwrite_mode;
+                            } else if (seq1 == '1') {
+                                el->line.cursor = 0;
+                                refresh_line(el);
+                            } else if (seq1 == '4') {
+                                el->line.cursor = el->line.len;
+                                refresh_line(el);
                             }
                         }
                     }
                 } else if (seq0 == 'd' || seq0 == 'D') { /* M-d kill-word */
                     if (kill_word(el)) refresh_line(el);
+                } else if (seq0 == 'f' || seq0 == 'F') { /* M-f */
+                    el->last_cmd_was_kill = 0;
+                    move_forward_word(el);
+                    refresh_line(el);
+                } else if (seq0 == 'b' || seq0 == 'B') { /* M-b */
+                    el->last_cmd_was_kill = 0;
+                    move_backward_word(el);
+                    refresh_line(el);
                 } else if (seq0 == 0x08 || seq0 == 0x7F) { /* M-BS or M-DEL */
                     if (backward_kill_word(el)) refresh_line(el);
                 } else {
