@@ -168,11 +168,11 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 13. Hex/String Dump (`-x` / `-p`)
 
-- [ ] `-x <section>` / `--hex-dump=<section>`: hex dump of section contents.
-- [ ] `-p <section>` / `--string-dump=<section>`: print strings from section.
-- [ ] Accept section by name or by index number.
-- [ ] Bounds-safe: do not read beyond section size.
-- [ ] Display offset column in hex dump.
+- [x] `-x <section>` / `--hex-dump=<section>`: hex dump of section contents.
+- [x] `-p <section>` / `--string-dump=<section>`: print strings from section.
+- [x] Accept section by name or by index number.
+- [x] Bounds-safe: do not read beyond section size.
+- [x] Display offset column in hex dump.
 
 ## 14. DWARF Debug Display (`-w` / `--debug-dump`)
 

@@ -218,6 +218,8 @@ typedef struct {
     int show_groups;
     int show_unwind;
     int show_arch_specific;
+    const char *hex_dump_target;
+    const char *str_dump_target;
 } readelf_opts_t;
 
 typedef struct {
@@ -2359,6 +2361,106 @@ static void print_arm_attributes(const elf_view_t *view, const elf_header_t *hdr
     }
 }
 
+static int parse_u64_text(const char *s, uint64_t *out) {
+    char *end = NULL;
+    unsigned long long v;
+    if (s == NULL || *s == '\0') return -1;
+    errno = 0;
+    v = strtoull(s, &end, 0);
+    if (errno != 0 || end == s || *end != '\0') return -1;
+    *out = (uint64_t)v;
+    return 0;
+}
+
+static int resolve_section_target(const elf_view_t *view, const elf_header_t *hdr,
+                                  const char *target, section_header_t *out, uint64_t *idx_out) {
+    uint64_t idx = 0;
+    uint64_t shnum = shnum_resolved(hdr);
+    section_header_t shstr;
+    const uint8_t *shstr_data = NULL;
+    size_t shstr_size = 0;
+    uint64_t i;
+
+    if (parse_u64_text(target, &idx) == 0) {
+        if (idx >= shnum || read_shdr(view, hdr, (size_t)idx, out) != 0) {
+            return -1;
+        }
+        *idx_out = idx;
+        return 0;
+    }
+
+    if (hdr->shstrndx < shnum && read_shdr(view, hdr, hdr->shstrndx, &shstr) == 0 &&
+        shstr.off + shstr.size <= view->size) {
+        shstr_data = view->data + shstr.off;
+        shstr_size = (size_t)shstr.size;
+    }
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        const char *nm;
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) break;
+        nm = shstr_name(shstr_data, shstr_size, sh.name);
+        if (strcmp(nm, target) == 0) {
+            *out = sh;
+            *idx_out = i;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static void do_hex_dump(const elf_view_t *view, const elf_header_t *hdr, const char *target) {
+    section_header_t sh;
+    uint64_t idx = 0;
+    uint64_t off = 0;
+    if (target == NULL) return;
+    if (resolve_section_target(view, hdr, target, &sh, &idx) != 0) {
+        warnf("section target '%s' not found", target);
+        return;
+    }
+    if (sh.off + sh.size > view->size) {
+        warnf("section '%s' is truncated", target);
+        return;
+    }
+    printf("\nHex dump of section [%llu]:\n", (unsigned long long)idx);
+    while (off < sh.size) {
+        uint64_t line = (sh.size - off > 16) ? 16 : (sh.size - off);
+        uint64_t i;
+        printf("  0x%08llx ", (unsigned long long)off);
+        for (i = 0; i < line; ++i) {
+            printf("%02x ", view->data[sh.off + off + i]);
+        }
+        printf("\n");
+        off += line;
+    }
+}
+
+static void do_string_dump(const elf_view_t *view, const elf_header_t *hdr, const char *target) {
+    section_header_t sh;
+    uint64_t idx = 0;
+    uint64_t off = 0;
+    if (target == NULL) return;
+    if (resolve_section_target(view, hdr, target, &sh, &idx) != 0) {
+        warnf("section target '%s' not found", target);
+        return;
+    }
+    if (sh.off + sh.size > view->size) {
+        warnf("section '%s' is truncated", target);
+        return;
+    }
+    printf("\nString dump of section [%llu]:\n", (unsigned long long)idx);
+    while (off < sh.size) {
+        const uint8_t *p = view->data + sh.off + off;
+        size_t len = 0;
+        while (off + len < sh.size && p[len] != '\0') {
+            ++len;
+        }
+        if (len >= 1) {
+            printf("  [%6llu] %.*s\n", (unsigned long long)off, (int)len, (const char *)p);
+        }
+        off += len + 1;
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -2552,6 +2654,8 @@ static void usage(FILE *out) {
             "  -g, --section-groups    Display section groups\n"
             "  -u, --unwind            Display ARM unwind tables\n"
             "  -A, --arch-specific     Display arch-specific attributes\n"
+            "  -x, --hex-dump=SEC      Hex dump section by name or index\n"
+            "  -p, --string-dump=SEC   String dump section by name or index\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
@@ -2582,6 +2686,8 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"section-groups", no_argument, NULL, 'g'},
         {"unwind", no_argument, NULL, 'u'},
         {"arch-specific", no_argument, NULL, 'A'},
+        {"hex-dump", required_argument, NULL, 'x'},
+        {"string-dump", required_argument, NULL, 'p'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
@@ -2598,7 +2704,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlsrdnVIguASeaW", longopts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "hlsrdnVIguAx:p:SeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -2635,6 +2741,12 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 break;
             case 'A':
                 opts->show_arch_specific = 1;
+                break;
+            case 'x':
+                opts->hex_dump_target = optarg;
+                break;
+            case 'p':
+                opts->str_dump_target = optarg;
                 break;
             case 'e':
                 opts->show_file_header = 1;
@@ -2726,7 +2838,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
         !opts->show_histogram &&
         !opts->show_groups &&
         !opts->show_unwind &&
-        !opts->show_arch_specific) {
+        !opts->show_arch_specific &&
+        opts->hex_dump_target == NULL &&
+        opts->str_dump_target == NULL) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -2814,6 +2928,12 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_arch_specific) {
         print_arm_attributes(&view, &hdr);
+    }
+    if (opts->hex_dump_target != NULL) {
+        do_hex_dump(&view, &hdr, opts->hex_dump_target);
+    }
+    if (opts->str_dump_target != NULL) {
+        do_string_dump(&view, &hdr, opts->str_dump_target);
     }
 
 out:
