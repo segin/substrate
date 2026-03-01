@@ -270,10 +270,10 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] Output parseable by scripts that consume `readelf -a` output.
 
 ### 19i. Edge Cases / Fuzz
-- [ ] Truncated ELF: no crash, partial display with warnings.
-- [ ] Zero-length sections: handled.
-- [ ] Very large symbol tables (100k+ symbols): displayed.
-- [ ] Fuzz harness: crash-free on arbitrary input.
+- [x] Truncated ELF: no crash, partial display with warnings.
+- [x] Zero-length sections: handled.
+- [x] Very large symbol tables (100k+ symbols): displayed.
+- [x] Fuzz harness: crash-free on arbitrary input.
 
 ## 20. Man Page
 
