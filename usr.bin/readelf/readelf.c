@@ -40,6 +40,47 @@
 #define EF_ARM_EABI_VER5 0x05000000u
 #endif
 
+#ifndef SHT_INIT_ARRAY
+#define SHT_INIT_ARRAY 14
+#define SHT_FINI_ARRAY 15
+#define SHT_PREINIT_ARRAY 16
+#define SHT_GROUP 17
+#define SHT_SYMTAB_SHNDX 18
+#endif
+
+#ifndef SHT_GNU_HASH
+#define SHT_GNU_ATTRIBUTES 0x6ffffff5
+#define SHT_GNU_HASH 0x6ffffff6
+#define SHT_GNU_verdef 0x6ffffffd
+#define SHT_GNU_verneed 0x6ffffffe
+#define SHT_GNU_versym 0x6fffffff
+#endif
+
+#ifndef SHT_ARM_EXIDX
+#define SHT_ARM_EXIDX 0x70000001
+#define SHT_ARM_PREEMPTMAP 0x70000002
+#define SHT_ARM_ATTRIBUTES 0x70000003
+#define SHT_AARCH64_ATTRIBUTES 0x70000003
+#endif
+
+#ifndef SHF_INFO_LINK
+#define SHF_INFO_LINK 0x40
+#define SHF_LINK_ORDER 0x80
+#define SHF_OS_NONCONFORMING 0x100
+#define SHF_GROUP 0x200
+#define SHF_TLS 0x400
+#define SHF_EXCLUDE 0x80000000u
+#endif
+
+#ifndef SHF_MASKOS
+#define SHF_MASKOS 0x0ff00000u
+#define SHF_MASKPROC 0xf0000000u
+#endif
+
+#ifndef SHF_ARM_PURECODE
+#define SHF_ARM_PURECODE 0x20000000u
+#endif
+
 typedef struct {
     int wide;
     int show_file_header;
@@ -71,6 +112,19 @@ typedef struct {
     uint16_t shstrndx;
     int truncated;
 } elf_header_t;
+
+typedef struct {
+    uint32_t name;
+    uint32_t type;
+    uint64_t flags;
+    uint64_t addr;
+    uint64_t off;
+    uint64_t size;
+    uint64_t entsize;
+    uint32_t link;
+    uint32_t info;
+    uint64_t addralign;
+} section_header_t;
 
 static const char *g_progname = "readelf";
 static void warnf(const char *fmt, ...);
@@ -170,6 +224,202 @@ static const char *machine_name(uint16_t machine) {
         default:
             return NULL;
     }
+}
+
+static uint64_t shnum_resolved(const elf_header_t *hdr) {
+    return hdr->shnum == 0 ? 0 : hdr->shnum;
+}
+
+static uint64_t shstrndx_resolved(const elf_header_t *hdr) {
+    return hdr->shstrndx;
+}
+
+static int read_shdr(const elf_view_t *view, const elf_header_t *hdr, size_t index,
+                     section_header_t *out) {
+    size_t off;
+
+    if (view == NULL || hdr == NULL || out == NULL) {
+        return -1;
+    }
+    if (hdr->shentsize == 0) {
+        return -1;
+    }
+    off = (size_t)hdr->shoff + ((size_t)hdr->shentsize * index);
+    memset(out, 0, sizeof(*out));
+
+    if (view->cls == ELFOBJ_CLASS_64) {
+        if (view_u32(view, off + 0, &out->name) != 0) return -1;
+        if (view_u32(view, off + 4, &out->type) != 0) return -1;
+        if (view_u64(view, off + 8, &out->flags) != 0) return -1;
+        if (view_u64(view, off + 16, &out->addr) != 0) return -1;
+        if (view_u64(view, off + 24, &out->off) != 0) return -1;
+        if (view_u64(view, off + 32, &out->size) != 0) return -1;
+        if (view_u32(view, off + 40, &out->link) != 0) return -1;
+        if (view_u32(view, off + 44, &out->info) != 0) return -1;
+        if (view_u64(view, off + 48, &out->addralign) != 0) return -1;
+        if (view_u64(view, off + 56, &out->entsize) != 0) return -1;
+    } else {
+        uint32_t v = 0;
+
+        if (view_u32(view, off + 0, &out->name) != 0) return -1;
+        if (view_u32(view, off + 4, &out->type) != 0) return -1;
+        if (view_u32(view, off + 8, &v) != 0) return -1;
+        out->flags = v;
+        if (view_u32(view, off + 12, &v) != 0) return -1;
+        out->addr = v;
+        if (view_u32(view, off + 16, &v) != 0) return -1;
+        out->off = v;
+        if (view_u32(view, off + 20, &v) != 0) return -1;
+        out->size = v;
+        if (view_u32(view, off + 24, &out->link) != 0) return -1;
+        if (view_u32(view, off + 28, &out->info) != 0) return -1;
+        if (view_u32(view, off + 32, &v) != 0) return -1;
+        out->addralign = v;
+        if (view_u32(view, off + 36, &v) != 0) return -1;
+        out->entsize = v;
+    }
+    return 0;
+}
+
+static const char *section_type_name(uint16_t machine, uint32_t type) {
+    if (type == SHT_ARM_ATTRIBUTES) {
+        return machine == EM_AARCH64 ? "AARCH64_ATTRIBUTES" : "ARM_ATTRIBUTES";
+    }
+    switch (type) {
+        case SHT_NULL: return "NULL";
+        case SHT_PROGBITS: return "PROGBITS";
+        case SHT_SYMTAB: return "SYMTAB";
+        case SHT_STRTAB: return "STRTAB";
+        case SHT_RELA: return "RELA";
+        case SHT_HASH: return "HASH";
+        case SHT_DYNAMIC: return "DYNAMIC";
+        case SHT_NOTE: return "NOTE";
+        case SHT_NOBITS: return "NOBITS";
+        case SHT_REL: return "REL";
+        case SHT_DYNSYM: return "DYNSYM";
+        case SHT_INIT_ARRAY: return "INIT_ARRAY";
+        case SHT_FINI_ARRAY: return "FINI_ARRAY";
+        case SHT_PREINIT_ARRAY: return "PREINIT_ARRAY";
+        case SHT_GROUP: return "GROUP";
+        case SHT_SYMTAB_SHNDX: return "SYMTAB_SHNDX";
+        case SHT_GNU_HASH: return "GNU_HASH";
+        case SHT_GNU_verdef: return "GNU_verdef";
+        case SHT_GNU_verneed: return "GNU_verneed";
+        case SHT_GNU_versym: return "GNU_versym";
+        case SHT_ARM_EXIDX: return "ARM_EXIDX";
+        case SHT_ARM_PREEMPTMAP: return "ARM_PREEMPTMAP";
+        case SHT_ARM_ATTRIBUTES: return "ARM_ATTRIBUTES";
+        default: return NULL;
+    }
+}
+
+static void section_flags_letters(uint16_t machine, uint64_t flags, char *buf, size_t buflen) {
+    size_t n = 0;
+#define APPEND_CH(ch) \
+    do { \
+        if (n + 1 < buflen) { \
+            buf[n++] = (ch); \
+        } \
+    } while (0)
+
+    if (buflen == 0) {
+        return;
+    }
+    if (flags & SHF_WRITE) APPEND_CH('W');
+    if (flags & SHF_ALLOC) APPEND_CH('A');
+    if (flags & SHF_EXECINSTR) APPEND_CH('X');
+    if (flags & SHF_MERGE) APPEND_CH('M');
+    if (flags & SHF_STRINGS) APPEND_CH('S');
+    if (flags & SHF_INFO_LINK) APPEND_CH('I');
+    if (flags & SHF_LINK_ORDER) APPEND_CH('L');
+    if (flags & SHF_OS_NONCONFORMING) APPEND_CH('O');
+    if (flags & SHF_GROUP) APPEND_CH('G');
+    if (flags & SHF_TLS) APPEND_CH('T');
+    if (flags & SHF_COMPRESSED) APPEND_CH('C');
+    if (flags & SHF_EXCLUDE) APPEND_CH('E');
+    if (machine == EM_ARM && (flags & SHF_ARM_PURECODE)) APPEND_CH('y');
+    if (flags & SHF_MASKOS) APPEND_CH('o');
+    if (flags & SHF_MASKPROC) APPEND_CH('p');
+    buf[n] = '\0';
+#undef APPEND_CH
+}
+
+static const char *shstr_name(const uint8_t *tab, size_t tabsz, uint32_t off) {
+    if (tab == NULL || off >= tabsz) {
+        return "<corrupt>";
+    }
+    return (const char *)(tab + off);
+}
+
+static void print_section_headers(const readelf_opts_t *opts, const elf_view_t *view,
+                                  const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    uint64_t shstrndx = shstrndx_resolved(hdr);
+    uint8_t *shstr_data = NULL;
+    size_t shstr_size = 0;
+    section_header_t shstr;
+    uint64_t i;
+
+    printf("There are %" PRIu64 " section headers, starting at offset 0x%" PRIx64 ":\n",
+           shnum, hdr->shoff);
+    printf("\nSection Headers:\n");
+    if (view->cls == ELFOBJ_CLASS_64) {
+        printf("  [Nr] Name              Type             Address           Offset\n");
+        printf("       Size              EntSize          Flags  Link  Info  Align\n");
+    } else {
+        printf("  [Nr] Name              Type            Addr     Off    Size   ES Flg Lk Inf Al\n");
+    }
+
+    if (shstrndx < shnum && read_shdr(view, hdr, (size_t)shstrndx, &shstr) == 0) {
+        if (shstr.off < view->size && shstr.off + shstr.size <= view->size) {
+            shstr_data = (uint8_t *)(uintptr_t)(view->data + shstr.off);
+            shstr_size = (size_t)shstr.size;
+        }
+    }
+
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        const char *type_name_local;
+        char type_buf[32];
+        char flg[32];
+        const char *name;
+        char trunc_name[20];
+
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) {
+            warnf("section header %" PRIu64 " is truncated", i);
+            break;
+        }
+        type_name_local = section_type_name(hdr->machine, sh.type);
+        if (type_name_local == NULL) {
+            snprintf(type_buf, sizeof(type_buf), "0x%x", sh.type);
+            type_name_local = type_buf;
+        }
+        section_flags_letters(hdr->machine, sh.flags, flg, sizeof(flg));
+        name = shstr_name(shstr_data, shstr_size, sh.name);
+
+        if (!opts->wide && strlen(name) > 17) {
+            memcpy(trunc_name, name, 17);
+            trunc_name[17] = '\0';
+            name = trunc_name;
+        }
+
+        if (view->cls == ELFOBJ_CLASS_64) {
+            printf("  [%2" PRIu64 "] %-17s %-16s %016" PRIx64 " %08" PRIx64 "\n",
+                   i, name, type_name_local, sh.addr, sh.off);
+            printf("       %016" PRIx64 " %016" PRIx64 " %-5s %5u %5u %5" PRIu64 "\n",
+                   sh.size, sh.entsize, flg, sh.link, sh.info, sh.addralign);
+        } else {
+            printf("  [%2" PRIu64 "] %-17s %-15s %08" PRIx64 " %06" PRIx64 " %06" PRIx64 " %02" PRIx64
+                   " %-3s %2u %3u %2" PRIu64 "\n",
+                   i, name, type_name_local, sh.addr, sh.off, sh.size, sh.entsize,
+                   flg, sh.link, sh.info, sh.addralign);
+        }
+    }
+
+    printf("Key to Flags:\n");
+    printf("  W (write), A (alloc), X (execute), M (merge), S (strings), I (info),\n");
+    printf("  L (link order), O (extra OS processing required), G (group), T (TLS),\n");
+    printf("  C (compressed), y (purecode), o (OS specific), E (exclude), p (processor specific)\n");
 }
 
 static int read_header(const elf_view_t *view, elf_header_t *out) {
@@ -522,6 +772,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
 
     if (opts->show_file_header) {
         print_file_header(path, &view, &hdr);
+    }
+    if (opts->show_section_headers) {
+        print_section_headers(opts, &view, &hdr);
     }
 
 out:

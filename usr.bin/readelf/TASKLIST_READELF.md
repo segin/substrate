@@ -35,14 +35,14 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 3. Section Headers Display (`-S` / `--section-headers` / `--sections`)
 
-- [ ] Tabular display: index, name, type, address, offset, size, entsize, flags, link, info, align.
-- [ ] Decode section type names: `SHT_NULL`, `SHT_PROGBITS`, `SHT_SYMTAB`, `SHT_STRTAB`, `SHT_RELA`, `SHT_HASH`, `SHT_DYNAMIC`, `SHT_NOTE`, `SHT_NOBITS`, `SHT_REL`, `SHT_DYNSYM`, `SHT_INIT_ARRAY`, `SHT_FINI_ARRAY`, `SHT_PREINIT_ARRAY`, `SHT_GROUP`, `SHT_SYMTAB_SHNDX`, `SHT_GNU_HASH`, `SHT_GNU_verdef`, `SHT_GNU_verneed`, `SHT_GNU_versym`.
-- [ ] ARM-specific types: `SHT_ARM_EXIDX` (ARM_EXIDX), `SHT_ARM_PREEMPTMAP`, `SHT_ARM_ATTRIBUTES` (ARM_ATTRIBUTES).
-- [ ] AArch64-specific types: `SHT_AARCH64_ATTRIBUTES`.
-- [ ] Decode flags: `W` (WRITE), `A` (ALLOC), `X` (EXECINSTR), `M` (MERGE), `S` (STRINGS), `I` (INFO_LINK), `L` (LINK_ORDER), `O` (OS_NONCONFORMING), `G` (GROUP), `T` (TLS), `C` (COMPRESSED), `o` (OS-specific), `E` (EXCLUDE), `p` (processor-specific).
-- [ ] ARM: `SHF_ARM_PURECODE` flag as `y`.
-- [ ] Flag legend at bottom of display.
-- [ ] With `-W` (wide): do not truncate section names.
+- [x] Tabular display: index, name, type, address, offset, size, entsize, flags, link, info, align.
+- [x] Decode section type names: `SHT_NULL`, `SHT_PROGBITS`, `SHT_SYMTAB`, `SHT_STRTAB`, `SHT_RELA`, `SHT_HASH`, `SHT_DYNAMIC`, `SHT_NOTE`, `SHT_NOBITS`, `SHT_REL`, `SHT_DYNSYM`, `SHT_INIT_ARRAY`, `SHT_FINI_ARRAY`, `SHT_PREINIT_ARRAY`, `SHT_GROUP`, `SHT_SYMTAB_SHNDX`, `SHT_GNU_HASH`, `SHT_GNU_verdef`, `SHT_GNU_verneed`, `SHT_GNU_versym`.
+- [x] ARM-specific types: `SHT_ARM_EXIDX` (ARM_EXIDX), `SHT_ARM_PREEMPTMAP`, `SHT_ARM_ATTRIBUTES` (ARM_ATTRIBUTES).
+- [x] AArch64-specific types: `SHT_AARCH64_ATTRIBUTES`.
+- [x] Decode flags: `W` (WRITE), `A` (ALLOC), `X` (EXECINSTR), `M` (MERGE), `S` (STRINGS), `I` (INFO_LINK), `L` (LINK_ORDER), `O` (OS_NONCONFORMING), `G` (GROUP), `T` (TLS), `C` (COMPRESSED), `o` (OS-specific), `E` (EXCLUDE), `p` (processor-specific).
+- [x] ARM: `SHF_ARM_PURECODE` flag as `y`.
+- [x] Flag legend at bottom of display.
+- [x] With `-W` (wide): do not truncate section names.
 
 ## 4. Program Headers Display (`-l` / `--program-headers` / `--segments`)
 
