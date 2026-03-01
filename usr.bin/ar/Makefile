@@ -2,28 +2,30 @@ include ../../Makefile.inc
 
 PROG = ar
 SRCS = ar.c
-ELFOBJ_LIB = ../../usr.lib/elfobj/libelfobj.a
-LDADD += $(ELFOBJ_LIB)
+LDADD += ../../usr.lib/elfobj/libelfobj.a
+USER_CFLAGS += -iquote ../../include
 
-# Include path for elfobj.h
-CFLAGS += -iquote $(TOP)/include
+include ../../Makefile.bin.inc
 
-# Links for ranlib
-LINKS = $(DESTDIR)/usr/bin/ar $(DESTDIR)/usr/bin/ranlib
+BINDIR := $(DESTDIR)/usr/bin
 
-all: $(PROG)
+$(PROG): ../../usr.lib/elfobj/libelfobj.a
 
-$(PROG): $(SRCS) $(ELFOBJ_LIB)
-	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDADD)
-
-$(ELFOBJ_LIB):
+../../usr.lib/elfobj/libelfobj.a:
 	$(MAKE) -C ../../usr.lib/elfobj $(if $(NATIVE_BUILD),NATIVE_BUILD=1)
 
-clean:
-	rm -f $(PROG) $(PROG).o
+install: install-ranlib-link install-man
 
-install: $(PROG)
-	@echo "Installing $(PROG)..."
-	@mkdir -p $(DESTDIR)/usr/bin
-	@cp $(PROG) $(DESTDIR)/usr/bin/$(PROG)
-	@ln -sf $(PROG) $(DESTDIR)/usr/bin/ranlib
+install-ranlib-link: $(PROG)
+	mkdir -p $(BINDIR)
+	ln -sf ar $(BINDIR)/ranlib
+
+install-man:
+	mkdir -p $(DESTDIR)/usr/share/man/man1
+	install -m 0644 ../../man/man1/ar.1 $(DESTDIR)/usr/share/man/man1/ar.1
+	install -m 0644 ../../man/man1/ranlib.1 $(DESTDIR)/usr/share/man/man1/ranlib.1
+
+depend:
+	$(CC) $(USER_CFLAGS) -MM $(SRCS) > .depend
+
+-include .depend

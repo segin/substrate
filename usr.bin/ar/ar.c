@@ -45,6 +45,7 @@
 #define MOD_DETERMINISTIC 0x0080
 #define MOD_NOSYMTAB    0x0400
 #define MOD_THIN        0x0800
+#define MOD_NOCLOBBER   0x1000
 
 static char *archive_name;
 static int operation = 0;
@@ -106,10 +107,13 @@ static void print_members(char **members, int count);
 static void ranlib(void);
 static void drop_symbol_tables(void);
 static void touch_symbol_table_member(void);
+static void free_members(void);
 static bool parse_numeric_field(const char *field, size_t field_len, int base, long long *out);
 static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special);
 static void store_be32(unsigned char *dst, uint32_t value);
 static void store_be64(unsigned char *dst, uint64_t value);
+static time_t archive_timestamp_for(time_t source_mtime);
+static size_t member_position(const struct ar_memb *m);
 static void list_insert_tail(struct ar_memb *node);
 static bool list_insert_relative(struct ar_memb *node, const char *anchor_name, bool before);
 static struct ar_memb *list_find_first(const char *name, struct ar_memb **prev_out);
@@ -143,6 +147,7 @@ int main(int argc, char *argv[])
         if (touch_only) touch_symbol_table_member();
         else ranlib();
         write_archive(archive_name);
+        free_members();
         return 0;
     }
 
@@ -200,6 +205,11 @@ int main(int argc, char *argv[])
             argi++;
             continue;
         }
+        if (strcmp(argv[argi], "--verbose") == 0) {
+            modifiers |= MOD_VERBOSE;
+            argi++;
+            continue;
+        }
         warnx("unknown option: %s", argv[argi]);
         usage();
     }
@@ -232,6 +242,7 @@ int main(int argc, char *argv[])
         case 'o': modifiers |= MOD_PRESERVE; break;
         case 'N': modifiers |= MOD_COUNT; break;
         case 'l': modifiers |= MOD_LOCAL; break;
+        case 'C': modifiers |= MOD_NOCLOBBER; break;
         case 'U':
         case 'D': modifiers |= MOD_DETERMINISTIC; break;
         case 'S': modifiers |= MOD_NOSYMTAB; break;
@@ -343,12 +354,13 @@ int main(int argc, char *argv[])
         break;
     }
 
+    free_members();
     return 0;
 }
 
 static void usage(void) {
     fprintf(stderr, "usage: ar [drqtpmx][lsvV] archive [member...]\n");
-    exit(1);
+    exit(2);
 }
 
 static void warn(const char *fmt, ...) {
@@ -641,12 +653,53 @@ static void store_be64(unsigned char *dst, uint64_t value) {
     dst[7] = (unsigned char)(value & 0xffu);
 }
 
+static time_t archive_timestamp_for(time_t source_mtime) {
+    const char *zero_ar_date = getenv("ZERO_AR_DATE");
+    const char *sde = getenv("SOURCE_DATE_EPOCH");
+    char *end = NULL;
+    long long v;
+
+    if (zero_ar_date != NULL && zero_ar_date[0] != '\0') {
+        return 0;
+    }
+    if (sde != NULL && sde[0] != '\0') {
+        errno = 0;
+        v = strtoll(sde, &end, 10);
+        if (errno == 0 && end != sde && *end == '\0' && v >= 0) {
+            return (time_t)v;
+        }
+    }
+    if (modifiers & MOD_DETERMINISTIC) {
+        return 0;
+    }
+    return source_mtime;
+}
+
+static size_t member_position(const struct ar_memb *m) {
+    size_t pos = 0;
+    const struct ar_memb *cur = head;
+    while (cur != NULL) {
+        if (cur == m) {
+            return pos;
+        }
+        pos++;
+        cur = cur->next;
+    }
+    return (size_t)-1;
+}
+
 static void read_archive(const char *path) {
     bool first_member = true;
+    size_t member_count = 0;
     int fd = open(path, O_RDONLY);
+    struct stat st_file;
+    off_t archive_size = -1;
     if (fd < 0) {
         if (errno == ENOENT) return;
         err(1, "%s", path);
+    }
+    if (fstat(fd, &st_file) == 0) {
+        archive_size = st_file.st_size;
     }
 
     char magic[8];
@@ -670,10 +723,11 @@ static void read_archive(const char *path) {
     struct ar_hdr hdr;
     while (read(fd, &hdr, sizeof(hdr)) == sizeof(hdr)) {
         char raw_name[17];
+        long long parsed_size = 0;
 
         if (memcmp(hdr.ar_fmag, ARFMAG, 2) != 0) {
             warnx("malformed header in %s", path);
-            break;
+            continue;
         }
 
         memcpy(raw_name, hdr.ar_name, 16);
@@ -687,11 +741,43 @@ static void read_archive(const char *path) {
                 archive_format = ARFMT_GNU;
             }
             first_member = false;
+            if (modifiers & MOD_VERBOSE) {
+                warnx("%s: detected %s archive format",
+                      path, archive_format == ARFMT_GNU ? "GNU" : "BSD");
+            }
         }
 
-        long size = atol(hdr.ar_size);
+        if (!parse_numeric_field(hdr.ar_size, sizeof(hdr.ar_size), 10, &parsed_size) ||
+            parsed_size < 0) {
+            warnx("%s: invalid member size field", path);
+            continue;
+        }
+        if ((unsigned long long)parsed_size > (unsigned long long)SIZE_MAX) {
+            warnx("%s: member size too large", path);
+            break;
+        }
+        long size = (long)parsed_size;
+        if (archive_size >= 0) {
+            off_t cur_pos = lseek(fd, 0, SEEK_CUR);
+            if (cur_pos >= 0 && cur_pos + (off_t)size > archive_size) {
+                warnx("%s: truncated member data", path);
+                break;
+            }
+        }
+        if (!parse_numeric_field(hdr.ar_uid, sizeof(hdr.ar_uid), 10, &parsed_size)) {
+            warnx("%s: non-numeric ar_uid field", path);
+        }
+        if (!parse_numeric_field(hdr.ar_gid, sizeof(hdr.ar_gid), 10, &parsed_size)) {
+            warnx("%s: non-numeric ar_gid field", path);
+        }
+        if (!parse_numeric_field(hdr.ar_mode, sizeof(hdr.ar_mode), 8, &parsed_size)) {
+            warnx("%s: non-numeric ar_mode field", path);
+        }
 
         struct ar_memb *m = malloc(sizeof(struct ar_memb));
+        if (m == NULL) {
+            errx(1, "out of memory");
+        }
         m->hdr = hdr;
         m->next = NULL;
         m->deleted = false;
@@ -705,7 +791,15 @@ static void read_archive(const char *path) {
             int name_len = atoi(hdr.ar_name + 3);
             int raw_name_len = name_len;
             m->name = malloc(name_len + 1);
-            read(fd, m->name, name_len);
+            if (m->name == NULL) {
+                errx(1, "out of memory");
+            }
+            if (read(fd, m->name, name_len) != name_len) {
+                warnx("%s: truncated extended member name", path);
+                free(m->name);
+                free(m);
+                break;
+            }
             m->name[name_len] = 0;
             while (name_len > 0 && m->name[name_len - 1] == '\0') {
                 name_len--;
@@ -719,14 +813,32 @@ static void read_archive(const char *path) {
                 strcmp(m->name, "//") != 0) {
                 m->thin_ref = true;
                 m->thin_path = malloc(payload_size + 1);
-                read(fd, m->thin_path, payload_size);
+                if (m->thin_path == NULL) {
+                    errx(1, "out of memory");
+                }
+                if (read(fd, m->thin_path, payload_size) != (ssize_t)payload_size) {
+                    warnx("%s: truncated thin member path", path);
+                    free(m->thin_path);
+                    free(m->name);
+                    free(m);
+                    break;
+                }
                 m->thin_path[payload_size] = 0;
                 m->size = 0;
                 m->data = NULL;
             } else {
                 m->size = payload_size;
                 m->data = malloc(m->size);
-                read(fd, m->data, m->size);
+                if (m->data == NULL && m->size != 0) {
+                    errx(1, "out of memory");
+                }
+                if (m->size > 0 && read(fd, m->data, m->size) != (ssize_t)m->size) {
+                    warnx("%s: truncated member payload", path);
+                    free(m->data);
+                    free(m->name);
+                    free(m);
+                    break;
+                }
             }
         } else {
             bool special = false;
@@ -742,14 +854,32 @@ static void read_archive(const char *path) {
                 strcmp(m->name, "//") != 0) {
                 m->thin_ref = true;
                 m->thin_path = malloc(size + 1);
-                read(fd, m->thin_path, size);
+                if (m->thin_path == NULL) {
+                    errx(1, "out of memory");
+                }
+                if (read(fd, m->thin_path, size) != size) {
+                    warnx("%s: truncated thin member path", path);
+                    free(m->thin_path);
+                    free(m->name);
+                    free(m);
+                    break;
+                }
                 m->thin_path[size] = 0;
                 m->size = 0;
                 m->data = NULL;
             } else {
                 m->size = size;
                 m->data = malloc(size);
-                read(fd, m->data, size);
+                if (m->data == NULL && size != 0) {
+                    errx(1, "out of memory");
+                }
+                if (size > 0 && read(fd, m->data, size) != size) {
+                    warnx("%s: truncated member payload", path);
+                    free(m->data);
+                    free(m->name);
+                    free(m);
+                    break;
+                }
 
                 if (archive_format == ARFMT_GNU && strcmp(m->name, "//") == 0) {
                     free(gnu_name_table);
@@ -772,6 +902,12 @@ static void read_archive(const char *path) {
             struct ar_memb *cur = head;
             while (cur->next) cur = cur->next;
             cur->next = m;
+        }
+
+        member_count++;
+        if (member_count > 1000000) {
+            warnx("%s: refusing archive with too many members", path);
+            break;
         }
     }
 
@@ -894,7 +1030,7 @@ static void append_files(char **files, int count) {
 
         memset(&m->hdr, ' ', sizeof(struct ar_hdr));
         char buf[32];
-        snprintf(buf, sizeof(buf), "%-12ld", (long)((modifiers & MOD_DETERMINISTIC) ? 0 : st.st_mtime));
+        snprintf(buf, sizeof(buf), "%-12ld", (long)archive_timestamp_for(st.st_mtime));
         memcpy(m->hdr.ar_date, buf, 12);
         snprintf(buf, sizeof(buf), "%-6d", (int)((modifiers & MOD_DETERMINISTIC) ? 0 : st.st_uid));
         memcpy(m->hdr.ar_uid, buf, 6);
@@ -1061,7 +1197,13 @@ static void extract_members(char **members, int count) {
             }
 
             if (modifiers & MOD_VERBOSE) printf("x - %s\n", name);
-            int fd = open(name, O_WRONLY | O_CREAT | O_TRUNC, mode & 07777);
+            int oflags = O_WRONLY | O_CREAT;
+            if (modifiers & MOD_NOCLOBBER) {
+                oflags |= O_EXCL;
+            } else {
+                oflags |= O_TRUNC;
+            }
+            int fd = open(name, oflags, mode & 07777);
             if (fd < 0) warn("%s", name);
             else {
                 if (cur->thin_ref && cur->thin_path != NULL) {
@@ -1272,7 +1414,15 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
 static int compare_syms(const void *a, const void *b) {
     struct sym_entry *const *sa = a;
     struct sym_entry *const *sb = b;
-    return strcmp((*sa)->name, (*sb)->name);
+    int cmp = strcmp((*sa)->name, (*sb)->name);
+    if (cmp != 0) {
+        return cmp;
+    }
+    size_t posa = member_position((*sa)->member);
+    size_t posb = member_position((*sb)->member);
+    if (posa < posb) return -1;
+    if (posa > posb) return 1;
+    return 0;
 }
 
 static void drop_symbol_tables(void) {
@@ -1299,6 +1449,19 @@ static void drop_symbol_tables(void) {
         prev = cur;
         cur = cur->next;
     }
+}
+
+static void free_members(void) {
+    struct ar_memb *cur = head;
+    while (cur != NULL) {
+        struct ar_memb *next = cur->next;
+        free(cur->name);
+        free(cur->data);
+        free(cur->thin_path);
+        free(cur);
+        cur = next;
+    }
+    head = NULL;
 }
 
 static void touch_symbol_table_member(void) {
@@ -1376,7 +1539,7 @@ static void ranlib(void) {
     m->gnu_name_off = 0;
     memset(&m->hdr, ' ', sizeof(struct ar_hdr));
     char buf[32];
-    snprintf(buf, sizeof(buf), "%-12ld", (long)((modifiers & MOD_DETERMINISTIC) ? 0 : time(NULL)));
+    snprintf(buf, sizeof(buf), "%-12ld", (long)archive_timestamp_for(time(NULL)));
     memcpy(m->hdr.ar_date, buf, 12);
     snprintf(buf, sizeof(buf), "%-6d", 0);
     memcpy(m->hdr.ar_uid, buf, 6);
@@ -1416,8 +1579,11 @@ static void ranlib(void) {
 static void write_archive(const char *path) {
     char *gnu_table = NULL;
     size_t gnu_table_len = 0;
-    FILE *fp = fopen(path, "w");
-    if (!fp) err(1, "fopen %s", path);
+    char tmp_path[1024];
+    FILE *fp;
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp.%ld", path, (long)getpid());
+    fp = fopen(tmp_path, "w");
+    if (!fp) err(1, "fopen %s", tmp_path);
     bool thin_output = archive_is_thin || ((modifiers & MOD_THIN) != 0);
     archive_is_thin = thin_output;
 
@@ -1623,10 +1789,18 @@ static void write_archive(const char *path) {
             continue;
         }
 
+        {
+            char dbuf[32];
+            time_t cur_mtime = 0;
+            if (parse_mtime_field(cur, &cur_mtime) != 0) {
+                cur_mtime = time(NULL);
+            }
+            snprintf(dbuf, sizeof(dbuf), "%-12ld", (long)archive_timestamp_for(cur_mtime));
+            memcpy(cur->hdr.ar_date, dbuf, 12);
+        }
+
         if (modifiers & MOD_DETERMINISTIC) {
             char dbuf[32];
-            snprintf(dbuf, sizeof(dbuf), "%-12d", 0);
-            memcpy(cur->hdr.ar_date, dbuf, 12);
             snprintf(dbuf, sizeof(dbuf), "%-6d", 0);
             memcpy(cur->hdr.ar_uid, dbuf, 6);
             snprintf(dbuf, sizeof(dbuf), "%-6d", 0);
@@ -1647,7 +1821,7 @@ static void write_archive(const char *path) {
             snprintf(buf, sizeof(buf), "%-16s", "//");
             memcpy(gnu_hdr.ar_name, buf, 16);
             snprintf(buf, sizeof(buf), "%-12ld",
-                     (long)((modifiers & MOD_DETERMINISTIC) ? 0 : time(NULL)));
+                     (long)archive_timestamp_for(time(NULL)));
             memcpy(gnu_hdr.ar_date, buf, 12);
             snprintf(buf, sizeof(buf), "%-6d", 0);
             memcpy(gnu_hdr.ar_uid, buf, 6);
@@ -1718,5 +1892,12 @@ static void write_archive(const char *path) {
         cur = cur->next;
     }
     free(gnu_table);
-    fclose(fp);
+    if (fclose(fp) != 0) {
+        unlink(tmp_path);
+        err(1, "fclose %s", tmp_path);
+    }
+    if (rename(tmp_path, path) != 0) {
+        unlink(tmp_path);
+        err(1, "rename %s", path);
+    }
 }

@@ -1,54 +1,143 @@
-.Dd October 26, 2023
+.Dd February 28, 2026
 .Dt AR 1
 .Os Substrate
 .Sh NAME
 .Nm ar
-.Nd archive utility
+.Nd create, modify, and extract archives
 .Sh SYNOPSIS
 .Nm
-.Op Fl cDrstuvx
-.Op Ar archive
+.Op Fl
+.Ar key
+.Op Ar posname
+.Ar archive
+.Op Ar member ...
+.Nm
+.Op Fl -format Ns = Ns Ar bsd | gnu
+.Op Fl -plugin Ns Oo = Ns Ar path Oc
+.Op Fl -verbose
+.Ar key
+.Op Ar posname
+.Ar archive
 .Op Ar member ...
 .Sh DESCRIPTION
-The
 .Nm
-utility creates, modifies, and extracts from archives.
-An archive is a single file holding a collection of other files in a structure that makes it possible to retrieve the original individual files (called members).
+creates and updates archive files.
+Archive members are object files or arbitrary byte streams.
 .Pp
-The options are as follows:
-.Bl -tag -width Ds
-.It Fl c
-Create the archive if it does not exist.
-.It Fl d
-Delete the specified members from the archive.
-.It Fl m
-Move the specified members.
-.It Fl p
-Print the specified members to standard output.
-.It Fl q
-Quickly append the specified members to the archive.
+Operation keys:
+.Bl -tag -width "Fl m"
 .It Fl r
-Replace or add the specified members to the archive.
-.It Fl s
-Write an object-file index into the archive, or update an existing one, even if no other change is made to the archive.
+Replace existing members or add new members.
+.It Fl q
+Quick append; always appends and does not deduplicate.
+.It Fl d
+Delete members.
 .It Fl t
-List the specified members.
-.It Fl u
-Only update members if the file is newer than the archive member.
-.It Fl v
-Verbose mode.
+List members.
+.It Fl p
+Write member contents to standard output.
 .It Fl x
-Extract the specified members.
+Extract members.
+.It Fl m
+Move members within the archive.
+.It Fl s
+Create or update the archive symbol table.
 .El
-.Sh COMPATIBILITY
-The
+.Pp
+Common modifiers:
+.Bl -tag -width "Fl -format=gnu"
+.It Fl c
+Suppress archive creation warning.
+.It Fl v
+Verbose output.
+.It Fl u
+Update only when input file is newer than the archived member.
+.It Fl a Ar posname
+Insert after
+.Ar posname
+.Pq with Fl r No or Fl m .
+.It Fl b Ar posname , Fl i Ar posname
+Insert before
+.Ar posname
+.Pq with Fl r No or Fl m .
+.It Fl N Ar count
+Operate on the
+.Ar count Ns th
+instance of duplicate member names
+.Pq Fl d , Fl t , Fl x .
+.It Fl o
+Preserve archived timestamps when extracting.
+.It Fl C
+Do not overwrite existing files on extraction.
+.It Fl U , Fl D
+Deterministic mode:
+set uid/gid/mtime to 0 and mode to 0644.
+.It Fl S
+Do not emit symbol tables when writing.
+.It Fl T
+Create or update as a thin archive.
+.It Fl l
+Accepted for compatibility (currently a no-op).
+.El
+.Pp
+Long options:
+.Bl -tag -width "Fl -format=gnu"
+.It Fl -format Ns = Ns Ar bsd | gnu
+Select output archive format.
+Default is GNU.
+.It Fl -plugin Ns Oo = Ns Ar path Oc
+Accepted for GCC LTO compatibility; ignored.
+.It Fl -verbose
+Equivalent to
+.Fl v .
+.It Fl -no-same-owner
+On extraction, do not restore archived uid/gid even when run as root.
+.El
+.Sh FORMATS
 .Nm
-utility supports the BSD archive format with
-.Dq #1/len
-extended filenames.
-It generates a BSD-style
-.Dq __.SYMDEF
-symbol table for ELF object files.
+supports:
+.Bl -bullet
+.It
+BSD archive format, including
+.Dq #1/length
+extended names.
+.It
+GNU/SVR4 archive format, including
+.Dq //
+long-name tables and
+.Dq /offset
+name references.
+.It
+Thin archives
+.Pq Dq !<thin>\\n
+that store member paths instead of member payloads.
+.El
+.Pp
+GNU symbol tables use
+.Dq /
+.Pq 32-bit offsets
+or
+.Dq /SYM64/
+.Pq 64-bit offsets
+when needed.
+BSD symbol tables use
+.Dq __.SYMDEF SORTED .
+.Sh ENVIRONMENT
+.Bl -tag -width "SOURCE_DATE_EPOCH"
+.It Ev ZERO_AR_DATE
+If set to a non-empty value, force member mtime to 0 on write.
+.It Ev SOURCE_DATE_EPOCH
+If set to a valid integer epoch value, use it as member mtime on write.
+.El
+.Sh EXIT STATUS
+.Bl -tag -width "0"
+.It 0
+Success.
+.It 1
+Operational failure (I/O, format, allocation, runtime failure).
+.It 2
+Usage error (invalid options or arguments).
+.El
 .Sh SEE ALSO
 .Xr ranlib 1 ,
 .Xr ld 1
