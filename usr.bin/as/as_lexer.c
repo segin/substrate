@@ -100,6 +100,23 @@ static int is_punct_delim(int ch) {
     return ch == ',' || ch == '(' || ch == ')' || ch == '[' || ch == ']' || ch == '{' || ch == '}';
 }
 
+static int is_operator_token(const char *tok) {
+    static const char *const ops[] = {
+        "+", "-", "*", "/", "%", "|", "&", "^", "~", "<<", ">>",
+    };
+    size_t i;
+
+    if (tok == NULL || tok[0] == '\0') {
+        return 0;
+    }
+    for (i = 0; i < sizeof(ops) / sizeof(ops[0]); ++i) {
+        if (strcmp(tok, ops[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int is_x86_register_name(const char *s) {
     static const char *const fixed[] = {
         "rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rsp", "rbp",
@@ -478,6 +495,9 @@ static as_token_kind_t classify_token(const char *tok, int intel_syntax) {
     if (looks_numeric(s)) {
         return AS_TOK_IMMEDIATE;
     }
+    if (is_operator_token(tok)) {
+        return AS_TOK_OPERATOR;
+    }
     return AS_TOK_IDENTIFIER;
 }
 
@@ -497,6 +517,14 @@ static int tokenize_line(const char *file, unsigned line_no, const char *line, i
             break;
         }
         if (is_punct_delim((unsigned char)line[i])) {
+            char punct[2];
+
+            punct[0] = line[i];
+            punct[1] = '\0';
+            if (as_token_vec_push(line_tokens, AS_TOK_PUNCT, punct, file, line_no, (unsigned)(i + 1)) != 0) {
+                set_err(ctx, "%s:%u: out of memory", file, line_no);
+                return -1;
+            }
             i++;
             continue;
         }

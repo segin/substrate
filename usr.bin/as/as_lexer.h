@@ -16,6 +16,8 @@ typedef enum {
     AS_TOK_DIRECTIVE,
     AS_TOK_STRING,
     AS_TOK_IDENTIFIER,
+    AS_TOK_OPERATOR,
+    AS_TOK_PUNCT,
 } as_token_kind_t;
 
 typedef struct {

@@ -15,13 +15,13 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] String escapes in `.ascii`/`.asciz`/`.string` directives.
 
 ### 1b. Parser
-- [ ] Instruction parsing: mnemonic + operand list.
-- [ ] Operand types: register, immediate, memory (base+index*scale+disp), label reference.
-- [ ] Expression parser: `+`, `-`, `*`, `/`, `%`, `|`, `&`, `^`, `~`, `<<`, `>>`, unary `-`.
-- [ ] Symbol references in expressions (forward/backward).
-- [ ] Local labels (`0:`–`9:`, `0b`/`0f` references).
-- [ ] Instruction prefixes: `lock`, `rep`/`repe`/`repne`, segment overrides, `rex` prefixes.
-- [ ] ARM: condition codes, shift operands, register lists, coprocessor operands.
+- [x] Instruction parsing: mnemonic + operand list.
+- [x] Operand types: register, immediate, memory (base+index*scale+disp), label reference.
+- [x] Expression parser: `+`, `-`, `*`, `/`, `%`, `|`, `&`, `^`, `~`, `<<`, `>>`, unary `-`.
+- [x] Symbol references in expressions (forward/backward).
+- [x] Local labels (`0:`–`9:`, `0b`/`0f` references).
+- [x] Instruction prefixes: `lock`, `rep`/`repe`/`repne`, segment overrides, `rex` prefixes.
+- [x] ARM: condition codes, shift operands, register lists, coprocessor operands.
 
 ### 1c. Symbol Table
 - [ ] Local, global, weak, common symbol types.
