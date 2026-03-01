@@ -144,11 +144,11 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 ## 12. ARM-Specific Displays
 
 ### 12a. ARM Unwind Tables (`-u` / `--unwind`)
-- [ ] Decode `.ARM.exidx` entries: function offset and personality routine index.
-- [ ] Display each entry's unwind opcodes.
-- [ ] Decode compact unwind instructions: `vsp = vsp + N`, `pop {rN-rM}`, `finish`, etc.
-- [ ] Cross-reference with `.ARM.extab` for extended unwind data.
-- [ ] Handle `EXIDX_CANTUNWIND` entries.
+- [x] Decode `.ARM.exidx` entries: function offset and personality routine index.
+- [x] Display each entry's unwind opcodes.
+- [x] Decode compact unwind instructions: `vsp = vsp + N`, `pop {rN-rM}`, `finish`, etc.
+- [x] Cross-reference with `.ARM.extab` for extended unwind data.
+- [x] Handle `EXIDX_CANTUNWIND` entries.
 
 ### 12b. ARM Build Attributes (`-A` / `--arch-specific`)
 - [ ] Parse and display `.ARM.attributes` (`SHT_ARM_ATTRIBUTES`) section.

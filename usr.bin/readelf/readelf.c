@@ -216,6 +216,8 @@ typedef struct {
     int show_version_info;
     int show_histogram;
     int show_groups;
+    int show_unwind;
+    int show_arch_specific;
 } readelf_opts_t;
 
 typedef struct {
@@ -2101,6 +2103,101 @@ static void print_section_groups(const elf_view_t *view, const elf_header_t *hdr
     }
 }
 
+static void decode_unwind_opcode(uint8_t op) {
+    if (op == 0xb0) {
+        printf("finish");
+    } else if ((op & 0xc0) == 0x00) {
+        printf("vsp = vsp + %u", ((op & 0x3f) << 2) + 4);
+    } else if ((op & 0xf0) == 0x80) {
+        printf("pop {r4-r%u}", 4 + (op & 0x0f));
+    } else if ((op & 0xf0) == 0x90) {
+        printf("vsp = r%u", op & 0x0f);
+    } else {
+        printf("op=0x%02x", op);
+    }
+}
+
+static void print_arm_unwind(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    section_header_t shstr;
+    const uint8_t *shstr_data = NULL;
+    size_t shstr_size = 0;
+    uint64_t i;
+
+    if (hdr->machine != EM_ARM) {
+        return;
+    }
+
+    if (hdr->shstrndx < shnum && read_shdr(view, hdr, hdr->shstrndx, &shstr) == 0 &&
+        shstr.off + shstr.size <= view->size) {
+        shstr_data = view->data + shstr.off;
+        shstr_size = (size_t)shstr.size;
+    }
+
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        uint64_t n;
+        uint64_t j;
+
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) {
+            break;
+        }
+        if (strcmp(shstr_name(shstr_data, shstr_size, sh.name), ".ARM.exidx") != 0 ||
+            sh.off + sh.size > view->size || sh.size < 8) {
+            continue;
+        }
+        n = sh.size / 8;
+        printf("\nARM Exception Index (.ARM.exidx), %llu entries:\n", (unsigned long long)n);
+        for (j = 0; j < n; ++j) {
+            elf_view_t sv = {.data = view->data + sh.off + j * 8, .size = 8, .endian = view->endian};
+            uint32_t prel31 = 0, w1 = 0;
+            uint32_t func_addr;
+            if (view_u32(&sv, 0, &prel31) != 0 || view_u32(&sv, 4, &w1) != 0) {
+                break;
+            }
+            func_addr = (uint32_t)(sh.addr + j * 8 + (prel31 & 0x7fffffff));
+            printf("  [%3llu] function=0x%08x ", (unsigned long long)j, func_addr);
+            if (w1 == 1) {
+                printf("EXIDX_CANTUNWIND\n");
+                continue;
+            }
+            if (w1 & 0x80000000u) {
+                uint8_t b0 = (w1 >> 16) & 0xff;
+                uint8_t b1 = (w1 >> 8) & 0xff;
+                uint8_t b2 = w1 & 0xff;
+                printf("compact:");
+                printf(" [");
+                decode_unwind_opcode(b0);
+                printf("] [");
+                decode_unwind_opcode(b1);
+                printf("] [");
+                decode_unwind_opcode(b2);
+                printf("]\n");
+            } else {
+                printf("extab=0x%08x\n", w1);
+            }
+        }
+        printf("  .ARM.extab cross-reference: ");
+        {
+            uint64_t k;
+            int found = 0;
+            for (k = 0; k < shnum; ++k) {
+                section_header_t x;
+                if (read_shdr(view, hdr, (size_t)k, &x) != 0) break;
+                if (strcmp(shstr_name(shstr_data, shstr_size, x.name), ".ARM.extab") == 0) {
+                    found = 1;
+                    printf("present at offset 0x%llx", (unsigned long long)x.off);
+                    break;
+                }
+            }
+            if (!found) {
+                printf("not present");
+            }
+            printf("\n");
+        }
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -2292,6 +2389,8 @@ static void usage(FILE *out) {
             "  -V, --version-info      Display version sections\n"
             "  -I, --histogram         Display hash histogram\n"
             "  -g, --section-groups    Display section groups\n"
+            "  -u, --unwind            Display ARM unwind tables\n"
+            "  -A, --arch-specific     Display arch-specific attributes\n"
             "  -e, --headers           Equivalent to -h -l -S\n"
             "  -a, --all               Display all core information\n"
             "  -W, --wide              Do not limit output width\n"
@@ -2320,6 +2419,8 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
         {"version-info", no_argument, NULL, 'V'},
         {"histogram", no_argument, NULL, 'I'},
         {"section-groups", no_argument, NULL, 'g'},
+        {"unwind", no_argument, NULL, 'u'},
+        {"arch-specific", no_argument, NULL, 'A'},
         {"headers", no_argument, NULL, 'e'},
         {"all", no_argument, NULL, 'a'},
         {"wide", no_argument, NULL, 'W'},
@@ -2336,7 +2437,7 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
     memset(opts, 0, sizeof(*opts));
 
     optind = 1;
-    while ((ch = getopt_long(argc, argv, "hlsrdnVIgSeaW", longopts, NULL)) != -1) {
+    while ((ch = getopt_long(argc, argv, "hlsrdnVIguASeaW", longopts, NULL)) != -1) {
         switch (ch) {
             case 'h':
                 opts->show_file_header = 1;
@@ -2368,6 +2469,12 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
             case 'g':
                 opts->show_groups = 1;
                 break;
+            case 'u':
+                opts->show_unwind = 1;
+                break;
+            case 'A':
+                opts->show_arch_specific = 1;
+                break;
             case 'e':
                 opts->show_file_header = 1;
                 opts->show_program_headers = 1;
@@ -2384,6 +2491,8 @@ static int parse_options(int argc, char **argv, readelf_opts_t *opts) {
                 opts->show_version_info = 1;
                 opts->show_histogram = 1;
                 opts->show_groups = 1;
+                opts->show_unwind = 1;
+                opts->show_arch_specific = 1;
                 break;
             case 'W':
                 opts->wide = 1;
@@ -2454,7 +2563,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
         !opts->show_notes &&
         !opts->show_version_info &&
         !opts->show_histogram &&
-        !opts->show_groups) {
+        !opts->show_groups &&
+        !opts->show_unwind &&
+        !opts->show_arch_specific) {
         opts = &(readelf_opts_t){
             .show_file_header = 1,
         };
@@ -2536,6 +2647,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_groups) {
         print_section_groups(&view, &hdr);
+    }
+    if (opts->show_unwind) {
+        print_arm_unwind(&view, &hdr);
     }
 
 out:
