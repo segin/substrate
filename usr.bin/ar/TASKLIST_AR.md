@@ -67,9 +67,9 @@ Goal: implement a production `ar` where ELF member inspection/parsing comes from
 ## 5. Archive Format Variants
 
 ### 5a. BSD Format (current)
-- [ ] Audit BSD `#1/length` extended names — handle trailing NUL padding in name region.
-- [ ] Ensure `ar_size` field correctly accounts for in‑band name length.
-- [ ] Verify names > 155 characters work (currently `name_len` is unbounded, which is correct).
+- [x] Audit BSD `#1/length` extended names — handle trailing NUL padding in name region.
+- [x] Ensure `ar_size` field correctly accounts for in‑band name length.
+- [x] Verify names > 155 characters work (currently `name_len` is unbounded, which is correct).
 
 ### 5b. GNU/SVR4 Format
 - [ ] Implement GNU long filename table member (`//`) containing concatenated `name/\n` entries.

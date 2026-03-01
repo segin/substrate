@@ -538,10 +538,15 @@ static void read_archive(const char *path) {
 
         if (memcmp(hdr.ar_name, "#1/", 3) == 0) {
             int name_len = atoi(hdr.ar_name + 3);
+            int raw_name_len = name_len;
             m->name = malloc(name_len + 1);
             read(fd, m->name, name_len);
             m->name[name_len] = 0;
-            size_t payload_size = size - name_len;
+            while (name_len > 0 && m->name[name_len - 1] == '\0') {
+                name_len--;
+            }
+            m->name[name_len] = 0;
+            size_t payload_size = size - raw_name_len;
             if (archive_is_thin &&
                 strcmp(m->name, RANLIBMAG) != 0 &&
                 strcmp(m->name, RANLIBSORT) != 0 &&
