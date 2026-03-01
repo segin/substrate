@@ -18,6 +18,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
                       int emit_debug, cc_target_t target, int opt_level, int wall, int werror, int pedantic,
                       int pedantic_errors, int gnu89_inline_mode, int gnu89_inline_override, int i386_isa_level,
                       int i386_has_sse2, int i386_has_mmx, int i386_fp_math_mode, int implicit_funcdecl_override,
+                      int pic,
                       cc_diag_t *diag) {
     cc_translation_unit_t tu;
     cc_ssa_module_t ssa;
@@ -101,7 +102,7 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         fprintf(stderr, "cc: timing opt=%.3fs\n", t_opt);
         t0 = now_seconds();
     }
-    if (cc_emit_gas(&ssa, out_s, display_src, emit_debug, target, diag) == 0) {
+    if (cc_emit_gas(&ssa, out_s, display_src, emit_debug, target, pic, diag) == 0) {
         rc = 0;
     } else if (diag != NULL && diag->message[0] == '\0') {
         snprintf(diag->message, sizeof(diag->message), "backend emission failed");

@@ -4511,6 +4511,46 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             return -1;
         }
     }
+    if (!grouped_ptr_decl && *out_name == NULL && p->tok.kind == TOK_LPAREN) {
+        parser_t q = *p;
+        q.diag = NULL;
+        if (next_tok(&q) == 0 && q.tok.kind == TOK_IDENT) {
+            const char *name_start = q.tok.start;
+            size_t name_len = q.tok.len;
+            if (next_tok(&q) == 0 && q.tok.kind == TOK_LPAREN && skip_balanced_parens(&q) == 0 &&
+                q.tok.kind == TOK_RPAREN) {
+                if (next_tok(p) != 0) {
+                    return -1;
+                }
+                *out_name = xstrdup_n(name_start, name_len);
+                if (*out_name == NULL) {
+                    return -1;
+                }
+                if (next_tok(p) != 0) {
+                    free(*out_name);
+                    *out_name = NULL;
+                    return -1;
+                }
+                if (skip_balanced_parens(p) != 0) {
+                    free(*out_name);
+                    *out_name = NULL;
+                    return -1;
+                }
+                if (expect(p, TOK_RPAREN, "expected ')' in parameter declarator") != 0) {
+                    free(*out_name);
+                    *out_name = NULL;
+                    return -1;
+                }
+                ty = ptr_of_type(ty);
+                if (ty == CC_TYPE_VOID) {
+                    set_ptr_depth_diag(p, __LINE__);
+                    free(*out_name);
+                    *out_name = NULL;
+                    return -1;
+                }
+            }
+        }
+    }
     while (p->tok.kind == TOK_LBRACK) {
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
@@ -7828,7 +7868,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         }
         decl_attrs_clear(&suffix_attrs);
         decl_attrs_clear(&merged_attrs);
-        if (!is_typedef && !complex_fn_ptr_decl && p->tok.kind == TOK_LPAREN) {
+        if (!is_typedef && !complex_fn_ptr_decl && !prefixed_fn_ptr && p->tok.kind == TOK_LPAREN) {
             if (skip_balanced_parens(p) != 0) {
                 free_stmt(&s);
                 return -1;
@@ -8137,7 +8177,6 @@ static int parse_stmt(parser_t *p, cc_stmt_t *s) {
     memset(s, 0, sizeof(*s));
     s->line = p->tok.line;
     s->col = p->tok.col;
-
     while (p->tok.kind == TOK_KW_EXTENSION) {
         if (next_tok(p) != 0) {
             return -1;
@@ -9040,9 +9079,11 @@ static int parse_function(parser_t *p, cc_function_t *f) {
 
 static int probe_is_function_head(parser_t *p) {
     parser_t q = *p;
+    parser_t probe;
     cc_type_t ty;
     int ty_sid = -1;
     int is_typedef = 0;
+    int prefixed_fn_ptr = 0;
     char *name = NULL;
     int rc = 0;
     const char *lf = p->lx.logical_file;
@@ -9066,6 +9107,25 @@ static int probe_is_function_head(parser_t *p) {
     }
     if (is_typedef) {
         goto done;
+    }
+    if (is_ptr_declarator_tok(q.tok.kind)) {
+        probe = q;
+        probe.diag = NULL;
+        while (is_ptr_declarator_tok(probe.tok.kind)) {
+            if (next_tok(&probe) != 0) {
+                prefixed_fn_ptr = 0;
+                break;
+            }
+            while (is_decl_qual_at_token(&probe)) {
+                if (next_tok(&probe) != 0) {
+                    prefixed_fn_ptr = 0;
+                    break;
+                }
+            }
+        }
+        if (probe.tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(&probe))) {
+            prefixed_fn_ptr = 1;
+        }
     }
     if (q.tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(&q))) {
         if (next_tok(&q) != 0) {
@@ -9100,7 +9160,11 @@ static int probe_is_function_head(parser_t *p) {
         if (parse_named_declarator(&q, ty, &ty, &name, "") != 0) {
             goto done;
         }
-        rc = (q.tok.kind == TOK_LPAREN);
+        if (prefixed_fn_ptr) {
+            rc = 0;
+        } else {
+            rc = (q.tok.kind == TOK_LPAREN);
+        }
     }
 done:
     free(name);

@@ -1462,7 +1462,8 @@ int cc_main(int argc, char **argv) {
                                       opt_level_num(&o), o.wall,
                                       o.werror, o.pedantic, o.pedantic_errors, o.gnu89_inline_mode,
                                       o.gnu89_inline_override, o.i386_isa_level, o.i386_has_sse2, o.i386_has_mmx,
-                                      o.i386_fp_math_mode, o.implicit_funcdecl_override, &diag) != 0) {
+                                      o.i386_fp_math_mode, o.implicit_funcdecl_override, (o.pic || o.shared),
+                                      &diag) != 0) {
                     if (diag.error_count > 0) {
                         if (diag.message[0] != '\0') {
                             fprintf(stderr, "cc: error: %s\n", diag.message);

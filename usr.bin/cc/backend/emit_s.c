@@ -2363,7 +2363,8 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     return 0;
 }
 
-static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit_debug, cc_diag_t *diag) {
+static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit_debug, int pic,
+                       cc_diag_t *diag) {
     size_t i;
 
     for (i = 0; i < m->func_count; ++i) {
@@ -2558,11 +2559,19 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             case CC_SSA_GADDR:
                 if (f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
-                    fprintf(fp, "\tleaq %s(%%rip), %%rax\n", in->sym);
+                    if (pic) {
+                        fprintf(fp, "\tmovq %s@GOTPCREL(%%rip), %%rax\n", in->sym);
+                    } else {
+                        fprintf(fp, "\tleaq %s(%%rip), %%rax\n", in->sym);
+                    }
                     fprintf(fp, "\tmovq %%rax, %d(%%rbp)\n", slot_off(&lay, in->dst));
                 } else {
                     int rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
-                    fprintf(fp, "\tleaq %s(%%rip), %s\n", in->sym, ist.regs[rd]);
+                    if (pic) {
+                        fprintf(fp, "\tmovq %s@GOTPCREL(%%rip), %s\n", in->sym, ist.regs[rd]);
+                    } else {
+                        fprintf(fp, "\tleaq %s(%%rip), %s\n", in->sym, ist.regs[rd]);
+                    }
                 }
                 break;
 
@@ -3851,7 +3860,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 }
 
 int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path,
-                int emit_debug, cc_target_t target, cc_diag_t *diag) {
+                int emit_debug, cc_target_t target, int pic, cc_diag_t *diag) {
     FILE *fp;
     cc_mir_module_t mir;
 
@@ -3909,7 +3918,7 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
             return -1;
         }
     } else {
-        if (emit_x86_64(fp, m, src_path, emit_debug, diag) != 0) {
+        if (emit_x86_64(fp, m, src_path, emit_debug, pic, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "x86_64 emission failed");
             }

@@ -6654,6 +6654,16 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             return 0;
         }
+        varv = new_value(sf, type_to_val(s->type));
+        if (varv < 0) {
+            set_diag(diag, "out of memory allocating local variable value");
+            return -1;
+        }
+        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0,
+                       NULL) != 0) {
+            set_diag(diag, "out of memory defining local variable");
+            return -1;
+        }
         if (s->expr != NULL) {
             v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
             if (v < 0) {
@@ -6667,22 +6677,12 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (v < 0) {
                 return -1;
             }
-            varv = new_value(sf, type_to_val(s->type));
-            if (varv < 0) {
-                set_diag(diag, "out of memory allocating local variable value");
-                return -1;
-            }
             if (emit_mov_instr(sf, varv, v) != 0) {
                 set_diag(diag, "out of memory appending declaration move");
                 return -1;
             }
         } else {
             cc_ssa_instr_t in;
-            varv = new_value(sf, type_to_val(s->type));
-            if (varv < 0) {
-                set_diag(diag, "out of memory allocating local variable value");
-                return -1;
-            }
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_CONST;
             in.dst = varv;
@@ -6694,11 +6694,6 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 set_diag(diag, "out of memory appending declaration default const");
                 return -1;
             }
-        }
-        if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0,
-                       NULL) != 0) {
-            set_diag(diag, "out of memory defining local variable");
-            return -1;
         }
         return 0;
     }
@@ -9102,15 +9097,6 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
         if (stmt_calls_named_fn(&f->stmts[i], "__builtin_va_arg_pack")) {
             return 1;
         }
-    }
-    if ((f->storage & CC_STORAGE_EXTERN) != 0 && (f->storage & CC_STORAGE_INLINE) != 0) {
-        /*
-         * Treat extern inline definitions as inline-only bodies.
-         * This matches GNU headers that use extern inline wrappers
-         * (often with __gnu_inline__) and rely on a separate out-of-line
-         * definition in the provider library.
-         */
-        return 1;
     }
     if ((f->storage & CC_STORAGE_STATIC) == 0) {
         return 0;

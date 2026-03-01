@@ -3643,7 +3643,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         return NULL;
                     }
                     exp_body = masked_body;
-                    while (src[k] == ' ' || src[k] == '\t') {
+                    while (src[k] == ' ' || src[k] == '\t' || src[k] == '\r' || src[k] == '\n') {
                         k++;
                     }
                     if (src[k] == '(') {
@@ -3718,7 +3718,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     char *subst = NULL;
                     char *exp_subst = NULL;
                     char *masked_subst = NULL;
-                    while (src[k] == ' ' || src[k] == '\t') {
+                    while (src[k] == ' ' || src[k] == '\t' || src[k] == '\r' || src[k] == '\n') {
                         k++;
                     }
                     if (src[k] != '(') {

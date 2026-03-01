@@ -7,7 +7,7 @@
 #include "cc_target.h"
 
 int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path,
-                int emit_debug, cc_target_t target, cc_diag_t *diag);
+                int emit_debug, cc_target_t target, int pic, cc_diag_t *diag);
 void cc_backend_set_i386_isa_level(int level);
 void cc_backend_set_i386_sse2(int enabled);
 void cc_backend_set_i386_mmx(int enabled);
