@@ -1088,6 +1088,97 @@ static const char *reloc_type_arm(uint32_t type) {
     }
 }
 
+static const char *reloc_type_aarch64(uint32_t type) {
+    switch (type) {
+        case 0: return "R_AARCH64_NONE";
+        case 257: return "R_AARCH64_ABS64";
+        case 258: return "R_AARCH64_ABS32";
+        case 259: return "R_AARCH64_ABS16";
+        case 260: return "R_AARCH64_PREL64";
+        case 261: return "R_AARCH64_PREL32";
+        case 262: return "R_AARCH64_PREL16";
+        case 273: return "R_AARCH64_LD_PREL_LO19";
+        case 274: return "R_AARCH64_ADR_PREL_LO21";
+        case 275: return "R_AARCH64_ADR_PREL_PG_HI21";
+        case 276: return "R_AARCH64_ADR_PREL_PG_HI21_NC";
+        case 277: return "R_AARCH64_ADD_ABS_LO12_NC";
+        case 278: return "R_AARCH64_LDST8_ABS_LO12_NC";
+        case 279: return "R_AARCH64_TSTBR14";
+        case 280: return "R_AARCH64_CONDBR19";
+        case 281: return "R_AARCH64_JUMP26";
+        case 282: return "R_AARCH64_CALL26";
+        case 283: return "R_AARCH64_LDST16_ABS_LO12_NC";
+        case 284: return "R_AARCH64_LDST32_ABS_LO12_NC";
+        case 285: return "R_AARCH64_LDST64_ABS_LO12_NC";
+        case 286: return "R_AARCH64_LDST128_ABS_LO12_NC";
+        case 299: return "R_AARCH64_MOVW_GOTOFF_G0";
+        case 300: return "R_AARCH64_MOVW_GOTOFF_G0_NC";
+        case 301: return "R_AARCH64_MOVW_GOTOFF_G1";
+        case 302: return "R_AARCH64_MOVW_GOTOFF_G1_NC";
+        case 303: return "R_AARCH64_MOVW_GOTOFF_G2";
+        case 304: return "R_AARCH64_MOVW_GOTOFF_G2_NC";
+        case 305: return "R_AARCH64_MOVW_GOTOFF_G3";
+        case 1024: return "R_AARCH64_COPY";
+        case 1025: return "R_AARCH64_GLOB_DAT";
+        case 1026: return "R_AARCH64_JUMP_SLOT";
+        case 1027: return "R_AARCH64_RELATIVE";
+        case 1028: return "R_AARCH64_TLS_DTPMOD";
+        case 1029: return "R_AARCH64_TLS_DTPREL";
+        case 1030: return "R_AARCH64_TLS_TPREL";
+        case 1031: return "R_AARCH64_TLSDESC";
+        case 1032: return "R_AARCH64_IRELATIVE";
+        case 512: return "R_AARCH64_TLSGD_ADR_PREL21";
+        case 513: return "R_AARCH64_TLSGD_ADR_PAGE21";
+        case 514: return "R_AARCH64_TLSGD_ADD_LO12_NC";
+        case 515: return "R_AARCH64_TLSGD_MOVW_G1";
+        case 516: return "R_AARCH64_TLSGD_MOVW_G0_NC";
+        case 517: return "R_AARCH64_TLSLD_ADR_PREL21";
+        case 518: return "R_AARCH64_TLSLD_ADR_PAGE21";
+        case 519: return "R_AARCH64_TLSLD_ADD_LO12_NC";
+        case 520: return "R_AARCH64_TLSLD_MOVW_G1";
+        case 521: return "R_AARCH64_TLSLD_MOVW_G0_NC";
+        case 522: return "R_AARCH64_TLSLD_LD_PREL19";
+        case 523: return "R_AARCH64_TLSLD_MOVW_DTPREL_G2";
+        case 524: return "R_AARCH64_TLSLD_MOVW_DTPREL_G1";
+        case 525: return "R_AARCH64_TLSLD_MOVW_DTPREL_G1_NC";
+        case 526: return "R_AARCH64_TLSLD_MOVW_DTPREL_G0";
+        case 527: return "R_AARCH64_TLSLD_MOVW_DTPREL_G0_NC";
+        case 528: return "R_AARCH64_TLSLD_ADD_DTPREL_HI12";
+        case 529: return "R_AARCH64_TLSLD_ADD_DTPREL_LO12";
+        case 530: return "R_AARCH64_TLSLD_ADD_DTPREL_LO12_NC";
+        case 531: return "R_AARCH64_TLSLD_LDST8_DTPREL_LO12";
+        case 532: return "R_AARCH64_TLSLD_LDST8_DTPREL_LO12_NC";
+        case 533: return "R_AARCH64_TLSLD_LDST16_DTPREL_LO12";
+        case 534: return "R_AARCH64_TLSLD_LDST16_DTPREL_LO12_NC";
+        case 535: return "R_AARCH64_TLSLD_LDST32_DTPREL_LO12";
+        case 536: return "R_AARCH64_TLSLD_LDST32_DTPREL_LO12_NC";
+        case 537: return "R_AARCH64_TLSLD_LDST64_DTPREL_LO12";
+        case 538: return "R_AARCH64_TLSLD_LDST64_DTPREL_LO12_NC";
+        case 539: return "R_AARCH64_TLSIE_MOVW_GOTTPREL_G1";
+        case 540: return "R_AARCH64_TLSIE_MOVW_GOTTPREL_G0_NC";
+        case 541: return "R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21";
+        case 542: return "R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC";
+        case 543: return "R_AARCH64_TLSIE_LD_GOTTPREL_PREL19";
+        case 544: return "R_AARCH64_TLSLE_MOVW_TPREL_G2";
+        case 545: return "R_AARCH64_TLSLE_MOVW_TPREL_G1";
+        case 546: return "R_AARCH64_TLSLE_MOVW_TPREL_G1_NC";
+        case 547: return "R_AARCH64_TLSLE_MOVW_TPREL_G0";
+        case 548: return "R_AARCH64_TLSLE_MOVW_TPREL_G0_NC";
+        case 549: return "R_AARCH64_TLSLE_ADD_TPREL_HI12";
+        case 550: return "R_AARCH64_TLSLE_ADD_TPREL_LO12";
+        case 551: return "R_AARCH64_TLSLE_ADD_TPREL_LO12_NC";
+        case 552: return "R_AARCH64_TLSLE_LDST8_TPREL_LO12";
+        case 553: return "R_AARCH64_TLSLE_LDST8_TPREL_LO12_NC";
+        case 554: return "R_AARCH64_TLSLE_LDST16_TPREL_LO12";
+        case 555: return "R_AARCH64_TLSLE_LDST16_TPREL_LO12_NC";
+        case 556: return "R_AARCH64_TLSLE_LDST32_TPREL_LO12";
+        case 557: return "R_AARCH64_TLSLE_LDST32_TPREL_LO12_NC";
+        case 558: return "R_AARCH64_TLSLE_LDST64_TPREL_LO12";
+        case 559: return "R_AARCH64_TLSLE_LDST64_TPREL_LO12_NC";
+        default: return NULL;
+    }
+}
+
 static const char *reloc_type_name(uint16_t machine, uint32_t type) {
     if (machine == EM_386) {
         return reloc_type_i386(type);
@@ -1097,6 +1188,9 @@ static const char *reloc_type_name(uint16_t machine, uint32_t type) {
     }
     if (machine == EM_ARM) {
         return reloc_type_arm(type);
+    }
+    if (machine == EM_AARCH64) {
+        return reloc_type_aarch64(type);
     }
     return NULL;
 }

@@ -72,7 +72,7 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 - [x] Display all `SHT_REL` and `SHT_RELA` sections.
 - [x] Columns: offset, info, type, sym.value, sym.name + addend.
-- [ ] Decode relocation type names per architecture:
+- [x] Decode relocation type names per architecture:
 
 ### 6a. i386 Relocation Names
 - [x] `R_386_NONE`, `R_386_32`, `R_386_PC32`, `R_386_GOT32`, `R_386_PLT32`, `R_386_COPY`, `R_386_GLOB_DAT`, `R_386_JMP_SLOT`, `R_386_RELATIVE`, `R_386_GOTOFF`, `R_386_GOTPC`, `R_386_GOT32X`.
@@ -92,9 +92,9 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] Key types: `R_ARM_ABS32`, `R_ARM_REL32`, `R_ARM_CALL`, `R_ARM_JUMP24`, `R_ARM_THM_CALL`, `R_ARM_THM_JUMP24`, `R_ARM_MOVW_ABS_NC`, `R_ARM_MOVT_ABS`, `R_ARM_PREL31`, `R_ARM_GOT_BREL`, `R_ARM_PLT32`, `R_ARM_TLS_GD32`, `R_ARM_TLS_IE32`, `R_ARM_V4BX`, `R_ARM_TARGET1`, `R_ARM_TARGET2`.
 
 ### 6d. AArch64 Relocation Names
-- [ ] All `R_AARCH64_*` types with human-readable names.
-- [ ] Key types: `R_AARCH64_ABS64`, `R_AARCH64_ABS32`, `R_AARCH64_PREL32`, `R_AARCH64_ADR_PREL_PG_HI21`, `R_AARCH64_ADD_ABS_LO12_NC`, `R_AARCH64_LDST*_ABS_LO12_NC`, `R_AARCH64_JUMP26`, `R_AARCH64_CALL26`, `R_AARCH64_GLOB_DAT`, `R_AARCH64_JUMP_SLOT`, `R_AARCH64_RELATIVE`, `R_AARCH64_TLS*`, `R_AARCH64_TLSDESC*`, `R_AARCH64_IRELATIVE`.
-- [ ] Unknown relocation type: print numeric value.
+- [x] All `R_AARCH64_*` types with human-readable names.
+- [x] Key types: `R_AARCH64_ABS64`, `R_AARCH64_ABS32`, `R_AARCH64_PREL32`, `R_AARCH64_ADR_PREL_PG_HI21`, `R_AARCH64_ADD_ABS_LO12_NC`, `R_AARCH64_LDST*_ABS_LO12_NC`, `R_AARCH64_JUMP26`, `R_AARCH64_CALL26`, `R_AARCH64_GLOB_DAT`, `R_AARCH64_JUMP_SLOT`, `R_AARCH64_RELATIVE`, `R_AARCH64_TLS*`, `R_AARCH64_TLSDESC*`, `R_AARCH64_IRELATIVE`.
+- [x] Unknown relocation type: print numeric value.
 
 ## 7. Dynamic Section (`-d` / `--dynamic`)
 
