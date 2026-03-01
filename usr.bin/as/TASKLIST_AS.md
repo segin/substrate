@@ -106,12 +106,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] Suppress-all-exceptions (`{sae}`).
 
 ### 2e. x86 Relocation Emission
-- [ ] `R_386_32`, `R_386_PC32`, `R_386_GOT32`, `R_386_PLT32`, `R_386_GOTOFF`, `R_386_GOTPC`.
-- [ ] `R_386_TLS_GD`, `R_386_TLS_LDM`, `R_386_TLS_IE`, `R_386_TLS_LE`.
-- [ ] `R_X86_64_64`, `R_X86_64_PC32`, `R_X86_64_32`, `R_X86_64_32S`.
-- [ ] `R_X86_64_GOT32`, `R_X86_64_PLT32`, `R_X86_64_GOTPCREL`, `R_X86_64_GOTPCRELX`.
-- [ ] `R_X86_64_REX_GOTPCRELX`.
-- [ ] `R_X86_64_TLSGD`, `R_X86_64_TLSLD`, `R_X86_64_GOTTPOFF`, `R_X86_64_TPOFF32`.
+- [x] `R_386_32`, `R_386_PC32`, `R_386_GOT32`, `R_386_PLT32`, `R_386_GOTOFF`, `R_386_GOTPC`.
+- [x] `R_386_TLS_GD`, `R_386_TLS_LDM`, `R_386_TLS_IE`, `R_386_TLS_LE`.
+- [x] `R_X86_64_64`, `R_X86_64_PC32`, `R_X86_64_32`, `R_X86_64_32S`.
+- [x] `R_X86_64_GOT32`, `R_X86_64_PLT32`, `R_X86_64_GOTPCREL`, `R_X86_64_GOTPCRELX`.
+- [x] `R_X86_64_REX_GOTPCRELX`.
+- [x] `R_X86_64_TLSGD`, `R_X86_64_TLSLD`, `R_X86_64_GOTTPOFF`, `R_X86_64_TPOFF32`.
 
 ---
 
