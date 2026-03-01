@@ -40,6 +40,10 @@
 #define MOD_COUNT       0x0008
 #define MOD_BEFORE      0x0010
 #define MOD_PRESERVE    0x0020
+#define MOD_LOCAL       0x0040
+#define MOD_DETERMINISTIC 0x0080
+#define MOD_NOSYMTAB    0x0100
+#define MOD_THIN        0x0200
 
 static char *archive_name;
 static int operation = 0;
@@ -47,19 +51,23 @@ static int modifiers = 0;
 static const char *progname;
 static const char *position_member = NULL;
 static bool no_same_owner = false;
+static unsigned long instance_count = 1;
 
 /* Structure to hold in-memory archive member */
 struct ar_memb {
     struct ar_hdr hdr;
     char *name;
     void *data;
+    char *thin_path;
     size_t size;
     struct ar_memb *next;
     bool dirty;
     bool deleted;
+    bool thin_ref;
 };
 
 static struct ar_memb *head = NULL;
+static bool archive_is_thin = false;
 
 /* Symbol table entry */
 struct sym_entry {
@@ -85,6 +93,7 @@ static void delete_members(char **members, int count);
 static void move_members(char **members, int count);
 static void print_members(char **members, int count);
 static void ranlib(void);
+static void drop_symbol_tables(void);
 static bool parse_numeric_field(const char *field, size_t field_len, int base, long long *out);
 static void list_insert_tail(struct ar_memb *node);
 static bool list_insert_relative(struct ar_memb *node, const char *anchor_name, bool before);
@@ -123,6 +132,17 @@ int main(int argc, char *argv[])
             argi++;
             continue;
         }
+        if (strcmp(argv[argi], "--plugin") == 0) {
+            argi++;
+            if (argi < argc && argv[argi][0] != '-') {
+                argi++;
+            }
+            continue;
+        }
+        if (strncmp(argv[argi], "--plugin=", 9) == 0) {
+            argi++;
+            continue;
+        }
         warnx("unknown option: %s", argv[argi]);
         usage();
     }
@@ -153,11 +173,32 @@ int main(int argc, char *argv[])
         case 'b':
         case 'i': modifiers |= MOD_BEFORE; break;
         case 'o': modifiers |= MOD_PRESERVE; break;
+        case 'N': modifiers |= MOD_COUNT; break;
+        case 'l': modifiers |= MOD_LOCAL; break;
+        case 'U':
+        case 'D': modifiers |= MOD_DETERMINISTIC; break;
+        case 'S': modifiers |= MOD_NOSYMTAB; break;
+        case 'T': modifiers |= MOD_THIN; break;
         default:
             warnx("illegal option -- %c", *key);
             usage();
         }
         key++;
+    }
+
+    if (modifiers & MOD_COUNT) {
+        char *end = NULL;
+        unsigned long parsed;
+        if (argi >= argc) {
+            errx(1, "modifier -N requires a positive count argument");
+        }
+        errno = 0;
+        parsed = strtoul(argv[argi], &end, 10);
+        if (errno != 0 || end == argv[argi] || *end != '\0' || parsed == 0) {
+            errx(1, "invalid -N count: %s", argv[argi]);
+        }
+        instance_count = parsed;
+        argi++;
     }
 
     if ((modifiers & MOD_AFTER) && (modifiers & MOD_BEFORE)) {
@@ -213,12 +254,14 @@ int main(int argc, char *argv[])
     case AR_REPLACE:
     case AR_APPEND:
         append_files(files, file_count);
-        if (modifiers & AR_TABLE) ranlib();
+        if (modifiers & MOD_NOSYMTAB) drop_symbol_tables();
+        else if (modifiers & AR_TABLE) ranlib();
         write_archive(archive_name);
         break;
     case AR_DELETE:
         delete_members(files, file_count);
-        if (modifiers & AR_TABLE) ranlib();
+        if (modifiers & MOD_NOSYMTAB) drop_symbol_tables();
+        else if (modifiers & AR_TABLE) ranlib();
         write_archive(archive_name);
         break;
     case AR_EXTRACT:
@@ -229,14 +272,16 @@ int main(int argc, char *argv[])
         break;
     case AR_MOVE:
         move_members(files, file_count);
-        if (modifiers & AR_TABLE) ranlib();
+        if (modifiers & MOD_NOSYMTAB) drop_symbol_tables();
+        else if (modifiers & AR_TABLE) ranlib();
         write_archive(archive_name);
         break;
     case AR_PRINT:
         print_members(files, file_count);
         break;
     case AR_TABLE:
-        ranlib();
+        if (modifiers & MOD_NOSYMTAB) drop_symbol_tables();
+        else ranlib();
         write_archive(archive_name);
         break;
     }
@@ -463,7 +508,14 @@ static void read_archive(const char *path) {
     }
 
     char magic[8];
-    if (read(fd, magic, 8) != 8 || memcmp(magic, ARMAG, 8) != 0) {
+    if (read(fd, magic, 8) != 8) {
+        errx(1, "%s: file format not recognized", path);
+    }
+    if (memcmp(magic, ARMAG, 8) == 0) {
+        archive_is_thin = false;
+    } else if (memcmp(magic, THINMAG, 8) == 0) {
+        archive_is_thin = true;
+    } else {
         errx(1, "%s: file format not recognized", path);
     }
 
@@ -481,15 +533,31 @@ static void read_archive(const char *path) {
         m->next = NULL;
         m->deleted = false;
         m->dirty = false;
+        m->thin_ref = false;
+        m->thin_path = NULL;
 
         if (memcmp(hdr.ar_name, "#1/", 3) == 0) {
             int name_len = atoi(hdr.ar_name + 3);
             m->name = malloc(name_len + 1);
             read(fd, m->name, name_len);
             m->name[name_len] = 0;
-            m->size = size - name_len;
-            m->data = malloc(m->size);
-            read(fd, m->data, m->size);
+            size_t payload_size = size - name_len;
+            if (archive_is_thin &&
+                strcmp(m->name, RANLIBMAG) != 0 &&
+                strcmp(m->name, RANLIBSORT) != 0 &&
+                strcmp(m->name, "/") != 0 &&
+                strcmp(m->name, "//") != 0) {
+                m->thin_ref = true;
+                m->thin_path = malloc(payload_size + 1);
+                read(fd, m->thin_path, payload_size);
+                m->thin_path[payload_size] = 0;
+                m->size = 0;
+                m->data = NULL;
+            } else {
+                m->size = payload_size;
+                m->data = malloc(m->size);
+                read(fd, m->data, m->size);
+            }
         } else {
             char tmp[17];
             memcpy(tmp, hdr.ar_name, 16);
@@ -501,9 +569,22 @@ static void read_archive(const char *path) {
                 else break;
             }
             m->name = strdup(tmp);
-            m->size = size;
-            m->data = malloc(size);
-            read(fd, m->data, size);
+            if (archive_is_thin &&
+                strcmp(m->name, RANLIBMAG) != 0 &&
+                strcmp(m->name, RANLIBSORT) != 0 &&
+                strcmp(m->name, "/") != 0 &&
+                strcmp(m->name, "//") != 0) {
+                m->thin_ref = true;
+                m->thin_path = malloc(size + 1);
+                read(fd, m->thin_path, size);
+                m->thin_path[size] = 0;
+                m->size = 0;
+                m->data = NULL;
+            } else {
+                m->size = size;
+                m->data = malloc(size);
+                read(fd, m->data, size);
+            }
         }
 
         if (size % 2 != 0) lseek(fd, 1, SEEK_CUR);
@@ -523,6 +604,8 @@ static void append_files(char **files, int count) {
         const char *fname = files[i];
         struct ar_memb *m = NULL;
         struct ar_memb *m_prev = NULL;
+        bool thin_mode = archive_is_thin || ((modifiers & MOD_THIN) != 0);
+        void *data = NULL;
         int fd = open(fname, O_RDONLY);
         if (fd < 0) {
             warn("%s", fname);
@@ -536,17 +619,19 @@ static void append_files(char **files, int count) {
             continue;
         }
 
-        void *data = malloc(st.st_size);
-        if (data == NULL && st.st_size != 0) {
-            warnx("%s: out of memory", fname);
-            close(fd);
-            continue;
-        }
-        if (st.st_size > 0 && read(fd, data, st.st_size) != st.st_size) {
-            warn("%s", fname);
-            free(data);
-            close(fd);
-            continue;
+        if (!thin_mode) {
+            data = malloc(st.st_size);
+            if (data == NULL && st.st_size != 0) {
+                warnx("%s: out of memory", fname);
+                close(fd);
+                continue;
+            }
+            if (st.st_size > 0 && read(fd, data, st.st_size) != st.st_size) {
+                warn("%s", fname);
+                free(data);
+                close(fd);
+                continue;
+            }
         }
         close(fd);
 
@@ -565,6 +650,7 @@ static void append_files(char **files, int count) {
             }
             if (modifiers & MOD_VERBOSE) printf("r - %s\n", base);
             free(m->data);
+            free(m->thin_path);
             free(m->name);
         } else {
             if (modifiers & MOD_VERBOSE) printf("a - %s\n", base);
@@ -586,25 +672,37 @@ static void append_files(char **files, int count) {
             }
         }
 
-        m->data = data;
-        m->size = st.st_size;
+        m->data = thin_mode ? NULL : data;
+        m->size = (size_t)st.st_size;
         m->name = strdup(base);
+        m->thin_ref = thin_mode;
+        m->thin_path = thin_mode ? strdup(fname) : NULL;
+        if (thin_mode && m->thin_path == NULL) {
+            warnx("%s: out of memory", fname);
+            if (m->data != NULL) free(m->data);
+            m->data = NULL;
+            m->size = 0;
+            m->thin_ref = false;
+            continue;
+        }
         m->dirty = true;
         m->deleted = false;
 
         memset(&m->hdr, ' ', sizeof(struct ar_hdr));
         char buf[32];
-        snprintf(buf, sizeof(buf), "%-12ld", (long)st.st_mtime);
+        snprintf(buf, sizeof(buf), "%-12ld", (long)((modifiers & MOD_DETERMINISTIC) ? 0 : st.st_mtime));
         memcpy(m->hdr.ar_date, buf, 12);
-        snprintf(buf, sizeof(buf), "%-6d", (int)st.st_uid);
+        snprintf(buf, sizeof(buf), "%-6d", (int)((modifiers & MOD_DETERMINISTIC) ? 0 : st.st_uid));
         memcpy(m->hdr.ar_uid, buf, 6);
-        snprintf(buf, sizeof(buf), "%-6d", (int)st.st_gid);
+        snprintf(buf, sizeof(buf), "%-6d", (int)((modifiers & MOD_DETERMINISTIC) ? 0 : st.st_gid));
         memcpy(m->hdr.ar_gid, buf, 6);
-        snprintf(buf, sizeof(buf), "%-8o", (int)st.st_mode);
+        snprintf(buf, sizeof(buf), "%-8o", (int)((modifiers & MOD_DETERMINISTIC) ? 0644 : st.st_mode));
         memcpy(m->hdr.ar_mode, buf, 8);
-        snprintf(buf, sizeof(buf), "%-10ld", (long)st.st_size);
+        size_t payload_size = thin_mode ? strlen(m->thin_path) : (size_t)st.st_size;
+        snprintf(buf, sizeof(buf), "%-10ld", (long)payload_size);
         memcpy(m->hdr.ar_size, buf, 10);
         memcpy(m->hdr.ar_fmag, ARFMAG, 2);
+        archive_is_thin = thin_mode;
         (void)m_prev;
     }
 }
@@ -614,11 +712,22 @@ static void delete_members(char **members, int count) {
     for (int i = 0; i < count; i++) {
         struct ar_memb *cur = head;
         bool found = false;
+        unsigned long seen = 0;
         while (cur) {
-            if (strcmp(cur->name, members[i]) == 0) {
+            if (!cur->deleted && strcmp(cur->name, members[i]) == 0) {
+                if (modifiers & MOD_COUNT) {
+                    seen++;
+                    if (seen != instance_count) {
+                        cur = cur->next;
+                        continue;
+                    }
+                }
                 if (modifiers & MOD_VERBOSE) printf("d - %s\n", cur->name);
                 cur->deleted = true;
                 found = true;
+                if (modifiers & MOD_COUNT) {
+                    break;
+                }
             }
             cur = cur->next;
         }
@@ -680,20 +789,53 @@ static void print_members(char **members, int count) {
 
         if (match) {
             if (modifiers & MOD_VERBOSE) printf("p - %s\n", cur->name);
-            fwrite(cur->data, cur->size, 1, stdout);
+            if (cur->thin_ref && cur->thin_path != NULL) {
+                int fd = open(cur->thin_path, O_RDONLY);
+                if (fd < 0) {
+                    warn("%s", cur->thin_path);
+                } else {
+                    char buf[4096];
+                    ssize_t nr;
+                    while ((nr = read(fd, buf, sizeof(buf))) > 0) {
+                        if (write(STDOUT_FILENO, buf, (size_t)nr) != nr) {
+                            warn("stdout");
+                            break;
+                        }
+                    }
+                    close(fd);
+                }
+            } else {
+                fwrite(cur->data, cur->size, 1, stdout);
+            }
         }
         cur = cur->next;
     }
 }
 
 static void extract_members(char **members, int count) {
+    unsigned long *seen = NULL;
     struct ar_memb *cur = head;
+
+    if ((modifiers & MOD_COUNT) && count > 0) {
+        seen = calloc((size_t)count, sizeof(*seen));
+        if (seen == NULL) {
+            errx(1, "out of memory");
+        }
+    }
+
     while (cur) {
         if (cur->deleted) { cur = cur->next; continue; }
         bool match = (count == 0);
         for (int i = 0; i < count; i++) {
             if (strcmp(cur->name, members[i]) == 0) {
-                match = true;
+                if ((modifiers & MOD_COUNT) && seen != NULL) {
+                    seen[i]++;
+                    if (seen[i] == instance_count) {
+                        match = true;
+                    }
+                } else {
+                    match = true;
+                }
                 break;
             }
         }
@@ -718,9 +860,26 @@ static void extract_members(char **members, int count) {
             int fd = open(name, O_WRONLY | O_CREAT | O_TRUNC, mode & 07777);
             if (fd < 0) warn("%s", name);
             else {
-                ssize_t wr = write(fd, cur->data, cur->size);
-                if (wr != (ssize_t)cur->size) {
-                    warn("%s", name);
+                if (cur->thin_ref && cur->thin_path != NULL) {
+                    int srcfd = open(cur->thin_path, O_RDONLY);
+                    if (srcfd < 0) {
+                        warn("%s", cur->thin_path);
+                    } else {
+                        char buf[4096];
+                        ssize_t nr;
+                        while ((nr = read(srcfd, buf, sizeof(buf))) > 0) {
+                            if (write(fd, buf, (size_t)nr) != nr) {
+                                warn("%s", name);
+                                break;
+                            }
+                        }
+                        close(srcfd);
+                    }
+                } else {
+                    ssize_t wr = write(fd, cur->data, cur->size);
+                    if (wr != (ssize_t)cur->size) {
+                        warn("%s", name);
+                    }
                 }
                 if (fchmod(fd, mode & 07777) != 0) {
                     warn("%s", name);
@@ -748,10 +907,21 @@ static void extract_members(char **members, int count) {
         }
         cur = cur->next;
     }
+
+    free(seen);
 }
 
 static void list_members(char **members, int count) {
+    unsigned long *seen = NULL;
     struct ar_memb *cur = head;
+
+    if ((modifiers & MOD_COUNT) && count > 0) {
+        seen = calloc((size_t)count, sizeof(*seen));
+        if (seen == NULL) {
+            errx(1, "out of memory");
+        }
+    }
+
     while (cur) {
         if (cur->deleted) { cur = cur->next; continue; }
         if (strcmp(cur->name, RANLIBMAG) == 0 || strcmp(cur->name, RANLIBSORT) == 0 ||
@@ -761,7 +931,14 @@ static void list_members(char **members, int count) {
         bool match = (count == 0);
         for (int i = 0; i < count; i++) {
             if (strcmp(cur->name, members[i]) == 0) {
-                match = true;
+                if ((modifiers & MOD_COUNT) && seen != NULL) {
+                    seen[i]++;
+                    if (seen[i] == instance_count) {
+                        match = true;
+                    }
+                } else {
+                    match = true;
+                }
                 break;
             }
         }
@@ -771,8 +948,10 @@ static void list_members(char **members, int count) {
                 uid_t uid = 0;
                 gid_t gid = 0;
                 time_t mtime = 0;
+                long display_size = (long)cur->size;
                 char date_buf[32] = "Jan  1 00:00 1970";
                 char type_char = '-';
+                struct stat stbuf;
 
                 (void)parse_mode_field(cur, &mode);
                 (void)parse_uid_field(cur, &uid);
@@ -794,18 +973,25 @@ static void list_members(char **members, int count) {
                 else if (S_ISSOCK(mode)) type_char = 's';
 #endif
 
+                if (cur->thin_ref && cur->thin_path != NULL &&
+                    stat(cur->thin_path, &stbuf) == 0) {
+                    display_size = (long)stbuf.st_size;
+                }
+
                 printf("%c%c%c%c%c%c%c%c%c%c %ld/%ld %6ld %s %s\n",
                     type_char,
                     (mode & S_IRUSR) ? 'r' : '-', (mode & S_IWUSR) ? 'w' : '-', (mode & S_IXUSR) ? 'x' : '-',
                     (mode & S_IRGRP) ? 'r' : '-', (mode & S_IWGRP) ? 'w' : '-', (mode & S_IXGRP) ? 'x' : '-',
                     (mode & S_IROTH) ? 'r' : '-', (mode & S_IWOTH) ? 'w' : '-', (mode & S_IXOTH) ? 'x' : '-',
-                    (long)uid, (long)gid, (long)cur->size, date_buf, cur->name);
+                    (long)uid, (long)gid, display_size, date_buf, cur->name);
             } else {
                 printf("%s\n", cur->name);
             }
         }
         cur = cur->next;
     }
+
+    free(seen);
 }
 
 static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
@@ -813,7 +999,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
     elf_err_t open_err;
     size_t symbol_count;
 
-    if (m == NULL || m->data == NULL || m->size == 0) {
+    if (m == NULL || m->thin_ref || m->data == NULL || m->size == 0) {
         return;
     }
 
@@ -879,19 +1065,36 @@ static int compare_syms(const void *a, const void *b) {
     return strcmp((*sa)->name, (*sb)->name);
 }
 
-static void ranlib(void) {
+static void drop_symbol_tables(void) {
     struct ar_memb *cur = head;
     struct ar_memb *prev = NULL;
-    while (cur) {
+
+    while (cur != NULL) {
         if (strcmp(cur->name, RANLIBMAG) == 0 || strcmp(cur->name, RANLIBSORT) == 0 ||
             strcmp(cur->name, "/") == 0 || strcmp(cur->name, "//") == 0) {
-            if (prev) prev->next = cur->next;
-            else head = cur->next;
-            cur = cur->next;
+            struct ar_memb *next = cur->next;
+            if (prev != NULL) {
+                prev->next = next;
+            } else {
+                head = next;
+            }
+            free(cur->name);
+            free(cur->data);
+            free(cur->thin_path);
+            free(cur);
+            cur = next;
             continue;
         }
         prev = cur;
         cur = cur->next;
+    }
+}
+
+static void ranlib(void) {
+    struct ar_memb *cur = head;
+    drop_symbol_tables();
+    if (archive_is_thin || (modifiers & MOD_THIN)) {
+        return;
     }
 
     struct sym_entry *list = NULL;
@@ -931,11 +1134,13 @@ static void ranlib(void) {
     m->name = strdup(RANLIBMAG);
     m->data = data;
     m->size = total_size;
+    m->thin_path = NULL;
     m->deleted = false;
     m->dirty = true;
+    m->thin_ref = false;
     memset(&m->hdr, ' ', sizeof(struct ar_hdr));
     char buf[32];
-    snprintf(buf, sizeof(buf), "%-12ld", (long)time(NULL));
+    snprintf(buf, sizeof(buf), "%-12ld", (long)((modifiers & MOD_DETERMINISTIC) ? 0 : time(NULL)));
     memcpy(m->hdr.ar_date, buf, 12);
     snprintf(buf, sizeof(buf), "%-6d", 0);
     memcpy(m->hdr.ar_uid, buf, 6);
@@ -975,8 +1180,10 @@ static void ranlib(void) {
 static void write_archive(const char *path) {
     FILE *fp = fopen(path, "w");
     if (!fp) err(1, "fopen %s", path);
+    bool thin_output = archive_is_thin || ((modifiers & MOD_THIN) != 0);
+    archive_is_thin = thin_output;
 
-    fprintf(fp, ARMAG);
+    fprintf(fp, "%s", thin_output ? THINMAG : ARMAG);
     uint32_t offset = 8;
 
     struct ar_memb *symdef = NULL;
@@ -1063,11 +1270,24 @@ static void write_archive(const char *path) {
     while (cur) {
         if (cur->deleted) { cur = cur->next; continue; }
 
+        if (modifiers & MOD_DETERMINISTIC) {
+            char dbuf[32];
+            snprintf(dbuf, sizeof(dbuf), "%-12d", 0);
+            memcpy(cur->hdr.ar_date, dbuf, 12);
+            snprintf(dbuf, sizeof(dbuf), "%-6d", 0);
+            memcpy(cur->hdr.ar_uid, dbuf, 6);
+            snprintf(dbuf, sizeof(dbuf), "%-6d", 0);
+            memcpy(cur->hdr.ar_gid, dbuf, 6);
+            snprintf(dbuf, sizeof(dbuf), "%-8o", 0644);
+            memcpy(cur->hdr.ar_mode, dbuf, 8);
+        }
+
         int name_len = strlen(cur->name);
+        size_t payload_size = cur->thin_ref && cur->thin_path != NULL ? strlen(cur->thin_path) : cur->size;
         bool extended = (name_len > 15 || strchr(cur->name, ' '));
 
         if (extended) {
-            long data_len = cur->size + name_len;
+            long data_len = (long)payload_size + name_len;
             char buf[32];
             snprintf(buf, sizeof(buf), "%-10ld", data_len);
             memcpy(cur->hdr.ar_size, buf, 10);
@@ -1083,9 +1303,13 @@ static void write_archive(const char *path) {
 
         fwrite(&cur->hdr, sizeof(struct ar_hdr), 1, fp);
         if (extended) fwrite(cur->name, name_len, 1, fp);
-        fwrite(cur->data, cur->size, 1, fp);
+        if (cur->thin_ref && cur->thin_path != NULL) {
+            fwrite(cur->thin_path, payload_size, 1, fp);
+        } else {
+            fwrite(cur->data, cur->size, 1, fp);
+        }
 
-        long total_data = cur->size + (extended ? name_len : 0);
+        long total_data = (long)payload_size + (extended ? name_len : 0);
         if (total_data % 2 != 0) fputc('\n', fp);
 
         cur = cur->next;

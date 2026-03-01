@@ -54,15 +54,15 @@ Goal: implement a production `ar` where ELF member inspection/parsing comes from
 
 ## 4. Modifiers and Flags
 
-- [ ] Implement `a` (after), `b`/`i` (before) positional modifiers for `r` and `m`.
-- [ ] Implement `N count` (instance count) modifier for `d`, `x`, `t` when duplicate member names exist.
-- [ ] Implement `l` (use local directory for temp files — may be a no‑op on modern systems).
-- [ ] Implement `o` (preserve original timestamps on extract).
-- [ ] Implement `U` (deterministic mode: zero uid/gid/mtime, mode 0644) — critical for reproducible builds.
-- [ ] Implement `D` (alias for deterministic mode, matching GNU ar).
-- [ ] Implement `S` (do not generate symbol table even when writing).
-- [ ] Implement `T` (thin archive — store pathnames instead of member data).
-- [ ] Add `--plugin` flag silently accepted for GCC LTO compatibility (can be a no‑op).
+- [x] Implement `a` (after), `b`/`i` (before) positional modifiers for `r` and `m`.
+- [x] Implement `N count` (instance count) modifier for `d`, `x`, `t` when duplicate member names exist.
+- [x] Implement `l` (use local directory for temp files — may be a no‑op on modern systems).
+- [x] Implement `o` (preserve original timestamps on extract).
+- [x] Implement `U` (deterministic mode: zero uid/gid/mtime, mode 0644) — critical for reproducible builds.
+- [x] Implement `D` (alias for deterministic mode, matching GNU ar).
+- [x] Implement `S` (do not generate symbol table even when writing).
+- [x] Implement `T` (thin archive — store pathnames instead of member data).
+- [x] Add `--plugin` flag silently accepted for GCC LTO compatibility (can be a no‑op).
 
 ## 5. Archive Format Variants
 

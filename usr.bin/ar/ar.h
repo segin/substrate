@@ -5,6 +5,7 @@
 
 #define ARMAG   "!<arch>\n"
 #define SARMAG  8
+#define THINMAG "!<thin>\n"
 
 #define ARFMAG  "`\n"
 
