@@ -53,6 +53,9 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         t0 = now_seconds();
     }
     if (cc_parse_file(in_c, &tu, diag) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "parser failed");
+        }
         return -1;
     }
     if (timings) {
@@ -61,6 +64,9 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         t0 = now_seconds();
     }
     if (cc_sema_check(&tu, diag) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "semantic analysis failed");
+        }
         cc_tu_free(&tu);
         return -1;
     }
@@ -70,6 +76,9 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         t0 = now_seconds();
     }
     if (cc_ast_to_ssa(&tu, &ssa, diag) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "AST to SSA lowering failed");
+        }
         cc_tu_free(&tu);
         return -1;
     }
@@ -79,6 +88,9 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         t0 = now_seconds();
     }
     if (cc_run_middle_passes(&ssa, opt_level, diag) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "middle-end optimization failed");
+        }
         cc_ssa_module_free(&ssa);
         cc_tu_free(&tu);
         return -1;
@@ -90,6 +102,8 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     }
     if (cc_emit_gas(&ssa, out_s, display_src, emit_debug, target, diag) == 0) {
         rc = 0;
+    } else if (diag != NULL && diag->message[0] == '\0') {
+        snprintf(diag->message, sizeof(diag->message), "backend emission failed");
     }
     if (timings) {
         t_emit = now_seconds() - t0;

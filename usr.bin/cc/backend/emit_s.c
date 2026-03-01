@@ -18,8 +18,10 @@ typedef struct {
 
 typedef struct {
     int *slot_of;
+    int *stackalloc_off;
     int slot_count;
     int slot_size;
+    int frame_bytes;
 } slot_layout_t;
 
 typedef struct {
@@ -516,6 +518,12 @@ static char *render_inline_asm_template(const char *tmpl, char **operand_texts, 
         free(out);
         return NULL;
     }
+    if (out == NULL) {
+        out = (char *)malloc(1);
+        if (out != NULL) {
+            out[0] = '\0';
+        }
+    }
     return out;
 }
 
@@ -562,6 +570,7 @@ static const char *ssa_op_name(cc_ssa_opcode_t op) {
     case CC_SSA_I2F: return "i2f";
     case CC_SSA_F2I: return "f2i";
     case CC_SSA_FROUND32: return "fround32";
+    case CC_SSA_STACKALLOC: return "stackalloc";
     case CC_SSA_LABEL: return "label";
     case CC_SSA_BR: return "br";
     case CC_SSA_BR_COND: return "br_cond";
@@ -691,6 +700,9 @@ static int eval_const_i64_for_value(const cc_ssa_function_t *f, const int *def_i
         visiting[value] = 0;
         return 0;
 
+    case CC_SSA_STACKALLOC:
+        break;
+
     default:
         break;
     }
@@ -735,6 +747,60 @@ static int find_const_i64_for_value(const cc_ssa_function_t *f, int value, size_
     return rc;
 }
 
+static int find_def_instr_index_before(const cc_ssa_function_t *f, int value, size_t max_instr_index) {
+    size_t i;
+
+    if (f == NULL || value < 0 || f->instr_count == 0) {
+        return -1;
+    }
+    if (max_instr_index >= f->instr_count) {
+        max_instr_index = f->instr_count - 1;
+    }
+    for (i = max_instr_index + 1; i > 0; --i) {
+        const cc_ssa_instr_t *in = &f->instrs[i - 1];
+        if (in->dst == value) {
+            return (int)(i - 1);
+        }
+    }
+    return -1;
+}
+
+static int resolve_asm_immediate_symbol(const cc_ssa_function_t *f, int value, size_t max_instr_index, size_t fn_index,
+                                        int depth, char *out, size_t outsz) {
+    int def_idx;
+    const cc_ssa_instr_t *def;
+
+    if (f == NULL || value < 0 || out == NULL || outsz == 0) {
+        return -1;
+    }
+    if (depth > 32) {
+        return -1;
+    }
+
+    def_idx = find_def_instr_index_before(f, value, max_instr_index);
+    if (def_idx < 0) {
+        return -1;
+    }
+    def = &f->instrs[def_idx];
+
+    if (def->op == CC_SSA_MOV) {
+        return resolve_asm_immediate_symbol(f, def->lhs, max_instr_index, fn_index, depth + 1, out, outsz);
+    }
+    if (def->op == CC_SSA_STR) {
+        snprintf(out, outsz, "$.L__cc_str_%zu_%d", fn_index, def_idx);
+        return 0;
+    }
+    if (def->op == CC_SSA_GADDR && def->sym != NULL && def->sym[0] != '\0') {
+        snprintf(out, outsz, "$%s", def->sym);
+        return 0;
+    }
+    if (def->op == CC_SSA_LADDR) {
+        snprintf(out, outsz, "$.L%s_%d", f->name != NULL ? f->name : "__fn", def->label);
+        return 0;
+    }
+    return -1;
+}
+
 static void emit_string_literal_label(FILE *fp, size_t fn_index, size_t instr_index, const char *literal,
                                       const char *restore_sec) {
     fprintf(fp, "\t.section .rodata\n");
@@ -769,6 +835,12 @@ static void emit_text_section(FILE *fp, const char *section_name) {
     } else {
         fprintf(fp, "\t.text\n");
     }
+}
+
+static void emit_compiler_stamp(FILE *fp) {
+    fprintf(fp, "\n\t.section .note.substrate_cc,\"a\",@progbits\n");
+    fprintf(fp, "\t.asciz \"Substrate C Compiler v0.1\"\n");
+    fprintf(fp, "\t.text\n");
 }
 
 static int is_pointer_type(cc_type_t t) {
@@ -1181,6 +1253,13 @@ static int slot_off(const slot_layout_t *lay, int v) {
     return -lay->slot_size * (lay->slot_of[v] + 1);
 }
 
+static int stackalloc_off(const slot_layout_t *lay, int v) {
+    if (lay == NULL || lay->stackalloc_off == NULL || v < 0 || v >= lay->slot_count) {
+        return 0;
+    }
+    return lay->stackalloc_off[v];
+}
+
 static void emit_frame_load_reg(FILE *fp, int is_64bit, long off, const char *reg) {
     if (is_64bit) {
         fprintf(fp, "\tmovq %ld(%%rbp), %s\n", off, reg);
@@ -1472,9 +1551,12 @@ static void slot_layout_free(slot_layout_t *lay) {
         return;
     }
     free(lay->slot_of);
+    free(lay->stackalloc_off);
     lay->slot_of = NULL;
+    lay->stackalloc_off = NULL;
     lay->slot_count = 0;
     lay->slot_size = 0;
+    lay->frame_bytes = 0;
 }
 
 static int __attribute__((unused)) allocate_slot(int *free_slots, int *free_count, int *next_slot) {
@@ -1602,7 +1684,7 @@ static const char *reg32_to16(const char *r) {
 }
 
 static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
-                           size_t instr_index, int is_64bit, cc_diag_t *diag) {
+                           size_t fn_index, size_t instr_index, int is_64bit, cc_diag_t *diag) {
     size_t out_n = in->asm_out_count;
     size_t in_n = in->asm_in_count;
     size_t total = out_n + in_n;
@@ -1697,8 +1779,17 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
         if (asm_constraint_is_immediate(c)) {
             long imm = 0;
             char ibuf[64];
+            int sym_ok = -1;
             if (find_const_i64_for_value(f, v, instr_index, &imm) == 0) {
                 snprintf(ibuf, sizeof(ibuf), "$%ld", imm);
+                op_text[slot] = dup_cstr(ibuf);
+                if (op_text[slot] == NULL) {
+                    goto oom;
+                }
+                continue;
+            }
+            sym_ok = resolve_asm_immediate_symbol(f, v, instr_index, fn_index, 0, ibuf, sizeof(ibuf));
+            if (sym_ok == 0) {
                 op_text[slot] = dup_cstr(ibuf);
                 if (op_text[slot] == NULL) {
                     goto oom;
@@ -1721,8 +1812,12 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
                              (def->lhs >= 0 && def->lhs < f->value_count) ? (int)f->value_types[def->lhs] : -1,
                              lhs_def != NULL ? ssa_op_name(lhs_def->op) : "none", lhs_const, lhs_imm);
                 } else {
-                    snprintf(msg, sizeof(msg), "asm immediate constraint requires constant input (fn=%s value=%d def=%s)",
-                             f->name != NULL ? f->name : "<anon>", v, def != NULL ? ssa_op_name(def->op) : "none");
+                    snprintf(msg, sizeof(msg),
+                             "asm immediate constraint requires constant input (fn=%s value=%d def=%s sym=%s type=%d sym_ok=%d def_idx=%d)",
+                             f->name != NULL ? f->name : "<anon>", v, def != NULL ? ssa_op_name(def->op) : "none",
+                             (def != NULL && def->sym != NULL) ? def->sym : "",
+                             (v >= 0 && v < f->value_count) ? (int)f->value_types[v] : -1, sym_ok,
+                             find_def_instr_index_before(f, v, instr_index));
                 }
                 set_diag(diag, msg);
                 goto fail;
@@ -1759,6 +1854,14 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
     rendered = render_inline_asm_template(in->sym != NULL ? in->sym : "", op_text, op_names, total, in->asm_goto_labels,
                                           in->asm_goto_names, in->asm_goto_count, f->name, diag);
     if (rendered == NULL) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            char msg[384];
+            snprintf(msg, sizeof(msg),
+                     "inline asm template rendering failed (fn=%s instr=%zu out=%zu in=%zu tmpl=%.120s)",
+                     f->name != NULL ? f->name : "<anon>", instr_index, out_n, in_n,
+                     in->sym != NULL ? in->sym : "<null>");
+            set_diag(diag, msg);
+        }
         goto fail;
     }
     if (in->asm_volatile) {
@@ -1793,6 +1896,12 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
 oom:
     set_diag(diag, "out of memory preparing inline asm");
 fail:
+    if (diag != NULL && diag->message[0] == '\0') {
+        char msg[192];
+        snprintf(msg, sizeof(msg), "inline asm emission failed (fn=%s instr=%zu)",
+                 f->name != NULL ? f->name : "<anon>", instr_index);
+        set_diag(diag, msg);
+    }
     free(rendered);
     for (i = 0; i < total; ++i) {
         free(op_text[i]);
@@ -1808,6 +1917,8 @@ fail:
 static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *out, cc_diag_t *diag) {
     int i;
     int nvals;
+    int raw_frame;
+    size_t j;
 
     memset(out, 0, sizeof(*out));
     out->slot_size = slot_size;
@@ -1818,14 +1929,35 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
 
     nvals = f->value_count;
     out->slot_of = (int *)malloc((size_t)nvals * sizeof(*out->slot_of));
-    if (out->slot_of == NULL) {
+    out->stackalloc_off = (int *)calloc((size_t)nvals, sizeof(*out->stackalloc_off));
+    if (out->slot_of == NULL || out->stackalloc_off == NULL) {
         set_diag(diag, "out of memory building stack slot layout");
+        slot_layout_free(out);
         return -1;
     }
     for (i = 0; i < nvals; ++i) {
         out->slot_of[i] = i;
     }
     out->slot_count = nvals;
+    raw_frame = nvals * slot_size;
+    for (j = 0; j < f->instr_count; ++j) {
+        const cc_ssa_instr_t *in = &f->instrs[j];
+        int bytes;
+
+        if (in->op != CC_SSA_STACKALLOC || in->dst < 0 || in->dst >= nvals) {
+            continue;
+        }
+        bytes = in->imm > 0 ? (int)in->imm : 1;
+        bytes = ((bytes + slot_size - 1) / slot_size) * slot_size;
+        if (raw_frame > INT32_MAX - bytes) {
+            set_diag(diag, "stack frame too large for stack allocation layout");
+            slot_layout_free(out);
+            return -1;
+        }
+        raw_frame += bytes;
+        out->stackalloc_off[in->dst] = -raw_frame;
+    }
+    out->frame_bytes = raw_frame;
     return 0;
 }
 
@@ -2216,9 +2348,12 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         int va_copy_off = 0;
 
         if (build_slot_layout(f, 8, &lay, diag) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                set_diag(diag, "x86_64: failed to build slot layout");
+            }
             return -1;
         }
-        raw_frame = lay.slot_count * 8;
+        raw_frame = lay.frame_bytes;
         if (f->is_variadic) {
             va_copy_off = -(raw_frame + 8);
             raw_frame += 8;
@@ -2263,6 +2398,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         }
         if (int_regs_init(&ist, f, emit_regs64, (int)(sizeof(emit_regs64) / sizeof(emit_regs64[0])), 1, diag) != 0) {
             slot_layout_free(&lay);
+            if (diag != NULL && diag->message[0] == '\0') {
+                set_diag(diag, "x86_64: failed to initialize integer register state");
+            }
             return -1;
         }
 
@@ -2358,6 +2496,20 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     int_regs_remap_dst(fp, f, &lay, &ist, in->dst, rl);
                 }
                 break;
+
+            case CC_SSA_STACKALLOC: {
+                int off = stackalloc_off(&lay, in->dst);
+                int rd;
+                if (off == 0) {
+                    set_diag(diag, "x86_64: missing stack allocation offset");
+                    int_regs_free(&ist);
+                    slot_layout_free(&lay);
+                    return -1;
+                }
+                rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                fprintf(fp, "\tleaq %d(%%rbp), %s\n", off, ist.regs[rd]);
+                break;
+            }
 
             case CC_SSA_ADDR:
                 /*
@@ -2482,6 +2634,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                     if (emit_x86_64_float_binop(fp, &lay, in, diag) != 0) {
                         int_regs_free(&ist);
                         slot_layout_free(&lay);
+                        if (diag != NULL && diag->message[0] == '\0') {
+                            set_diag(diag, "x86_64: floating arithmetic emission failed");
+                        }
                         return -1;
                     }
                 } else {
@@ -2589,6 +2744,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 if (emit_x86_64_cmp(fp, f, &lay, &ist, in) != 0) {
                     int_regs_free(&ist);
                     slot_layout_free(&lay);
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        set_diag(diag, "x86_64: compare emission failed");
+                    }
                     return -1;
                 }
                 break;
@@ -2646,6 +2804,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 if (emit_x86_64_call(fp, f, &lay, &ist, in, diag) != 0) {
                     int_regs_free(&ist);
                     slot_layout_free(&lay);
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        set_diag(diag, "x86_64: call emission failed");
+                    }
                     return -1;
                 }
                 break;
@@ -2653,9 +2814,15 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             case CC_SSA_ASM:
                 int_regs_flush(fp, f, &lay, &ist);
-                if (emit_inline_asm(fp, f, &lay, in, j, 1, diag) != 0) {
+                if (emit_inline_asm(fp, f, &lay, in, i, j, 1, diag) != 0) {
                     int_regs_free(&ist);
                     slot_layout_free(&lay);
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        char msg[256];
+                        snprintf(msg, sizeof(msg), "x86_64: inline asm emission failed (fn=%s instr=%zu tmpl=%.64s)",
+                                 f->name != NULL ? f->name : "<anon>", j, in->sym != NULL ? in->sym : "");
+                        set_diag(diag, msg);
+                    }
                     return -1;
                 }
                 break;
@@ -3331,7 +3498,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         if (build_slot_layout(f, 8, &lay, diag) != 0) {
             return -1;
         }
-        frame = (lay.slot_count * 8 + 16 + 15) & ~15;
+        frame = (lay.frame_bytes + 16 + 15) & ~15;
         scratch_off = -frame;
 
         fprintf(fp, "\n");
@@ -3414,6 +3581,20 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
                     int_regs_remap_dst(fp, f, &lay, &ist, in->dst, rl);
                 }
                 break;
+
+            case CC_SSA_STACKALLOC: {
+                int off = stackalloc_off(&lay, in->dst);
+                int rd;
+                if (off == 0) {
+                    set_diag(diag, "i386: missing stack allocation offset");
+                    int_regs_free(&ist);
+                    slot_layout_free(&lay);
+                    return -1;
+                }
+                rd = int_regs_define(fp, f, &lay, &ist, in->dst, -1, -1);
+                fprintf(fp, "\tleal %d(%%ebp), %s\n", off, ist.regs[rd]);
+                break;
+            }
 
             case CC_SSA_ADDR:
                 /*
@@ -3590,7 +3771,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
 
             case CC_SSA_ASM:
                 int_regs_flush(fp, f, &lay, &ist);
-                if (emit_inline_asm(fp, f, &lay, in, j, 0, diag) != 0) {
+                if (emit_inline_asm(fp, f, &lay, in, i, j, 0, diag) != 0) {
                     int_regs_free(&ist);
                     slot_layout_free(&lay);
                     return -1;
@@ -3661,10 +3842,16 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
 
     cc_mir_module_init(&mir);
     if (cc_backend_lower_to_mir(m, &mir, diag) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            set_diag(diag, "MIR lowering failed");
+        }
         fclose(fp);
         return -1;
     }
     if (cc_backend_mir_validate(&mir, diag) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            set_diag(diag, "MIR validation failed");
+        }
         cc_mir_module_free(&mir);
         fclose(fp);
         return -1;
@@ -3675,18 +3862,28 @@ int cc_emit_gas(const cc_ssa_module_t *m, const char *path, const char *src_path
         fprintf(fp, ".file 1 \"%s\"\n", src_path);
     }
     if (emit_globals(fp, m, target == CC_TARGET_I386 ? 4 : 8, diag) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            set_diag(diag, "global emission failed");
+        }
         fclose(fp);
         return -1;
     }
+    emit_compiler_stamp(fp);
 
     if (target == CC_TARGET_I386) {
         fprintf(fp, ".code32\n");
         if (emit_i386(fp, m, src_path, emit_debug, diag) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                set_diag(diag, "i386 emission failed");
+            }
             fclose(fp);
             return -1;
         }
     } else {
         if (emit_x86_64(fp, m, src_path, emit_debug, diag) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                set_diag(diag, "x86_64 emission failed");
+            }
             fclose(fp);
             return -1;
         }

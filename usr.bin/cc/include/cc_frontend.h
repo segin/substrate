@@ -169,6 +169,7 @@ struct cc_expr {
     size_t col;
     cc_type_t value_type;
     int struct_id;
+    unsigned char paren_wrapped;
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     long int_val;

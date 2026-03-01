@@ -205,6 +205,9 @@ static int lower_instr(const cc_ssa_instr_t *si, cc_mir_instr_t *mi, cc_diag_t *
         mi->op = CC_MIR_CAST;
         mi->cast_op = CC_MIR_CAST_FROUND32;
         return 0;
+    case CC_SSA_STACKALLOC:
+        mi->op = CC_MIR_ADDR;
+        return 0;
     case CC_SSA_LABEL:
         mi->op = CC_MIR_LABEL;
         return 0;

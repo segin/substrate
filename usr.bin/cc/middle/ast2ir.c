@@ -55,6 +55,7 @@ static int var_find_visible(var_entry_t *vars, size_t var_count, const char *nam
 static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name);
 static int member_base_struct_id(const cc_expr_t *e);
 static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t *tu, int sid, const char *name);
+static const cc_expr_t *unwrap_self_designated_init_list(const cc_expr_t *init_list, const char *member_name);
 
 static int asm_constraint_has(const char *c, char ch) {
     return c != NULL && strchr(c, ch) != NULL;
@@ -1507,59 +1508,25 @@ static int is_freestanding_mode(void) {
     return 1;
 }
 
-static const char *local_array_allocator_symbol(void) {
-    return is_freestanding_mode() ? "kzalloc" : "calloc";
-}
-
 static int emit_local_storage_alloc(cc_ssa_function_t *sf, long total_size, cc_diag_t *diag) {
-    cc_ssa_instr_t call_in;
-    const char *alloc_sym = local_array_allocator_symbol();
-    int onev = -1;
-    int bytesv;
+    cc_ssa_instr_t in;
     int dst;
 
     if (total_size <= 0) {
         set_diag(diag, "invalid local storage size");
         return -1;
     }
-    bytesv = emit_const_i64_instr(sf, total_size);
-    if (bytesv < 0) {
-        return -1;
-    }
-    if (strcmp(alloc_sym, "calloc") == 0) {
-        onev = emit_const_i64_instr(sf, 1);
-        if (onev < 0) {
-            return -1;
-        }
-    }
     dst = new_value(sf, CC_VAL_I64);
     if (dst < 0) {
         set_diag(diag, "out of memory allocating local storage value");
         return -1;
     }
-    memset(&call_in, 0, sizeof(call_in));
-    call_in.op = CC_SSA_CALL;
-    call_in.call_is_variadic = 0;
-    call_in.sym = xstrdup(alloc_sym);
-    call_in.arg_count = strcmp(alloc_sym, "calloc") == 0 ? 2 : 1;
-    call_in.args = (int *)calloc(call_in.arg_count, sizeof(*call_in.args));
-    call_in.dst = dst;
-    if (call_in.sym == NULL || call_in.args == NULL) {
-        free(call_in.sym);
-        free(call_in.args);
-        set_diag(diag, "out of memory allocating local storage call");
-        return -1;
-    }
-    if (call_in.arg_count == 2) {
-        call_in.args[0] = onev;
-        call_in.args[1] = bytesv;
-    } else {
-        call_in.args[0] = bytesv;
-    }
-    if (push_instr(sf, call_in) != 0) {
-        free(call_in.sym);
-        free(call_in.args);
-        set_diag(diag, "out of memory appending local storage call");
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_STACKALLOC;
+    in.dst = dst;
+    in.imm = total_size;
+    if (push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory appending local storage allocation");
         return -1;
     }
     return dst;
@@ -2797,7 +2764,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             if (cmp_vt == CC_VAL_I64) {
-                cmp_it = common_integral_type(e->lhs->value_type, e->rhs->value_type);
+                if (is_pointer_type(e->lhs->value_type) || is_pointer_type(e->rhs->value_type)) {
+                    cmp_it = g_pointer_size_bytes <= 4 ? CC_TYPE_UINT : CC_TYPE_ULONG_LONG;
+                } else {
+                    cmp_it = common_integral_type(e->lhs->value_type, e->rhs->value_type);
+                }
                 if (is_integral_type(cmp_it)) {
                     lhs = normalize_integral_value(sf, lhs, cmp_it, diag);
                     rhs = normalize_integral_value(sf, rhs, cmp_it, diag);
@@ -4661,53 +4632,17 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return -1;
         }
         if (aggregate_cast_target) {
-            cc_ssa_instr_t call_in;
-            int onev = -1;
-            int sizev;
             int dst_ptr;
             int storesrc;
             long store_size;
             long sz = type_size_bytes_with_struct(tu, e->aux_type, e->aux_struct_id);
-            const char *alloc_sym = local_array_allocator_symbol();
             if (sz <= 0) {
                 sz = 1;
             }
-            sizev = emit_const_i64_instr(sf, sz);
-            if (sizev < 0) {
+            dst_ptr = emit_local_storage_alloc(sf, sz, diag);
+            if (dst_ptr < 0) {
                 return -1;
             }
-            if (strcmp(alloc_sym, "calloc") == 0) {
-                onev = emit_const_i64_instr(sf, 1);
-                if (onev < 0) {
-                    return -1;
-                }
-            }
-            memset(&call_in, 0, sizeof(call_in));
-            call_in.op = CC_SSA_CALL;
-            call_in.call_is_variadic = 0;
-            call_in.sym = xstrdup(alloc_sym);
-            call_in.arg_count = strcmp(alloc_sym, "calloc") == 0 ? 2 : 1;
-            call_in.args = (int *)calloc(call_in.arg_count, sizeof(*call_in.args));
-            call_in.dst = new_value(sf, CC_VAL_I64);
-            if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
-                free(call_in.sym);
-                free(call_in.args);
-                set_diag(diag, "out of memory allocating aggregate cast storage");
-                return -1;
-            }
-            if (call_in.arg_count == 2) {
-                call_in.args[0] = onev;
-                call_in.args[1] = sizev;
-            } else {
-                call_in.args[0] = sizev;
-            }
-            if (push_instr(sf, call_in) != 0) {
-                free(call_in.sym);
-                free(call_in.args);
-                set_diag(diag, "out of memory emitting aggregate cast allocation");
-                return -1;
-            }
-            dst_ptr = call_in.dst;
             if (cast_src->kind == CC_EXPR_INIT_LIST) {
                 if (lower_struct_init_to_ptr(tu, sf, ctx, vars, var_count, depth, dst_ptr, e->aux_struct_id, cast_src,
                                              diag) != 0) {
@@ -4767,7 +4702,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
             }
-            return call_in.dst;
+            return dst_ptr;
         }
         if (cast_src->kind == CC_EXPR_INIT_LIST) {
             cast_src = unwrap_scalar_initializer_expr(cast_src, diag);
@@ -5691,6 +5626,7 @@ static int lower_struct_init_to_ptr(const cc_translation_unit_t *tu, cc_ssa_func
                 item->lhs != NULL && item->lhs->kind == CC_EXPR_INIT_LIST) {
                 nested_item = item->lhs;
             }
+            nested_item = unwrap_self_designated_init_list(nested_item, m->name);
             if (nested_item->kind != CC_EXPR_INIT_LIST) {
                 if (nested_item->value_type == CC_TYPE_VOID && nested_item->struct_id == m->type_struct_id) {
                     int rhsv;
@@ -6490,12 +6426,30 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             const cc_asm_operand_t *op = &s->asm_outputs[i4];
             if (op->expr != NULL && op->expr->kind == CC_EXPR_IDENT && op->expr->ident != NULL) {
                 vidx = var_find_visible(*vars, *var_count, op->expr->ident, depth);
-                if (vidx < 0) {
-                    free_asm_instr_fields(&in);
-                    set_diag(diag, "asm output target must reference a local variable");
-                    return -1;
+                if (vidx >= 0) {
+                    in.asm_out_values[i4] = (*vars)[vidx].value;
+                } else if (asm_constraint_is_memory_only(op->constraint)) {
+                    const cc_global_t *g = find_global(tu, op->expr->ident);
+                    if (g != NULL) {
+                        int addrv = emit_global_addr(sf, g->name, diag);
+                        if (addrv < 0) {
+                            free_asm_instr_fields(&in);
+                            return -1;
+                        }
+                        in.asm_out_values[i4] = CC_SSA_ASM_MEM_INDIRECT_ENCODE(addrv);
+                    } else {
+                        free_asm_instr_fields(&in);
+                        set_diag(diag, "asm output target must reference a local or global lvalue");
+                        return -1;
+                    }
+                } else {
+                    int av = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr, diag);
+                    if (av < 0) {
+                        free_asm_instr_fields(&in);
+                        return -1;
+                    }
+                    in.asm_out_values[i4] = av;
                 }
-                in.asm_out_values[i4] = (*vars)[vidx].value;
             } else if (op->expr != NULL && op->expr->kind == CC_EXPR_DEREF && op->expr->lhs != NULL &&
                        asm_constraint_is_memory_only(op->constraint)) {
                 int addrv = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr->lhs, diag);
@@ -7712,6 +7666,45 @@ static int find_struct_member_index_by_name(const cc_struct_def_t *sd, const cha
     return -1;
 }
 
+static int find_struct_member_recursive(const cc_translation_unit_t *tu, int struct_id, const char *name,
+                                        const cc_struct_member_t **out_member, long *out_off) {
+    const cc_struct_def_t *sd;
+    size_t i;
+
+    if (tu == NULL || name == NULL || out_member == NULL || out_off == NULL ||
+        struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        return -1;
+    }
+
+    sd = &tu->structs[struct_id];
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        if (m->name != NULL && strcmp(m->name, name) == 0) {
+            *out_member = m;
+            *out_off = m->offset;
+            return 0;
+        }
+    }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        const cc_struct_member_t *sub_m = NULL;
+        long sub_off = 0;
+        if (m->name != NULL && m->name[0] != '\0') {
+            continue;
+        }
+        if (m->type != CC_TYPE_VOID || m->type_struct_id < 0 ||
+            (size_t)m->type_struct_id >= tu->struct_count) {
+            continue;
+        }
+        if (find_struct_member_recursive(tu, m->type_struct_id, name, &sub_m, &sub_off) == 0) {
+            *out_member = sub_m;
+            *out_off = m->offset + sub_off;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static size_t struct_next_init_member_index(const cc_struct_def_t *sd, size_t member_idx) {
     size_t next = member_idx + 1;
     long off;
@@ -7926,6 +7919,24 @@ static const cc_expr_t *extract_struct_init_list_expr(const cc_expr_t *e, int st
     return NULL;
 }
 
+static const cc_expr_t *unwrap_self_designated_init_list(const cc_expr_t *init_list, const char *member_name) {
+    const cc_expr_t *raw;
+    if (init_list == NULL || init_list->kind != CC_EXPR_INIT_LIST || member_name == NULL || member_name[0] == '\0') {
+        return init_list;
+    }
+    if (init_list->arg_count != 1 || init_list->args == NULL || init_list->args[0] == NULL) {
+        return init_list;
+    }
+    raw = init_list->args[0];
+    if (!is_member_designator_expr(raw) || raw->ident == NULL || raw->rhs == NULL) {
+        return init_list;
+    }
+    if (strcmp(raw->ident, member_name) != 0) {
+        return init_list;
+    }
+    return raw->rhs;
+}
+
 static int fill_fixed_char_array_from_string(const cc_expr_t *expr, cc_type_t elem_type, long elem_size, long max_elems,
                                              long field_off, unsigned char *buf, long buf_size, cc_diag_t *diag) {
     unsigned long *units = NULL;
@@ -8078,22 +8089,34 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
     while (i < init_list->arg_count) {
         const cc_expr_t *raw = init_list->args[i];
         const cc_expr_t *item = raw;
-        const cc_struct_member_t *m;
+        const cc_struct_member_t *m = NULL;
+        const cc_struct_member_t *nested_m = NULL;
         size_t member_idx = next_member;
         long field_off;
+        long nested_off = 0;
         long scalar_size;
         int is_designator = 0;
+        int is_nested_designator = 0;
         int consumed_item = 0;
         long natural_size;
 
         if (is_member_designator_expr(raw)) {
             int didx = find_struct_member_index_by_name(sd, raw->ident);
             if (didx < 0) {
-                set_diag(diag, "unknown designated struct member in global initializer");
-                return -1;
+                if (find_struct_member_recursive(tu, struct_id, raw->ident, &nested_m, &nested_off) != 0) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message),
+                                 "unknown designated struct member '%s' in global initializer for struct %s",
+                                 raw->ident != NULL ? raw->ident : "<null>",
+                                 sd->tag != NULL ? sd->tag : "<anonymous>");
+                    }
+                    return -1;
+                }
+                is_nested_designator = 1;
+            } else {
+                member_idx = (size_t)didx;
             }
             is_designator = 1;
-            member_idx = (size_t)didx;
             item = raw->rhs;
             consumed_item = 1;
             i++;
@@ -8101,26 +8124,26 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
         if (!is_designator && member_idx >= sd->member_count) {
             break;
         }
-        if (member_idx >= sd->member_count) {
+        if (!is_nested_designator && member_idx >= sd->member_count) {
             i = init_list->arg_count;
             break;
         }
 
-        m = &sd->members[member_idx];
-        if (!sd->is_union) {
+        m = is_nested_designator ? nested_m : &sd->members[member_idx];
+        if (!is_nested_designator && !sd->is_union) {
             next_member = struct_next_init_member_index(sd, member_idx);
-        } else if (!is_designator) {
+        } else if (!is_nested_designator && !is_designator) {
             /* A plain union initializer initializes a single member. */
             next_member = sd->member_count;
         }
-        if (struct_has_flexible_tail(sd) && member_idx + 1 == sd->member_count) {
+        if (!is_nested_designator && struct_has_flexible_tail(sd) && member_idx + 1 == sd->member_count) {
             /* GNU-compatible extension: accept and ignore flexible-array initializers. */
             if (!consumed_item) {
                 i++;
             }
             continue;
         }
-        field_off = base + m->offset;
+        field_off = base + (is_nested_designator ? nested_off : m->offset);
         if (field_off < 0 || field_off + m->size > buf_size) {
             set_diag(diag, "struct member offset exceeds global initializer object");
             return -1;
@@ -8192,6 +8215,7 @@ static int flatten_struct_init_bytes_cursor(const cc_translation_unit_t *tu, int
 
         if (m->type == CC_TYPE_VOID && m->type_struct_id >= 0) {
             const cc_expr_t *nested = extract_struct_init_list_expr(item, m->type_struct_id);
+            nested = unwrap_self_designated_init_list(nested, m->name);
             if (nested != NULL) {
                 size_t sub = 0;
                 if (!consumed_item) {

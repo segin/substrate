@@ -3037,9 +3037,9 @@ next_iter:
 
 static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, char ***out_args, size_t *out_count) {
     size_t i = open_pos + 1;
-    int level = 1;
-    int saw_any_token = 0;
-    int saw_comma = 0;
+    int paren_level = 1;
+    int brace_level = 0;
+    int bracket_level = 0;
     sb_t cur;
     pp_strvec_t args;
     memset(&cur, 0, sizeof(cur));
@@ -3048,7 +3048,6 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
         char c = src[i];
         if (c == '"' || c == '\'') {
             char q = c;
-            saw_any_token = 1;
             if (sb_append_c(&cur, c) != 0) {
                 goto fail;
             }
@@ -3071,8 +3070,43 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
             continue;
         }
         if (c == '(') {
-            level++;
-            saw_any_token = 1;
+            paren_level++;
+            if (sb_append_c(&cur, c) != 0) {
+                goto fail;
+            }
+            i++;
+            continue;
+        }
+        if (c == '{') {
+            brace_level++;
+            if (sb_append_c(&cur, c) != 0) {
+                goto fail;
+            }
+            i++;
+            continue;
+        }
+        if (c == '}') {
+            if (brace_level > 0) {
+                brace_level--;
+            }
+            if (sb_append_c(&cur, c) != 0) {
+                goto fail;
+            }
+            i++;
+            continue;
+        }
+        if (c == '[') {
+            bracket_level++;
+            if (sb_append_c(&cur, c) != 0) {
+                goto fail;
+            }
+            i++;
+            continue;
+        }
+        if (c == ']') {
+            if (bracket_level > 0) {
+                bracket_level--;
+            }
             if (sb_append_c(&cur, c) != 0) {
                 goto fail;
             }
@@ -3080,19 +3114,14 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
             continue;
         }
         if (c == ')') {
-            level--;
-            if (level == 0) {
+            paren_level--;
+            if (paren_level < 0) {
+                goto fail;
+            }
+            if (paren_level == 0 && brace_level == 0 && bracket_level == 0) {
                 char *arg = trim_dup(cur.buf != NULL ? cur.buf : "");
                 if (arg == NULL) {
                     goto fail;
-                }
-                if (!saw_any_token && !saw_comma && arg[0] == '\0') {
-                    free(arg);
-                    *end_pos = i + 1;
-                    *out_args = args.items;
-                    *out_count = args.count;
-                    sb_free(&cur);
-                    return 0;
                 }
                 if (strvec_push(&args, arg) != 0) {
                     free(arg);
@@ -3111,7 +3140,7 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
             i++;
             continue;
         }
-        if (c == ',' && level == 1) {
+        if (c == ',' && paren_level == 1 && brace_level == 0 && bracket_level == 0) {
             char *arg = trim_dup(cur.buf != NULL ? cur.buf : "");
             if (arg == NULL) {
                 goto fail;
@@ -3125,16 +3154,11 @@ static int parse_call_args(const char *src, size_t open_pos, size_t *end_pos, ch
             if (cur.buf != NULL) {
                 cur.buf[0] = '\0';
             }
-            saw_comma = 1;
-            saw_any_token = 0;
             i++;
             continue;
         }
         if (sb_append_c(&cur, c) != 0) {
             goto fail;
-        }
-        if (c != ' ' && c != '\t' && c != '\r' && c != '\n') {
-            saw_any_token = 1;
         }
         i++;
     }
@@ -3341,6 +3365,7 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                 if (!m->is_function) {
                     char *exp_body;
                     char *masked_body;
+                    size_t k = j;
                     if (disabled != NULL && strvec_push(disabled, name) != 0) {
                         free(name);
                         sb_free(&out);
@@ -3363,6 +3388,60 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         return NULL;
                     }
                     exp_body = masked_body;
+                    while (src[k] == ' ' || src[k] == '\t') {
+                        k++;
+                    }
+                    if (src[k] == '(') {
+                        const char *alias_start = skip_ws(exp_body);
+                        const char *alias_end = alias_start;
+                        while (is_ident_char((unsigned char)*alias_end)) {
+                            alias_end++;
+                        }
+                        if (alias_end > alias_start && skip_ws(alias_end)[0] == '\0') {
+                            char *alias_name = xstrdup_n(alias_start, (size_t)(alias_end - alias_start));
+                            if (alias_name == NULL) {
+                                free(exp_body);
+                                free(name);
+                                sb_free(&out);
+                                return NULL;
+                            }
+                            {
+                                pp_macro_t *alias_m = macro_find(&st->macros, alias_name);
+                                if (alias_m != NULL && alias_m->is_function) {
+                                    size_t call_end = 0;
+                                    char **alias_args = NULL;
+                                    size_t alias_arg_count = 0;
+                                    size_t ai;
+                                    if (parse_call_args(src, k, &call_end, &alias_args, &alias_arg_count) != 0) {
+                                        set_diag(diag, (size_t)line, k + 1, "malformed function-like macro invocation");
+                                        emit_macro_trace(file, line, alias_name);
+                                        free(alias_name);
+                                        free(exp_body);
+                                        free(name);
+                                        sb_free(&out);
+                                        return NULL;
+                                    }
+                                    for (ai = 0; ai < alias_arg_count; ++ai) {
+                                        free(alias_args[ai]);
+                                    }
+                                    free(alias_args);
+                                    if (sb_append(&out, exp_body) != 0 || sb_append_n(&out, src + j, call_end - j) != 0) {
+                                        free(alias_name);
+                                        free(exp_body);
+                                        free(name);
+                                        sb_free(&out);
+                                        return NULL;
+                                    }
+                                    free(alias_name);
+                                    free(exp_body);
+                                    free(name);
+                                    i = call_end;
+                                    continue;
+                                }
+                            }
+                            free(alias_name);
+                        }
+                    }
                     if (sb_append(&out, exp_body) != 0) {
                         free(exp_body);
                         free(name);
@@ -3403,9 +3482,22 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         sb_free(&out);
                         return NULL;
                     }
+                    if (!m->is_variadic && m->param_count == 0 && arg_count == 1 && args != NULL && args[0] != NULL &&
+                        args[0][0] == '\0') {
+                        free(args[0]);
+                        free(args);
+                        args = NULL;
+                        arg_count = 0;
+                    }
                     if ((!m->is_variadic && arg_count != m->param_count) || (m->is_variadic && arg_count < m->param_count)) {
-                        char msg[96];
-                        snprintf(msg, sizeof(msg), "macro '%s' argument count mismatch", name);
+                        char msg[160];
+                        if (m->is_variadic) {
+                            snprintf(msg, sizeof(msg), "macro '%s' argument count mismatch (got %zu, need at least %zu)",
+                                     name, arg_count, m->param_count);
+                        } else {
+                            snprintf(msg, sizeof(msg), "macro '%s' argument count mismatch (got %zu, expected %zu)", name,
+                                     arg_count, m->param_count);
+                        }
                         set_diag(diag, (size_t)line, k + 1, msg);
                         emit_macro_trace(file, line, name);
                         free(name);
@@ -3808,23 +3900,23 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
         }
         if (strcmp(next, cur) == 0) {
             char *normalized = strip_pragma_operators(next);
-            char *unmasked;
             free(cur);
-            if (use_local_disabled) {
-                strvec_free(disabled);
-            }
             free(next);
             if (normalized == NULL) {
                 set_diag(diag, (size_t)line, 1, "out of memory stripping _Pragma operators");
                 return NULL;
             }
-            unmasked = unmask_hidden_macro_tokens(normalized);
-            free(normalized);
-            if (unmasked == NULL) {
-                set_diag(diag, (size_t)line, 1, "out of memory unmasking hidden macro tokens");
-                return NULL;
+            if (use_local_disabled) {
+                char *unmasked = unmask_hidden_macro_tokens(normalized);
+                strvec_free(disabled);
+                free(normalized);
+                if (unmasked == NULL) {
+                    set_diag(diag, (size_t)line, 1, "out of memory unmasking hidden macro tokens");
+                    return NULL;
+                }
+                return unmasked;
             }
-            return unmasked;
+            return normalized;
         }
         free(cur);
         cur = next;
@@ -3834,19 +3926,21 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
     }
     {
         char *normalized = strip_pragma_operators(cur);
-        char *unmasked;
         free(cur);
         if (normalized == NULL) {
             set_diag(diag, (size_t)line, 1, "out of memory stripping _Pragma operators");
             return NULL;
         }
-        unmasked = unmask_hidden_macro_tokens(normalized);
-        free(normalized);
-        if (unmasked == NULL) {
-            set_diag(diag, (size_t)line, 1, "out of memory unmasking hidden macro tokens");
-            return NULL;
+        if (use_local_disabled) {
+            char *unmasked = unmask_hidden_macro_tokens(normalized);
+            free(normalized);
+            if (unmasked == NULL) {
+                set_diag(diag, (size_t)line, 1, "out of memory unmasking hidden macro tokens");
+                return NULL;
+            }
+            return unmasked;
         }
-        return unmasked;
+        return normalized;
     }
 }
 
@@ -4845,7 +4939,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
         proc = stripped.buf != NULL ? stripped.buf : "";
         p = skip_ws(proc);
         if (*p == '#') {
-            if (code_accum.len > 0) {
+            if (code_accum.len > 0 && code_paren_depth == 0) {
                 char *expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path, code_start_line,
                                              0, NULL, diag);
                 if (expanded == NULL) {
@@ -5340,10 +5434,6 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
 
     if (code_accum.len > 0) {
         char *expanded;
-        if (code_paren_depth != 0) {
-            set_diag(diag, (size_t)code_start_line, 1, "unterminated parenthesized expression");
-            goto fail;
-        }
         expanded = expand_text(st, code_accum.buf != NULL ? code_accum.buf : "", path, code_start_line, 0, NULL,
                                diag);
         if (expanded == NULL) {
