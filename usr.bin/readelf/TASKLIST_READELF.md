@@ -250,9 +250,9 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] Unknown types: numeric display.
 
 ### 19e. Dynamic Tests
-- [ ] All `DT_*` tags decoded.
-- [ ] `DT_FLAGS` and `DT_FLAGS_1` bit decoding.
-- [ ] String resolution from `.dynstr`.
+- [x] All `DT_*` tags decoded.
+- [x] `DT_FLAGS` and `DT_FLAGS_1` bit decoding.
+- [x] String resolution from `.dynstr`.
 
 ### 19f. Notes Tests
 - [ ] GNU build-id displayed as hex.
