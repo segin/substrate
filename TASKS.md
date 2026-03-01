@@ -968,17 +968,196 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] **VirtIO-SCSI:** <!-- virtio_scsi.c -->
             - [x] Pass-through driver mapping request queues to virtqueues. <!-- virtio_scsi.c:vscsi_execute -->
             - [x] Event queue handling (hot-plug). <!-- virtio_scsi.c:vscsi_process_events, vscsi_setup_event_buffers -->
-- [x] **ATA/IDE (Legacy):** <!-- ide.c complete with PIO, DMA, LBA48, ATAPI -->
-    - [x] Implement PIO Mode transfers.
-    - [x] **DMA Transfers:** <!-- ide.c:ide_dma_read, ide_dma_write -->
-        - [x] Bus Master Register access <!-- ide.c:ide_bm_* functions -->
-        - [x] PRDT (Physical Region Descriptor Table) setup <!-- ide.c:ide_prdt_setup, prdt_entry_t -->
-    - [x] Implement LBA48 support.
-    - [x] **ATAPI (SCSI Transport):** <!-- ide.c:ide_atapi_packet, SCSI commands -->
-        - [x] Packet command transmission standard (hooks into SCSI stack) <!-- ide.c:ide_atapi_packet -->
-        - [x] CD-ROM support <!-- ide.c:ide_atapi_read_sectors, ide_atapi_read_capacity, ide_atapi_read_toc -->
-    - [x] Support Primary/Secondary channels.
-    - [x] Support Master/Slave drives.
+- [ ] **ATA/IDE (Legacy):** <!-- ide.c, ide.h -->
+
+    > **Files:** `sys/drivers/storage/ide/ide.c`, `ide.h`.
+    >
+    > **Current state:** supports primary/secondary channels, PIO (LBA28/48),
+    > DMA (bus master), ATAPI packet commands, master/slave device selection.
+    > Channel struct hardcoded for 2 channels.
+
+    - [ ] **Channel Architecture:**
+        - [ ] **Primary Channel:** I/O 0x1F0, Control 0x3F6, IRQ 14.
+        - [ ] **Secondary Channel:** I/O 0x170, Control 0x376, IRQ 15.
+        - [ ] **Tertiary Channel:** I/O 0x1E8, Control 0x3EE, IRQ 11.
+            - ISA add‑in IDE controllers (e.g., Sound Blaster AWE32/64, Promise DC4030).
+            - Linux equivalents: `/dev/hde` (master), `/dev/hdf` (slave).
+        - [ ] **Quaternary Channel:** I/O 0x168, Control 0x36E, IRQ 10 (or 9).
+            - ISA add‑in IDE controllers, secondary port.
+            - Linux equivalents: `/dev/hdg` (master), `/dev/hdh` (slave).
+        - [ ] Expand `ide_channel_t` array from 2 to 4 entries.
+        - [ ] Expand `ide_device_t` array from 4 to 8 entries (2 per channel × 4 channels).
+        - [ ] Add `ATA_TERTIARY_IO` (0x1E8), `ATA_TERTIARY_CTRL` (0x3EE), `ATA_QUATERNARY_IO` (0x168), `ATA_QUATERNARY_CTRL` (0x36E) defines to `ide.h`.
+        - [ ] Probe all four channels during `ide_init()` — detect presence by reading status register (0xFF = empty bus).
+        - [ ] Support configurable channel I/O bases (for PCI IDE controllers with non‑standard BARs).
+    - [ ] **PCI IDE Controller Discovery:**
+        - [ ] Scan PCI class 0x01 subclass 0x01 (IDE Controller) for native/compatibility mode.
+        - [ ] Read PCI Programming Interface byte to determine:
+            - Bit 0: Primary channel in native mode (use BAR0/BAR1) vs compatibility mode (0x1F0/0x3F6).
+            - Bit 2: Secondary channel in native mode (use BAR2/BAR3) vs compatibility mode (0x170/0x376).
+            - Bit 7: Bus Master capable (use BAR4 for DMA registers).
+        - [ ] For native‑mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line.
+        - [ ] Detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 — typically expose as separate PCI functions).
+        - [ ] ISA tertiary/quaternary probing: if PCI does not enumerate additional channels, probe legacy I/O ports at 0x1E8 and 0x168 for device presence.
+    - [ ] **Device Identification (`ide_identify` / `ide_identify_atapi`):**
+        - [ ] Issue IDENTIFY DEVICE (0xEC) or IDENTIFY PACKET DEVICE (0xA1).
+        - [ ] Parse model, serial, firmware revision strings (byte‑swap from ATA word format).
+        - [ ] Extract LBA28 sector count (words 60–61) and LBA48 sector count (words 100–103).
+        - [ ] Extract supported command sets: DMA, LBA48, SMART, NCQ, TRIM.
+        - [ ] Extract supported DMA modes: MWDMA (words 63), UDMA (word 88).
+        - [ ] Detect 48‑bit addressing support (command set word 83 bit 10).
+    - [ ] **PIO Mode Transfers:**
+        - [ ] **LBA28 Read/Write:** `ide_read_sectors()` / `ide_write_sectors()` — 28‑bit LBA, max 256 sectors.
+        - [ ] **LBA48 Read/Write:** `ide_read_sectors_ext()` / `ide_write_sectors_ext()` — 48‑bit LBA, max 65536 sectors.
+        - [ ] Wait‑for‑BSY / wait‑for‑DRQ polling loops with bounded timeout.
+        - [ ] Error detection: check ERR bit after command completion, decode error register.
+        - [ ] 400 ns delay after writing command register (read alternate status 4 times).
+    - [ ] **DMA Transfers:**
+        - [ ] **Bus Master Register Access:**
+            - [ ] `ide_bm_start(channel, write)`: set direction, start DMA.
+            - [ ] `ide_bm_stop(channel)`: clear start bit.
+            - [ ] `ide_bm_status(channel)`: read status (active, error, interrupt).
+            - [ ] `ide_bm_clear_interrupt(channel)`: write 1 to clear interrupt bit.
+        - [ ] **PRDT (Physical Region Descriptor Table) Setup:**
+            - [ ] `ide_prdt_setup(channel, buffer, byte_count)`: build scatter‑gather list.
+            - [ ] Each PRD entry: 4‑byte aligned phys address + byte count + EOT flag.
+            - [ ] PRDT must not cross 64 KB boundary.
+            - [ ] Max 32 PRD entries (128 KB transfer).
+        - [ ] **DMA Read/Write:** `ide_dma_read()` / `ide_dma_write()` — issue DMA command, start bus master, wait for IRQ.
+        - [ ] **UDMA Mode Negotiation:**
+            - [ ] Read supported UDMA modes from IDENTIFY word 88.
+            - [ ] Issue SET FEATURES (0xEF) subcommand 0x03 with transfer mode.
+            - [ ] Track active DMA mode per device (`ide_device_t.dma_mode`).
+    - [ ] **ATAPI (SCSI Transport):**
+        - [ ] `ide_atapi_packet(channel, drive, cdb, cdb_len, buffer, buf_len, write)`: send CDB via PACKET command (0xA0).
+        - [ ] Handle DRQ‑based data transfer (PIO) or DMA‑based transfer.
+        - [ ] `ide_atapi_read_capacity()`: SCSI READ CAPACITY (0x25).
+        - [ ] `ide_atapi_read_sectors()`: SCSI READ (10) (0x28).
+        - [ ] `ide_atapi_read_toc()`: SCSI READ TOC (0x43) for CD‑ROM.
+        - [ ] Medium change detection (unit attention sense key).
+    - [ ] **IRQ Handling:**
+        - [ ] `ide_irq_handler(irq)`: acknowledge interrupt, signal DMA completion.
+        - [ ] IRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary).
+        - [ ] Support shared IRQs for PCI native‑mode controllers.
+    - [ ] **Software Reset:**
+        - [ ] Issue SRST via device control register (bit 2).
+        - [ ] Wait for BSY clear on both master and slave.
+        - [ ] Re‑identify devices after reset.
+    - [ ] **Power Management (deferred):**
+        - [ ] STANDBY IMMEDIATE (0xE0), IDLE IMMEDIATE (0xE1).
+        - [ ] CHECK POWER MODE (0xE5).
+        - [ ] Spin‑down timer configuration.
+    - [ ] **Naming Convention:**
+        - [ ] Primary master: `ide0`, primary slave: `ide1`.
+        - [ ] Secondary master: `ide2`, secondary slave: `ide3`.
+        - [ ] Tertiary master: `ide4`, tertiary slave: `ide5`.
+        - [ ] Quaternary master: `ide6`, quaternary slave: `ide7`.
+        - [ ] Register with `/dev/storage/ideN` DevFS nodes.
+    - [ ] **Error Handling:**
+        - [ ] Decode ATA error register bits (BBK, UNC, IDNF, ABRT, TK0NF, AMNF).
+        - [ ] Retry failed reads up to 3 times before reporting error.
+        - [ ] Log device faults and media errors to kernel console.
+        - [ ] Handle timeout (device not responding) gracefully — mark device offline.
+    - [ ] **Testing:**
+        - [ ] Unit: IDENTIFY parsing (model string byte‑swap, LBA48 detection, DMA mode extraction).
+        - [ ] Unit: PRDT construction (alignment, boundary, EOT flag).
+        - [ ] Integration: PIO read/write round‑trip on QEMU `-hda` disk.
+        - [ ] Integration: DMA read/write round‑trip on QEMU with bus master.
+        - [ ] Integration: ATAPI CD‑ROM read capacity + read sectors on QEMU `-cdrom`.
+        - [ ] Integration: tertiary/quaternary channel detection on QEMU with `-device ide-hd,bus=ide.2,...` (or equivalent).
+    - [ ] **Documentation:**
+        - [ ] Internal doc: ATA/IDE register map and command reference.
+        - [ ] Internal doc: channel probing strategy (PCI native vs ISA compatibility vs legacy tertiary/quaternary).
+
+- [ ] **Floppy Disk Controller (`sys/drivers/storage/floppy/`):**
+
+    > Supports standard PC floppy disk controller (Intel 82077AA / NEC µPD765
+    > compatible). Up to 4 drives (2 per controller, though most PCs have 1 controller).
+    > Naming: `fd0`–`fd3` at `/dev/storage/fdN`.
+
+    - [ ] **Controller Initialization (`fdc_init`):**
+        - [ ] Detect FDC presence: read MSR (Main Status Register) at 0x3F4.
+        - [ ] Issue RESET command: assert bit 2 of DOR (Digital Output Register, 0x3F2), then deassert.
+        - [ ] Wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4).
+        - [ ] Configure controller: CONFIGURE command (implied seek, FIFO threshold).
+        - [ ] Set data rate via CCR (Configuration Control Register, 0x3F7): 500kbps for HD, 300kbps for DD, 250kbps for SD.
+        - [ ] Enable DMA channel 2 for data transfers (ISA DMA).
+    - [ ] **I/O Registers (base 0x3F0):**
+        - [ ] 0x3F2: DOR (Digital Output Register) — drive select, motor control, DMA/IRQ enable, reset.
+        - [ ] 0x3F4: MSR (Main Status Register) — RQM, DIO, NDMA, busy flags.
+        - [ ] 0x3F5: Data Register (FIFO) — command/result/data bytes.
+        - [ ] 0x3F7: DIR (Digital Input Register, read) — disk change detect (bit 7).
+        - [ ] 0x3F7: CCR (Configuration Control Register, write) — data rate select.
+    - [ ] **DMA Configuration:**
+        - [ ] ISA DMA channel 2 (8‑bit transfers).
+        - [ ] Program DMA controller (ports 0x04, 0x05, 0x81, 0x0A, 0x0B, 0x0C) for read/write.
+        - [ ] DMA buffer must be below 16 MB (ISA 24‑bit addressing).
+        - [ ] Allocate bounce buffer in low memory if kernel buffer is above 16 MB.
+    - [ ] **Drive Detection:**
+        - [ ] Query CMOS (RTC port 0x70/0x71, register 0x10) for drive types:
+            - Bits 7–4: drive 0 type, bits 3–0: drive 1 type.
+            - 0=none, 1=360K, 2=1.2M, 3=720K, 4=1.44M, 5=2.88M.
+        - [ ] Support up to 4 drives: drives 0–1 on primary FDC (0x3F0), drives 2–3 on secondary FDC (0x370, rare).
+        - [ ] Register detected drives with DevFS as `/dev/storage/fd0`..`/dev/storage/fd3`.
+    - [ ] **Motor Control:**
+        - [ ] Motor on: set DOR motor bits (bits 4–7) for target drive.
+        - [ ] Spin‑up delay: wait 300–500 ms after motor on before I/O.
+        - [ ] Motor off timer: auto‑stop motor after 2–3 seconds of inactivity.
+        - [ ] Track motor state per drive to avoid redundant spin‑up.
+    - [ ] **Media Types:**
+        - [ ] 3.5" HD: 1.44 MB — 80 cylinders, 2 heads, 18 sectors/track, 512 bytes/sector.
+        - [ ] 3.5" DD: 720 KB — 80 cylinders, 2 heads, 9 sectors/track.
+        - [ ] 3.5" ED: 2.88 MB — 80 cylinders, 2 heads, 36 sectors/track (rare).
+        - [ ] 5.25" HD: 1.2 MB — 80 cylinders, 2 heads, 15 sectors/track.
+        - [ ] 5.25" DD: 360 KB — 40 cylinders, 2 heads, 9 sectors/track.
+        - [ ] Store geometry per drive in `fdc_drive_t` struct.
+    - [ ] **Seek and Recalibrate:**
+        - [ ] RECALIBRATE command: move head to cylinder 0 (issued on init and after errors).
+        - [ ] SEEK command: move to target cylinder.
+        - [ ] Wait for IRQ6 after seek; issue SENSE INTERRUPT to confirm.
+        - [ ] Track current cylinder per drive to avoid redundant seeks.
+    - [ ] **Read/Write Operations:**
+        - [ ] READ DATA command (MT=1, MFM=1): multi‑track read with DMA.
+        - [ ] WRITE DATA command (MT=1, MFM=1): multi‑track write with DMA.
+        - [ ] CHS‑to‑LBA and LBA‑to‑CHS conversion for block device interface.
+        - [ ] Convert sector addresses: `cylinder = LBA / (heads * spt)`, `head = (LBA / spt) % heads`, `sector = (LBA % spt) + 1`.
+        - [ ] Read result bytes (ST0, ST1, ST2, C, H, R, N) after each command to check success.
+        - [ ] Retry on error: recalibrate and retry up to 3 times, then fail.
+    - [ ] **Format Track:**
+        - [ ] FORMAT TRACK command: write sector headers for an entire track.
+        - [ ] Build format buffer with (C, H, R, N) tuples for each sector.
+        - [ ] Used by disk formatting utilities.
+    - [ ] **Disk Change Detection:**
+        - [ ] Read DIR bit 7 (DSKCHG) to detect media removal/insertion.
+        - [ ] On change: invalidate cached geometry, re‑detect media type.
+        - [ ] Seek to cylinder 1 and back to cylinder 0 to clear DSKCHG bit.
+    - [ ] **IRQ Handling:**
+        - [ ] IRQ 6 handler: set completion flag, wake waiting thread.
+        - [ ] SENSE INTERRUPT STATUS command after IRQ to read ST0 and current cylinder.
+    - [ ] **Error Handling:**
+        - [ ] Decode ST0/ST1/ST2 result bytes for error classification.
+        - [ ] ST0 bits 7–6: interrupt code (00=normal, 01=abnormal, 10=invalid, 11=drive not ready).
+        - [ ] ST1: missing address mark, write protect, no data, overrun, CRC error.
+        - [ ] ST2: wrong cylinder, bad cylinder, missing data address mark.
+        - [ ] Automatic retry with recalibrate on recoverable errors.
+    - [ ] **Block Device Interface:**
+        - [ ] Register with storage subsystem as block device.
+        - [ ] `fdc_read(drive, lba, count, buffer)` / `fdc_write(drive, lba, count, buffer)`.
+        - [ ] Sector size: 512 bytes (standard).
+        - [ ] Report device capacity based on detected media geometry.
+    - [ ] **Testing:**
+        - [ ] Unit: CHS↔LBA conversion for all supported media geometries.
+        - [ ] Unit: DMA buffer address validation (below 16 MB, page‑aligned).
+        - [ ] Unit: CMOS drive type parsing.
+        - [ ] Integration: read/write/verify cycle on QEMU with `-fda` / `-fdb` images.
+        - [ ] Integration: disk change detection on QEMU.
+        - [ ] Integration: format + read‑back on blank floppy image.
+    - [ ] **Documentation:**
+        - [ ] Internal doc: FDC register map and command reference.
+        - [ ] Internal doc: DMA programming for ISA channel 2.
+        - [ ] Internal doc: media type detection and geometry tables.
+
+
 - [ ] **AHCI:**
     - [ ] **HBA Initialization:**
         - [ ] Enable AHCI Mode (GHC.AE).
