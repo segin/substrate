@@ -48,14 +48,14 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `.incbin` for binary inclusion.
 
 ### 1f. ELF Output (via `libelfobj`)
-- [ ] Generate ET_REL ELF32 (i386, ARMv7) and ELF64 (x86-64, AArch64).
-- [ ] Emit section headers, symbol table (`.symtab`/`.strtab`), section name table (`.shstrtab`).
-- [ ] Emit relocations: REL (i386, ARM) and RELA (x86-64, AArch64).
-- [ ] `.note.gnu.property` for x86-64-v2/v3/v4 ISA level marking.
-- [ ] `.note.GNU-stack` for executable stack control.
-- [ ] Debug sections passthrough (`.debug_*`, `.eh_frame`).
-- [ ] DWARF `.debug_line` generation from `.loc`/`.file` directives.
-- [ ] `.eh_frame` / `.eh_frame_hdr` CFI via `.cfi_*` directives.
+- [x] Generate ET_REL ELF32 (i386, ARMv7) and ELF64 (x86-64, AArch64).
+- [x] Emit section headers, symbol table (`.symtab`/`.strtab`), section name table (`.shstrtab`).
+- [x] Emit relocations: REL (i386, ARM) and RELA (x86-64, AArch64).
+- [x] `.note.gnu.property` for x86-64-v2/v3/v4 ISA level marking.
+- [x] `.note.GNU-stack` for executable stack control.
+- [x] Debug sections passthrough (`.debug_*`, `.eh_frame`).
+- [x] DWARF `.debug_line` generation from `.loc`/`.file` directives.
+- [x] `.eh_frame` / `.eh_frame_hdr` CFI via `.cfi_*` directives.
 
 ### 1g. Relaxation Engine
 - [ ] Branch relaxation: short→near→far jump promotion.
