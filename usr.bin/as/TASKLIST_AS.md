@@ -192,21 +192,21 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 > AVX-512F, AVX-512BW, AVX-512CD, AVX-512DQ, AVX-512VL.
 
 ### 5a. AVX-512F (Foundation)
-- [ ] 512-bit arithmetic: `VADDPS/PD`, `VSUB`, `VMUL`, `VDIV`, `VMAX`, `VMIN`, `VSQRT` (zmm)
-- [ ] `VRSQRT14`, `VRCP14`, FMA 512-bit forms
-- [ ] Conversions: `VCVT{PS,PD,DQ,UDQ,QQ,UQQ}2{PS,PD,DQ,UDQ}` (all signed/unsigned)
-- [ ] Broadcasts: `VBROADCASTSS/SD/F32X4/F64X4` (zmm)
-- [ ] Insert/Extract: `VINSERTF32X4/F64X4`, `VEXTRACTF32X4/F64X4`
-- [ ] Permutes: `VPERMPS/PD/D/Q`, `VPERMI2{PS,PD,D,Q,W,B}`, `VPERMT2{PS,PD,D,Q,W,B}`
-- [ ] Shuffles: `VSHUFF32X4/F64X2`, `VSHUFI32X4/I64X2`
-- [ ] Compress/Expand: `VCOMPRESSPS/PD`, `VPCOMPRESSD/Q`, `VEXPANDPS/PD`, `VPEXPANDD/Q`
-- [ ] FP special: `VGETEXPPS/PD/SS/SD`, `VGETMANTPS/PD/SS/SD`, `VSCALEFPS/PD/SS/SD`, `VFIXUPIMMPS/PD/SS/SD`, `VRNDSCALEPS/PD/SS/SD`
-- [ ] Compares-to-mask: `VCMPPS/PD`, `VPCMPD/Q/UD/UQ`
-- [ ] Blend/Logic: `VPBLENDMD/MQ`, `VPTERNLOGD/Q`
-- [ ] Down-converts: `VPMOVDB/DW/QB/QD/QW` (truncate/signed-sat/unsigned-sat)
-- [ ] Masked moves: `VMOVDQA32/64`, `VMOVDQU8/16/32/64`
-- [ ] Gather/Scatter: `VGATHER{D,Q}{PS,PD}`, `VPGATHER{DD,DQ,QD,QQ}`, `VSCATTER{D,Q}{PS,PD}`, `VPSCATTER{DD,DQ,QD,QQ}` (zmm)
-- [ ] **Opmask:** `KMOV{B,W,D,Q}`, `KAND/OR/XOR/XNOR/NOT/ANDN{B,W,D,Q}`, `KORTEST/KTEST{B,W,D,Q}`, `KSHIFTL/R{B,W,D,Q}`, `KUNPCK{BW,WD,DQ}`, `KADD{W,D,Q}`
+- [x] 512-bit arithmetic: `VADDPS/PD`, `VSUB`, `VMUL`, `VDIV`, `VMAX`, `VMIN`, `VSQRT` (zmm)
+- [x] `VRSQRT14`, `VRCP14`, FMA 512-bit forms
+- [x] Conversions: `VCVT{PS,PD,DQ,UDQ,QQ,UQQ}2{PS,PD,DQ,UDQ}` (all signed/unsigned)
+- [x] Broadcasts: `VBROADCASTSS/SD/F32X4/F64X4` (zmm)
+- [x] Insert/Extract: `VINSERTF32X4/F64X4`, `VEXTRACTF32X4/F64X4`
+- [x] Permutes: `VPERMPS/PD/D/Q`, `VPERMI2{PS,PD,D,Q,W,B}`, `VPERMT2{PS,PD,D,Q,W,B}`
+- [x] Shuffles: `VSHUFF32X4/F64X2`, `VSHUFI32X4/I64X2`
+- [x] Compress/Expand: `VCOMPRESSPS/PD`, `VPCOMPRESSD/Q`, `VEXPANDPS/PD`, `VPEXPANDD/Q`
+- [x] FP special: `VGETEXPPS/PD/SS/SD`, `VGETMANTPS/PD/SS/SD`, `VSCALEFPS/PD/SS/SD`, `VFIXUPIMMPS/PD/SS/SD`, `VRNDSCALEPS/PD/SS/SD`
+- [x] Compares-to-mask: `VCMPPS/PD`, `VPCMPD/Q/UD/UQ`
+- [x] Blend/Logic: `VPBLENDMD/MQ`, `VPTERNLOGD/Q`
+- [x] Down-converts: `VPMOVDB/DW/QB/QD/QW` (truncate/signed-sat/unsigned-sat)
+- [x] Masked moves: `VMOVDQA32/64`, `VMOVDQU8/16/32/64`
+- [x] Gather/Scatter: `VGATHER{D,Q}{PS,PD}`, `VPGATHER{DD,DQ,QD,QQ}`, `VSCATTER{D,Q}{PS,PD}`, `VPSCATTER{DD,DQ,QD,QQ}` (zmm)
+- [x] **Opmask:** `KMOV{B,W,D,Q}`, `KAND/OR/XOR/XNOR/NOT/ANDN{B,W,D,Q}`, `KORTEST/KTEST{B,W,D,Q}`, `KSHIFTL/R{B,W,D,Q}`, `KUNPCK{BW,WD,DQ}`, `KADD{W,D,Q}`
 
 ### 5b. AVX-512BW (Byte/Word)
 - [ ] 512-bit byte/word arithmetic, pack, unpack, shuffle, shift, compare-to-mask

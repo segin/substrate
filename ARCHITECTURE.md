@@ -204,6 +204,7 @@ These components are essential for booting and basic system operation.
   - F16C support (`vcvtph2ps`, `vcvtps2ph`) is staged in `usr.bin/as/as_x86_f16c.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_f16c_core.sh`.
   - FMA3 support (`vfmadd*`, `vfmsub*`, `vfnmadd*`, `vfnmsub*`, `vfmaddsub*`, `vfmsubadd*` across 132/213/231 packed+scalar forms) is staged in `usr.bin/as/as_x86_fma.c` with exhaustive form coverage in `tests/usr.bin/as/test_x86_fma_core.sh`.
   - x86-64-v3 miscellaneous support (`lzcnt`, `movbe`, and `xsave*`/`xrstor*`/`xgetbv`/`xsetbv` families including explicit `*64` forms) is staged in `usr.bin/as/as_x86_v3_misc.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_v3_misc_core.sh`.
+  - AVX-512F staged support (EVEX arithmetic, broadcast/permute/shuffle, compress/expand, FP-special, compare-to-mask, blend/ternlog, down-convert, gather/scatter, and K-mask instruction families) is staged in `usr.bin/as/as_x86_avx512f.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_avx512f_core.sh`.
   - CLI compatibility surface now includes `-msyntax=att|intel`, warning controls (`-W/--warn/--no-warn/--fatal-warnings`), `--defsym`, `-al` listings, `--statistics`, and `--target-help` with regression coverage in `tests/usr.bin/as/test_cli_extended.sh`.
   - For complete ISA coverage during migration, it still forwards final assembly to host GCC/GAS (`-m32`/`-m64`) and validates ELF class/machine/type through `libelfobj`.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).
