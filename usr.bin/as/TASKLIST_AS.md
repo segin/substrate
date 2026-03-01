@@ -177,8 +177,8 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `VCVTPH2PS`, `VCVTPS2PH`
 
 ### 4f. FMA (132/213/231 × PS/PD/SS/SD)
-- [ ] `VFMADD`, `VFMSUB`, `VFNMADD`, `VFNMSUB` (all 12 forms each)
-- [ ] `VFMADDSUB`, `VFMSUBADD` (all 6 forms each)
+- [x] `VFMADD`, `VFMSUB`, `VFNMADD`, `VFNMSUB` (all 12 forms each)
+- [x] `VFMADDSUB`, `VFMSUBADD` (all 6 forms each)
 
 ### 4g. LZCNT / MOVBE / XSAVE
 - [ ] `LZCNT r16/32/64, r/m16/32/64`
