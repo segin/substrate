@@ -112,16 +112,16 @@ Execution policy:
 - [x] Driver output compatibility with `ld` and `objdump`.
 
 ## 9) Diagnostics, Safety, and Determinism
-- [ ] `file:line:col` diagnostics for parse/encode errors.
-- [ ] Include stack trace in diagnostics.
-- [ ] Expression evaluation context in overflow diagnostics.
-- [ ] Bounds checks for all section/data buffer writes.
-- [ ] Configurable hard limits (macro depth, include depth, token length).
-- [ ] Reproducible object output under identical inputs/options.
-- [ ] No host-dependent ordering of symbols/sections.
-- [ ] Graceful OOM handling with deterministic failure.
-- [ ] Fuzz-hardening for parser and expression engine.
-- [ ] Structured internal error codes for programmatic use.
+- [x] `file:line:col` diagnostics for parse/encode errors.
+- [x] Include stack trace in diagnostics.
+- [x] Expression evaluation context in overflow diagnostics.
+- [x] Bounds checks for all section/data buffer writes.
+- [x] Configurable hard limits (macro depth, include depth, token length).
+- [x] Reproducible object output under identical inputs/options.
+- [x] No host-dependent ordering of symbols/sections.
+- [x] Graceful OOM handling with deterministic failure.
+- [x] Fuzz-hardening for parser and expression engine.
+- [x] Structured internal error codes for programmatic use.
 
 ## 10) Testing, Fuzzing, and Performance
 - [ ] Unit tests: lexer/parser/expression engine.

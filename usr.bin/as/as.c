@@ -1,8 +1,11 @@
 #include "elfobj.h"
+#include <ctype.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -27,14 +30,60 @@ typedef struct {
     const char *out_path;
     const char *self_path;
     const char *march;
+    unsigned long long max_input_bytes;
+    unsigned long long max_line_bytes;
+    unsigned long long max_token_length;
+    unsigned long long max_macro_depth;
+    unsigned long long max_include_depth;
     strvec_t gcc_opts;
     strvec_t as_opts;
 } as_ctx_t;
 
+typedef enum {
+    AS_E_USAGE,
+    AS_E_INTERNAL,
+    AS_E_BACKEND,
+    AS_E_VALIDATE,
+    AS_E_LIMIT,
+} as_error_code_t;
+
+static int g_emit_error_codes = 0;
+
+static const char *as_error_code_name(as_error_code_t code) {
+    switch (code) {
+    case AS_E_USAGE:
+        return "AS_E_USAGE";
+    case AS_E_INTERNAL:
+        return "AS_E_INTERNAL";
+    case AS_E_BACKEND:
+        return "AS_E_BACKEND";
+    case AS_E_VALIDATE:
+        return "AS_E_VALIDATE";
+    case AS_E_LIMIT:
+        return "AS_E_LIMIT";
+    default:
+        return "AS_E_UNKNOWN";
+    }
+}
+
+static void as_diag(as_error_code_t code, const char *fmt, ...) {
+    va_list ap;
+
+    if (g_emit_error_codes) {
+        fprintf(stderr, "[%s] ", as_error_code_name(code));
+    }
+    fprintf(stderr, "as: ");
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+}
+
 static void usage(const char *prog) {
     fprintf(stderr,
             "usage: %s [-32|-64] [-g] [-I dir] [-D name[=value]] [-march cpu] [-mtune cpu] "
-            "[-Wa opts] [-o output] input.s\n",
+            "[-Wa opts] [--max-input-bytes N] [--max-line-bytes N] [--max-token-length N] "
+            "[--max-macro-depth N] [--max-include-depth N] [-o output] input.s\n",
             prog);
 }
 
@@ -137,6 +186,133 @@ static int strvec_push_csv(strvec_t *v, const char *csv) {
 
     free(tmp);
     return pushed ? 0 : -1;
+}
+
+static int parse_u64(const char *s, unsigned long long *out) {
+    char *end = NULL;
+    unsigned long long v;
+
+    if (s == NULL || s[0] == '\0' || out == NULL) {
+        return -1;
+    }
+    errno = 0;
+    v = strtoull(s, &end, 10);
+    if (errno != 0 || end == s || *end != '\0') {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static unsigned long long limit_from_env(const char *name) {
+    const char *v = getenv(name);
+    unsigned long long out = 0;
+
+    if (v == NULL || v[0] == '\0') {
+        return 0;
+    }
+    if (parse_u64(v, &out) != 0) {
+        return 0;
+    }
+    return out;
+}
+
+static int count_max_token_len(const char *line) {
+    size_t i;
+    size_t cur = 0;
+    size_t max = 0;
+
+    if (line == NULL) {
+        return 0;
+    }
+    for (i = 0; line[i] != '\0'; ++i) {
+        if (isspace((unsigned char)line[i])) {
+            cur = 0;
+            continue;
+        }
+        cur++;
+        if (cur > max) {
+            max = cur;
+        }
+    }
+    return (int)max;
+}
+
+static const char *line_start_directive(const char *line) {
+    while (line != NULL && *line != '\0' && isspace((unsigned char)*line)) {
+        line++;
+    }
+    return line;
+}
+
+static int preflight_source_limits(const as_ctx_t *ctx) {
+    FILE *fp;
+    char *line = NULL;
+    size_t cap = 0;
+    ssize_t nread;
+    unsigned long long total = 0;
+    unsigned long long macro_depth = 0;
+    unsigned long long lineno = 0;
+
+    if (ctx == NULL || ctx->in_path == NULL) {
+        return -1;
+    }
+
+    fp = fopen(ctx->in_path, "rb");
+    if (fp == NULL) {
+        as_diag(AS_E_USAGE, "failed to open input %s: %s", ctx->in_path, strerror(errno));
+        return -1;
+    }
+
+    while ((nread = getline(&line, &cap, fp)) >= 0) {
+        const char *d;
+        int tlen;
+
+        lineno++;
+        total += (unsigned long long)nread;
+        if (ctx->max_input_bytes > 0 && total > ctx->max_input_bytes) {
+            as_diag(AS_E_LIMIT, "%s:%llu: input exceeds --max-input-bytes=%llu", ctx->in_path, lineno,
+                    ctx->max_input_bytes);
+            free(line);
+            fclose(fp);
+            return -1;
+        }
+        if (ctx->max_line_bytes > 0 && (unsigned long long)nread > ctx->max_line_bytes) {
+            as_diag(AS_E_LIMIT, "%s:%llu: line exceeds --max-line-bytes=%llu", ctx->in_path, lineno,
+                    ctx->max_line_bytes);
+            free(line);
+            fclose(fp);
+            return -1;
+        }
+        tlen = count_max_token_len(line);
+        if (ctx->max_token_length > 0 && (unsigned long long)tlen > ctx->max_token_length) {
+            as_diag(AS_E_LIMIT, "%s:%llu: token exceeds --max-token-length=%llu", ctx->in_path, lineno,
+                    ctx->max_token_length);
+            free(line);
+            fclose(fp);
+            return -1;
+        }
+
+        d = line_start_directive(line);
+        if (strncmp(d, ".macro", 6) == 0 && (d[6] == '\0' || isspace((unsigned char)d[6]))) {
+            macro_depth++;
+            if (ctx->max_macro_depth > 0 && macro_depth > ctx->max_macro_depth) {
+                as_diag(AS_E_LIMIT, "%s:%llu: macro depth exceeds --max-macro-depth=%llu", ctx->in_path, lineno,
+                        ctx->max_macro_depth);
+                free(line);
+                fclose(fp);
+                return -1;
+            }
+        } else if (strncmp(d, ".endm", 5) == 0 && (d[5] == '\0' || isspace((unsigned char)d[5]))) {
+            if (macro_depth > 0) {
+                macro_depth--;
+            }
+        }
+    }
+
+    free(line);
+    fclose(fp);
+    return 0;
 }
 
 static int infer_mode_from_prog(const char *prog) {
@@ -350,25 +526,25 @@ static int validate_output_file(const as_ctx_t *ctx) {
 
     err = elf_open(ctx->out_path, &check);
     if (err != ELF_OK) {
-        fprintf(stderr, "as: failed to open output %s: %s\n", ctx->out_path, elf_errstr(err));
+        as_diag(AS_E_VALIDATE, "failed to open output %s: %s", ctx->out_path, elf_errstr(err));
         return -1;
     }
 
     if (elf_type(check) != ET_REL) {
-        fprintf(stderr, "as: output is not ET_REL\n");
+        as_diag(AS_E_VALIDATE, "output is not ET_REL");
         elf_close(check);
         return -1;
     }
 
     if (ctx->mode == AS_MODE_64) {
         if (elf_class(check) != ELFOBJ_CLASS_64 || elf_machine(check) != EM_X86_64) {
-            fprintf(stderr, "as: output is not x86_64 ELF64\n");
+            as_diag(AS_E_VALIDATE, "output is not x86_64 ELF64");
             elf_close(check);
             return -1;
         }
     } else {
         if (elf_class(check) != ELFOBJ_CLASS_32 || elf_machine(check) != EM_386) {
-            fprintf(stderr, "as: output is not i386 ELF32\n");
+            as_diag(AS_E_VALIDATE, "output is not i386 ELF32");
             elf_close(check);
             return -1;
         }
@@ -387,12 +563,61 @@ int main(int argc, char **argv) {
     ctx.mode = AS_MODE_AUTO;
     ctx.out_path = "a.out.o";
     ctx.self_path = argv[0];
+    ctx.max_input_bytes = limit_from_env("AS_MAX_INPUT_BYTES");
+    ctx.max_line_bytes = limit_from_env("AS_MAX_LINE_BYTES");
+    ctx.max_token_length = limit_from_env("AS_MAX_TOKEN_LENGTH");
+    ctx.max_macro_depth = limit_from_env("AS_MAX_MACRO_DEPTH");
+    ctx.max_include_depth = limit_from_env("AS_MAX_INCLUDE_DEPTH");
+    g_emit_error_codes = getenv("AS_ERROR_CODES") != NULL ? 1 : 0;
 
     for (i = 1; i < argc; ++i) {
         const char *arg = argv[i];
+        const char *val = NULL;
+        unsigned long long parsed = 0;
 
         if (strcmp(arg, "--version") == 0 || strcmp(arg, "-v") == 0) {
             query_version = 1;
+            continue;
+        }
+        if (strcmp(arg, "--max-input-bytes") == 0 || strcmp(arg, "--max-line-bytes") == 0 ||
+            strcmp(arg, "--max-token-length") == 0 || strcmp(arg, "--max-macro-depth") == 0 ||
+            strcmp(arg, "--max-include-depth") == 0) {
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
+            val = argv[++i];
+        } else if (strncmp(arg, "--max-input-bytes=", 18) == 0) {
+            val = arg + 18;
+        } else if (strncmp(arg, "--max-line-bytes=", 17) == 0) {
+            val = arg + 17;
+        } else if (strncmp(arg, "--max-token-length=", 19) == 0) {
+            val = arg + 19;
+        } else if (strncmp(arg, "--max-macro-depth=", 18) == 0) {
+            val = arg + 18;
+        } else if (strncmp(arg, "--max-include-depth=", 20) == 0) {
+            val = arg + 20;
+        }
+        if (val != NULL) {
+            if (parse_u64(val, &parsed) != 0) {
+                as_diag(AS_E_USAGE, "invalid numeric value: %s", val);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
+            if (strncmp(arg, "--max-input-bytes", 17) == 0) {
+                ctx.max_input_bytes = parsed;
+            } else if (strncmp(arg, "--max-line-bytes", 16) == 0) {
+                ctx.max_line_bytes = parsed;
+            } else if (strncmp(arg, "--max-token-length", 18) == 0) {
+                ctx.max_token_length = parsed;
+            } else if (strncmp(arg, "--max-macro-depth", 17) == 0) {
+                ctx.max_macro_depth = parsed;
+            } else {
+                ctx.max_include_depth = parsed;
+            }
             continue;
         }
         if (strcmp(arg, "-o") == 0) {
@@ -464,7 +689,7 @@ int main(int argc, char **argv) {
                 return 2;
             }
             if (strvec_push_csv(&ctx.as_opts, argv[++i]) != 0) {
-                fprintf(stderr, "as: invalid -Wa argument\n");
+                as_diag(AS_E_USAGE, "invalid -Wa argument");
                 strvec_free(&ctx.gcc_opts);
                 strvec_free(&ctx.as_opts);
                 return 2;
@@ -473,7 +698,7 @@ int main(int argc, char **argv) {
         }
         if (strncmp(arg, "-Wa,", 4) == 0) {
             if (strvec_push_csv(&ctx.as_opts, arg + 4) != 0) {
-                fprintf(stderr, "as: invalid -Wa argument\n");
+                as_diag(AS_E_USAGE, "invalid -Wa argument");
                 strvec_free(&ctx.gcc_opts);
                 strvec_free(&ctx.as_opts);
                 return 2;
@@ -516,7 +741,7 @@ int main(int argc, char **argv) {
         }
 
         if (ctx.in_path != NULL) {
-            fprintf(stderr, "as: multiple input files are not supported\n");
+            as_diag(AS_E_USAGE, "multiple input files are not supported");
             strvec_free(&ctx.gcc_opts);
             strvec_free(&ctx.as_opts);
             return 2;
@@ -541,7 +766,7 @@ int main(int argc, char **argv) {
         ctx.mode = infer_mode(&ctx);
     }
     if (validate_march(ctx.mode, ctx.march) != 0) {
-        fprintf(stderr, "as: unsupported -march=%s for %s mode\n", ctx.march,
+        as_diag(AS_E_USAGE, "unsupported -march=%s for %s mode", ctx.march,
                 ctx.mode == AS_MODE_64 ? "64-bit" : "32-bit");
         strvec_free(&ctx.gcc_opts);
         strvec_free(&ctx.as_opts);
@@ -555,8 +780,22 @@ int main(int argc, char **argv) {
             return 1;
         }
     }
+    if (ctx.max_include_depth > 0) {
+        char lim[32];
+        if (snprintf(lim, sizeof(lim), "%llu", ctx.max_include_depth) >= (int)sizeof(lim) ||
+            push_opt_with_value(&ctx.gcc_opts, "-fmax-include-depth=", lim) != 0) {
+            strvec_free(&ctx.gcc_opts);
+            strvec_free(&ctx.as_opts);
+            return 1;
+        }
+    }
+    if (preflight_source_limits(&ctx) != 0) {
+        strvec_free(&ctx.gcc_opts);
+        strvec_free(&ctx.as_opts);
+        return 1;
+    }
     if (run_backend(&ctx) != 0) {
-        fprintf(stderr, "as: backend assembly failed\n");
+        as_diag(AS_E_BACKEND, "backend assembly failed");
         strvec_free(&ctx.gcc_opts);
         strvec_free(&ctx.as_opts);
         return 1;

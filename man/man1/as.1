@@ -13,6 +13,11 @@
 .Op Fl march Ar cpu
 .Op Fl mtune Ar cpu
 .Op Fl Wa Ar opts
+.Op Fl -max-input-bytes Ar n
+.Op Fl -max-line-bytes Ar n
+.Op Fl -max-token-length Ar n
+.Op Fl -max-macro-depth Ar n
+.Op Fl -max-include-depth Ar n
 .Op Fl o Ar output
 .Ar input.s
 .Sh DESCRIPTION
@@ -23,6 +28,14 @@ invokes a backend compiler driver
 in assembler mode and validates the emitted object using
 .Xr libelfobj 3 .
 The wrapper selects 32-bit or 64-bit mode and performs ELF sanity checks.
+.Pp
+Optional hard limits can be set using
+.Fl -max-input-bytes ,
+.Fl -max-line-bytes ,
+.Fl -max-token-length ,
+.Fl -max-macro-depth ,
+and
+.Fl -max-include-depth .
 .Sh ENVIRONMENT
 .Bl -tag -width AS_BACKEND
 .It Ev AS_BACKEND
@@ -32,6 +45,25 @@ uses
 .Ev CC
 or falls back to
 .Dq gcc .
+.It Ev AS_ERROR_CODES
+If set to a non-empty value,
+.Nm
+prefixes wrapper-originated diagnostics with a stable internal error code.
+.It Ev AS_MAX_INPUT_BYTES
+Default value for
+.Fl -max-input-bytes .
+.It Ev AS_MAX_LINE_BYTES
+Default value for
+.Fl -max-line-bytes .
+.It Ev AS_MAX_TOKEN_LENGTH
+Default value for
+.Fl -max-token-length .
+.It Ev AS_MAX_MACRO_DEPTH
+Default value for
+.Fl -max-macro-depth .
+.It Ev AS_MAX_INCLUDE_DEPTH
+Default value for
+.Fl -max-include-depth .
 .El
 .Sh EXIT STATUS
 .Ex -std
