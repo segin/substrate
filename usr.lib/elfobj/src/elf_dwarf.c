@@ -306,10 +306,49 @@ static elf_err_t validate_dwarf_unit_stream(const elf_section_t *section) {
     return ELF_OK;
 }
 
+static int dwarf_frame_pointer_reg(uint16_t machine) {
+    if (machine == EM_ARM) {
+        return 11;
+    }
+    if (machine == EM_AARCH64) {
+        return 29;
+    }
+    if (machine == EM_386) {
+        return 5;
+    }
+    if (machine == EM_X86_64) {
+        return 6;
+    }
+    return -1;
+}
+
+static int dwarf_link_register_reg(uint16_t machine) {
+    if (machine == EM_AARCH64) {
+        return 30;
+    }
+    if (machine == EM_ARM) {
+        return 14;
+    }
+    return -1;
+}
+
+static int validate_arch_cfi_presence(elfobj_t *obj, int *found_cfi) {
+    size_t i;
+    *found_cfi = 0;
+    for (i = 0; i < obj->section_count; ++i) {
+        if (elf_section_is_cfi(obj->sections[i])) {
+            *found_cfi = 1;
+            return 0;
+        }
+    }
+    return 0;
+}
+
 elf_err_t elf_debug_validate(elfobj_t *obj, char **diagnostics) {
     size_t i;
     int has_error = 0;
     elf_err_t base;
+    int have_cfi = 0;
 
     if (obj == NULL) {
         return ELF_ERR_STATE;
@@ -369,6 +408,19 @@ elf_err_t elf_debug_validate(elfobj_t *obj, char **diagnostics) {
             has_error = 1;
             (void)elf__append_diag_fmt(obj, "debug relocation missing symbol index=", i);
         }
+    }
+
+    (void)validate_arch_cfi_presence(obj, &have_cfi);
+    if ((obj->machine == EM_ARM || obj->machine == EM_AARCH64) && !have_cfi) {
+        (void)elf__diag_append(obj, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                               "no CFI section found for target architecture");
+    }
+    if (obj->machine == EM_ARM || obj->machine == EM_AARCH64) {
+        int fp = dwarf_frame_pointer_reg(obj->machine);
+        int lr = dwarf_link_register_reg(obj->machine);
+        char msg[96];
+        (void)snprintf(msg, sizeof(msg), "DWARF frame model fp=%d lr=%d", fp, lr);
+        (void)elf__diag_append(obj, ELF_DIAG_INFO, ELF_OK, UINT64_MAX, msg);
     }
 
     if (diagnostics != NULL) {
