@@ -6,322 +6,488 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 ### 1. Kernel Core (`sys/core`, `sys/kern`)
 - [ ] **Memory Management:**
-    - [x] **Physical Memory Manager (PMM Refactor):**
-        - [x] **Boot Memory Detection:**
-            - [x] Parse Multiboot Memory Map (mmap). <!-- pmm.c:pmm_walk_mmap with pmm_validate_mmap_entry, test_mmap_parsing.c -->
-            - [x] Parse e820 Memory Map (legacy BIOS). <!-- pmm.c:pmm_init_e820, pmm_walk_e820, test_e820_parsing.c -->
-            - [x] **Hardening (Phase 1):**
-                - [x] Sanitize memory map entries (validate type, clamp to 32-bit). <!-- pmm_validate_mmap_entry, pmm_validate_e820_entry -->
-                - [x] Calculate and report total usable RAM. <!-- pmm_cb_stats with 64-bit total_usable -->
-                - [x] Properly identify kernel physical bounds from linker symbols. <!-- _kernel_end in pmm_watermark_init, pmm_cb_init_buddy -->
-        - [x] **Core Allocator Rewrite:** <!-- pmm.c, phys_mem.c, test_vm_phys.c, test_pmm_buddy.c -->
-            - [x] **Bootstrap:** Implement early-boot "watermark" allocator for kernel structures. <!-- pmm.c:21-47 pmm_watermark_init/alloc/used -->
-            - [x] **Dynamic Metadata:** Calculate and allocate `vm_page_t` array or bitmaps based on *actual* detected RAM (remove 128MB static limit). <!-- pmm.c:271-290, pmm_watermark_alloc for page array -->
-            - [x] **Low Memory (4MiB) Support:** efficient handling of constrained environments. <!-- pmm.c:33-34 watermark_end clamping, pmm.c:278-286 fallback to static bitmap -->
-            - [x] **Algorithms:** <!-- phys_mem.c:20-97 buddy enqueue/dequeue/alloc/free -->
-                - [x] **Single Page:** O(1) Free List allocation (replace bitmap scan). <!-- phys_mem.c:155-164 vm_phys_alloc_page, O(1) via free_lists[0] -->
-                - [x] **Contiguous:** Implement Buddy Allocator or Bitmap Tree for efficient `pmm_alloc_contiguous`. <!-- phys_mem.c:180-194 vm_phys_alloc_contiguous, order-based buddy, test_vm_phys.c tests -->
-        - [x] **Safety & Integration:** <!-- phys_mem.c:15 spinlock, vm_page.c integration -->
-            - [x] **Locking:** Fine-grained spinlocks for SMP access. <!-- phys_mem.c:15 vm_phys_lock, intr_disable/restore guards in all APIs -->
-            - [x] **VM Integration:** Direct interface with `sys/vm/vm_page.c` queues. <!-- pmm.c:323-347 pmm_alloc/free_block wrappers, vm_page.c:46-78 vm_page_alloc -->
+    - [ ] **Physical Memory Manager (PMM Refactor):**
+
+        > **Files:** `sys/core/pmm.c`, `sys/vm/phys_mem.c`, `sys/vm/vm_page.h`.
+        >
+        > **Architecture:** Two-phase allocator — watermark (bootstrap) →
+        > buddy (runtime). Returns kernel virtual addresses (0xC0000000+).
+
+        - [ ] **Boot Memory Detection:**
+            - [ ] Parse Multiboot Memory Map (`mmap`).
+            - [ ] Parse e820 Memory Map (legacy BIOS fallback).
+            - [ ] **Hardening:**
+                - [ ] Sanitize memory map entries: validate type, clamp to 32‑bit address space.
+                - [ ] Reject overlapping or zero‑length regions.
+                - [ ] Calculate and report total usable RAM (64‑bit accumulation for >4 GB physical).
+                - [ ] Identify kernel physical bounds from linker symbols (`_kernel_start`, `_kernel_end`).
+                - [ ] Exclude kernel text/data/BSS region from free pool.
+                - [ ] Exclude Multiboot info structure and module regions.
+                - [ ] Reserve BIOS/ACPI regions (type 3/4) and memory holes.
+        - [ ] **Bootstrap Watermark Allocator:**
+            - [ ] Bump allocator for early boot before buddy is ready.
+            - [ ] `pmm_watermark_init(start, end)`: initialize allocator with usable range.
+            - [ ] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment.
+            - [ ] `pmm_watermark_used()`: report bytes consumed.
+            - [ ] Used for: `vm_page_t` array, initial page tables, kernel stacks.
+            - [ ] Watermark region clamped to avoid exceeding available low memory.
+        - [ ] **Dynamic Metadata:**
+            - [ ] Calculate `vm_page_t` array size based on actual detected RAM.
+            - [ ] Allocate array via watermark allocator.
+            - [ ] Remove hardcoded 128 MB static limit.
+            - [ ] Fallback to static bitmap if RAM < 4 MB (constrained environments).
+        - [ ] **Buddy Allocator:**
+            - [ ] Orders 0–10 (4 KB – 4 MB pages).
+            - [ ] **Free Lists:** per‑order doubly‑linked free page lists.
+            - [ ] `vm_phys_alloc_page()`: O(1) single-page allocation from order‑0 free list.
+            - [ ] `vm_phys_alloc_contiguous(order)`: allocate 2^order contiguous pages.
+            - [ ] `vm_phys_free_page(page)`: return page and coalesce with buddy if free.
+            - [ ] `vm_phys_free_contiguous(page, order)`: return and coalesce multi-page block.
+            - [ ] **Buddy Coalescing:** merge adjacent free pages up through orders.
+            - [ ] **Buddy Splitting:** split higher-order blocks when lower order is empty.
+            - [ ] Interrupt‑safe: disable interrupts during alloc/free.
+        - [ ] **Public API (returning kernel virtual addresses):**
+            - [ ] `pmm_alloc_block()`: allocate single page, return 0xC0000000+ virtual address.
+            - [ ] `pmm_free_block(vaddr)`: free single page given virtual address.
+            - [ ] `pmm_alloc_contiguous(count)`: allocate `count` contiguous pages.
+            - [ ] `pmm_free_contiguous(vaddr, count)`: free contiguous block.
+            - [ ] `pmm_get_page(phys_addr)`: look up `vm_page_t` for physical address.
+        - [ ] **Safety & Integration:**
+            - [ ] Fine-grained spinlock for SMP access (`vm_phys_lock`).
+            - [ ] Interrupt disable/restore guards in all API entry points.
+            - [ ] Direct interface with `vm_page.c` queues.
+            - [ ] Low memory watermark: warn when free pages drop below threshold.
+        - [ ] **NUMA-Aware Allocation (deferred):**
+            - [ ] Per-node free lists.
+            - [ ] Node affinity for allocation (prefer local node).
+            - [ ] Cross-node fallback when local node exhausted.
+        - [ ] **Testing:**
+            - [ ] Unit: watermark allocator — sequential allocations, alignment, exhaustion.
+            - [ ] Unit: buddy allocator — alloc/free single pages, verify O(1) behavior.
+            - [ ] Unit: buddy coalescing — free adjacent pages, verify order promotion.
+            - [ ] Unit: buddy splitting — exhaust order 0, verify split from higher order.
+            - [ ] Unit: contiguous allocation — various orders, verify alignment.
+            - [ ] Unit: memory map parsing — Multiboot and e820 with edge cases (overlaps, holes).
+            - [ ] Property: `alloc → free → alloc` returns same page (no leak).
+            - [ ] Property: free page count + allocated count = total pages (invariant).
+            - [ ] Property: buddy free list integrity (no cycles, all entries valid).
+            - [ ] Integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: PMM architecture (watermark → buddy transition).
+            - [ ] Internal doc: virtual vs physical address API convention.
+
     - [ ] **Memory Management (BSD/Mach Design):**
-        - [x] **Physical Memory (Machine Independent):** <!-- vm_page.h, vm_page.c, phys_mem.c, test_vm_page_queue.c -->
-            - [x] **Refactor:** `vm_page_t`: Core structure tracking state of every physical page. <!-- vm_page.h:12-64 -->
-                - [x] **Fields:** `phys_addr`, `flags`, `wire_count`, `ref_count`, `order` (buddy), `object`, `pindex` <!-- vm_page.h:22-56 -->
-                - [x] **State Flags:** `PG_BUSY`, `PG_VALID`, `PG_DIRTY`, `PG_ACTIVE`, `PG_INACTIVE`, `PG_FREE`, `PG_ZERO`, `PG_SWAPPED` <!-- vm_page.h:32-42 -->
-                - [x] **Initialization:** Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator) <!-- phys_mem.c:vm_phys_early_init:101-120 -->
-                - [x] **Accessors:** `pmm_get_page(pa)` for PA-to-page lookup <!-- phys_mem.c:vm_phys_paddr_to_page:45-51 -->
-                - [x] **Ownership:** Track which `vm_object` (anonymous, vnode, device) owns each page <!-- vm_page.h:24-28 object/pindex fields -->
-                - [x] **Pmap Backlinks:** Track which pmaps/PTEs reference this page (for shootdown) <!-- vm_page.h:58-77 pv_entry struct, pv_list field -->
-            - [x] **Refactor:** **Page Queues:** Active/Inactive/Free lists for page replacement logic. <!-- vm_page.c:6-11 global queues -->
-                - [x] **Queue Types:**
-                    - [x] **Free Queue:** Pages available for immediate allocation (order-0 buddy list head) <!-- vm_page.c:7 free_queue, phys_mem.c:12 vm_phys_free_lists -->
-                    - [x] **Active Queue:** Recently accessed pages (LRU head) <!-- vm_page.c:8 active_queue -->
-                    - [x] **Inactive Queue:** Eviction candidates (LRU tail, not recently accessed) <!-- vm_page.c:9 inactive_queue -->
-                    - [x] **Wired Queue:** Pages that cannot be paged out (kernel, DMA buffers) <!-- vm_page.c:10 wired_queue -->
-                    - [x] **Laundry Queue:** Dirty pages waiting to be written to backing store <!-- vm_page.c:11 laundry_queue -->
-                - [x] **Queue Operations:** `vm_page_activate()`, `vm_page_deactivate()`, `vm_page_wire()`, `vm_page_unwire()` <!-- vm_page.c:117-178, test_vm_page_queue.c -->
-                - [x] **LRU Scanning:** Periodic scan to move pages from Active→Inactive based on access bits <!-- vm_page.c:199-238 vm_pageout_scan -->
-                    - [x] `vm_pageout_scan()`: Walk active queue and check PTE accessed bits <!-- vm_page.c:201-238 -->
-                    - [x] `pmap_is_referenced()`: Query PTE A bit for a given page <!-- vm_page.c:196, pmap.c extern -->
-                    - [x] `pmap_clear_reference()`: Clear PTE A bit after checking <!-- vm_page.c:197, pmap.c extern -->
-                    - [x] Move unreferenced pages to inactive queue tail <!-- vm_page.c:226-231 -->
-                    - [x] Second-chance algorithm: Pages touched again stay active <!-- vm_page.c:218-224 -->
-                - [x] **Page Daemon:** Background thread (`pagedaemon`) to free pages when `free_count < free_target` <!-- vm_page.c:240-394 -->
-                    - [x] `vm_pageout()`: Main daemon loop (sleeps on `vm_pages_needed` wakeup) <!-- vm_page.c:331-394 -->
-                    - [x] `vm_page_launder()`: Write dirty pages to backing store <!-- vm_page.c:281-327 -->
-                    - [x] `vm_page_try_to_free()`: Attempt to free clean inactive pages <!-- vm_page.c:262-278 -->
-                    - [x] Priority-based scanning: Inactive→Laundry→Active <!-- vm_page.c:347-384 phases 1-3 -->
-                    - [x] OOM killer hook: Kill process if cannot free memory <!-- vm_page.c:390-393 -->
-                - [x] **Thresholds:** `free_min`, `free_target`, `inactive_target` for pressure management <!-- vm_page.c:244-246 -->
-                    - [x] `vm_page_free_min`: Absolute minimum free pages (panic below) <!-- vm_page.c:244 = 16 -->
-                    - [x] `vm_page_free_target`: Target free pages (daemon sleeps above) <!-- vm_page.c:245 = 64 -->
-                    - [x] `vm_page_inactive_target`: Target inactive queue length <!-- implicit in vm_pageout_scan -->
-                    - [x] `vm_page_free_reserved`: Reserved for kernel emergencies <!-- vm_page.c:246 = 8 -->
-                    - [x] Dynamic threshold adjustment based on total RAM <!-- vm_phys_page_count in phys_mem.c -->
-                - [x] **Statistics:** Track queue lengths, page faults, pageouts, pageins <!-- vm_page.c:249-256 -->
-                    - [x] `vm_stat` structure: `free_count`, `active_count`, `inactive_count`, `wire_count` <!-- vm_page.c:113-118 vm_page_stats_t -->
-                    - [x] `vm_stat.pageins`: Pages read from disk <!-- vm_page.c:254 -->
-                    - [x] `vm_stat.pageouts`: Pages written to disk <!-- vm_page.c:253 -->
-                    - [x] `vm_stat.faults`: Total page faults handled <!-- vm_page.c:255 -->
-                    - [x] `vm_stat.cow_faults`: Copy-on-write faults <!-- TODO: track in pmap_copy -->
-                    - [x] `vm_stat.reactivations`: Pages moved back to active <!-- implicit in vm_page_age_scan -->
-                    - [x] `/proc/vmstat` or sysctl interface for userspace <!-- TODO: sysctl/procfs exposure -->
-        - [/] **PMAP Layer (Machine Dependent - i386):** <!-- pmap.c (1582 lines), pmap.h (144 lines), test_pmap.c (220 lines) -->
-            - [x] **Refactor:** `pmap_init`: Bootstrap hardware paging structures. <!-- pmap.c:97-189 pmap_bootstrap -->
-                - [x] Initialize kernel page directory from static bootstrap <!-- pmap.c:12-17 kernel_page_directory, kernel_page_tables -->
-                - [x] Set up recursive mapping at PD entry 1023 (0xFFC00000) <!-- pmap.c:154 -->
-                - [x] Map kernel space (0xC0000000+) with global flag if available <!-- pmap.c:109-132 CPUID PGE/PSE check, L136-151 -->
-                - [x] Initialize pmap lock for SMP safety <!-- pmap.c:34-35, L180 -->
-            - [x] **Refactor:** `pmap_enter`/`pmap_remove`: Low-level PTE manipulation. <!-- pmap.c:512-658 -->
-                - [x] `pmap_enter(pmap, va, pa, prot, flags)`: Insert/update PTE <!-- pmap.c:512-550 -->
-                - [x] `pmap_remove(pmap, va)`: Clear PTE and invalidate TLB <!-- pmap.c:636-658 -->
-                - [x] `pmap_kenter(va, pa)`: Kernel-only fast path (no locking) <!-- pmap.c:662-691 -->
-                - [x] `pmap_kremove(va)`: Kernel-only removal <!-- pmap.c:694-701 -->
-                - [x] Allocate page tables on demand when PDE is empty <!-- pmap.c:523-534, L667-678 -->
-                - [x] Handle PG_U (user), PG_W (write), PG_G (global) flags <!-- pmap.c:537-544, L682-688 -->
-            - [x] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading). <!-- pmap.c:495-506 -->
-                - [x] Load pmap->pdir_phys into CR3 <!-- pmap.c:504 -->
-                - [x] Handle lazy FPU state switching <!-- FPU handled in scheduler -->
-                - [x] Maintain `curpmap` pointer <!-- pmap.c:493-498 -->
-            - [x] **Refactor:** **Recursive Paging:** Efficient Page Table mapping. <!-- pmap.c:509-510 V_PD, V_PT macros -->
-                - [x] Reserve PDE 1023 for self-referencing <!-- pmap.c:154, L305 -->
-                - [x] V_PD macro: Access current PD at 0xFFFFF000 <!-- pmap.c:509 -->
-                - [x] V_PT(n) macro: Access PT n at 0xFFC00000 + n*4096 <!-- pmap.c:510 -->
-                - [x] Use recursive mapping for PTE manipulation <!-- All pmap_enter/remove/protect use V_PD/V_PT -->
-            - [x] **Higher Half Transition:** Stable 3GB/1GB split with LMA=1M/VMA=C0000000. <!-- boot.S, pmap.c:149-150 -->
-            - [/] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management <!-- pmap.c:236-403, FIXED: L326 bug -->
-                - [x] **Architecture Overview:** <!-- pmap.h:4-15 header comment -->
-                    - [x] Each process gets its own `pmap_t` representing its virtual address space. <!-- pmap.h:32 typedef -->
-                    - [x] User space: 0x00000000 - 0xBFFFFFFF (3GB, PDEs 0-767). <!-- pmap.h:9 -->
-                    - [x] Kernel space: 0xC0000000 - 0xFFFFFFFF (1GB, PDEs 768-1023, shared). <!-- pmap.h:10 -->
-                    - [x] Kernel PDEs are shared by reference, not copied. <!-- pmap.c:288-302 -->
-                    - [x] Recursive mapping at PDE 1023 for efficient PT access. <!-- pmap.c:305 -->
-                    - [x] **Dynamic PT Allocation:** Only allocate page tables on demand (not 768 PTs upfront). <!-- pmap.c:523-534 in pmap_enter -->
-                    - [x] Minimum overhead per process: 1 PD (4KB) + PTs as needed (~4KB per 4MB mapped). <!-- pmap.c:247,281-284 -->
-                    - [x] Avoid pre-allocating all user-space PTs (would waste 128KB+ per process). <!-- Verified: only 2 allocs in pmap_create -->
-                - [x] **`pmap_t` Data Structure:** <!-- pmap.h:59-69 struct pmap -->
-                    - [x] `pd_phys`: Physical address of page directory. <!-- pmap.h:61 pdir_phys -->
-                    - [x] `pd_virt`: Virtual address for kernel access to PD. <!-- pmap.h:60 pdir -->
-                    - [x] `refcount`: Number of references (for COW sharing). <!-- pmap.h:62 ref_count -->
-                    - [x] `resident_count`: Count of resident pages in this pmap. <!-- pmap.h:63 -->
-                    - [x] `wired_count`: Count of wired (unpageable) pages. <!-- pmap.h:64 -->
-                    - [x] `stats`: Per-pmap statistics (faults, cow_faults, zero_fills). <!-- pmap.h:65, struct pmap_stats L36-48 -->
-                    - [x] `lock`: Spinlock for SMP safety. <!-- pmap.h:66 -->
-                    - [x] `asid`: Address Space ID (for TLB tagging, future PCID). <!-- pmap.h:67 -->
-                    - [x] `list_entry`: For global pmap list (TLB shootdown). <!-- pmap.h:68 struct pmap_list_entry -->
-                - [x] **`pmap_create()` - Create New Address Space:** <!-- pmap.c:236-311 -->
-                    - [x] Allocate one 4KB page for page directory. <!-- pmap.c:247-251 -->
-                    - [x] Zero user portion (PDEs 0-767). <!-- pmap.c:282-284 -->
-                    - [x] Copy kernel PDEs (768-1022) from `kernel_pmap`. <!-- pmap.c:288-302 -->
-                    - [x] Set up recursive mapping in PDE 1023. <!-- pmap.c:305 -->
-                    - [x] Initialize reference count to 1. <!-- pmap.c:267 -->
-                    - [x] Add to global pmap list for TLB management. <!-- pmap.c:308 pmap_list_add -->
-                    - [x] Allocate unique ASID if available. <!-- pmap.c:275 asid=0 (future) -->
-                    - [x] Return `pmap_t*` or NULL on failure. <!-- pmap.c:241,248-250 -->
-                - [x] **`pmap_destroy()` - Destroy Address Space:** <!-- pmap.c:313-404, FIXED: used pmap->pdir_phys -->
-                    - [x] Decrement reference count. <!-- pmap.c:321 -->
-                    - [x] If refcount > 0, return (still in use by COW children). <!-- pmap.c:324 -->
-                    - [x] Walk all user PDEs (0-767): <!-- pmap.c:348-383 -->
-                        - [x] For each present PDE, walk all 1024 PTEs. <!-- pmap.c:362-374 -->
-                        - [x] For each present PTE, decrement physical page refcount. <!-- pmap.c:370 pmm_free_block -->
-                        - [x] Free PT page if all entries are empty. <!-- pmap.c:377 -->
-                    - [x] Free the page directory page. <!-- pmap.c:400 -->
-                    - [x] Remove from global pmap list. <!-- pmap.c:397 pmap_list_remove -->
-                    - [x] Release ASID to pool. <!-- TODO: ASID pool not yet implemented -->
-                - [x] **`pmap_reference()` - Increment Reference Count:** <!-- pmap.c:406-410 -->
-                    - [x] Atomically increment `refcount`. <!-- pmap.c:409 __sync_fetch_and_add -->
-                    - [x] Used when forking to share pmap temporarily.
-                - [x] **`pmap_release()` - Decrement Reference Count:** <!-- pmap.c:412-425 -->
-                    - [x] Atomically decrement `refcount`. <!-- pmap.c:417 __sync_fetch_and_sub -->
-                    - [x] If reaches 0, call `pmap_destroy()`. <!-- pmap.c:420-424 -->
-                - [x] **`pmap_fork()` - Fork Address Space (COW):** <!-- pmap.c:427-490 -->
-                    - [x] Create new pmap via `pmap_create()`. <!-- pmap.c:432-433 -->
-                    - [x] Walk parent's user PTEs: <!-- pmap.c:439-486 -->
-                        - [x] Copy PTE to child with write bit cleared. <!-- pmap.c:471 -->
-                        - [x] Clear write bit in parent too (both now COW). <!-- pmap.c:474 -->
-                        - [x] Increment physical page reference count. <!-- pmap.c:476-477 note: PMM lacks refcount -->
-                    - [x] Increment parent's resident page COW counter. <!-- pmap.c:482-485 stats.cow_pages_mapped -->
-                    - [x] Return new pmap. <!-- pmap.c:489 -->
-                - [x] **`pmap_switch()` / `pmap_activate()` - Context Switch:** <!-- pmap.c:495-506 -->
-                    - [x] Load new pmap's `pd_phys` into CR3. <!-- pmap.c:504 -->
-                    - [ ] Use PCID if available to avoid TLB flush. (Future x86_64) <!-- Deferred: requires x86_64 PAE/long mode -->
-                    - [x] Update `curpmap` thread-local pointer. (Scheduler integration) <!-- pmap.c:498 -->
-                    - [x] Set TSS ESP0 for kernel stack. (Scheduler integration) <!-- Done in sched.c context switch -->
-                - [x] **Kernel PDE Synchronization:** <!-- pmap.c:288-302 copies kernel PDEs on create -->
-                    - [ ] When kernel maps new pages (e.g., vmalloc), must update all pmaps. (Deferred) <!-- Requires vmalloc impl -->
-                    - [x] Maintain `kernel_pmap` as authoritative source. <!-- pmap.c:27-28 kernel_pmap_store -->
-                    - [ ] On PDE change in kernel range, walk global pmap list and copy. (Deferred) <!-- pmap_list_head exists L31 -->
-                    - [x] Alternatively: share kernel PTs by reference (pmap_create copies kernel PDEs). <!-- pmap.c:290-294 -->
-                - [ ] **ASID/PCID Support (Future x86_64):** (Deferred) <!-- pmap.h:67 asid field exists, pool not impl -->
-                    - [ ] ASID pool management (allocate, free, recycle).
-                    - [ ] Assign ASID on pmap creation. <!-- pmap.c:275 sets asid=0 -->
-                    - [ ] Include ASID in CR3 on context switch.
-                    - [ ] Avoid TLB flush when switching between processes with different ASIDs.
-            - [x] `pmap_protect`: Change page protections <!-- pmap.c:729-812 -->
-                - [x] Walk range and update PTE protection bits <!-- pmap.c:740-794 -->
-                - [x] Handle R/W and NX bit changes <!-- pmap.c:772-774 PTE_W, note: no NX in 32-bit -->
-                - [x] Invalidate affected TLB entries <!-- pmap.c:797-809 batch/single -->
-                - [/] **Enhancements:** <!-- All implemented -->
-                    - [x] Batch TLB invalidations for large ranges. <!-- pmap.c:797-799 TLB_BATCH_THRESHOLD -->
-                    - [x] Support protection upgrade (read→read/write) and downgrade. <!-- pmap.c:756-766, L784-788 stats -->
-                    - [x] Track protection changes for COW handling. <!-- pmap.c:761-765 COW check -->
-            - [x] `pmap_copy`: Copy mappings between address spaces <!-- pmap.c:814-901 -->
-                - [x] Copy PTE entries from src to dst pmap <!-- pmap.c:827-897 -->
-                - [x] Set up COW if requested (clear write bit) <!-- pmap.c:884-889 -->
-                - [x] Used for fork() optimization
-                - [x] **Enhancements:** <!-- All implemented -->
-                    - [x] Support partial range copy (for vfork/clone). <!-- pmap.c:827 sva/eva params -->
-                    - [x] Copy-on-write reference counting integration. <!-- pmap.c:892-894 page->ref_count++ -->
-                    - [x] Handle mixed COW and private mappings. <!-- pmap.c:863-879 PG_PRIVATE check -->
-            - [x] **Page Reference/Modification Tracking:** <!-- pmap.c:1083-1330 -->
-                - [x] **`pmap_is_referenced(pmap, va)` - Check if Page Was Accessed:** <!-- pmap.c:1085-1118 -->
-                    - [x] Locate PTE for given virtual address. <!-- pmap.c:1101-1107 V_PD/V_PT -->
-                    - [x] Return true if PTE Accessed (A) bit is set. <!-- pmap.c:1110-1111 -->
-                    - [x] CPU sets A bit automatically on first access.
-                    - [x] **Enhancements:** <!-- All implemented -->
-                        - [x] Batch query for multiple pages (`pmap_is_referenced_range`). <!-- pmap.c:1155-1180 -->
-                        - [x] Clear A bit atomically while querying (`pmap_test_and_clear_ref`). <!-- pmap.c:1184-1211 -->
-                        - [x] Track per-page access frequency for page aging. <!-- pmap.c:1216-1262 pmap_track_access -->
-                - [x] **`pmap_is_modified(pmap, va)` - Check if Page Was Written:** <!-- pmap.c:1264-1291 (range version) -->
-                    - [x] Locate PTE for given virtual address. <!-- pmap.c:1277-1283 -->
-                    - [x] Return true if PTE Dirty (D) bit is set. <!-- pmap.c:1285-1286 -->
-                    - [x] CPU sets D bit automatically on first write.
-                    - [x] **Enhancements:** <!-- All implemented -->
-                        - [x] Batch query for multiple pages. <!-- pmap.c:1266 pmap_is_modified_range -->
-                        - [x] Clear D bit atomically while querying. <!-- pmap.c:1295-1330 pmap_test_and_clear_modify -->
-                        - [x] Track modification for writeback scheduling. <!-- vm_page.c integration -->
-                - [x] **`pmap_clear_reference(pmap, va)` - Clear Accessed Bit:** <!-- pmap.c:1121-1151 vm_page version -->
-                    - [x] Locate PTE and clear A bit. <!-- pmap.c:1146 -->
-                    - [x] Invalidate TLB entry to force re-check on next access. <!-- pmap.c:1147 -->
-                    - [x] **Usage:** Page replacement algorithms (Clock, WSClock, LRU).
-                - [x] **`pmap_clear_modify(pmap, va)` - Clear Dirty Bit:** <!-- pmap.c:1295-1330 via pmap_test_and_clear_modify -->
-                    - [x] Locate PTE and clear D bit. <!-- pmap.c:1318-1319 -->
-                    - [x] Invalidate TLB entry. <!-- pmap.c:1320 -->
-            - [x] **COW Statistics & Reporting:**
-                - [x] **Track COW Stats:**
-                    - [x] `cow_faults` (Total COW faults handled).
-                    - [x] `cow_pages_mapped` (Pages shared via COW).
-                    - [x] `protection_upgrades`/`downgrades`.
-                - [x] **Expose Stats:**
-                    - [x] Native Syscall `SYS_GET_COW_STATS` (241).
-                    - [x] Procfs entry `/proc/cow_stats` matching Linux-style text format.
-                    - [x] **Usage:** Track pages that need writeback to swap/file.
-                - [x] **Page Aging Algorithm Integration:**
-                    - [x] Periodic scanning of all resident pages.
-                    - [x] Decrement age counter if not referenced.
-                    - [x] Pages with age 0 become eviction candidates.
-                    - [x] Support for multiple aging policies (Clock, LRU approximation).
-                - [x] **Hardware A/D Bit Emulation (if needed):**
-                    - [x] Some architectures lack hardware A/D bits.
-                    - [x] Emulate via software: mark page not-present, trap on access.
-                    - [x] Not needed for x86/x86_64 (native support).
-                - [x] **Integration with Page Replacement:**
-                    - [x] Export referenced/modified info to VM layer.
-                    - [x] Support for working set estimation.
-                    - [x] Feed into swapper/pageout daemon decisions.
-            - [x] **Copy-on-Write (COW) System:**
-                - [x] Mark shared pages read-only in both parent and child
-                - [x] **COW Fault Handler:**
-                    - [x] On write fault to COW page:
-                    - [x] Allocate new physical page.
-                    - [x] Copy contents from original page.
-                    - [x] Map new page R/W at faulting VA.
-                    - [x] Decrement original page refcount.
-                    - [x] If refcount == 1, optionally remap original R/W in parent.
-                - [x] Track COW page reference counts
-                - [x] `pmap_page_is_cow()`: Check if page is COW shared
-                - [x] **COW Statistics:**
-                    - [x] Track total COW faults.
-                    - [x] Track pages saved by COW.
-                    - [x] Track COW page duplications.
+
+        - [ ] **Physical Memory (Machine Independent):**
+
+            > **Files:** `sys/vm/vm_page.h`, `sys/vm/vm_page.c`, `sys/vm/phys_mem.c`.
+
+            - [ ] **`vm_page_t` Structure:**
+                - [ ] `phys_addr`: physical address of this page frame.
+                - [ ] `flags`: state flags (see below).
+                - [ ] `wire_count`: wired reference count (cannot be paged out while > 0).
+                - [ ] `ref_count`: general reference count (for COW sharing).
+                - [ ] `order`: buddy allocator order (0 = single page).
+                - [ ] `object`: back-pointer to owning `vm_object` (anonymous, vnode, device).
+                - [ ] `pindex`: page index within owning object.
+                - [ ] `pv_list`: list of `pv_entry` structs for pmap backlinks (which PTEs map this page).
+                - [ ] **State Flags:**
+                    - [ ] `PG_BUSY`: page is being I/O'd (don't touch).
+                    - [ ] `PG_VALID`: page contains valid data.
+                    - [ ] `PG_DIRTY`: page has been modified since last writeback.
+                    - [ ] `PG_ACTIVE`: page is on active queue.
+                    - [ ] `PG_INACTIVE`: page is on inactive queue.
+                    - [ ] `PG_FREE`: page is on free queue.
+                    - [ ] `PG_ZERO`: page is known to be zeroed.
+                    - [ ] `PG_SWAPPED`: page contents are on swap.
+                - [ ] **Initialization:**
+                    - [ ] Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator).
+                    - [ ] Initialize all pages as `PG_FREE`, link into free lists.
+                - [ ] **Accessors:**
+                    - [ ] `pmm_get_page(pa)`: PA-to-page lookup (O(1) via array index).
+                    - [ ] `vm_page_to_phys(page)`: page-to-PA conversion.
+                - [ ] **Ownership Tracking:**
+                    - [ ] Track which `vm_object` (anonymous, vnode, device) owns each page.
+                    - [ ] `vm_page_insert(page, object, pindex)`: link page to object.
+                    - [ ] `vm_page_remove(page)`: unlink page from object.
+                - [ ] **Pmap Backlinks (`pv_entry`):**
+                    - [ ] Track which pmaps/PTEs reference this physical page.
+                    - [ ] `pv_entry`: `{pmap, va, next}` — singly-linked list per page.
+                    - [ ] Used for reverse mapping: given a physical page, find all virtual mappings.
+                    - [ ] Essential for TLB shootdown and page eviction.
+
+            - [ ] **Page Queues:**
+                - [ ] **Queue Types:**
+                    - [ ] **Free Queue:** pages available for immediate allocation.
+                    - [ ] **Active Queue:** recently accessed pages (LRU head).
+                    - [ ] **Inactive Queue:** eviction candidates (LRU tail).
+                    - [ ] **Wired Queue:** kernel/DMA pages that cannot be paged out.
+                    - [ ] **Laundry Queue:** dirty pages waiting to be written to backing store.
+                - [ ] **Queue Operations:**
+                    - [ ] `vm_page_activate(page)`: move to active queue, set `PG_ACTIVE`.
+                    - [ ] `vm_page_deactivate(page)`: move to inactive queue, clear `PG_ACTIVE`.
+                    - [ ] `vm_page_wire(page)`: increment wire count, move to wired queue.
+                    - [ ] `vm_page_unwire(page)`: decrement wire count, move to inactive if count reaches 0.
+                    - [ ] `vm_page_free(page)`: return to free queue, clear all flags.
+                    - [ ] `vm_page_launder(page)`: move to laundry queue for async writeback.
+                - [ ] **LRU Scanning (`vm_pageout_scan`):**
+                    - [ ] Periodic scan of active queue.
+                    - [ ] Check PTE accessed (A) bit via `pmap_is_referenced()`.
+                    - [ ] Clear A bit via `pmap_clear_reference()`.
+                    - [ ] Move unreferenced pages to inactive queue tail.
+                    - [ ] Second-chance algorithm: pages touched again stay active.
+                - [ ] **Page Daemon (`vm_pageout`):**
+                    - [ ] Background kernel thread (`pagedaemon`).
+                    - [ ] Sleep on `vm_pages_needed` wakeup channel.
+                    - [ ] `vm_page_launder()`: write dirty pages to backing store.
+                    - [ ] `vm_page_try_to_free()`: attempt to free clean inactive pages.
+                    - [ ] Priority-based scanning phases: Inactive → Laundry → Active.
+                    - [ ] OOM killer hook: kill process if cannot free memory.
+                - [ ] **Thresholds:**
+                    - [ ] `vm_page_free_min`: absolute minimum free pages (16 default; panic below).
+                    - [ ] `vm_page_free_target`: target free pages (64 default; daemon sleeps above).
+                    - [ ] `vm_page_inactive_target`: target inactive queue length.
+                    - [ ] `vm_page_free_reserved`: reserved for kernel emergencies (8 default).
+                    - [ ] Dynamic threshold adjustment based on total RAM.
+                - [ ] **Statistics (`vm_stat`):**
+                    - [ ] `free_count`, `active_count`, `inactive_count`, `wire_count`, `laundry_count`.
+                    - [ ] `pageins`: pages read from disk.
+                    - [ ] `pageouts`: pages written to disk.
+                    - [ ] `faults`: total page faults handled.
+                    - [ ] `cow_faults`: copy-on-write faults.
+                    - [ ] `reactivations`: pages moved back to active.
+                    - [ ] `zero_fill_pages`: pages satisfied by zero-fill.
+                    - [ ] `/proc/vmstat` or sysctl interface for userspace exposure.
+
+            - [ ] **Testing:**
+                - [ ] Unit: page queue transitions (free→active→inactive→laundry→free).
+                - [ ] Unit: wire/unwire reference counting.
+                - [ ] Unit: `vm_page_insert` / `vm_page_remove` object linkage.
+                - [ ] Unit: `pv_entry` list manipulation (insert, remove, lookup).
+                - [ ] Unit: page daemon thresholds — verify scan triggers at correct free count.
+                - [ ] Property: queue length invariant — sum of all queue counts = total pages.
+                - [ ] Property: no page appears on two queues simultaneously.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: page queue state machine and transitions.
+                - [ ] Internal doc: page daemon algorithm and tuning parameters.
+
+        - [ ] **PMAP Layer (Machine Dependent — i386):**
+
+            > **Files:** `sys/arch/i386/pmap.c`, `pmap.h`.
+            >
+            > **Architecture:** Two-level page tables (PD + PT). 3 GB/1 GB
+            > user/kernel split. Recursive mapping at PDE 1023.
+
+            - [ ] **Initialization (`pmap_bootstrap`):**
+                - [ ] Initialize kernel page directory from static bootstrap allocation.
+                - [ ] Set up recursive mapping at PD entry 1023 (self-reference at 0xFFC00000).
+                - [ ] Map kernel space (0xC0000000+) with global flag if CPUID reports PGE.
+                - [ ] Detect CPU features: PSE (4 MB pages), PGE (global pages), PAE (36‑bit physical).
+                - [ ] Initialize pmap lock for SMP safety.
+                - [ ] Identity-map LAPIC MMIO region (0xFEE00000) with PCD flag.
+                - [ ] Record `kernel_pmap` as authoritative kernel address space.
+
+            - [ ] **Core PTE Manipulation:**
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: insert/update PTE.
+                    - [ ] Allocate page table on demand when PDE is empty.
+                    - [ ] Set `PG_U` (user), `PG_W` (write), `PG_G` (global) flags per `prot`.
+                    - [ ] Invalidate TLB entry for updated VA.
+                    - [ ] Update `pv_entry` list for the physical page.
+                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB.
+                    - [ ] Remove `pv_entry` for this mapping.
+                    - [ ] Free page table if all entries empty (optional reclamation).
+                - [ ] `pmap_kenter(va, pa)`: kernel-only fast path (no locking, no pv_entry).
+                - [ ] `pmap_kremove(va)`: kernel-only removal.
+                - [ ] `pmap_extract(pmap, va)`: return physical address for VA (read PTE).
+                - [ ] `pmap_zero_page(phys)`: zero a physical page via temporary mapping.
+                - [ ] `pmap_copy_page(src_phys, dst_phys)`: copy between physical pages.
+
+            - [ ] **Context Switch (`pmap_activate`):**
+                - [ ] Load `pmap->pdir_phys` into CR3.
+                - [ ] Update `curpmap` thread-local pointer.
+                - [ ] Set TSS ESP0 for kernel stack (scheduler integration).
+
+            - [ ] **Recursive Paging:**
+                - [ ] Reserve PDE 1023 for self-referencing.
+                - [ ] `V_PD` macro: access current PD at 0xFFFFF000.
+                - [ ] `V_PT(n)` macro: access page table `n` at 0xFFC00000 + n×4096.
+                - [ ] All PTE manipulation uses recursive window (no temporary mappings needed).
+
+            - [ ] **Higher-Half Transition:**
+                - [ ] Stable 3 GB/1 GB split: user 0x00000000–0xBFFFFFFF, kernel 0xC0000000–0xFFFFFFFF.
+                - [ ] LMA=0x100000 (1 MB), VMA=0xC0100000 (kernel linked at high address).
+                - [ ] Boot trampoline in `boot.S` enables paging with identity + high mapping.
+
+            - [ ] **Per-Process Address Space (`pmap_t`):**
+                - [ ] **Data Structure:**
+                    - [ ] `pdir` / `pdir_phys`: virtual and physical address of page directory.
+                    - [ ] `ref_count`: reference count for COW sharing.
+                    - [ ] `resident_count`: count of resident pages.
+                    - [ ] `wired_count`: count of wired (unpageable) pages.
+                    - [ ] `stats` (`pmap_stats`): per-pmap counters (faults, cow_faults, zero_fills, protection changes).
+                    - [ ] `lock`: spinlock for SMP safety.
+                    - [ ] `asid`: address space ID (future PCID support, currently 0).
+                    - [ ] `list_entry`: linkage for global pmap list (TLB shootdown).
+                - [ ] **`pmap_create()` — Create New Address Space:**
+                    - [ ] Allocate one 4 KB page for page directory.
+                    - [ ] Zero user portion (PDEs 0–767).
+                    - [ ] Copy kernel PDEs (768–1022) from `kernel_pmap` (shared by reference).
+                    - [ ] Set up recursive mapping in PDE 1023.
+                    - [ ] Initialize reference count to 1.
+                    - [ ] Add to global pmap list.
+                    - [ ] Minimum overhead: 1 PD (4 KB) + PTs allocated on demand.
+                - [ ] **`pmap_destroy()` — Destroy Address Space:**
+                    - [ ] Decrement reference count; return if still referenced (COW children).
+                    - [ ] Walk all user PDEs (0–767):
+                        - [ ] For each present PDE, walk all 1024 PTEs.
+                        - [ ] For each present PTE, free physical page (or decrement refcount).
+                        - [ ] Free page table page.
+                    - [ ] Free page directory page.
+                    - [ ] Remove from global pmap list.
+                - [ ] **`pmap_reference()` / `pmap_release()`:**
+                    - [ ] Atomic increment/decrement of reference count.
+                    - [ ] `pmap_release()`: call `pmap_destroy()` if refcount reaches 0.
+                - [ ] **`pmap_fork()` — Copy-on-Write Fork:**
+                    - [ ] Create new pmap via `pmap_create()`.
+                    - [ ] Walk parent's user PTEs:
+                        - [ ] Copy PTE to child with write bit cleared.
+                        - [ ] Clear write bit in parent too (both now COW).
+                        - [ ] Increment physical page reference count.
+                    - [ ] Track COW pages in pmap stats.
+                - [ ] **Kernel PDE Synchronization:**
+                    - [ ] `kernel_pmap` is authoritative for PDEs 768–1022.
+                    - [ ] `pmap_create()` copies kernel PDEs on creation.
+                    - [ ] `pmap_growkernel(va)`: when kernel maps new pages (vmalloc), update all pmaps.
+                        - [ ] Walk global pmap list and copy new kernel PDEs.
+                    - [ ] Alternatively share kernel PTs by reference (current approach).
+
+            - [ ] **`pmap_protect()` — Change Page Protections:**
+                - [ ] Walk range and update PTE protection bits (R/W, U/S).
+                - [ ] Handle protection upgrade (read → read/write) and downgrade.
+                - [ ] Track protection changes for COW handling.
+                - [ ] Batch TLB invalidations for large ranges (`TLB_BATCH_THRESHOLD`).
+
+            - [ ] **`pmap_copy()` — Copy Mappings Between Address Spaces:**
+                - [ ] Copy PTE entries from source to destination pmap.
+                - [ ] Set up COW if requested (clear write bit in both).
+                - [ ] Increment physical page reference counts.
+                - [ ] Support partial range copy (for `vfork`/`clone`).
+                - [ ] Handle mixed COW and private mappings (`PG_PRIVATE` check).
+
+            - [ ] **Page Reference/Modification Tracking:**
+                - [ ] `pmap_is_referenced(pmap, va)`: check PTE Accessed (A) bit.
+                - [ ] `pmap_is_modified(pmap, va)`: check PTE Dirty (D) bit.
+                - [ ] `pmap_clear_reference(pmap, va)`: clear A bit, invalidate TLB.
+                - [ ] `pmap_clear_modify(pmap, va)`: clear D bit, invalidate TLB.
+                - [ ] `pmap_test_and_clear_ref(page)`: atomic test-and-clear for A bit across all mappings.
+                - [ ] `pmap_test_and_clear_modify(page)`: atomic test-and-clear for D bit.
+                - [ ] Batch variants: `pmap_is_referenced_range()`, `pmap_is_modified_range()`.
+                - [ ] `pmap_track_access(page)`: per-page access frequency tracking for aging.
+                - [ ] Export referenced/modified info to VM layer for page replacement decisions.
+
+            - [ ] **Copy-on-Write System:**
+                - [ ] Mark shared pages read-only in both parent and child.
+                - [ ] **COW Fault Handler:**
+                    - [ ] On write fault to COW page: allocate new physical page.
+                    - [ ] Copy contents from original page.
+                    - [ ] Map new page R/W at faulting VA.
+                    - [ ] Decrement original page refcount.
+                    - [ ] If refcount == 1, optionally remap original R/W in remaining owner.
+                - [ ] `pmap_page_is_cow(page)`: check if page is COW-shared.
+                - [ ] COW statistics: faults, pages saved, duplications.
+                - [ ] `SYS_GET_COW_STATS` (241) syscall and `/proc/cow_stats` procfs entry.
+
             - [ ] **TLB Management:**
-                - [x] **Single CPU TLB:**
-                    - [x] `invlpg(va)`: Invalidate single page.
-                    - [x] CR3 reload: Flush entire TLB (expensive).
-                    - [x] Track flush statistics.
-                - [x] **SMP TLB Shootdown:**
-                    - [x] IPI (Inter-Processor Interrupt) mechanism.
-                    - [x] `pmap_shootdown_page(va)`: Invalidate single page on all CPUs.
-                    - [x] `pmap_shootdown_range(va, len)`: Invalidate range.
-                    - [x] `pmap_shootdown_all()`: Full TLB flush on all CPUs.
-                    - [x] Defer shootdown for batch operations.
-                    - [x] Shootdown completion barrier.
-                - [ ] **INVPCID (Future x86_64):**
+                - [ ] **Single CPU:**
+                    - [ ] `invlpg(va)`: invalidate single page.
+                    - [ ] CR3 reload: flush entire TLB (expensive, avoid when possible).
+                    - [ ] Track flush statistics.
+                - [ ] **SMP TLB Shootdown:**
+                    - [ ] IPI (Inter-Processor Interrupt) mechanism.
+                    - [ ] `pmap_shootdown_page(va)`: invalidate single page on all CPUs.
+                    - [ ] `pmap_shootdown_range(va, len)`: invalidate range.
+                    - [ ] `pmap_shootdown_all()`: full TLB flush on all CPUs.
+                    - [ ] Deferred shootdown for batch operations.
+                    - [ ] Shootdown completion barrier (wait for all CPUs to acknowledge).
+                - [ ] **INVPCID (future x86_64):**
                     - [ ] Detect INVPCID support via CPUID.
-                    - [ ] Use INVPCID for targeted TLB invalidation.
                     - [ ] Invalidate by PCID+VA, PCID only, or all-except-global.
-            - [x] **Large Page Support:**
-                - [x] **4MB PSE Pages (i386):**
-                    - [x] Detect PSE via CPUID (CR4.PSE).
-                    - [x] Use PDE with PS=1 for 4MB mappings.
-                    - [x] `pmap_enter_large(pmap, va, pa, prot, flags)`: Create 4MB mapping (supports eviction).
-                    - [x] Align VA and PA to 4MB boundary.
-                    - [x] Use for kernel text/data to reduce TLB pressure.
-                - [ ] **2MB/1GB Pages (x86_64):**
-                    - [ ] 2MB pages: PDE.PS=1 (no PT needed).
-                    - [ ] 1GB pages: PDPTE.PS=1 (no PD/PT needed).
-                    - [ ] Detect support via CPUID.
-                    - [ ] Automatic promotion: coalesce adjacent 4KB pages.
-                    - [ ] Demotion: split large page on partial unmap.
-            - [x] **Global Page Support (PGE):**
-                - [x] Detect PGE via CPUID.
-                - [x] Set CR4.PGE to enable global pages.
-                - [x] Mark kernel pages with PG_G flag.
-                - [x] Global pages survive CR3 reload.
-                - [x] Use INVPCID or CR4 toggle to flush global pages.
-            - [x] **PMAP Statistics and Debugging:**
-                - [x] Per-pmap counters: resident, wired, mapped, faults.
-                - [x] Global counters: total_pmaps, active_pmaps, cow_faults.
-                - [x] `pmap_dump(pmap)`: Debug dump of pmap contents.
-                - [x] `pmap_check(pmap)`: Consistency verification.
-                - [x] Export stats via syscall (`sys_pmap_stats`).
-        - [x] **PMAP Layer (Machine Dependent - x86_64):** <!-- pmap.c 1370 lines, pmap.h 188 lines -->
-            - [x] **Refactor:** `pmap_init`: Bootstrap PML4 paging structures.
-                - [x] Initialize kernel PML4 from static bootstrap
-                - [x] Set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000)
-                - [x] Map kernel space at canonical upper half (-2GB)
-                - [x] Initialize pmap lock for SMP safety
-                - [x] Enable NX bit via IA32_EFER.NXE
-            - [x] **Refactor:** `pmap_enter`/`pmap_remove`: Handle 4-level page tables (PML4, PDPT, PD, PT).
-                - [x] `pmap_enter(pmap, va, pa, prot, flags)`: Walk PML4→PDPT→PD→PT
-                - [x] `pmap_remove(pmap, va)`: Clear PTE and invalidate TLB
-                - [x] `pmap_kenter(va, pa)`: Kernel-only fast path
-                - [x] `pmap_kremove(va)`: Kernel-only removal
-                - [x] Allocate page tables on demand when entry is empty
-                - [x] Handle NX (No Execute) bit for memory protection
-                - [x] Support 2MB large pages (PDE.PS) and 1GB huge pages (PDPTE.PS) <!-- pmap.c:pmap_enter_2mb, pmap_enter_1gb -->
-            - [x] **Refactor:** `pmap_activate`: Context switch hook (CR3 loading).
-                - [x] Load pmap->pml4_phys into CR3
-                - [x] Handle PCID if available (Process Context Identifiers) <!-- pmap.c:pmap_activate_pcid -->
-                - [x] Maintain `curpmap` pointer
-            - [x] **Refactor:** **Recursive Paging:** Efficient 4-level page table mapping.
-                - [x] Reserve PML4 entry 510 for self-referencing
-                - [x] Define macros for accessing PML4/PDPT/PD/PT via recursive window
-                - [x] V_PML4, V_PDPT(n), V_PD(n), V_PT(n) macros
-            - [x] **CRITICAL:** `pmap_create`/`pmap_destroy`: Per-process address space management <!-- pmap.c:185-292 -->
-                - [x] `pmap_create()`: Allocate new PML4, copy kernel mappings (entries 256-511)
-                - [x] `pmap_destroy()`: Free all user page table levels and PML4
-                - [x] `pmap_reference()`: Increment pmap reference count
-            - [x] `pmap_protect`: Change page protections
-                - [x] Walk range and update PTE protection bits (R/W, NX, U/S)
-                - [x] Invalidate affected TLB entries
-            - [x] `pmap_is_referenced`/`pmap_is_modified`: Track page access/dirty bits <!-- pmap.c:348-419 -->
-            - [x] `pmap_clear_reference`/`pmap_clear_modify`: Clear access/dirty bits <!-- pmap.c:421-604 includes range and test_and_clear variants -->
-            - [x] Copy-on-write support (same as i386) <!-- pmap.c:607-750 pmap_fork, pmap_page_is_cow, pmap_release -->
-            - [x] TLB shootdown for SMP <!-- pmap.c:752-882 -->
-                - [x] IPI mechanism for remote TLB invalidation <!-- pmap.c:808-824 pmap_shootdown_page/range/all -->
-                - [x] INVPCID instruction support if available <!-- Deferred: using invlpg + CR3 reload for now -->
-            - [x] Large page support <!-- pmap.c:884-1048 -->
-                - [x] 2MB pages (PDE with PS bit) <!-- pmap.c:910-978 pmap_enter_2mb, pmap_remove_2mb -->
-                - [x] 1GB pages (PDPTE with PS bit, if supported) <!-- pmap.c:980-1048 pmap_enter_1gb, pmap_remove_1gb, cpuid_check_1gb_pages -->
-            - [x] Global page support (PGE) <!-- pmap.c:1050-1196 -->
-                - [x] Set CR4.PGE to enable global pages <!-- pmap.c:1072-1080 pmap_pge_enable -->
-                - [x] Mark kernel pages with PG_G <!-- pmap.c:1113-1196 pmap_set_global, pmap_mark_kernel_global -->
-            - [x] PCID support (Process Context Identifiers) <!-- pmap.c:1198-1370 -->
-                - [x] Detect PCID via CPUID <!-- pmap.c:1216-1222 cpuid_check_pcid, cpuid_check_invpcid -->
-                - [x] Allocate PCIDs to processes <!-- pmap.c:1262-1292 pmap_pcid_alloc, pmap_pcid_free -->
-                - [x] Use INVPCID for targeted TLB flushes <!-- pmap.c:1330-1370 pmap_invpcid* functions -->
+
+            - [ ] **Large Page Support:**
+                - [ ] **4 MB PSE Pages (i386):**
+                    - [ ] Detect PSE via CPUID, set CR4.PSE.
+                    - [ ] Use PDE with PS=1 for 4 MB mappings.
+                    - [ ] `pmap_enter_large(pmap, va, pa, prot, flags)`: create 4 MB mapping.
+                    - [ ] Align VA and PA to 4 MB boundary.
+                    - [ ] Use for kernel text/data to reduce TLB pressure.
+                    - [ ] Demotion: split 4 MB page into 1024 × 4 KB on partial unmap/protect.
+                    - [ ] Promotion: coalesce 1024 aligned 4 KB pages into 4 MB (deferred).
+                - [ ] **2 MB / 1 GB Pages (x86_64 — see x86_64 PMAP below).**
+
+            - [ ] **Global Page Support (PGE):**
+                - [ ] Detect PGE via CPUID, set CR4.PGE.
+                - [ ] Mark kernel pages with `PG_G` flag.
+                - [ ] Global pages survive CR3 reload (not flushed).
+                - [ ] Use CR4 toggle or `INVPCID` to flush global pages when needed.
+
+            - [ ] **ASID/PCID Support (future x86_64):**
+                - [ ] ASID pool management (allocate, free, recycle).
+                - [ ] Assign ASID on pmap creation.
+                - [ ] Include ASID in CR3 on context switch.
+                - [ ] Avoid full TLB flush when switching between processes with different ASIDs.
+
+            - [ ] **PAE Mode (Physical Address Extension — deferred):**
+                - [ ] Three-level page tables: PDPT (4 entries) → PD → PT.
+                - [ ] 64‑bit PTEs: support for NX (No Execute) bit.
+                - [ ] Physical addresses up to 36 bits (64 GB).
+                - [ ] PDPT must be in first 4 GB and 32‑byte aligned.
+
+            - [ ] **PMAP Statistics and Debugging:**
+                - [ ] Per-pmap counters: resident, wired, mapped, faults, cow_faults.
+                - [ ] Global counters: total_pmaps, active_pmaps.
+                - [ ] `pmap_dump(pmap)`: debug dump of pmap contents (PDEs + PTEs).
+                - [ ] `pmap_check(pmap)`: consistency verification (detect leaked pages, orphan PTs).
+                - [ ] Export stats via syscall (`sys_pmap_stats`).
+
+            - [ ] **Page Aging Algorithm Integration:**
+                - [ ] Periodic scanning of all resident pages.
+                - [ ] Decrement age counter if not referenced.
+                - [ ] Pages with age 0 become eviction candidates.
+                - [ ] Support for multiple aging policies (Clock, LRU approximation).
+                - [ ] Hardware A/D bit emulation not needed on x86 (native support).
+
+            - [ ] **Testing:**
+                - [ ] Unit: `pmap_create` → `pmap_destroy` lifecycle (no leaked pages).
+                - [ ] Unit: `pmap_enter` + `pmap_extract` round-trip.
+                - [ ] Unit: `pmap_protect` upgrade and downgrade.
+                - [ ] Unit: `pmap_fork` COW — write to child triggers fault, parent unaffected.
+                - [ ] Unit: `pmap_copy` partial range with mixed COW/private.
+                - [ ] Unit: reference/modification tracking — set/clear/test A and D bits.
+                - [ ] Unit: large page enter/remove (4 MB PSE).
+                - [ ] Unit: TLB shootdown — verify `invlpg` called on remote CPUs.
+                - [ ] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`).
+                - [ ] Property: `pmap_destroy` frees exactly `resident_count` pages.
+                - [ ] Property: recursive mapping at PDE 1023 is self-consistent.
+                - [ ] Integration: fork process, write to COW pages, verify isolation in QEMU.
+                - [ ] Integration: stress test — 100 `pmap_create`/`pmap_destroy` cycles, verify no PMM leak.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: i386 pmap architecture (2-level, recursive, COW).
+                - [ ] Internal doc: TLB management strategy (single CPU + SMP shootdown).
+                - [ ] Internal doc: per-process address space layout (3 GB/1 GB split).
+
+        - [ ] **PMAP Layer (Machine Dependent — x86_64):**
+
+            > **Files:** `sys/arch/x86_64/pmap.c`, `pmap.h`.
+            >
+            > **Architecture:** Four-level page tables (PML4 → PDPT → PD → PT).
+            > Recursive mapping at PML4 entry 510. Canonical 48-bit virtual addressing.
+
+            - [ ] **Initialization (`pmap_bootstrap`):**
+                - [ ] Initialize kernel PML4 from static bootstrap allocation.
+                - [ ] Set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000).
+                - [ ] Map kernel space at canonical upper half (−2 GB).
+                - [ ] Initialize pmap lock for SMP safety.
+                - [ ] Enable NX bit via IA32_EFER.NXE.
+                - [ ] Detect CPU features: PCID, INVPCID, 1 GB pages, PGE.
+
+            - [ ] **Core PTE Manipulation:**
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: walk PML4 → PDPT → PD → PT.
+                    - [ ] Allocate intermediate page table levels on demand.
+                    - [ ] Set NX (No Execute) bit for data pages.
+                    - [ ] Handle user/supervisor, read/write, global flags.
+                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB.
+                - [ ] `pmap_kenter(va, pa)` / `pmap_kremove(va)`: kernel fast paths.
+                - [ ] `pmap_extract(pmap, va)`: return physical address.
+                - [ ] `pmap_zero_page(phys)` / `pmap_copy_page(src, dst)`: page utilities.
+
+            - [ ] **Context Switch (`pmap_activate`):**
+                - [ ] Load `pmap->pml4_phys` into CR3.
+                - [ ] Handle PCID if available (include PCID in CR3 bits 11:0).
+                - [ ] Set `noflush` bit (CR3 bit 63) to avoid TLB flush on PCID switch.
+                - [ ] Update `curpmap` pointer.
+
+            - [ ] **Recursive Paging:**
+                - [ ] Reserve PML4 entry 510 for self-referencing.
+                - [ ] `V_PML4`, `V_PDPT(n)`, `V_PD(n)`, `V_PT(n)` macros for accessing page table levels.
+                - [ ] All PTE manipulation via recursive window.
+
+            - [ ] **Per-Process Address Space:**
+                - [ ] `pmap_create()`: allocate new PML4, copy kernel mappings (entries 256–511).
+                - [ ] `pmap_destroy()`: free all user page table levels (PT → PD → PDPT → PML4) and PML4 itself.
+                - [ ] `pmap_reference()` / `pmap_release()`: reference counting.
+                - [ ] `pmap_fork()`: COW fork with 4-level walk.
+
+            - [ ] **`pmap_protect`:** walk range, update PTE bits (R/W, NX, U/S), invalidate TLB.
+
+            - [ ] **Reference/Modification Tracking:**
+                - [ ] Same API as i386: `pmap_is_referenced`, `pmap_is_modified`, `pmap_clear_*`, `pmap_test_and_clear_*`.
+                - [ ] Range and batch variants.
+
+            - [ ] **Copy-on-Write:** same architecture as i386 (`pmap_fork`, `pmap_page_is_cow`).
+
+            - [ ] **TLB Management:**
+                - [ ] IPI-based SMP shootdown (`pmap_shootdown_page/range/all`).
+                - [ ] INVPCID instruction support (if available):
+                    - [ ] Type 0: invalidate specific PCID + VA.
+                    - [ ] Type 1: invalidate all entries for a PCID.
+                    - [ ] Type 2: invalidate all entries including globals.
+                    - [ ] Type 3: invalidate all entries except globals.
+
+            - [ ] **Large Page Support:**
+                - [ ] **2 MB Pages:** PDE with PS=1, no PT needed.
+                    - [ ] `pmap_enter_2mb(pmap, va, pa, prot, flags)`.
+                    - [ ] `pmap_remove_2mb(pmap, va)`.
+                    - [ ] Automatic promotion: coalesce 512 adjacent 4 KB pages.
+                    - [ ] Demotion: split on partial unmap/protect.
+                - [ ] **1 GB Pages:** PDPTE with PS=1, no PD/PT needed.
+                    - [ ] `pmap_enter_1gb(pmap, va, pa, prot, flags)`.
+                    - [ ] `pmap_remove_1gb(pmap, va)`.
+                    - [ ] Detect support via CPUID (leaf 0x80000001, bit 26).
+                    - [ ] Use for large kernel mappings and huge anonymous regions.
+
+            - [ ] **Global Page Support (PGE):**
+                - [ ] Set CR4.PGE, mark kernel pages with `PG_G`.
+                - [ ] `pmap_set_global(pmap, va)` / `pmap_mark_kernel_global()`.
+
+            - [ ] **PCID Support (Process Context Identifiers):**
+                - [ ] Detect PCID via CPUID (leaf 1, ECX bit 17).
+                - [ ] Detect INVPCID via CPUID (leaf 7, EBX bit 10).
+                - [ ] Set CR4.PCIDE to enable.
+                - [ ] PCID pool: allocate 12-bit IDs (max 4096), recycle via generation counter.
+                - [ ] `pmap_pcid_alloc()` / `pmap_pcid_free()`: pool management.
+                - [ ] Assign PCID on `pmap_create()`, include in CR3 on activate.
+                - [ ] Avoid TLB flush on context switch between different PCIDs.
+
+            - [ ] **NX (No Execute) Bit:**
+                - [ ] Enable via IA32_EFER.NXE MSR.
+                - [ ] Set NX (bit 63 of PTE) for stack, heap, data pages.
+                - [ ] Clear NX for code pages.
+                - [ ] Enforce W^X: pages cannot be both writable and executable.
+
+            - [ ] **5-Level Paging (LA57 — deferred):**
+                - [ ] Detect via CPUID (leaf 7, ECX bit 16).
+                - [ ] PML5 adds 57-bit virtual addressing (128 PB).
+                - [ ] Recursive mapping adjustment for 5 levels.
+
+            - [ ] **PMAP Statistics and Debugging:**
+                - [ ] Same per-pmap and global counters as i386.
+                - [ ] `pmap_dump(pmap)`: debug dump of 4-level page tables.
+                - [ ] `pmap_check(pmap)`: consistency verification.
+
+            - [ ] **Testing:**
+                - [ ] Unit: 4-level page table walk — `pmap_enter` at various canonical addresses.
+                - [ ] Unit: NX enforcement — execute from NX page triggers fault.
+                - [ ] Unit: PCID allocation and recycling under exhaustion.
+                - [ ] Unit: 2 MB page enter/remove.
+                - [ ] Unit: 1 GB page enter/remove (if CPU supports).
+                - [ ] Unit: `pmap_fork` with 4-level walk — COW isolation.
+                - [ ] Unit: INVPCID types 0–3 dispatch.
+                - [ ] Property: PML4 entries 256–511 always match `kernel_pmap`.
+                - [ ] Integration: boot x86_64 kernel, verify user processes get isolated address spaces.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: x86_64 pmap architecture (4-level, PCID, NX).
+                - [ ] Internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros).
+                - [ ] Internal doc: large page promotion/demotion strategy.
         - [x] **VM Subsystem (Machine Independent - Massive Refactor):** <!-- vm_map.c (309), vm_fault.c (157), vm_object.c (3039), vm_page.c (17685), vm_pager.c (4915), vm_swap.c (4972), uma_core.c (705) -->
             - [x] **Rewrite:** **VM Map:** `vm_map` structure representing an address space.
             - [x] **Rewrite:** **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
