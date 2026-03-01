@@ -187,6 +187,9 @@ These components are essential for booting and basic system operation.
 - **`as`**: x86 assembler driver for i386/x86_64.
   - For complete ISA coverage, it forwards assembly to host GCC/GAS (`-m32`/`-m64`) and validates ELF class/machine/type through `libelfobj`.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).
+  - Exposes optional safety limits (`--max-input-bytes`, `--max-line-bytes`, `--max-token-length`, `--max-macro-depth`, `--max-include-depth`) and optional structured wrapper diagnostics via `AS_ERROR_CODES=1`.
+  - Spec and rollout docs are maintained under `docs/specs/as_spec.md` and `docs/specs/as_rollout.md`.
+  - Regression coverage lives in `tests/usr.bin/as/` including compatibility, relocation/ELF, diagnostics, determinism, fuzz-smoke, and rollout integration harnesses.
 - **`ld`**: linker prototype built on `libelfobj`.
   - Merges objects/archives and emits ET_REL/ET_EXEC/ET_DYN outputs.
   - Current limitation: `libelfobj` validator can reject some compiler-style relocation layouts; full relocation+layout validation is pending.
