@@ -97,8 +97,8 @@ Goal: implement `size` using section accounting from `libelfobj`.
 - [x] `-o` radix: all numbers in octal.
 
 ### 9c. Multi‑File Tests
-- [ ] Two files: two rows + total row.
-- [ ] Archive with 3 `.o` members: 3 rows with `archive(member)` names.
+- [x] Two files: two rows + total row.
+- [x] Archive with 3 `.o` members: 3 rows with `archive(member)` names.
 
 ### 9d. Overflow Tests
 - [ ] Mock ELF64 object with `.bss` size > 4 GiB — total does not wrap.
