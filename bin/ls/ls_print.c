@@ -1,3 +1,7 @@
+#if defined(NATIVE_BUILD) && !defined(_XOPEN_SOURCE)
+#define _XOPEN_SOURCE 700
+#endif
+
 #include <ctype.h>
 #include <limits.h>
 #include <pwd.h>
