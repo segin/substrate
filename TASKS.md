@@ -24,18 +24,18 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [x] Exclude kernel text/data/BSS region from free pool.
                 - [x] Exclude Multiboot info structure and module regions.
                 - [x] Reserve BIOS/ACPI regions (type 3/4) and memory holes.
-        - [ ] **Bootstrap Watermark Allocator:**
-            - [ ] Bump allocator for early boot before buddy is ready.
-            - [ ] `pmm_watermark_init(start, end)`: initialize allocator with usable range.
-            - [ ] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment.
-            - [ ] `pmm_watermark_used()`: report bytes consumed.
-            - [ ] Used for: `vm_page_t` array, initial page tables, kernel stacks.
-            - [ ] Watermark region clamped to avoid exceeding available low memory.
-        - [ ] **Dynamic Metadata:**
-            - [ ] Calculate `vm_page_t` array size based on actual detected RAM.
-            - [ ] Allocate array via watermark allocator.
-            - [ ] Remove hardcoded 128 MB static limit.
-            - [ ] Fallback to static bitmap if RAM < 4 MB (constrained environments).
+        - [x] **Bootstrap Watermark Allocator:**
+            - [x] Bump allocator for early boot before buddy is ready.
+            - [x] `pmm_watermark_init(start, end)`: initialize allocator with usable range.
+            - [x] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment.
+            - [x] `pmm_watermark_used()`: report bytes consumed.
+            - [x] Used for: `vm_page_t` array, initial page tables, kernel stacks.
+            - [x] Watermark region clamped to avoid exceeding available low memory.
+        - [x] **Dynamic Metadata:**
+            - [x] Calculate `vm_page_t` array size based on actual detected RAM.
+            - [x] Allocate array via watermark allocator.
+            - [x] Remove hardcoded 128 MB static limit.
+            - [x] Fallback to static bitmap if RAM < 4 MB (constrained environments).
         - [ ] **Buddy Allocator:**
             - [ ] Orders 0–10 (4 KB – 4 MB pages).
             - [ ] **Free Lists:** per‑order doubly‑linked free page lists.

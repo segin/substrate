@@ -263,19 +263,16 @@ static uint32_t watermark_base;
 static uint32_t watermark_ptr;
 static uint32_t watermark_end;
 
-void pmm_watermark_init(uint32_t phys_limit) {
-    extern uint32_t _kernel_end;
-    uint32_t v_end = (uint32_t)(uintptr_t)&_kernel_end;
-    uint32_t p_end = v_end - 0xC0000000;
-    
-    watermark_base = (p_end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+void pmm_watermark_init(uint32_t start, uint32_t end) {
+    watermark_base = (start + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
     watermark_ptr = watermark_base;
-    watermark_end = watermark_base + (4 * 1024 * 1024);
-    if (watermark_end > phys_limit) watermark_end = phys_limit;
+    watermark_end = end;
 }
 
-void* pmm_watermark_alloc(size_t bytes) {
-    bytes = (bytes + 15) & ~15;
+void* pmm_watermark_alloc(size_t bytes, size_t align) {
+    if (align == 0) align = 16;
+    watermark_ptr = (watermark_ptr + align - 1) & ~(align - 1);
+    
     if (watermark_ptr + bytes > watermark_end) return NULL;
     uint32_t result = watermark_ptr;
     watermark_ptr += bytes;
@@ -592,7 +589,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm_total_reserved_ram = stats.total_reserved;
 
     // 3. Init Watermark
-    pmm_watermark_init((uint32_t)stats.max_phys);
+    pmm_watermark_init(kernel_phys_end, (uint32_t)stats.max_phys);
     
     uint32_t max_phys_addr = (uint32_t)stats.max_phys;
     if (max_phys_addr & (PMM_BLOCK_SIZE - 1)) {
@@ -602,9 +599,9 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     size_t total_blocks = max_phys_addr / PMM_BLOCK_SIZE;
     size_t bitmap_bytes = (total_blocks + 7) / 8;
     
-    uint8_t* pmm_bitmap = (uint8_t*)pmm_watermark_alloc(bitmap_bytes);
+    uint8_t* pmm_bitmap = (uint8_t*)pmm_watermark_alloc(bitmap_bytes, 16);
     size_t array_bytes = total_blocks * sizeof(vm_page_t);
-    vm_page_t* pmm_page_array = (vm_page_t*)pmm_watermark_alloc(array_bytes);
+    vm_page_t* pmm_page_array = (vm_page_t*)pmm_watermark_alloc(array_bytes, PMM_BLOCK_SIZE);
     
     if (!pmm_bitmap) {
         // Fallback
@@ -890,12 +887,12 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
         kprint("PMM: No e820 map provided, using fallback 16MB\n");
         uint32_t k_end = kernel_phys_end;
         
-        pmm_watermark_init(16 * 1024 * 1024);
+        pmm_watermark_init(k_end, 16 * 1024 * 1024);
         
         /* Minimal init */
         size_t total_blocks = (16 * 1024 * 1024) / PMM_BLOCK_SIZE;
         size_t bitmap_bytes = (total_blocks + 7) / 8;
-        uint8_t *pmm_bitmap = (uint8_t *)pmm_watermark_alloc(bitmap_bytes);
+        uint8_t *pmm_bitmap = (uint8_t *)pmm_watermark_alloc(bitmap_bytes, 16); // Assuming 16-byte alignment for bitmap
         
         if (!pmm_bitmap) {
             pmm_bitmap = pmm_bitmap_static;
@@ -921,7 +918,7 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     pmm_total_reserved_ram = stats.total_reserved;
     
     /* Init Watermark */
-    pmm_watermark_init((uint32_t)stats.max_phys);
+    pmm_watermark_init(kernel_phys_end, (uint32_t)stats.max_phys);
     
     uint32_t max_phys_addr = (uint32_t)stats.max_phys;
     if (max_phys_addr & (PMM_BLOCK_SIZE - 1)) {
@@ -931,9 +928,9 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     size_t total_blocks = max_phys_addr / PMM_BLOCK_SIZE;
     size_t bitmap_bytes = (total_blocks + 7) / 8;
     
-    uint8_t *pmm_bitmap = (uint8_t *)pmm_watermark_alloc(bitmap_bytes);
+    uint8_t* pmm_bitmap = (uint8_t*)pmm_watermark_alloc(bitmap_bytes, 16);
     size_t array_bytes = total_blocks * sizeof(vm_page_t);
-    vm_page_t *pmm_page_array = (vm_page_t *)pmm_watermark_alloc(array_bytes);
+    vm_page_t* pmm_page_array = (vm_page_t*)pmm_watermark_alloc(array_bytes, PMM_BLOCK_SIZE);
     
     if (!pmm_bitmap) {
         kprint("PMM: Warn - using static bitmap.\n");

@@ -34,8 +34,8 @@ void pmm_walk_e820(const e820_entry_t *map, uint32_t count, pmm_region_callback 
 void pmm_dump_e820(const e820_entry_t *map, uint32_t count);
 
 // Watermark Allocator (Early Boot)
-void pmm_watermark_init(uint32_t phys_limit);
-void* pmm_watermark_alloc(size_t bytes);
+void pmm_watermark_init(uint32_t start, uint32_t end);
+void* pmm_watermark_alloc(size_t bytes, size_t align);
 uint32_t pmm_watermark_used(void);
 
 // VM Page Integration
