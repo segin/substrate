@@ -322,6 +322,29 @@ SRC
     OUT_MANY=$($BIN -e "$TMP/many_cu" 0x$MANY_ADDR)
     expect_nonempty_match "10f-5" "$OUT_MANY" 'unit_37\.c:[0-9]+'
 
+    # 10g-1: -f -s prints function and basename-only path
+    OUT_FS=$($BIN -f -s -e "$TMP/exec64_v5" 0x$A5)
+    expect_eq "10g-1-func" "$(printf '%s\n' "$OUT_FS" | sed -n '1p')" "f1"
+    FS_LOC=$(printf '%s\n' "$OUT_FS" | sed -n '2p')
+    expect_nonempty_match "10g-1-loc" "$FS_LOC" '^sample\.c:[0-9]+$'
+
+    # 10g-2: -f -C -i -p yields one-line pretty inline frames
+    OUT_FCIP=$($BIN -f -C -i -p -e "$TMP/rust_inline" 0x$INLINE_ADDR)
+    FCIP_LINES=$(printf '%s\n' "$OUT_FCIP" | wc -l | tr -d ' ')
+    [ "$FCIP_LINES" -ge 2 ] || fail "10g-2 expected multiple pretty inline lines"
+    expect_nonempty_match "10g-2" "$(first_line "$OUT_FCIP")" '^.+ at .+:[0-9]+$'
+
+    # 10g-3: -a prepends address column
+    OUT_A=$($BIN -a -e "$TMP/exec64_v5" 0x$A5)
+    A5_CANON=$(printf '%x' $((0x$A5)))
+    expect_eq "10g-3" "$(first_line "$OUT_A")" "0x$A5_CANON"
+
+    # 10g-4: stdin mode resolves one output per input line
+    OUT_STDIN=$(printf '0x%s\n0x%s\n0x%s\n' "$A0" "$A5" "$AM" | \
+        "$BIN" -e "$TMP/exec64_v5")
+    STDIN_LINES=$(printf '%s\n' "$OUT_STDIN" | wc -l | tr -d ' ')
+    expect_eq "10g-4" "$STDIN_LINES" "3"
+
     pass "all"
 }
 

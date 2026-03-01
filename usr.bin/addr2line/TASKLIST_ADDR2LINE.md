@@ -291,10 +291,10 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] Very large DWARF (many CUs): no crash, correct lookup.
 
 ### 10g. Flag Combination Tests **(FR‑50 – FR‑55)**
-- [ ] `-f -s`: function + basename only.
-- [ ] `-f -C -i -p`: demangled, inlined, pretty‑print.
-- [ ] `-a`: verify address column prepended.
-- [ ] Stdin mode: pipe addresses, verify per-line output.
+- [x] `-f -s`: function + basename only.
+- [x] `-f -C -i -p`: demangled, inlined, pretty‑print.
+- [x] `-a`: verify address column prepended.
+- [x] Stdin mode: pipe addresses, verify per-line output.
 
 ### 10h. Compressed Debug Tests **(FR‑04)**
 - [ ] `.zdebug_line` (zlib‑gnu): verify transparent decompression.
