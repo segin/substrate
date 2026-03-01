@@ -934,40 +934,272 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 ### 3. Drivers (`sys/drivers`)
 - [ ] **Storage Subsystem (Unified SCSI Stack):**
-    - [x] **Core Architecture (CAM/Mid-layer):** <!-- scsi.h, scsi.c, scsi_dev.c, scsi_ctl.c -->**
-        - [x] **Data Structures:** Define `scsi_request`, `scsi_device`, `scsi_link` (transport linkage). <!-- scsi.h, scsi.c, test_scsi.c -->
-        - [x] **Discovery:** <!-- scsi.c:scsi_scan_bus, scsi_probe_lun, scsi_report_luns -->
-            - [x] Implement Bus Scanning logic (HBA enumeration). <!-- scsi.c:scsi_scan_bus, scsi_probe_lun -->
-            - [x] Implement `REPORT LUNS` and `INQUIRY` probing. <!-- scsi.c:scsi_report_luns, scsi_scan_bus -->
-            - [x] Device Registry: registration of found targets/LUNs. <!-- scsi.c:scsi_device_register, scsi_device_lookup -->
-        - [x] **Command Handling:** <!-- scsi.c timeout/retry, sense parsing -->
-            - [x] Asynchronous command queueing (completion callbacks). <!-- scsi.c:scsi_queue_request, scsi_complete_request -->
-            - [x] Timeout management and retries. <!-- scsi.c:scsi_execute (retry loop) -->
-            - [x] Error Handling: Sense Data definition and parsing (SPC-3). <!-- scsi.c:scsi_sense_key, scsi_sense_string -->
-    - [x] **High-Level Device Drivers:** <!-- scsi_dev.c, scsi_ctl.c -->
-        - [x] **Unified Userspace Interface:** <!-- Device nodes and unified driver complete -->
-            - [x] **Device Nodes:** <!-- scsi_ctl.c:scsi_create_generic_node, scsi_create_bus_node -->
-                - [x] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`) - Direct generic SCSI access (Bus:Target:LUN). <!-- scsi_ctl.c:sg_ioctl -->
-                - [x] `/dev/storage/scsi/B` (e.g., `0`) - Bus controller ioctl endpoint (Enumeration/Rescan). <!-- scsi_ctl.c:bus_ioctl -->
-                - [x] `/dev/storage/scsiN` (e.g., `scsi0`) - High-level Block Device alias (e.g., first disk). <!-- scsi_dev.c:scsi_dev_attach -->
-            - [x] **Unified SCSI Driver:** <!-- scsi_dev.c -->
-                - [x] **Command Translation:** Map high-level Block I/O to SCSI READ/WRITE CDBs. <!-- scsi_dev.c:scsi_blk_read, scsi_blk_write -->
-                - [x] **Device Type Handling:**
-                    - [x] **Direct Access (Disk):** Capacity/Geometry, Cache Flush. <!-- scsi_dev.c:scsi_dev_attach -->
-                    - [x] **CD-ROM:** `READ TOC`, Sector Size switching (2048/512), Door locking. <!-- scsi_dev.c:scsi_read_toc, scsi_lock_door -->
-            - [x] **Integration:**
-                - [x] Register with DevFS using the schematic above. <!-- blkdev.c:blkdev_register -> devfs_register_device -->
-                - [x] Implement `ioctl` for Bus Enumeration on controller nodes. <!-- scsi_ctl.c:bus_ioctl -->
+
+    > **Files:** `sys/drivers/storage/scsi/scsi.h`, `scsi.c`, `scsi_dev.c`,
+    > `scsi_ctl.c`, `atapi_scsi.c`/`.h`, `virtio_scsi.c`.
+    >
+    > **Architecture:** CAM-inspired mid-layer with transport-independent
+    > command execution. No artificial sd/sr split — everything is a
+    > `scsi_device` with type-specific behavior.
+
+    - [ ] **Core Architecture (CAM/Mid-layer):**
+
+        - [ ] **Data Structures (`scsi.h`):**
+            - [ ] `scsi_request_t`: command execution context.
+                - [ ] CDB storage (up to `SCSI_MAX_CDB_LEN` = 16 bytes).
+                - [ ] `cdb_len`: actual CDB length (6, 10, 12, or 16).
+                - [ ] `data`/`data_len`: DMA buffer pointer and transfer length.
+                - [ ] `flags`: direction (`SCSI_REQ_READ`, `SCSI_REQ_WRITE`), and options.
+                - [ ] `status`: SCSI status byte (GOOD, CHECK CONDITION, BUSY, etc.).
+                - [ ] `sense_data[SCSI_SENSE_LEN]`: auto-sense buffer (32 bytes).
+                - [ ] `sense_len`: actual sense data returned.
+                - [ ] `timeout_ms`: per-command timeout.
+                - [ ] `retries` / `max_retries`: retry counters (default 3, media error = 0).
+                - [ ] `callback`: async completion function pointer.
+                - [ ] `submit_time` / `start_time` / `elapsed_ms`: timing instrumentation.
+                - [ ] Queue linkage (`next` pointer).
+            - [ ] `scsi_device_t`: target representation.
+                - [ ] Addressing: `bus`, `target` (0–15), `lun` (0–255).
+                - [ ] Identity from INQUIRY: `vendor[9]`, `product[17]`, `revision[5]`, `serial[21]`.
+                - [ ] `type`: peripheral device type (disk=0x00, tape=0x01, cdrom=0x05, etc.).
+                - [ ] `removable`: RMB bit from INQUIRY.
+                - [ ] `scsi_version`: SPC version from INQUIRY.
+                - [ ] `capacity`: total sectors (from READ CAPACITY).
+                - [ ] `sector_size`: bytes/sector (512 for disk, 2048 for CD-ROM).
+                - [ ] `flags`: online/offline, write-protected, supports TCQ.
+                - [ ] Command queue: `queue_head`/`queue_tail`, `queue_depth`, `max_queue_depth`.
+                - [ ] `link`: back-pointer to transport interface.
+                - [ ] Registry linkage (`next` pointer).
+            - [ ] `scsi_link_t`: transport adapter interface.
+                - [ ] `name[32]`: adapter name (e.g., `"atapi0"`, `"virtio-scsi0"`).
+                - [ ] `execute(link, request)`: function pointer — transport-specific command dispatch.
+                - [ ] `max_targets` / `max_luns`: bus topology limits.
+                - [ ] `adapter_queue_depth`: HBA-level parallelism.
+                - [ ] `flags`: DMA-capable, supports tagged queueing, ordered tags.
+                - [ ] Statistics: `cmds_completed`, `cmds_failed`, `bytes_read`, `bytes_written`.
+            - [ ] `scsi_sense_fixed`: SPC-3 fixed-format sense data (36 bytes).
+                - [ ] `response_code` (0x70 current, 0x71 deferred).
+                - [ ] `sense_key` (bits 0–3), `ILI` (bit 5), `EOM` (bit 6), `FileMark` (bit 7).
+                - [ ] `info[4]`: command-specific information.
+                - [ ] `asc` / `ascq`: Additional Sense Code / Qualifier.
+            - [ ] `scsi_inquiry_data`: standard INQUIRY response (36+ bytes).
+                - [ ] `device_type` (bits 0–4), `qualifier` (bits 5–7).
+                - [ ] `rmb` (bit 7), `version`, `response_format`.
+                - [ ] `additional_length`, `flags` (CmdQue, etc.).
+                - [ ] Vendor/Product/Revision strings (space-padded).
+            - [ ] `scsi_report_luns_data`: REPORT LUNS response (up to 64 LUNs).
+
+        - [ ] **Initialization (`scsi_init`):**
+            - [ ] Initialize device registry (pre-allocate pool of `scsi_device_t`, 64 max).
+            - [ ] Initialize request pool (pre-allocate `scsi_request_t`, 128 max).
+            - [ ] Initialize free lists for both pools.
+            - [ ] Call `scsi_dev_init()` and `scsi_ctl_init()`.
+
+        - [ ] **Transport Registration:**
+            - [ ] `scsi_register_link(link)`: register HBA/transport adapter.
+                - [ ] Validate `execute` callback is non-NULL.
+                - [ ] Add to global link list (max 8 links).
+                - [ ] Trigger bus scan on the new link.
+            - [ ] `scsi_unregister_link(link)`: unregister adapter.
+                - [ ] Detach all devices on this link.
+                - [ ] Free associated resources.
+
+        - [ ] **Device Discovery:**
+            - [ ] `scsi_scan_bus(link, bus)`: enumerate all targets on a bus.
+                - [ ] Iterate target IDs 0..`link->max_targets - 1`.
+                - [ ] For each target: INQUIRY at LUN 0, then REPORT LUNS for multi-LUN.
+                - [ ] Fallback: sequential LUN probing if REPORT LUNS fails (old devices).
+            - [ ] `scsi_probe_lun(link, bus, target, lun)`: probe a single LUN.
+                - [ ] Send TEST UNIT READY.
+                - [ ] Send INQUIRY; parse device type, vendor, product, revision.
+                - [ ] If device type is valid: `scsi_device_register()`.
+                - [ ] Send READ CAPACITY (10 or 16) for block devices.
+                - [ ] Trigger `scsi_auto_attach()` on success.
+            - [ ] `scsi_device_register(dev)`: add to global device list.
+                - [ ] Check for duplicate (same bus:target:lun).
+                - [ ] Assign monotonically increasing device number.
+                - [ ] Log discovery: `"scsi: B:T:L vendor product [type]"`.
+            - [ ] `scsi_device_unregister(dev)`: remove from list.
+            - [ ] `scsi_device_lookup(bus, target, lun)`: find registered device.
+
+        - [ ] **Command Execution:**
+            - [ ] **Request Lifecycle:**
+                - [ ] `scsi_request_alloc()`: allocate from pool (or return NULL if exhausted).
+                - [ ] `scsi_request_init(req, dev)`: zero fields, link to device, set default timeout (30s) and retries (3).
+                - [ ] `scsi_request_free(req)`: return to free pool.
+            - [ ] **Synchronous Execution:**
+                - [ ] `scsi_execute_sync(dev, cdb, cdb_len, data, data_len, flags, timeout_ms)`:
+                    - [ ] Allocate request, fill CDB/buffer, call `scsi_execute()`, block until complete, return status.
+            - [ ] **Core Execution (`scsi_execute`):**
+                - [ ] Record `submit_time` timestamp.
+                - [ ] Retry loop: attempt up to `max_retries + 1` times.
+                - [ ] Call `link->execute(link, req)` to dispatch to transport.
+                - [ ] Record `start_time`, measure `elapsed_ms`.
+                - [ ] On CHECK CONDITION: auto-request sense, parse sense key.
+                    - [ ] UNIT ATTENTION (sense key 6): retry automatically (medium changed).
+                    - [ ] NOT READY (sense key 2): retry with delay (device spinning up).
+                    - [ ] MEDIUM ERROR (sense key 3): no retry (data loss).
+                    - [ ] ABORTED COMMAND (sense key 0xB): retry.
+                - [ ] On BUSY / TASK SET FULL: backoff and retry.
+                - [ ] Update link statistics on completion.
+            - [ ] **Async Queue Management:**
+                - [ ] `scsi_queue_request(req)`: enqueue to device's command queue.
+                    - [ ] Respect `max_queue_depth` (drop or backpressure).
+                - [ ] `scsi_process_queue(dev)`: dequeue and execute pending requests.
+                - [ ] `scsi_abort_request(req)`: cancel pending request (remove from queue, invoke callback with error).
+                - [ ] `scsi_complete_request(req, status)`: mark done, invoke callback, trigger queue processing.
+
+        - [ ] **Sense Data Parsing:**
+            - [ ] `scsi_sense_key(sense, len)`: extract sense key from fixed or descriptor format.
+            - [ ] `scsi_sense_asc(sense, len)`: extract ASC (Additional Sense Code).
+            - [ ] `scsi_sense_ascq(sense, len)`: extract ASCQ (Additional Sense Code Qualifier).
+            - [ ] `scsi_sense_string(sense, len, buf, buflen)`: human-readable sense string.
+            - [ ] Sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED.
+            - [ ] Common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present).
+
+        - [ ] **CDB Builders:**
+            - [ ] `scsi_cdb_test_unit_ready(cdb)`: 6-byte TUR.
+            - [ ] `scsi_cdb_inquiry(cdb, len)`: 6-byte INQUIRY with allocation length.
+            - [ ] `scsi_cdb_request_sense(cdb, len)`: 6-byte REQUEST SENSE.
+            - [ ] `scsi_cdb_read_capacity_10(cdb)`: 10-byte READ CAPACITY.
+            - [ ] `scsi_cdb_read_10(cdb, lba, count)`: 10-byte READ.
+            - [ ] `scsi_cdb_write_10(cdb, lba, count)`: 10-byte WRITE.
+            - [ ] `scsi_cdb_read_16(cdb, lba, count)`: 16-byte READ (LBA > 2TB).
+            - [ ] `scsi_cdb_write_16(cdb, lba, count)`: 16-byte WRITE (LBA > 2TB).
+            - [ ] `scsi_cdb_mode_sense_6(cdb, page, len)` / `scsi_cdb_mode_sense_10(cdb, page, len)`.
+            - [ ] `scsi_cdb_start_stop(cdb, start, load_eject)`: START STOP UNIT.
+            - [ ] `scsi_cdb_sync_cache(cdb, lba, count)`: SYNCHRONIZE CACHE (10).
+            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`.
+
+        - [ ] **Standard Command Wrappers:**
+            - [ ] `scsi_test_unit_ready(dev)`: send TUR, return 0 on GOOD.
+            - [ ] `scsi_inquiry(dev, inq)`: send INQUIRY, fill `scsi_inquiry_data`.
+            - [ ] `scsi_read_capacity(dev, sectors, sector_size)`: READ CAPACITY (10 or 16), fill output.
+            - [ ] `scsi_request_sense(dev, sense, len)`: explicit REQUEST SENSE.
+            - [ ] `scsi_start_stop(dev, start, load_eject)`: START STOP UNIT.
+            - [ ] `scsi_report_luns(dev, luns)`: REPORT LUNS, parse big-endian LUN list.
+            - [ ] `scsi_synchronize_cache(dev)`: SYNCHRONIZE CACHE (write-back).
+            - [ ] `scsi_mode_sense(dev, page, buffer, len)`: MODE SENSE (for caching, geometry pages).
+
+    - [ ] **High-Level Device Driver (`scsi_dev.c`):**
+
+        - [ ] **Block Device Callbacks:**
+            - [ ] `scsi_blk_read(blkdev, sector, count, buffer)`: build READ(10) CDB, execute sync, return sector count or -1.
+            - [ ] `scsi_blk_write(blkdev, sector, count, buffer)`: build WRITE(10) CDB, execute sync; reject writes to CD-ROM.
+            - [ ] Handle sector size translation (512 vs 2048 for CD-ROM).
+            - [ ] Support READ(16)/WRITE(16) for devices with capacity > 2TB.
+        - [ ] **Device Type Handling:**
+            - [ ] **Direct Access (Type 0x00 — Disk):**
+                - [ ] READ CAPACITY for sector count and size.
+                - [ ] Cache flush via SYNCHRONIZE CACHE on unmount/shutdown.
+                - [ ] Device name: `scsiN` (sequential numbering).
+            - [ ] **CD-ROM / DVD (Type 0x05 — ROM):**
+                - [ ] `scsi_read_toc(dev, buffer, buflen)`: READ TOC/PMA/ATIP (CDB 0x43).
+                - [ ] `scsi_lock_door(dev, lock)`: PREVENT/ALLOW MEDIUM REMOVAL (CDB 0x1E).
+                - [ ] Sector size: 2048 bytes (data CD standard).
+                - [ ] Handle UNIT ATTENTION on media change: re-read capacity.
+            - [ ] **WORM / Optical (Types 0x04, 0x07):**
+                - [ ] Same as disk but write-once semantics; reject overwrites.
+            - [ ] **Sequential Access (Type 0x01 — Tape) — deferred.**
+        - [ ] **Attach / Detach:**
+            - [ ] `scsi_dev_attach(scsi_dev)`: create `scsi_blk_dev_t`, register block device.
+                - [ ] Only attach block-capable types (disk, cdrom, optical, worm).
+                - [ ] Set sector size based on device type.
+                - [ ] Log: `"scsi: attached scsiN (type) [vendor product]"`.
+            - [ ] `scsi_dev_detach(scsi_dev)`: unregister block device, remove from list.
+            - [ ] `scsi_dev_lookup(name)`: find block device by name (e.g., `"scsi0"`).
+            - [ ] `scsi_dev_init()`: initialize unified device subsystem.
+            - [ ] `scsi_auto_attach(dev)`: called on discovery — create generic node + block device.
+
+    - [ ] **Controller Interface (`scsi_ctl.c`):**
+
+        - [ ] **Device Node Hierarchy:**
+            - [ ] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`): generic SCSI pass-through node.
+                - [ ] `scsi_create_generic_node(dev)`: create DevFS entry.
+                - [ ] `sg_ioctl(node, request, arg)`: ioctl handler for generic nodes.
+            - [ ] `/dev/storage/scsi/B` (e.g., `0`): bus controller endpoint.
+                - [ ] `scsi_create_bus_node(link, bus_id)`: create DevFS entry.
+                - [ ] `bus_ioctl(node, request, arg)`: ioctl handler for bus operations.
+            - [ ] `/dev/storage/scsiN` (e.g., `scsi0`): high-level block device alias.
+        - [ ] **ioctl Operations:**
+            - [ ] `SCSI_IOCTL_SCAN` (0x5301): trigger bus rescan.
+            - [ ] `SCSI_IOCTL_GET_INFO` (0x5302): return `scsi_ioctl_info_t` (bus, target, lun, type, vendor, product, capacity).
+            - [ ] `SCSI_IOCTL_GET_IDLUN` (0x5303): return packed bus:target:lun.
+            - [ ] `SCSI_IOCTL_GET_COUNT` (0x5304): return device count on bus.
+            - [ ] `SCSI_IOCTL_SEND_CMD` (0x5305): pass-through raw SCSI CDB with data buffer.
+                - [ ] Copy CDB from userspace, validate length.
+                - [ ] Execute via `scsi_execute_sync()`, copy results back.
+                - [ ] Require appropriate privilege (root or CAP_SYS_RAWIO).
+
     - [ ] **Transport/HBA Drivers (Low-Level):**
-        - [x] **ATAPI (Legacy):** <!-- atapi_scsi.c, ide.c:ide_atapi_packet -->
-            - [x] Encapsulate SCSI CDBs into ATA Packet Commands used by IDE/PATA. <!-- atapi_scsi.c:atapi_execute -->
-            - [x] Handle IRQ and DRQ states for packet transfer. <!-- ide.c:ide_atapi_packet (wait_bsy, wait_drq) -->
-        - [ ] **USB Mass Storage:**
-            - [ ] Implement Bulk-Only Transport (BOT).
-            - [ ] Handle Command Block Wrapper (CBW) and Command Status Wrapper (CSW).
-        - [x] **VirtIO-SCSI:** <!-- virtio_scsi.c -->
-            - [x] Pass-through driver mapping request queues to virtqueues. <!-- virtio_scsi.c:vscsi_execute -->
-            - [x] Event queue handling (hot-plug). <!-- virtio_scsi.c:vscsi_process_events, vscsi_setup_event_buffers -->
+
+        - [ ] **ATAPI Transport (`atapi_scsi.c`, `atapi_scsi.h`):**
+            - [ ] `atapi_link`: `scsi_link_t` instance for ATA secondary (ATAPI) devices.
+            - [ ] `atapi_execute(link, req)`: translate `scsi_request_t` to ATA PACKET command.
+                - [ ] Select drive (master/slave) via device register.
+                - [ ] Write PACKET command (0xA0) to command register.
+                - [ ] Wait for DRQ, then PIO-out the CDB (12 or 16 bytes, padded to 12).
+                - [ ] Wait for DRQ for data phase; PIO-in/out data buffer.
+                - [ ] Read status register for errors; auto-request sense on CHECK CONDITION.
+            - [ ] `atapi_init()`: register link, set max_targets=2 (master/slave per channel).
+            - [ ] Support: primary + secondary IDE channels (4 possible ATAPI devices).
+            - [ ] Support: tertiary + quaternary channels (if IDE driver supports them).
+
+        - [ ] **USB Mass Storage (deferred):**
+            - [ ] **Bulk-Only Transport (BOT):**
+                - [ ] Build Command Block Wrapper (CBW): 31-byte header with signature (0x43425355), tag, transfer length, flags, LUN, CDB.
+                - [ ] Send CBW via Bulk-OUT endpoint.
+                - [ ] Transfer data via Bulk-IN (read) or Bulk-OUT (write) endpoint.
+                - [ ] Receive Command Status Wrapper (CSW): 13-byte response with signature (0x53425355), tag, residue, status.
+                - [ ] CSW status: 0=passed, 1=failed (issue REQUEST SENSE), 2=phase error (reset recovery).
+            - [ ] **Reset Recovery:**
+                - [ ] Bulk-Only Mass Storage Reset (class-specific request 0xFF).
+                - [ ] Clear HALT on Bulk-IN and Bulk-OUT endpoints.
+            - [ ] **Integration:**
+                - [ ] Register `scsi_link_t` per USB device (bridge to SCSI mid-layer).
+                - [ ] Set max_targets=1, max_luns from GET MAX LUN request.
+                - [ ] Handle device disconnect: unregister link, detach all devices.
+
+        - [ ] **VirtIO-SCSI (`virtio_scsi.c`):**
+            - [ ] `vscsi_execute(link, req)`: map `scsi_request_t` to virtio request descriptor.
+                - [ ] Build request header: LUN (8-byte SAM encoding), tag, task attributes, CDB.
+                - [ ] Attach data buffers as scatter-gather (device-readable for writes, device-writable for reads).
+                - [ ] Attach response buffer (sense data, residual, status).
+                - [ ] Submit to request virtqueue; wait for used buffer notification.
+            - [ ] `vscsi_setup_event_buffers()`: pre-populate event virtqueue.
+            - [ ] `vscsi_process_events()`: handle hotplug add/remove, transport reset, parameter change events.
+            - [ ] Control virtqueue: INQUIRY, REPORT LUNS, task management via control queue.
+            - [ ] Multi-queue support: one request virtqueue per vCPU (if negotiated).
+
+        - [ ] **iSCSI (deferred):**
+            - [ ] TCP-based SCSI transport.
+            - [ ] Login, discovery, full-feature phase.
+            - [ ] PDU framing, session management.
+
+    - [ ] **Testing:**
+        - [ ] **Unit Tests:**
+            - [ ] CDB builder correctness: verify byte layout for READ(10), WRITE(10), INQUIRY, READ CAPACITY.
+            - [ ] Sense data parsing: fixed format with all 16 sense keys.
+            - [ ] Sense data parsing: common ASC/ASCQ pairs.
+            - [ ] Device registry: register, lookup, unregister, duplicate detection.
+            - [ ] Request allocation: pool exhaustion, free and reuse.
+            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`.
+        - [ ] **Property Tests:**
+            - [ ] All CDB builders produce valid length CDBs (6/10/12/16).
+            - [ ] Request pool invariant: allocated + free = total pool size.
+            - [ ] Device list: no duplicates (unique bus:target:lun).
+        - [ ] **Integration Tests:**
+            - [ ] VirtIO-SCSI disk: boot QEMU with `-device virtio-scsi-pci -device scsi-hd`, verify discovery + read/write.
+            - [ ] ATAPI CD-ROM: boot QEMU with `-cdrom`, verify READ CAPACITY + READ TOC + sector read.
+            - [ ] Bus rescan: add device to VirtIO-SCSI via hotplug, verify auto-attach.
+            - [ ] Generic passthrough: send INQUIRY via `SCSI_IOCTL_SEND_CMD` from userspace, verify response.
+            - [ ] Error path: simulate CHECK CONDITION, verify retry and sense reporting.
+
+    - [ ] **Documentation:**
+        - [ ] Internal doc: SCSI mid-layer architecture (link/device/request lifecycle).
+        - [ ] Internal doc: transport driver interface (`scsi_link_t.execute` contract).
+        - [ ] Internal doc: CDB reference and sense key/ASC/ASCQ table.
+        - [ ] Internal doc: device node hierarchy and ioctl interface.
 - [ ] **ATA/IDE (Legacy):** <!-- ide.c, ide.h -->
 
     > **Files:** `sys/drivers/storage/ide/ide.c`, `ide.h`.
