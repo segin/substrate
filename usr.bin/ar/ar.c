@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
 #include <string.h>
 #include <errno.h>
 #include <time.h>
@@ -42,8 +43,8 @@
 #define MOD_PRESERVE    0x0020
 #define MOD_LOCAL       0x0040
 #define MOD_DETERMINISTIC 0x0080
-#define MOD_NOSYMTAB    0x0100
-#define MOD_THIN        0x0200
+#define MOD_NOSYMTAB    0x0400
+#define MOD_THIN        0x0800
 
 static char *archive_name;
 static int operation = 0;
@@ -52,6 +53,14 @@ static const char *progname;
 static const char *position_member = NULL;
 static bool no_same_owner = false;
 static unsigned long instance_count = 1;
+typedef enum {
+    ARFMT_BSD = 0,
+    ARFMT_GNU = 1
+} ar_format_t;
+static ar_format_t archive_format = ARFMT_GNU;
+static bool format_forced = false;
+static char *gnu_name_table = NULL;
+static size_t gnu_name_table_size = 0;
 
 /* Structure to hold in-memory archive member */
 struct ar_memb {
@@ -60,10 +69,12 @@ struct ar_memb {
     void *data;
     char *thin_path;
     size_t size;
+    size_t gnu_name_off;
     struct ar_memb *next;
     bool dirty;
     bool deleted;
     bool thin_ref;
+    bool gnu_name_ref;
 };
 
 static struct ar_memb *head = NULL;
@@ -72,7 +83,7 @@ static bool archive_is_thin = false;
 /* Symbol table entry */
 struct sym_entry {
     char *name;
-    uint32_t offset; /* File offset of member header */
+    uint64_t offset; /* File offset of member header */
     struct ar_memb *member; /* Pointer to member */
     struct sym_entry *next;
 };
@@ -95,6 +106,9 @@ static void print_members(char **members, int count);
 static void ranlib(void);
 static void drop_symbol_tables(void);
 static bool parse_numeric_field(const char *field, size_t field_len, int base, long long *out);
+static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special);
+static void store_be32(unsigned char *dst, uint32_t value);
+static void store_be64(unsigned char *dst, uint64_t value);
 static void list_insert_tail(struct ar_memb *node);
 static bool list_insert_relative(struct ar_memb *node, const char *anchor_name, bool before);
 static struct ar_memb *list_find_first(const char *name, struct ar_memb **prev_out);
@@ -140,6 +154,36 @@ int main(int argc, char *argv[])
             continue;
         }
         if (strncmp(argv[argi], "--plugin=", 9) == 0) {
+            argi++;
+            continue;
+        }
+        if (strcmp(argv[argi], "--format") == 0) {
+            const char *fmt;
+            argi++;
+            if (argi >= argc) {
+                errx(1, "--format requires an argument");
+            }
+            fmt = argv[argi++];
+            if (strcmp(fmt, "bsd") == 0) {
+                archive_format = ARFMT_BSD;
+            } else if (strcmp(fmt, "gnu") == 0) {
+                archive_format = ARFMT_GNU;
+            } else {
+                errx(1, "unsupported --format value: %s", fmt);
+            }
+            format_forced = true;
+            continue;
+        }
+        if (strncmp(argv[argi], "--format=", 9) == 0) {
+            const char *fmt = argv[argi] + 9;
+            if (strcmp(fmt, "bsd") == 0) {
+                archive_format = ARFMT_BSD;
+            } else if (strcmp(fmt, "gnu") == 0) {
+                archive_format = ARFMT_GNU;
+            } else {
+                errx(1, "unsupported --format value: %s", fmt);
+            }
+            format_forced = true;
             argi++;
             continue;
         }
@@ -500,7 +544,92 @@ static bool name_has_path_components(const char *name) {
     return false;
 }
 
+static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special) {
+    char tmp[17];
+    char *name;
+    char *slash;
+
+    if (is_special != NULL) {
+        *is_special = false;
+    }
+
+    memcpy(tmp, hdr->ar_name, 16);
+    tmp[16] = '\0';
+
+    for (int i = 15; i >= 0; i--) {
+        if (tmp[i] == ' ') {
+            tmp[i] = '\0';
+        } else {
+            break;
+        }
+    }
+
+    if (archive_format == ARFMT_GNU) {
+        if (strcmp(tmp, "/") == 0 || strcmp(tmp, "//") == 0 || strcmp(tmp, "/SYM64/") == 0) {
+            if (is_special != NULL) {
+                *is_special = true;
+            }
+            return strdup(tmp);
+        }
+
+        if (tmp[0] == '/' && isdigit((unsigned char)tmp[1])) {
+            char *end = NULL;
+            unsigned long off = strtoul(tmp + 1, &end, 10);
+            if (end != NULL && *end == '\0' && gnu_name_table != NULL && off < gnu_name_table_size) {
+                const char *start = gnu_name_table + off;
+                const char *p = start;
+                while ((size_t)(p - gnu_name_table) < gnu_name_table_size &&
+                       *p != '\0' && *p != '\n') {
+                    p++;
+                }
+                size_t nlen = (size_t)(p - start);
+                if (nlen > 0 && start[nlen - 1] == '/') {
+                    nlen--;
+                }
+                name = malloc(nlen + 1);
+                if (name == NULL) {
+                    return NULL;
+                }
+                memcpy(name, start, nlen);
+                name[nlen] = '\0';
+                return name;
+            }
+        }
+
+        slash = strchr(tmp, '/');
+        if (slash != NULL) {
+            *slash = '\0';
+        }
+        return strdup(tmp);
+    }
+
+    slash = strchr(tmp, '/');
+    if (slash != NULL) {
+        *slash = '\0';
+    }
+    return strdup(tmp);
+}
+
+static void store_be32(unsigned char *dst, uint32_t value) {
+    dst[0] = (unsigned char)((value >> 24) & 0xffu);
+    dst[1] = (unsigned char)((value >> 16) & 0xffu);
+    dst[2] = (unsigned char)((value >> 8) & 0xffu);
+    dst[3] = (unsigned char)(value & 0xffu);
+}
+
+static void store_be64(unsigned char *dst, uint64_t value) {
+    dst[0] = (unsigned char)((value >> 56) & 0xffu);
+    dst[1] = (unsigned char)((value >> 48) & 0xffu);
+    dst[2] = (unsigned char)((value >> 40) & 0xffu);
+    dst[3] = (unsigned char)((value >> 32) & 0xffu);
+    dst[4] = (unsigned char)((value >> 24) & 0xffu);
+    dst[5] = (unsigned char)((value >> 16) & 0xffu);
+    dst[6] = (unsigned char)((value >> 8) & 0xffu);
+    dst[7] = (unsigned char)(value & 0xffu);
+}
+
 static void read_archive(const char *path) {
+    bool first_member = true;
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
         if (errno == ENOENT) return;
@@ -518,12 +647,33 @@ static void read_archive(const char *path) {
     } else {
         errx(1, "%s: file format not recognized", path);
     }
+    free(gnu_name_table);
+    gnu_name_table = NULL;
+    gnu_name_table_size = 0;
+    if (!format_forced) {
+        archive_format = ARFMT_GNU;
+    }
 
     struct ar_hdr hdr;
     while (read(fd, &hdr, sizeof(hdr)) == sizeof(hdr)) {
+        char raw_name[17];
+
         if (memcmp(hdr.ar_fmag, ARFMAG, 2) != 0) {
             warnx("malformed header in %s", path);
             break;
+        }
+
+        memcpy(raw_name, hdr.ar_name, 16);
+        raw_name[16] = '\0';
+        if (first_member && !format_forced) {
+            if (memcmp(raw_name, "#1/", 3) == 0) {
+                archive_format = ARFMT_BSD;
+            } else if (raw_name[0] == '/' &&
+                       (raw_name[1] == '/' || raw_name[1] == ' ' ||
+                        isdigit((unsigned char)raw_name[1]))) {
+                archive_format = ARFMT_GNU;
+            }
+            first_member = false;
         }
 
         long size = atol(hdr.ar_size);
@@ -535,6 +685,8 @@ static void read_archive(const char *path) {
         m->dirty = false;
         m->thin_ref = false;
         m->thin_path = NULL;
+        m->gnu_name_ref = false;
+        m->gnu_name_off = 0;
 
         if (memcmp(hdr.ar_name, "#1/", 3) == 0) {
             int name_len = atoi(hdr.ar_name + 3);
@@ -564,16 +716,12 @@ static void read_archive(const char *path) {
                 read(fd, m->data, m->size);
             }
         } else {
-            char tmp[17];
-            memcpy(tmp, hdr.ar_name, 16);
-            tmp[16] = 0;
-            char *slash = strchr(tmp, '/');
-            if (slash) *slash = 0;
-            for (int i=15; i>=0; i--) {
-                if (tmp[i] == ' ') tmp[i] = 0;
-                else break;
+            bool special = false;
+            m->name = parse_ar_name_field(&hdr, &special);
+            (void)special;
+            if (m->name == NULL) {
+                errx(1, "out of memory while parsing member name");
             }
-            m->name = strdup(tmp);
             if (archive_is_thin &&
                 strcmp(m->name, RANLIBMAG) != 0 &&
                 strcmp(m->name, RANLIBSORT) != 0 &&
@@ -589,6 +737,18 @@ static void read_archive(const char *path) {
                 m->size = size;
                 m->data = malloc(size);
                 read(fd, m->data, size);
+
+                if (archive_format == ARFMT_GNU && strcmp(m->name, "//") == 0) {
+                    free(gnu_name_table);
+                    gnu_name_table = malloc(m->size + 1);
+                    if (gnu_name_table != NULL) {
+                        memcpy(gnu_name_table, m->data, m->size);
+                        gnu_name_table[m->size] = '\0';
+                        gnu_name_table_size = m->size;
+                    } else {
+                        gnu_name_table_size = 0;
+                    }
+                }
             }
         }
 
@@ -692,6 +852,8 @@ static void append_files(char **files, int count) {
         }
         m->dirty = true;
         m->deleted = false;
+        m->gnu_name_ref = false;
+        m->gnu_name_off = 0;
 
         memset(&m->hdr, ' ', sizeof(struct ar_hdr));
         char buf[32];
@@ -930,7 +1092,8 @@ static void list_members(char **members, int count) {
     while (cur) {
         if (cur->deleted) { cur = cur->next; continue; }
         if (strcmp(cur->name, RANLIBMAG) == 0 || strcmp(cur->name, RANLIBSORT) == 0 ||
-            strcmp(cur->name, "/") == 0 || strcmp(cur->name, "//") == 0) {
+            strcmp(cur->name, "/") == 0 || strcmp(cur->name, "/SYM64/") == 0 ||
+            strcmp(cur->name, "//") == 0) {
             cur = cur->next; continue;
         }
         bool match = (count == 0);
@@ -1076,7 +1239,8 @@ static void drop_symbol_tables(void) {
 
     while (cur != NULL) {
         if (strcmp(cur->name, RANLIBMAG) == 0 || strcmp(cur->name, RANLIBSORT) == 0 ||
-            strcmp(cur->name, "/") == 0 || strcmp(cur->name, "//") == 0) {
+            strcmp(cur->name, "/") == 0 || strcmp(cur->name, "/SYM64/") == 0 ||
+            strcmp(cur->name, "//") == 0) {
             struct ar_memb *next = cur->next;
             if (prev != NULL) {
                 prev->next = next;
@@ -1128,21 +1292,29 @@ static void ranlib(void) {
     int strsize = 0;
     for (int i = 0; i < count; i++) strsize += strlen(arr[i]->name) + 1;
 
-    uint32_t array_size = count * sizeof(struct ranlib);
-    size_t total_size = sizeof(uint32_t) + array_size + sizeof(uint32_t) + strsize;
+    size_t total_size;
+    if (archive_format == ARFMT_GNU) {
+        /* Reserve for potential /SYM64/ payload (count + 64-bit offsets + strings). */
+        total_size = sizeof(uint64_t) + (size_t)count * sizeof(uint64_t) + strsize;
+    } else {
+        uint32_t array_size = count * sizeof(struct ranlib);
+        total_size = sizeof(uint32_t) + array_size + sizeof(uint32_t) + strsize;
+    }
 
     /* Create dummy data to reserve space */
     void *data = calloc(1, total_size);
     /* We'll fill offsets in write_archive */
 
     struct ar_memb *m = malloc(sizeof(struct ar_memb));
-    m->name = strdup(RANLIBMAG);
+    m->name = strdup(archive_format == ARFMT_GNU ? "/" : RANLIBMAG);
     m->data = data;
     m->size = total_size;
     m->thin_path = NULL;
     m->deleted = false;
     m->dirty = true;
     m->thin_ref = false;
+    m->gnu_name_ref = false;
+    m->gnu_name_off = 0;
     memset(&m->hdr, ' ', sizeof(struct ar_hdr));
     char buf[32];
     snprintf(buf, sizeof(buf), "%-12ld", (long)((modifiers & MOD_DETERMINISTIC) ? 0 : time(NULL)));
@@ -1156,7 +1328,7 @@ static void ranlib(void) {
     snprintf(buf, sizeof(buf), "%-10ld", (long)total_size);
     memcpy(m->hdr.ar_size, buf, 10);
     memcpy(m->hdr.ar_fmag, ARFMAG, 2);
-    snprintf(buf, sizeof(buf), "%-16s", RANLIBMAG);
+    snprintf(buf, sizeof(buf), "%-16s", m->name);
     memcpy(m->hdr.ar_name, buf, 16);
 
     m->next = head;
@@ -1183,16 +1355,55 @@ static void ranlib(void) {
 }
 
 static void write_archive(const char *path) {
+    char *gnu_table = NULL;
+    size_t gnu_table_len = 0;
     FILE *fp = fopen(path, "w");
     if (!fp) err(1, "fopen %s", path);
     bool thin_output = archive_is_thin || ((modifiers & MOD_THIN) != 0);
     archive_is_thin = thin_output;
 
+    if (archive_format == ARFMT_GNU) {
+        struct ar_memb *m = head;
+        while (m != NULL) {
+            m->gnu_name_ref = false;
+            m->gnu_name_off = 0;
+            if (!m->deleted &&
+                strcmp(m->name, "/") != 0 &&
+                strcmp(m->name, "/SYM64/") != 0 &&
+                strcmp(m->name, "//") != 0 &&
+                strcmp(m->name, RANLIBMAG) != 0 &&
+                strcmp(m->name, RANLIBSORT) != 0) {
+                size_t nlen = strlen(m->name);
+                if (nlen > 15 || strchr(m->name, ' ') != NULL) {
+                    size_t entry_len = nlen + 2; /* name + '/' + '\n' */
+                    char *next = realloc(gnu_table, gnu_table_len + entry_len);
+                    if (next == NULL) {
+                        free(gnu_table);
+                        errx(1, "out of memory building GNU longname table");
+                    }
+                    gnu_table = next;
+                    memcpy(gnu_table + gnu_table_len, m->name, nlen);
+                    gnu_table[gnu_table_len + nlen] = '/';
+                    gnu_table[gnu_table_len + nlen + 1] = '\n';
+                    m->gnu_name_ref = true;
+                    m->gnu_name_off = gnu_table_len;
+                    gnu_table_len += entry_len;
+                }
+            }
+            m = m->next;
+        }
+    }
+
     fprintf(fp, "%s", thin_output ? THINMAG : ARMAG);
     uint32_t offset = 8;
 
     struct ar_memb *symdef = NULL;
-    if (head && strcmp(head->name, RANLIBMAG) == 0) symdef = head;
+    if (head &&
+        (strcmp(head->name, RANLIBMAG) == 0 ||
+         strcmp(head->name, "/") == 0 ||
+         strcmp(head->name, "/SYM64/") == 0)) {
+        symdef = head;
+    }
 
     struct ar_memb *cur = head;
 
@@ -1203,12 +1414,20 @@ static void write_archive(const char *path) {
         int count = 0;
 
         /* Calculate initial offset past symdef */
-        uint32_t current_off = offset + sizeof(struct ar_hdr) + symdef->size + (symdef->size % 2);
+        uint64_t current_off = offset + sizeof(struct ar_hdr) + symdef->size + (symdef->size % 2);
+        if (archive_format == ARFMT_GNU && gnu_table_len > 0) {
+            current_off += sizeof(struct ar_hdr) + gnu_table_len + (gnu_table_len % 2);
+        }
 
         struct ar_memb *m = symdef->next;
         while (m) {
-            if (!m->deleted) {
-                uint32_t m_off = current_off;
+            if (!m->deleted &&
+                strcmp(m->name, "//") != 0 &&
+                strcmp(m->name, "/") != 0 &&
+                strcmp(m->name, "/SYM64/") != 0 &&
+                strcmp(m->name, RANLIBMAG) != 0 &&
+                strcmp(m->name, RANLIBSORT) != 0) {
+                uint64_t m_off = current_off;
 
                 struct sym_entry *s_head = NULL;
                 get_elf_symbols(m, &s_head);
@@ -1223,9 +1442,12 @@ static void write_archive(const char *path) {
                 }
 
                 int name_len = strlen(m->name);
+                size_t payload_size = m->thin_ref && m->thin_path != NULL ? strlen(m->thin_path) : m->size;
                 bool extended = (name_len > 15 || strchr(m->name, ' '));
-                long m_size = m->size;
-                if (extended) m_size += name_len;
+                long m_size = (long)payload_size;
+                if (archive_format != ARFMT_GNU && extended) {
+                    m_size += name_len;
+                }
                 current_off += sizeof(struct ar_hdr) + m_size + (m_size % 2);
             }
             m = m->next;
@@ -1242,23 +1464,84 @@ static void write_archive(const char *path) {
             qsort(arr, count, sizeof(struct sym_entry*), compare_syms);
 
             /* Fill symdef data */
-            char *p = (char *)symdef->data;
             int strsize = 0;
             for (int i = 0; i < count; i++) strsize += strlen(arr[i]->name) + 1;
+            if (archive_format == ARFMT_GNU) {
+                uint64_t max_off = 0;
+                for (int i = 0; i < count; i++) {
+                    if (arr[i]->offset > max_off) {
+                        max_off = arr[i]->offset;
+                    }
+                }
+                if (max_off > 0xffffffffULL) {
+                    size_t total = sizeof(uint64_t) + (size_t)count * sizeof(uint64_t) + strsize;
+                    unsigned char *p;
+                    unsigned char *strp;
+                    int stroff = 0;
 
-            uint32_t array_size = count * sizeof(struct ranlib);
-            *(uint32_t *)p = array_size; p += 4;
-            struct ranlib *ra = (struct ranlib *)p;
-            p += array_size;
-            *(uint32_t *)p = strsize; p += 4;
-            char *strp = p;
+                    symdef->data = realloc(symdef->data, total);
+                    if (symdef->data == NULL) {
+                        errx(1, "out of memory building GNU /SYM64/ table");
+                    }
+                    symdef->size = total;
+                    free(symdef->name);
+                    symdef->name = strdup("/SYM64/");
+                    p = (unsigned char *)symdef->data;
+                    store_be64(p, (uint64_t)count);
+                    p += sizeof(uint64_t);
+                    for (int i = 0; i < count; i++) {
+                        store_be64(p, arr[i]->offset);
+                        p += sizeof(uint64_t);
+                    }
+                    strp = p;
+                    for (int i = 0; i < count; i++) {
+                        strcpy((char *)strp + stroff, arr[i]->name);
+                        stroff += strlen(arr[i]->name) + 1;
+                    }
+                } else {
+                    size_t total = sizeof(uint32_t) + (size_t)count * sizeof(uint32_t) + strsize;
+                    unsigned char *p;
+                    unsigned char *strp;
+                    int stroff = 0;
 
-            int stroff = 0;
-            for (int i = 0; i < count; i++) {
-                ra[i].ran_un.ran_strx = stroff;
-                ra[i].ran_off = arr[i]->offset;
-                strcpy(strp + stroff, arr[i]->name);
-                stroff += strlen(arr[i]->name) + 1;
+                    symdef->data = realloc(symdef->data, total);
+                    if (symdef->data == NULL) {
+                        errx(1, "out of memory building GNU symbol table");
+                    }
+                    symdef->size = total;
+                    free(symdef->name);
+                    symdef->name = strdup("/");
+                    p = (unsigned char *)symdef->data;
+                    store_be32(p, (uint32_t)count);
+                    p += sizeof(uint32_t);
+                    for (int i = 0; i < count; i++) {
+                        store_be32(p, (uint32_t)arr[i]->offset);
+                        p += sizeof(uint32_t);
+                    }
+                    strp = p;
+                    for (int i = 0; i < count; i++) {
+                        strcpy((char *)strp + stroff, arr[i]->name);
+                        stroff += strlen(arr[i]->name) + 1;
+                    }
+                }
+            } else {
+                char *p = (char *)symdef->data;
+                uint32_t array_size = count * sizeof(struct ranlib);
+                *(uint32_t *)p = array_size;
+                p += 4;
+                struct ranlib *ra = (struct ranlib *)p;
+                p += array_size;
+                *(uint32_t *)p = strsize;
+                p += 4;
+                char *strp = p;
+
+                int stroff = 0;
+                for (int i = 0; i < count; i++) {
+                    ra[i].ran_un.ran_strx = stroff;
+                    ra[i].ran_off = (uint32_t)arr[i]->offset;
+                    strcpy(strp + stroff, arr[i]->name);
+                    stroff += strlen(arr[i]->name) + 1;
+                }
             }
             free(arr);
         }
@@ -1272,8 +1555,14 @@ static void write_archive(const char *path) {
     }
 
     cur = head;
+    bool wrote_gnu_table = (archive_format != ARFMT_GNU || gnu_table_len == 0);
     while (cur) {
         if (cur->deleted) { cur = cur->next; continue; }
+
+        if (archive_format == ARFMT_GNU && strcmp(cur->name, "//") == 0) {
+            cur = cur->next;
+            continue;
+        }
 
         if (modifiers & MOD_DETERMINISTIC) {
             char dbuf[32];
@@ -1287,11 +1576,58 @@ static void write_archive(const char *path) {
             memcpy(cur->hdr.ar_mode, dbuf, 8);
         }
 
+        if (!wrote_gnu_table &&
+            strcmp(cur->name, "/") != 0 &&
+            strcmp(cur->name, "/SYM64/") != 0 &&
+            strcmp(cur->name, RANLIBMAG) != 0 &&
+            strcmp(cur->name, RANLIBSORT) != 0) {
+            struct ar_hdr gnu_hdr;
+            char buf[32];
+
+            memset(&gnu_hdr, ' ', sizeof(gnu_hdr));
+            snprintf(buf, sizeof(buf), "%-16s", "//");
+            memcpy(gnu_hdr.ar_name, buf, 16);
+            snprintf(buf, sizeof(buf), "%-12ld",
+                     (long)((modifiers & MOD_DETERMINISTIC) ? 0 : time(NULL)));
+            memcpy(gnu_hdr.ar_date, buf, 12);
+            snprintf(buf, sizeof(buf), "%-6d", 0);
+            memcpy(gnu_hdr.ar_uid, buf, 6);
+            snprintf(buf, sizeof(buf), "%-6d", 0);
+            memcpy(gnu_hdr.ar_gid, buf, 6);
+            snprintf(buf, sizeof(buf), "%-8o", 0644);
+            memcpy(gnu_hdr.ar_mode, buf, 8);
+            snprintf(buf, sizeof(buf), "%-10ld", (long)gnu_table_len);
+            memcpy(gnu_hdr.ar_size, buf, 10);
+            memcpy(gnu_hdr.ar_fmag, ARFMAG, 2);
+
+            fwrite(&gnu_hdr, sizeof(gnu_hdr), 1, fp);
+            fwrite(gnu_table, gnu_table_len, 1, fp);
+            if ((gnu_table_len % 2) != 0) {
+                fputc('\n', fp);
+            }
+            wrote_gnu_table = true;
+        }
+
         int name_len = strlen(cur->name);
         size_t payload_size = cur->thin_ref && cur->thin_path != NULL ? strlen(cur->thin_path) : cur->size;
         bool extended = (name_len > 15 || strchr(cur->name, ' '));
+        bool gnu_special = strcmp(cur->name, "/") == 0 || strcmp(cur->name, "/SYM64/") == 0;
 
-        if (extended) {
+        if (archive_format == ARFMT_GNU) {
+            char buf[32];
+            char namebuf[32];
+            snprintf(buf, sizeof(buf), "%-10ld", (long)payload_size);
+            memcpy(cur->hdr.ar_size, buf, 10);
+            if (gnu_special) {
+                snprintf(namebuf, sizeof(namebuf), "%s", cur->name);
+            } else if (cur->gnu_name_ref) {
+                snprintf(namebuf, sizeof(namebuf), "/%zu", cur->gnu_name_off);
+            } else {
+                snprintf(namebuf, sizeof(namebuf), "%s/", cur->name);
+            }
+            snprintf(buf, sizeof(buf), "%-16s", namebuf);
+            memcpy(cur->hdr.ar_name, buf, 16);
+        } else if (extended) {
             long data_len = (long)payload_size + name_len;
             char buf[32];
             snprintf(buf, sizeof(buf), "%-10ld", data_len);
@@ -1304,20 +1640,24 @@ static void write_archive(const char *path) {
             char buf[32];
             snprintf(buf, sizeof(buf), "%-16s", cur->name);
             memcpy(cur->hdr.ar_name, buf, 16);
+            snprintf(buf, sizeof(buf), "%-10ld", (long)payload_size);
+            memcpy(cur->hdr.ar_size, buf, 10);
         }
 
         fwrite(&cur->hdr, sizeof(struct ar_hdr), 1, fp);
-        if (extended) fwrite(cur->name, name_len, 1, fp);
+        if (archive_format != ARFMT_GNU && extended) fwrite(cur->name, name_len, 1, fp);
         if (cur->thin_ref && cur->thin_path != NULL) {
             fwrite(cur->thin_path, payload_size, 1, fp);
         } else {
             fwrite(cur->data, cur->size, 1, fp);
         }
 
-        long total_data = (long)payload_size + (extended ? name_len : 0);
+        long total_data = (long)payload_size +
+                          ((archive_format != ARFMT_GNU && extended) ? name_len : 0);
         if (total_data % 2 != 0) fputc('\n', fp);
 
         cur = cur->next;
     }
+    free(gnu_table);
     fclose(fp);
 }

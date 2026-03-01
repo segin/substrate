@@ -72,12 +72,12 @@ Goal: implement a production `ar` where ELF member inspection/parsing comes from
 - [x] Verify names > 155 characters work (currently `name_len` is unbounded, which is correct).
 
 ### 5b. GNU/SVR4 Format
-- [ ] Implement GNU long filename table member (`//`) containing concatenated `name/\n` entries.
-- [ ] Implement member name references as `/offset` into the `//` table.
-- [ ] Implement GNU‑style symbol table (`/`) with big‑endian 32‑bit offset array + string pool.
-- [ ] Implement 64‑bit GNU symbol table (`/SYM64/`) for archives > 4 GiB.
-- [ ] On read: detect format by first special member name and select parser accordingly.
-- [ ] On write: add `--format={bsd,gnu}` flag (default to GNU for toolchain compat with `ld`).
+- [x] Implement GNU long filename table member (`//`) containing concatenated `name/\n` entries.
+- [x] Implement member name references as `/offset` into the `//` table.
+- [x] Implement GNU‑style symbol table (`/`) with big‑endian 32‑bit offset array + string pool.
+- [x] Implement 64‑bit GNU symbol table (`/SYM64/`) for archives > 4 GiB.
+- [x] On read: detect format by first special member name and select parser accordingly.
+- [x] On write: add `--format={bsd,gnu}` flag (default to GNU for toolchain compat with `ld`).
 
 ### 5c. Thin Archives
 - [ ] Implement thin archive magic (`!<thin>\n`).
