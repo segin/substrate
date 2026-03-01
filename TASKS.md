@@ -5064,7 +5064,7 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] Implement `el_resize(EditLine *el)`: force terminal size re‑query and redraw.
     - [x] Thread‑safety: document that `EditLine` is not thread‑safe (single‑thread contract).
 
-- [ ] **Line Editing Engine (`readline.c`):**
+- [x] **Line Editing Engine (`readline.c`):**
     - [x] **Character Insertion:**
         - [x] Insert printable ASCII at cursor with `memmove` rightward shift.
         - [x] Reject insertion when buffer is at capacity (grow or beep).
