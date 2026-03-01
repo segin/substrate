@@ -255,10 +255,10 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] String resolution from `.dynstr`.
 
 ### 19f. Notes Tests
-- [ ] GNU build-id displayed as hex.
-- [ ] x86 ISA level property decoded.
-- [ ] AArch64 BTI/PAC property decoded.
-- [ ] Unknown notes display hex dump.
+- [x] GNU build-id displayed as hex.
+- [x] x86 ISA level property decoded.
+- [x] AArch64 BTI/PAC property decoded.
+- [x] Unknown notes display hex dump.
 
 ### 19g. ARM-Specific Tests
 - [ ] ARM unwind table decoded.
