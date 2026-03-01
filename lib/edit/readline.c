@@ -127,6 +127,121 @@ static int backward_kill_word(EditLine *el) {
     return 1;
 }
 
+static void undo_push(EditLine *el) {
+    struct undo_entry entry;
+    size_t i;
+
+    if (!el) return;
+    entry.buffer = malloc(el->line.len + 1);
+    if (!entry.buffer) return;
+    memcpy(entry.buffer, el->line.buffer, el->line.len + 1);
+    entry.len = el->line.len;
+    entry.cursor = el->line.cursor;
+
+    if (el->undo_depth == EL_UNDO_DEPTH) {
+        free(el->undo_stack[0].buffer);
+        for (i = 1; i < el->undo_depth; i++) {
+            el->undo_stack[i - 1] = el->undo_stack[i];
+        }
+        el->undo_depth--;
+    }
+    el->undo_stack[el->undo_depth++] = entry;
+}
+
+static int undo_pop(EditLine *el) {
+    struct undo_entry entry;
+
+    if (!el || el->undo_depth == 0) return 0;
+
+    entry = el->undo_stack[--el->undo_depth];
+    if (line_ensure_capacity(el, entry.len + 1) == -1) {
+        free(entry.buffer);
+        return 0;
+    }
+    memcpy(el->line.buffer, entry.buffer, entry.len + 1);
+    el->line.len = entry.len;
+    el->line.cursor = (entry.cursor <= entry.len) ? entry.cursor : entry.len;
+    free(entry.buffer);
+    return 1;
+}
+
+static size_t kill_ring_prev_index(EditLine *el, size_t start_idx) {
+    size_t idx;
+    size_t i;
+
+    if (!el || el->kill_ring_count == 0) return start_idx;
+    idx = start_idx;
+    for (i = 0; i < EL_KILL_RING_SIZE; i++) {
+        idx = (idx + EL_KILL_RING_SIZE - 1) % EL_KILL_RING_SIZE;
+        if (el->kill_ring[idx]) return idx;
+    }
+    return start_idx;
+}
+
+static int yank_from_kill_ring(EditLine *el) {
+    const char *text;
+    size_t len;
+    size_t start;
+
+    if (!el || el->kill_ring_count == 0 || !el->kill_ring[el->kill_ring_head]) return 0;
+    text = el->kill_ring[el->kill_ring_head];
+    len = strlen(text);
+    start = el->line.cursor;
+    if (line_ensure_capacity(el, el->line.len + len + 1) == -1) return 0;
+
+    memmove(el->line.buffer + start + len,
+            el->line.buffer + start,
+            el->line.len - start + 1);
+    memcpy(el->line.buffer + start, text, len);
+    el->line.len += len;
+    el->line.cursor += len;
+    el->yank_active = 1;
+    el->yank_start = start;
+    el->yank_len = len;
+    el->yank_ring_index = el->kill_ring_head;
+    return 1;
+}
+
+static int yank_pop(EditLine *el) {
+    size_t next_idx;
+    const char *text;
+    size_t len;
+
+    if (!el || !el->yank_active || el->kill_ring_count < 2) return 0;
+
+    next_idx = kill_ring_prev_index(el, el->yank_ring_index);
+    if (next_idx == el->yank_ring_index || !el->kill_ring[next_idx]) return 0;
+
+    text = el->kill_ring[next_idx];
+    len = strlen(text);
+
+    delete_range(el, el->yank_start, el->yank_start + el->yank_len);
+    if (line_ensure_capacity(el, el->line.len + len + 1) == -1) return 0;
+    memmove(el->line.buffer + el->yank_start + len,
+            el->line.buffer + el->yank_start,
+            el->line.len - el->yank_start + 1);
+    memcpy(el->line.buffer + el->yank_start, text, len);
+    el->line.len += len;
+    el->line.cursor = el->yank_start + len;
+    el->yank_len = len;
+    el->yank_ring_index = next_idx;
+    return 1;
+}
+
+static int transpose_chars(EditLine *el) {
+    size_t left;
+    char tmp;
+
+    if (!el || el->line.len < 2 || el->line.cursor == 0) return 0;
+
+    left = (el->line.cursor == el->line.len) ? el->line.cursor - 2 : el->line.cursor - 1;
+    tmp = el->line.buffer[left];
+    el->line.buffer[left] = el->line.buffer[left + 1];
+    el->line.buffer[left + 1] = tmp;
+    if (el->line.cursor < el->line.len) el->line.cursor++;
+    return 1;
+}
+
 static void move_forward_word(EditLine *el) {
     size_t i;
 
@@ -383,6 +498,8 @@ static void history_incremental_search(EditLine *el, int reverse) {
 }
 
 const char *el_gets(EditLine *el, int *count) {
+    size_t i;
+
     if (count) *count = 0;
     if (terminal_set_raw(el) == -1) return NULL;
 
@@ -393,6 +510,14 @@ const char *el_gets(EditLine *el, int *count) {
     el->render_cache_len = 0;
     el->render_cache_cursor = 0;
     el->history_browsing = 0;
+    el->yank_active = 0;
+    for (i = 0; i < el->undo_depth; i++) {
+        if (el->undo_stack[i].buffer) {
+            free(el->undo_stack[i].buffer);
+            el->undo_stack[i].buffer = NULL;
+        }
+    }
+    el->undo_depth = 0;
     if (el->render_cache) el->render_cache[0] = '\0';
 
     if (el->prompt) {
@@ -406,6 +531,7 @@ const char *el_gets(EditLine *el, int *count) {
 
         if (c == '\n' || c == '\r') {
             el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
             fprintf(el->fout, "\r\n");
             terminal_set_orig(el);
             if (count) *count = el->line.len;
@@ -413,6 +539,8 @@ const char *el_gets(EditLine *el, int *count) {
         } else if (c == 0x7F || c == 0x08) { /* Backspace */
             if (el->line.cursor > 0) {
                 el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                undo_push(el);
                 memmove(el->line.buffer + el->line.cursor - 1,
                         el->line.buffer + el->line.cursor,
                         el->line.len - el->line.cursor + 1);
@@ -423,22 +551,27 @@ const char *el_gets(EditLine *el, int *count) {
         } else if (c == 0x04) { /* ^D - EOF */
             if (el->line.len == 0) {
                 el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
                 terminal_set_orig(el);
                 return NULL;
             }
             if (el->line.cursor < el->line.len) {
                 el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                undo_push(el);
                 memmove(el->line.buffer + el->line.cursor,
                         el->line.buffer + el->line.cursor + 1,
                         el->line.len - el->line.cursor);
                 el->line.len--;
                 refresh_line(el);
             } else if (el->completion) {
+                el->yank_active = 0;
                 el->completion(el, c);
                 refresh_line(el);
             }
         } else if (c == 0x03) { /* ^C - Clear line */
             el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
             fprintf(el->fout, "^C\r\n");
             el_reset(el);
             if (el->prompt) {
@@ -447,26 +580,52 @@ const char *el_gets(EditLine *el, int *count) {
             }
         } else if (c == 0x0C) { /* ^L - Clear screen */
             el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
             fprintf(el->fout, "\033[H\033[2J");
             refresh_line(el);
         } else if (c == 0x01) { /* ^A */
             el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
             el->line.cursor = 0;
             refresh_line(el);
         } else if (c == 0x05) { /* ^E */
             el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
             el->line.cursor = el->line.len;
             refresh_line(el);
         } else if (c == 0x12) { /* ^R history-search-backward */
             el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
             history_incremental_search(el, 1);
         } else if (c == 0x13) { /* ^S history-search-forward */
             el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
             history_incremental_search(el, 0);
         } else if (c == 0x0B) { /* ^K kill-line */
+            el->yank_active = 0;
+            undo_push(el);
             if (kill_line(el)) refresh_line(el);
         } else if (c == 0x15) { /* ^U backward-kill-line */
+            el->yank_active = 0;
+            undo_push(el);
             if (backward_kill_line(el)) refresh_line(el);
+        } else if (c == 0x17) { /* ^W unix-word-rubout */
+            el->yank_active = 0;
+            undo_push(el);
+            if (backward_kill_word(el)) refresh_line(el);
+        } else if (c == 0x14) { /* ^T transpose-chars */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            undo_push(el);
+            if (transpose_chars(el)) refresh_line(el);
+        } else if (c == 0x19) { /* ^Y yank */
+            el->last_cmd_was_kill = 0;
+            undo_push(el);
+            if (yank_from_kill_ring(el)) refresh_line(el);
+        } else if (c == 0x1F) { /* ^_ undo */
+            el->last_cmd_was_kill = 0;
+            el->yank_active = 0;
+            if (undo_pop(el)) refresh_line(el);
         } else if (c == 0x1B) { /* ESC */
             char seq0;
             if (read(fileno(el->fin), &seq0, 1) == 1) {
@@ -475,26 +634,31 @@ const char *el_gets(EditLine *el, int *count) {
                     if (read(fileno(el->fin), &seq1, 1) != 1) continue;
                     if (seq1 == 'C') { /* Right */
                         el->last_cmd_was_kill = 0;
+                        el->yank_active = 0;
                         if (el->line.cursor < el->line.len) {
                             el->line.cursor++;
                             refresh_line(el);
                         }
                     } else if (seq1 == 'D') { /* Left */
                         el->last_cmd_was_kill = 0;
+                        el->yank_active = 0;
                         if (el->line.cursor > 0) {
                             el->line.cursor--;
                             refresh_line(el);
                         }
                     } else if (seq1 == 'H') { /* Home */
                         el->last_cmd_was_kill = 0;
+                        el->yank_active = 0;
                         el->line.cursor = 0;
                         refresh_line(el);
                     } else if (seq1 == 'F') { /* End */
                         el->last_cmd_was_kill = 0;
+                        el->yank_active = 0;
                         el->line.cursor = el->line.len;
                         refresh_line(el);
                     } else if (seq1 == 'A') { /* Up (History) */
                         el->last_cmd_was_kill = 0;
+                        el->yank_active = 0;
                         if (el->history) {
                             HistEvent ev;
                             if (!el->history_browsing) {
@@ -508,6 +672,7 @@ const char *el_gets(EditLine *el, int *count) {
                         }
                     } else if (seq1 == 'B') { /* Down (History) */
                         el->last_cmd_was_kill = 0;
+                        el->yank_active = 0;
                         if (el->history) {
                             HistEvent ev;
                             if (history(el->history, &ev, H_NEXT) == 0 && ev.str) {
@@ -523,6 +688,7 @@ const char *el_gets(EditLine *el, int *count) {
                         char seq2;
                         if (read(fileno(el->fin), &seq2, 1) == 1 && seq2 == '~') {
                             el->last_cmd_was_kill = 0;
+                            el->yank_active = 0;
                             if (seq1 == '2') {
                                 el->overwrite_mode = !el->overwrite_mode;
                             } else if (seq1 == '1') {
@@ -535,17 +701,22 @@ const char *el_gets(EditLine *el, int *count) {
                         }
                     }
                 } else if (seq0 == 'd' || seq0 == 'D') { /* M-d kill-word */
+                    el->yank_active = 0;
+                    undo_push(el);
                     if (kill_word(el)) refresh_line(el);
                 } else if (seq0 == 'f' || seq0 == 'F') { /* M-f */
                     el->last_cmd_was_kill = 0;
+                    el->yank_active = 0;
                     move_forward_word(el);
                     refresh_line(el);
                 } else if (seq0 == 'b' || seq0 == 'B') { /* M-b */
                     el->last_cmd_was_kill = 0;
+                    el->yank_active = 0;
                     move_backward_word(el);
                     refresh_line(el);
                 } else if (seq0 == '<') { /* M-< beginning-of-history */
                     el->last_cmd_was_kill = 0;
+                    el->yank_active = 0;
                     if (el->history) {
                         HistEvent ev;
                         if (!el->history_browsing) {
@@ -559,6 +730,7 @@ const char *el_gets(EditLine *el, int *count) {
                     }
                 } else if (seq0 == '>') { /* M-> end-of-history */
                     el->last_cmd_was_kill = 0;
+                    el->yank_active = 0;
                     if (el->history) {
                         HistEvent ev;
                         if (history(el->history, &ev, H_LAST) == 0 && ev.str) {
@@ -573,15 +745,24 @@ const char *el_gets(EditLine *el, int *count) {
                         }
                         refresh_line(el);
                     }
+                } else if (seq0 == 'y' || seq0 == 'Y') { /* M-y yank-pop */
+                    el->last_cmd_was_kill = 0;
+                    undo_push(el);
+                    if (yank_pop(el)) refresh_line(el);
                 } else if (seq0 == 0x08 || seq0 == 0x7F) { /* M-BS or M-DEL */
+                    el->yank_active = 0;
+                    undo_push(el);
                     if (backward_kill_word(el)) refresh_line(el);
                 } else {
                     el->last_cmd_was_kill = 0;
+                    el->yank_active = 0;
                 }
             }
         } else if (c >= 32 && c < 127) {
             if (line_ensure_capacity(el, el->line.len + 2) == 0) {
                 el->last_cmd_was_kill = 0;
+                el->yank_active = 0;
+                undo_push(el);
                 if (el->overwrite_mode && el->line.cursor < el->line.len) {
                     el->line.buffer[el->line.cursor] = (char)c;
                     el->line.cursor++;

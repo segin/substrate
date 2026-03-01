@@ -5102,11 +5102,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] `^C`: print `^C`, reset line, reprint prompt.
         - [x] `^L`: clear screen (`CSI H` + `CSI 2J`), refresh line.
         - [x] Enter (`\\n` / `\\r`): accept line, restore terminal, return buffer.
-        - [ ] `^T` (`transpose-chars`): swap char at cursor with previous.
-        - [ ] `^W` (`unix-word-rubout`): kill word backward (whitespace‑delimited).
-        - [ ] `^Y` (`yank`): paste most recent kill‑ring entry.
-        - [ ] `M-y` (`yank-pop`): cycle through kill ring after yank.
-        - [ ] `^_` (`undo`): undo last editing operation.
+        - [x] `^T` (`transpose-chars`): swap char at cursor with previous.
+        - [x] `^W` (`unix-word-rubout`): kill word backward (whitespace‑delimited).
+        - [x] `^Y` (`yank`): paste most recent kill‑ring entry.
+        - [x] `M-y` (`yank-pop`): cycle through kill ring after yank.
+        - [x] `^_` (`undo`): undo last editing operation.
     - [x] **Escape Sequence Decoding:**
         - [x] Two‑byte CSI: `ESC [` + final byte.
         - [ ] Three‑byte CSI with numeric parameter: `ESC [ <digit> ~` (Delete, Insert, PgUp, PgDn).

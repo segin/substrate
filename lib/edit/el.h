@@ -7,6 +7,7 @@
 #include <histedit.h>
 
 #define EL_KILL_RING_SIZE 8
+#define EL_UNDO_DEPTH 256
 
 enum editor_mode {
     ED_EMACS = 0,
@@ -29,6 +30,12 @@ struct signal_state {
     struct sigaction old_sigterm;
     struct sigaction old_sighup;
     sigset_t old_mask;
+};
+
+struct undo_entry {
+    char *buffer;
+    size_t len;
+    size_t cursor;
 };
 
 struct line {
@@ -59,6 +66,12 @@ struct editline {
     size_t kill_ring_count;
     size_t kill_ring_head;
     int last_cmd_was_kill;
+    int yank_active;
+    size_t yank_start;
+    size_t yank_len;
+    size_t yank_ring_index;
+    struct undo_entry undo_stack[EL_UNDO_DEPTH];
+    size_t undo_depth;
     size_t refresh_rows;
     char *render_cache;
     size_t render_cache_cap;

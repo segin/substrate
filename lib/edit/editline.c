@@ -73,6 +73,9 @@ void el_end(EditLine *el) {
     for (i = 0; i < EL_KILL_RING_SIZE; i++) {
         if (el->kill_ring[i]) free(el->kill_ring[i]);
     }
+    for (i = 0; i < el->undo_depth; i++) {
+        if (el->undo_stack[i].buffer) free(el->undo_stack[i].buffer);
+    }
     if (el->prog) free(el->prog);
     free(el);
 }
