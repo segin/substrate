@@ -68,6 +68,7 @@ void el_end(EditLine *el) {
     if (!el) return;
     terminal_set_orig(el);
     if (el->line.buffer) free(el->line.buffer);
+    if (el->render_cache) free(el->render_cache);
     for (i = 0; i < EL_KILL_RING_SIZE; i++) {
         if (el->kill_ring[i]) free(el->kill_ring[i]);
     }

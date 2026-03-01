@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <sys/ioctl.h>
 #include "el.h"
 
 static int is_word_char(unsigned char ch) {
@@ -146,16 +147,119 @@ static void move_backward_word(EditLine *el) {
     el->line.cursor = i;
 }
 
-static void refresh_line(EditLine *el) {
-    /* Move cursor to start of line, clear to end of line, print prompt and buffer */
-    fprintf(el->fout, "\r\033[K%s%s", el->prompt ? el->prompt : "", el->line.buffer);
-    
-    /* Move cursor to correct position */
-    if (el->line.cursor < el->line.len) {
-        int back = el->line.len - el->line.cursor;
-        fprintf(el->fout, "\033[%dD", back);
+static size_t get_terminal_columns(EditLine *el) {
+    struct winsize ws;
+
+    if (el && el->fout &&
+        ioctl(fileno(el->fout), TIOCGWINSZ, &ws) == 0 &&
+        ws.ws_col > 0) {
+        return (size_t)ws.ws_col;
     }
+    return 80;
+}
+
+static size_t line_dirty_from_cache(EditLine *el) {
+    size_t i;
+    size_t limit;
+
+    if (!el || !el->render_cache) return 0;
+
+    limit = (el->render_cache_len < el->line.len) ? el->render_cache_len : el->line.len;
+    for (i = 0; i < limit; i++) {
+        if (el->render_cache[i] != el->line.buffer[i]) return i;
+    }
+    return limit;
+}
+
+static void line_update_cache(EditLine *el) {
+    char *new_cache;
+
+    if (!el) return;
+
+    if (el->render_cache_cap < el->line.len + 1) {
+        size_t needed = el->line.len + 1;
+        new_cache = realloc(el->render_cache, needed);
+        if (!new_cache) return;
+        el->render_cache = new_cache;
+        el->render_cache_cap = needed;
+    }
+    if (el->line.len > 0) memcpy(el->render_cache, el->line.buffer, el->line.len);
+    el->render_cache[el->line.len] = '\0';
+    el->render_cache_len = el->line.len;
+    el->render_cache_cursor = el->line.cursor;
+}
+
+static void refresh_line(EditLine *el) {
+    size_t cols;
+    size_t prompt_len;
+    size_t total_len;
+    size_t cursor_total;
+    size_t end_row;
+    size_t rows;
+    size_t cursor_row;
+    size_t cursor_col;
+    size_t dirty_from;
+    size_t i;
+
+    if (!el || !el->fout) return;
+
+    cols = get_terminal_columns(el);
+    if (cols == 0) cols = 80;
+
+    prompt_len = el->prompt ? strlen(el->prompt) : 0;
+    total_len = prompt_len + el->line.len;
+    cursor_total = prompt_len + el->line.cursor;
+    end_row = total_len / cols;
+    rows = end_row + 1;
+    cursor_row = cursor_total / cols;
+    cursor_col = cursor_total % cols;
+    dirty_from = line_dirty_from_cache(el);
+
+    /*
+     * Dirty-region fast path for single-row refreshes.
+     * Keep full redraw logic for wrapped output.
+     */
+    if (el->refresh_rows <= 1 && rows <= 1 &&
+        dirty_from < el->line.len &&
+        el->render_cache_cursor <= cols &&
+        prompt_len <= cols) {
+        size_t target_col = prompt_len + dirty_from;
+        fprintf(el->fout, "\r");
+        if (target_col > 0) fprintf(el->fout, "\033[%zuC", target_col);
+        fwrite(el->line.buffer + dirty_from, 1, el->line.len - dirty_from, el->fout);
+        if (el->render_cache_len > el->line.len) fprintf(el->fout, "\033[K");
+        fprintf(el->fout, "\r");
+        if (cursor_total > 0) fprintf(el->fout, "\033[%zuC", cursor_total);
+        fflush(el->fout);
+        el->refresh_rows = 1;
+        line_update_cache(el);
+        return;
+    }
+
+    /* Return to first physical row of the previous render block. */
+    fprintf(el->fout, "\r");
+    if (el->refresh_rows > 1) fprintf(el->fout, "\033[%zuA", el->refresh_rows - 1);
+    fprintf(el->fout, "\r");
+
+    /* Clear the old wrapped rows. */
+    for (i = 0; i < el->refresh_rows; i++) {
+        fprintf(el->fout, "\033[2K");
+        if (i + 1 < el->refresh_rows) fprintf(el->fout, "\n");
+    }
+    if (el->refresh_rows > 1) fprintf(el->fout, "\033[%zuA", el->refresh_rows - 1);
+    fprintf(el->fout, "\r");
+
+    if (el->prompt) fwrite(el->prompt, 1, prompt_len, el->fout);
+    if (el->line.len > 0) fwrite(el->line.buffer, 1, el->line.len, el->fout);
+
+    /* Reposition cursor from render end to logical cursor location. */
+    if (end_row > cursor_row) fprintf(el->fout, "\033[%zuA", end_row - cursor_row);
+    fprintf(el->fout, "\r");
+    if (cursor_col > 0) fprintf(el->fout, "\033[%zuC", cursor_col);
+
     fflush(el->fout);
+    el->refresh_rows = rows;
+    line_update_cache(el);
 }
 
 static void line_load_history(EditLine *el, const char *text) {
@@ -178,6 +282,10 @@ const char *el_gets(EditLine *el, int *count) {
     el->line.len = 0;
     el->line.cursor = 0;
     el->line.buffer[0] = '\0';
+    el->refresh_rows = 1;
+    el->render_cache_len = 0;
+    el->render_cache_cursor = 0;
+    if (el->render_cache) el->render_cache[0] = '\0';
 
     if (el->prompt) {
         fprintf(el->fout, "%s", el->prompt);

@@ -59,6 +59,11 @@ struct editline {
     size_t kill_ring_count;
     size_t kill_ring_head;
     int last_cmd_was_kill;
+    size_t refresh_rows;
+    char *render_cache;
+    size_t render_cache_cap;
+    size_t render_cache_len;
+    size_t render_cache_cursor;
 };
 
 /* Internal functions */

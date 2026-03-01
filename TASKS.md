@@ -4907,10 +4907,10 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Home / End keys (ESC `[H`, ESC `[F`, and alternate sequences ESC `[1~` / ESC `[4~`).
     - [x] **Screen Refresh (`refresh_line`):**
         - [x] `\\r` + `CSI K` + prompt + buffer + cursor reposition via `CSI %dD`.
-        - [ ] Handle multi‑line buffers: track physical rows, scroll window.
-        - [ ] Calculate visible width accounting for prompt length and terminal columns.
-        - [ ] Handle lines wider than terminal width (horizontal scrolling or wrapping).
-        - [ ] Optimize refresh: track dirty region and only redraw changed portion.
+        - [x] Handle multi‑line buffers: track physical rows, scroll window.
+        - [x] Calculate visible width accounting for prompt length and terminal columns.
+        - [x] Handle lines wider than terminal width (horizontal scrolling or wrapping).
+        - [x] Optimize refresh: track dirty region and only redraw changed portion.
     - [x] **History Navigation:**
         - [x] Up arrow (`ESC [A`): `H_PREV` — load previous history entry.
         - [x] Down arrow (`ESC [B`): `H_NEXT` — load next or reset to empty.
