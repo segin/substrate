@@ -498,7 +498,141 @@ double fmin(double x, double y) {
 
 /* Positive difference */
 double fdim(double x, double y) {
-    return (x > y) ? (x - y) : 0.0;
+	if(isnan(x) || isnan(y)) return NAN;
+	return (x > y) ? (x - y) : 0.0;
+}
+
+/*
+ * remquo: IEEE remainder with low-order quotient bits.
+ * Returns remainder(x, y) and stores quotient sign + low 3 bits in *quo.
+ */
+double remquo(double x, double y, int *quo) {
+	if(isnan(x) || isnan(y) || isinf(x) || y == 0.0) {
+		*quo = 0;
+		return NAN;
+	}
+
+	int sign = 1;
+	double ax = x, ay = y;
+	if(ax < 0) { ax = -ax; sign = -sign; }
+	if(ay < 0) { ay = -ay; sign = -sign; }
+
+	/* Use repeated division to get full quotient mod 8 */
+	double q_approx = ax / ay;
+	long long q_int = (long long)rint(q_approx);
+	*quo = (int)((q_int & 0x7) * sign);
+
+	return remainder(x, y);
+}
+
+/*
+ * fma(x, y, z) - Fused Multiply-Add: (x * y) + z with single rounding.
+ *
+ * On x87 there is no hardware FMA instruction. We use Dekker's algorithm
+ * to split the product x*y into an exact hi+lo pair via double-double
+ * arithmetic, then add z and round once.
+ *
+ * Dekker split factor for 53-bit mantissa: 2^27 + 1 = 134217729.
+ */
+double fma(double x, double y, double z) {
+	/* Handle special values */
+	if(isnan(x) || isnan(y) || isnan(z)) return NAN;
+	if((isinf(x) && y == 0.0) || (x == 0.0 && isinf(y))) return NAN;
+	if(isinf(x) || isinf(y)) {
+		double p = x * y;
+		if(isinf(z) && ((p > 0) != (z > 0))) return NAN;
+		return p + z;
+	}
+	if(isinf(z)) return z;
+	if(x == 0.0 || y == 0.0) return x * y + z;
+
+	/*
+	 * Dekker's product: split x and y into hi/lo parts so that
+	 * x*y = p_hi + p_lo exactly (no rounding error in the sum).
+	 */
+	static const double SPLIT = 134217729.0; /* 2^27 + 1 */
+
+	double cx = x * SPLIT;
+	double x_hi = cx - (cx - x);
+	double x_lo = x - x_hi;
+
+	double cy = y * SPLIT;
+	double y_hi = cy - (cy - y);
+	double y_lo = y - y_hi;
+
+	double p_hi = x * y;          /* rounded product */
+	double p_lo = ((x_hi * y_hi - p_hi) + x_hi * y_lo
+	              + x_lo * y_hi) + x_lo * y_lo;
+
+	/* Now compute (p_hi + p_lo) + z with single rounding */
+	double s_hi = p_hi + z;
+	double s_lo;
+	if(fabs(p_hi) >= fabs(z))
+		s_lo = (p_hi - s_hi) + z + p_lo;
+	else
+		s_lo = (z - s_hi) + p_hi + p_lo;
+
+	return s_hi + s_lo;
+}
+
+/*
+ * C23 fmaximum / fminimum family.
+ *
+ * fmaximum/fminimum:         NaN-propagating, distinguish +0/-0.
+ * fmaximum_num/fminimum_num: NaN-ignoring (like C99 fmax/fmin), distinguish +0/-0.
+ * fmaximum_mag/fminimum_mag: compare magnitudes, NaN-propagating.
+ */
+double fmaximum(double x, double y) {
+	if(isnan(x) || isnan(y)) return NAN;
+	if(x == 0.0 && y == 0.0) {
+		/* +0 > -0 */
+		return signbit(x) ? y : x;
+	}
+	return (x > y) ? x : y;
+}
+
+double fminimum(double x, double y) {
+	if(isnan(x) || isnan(y)) return NAN;
+	if(x == 0.0 && y == 0.0) {
+		/* -0 < +0 */
+		return signbit(x) ? x : y;
+	}
+	return (x < y) ? x : y;
+}
+
+double fmaximum_num(double x, double y) {
+	if(isnan(x) && isnan(y)) return NAN;
+	if(isnan(x)) return y;
+	if(isnan(y)) return x;
+	if(x == 0.0 && y == 0.0)
+		return signbit(x) ? y : x;
+	return (x > y) ? x : y;
+}
+
+double fminimum_num(double x, double y) {
+	if(isnan(x) && isnan(y)) return NAN;
+	if(isnan(x)) return y;
+	if(isnan(y)) return x;
+	if(x == 0.0 && y == 0.0)
+		return signbit(x) ? x : y;
+	return (x < y) ? x : y;
+}
+
+double fmaximum_mag(double x, double y) {
+	if(isnan(x) || isnan(y)) return NAN;
+	double ax = fabs(x), ay = fabs(y);
+	if(ax > ay) return x;
+	if(ay > ax) return y;
+	/* Equal magnitudes: fall back to fmaximum for sign distinction */
+	return fmaximum(x, y);
+}
+
+double fminimum_mag(double x, double y) {
+	if(isnan(x) || isnan(y)) return NAN;
+	double ax = fabs(x), ay = fabs(y);
+	if(ax < ay) return x;
+	if(ay < ax) return y;
+	return fminimum(x, y);
 }
 
 /* Rounding functions */
@@ -543,19 +677,29 @@ long long llrint(double x) {
 }
 
 /* Float versions */
-float sinf(float x) { return (float)sin(x); }
-float cosf(float x) { return (float)cos(x); }
-float tanf(float x) { return (float)tan(x); }
-float sqrtf(float x) { return (float)sqrt(x); }
-float powf(float x, float y) { return (float)pow(x, y); }
+float sinf(float x) { return(float)sin(x); }
+float cosf(float x) { return(float)cos(x); }
+float tanf(float x) { return(float)tan(x); }
+float sqrtf(float x) { return(float)sqrt(x); }
+float powf(float x, float y) { return(float)pow(x, y); }
 float fabsf(float x) { return (x < 0) ? -x : x; }
-float fmodf(float x, float y) { return (float)fmod(x, y); }
-float fmaxf(float x, float y) { return (float)fmax(x, y); }
-float fminf(float x, float y) { return (float)fmin(x, y); }
-float ceilf(float x) { return (float)ceil(x); }
-float floorf(float x) { return (float)floor(x); }
-float truncf(float x) { return (float)trunc(x); }
-float roundf(float x) { return (float)round(x); }
+float fmodf(float x, float y) { return(float)fmod(x, y); }
+float remainderf(float x, float y) { return(float)remainder(x, y); }
+float remquof(float x, float y, int *quo) { return(float)remquo(x, y, quo); }
+float fmaf(float x, float y, float z) { return(float)fma(x, y, z); }
+float fmaxf(float x, float y) { return(float)fmax(x, y); }
+float fminf(float x, float y) { return(float)fmin(x, y); }
+float fdimf(float x, float y) { return(float)fdim(x, y); }
+float ceilf(float x) { return(float)ceil(x); }
+float floorf(float x) { return(float)floor(x); }
+float truncf(float x) { return(float)trunc(x); }
+float roundf(float x) { return(float)round(x); }
+float fmaximumf(float x, float y) { return(float)fmaximum(x, y); }
+float fminimumf(float x, float y) { return(float)fminimum(x, y); }
+float fmaximum_numf(float x, float y) { return(float)fmaximum_num(x, y); }
+float fminimum_numf(float x, float y) { return(float)fminimum_num(x, y); }
+float fmaximum_magf(float x, float y) { return(float)fmaximum_mag(x, y); }
+float fminimum_magf(float x, float y) { return(float)fminimum_mag(x, y); }
 
 /* Long double versions (same as double on i386) */
 long double sinl(long double x) { return sin(x); }
@@ -565,9 +709,19 @@ long double sqrtl(long double x) { return sqrt(x); }
 long double powl(long double x, long double y) { return pow(x, y); }
 long double fabsl(long double x) { return (x < 0) ? -x : x; }
 long double fmodl(long double x, long double y) { return fmod(x, y); }
+long double remainderl(long double x, long double y) { return remainder(x, y); }
+long double remquol(long double x, long double y, int *quo) { return remquo(x, y, quo); }
+long double fmal(long double x, long double y, long double z) { return fma(x, y, z); }
 long double fmaxl(long double x, long double y) { return fmax(x, y); }
 long double fminl(long double x, long double y) { return fmin(x, y); }
+long double fdiml(long double x, long double y) { return fdim(x, y); }
 long double ceill(long double x) { return ceil(x); }
 long double floorl(long double x) { return floor(x); }
 long double truncl(long double x) { return trunc(x); }
 long double roundl(long double x) { return round(x); }
+long double fmaximuml(long double x, long double y) { return fmaximum(x, y); }
+long double fminimuml(long double x, long double y) { return fminimum(x, y); }
+long double fmaximum_numl(long double x, long double y) { return fmaximum_num(x, y); }
+long double fminimum_numl(long double x, long double y) { return fminimum_num(x, y); }
+long double fmaximum_magl(long double x, long double y) { return fmaximum_mag(x, y); }
+long double fminimum_magl(long double x, long double y) { return fminimum_mag(x, y); }

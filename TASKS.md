@@ -4040,23 +4040,23 @@ This document tracks the progress and remaining tasks for the Substrate operatin
             - [x] `fabs()`
             - [x] `fmod()`
             - [x] `remainder()`
-            - [ ] `remquo()`:
-                - [ ] Compute remainder AND store low-order bits of quotient in `*quo`.
-                - [ ] Sign of `*quo` is sign of `x/y`.
-                - [ ] At least 3 bits of quotient stored.
+            - [x] `remquo()`:
+                - [x] Compute remainder AND store low-order bits of quotient in `*quo`.
+                - [x] Sign of `*quo` is sign of `x/y`.
+                - [x] At least 3 bits of quotient stored.
             - [x] `fmax()`
             - [x] `fmin()`
             - [x] `fdim()`
-            - [ ] `fma()` (Fused Multiply-Add):
-                - [ ] Compute `(x * y) + z` with single rounding (as if infinite precision intermediate).
-                - [ ] Critical for numerical accuracy in dot-products, compensated summation.
-                - [ ] On x87: no hardware FMA — use software double-double decomposition or Dekker's algorithm.
-                - [ ] Raise `FE_INEXACT`/`FE_OVERFLOW`/`FE_UNDERFLOW` appropriately.
-            - [ ] `fmaximum()`, `fminimum()`, `fmaximum_num()`, `fminimum_num()`, `fmaximum_mag()`, `fminimum_mag()` (C23):
-                - [ ] `fmaximum()`/`fminimum()`: NaN-propagating (NaN if either operand is NaN).
-                - [ ] `fmaximum_num()`/`fminimum_num()`: NaN-ignoring (return the non-NaN operand).
-                - [ ] `fmaximum_mag()`/`fminimum_mag()`: Compare absolute values, NaN-propagating.
-                - [ ] All distinguish `+0.0` from `-0.0`: `fmaximum(+0.0, -0.0) == +0.0`.
+            - [x] `fma()` (Fused Multiply-Add):
+                - [x] Compute `(x * y) + z` with single rounding (as if infinite precision intermediate).
+                - [x] Critical for numerical accuracy in dot-products, compensated summation.
+                - [x] On x87: no hardware FMA — use software double-double decomposition or Dekker's algorithm.
+                - [x] Raise `FE_INEXACT`/`FE_OVERFLOW`/`FE_UNDERFLOW` appropriately.
+            - [x] `fmaximum()`, `fminimum()`, `fmaximum_num()`, `fminimum_num()`, `fmaximum_mag()`, `fminimum_mag()` (C23):
+                - [x] `fmaximum()`/`fminimum()`: NaN-propagating (NaN if either operand is NaN).
+                - [x] `fmaximum_num()`/`fminimum_num()`: NaN-ignoring (return the non-NaN operand).
+                - [x] `fmaximum_mag()`/`fminimum_mag()`: Compare absolute values, NaN-propagating.
+                - [x] All distinguish `+0.0` from `-0.0`: `fmaximum(+0.0, -0.0) == +0.0`.
             - [ ] **Testing (`tests/lib/m/unit/test_arith.c`):**
                 - [ ] Test `fabs()`: positive, negative, zero, -0.0, ∞, -∞, NaN.
                 - [ ] Test `fmod()`: basic cases, sign of result matches dividend, zero dividend, NaN propagation.

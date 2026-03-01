@@ -109,11 +109,37 @@ double hypot(double x, double y);
 double fabs(double x);
 double fmod(double x, double y);
 double remainder(double x, double y);
+double remquo(double x, double y, int *quo);
 
-/* Min/Max */
+/* Fused multiply-add */
+double fma(double x, double y, double z);
+float fmaf(float x, float y, float z);
+long double fmal(long double x, long double y, long double z);
+
+/* Min/Max (C99 — NaN-ignoring) */
 double fmax(double x, double y);
 double fmin(double x, double y);
 double fdim(double x, double y);
+
+/* Min/Max (C23 — NaN-propagating and variants) */
+double fmaximum(double x, double y);
+double fminimum(double x, double y);
+double fmaximum_num(double x, double y);
+double fminimum_num(double x, double y);
+double fmaximum_mag(double x, double y);
+double fminimum_mag(double x, double y);
+float fmaximumf(float x, float y);
+float fminimumf(float x, float y);
+float fmaximum_numf(float x, float y);
+float fminimum_numf(float x, float y);
+float fmaximum_magf(float x, float y);
+float fminimum_magf(float x, float y);
+long double fmaximuml(long double x, long double y);
+long double fminimuml(long double x, long double y);
+long double fmaximum_numl(long double x, long double y);
+long double fminimum_numl(long double x, long double y);
+long double fmaximum_magl(long double x, long double y);
+long double fminimum_magl(long double x, long double y);
 
 /* Rounding */
 double ceil(double x);
@@ -133,8 +159,11 @@ float sqrtf(float x);
 float powf(float x, float y);
 float fabsf(float x);
 float fmodf(float x, float y);
+float remainderf(float x, float y);
+float remquof(float x, float y, int *quo);
 float fmaxf(float x, float y);
 float fminf(float x, float y);
+float fdimf(float x, float y);
 float ceilf(float x);
 float floorf(float x);
 float truncf(float x);
@@ -149,8 +178,11 @@ long double sqrtl(long double x);
 long double powl(long double x, long double y);
 long double fabsl(long double x);
 long double fmodl(long double x, long double y);
+long double remainderl(long double x, long double y);
+long double remquol(long double x, long double y, int *quo);
 long double fmaxl(long double x, long double y);
 long double fminl(long double x, long double y);
+long double fdiml(long double x, long double y);
 long double ceill(long double x);
 long double floorl(long double x);
 long double truncl(long double x);
