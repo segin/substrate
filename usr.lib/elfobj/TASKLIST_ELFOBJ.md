@@ -383,25 +383,25 @@ Beyond the currently-implemented core set, add the full x86 relocation roster:
 ## 4. Validation (`elf_validate.c`)
 
 ### 4a. ARM Validation Rules
-- [ ] Accept `EM_ARM` with `ELFCLASS32` only.
-- [ ] Accept both `ELFDATA2LSB` (little-endian, common) and `ELFDATA2MSB` (big-endian).
-- [ ] Validate `e_flags` EABI version (≥ `EF_ARM_ABI_VER5` for modern toolchains).
-- [ ] Validate float ABI flags consistency (`HARD`/`SOFT` not both set).
-- [ ] Validate `SHT_ARM_EXIDX` sections have `SHF_LINK_ORDER` flag.
-- [ ] Validate `.ARM.attributes` section if present.
-- [ ] Validate alignment constraints for ARM instructions (4 for ARM, 2 for Thumb).
-- [ ] Validate `PT_ARM_EXIDX` segment if present points to `SHT_ARM_EXIDX` section.
-- [ ] Validate mapping symbols (`$a`, `$t`, `$d`) are present in code sections.
+- [x] Accept `EM_ARM` with `ELFCLASS32` only.
+- [x] Accept both `ELFDATA2LSB` (little-endian, common) and `ELFDATA2MSB` (big-endian).
+- [x] Validate `e_flags` EABI version (≥ `EF_ARM_ABI_VER5` for modern toolchains).
+- [x] Validate float ABI flags consistency (`HARD`/`SOFT` not both set).
+- [x] Validate `SHT_ARM_EXIDX` sections have `SHF_LINK_ORDER` flag.
+- [x] Validate `.ARM.attributes` section if present.
+- [x] Validate alignment constraints for ARM instructions (4 for ARM, 2 for Thumb).
+- [x] Validate `PT_ARM_EXIDX` segment if present points to `SHT_ARM_EXIDX` section.
+- [x] Validate mapping symbols (`$a`, `$t`, `$d`) are present in code sections.
 
 ### 4b. AArch64 Validation Rules
-- [ ] Accept `EM_AARCH64` with `ELFCLASS64` only.
-- [ ] Accept both `ELFDATA2LSB` and `ELFDATA2MSB`.
-- [ ] Validate `e_flags` is 0 or recognized optional flags only.
-- [ ] Validate instruction alignment: all code sections 4-byte aligned.
-- [ ] Validate `.note.gnu.property` for BTI (`GNU_PROPERTY_AARCH64_FEATURE_1_BTI`) and PAC (`GNU_PROPERTY_AARCH64_FEATURE_1_PAC`) if present.
-- [ ] Validate ADRP+ADD/LDR pairs have consistent page references.
-- [ ] Check for unrecognized relocation types.
-- [ ] Validate mapping symbols (`$x`, `$d`) in code sections.
+- [x] Accept `EM_AARCH64` with `ELFCLASS64` only.
+- [x] Accept both `ELFDATA2LSB` and `ELFDATA2MSB`.
+- [x] Validate `e_flags` is 0 or recognized optional flags only.
+- [x] Validate instruction alignment: all code sections 4-byte aligned.
+- [x] Validate `.note.gnu.property` for BTI (`GNU_PROPERTY_AARCH64_FEATURE_1_BTI`) and PAC (`GNU_PROPERTY_AARCH64_FEATURE_1_PAC`) if present.
+- [x] Validate ADRP+ADD/LDR pairs have consistent page references.
+- [x] Check for unrecognized relocation types.
+- [x] Validate mapping symbols (`$x`, `$d`) in code sections.
 
 ---
 

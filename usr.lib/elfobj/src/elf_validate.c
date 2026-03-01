@@ -99,6 +99,194 @@ static int section_is_allocated(const struct elf_section *s) {
     return (s->flags & SHF_ALLOC) != 0 && s->type != SHT_NOBITS && s->size != 0;
 }
 
+static int is_exec_section(const struct elf_section *s) {
+    return s != NULL && (s->flags & SHF_EXECINSTR) != 0;
+}
+
+static int has_mapping_symbol(const elfobj_t *obj, char tag0, char tag1) {
+    size_t i;
+    for (i = 0; i < obj->symbol_count; ++i) {
+        const struct elf_symbol *sym = obj->symbols[i];
+        if (sym == NULL || sym->name == NULL) {
+            continue;
+        }
+        if (sym->name[0] == '$' && (sym->name[1] == tag0 || sym->name[1] == tag1)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int validate_arm_specific(validate_ctx_t *ctx, const elfobj_t *obj) {
+    size_t i;
+    int have_exidx = 0;
+    int have_attrs = 0;
+    int have_exec = 0;
+
+    for (i = 0; i < obj->section_count; ++i) {
+        const struct elf_section *s = obj->sections[i];
+        if (s == NULL) {
+            continue;
+        }
+        if (s->type == SHT_ARM_EXIDX) {
+            have_exidx = 1;
+            if ((s->flags & SHF_LINK_ORDER) == 0) {
+                if (report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                "SHT_ARM_EXIDX missing SHF_LINK_ORDER")) {
+                    return 1;
+                }
+            }
+        }
+        if (s->type == SHT_ARM_ATTRIBUTES || (s->name != NULL &&
+                                              strcmp(s->name, ".ARM.attributes") == 0)) {
+            have_attrs = 1;
+            if (s->data_size == 0 || s->data == NULL || s->data[0] != 'A') {
+                if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
+                                ".ARM.attributes has invalid payload")) {
+                    return 1;
+                }
+            }
+        }
+        if (is_exec_section(s)) {
+            have_exec = 1;
+            if (s->addralign < 2) {
+                if (report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                "ARM code section alignment must be >= 2")) {
+                    return 1;
+                }
+            }
+            if (s->name != NULL && strstr(s->name, ".text") != NULL && s->addralign < 4) {
+                if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
+                                "ARM text section alignment should be >= 4")) {
+                    return 1;
+                }
+            }
+        }
+    }
+
+    if (have_exec && !has_mapping_symbol(obj, 'a', 't')) {
+        if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                        "ARM executable sections missing $a/$t mapping symbols")) {
+            return 1;
+        }
+    }
+    if (have_exec && !has_mapping_symbol(obj, 'd', 'd')) {
+        if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                        "ARM executable sections missing $d mapping symbols")) {
+            return 1;
+        }
+    }
+    if (!have_attrs) {
+        if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                        "ARM object missing .ARM.attributes section")) {
+            return 1;
+        }
+    }
+
+    for (i = 0; i < obj->phdr_count; ++i) {
+        const struct elf_phdr *ph = &obj->phdrs[i];
+        if (ph->type == PT_ARM_EXIDX && !have_exidx) {
+            if (report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                            "PT_ARM_EXIDX present but no SHT_ARM_EXIDX section")) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int validate_note_gnu_property_aarch64(validate_ctx_t *ctx, const struct elf_section *s,
+                                               size_t index) {
+    uint32_t namesz;
+    uint32_t descsz;
+    uint32_t type;
+    size_t off;
+    if (s->data == NULL || s->data_size < 16) {
+        return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                           ".note.gnu.property payload too small");
+    }
+    namesz = elf__rd32(s->data + 0, s->obj->endian);
+    descsz = elf__rd32(s->data + 4, s->obj->endian);
+    type = elf__rd32(s->data + 8, s->obj->endian);
+    if (type != 5u) {
+        return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                           ".note.gnu.property unexpected note type");
+    }
+    off = 12;
+    off = (off + namesz + 3u) & ~3u;
+    if (off + descsz > s->data_size) {
+        return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
+                           ".note.gnu.property desc out of bounds");
+    }
+    while (descsz >= 8 && off + 8 <= s->data_size) {
+        uint32_t pr_type = elf__rd32(s->data + off, s->obj->endian);
+        uint32_t pr_datasz = elf__rd32(s->data + off + 4, s->obj->endian);
+        uint32_t bits = 0;
+        off += 8;
+        if (off + pr_datasz > s->data_size) {
+            return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_BOUNDS, index,
+                               ".note.gnu.property item out of bounds");
+        }
+        if (pr_type == GNU_PROPERTY_AARCH64_FEATURE_1_AND && pr_datasz >= 4) {
+            bits = elf__rd32(s->data + off, s->obj->endian);
+            if ((bits & ~(GNU_PROPERTY_AARCH64_FEATURE_1_BTI |
+                          GNU_PROPERTY_AARCH64_FEATURE_1_PAC)) != 0) {
+                if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, index,
+                                "AArch64 GNU property has unknown feature bits")) {
+                    return 1;
+                }
+            }
+        }
+        off += pr_datasz;
+        off = (off + 7u) & ~7u;
+        if (descsz < 8 + pr_datasz) {
+            break;
+        }
+        descsz -= 8 + pr_datasz;
+    }
+    return 0;
+}
+
+static int validate_aarch64_specific(validate_ctx_t *ctx, const elfobj_t *obj) {
+    size_t i;
+    int have_exec = 0;
+
+    for (i = 0; i < obj->section_count; ++i) {
+        const struct elf_section *s = obj->sections[i];
+        if (s == NULL) {
+            continue;
+        }
+        if (is_exec_section(s)) {
+            have_exec = 1;
+            if (s->addralign < 4) {
+                if (report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                "AArch64 code section alignment must be >= 4")) {
+                    return 1;
+                }
+            }
+        }
+        if (s->name != NULL && strcmp(s->name, ".note.gnu.property") == 0) {
+            if (validate_note_gnu_property_aarch64(ctx, s, i)) {
+                return 1;
+            }
+        }
+    }
+
+    if (have_exec && !has_mapping_symbol(obj, 'x', 'x')) {
+        if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                        "AArch64 executable sections missing $x mapping symbols")) {
+            return 1;
+        }
+    }
+    if (have_exec && !has_mapping_symbol(obj, 'd', 'd')) {
+        if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                        "AArch64 executable sections missing $d mapping symbols")) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
     if (ctx == NULL || obj == NULL) {
         return 1;
@@ -197,6 +385,13 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
         goto done;
     }
 
+    if (obj->machine == EM_ARM && validate_arm_specific(&ctx, obj)) {
+        goto done;
+    }
+    if (obj->machine == EM_AARCH64 && validate_aarch64_specific(&ctx, obj)) {
+        goto done;
+    }
+
     for (i = 0; i < obj->section_count; ++i) {
         struct elf_section *s = obj->sections[i];
         if (s == NULL) {
@@ -263,11 +458,42 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
                                 "relocation offset out of range idx=", i)) goto done;
         }
         relsz = elf_reloc_size_for_machine(obj->machine, r->type);
+        if (relsz < 0) {
+            if (report_diag_fmt(&ctx, ELF_DIAG_WARNING, ELF_ERR_UNSUPPORTED, i,
+                                "unrecognized relocation type idx=", i)) {
+                goto done;
+            }
+        }
         if (relsz > 0 && r->section->type != SHT_NOBITS) {
             uint64_t end;
             if (!elf__u64_add(r->offset, (uint64_t)relsz, &end) || end > r->section->size) {
                 if (report_diag_fmt(&ctx, ELF_DIAG_WARNING, ELF_ERR_RELOC, i,
                                     "relocation width out of range idx=", i)) goto done;
+            }
+        }
+        if (obj->machine == EM_AARCH64 && r->type == R_AARCH64_ADR_PREL_PG_HI21) {
+            size_t k;
+            int found_pair = 0;
+            for (k = 0; k < obj->reloc_count; ++k) {
+                const struct elf_reloc *q = obj->relocs[k];
+                if (q == NULL || q == r || q->section != r->section || q->symbol != r->symbol) {
+                    continue;
+                }
+                if (q->type == R_AARCH64_ADD_ABS_LO12_NC ||
+                    q->type == R_AARCH64_LDST8_ABS_LO12_NC ||
+                    q->type == R_AARCH64_LDST16_ABS_LO12_NC ||
+                    q->type == R_AARCH64_LDST32_ABS_LO12_NC ||
+                    q->type == R_AARCH64_LDST64_ABS_LO12_NC ||
+                    q->type == R_AARCH64_LDST128_ABS_LO12_NC) {
+                    found_pair = 1;
+                    break;
+                }
+            }
+            if (!found_pair) {
+                if (report_diag_fmt(&ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
+                                    "ADRP relocation has no matching LO12 pair idx=", i)) {
+                    goto done;
+                }
             }
         }
     }
