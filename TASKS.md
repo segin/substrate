@@ -2399,676 +2399,408 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
 - [ ] **VFS Subsystem Refactor (BSD-style):**
+
+    > **Files:** `sys/vfs/vfs.h`, `vfs.c`, `vnode.h`, `vnode_ops.c`,
+    > `namecache.c`, `bio.c`, `buf.h`, `vnode_lock.c`, `vfs_mount.c`.
+    >
+    > **Architecture:** BSD-style VFS with vnodes, mount points, namei
+    > lookup, buffer cache, and per-filesystem operations vectors.
+
     - [ ] **Core Structures & Life Cycle:**
-        - [x] **`struct vnode`:**
-            - [x] `v_type` (VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD).
-            - [x] `v_tag` (VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.).
-            - [x] `v_op` (operations vector), `v_data` (private fs data).
-            - [x] `v_mount` (pointer to mount point).
-            - [x] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
-            - [x] `v_writecount` (writers count), `v_flag` (VROOT, VTEXT, VSYSTEM, etc.).
-            - [x] `v_lock` (exclusive/shared lock).
-            - [x] **Life Cycle:**
-                - [x] `getnewvnode()`: Allocate new vnode from zone, recycle LRU if full.
-                - [x] `vref()`: Increment use count.
-                - [x] `vrele()`: Decrement use count, trigger inactive/reclaim if zero.
-                - [x] `vput()`: Unlock and vrele.
-                - [x] `vget()`: Lock and vref.
-                - [x] `vgone()`: Mark vnode for doom/destruction.
-                - [x] `vclean()`: Disassociate vnode from filesystem data.
-        - [x] **`struct mount`:**
-            - [x] `mnt_vnodecovered` (vnode mounted on).
-            - [x] `mnt_op` (VFS ops vector).
-            - [x] `mnt_data` (private fs data).
-            - [x] `mnt_flag` (MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS).
-            - [x] `mnt_nvnodelist` (list of active vnodes).
-            - [x] `mnt_stat` (cached filesystem statistics).
-        - [x] **`struct file`:**
-            - [x] `f_type` (DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE).
-            - [x] `f_data` (pointer to vnode/socket/pipe).
-            - [x] `f_flag` (FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT).
-            - [x] `f_ops` (file operations vector: read, write, ioctl, poll, close).
-            - [x] `f_offset` (current file offset).
-            - [x] `f_count` (reference count).
-            - [x] `f_cred` (credentials at open time).
-    - [x] **Pathname Lookup (`namei`):**
-        - [x] **`struct nameidata`:** Encapsulate lookup state, path string, purpose (LOOKUP/CREATE/DELETE).
-        - [x] **`struct componentname`:** Current path component being resolved.
-        - [x] **Lookup Logic:**
-            - [x] Parsing `/` delimiters.
-            - [x] Handling `.` and `..`.
-            - [x] Crossing mount points (`mnt_vnodecovered`).
-            - [x] Symbolic link resolution (recursion limit: MAXSYMLINKS).
-        - [x] **Name Cache:** Global hash table (`nchash`) mapping `(directory vnode, name)` -> `target vnode`.
+        - [ ] **`struct vnode`:**
+            - [ ] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD.
+            - [ ] `v_tag`: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.
+            - [ ] `v_op` (operations vector), `v_data` (private fs data).
+            - [ ] `v_mount` (pointer to mount point).
+            - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
+            - [ ] `v_writecount` (writers count).
+            - [ ] `v_flag`: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc.
+            - [ ] `v_lock` (exclusive/shared lockmgr lock).
+            - [ ] `v_numoutput` (pending async writes for fsync).
+            - [ ] `v_hash` (hash chain for vnode cache lookup).
+            - [ ] **Life Cycle:**
+                - [ ] `getnewvnode(tag, mp, ops, vpp)`: allocate from zone, recycle LRU if pool full.
+                - [ ] `vref(vp)`: increment use count.
+                - [ ] `vrele(vp)`: decrement use count, trigger inactive/reclaim if zero.
+                - [ ] `vput(vp)`: unlock and vrele.
+                - [ ] `vget(vp, flags)`: lock and vref (with LK_NOWAIT support).
+                - [ ] `vgone(vp)`: mark for doom/destruction.
+                - [ ] `vclean(vp, flags)`: disassociate from filesystem data.
+                - [ ] `vinvalbuf(vp, flags)`: invalidate all buffers for vnode.
+                - [ ] `vflush(mp, skipvp, flags)`: flush all vnodes for mount point.
+        - [ ] **`struct mount`:**
+            - [ ] `mnt_vnodecovered` (vnode mounted on).
+            - [ ] `mnt_op` (VFS ops vector).
+            - [ ] `mnt_data` (private fs data).
+            - [ ] `mnt_flag`: MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS, MNT_ASYNC, MNT_UNION, MNT_LOCAL.
+            - [ ] `mnt_nvnodelist` (list of active vnodes).
+            - [ ] `mnt_stat` (cached `struct statfs`).
+            - [ ] `mnt_maxsymlinklen`: max symlink target stored inline.
+            - [ ] `mnt_lock`: mount-level reader/writer lock.
+        - [ ] **`struct file`:**
+            - [ ] `f_type`: DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE.
+            - [ ] `f_data` (pointer to vnode/socket/pipe).
+            - [ ] `f_flag`: FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT, O_CLOEXEC.
+            - [ ] `f_ops` (file operations vector: read, write, ioctl, poll, close, stat).
+            - [ ] `f_offset` (current file offset, atomic for concurrent access).
+            - [ ] `f_count` (reference count).
+            - [ ] `f_cred` (credentials at open time).
+
+    - [ ] **Pathname Lookup (`namei`):**
+        - [ ] **`struct nameidata`:** lookup state, path string, purpose (LOOKUP/CREATE/DELETE/RENAME).
+        - [ ] **`struct componentname`:** current component, `cn_flags`, `cn_nameptr`, `cn_namelen`.
+        - [ ] **Lookup Logic:**
+            - [ ] Parse `/` delimiters, handle multiple consecutive slashes.
+            - [ ] Handle `.` (current directory) and `..` (parent directory).
+            - [ ] Cross mount points via `mnt_vnodecovered`/`v_mountedhere`.
+            - [ ] Symbolic link resolution with recursion limit (MAXSYMLINKS = 32).
+            - [ ] Handle trailing slash on non-directory (ENOTDIR).
+            - [ ] Handle `AT_FDCWD` and `*at()` syscall relative lookups.
+        - [ ] **Name Cache (`nchash`):**
+            - [ ] Global hash table: `(directory vnode, name)` → target vnode.
+            - [ ] Negative entries: cache "does not exist" results.
+            - [ ] `cache_lookup(dvp, vpp, cnp)`: check cache.
+            - [ ] `cache_enter(dvp, vp, cnp)`: add to cache.
+            - [ ] `cache_purge(vp)`: remove all entries for vnode.
+            - [ ] `cache_purgevfs(mp)`: remove all entries for mount point.
+            - [ ] LRU eviction of cache entries under memory pressure.
+            - [ ] Reader/writer lock for SMP scalability.
+
     - [ ] **Operations Vectors:**
         - [ ] **`vfs_ops` (Filesystem-level):**
-            - [x] Implement `vfs_mount(mp, path, data, ndp, p)`.
-                - Files: `sys/vfs/vfs_mount.c` (new), `sys/vfs/vfs.h`
-                - API: Mount filesystem at path, parse mount options
-                - Tests: unit (mount success/failure), integration (mount ext2/fat)
-                - Docs: `vfs_mount.9`
-                - Acceptance: Filesystem mounted, accessible via path
-            - [x] Implement `vfs_start(mp, flags, p)`.
-                - Files: `sys/vfs/vfs_mount.c`
-                - API: Post-mount initialization callback
-                - Tests: unit (callback invoked after mount)
-                - Docs: `vfs_start.9`
-                - Acceptance: Filesystem fully operational after start
-            - [x] Implement `vfs_unmount(mp, mntflags, p)`.
-                - Files: `sys/vfs/vfs_mount.c`
-                - API: Unmount filesystem, flush buffers, free resources
-                - Flags: `MNT_FORCE` for forced unmount
-                - Tests: unit (clean unmount, busy unmount rejection, force unmount)
-                - Docs: `vfs_unmount.9`
-                - Acceptance: Filesystem detached, resources freed
-            - [x] Implement `vfs_root(mp, vpp)`.
-                - Files: `sys/vfs/vfs_mount.c`
-                - API: Return root vnode for mounted filesystem
-                - Tests: unit (root vnode returned with correct type)
-                - Docs: `vfs_root.9`
-                - Acceptance: Root vnode valid, ref count incremented
-            - [x] Implement `vfs_statfs(mp, sbp, p)`.
-                - Files: `sys/vfs/vfs_mount.c`
-                - API: Fill statfs structure with filesystem stats
-                - Fields: `f_blocks`, `f_bfree`, `f_bavail`, `f_files`, `f_ffree`
-                - Tests: unit (stats match filesystem state)
-                - Docs: `vfs_statfs.9`
-                - Acceptance: Correct free space/inode counts
-            - [x] Implement `vfs_sync(mp, waitfor, cred, p)`.
-                - Files: `sys/vfs/vfs_mount.c`
-                - API: Sync dirty buffers to disk
-                - Flags: `MNT_WAIT` (sync), `MNT_NOWAIT` (async)
-                - Tests: integration (sync flushes dirty data)
-                - Docs: `vfs_sync.9`
-                - Acceptance: All dirty buffers written
-            - [x] Implement `vfs_vget(mp, ino, vpp)`.
-                - Files: `sys/vfs/vfs_mount.c`
-                - API: Get vnode by inode number
-                - Tests: unit (vnode retrieved, cache hit/miss)
-                - Docs: `vfs_vget.9`
-                - Acceptance: Correct vnode returned for inode
-            - [x] Implement `vfs_fhtovp(mp, fhp, vpp)`.
-                - Files: `sys/vfs/vfs_mount.c`
-                - API: Convert NFS file handle to vnode
-                - Tests: unit (handle resolution)
-                - Docs: `vfs_fhtovp.9`
-                - Acceptance: Valid vnode from file handle
+            - [ ] `vfs_mount(mp, path, data, ndp, p)`: mount filesystem at path.
+            - [ ] `vfs_start(mp, flags, p)`: post-mount initialization.
+            - [ ] `vfs_unmount(mp, mntflags, p)`: unmount, flush, free.
+                - [ ] `MNT_FORCE`: forced unmount (kill active references).
+            - [ ] `vfs_root(mp, vpp)`: return root vnode.
+            - [ ] `vfs_statfs(mp, sbp, p)`: fill `struct statfs` (f_blocks, f_bfree, f_bavail, f_files, f_ffree).
+            - [ ] `vfs_sync(mp, waitfor, cred, p)`: sync dirty buffers.
+                - [ ] `MNT_WAIT` (synchronous) / `MNT_NOWAIT` (asynchronous).
+            - [ ] `vfs_vget(mp, ino, vpp)`: get vnode by inode number.
+            - [ ] `vfs_fhtovp(mp, fhp, vpp)`: NFS file handle → vnode.
+            - [ ] `vfs_init(vfsp)`: filesystem type initialization (register).
+            - [ ] `vfs_uninit(vfsp)`: filesystem type teardown (unregister).
         - [ ] **`vnode_ops` (File-level):**
-            - [x] **Name Resolution:**
-                - [x] Implement `vop_lookup(dvp, vpp, cnp)`.
-                    - Files: `sys/vfs/vnode_ops.c` (new), `sys/vfs/vnode.h`
-                    - API: Look up component name in directory vnode
-                    - Returns: `ENOENT` if not found, `0` + vnode if found
-                    - Tests: unit (found, not found, permission denied)
-                    - Docs: `vop_lookup.9`
-                    - Acceptance: Correct vnode returned for existing entry
-                - [x] Implement `vop_cachedlookup(dvp, vpp, cnp)`.
-                    - Files: `sys/vfs/vnode_ops.c`, `sys/vfs/namecache.c`
-                    - API: Lookup wrapper interacting with name cache
-                    - Logic: Check cache first, call vop_lookup on miss
-                    - Tests: unit (cache hit, cache miss, negative cache)
-                    - Docs: `vop_cachedlookup.9`
-                    - Acceptance: Cache reduces filesystem lookups
+            - [ ] **Name Resolution:**
+                - [ ] `vop_lookup(dvp, vpp, cnp)`: look up component in directory.
+                - [ ] `vop_cachedlookup(dvp, vpp, cnp)`: cache-first wrapper.
             - [ ] **Creation/Deletion:**
-                - [x] Implement `vop_create(dvp, vpp, cnp, vap)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Create regular file in directory
-                    - Logic: Allocate inode, create dir entry, return new vnode
-                    - Tests: unit (create success, EEXIST, EACCES, ENOSPC)
-                    - Docs: `vop_create.9`
-                    - Acceptance: New file created with correct attributes
-                - [x] Implement `vop_mknod(dvp, vpp, cnp, vap)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Create device node (block/char special)
-                    - Attrs: `va_rdev` for device major/minor
-                    - Tests: unit (block device, char device, FIFO, socket)
-                    - Docs: `vop_mknod.9`
-                    - Acceptance: Device node with correct rdev
-                - [x] Implement `vop_mkdir(dvp, vpp, cnp, vap)`. <!-- vfs.h, vfs.c, udf.c -->
-                    - Files: `sys/vfs/vfs.c`, `sys/fs/udf/udf.c`
-                    - API: Create directory
-                    - Tests: unit (mkdir success, nested mkdir)
-                    - Docs: `vop_mkdir.9`
-                    - Acceptance: Directory created with . and .. entries
-                - [x] Implement `vop_whiteout(dvp, cnp, flags)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: UnionFS whiteout entry support
-                    - Flags: `CREATE`, `DELETE`, `LOOKUP`
-                    - Tests: unit (create whiteout, delete whiteout)
-                    - Docs: `vop_whiteout.9`
-                    - Acceptance: Whiteout hides lower layer entry
-                - [x] Implement `vop_remove(dvp, vp, cnp)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Remove directory entry (unlink)
-                    - Logic: Decrement link count, free inode if zero
-                    - Tests: unit (unlink file, unlink with hardlinks, ENOENT)
-                    - Docs: `vop_remove.9`
-                    - Acceptance: Entry removed, inode freed when nlink=0
-                - [x] Implement `vop_rmdir(dvp, vp, cnp)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Remove empty directory
-                    - Tests: unit (rmdir empty, ENOTEMPTY, EBUSY for .)
-                    - Docs: `vop_rmdir.9`
-                    - Acceptance: Empty directory removed
-            - [x] **Access/Attributes:**
-                - [x] Implement `vop_access(vp, mode, cred, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Check r/w/x permissions
-                    - Logic: Compare cred uid/gid against vnode owner/group, check mode bits
-                    - Tests: unit (owner access, group access, other access, root bypass)
-                    - Docs: `vop_access.9`
-                    - Acceptance: Permission checks match POSIX semantics
-                - [x] Implement `vop_getattr(vp, vap, cred, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Get file attributes (stat equivalent)
-                    - Fields: `va_mode`, `va_nlink`, `va_uid`, `va_gid`, `va_size`, `va_atime`, `va_mtime`, `va_ctime`
-                    - Tests: unit (all stat fields correct)
-                    - Docs: `vop_getattr.9`
-                    - Acceptance: All vattr fields populated correctly
-                - [x] Implement `vop_setattr(vp, vap, cred, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Set file attributes (chmod/chown/utimes)
-                    - Logic: Check permissions, update inode, mark dirty
-                    - Tests: unit (chmod, chown, truncate, utimes)
-                    - Docs: `vop_setattr.9`
-                    - Acceptance: Attributes updated, persisted after sync
-                - [x] Implement `vop_pathconf(vp, name, retval)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: POSIX pathconf support
-                    - Names: `_PC_LINK_MAX`, `_PC_NAME_MAX`, `_PC_PATH_MAX`, etc.
-                    - Tests: unit (all pathconf values)
-                    - Docs: `vop_pathconf.9`
-                    - Acceptance: Correct limits returned
-            - [x] **I/O Operations:**
-                - [x] Implement `vop_open(vp, mode, cred, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: File open callback
-                    - Logic: Check access, increment open count, device-specific init
-                    - Tests: unit (open read, open write, open RW, EACCES)
-                    - Docs: `vop_open.9`
-                    - Acceptance: Vnode ready for I/O
-                - [x] Implement `vop_close(vp, fflag, cred, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: File close callback
-                    - Logic: Decrement open count, flush if last close
-                    - Tests: unit (close, close last handle triggers sync)
-                    - Docs: `vop_close.9`
-                    - Acceptance: Resources released on last close
-                - [x] Implement `vop_read(vp, uio, ioflag, cred)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Read data from vnode
-                    - Logic: Use buffer cache, handle EOF, update atime
-                    - Tests: unit (read full, read partial, read at EOF, read past EOF)
-                    - Docs: `vop_read.9`
-                    - Acceptance: Correct data returned, uio updated
-                - [x] Implement `vop_write(vp, uio, ioflag, cred)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Write data to vnode
-                    - Logic: Extend file if needed, use buffer cache, update mtime
-                    - Flags: `IO_APPEND`, `IO_SYNC`
-                    - Tests: unit (write, append, write extends file, ENOSPC)
-                    - Docs: `vop_write.9`
-                    - Acceptance: Data written, size updated
-                - [x] Implement `vop_ioctl(vp, command, data, fflag, cred, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Device control operations
-                    - Tests: unit (device-specific ioctls)
-                    - Docs: `vop_ioctl.9`
-                    - Acceptance: Ioctl dispatched to device
-                - [x] Implement `vop_poll(vp, events, cred, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Select/poll support
-                    - Events: `POLLIN`, `POLLOUT`, `POLLHUP`, `POLLERR`
-                    - Tests: unit (poll ready, poll wait)
-                    - Docs: `vop_poll.9`
-                    - Acceptance: Correct events returned
-                - [x] Implement `vop_fsync(vp, cred, waitfor, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Flush dirty buffers to disk
-                    - Flags: `MNT_WAIT` (sync), `MNT_NOWAIT` (async)
-                    - Tests: integration (data persisted after fsync)
-                    - Docs: `vop_fsync.9`
-                    - Acceptance: All dirty data written
-                - [x] Implement `vop_bmap(vp, bn, vpp, bnp, runp)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Logical to physical block mapping
-                    - Returns: Physical block number, run length for readahead
-                    - Tests: unit (contiguous blocks, fragmented blocks)
-                    - Docs: `vop_bmap.9`
-                    - Acceptance: Correct physical block returned
-                - [x] Implement `vop_strategy(vp, bp)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Block I/O strategy (buffer cache integration)
-                    - Logic: Submit buffer to block device driver
-                    - Tests: integration (read/write via strategy)
-                    - Docs: `vop_strategy.9`
-                    - Acceptance: I/O completed, buffer marked done
+                - [ ] `vop_create(dvp, vpp, cnp, vap)`: create regular file.
+                - [ ] `vop_mknod(dvp, vpp, cnp, vap)`: create device node (block/char/FIFO).
+                - [ ] `vop_mkdir(dvp, vpp, cnp, vap)`: create directory (with `.` and `..`).
+                - [ ] `vop_whiteout(dvp, cnp, flags)`: UnionFS whiteout entry.
+                - [ ] `vop_remove(dvp, vp, cnp)`: unlink directory entry.
+                - [ ] `vop_rmdir(dvp, vp, cnp)`: remove empty directory.
+            - [ ] **Access/Attributes:**
+                - [ ] `vop_access(vp, mode, cred, p)`: check r/w/x permissions (POSIX semantics).
+                - [ ] `vop_getattr(vp, vap, cred, p)`: stat (mode, nlink, uid, gid, size, times).
+                - [ ] `vop_setattr(vp, vap, cred, p)`: chmod/chown/truncate/utimes.
+                - [ ] `vop_pathconf(vp, name, retval)`: POSIX pathconf (`_PC_LINK_MAX`, `_PC_NAME_MAX`, etc.).
+            - [ ] **I/O Operations:**
+                - [ ] `vop_open(vp, mode, cred, p)`: open callback (access check, device init).
+                - [ ] `vop_close(vp, fflag, cred, p)`: close callback (sync on last close).
+                - [ ] `vop_read(vp, uio, ioflag, cred)`: read via buffer cache, update atime.
+                - [ ] `vop_write(vp, uio, ioflag, cred)`: write, extend file, update mtime.
+                    - [ ] Flags: `IO_APPEND`, `IO_SYNC`, `IO_UNIT`.
+                - [ ] `vop_ioctl(vp, cmd, data, fflag, cred, p)`: device control.
+                - [ ] `vop_poll(vp, events, cred, p)`: select/poll (POLLIN/POLLOUT/POLLHUP/POLLERR).
+                - [ ] `vop_fsync(vp, cred, waitfor, p)`: flush dirty data.
+                - [ ] `vop_bmap(vp, bn, vpp, bnp, runp)`: logical→physical block mapping.
+                - [ ] `vop_strategy(vp, bp)`: submit buffer to block device.
             - [ ] **Directories:**
-                - [x] Implement `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Read directory entries
-                    - Format: `struct dirent` with d_ino, d_type, d_namlen, d_name
-                    - Tests: unit (read all entries, readdir with seek, eofflag)
-                    - Docs: `vop_readdir.9`
-                    - Acceptance: All entries returned with correct format
+                - [ ] `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`: read `struct dirent` entries.
             - [ ] **Links:**
-                - [ ] Implement `vop_link(dvp, vp, cnp)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Create hard link
-                    - Logic: Add dir entry, increment nlink
-                    - Tests: unit (link success, EXDEV cross-device, EMLINK max)
-                    - Docs: `vop_link.9`
-                    - Acceptance: Hard link created, nlink incremented
-                - [ ] Implement `vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Rename file/directory
-                    - Logic: Handle same-dir, cross-dir, overwrite existing
-                    - Tests: unit (rename file, rename dir, rename overwrite, EXDEV)
-                    - Docs: `vop_rename.9`
-                    - Acceptance: Entry moved atomically
-                - [ ] Implement `vop_symlink(dvp, vpp, cnp, vap, target)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Create symbolic link
-                    - Logic: Create inode with S_IFLNK, store target path
-                    - Tests: unit (symlink success, long target, ENAMETOOLONG)
-                    - Docs: `vop_symlink.9`
-                    - Acceptance: Symlink created with correct target
-                - [ ] Implement `vop_readlink(vp, uio, cred)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Read symbolic link target
-                    - Tests: unit (read full target, read partial)
-                    - Docs: `vop_readlink.9`
-                    - Acceptance: Correct target string returned
+                - [ ] `vop_link(dvp, vp, cnp)`: create hard link (increment nlink).
+                - [ ] `vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp)`: rename/move (atomic within FS).
+                    - [ ] Same-directory rename, cross-directory rename, overwrite existing.
+                    - [ ] Directory rename: update `..` entry, detect cycles.
+                - [ ] `vop_symlink(dvp, vpp, cnp, vap, target)`: create symbolic link.
+                - [ ] `vop_readlink(vp, uio, cred)`: read symlink target.
             - [ ] **VM/Memory Integration:**
-                - [ ] Implement `vop_inactive(vp, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Vnode no longer referenced by any file descriptor
-                    - Logic: Truncate if nlink=0, sync dirty data
-                    - Tests: unit (inactive with nlink>0, inactive with nlink=0)
-                    - Docs: `vop_inactive.9`
-                    - Acceptance: Resources freed when appropriate
-                - [ ] Implement `vop_reclaim(vp, p)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Vnode being recycled from cache
-                    - Logic: Free filesystem-private data, remove from hash
-                    - Tests: unit (reclaim frees private data)
-                    - Docs: `vop_reclaim.9`
-                    - Acceptance: All fs-specific resources freed
-                - [ ] Implement `vop_lock(vp, flags, p)`.
-                    - Files: `sys/vfs/vnode_lock.c` (new)
-                    - API: Lock vnode for exclusive/shared access
-                    - Flags: `LK_SHARED`, `LK_EXCLUSIVE`, `LK_NOWAIT`, `LK_UPGRADE`
-                    - Tests: unit (exclusive lock, shared lock, upgrade, downgrade)
-                    - Docs: `vop_lock.9`
-                    - Acceptance: Lock acquired with correct semantics
-                - [ ] Implement `vop_unlock(vp, flags, p)`.
-                    - Files: `sys/vfs/vnode_lock.c`
-                    - API: Unlock vnode
-                    - Tests: unit (unlock exclusive, unlock shared)
-                    - Docs: `vop_unlock.9`
-                    - Acceptance: Lock released, waiters woken
-                - [ ] Implement `vop_islocked(vp, p)`.
-                    - Files: `sys/vfs/vnode_lock.c`
-                    - API: Query lock status
-                    - Returns: `LK_EXCLUSIVE`, `LK_SHARED`, or 0
-                    - Tests: unit (query locked, query unlocked)
-                    - Docs: `vop_islocked.9`
-                    - Acceptance: Correct status returned
-                - [ ] Implement `vop_print(vp)`.
-                    - Files: `sys/vfs/vnode_ops.c`
-                    - API: Debug print vnode details
-                    - Output: Type, flags, refcount, fs-specific info
-                    - Tests: unit (output contains expected fields)
-                    - Docs: `vop_print.9`
-                    - Acceptance: Human-readable vnode dump
-    - [x] **Native Build Integration (`native_dist`):**
-        - [x] Update `native_dist` target to build userspace with `HOSTCC`.
-        - [x] Sanitize `Makefile.inc` for non-cross builds.
-        - [x] Verify `bin/` and `sbin/` builds on host.
-        - [x] Change host output directory to `host_dist`.
-    - [ ] **Compiler Construction Tools (`yacc`/`lex`):**
-        - [/] **`yacc` (Yet Another Compiler Compiler):**
-            - [x] Initial skeleton implementation (`usr.bin/yacc`).
-            - [ ] Implement grammar parsing.
-            - [ ] Implement LALR(1) parser generation.
+                - [ ] `vop_inactive(vp, p)`: last FD closed — truncate if nlink=0, sync dirty.
+                - [ ] `vop_reclaim(vp, p)`: vnode recycled — free fs-private data.
+                - [ ] `vop_lock(vp, flags, p)`: lockmgr lock (LK_SHARED/EXCLUSIVE/NOWAIT/UPGRADE).
+                - [ ] `vop_unlock(vp, flags, p)`: lockmgr unlock.
+                - [ ] `vop_islocked(vp, p)`: query lock status.
+                - [ ] `vop_print(vp)`: debug dump (type, flags, refcount, fs info).
+                - [ ] `vop_advlock(vp, id, op, fl, flags)`: POSIX advisory locking (F_GETLK/F_SETLK/F_SETLKW).
+
+    - [ ] **Native Build Integration (`native_dist`):**
+        - [ ] Update `native_dist` target to build userspace with `HOSTCC`.
+        - [ ] Sanitize `Makefile.inc` for non-cross builds.
+        - [ ] Verify `bin/` and `sbin/` builds on host.
+        - [ ] Host output directory: `host_dist`.
+
+    - [ ] **Compiler Construction Tools:**
+        - [ ] **`yacc` (LALR(1) Parser Generator):**
+            - [ ] Initial skeleton (`usr.bin/yacc`).
+            - [ ] Grammar file parsing (rules, precedence, %token/%type).
+            - [ ] LALR(1) parse table generation (states, actions, gotos).
+            - [ ] Conflict resolution (shift/reduce, reduce/reduce).
             - [ ] Output `y.tab.c` and `y.tab.h`.
+            - [ ] `-d` flag for header generation.
+            - [ ] `-v` flag for verbose state output (`y.output`).
+        - [ ] **`lex` (Lexical Analyzer Generator):**
+            - [ ] Regular expression to NFA conversion (Thompson's construction).
+            - [ ] NFA to DFA conversion (subset construction).
+            - [ ] DFA minimization (Hopcroft's algorithm).
+            - [ ] Output `lex.yy.c`.
+            - [ ] Character class support (`[a-zA-Z]`, POSIX classes).
+            - [ ] Start conditions (exclusive/inclusive).
+            - [ ] `yywrap()` and `yylex()` interface.
+
     - [ ] **Buffer Cache Integration (`bio`):**
+
+        > **Files:** `sys/vfs/buf.h`, `sys/vfs/bio.c`.
+        >
+        > **Architecture:** Traditional BSD buffer cache with delayed write,
+        > LRU eviction, and VM page integration.
+
         - [ ] **`struct buf` Definition:**
-            - [ ] Define `struct buf` in `sys/vfs/buf.h`.
-                - Files: `sys/vfs/buf.h` (new)
-                - Fields: `b_flags`, `b_data`, `b_bcount`, `b_blkno`, `b_lblkno`, `b_vp`, `b_rcred`, `b_wcred`, `b_resid`, `b_iodone`, `b_error`
-                - Flags: `B_BUSY`, `B_DONE`, `B_ERROR`, `B_DELWRI`, `B_PHYS`, `B_READ`, `B_WRITE`, `B_ASYNC`, `B_INVAL`
-                - Tests: unit (struct layout, flag combinations)
-                - Docs: `buf.9`
-                - Acceptance: Header compiles, all fields accessible
+            - [ ] Fields: `b_flags`, `b_data`, `b_bcount`, `b_blkno`, `b_lblkno`, `b_vp`, `b_rcred`, `b_wcred`, `b_resid`, `b_iodone`, `b_error`.
+            - [ ] Flags: `B_BUSY`, `B_DONE`, `B_ERROR`, `B_DELWRI`, `B_PHYS`, `B_READ`, `B_WRITE`, `B_ASYNC`, `B_INVAL`, `B_NOCACHE`, `B_CACHE`.
+            - [ ] Hash chain linkage for lookup by `(vp, blkno)`.
         - [ ] **Buffer Queues:**
-            - [ ] Implement `bufqueues[BQ_LOCKED]` (Locked buffers).
-                - Files: `sys/vfs/bio.c` (new)
-                - Logic: Buffers currently in use, cannot be reused
-                - Tests: unit (locked buffer not evicted)
-                - Docs: `bufqueue.9`
-                - Acceptance: Locked buffers protected
-            - [ ] Implement `bufqueues[BQ_CLEAN]` (Clean LRU).
-                - Files: `sys/vfs/bio.c`
-                - Logic: Clean buffers eligible for reuse, LRU eviction
-                - Tests: unit (LRU eviction order)
-                - Docs: `bufqueue.9`
-                - Acceptance: Oldest clean buffer evicted first
-            - [ ] Implement `bufqueues[BQ_DIRTY]` (Delayed write).
-                - Files: `sys/vfs/bio.c`
-                - Logic: Dirty buffers awaiting writeback
-                - Tests: unit (dirty queue ordering, sync flushes all)
-                - Docs: `bufqueue.9`
-                - Acceptance: Dirty buffers written in order
-            - [ ] Implement `bufqueues[BQ_EMPTY]` (Empty headers).
-                - Files: `sys/vfs/bio.c`
-                - Logic: Free buffer headers without data
-                - Tests: unit (empty header reuse)
-                - Docs: `bufqueue.9`
-                - Acceptance: Headers recycled efficiently
+            - [ ] `BQ_LOCKED`: buffers currently in use.
+            - [ ] `BQ_CLEAN`: clean LRU (eligible for reuse).
+            - [ ] `BQ_DIRTY`: delayed write queue.
+            - [ ] `BQ_EMPTY`: free buffer headers without data.
         - [ ] **Buffer Cache Functions:**
-            - [ ] Implement `getblk(vp, blkno, size, slpflag, slptimeo)`.
-                - Files: `sys/vfs/bio.c`
-                - API: Get buffer from cache or allocate new
-                - Logic: Hash lookup, evict if needed, allocate memory
-                - Tests: unit (cache hit, cache miss, wait for buffer)
-                - Docs: `getblk.9`
-                - Acceptance: Buffer returned ready for use
-            - [ ] Implement `bread(vp, blkno, size, cred, bpp)`.
-                - Files: `sys/vfs/bio.c`
-                - API: Read block synchronously
-                - Logic: getblk + initiate I/O + biowait
-                - Tests: unit (read from disk, cache hit skips I/O)
-                - Docs: `bread.9`
-                - Acceptance: Buffer contains valid data
-            - [ ] Implement `bwrite(bp)`.
-                - Files: `sys/vfs/bio.c`
-                - API: Write buffer synchronously
-                - Logic: Initiate I/O, wait for completion
-                - Tests: unit (sync write completes)
-                - Docs: `bwrite.9`
-                - Acceptance: Data on disk after return
-            - [ ] Implement `bawrite(bp)`.
-                - Files: `sys/vfs/bio.c`
-                - API: Write buffer asynchronously
-                - Logic: Initiate I/O, return immediately
-                - Tests: unit (async write initiated)
-                - Docs: `bawrite.9`
-                - Acceptance: I/O started, buffer released
-            - [ ] Implement `bdwrite(bp)`.
-                - Files: `sys/vfs/bio.c`
-                - API: Delayed write (mark dirty, release)
-                - Logic: Set B_DELWRI, move to dirty queue
-                - Tests: unit (buffer marked dirty, not written yet)
-                - Docs: `bdwrite.9`
-                - Acceptance: Buffer in dirty queue
-            - [ ] Implement `brelse(bp)`.
-                - Files: `sys/vfs/bio.c`
-                - API: Release buffer to appropriate queue
-                - Logic: Move to clean/dirty/empty based on flags
-                - Tests: unit (release clean, release dirty, release invalid)
-                - Docs: `brelse.9`
-                - Acceptance: Buffer available for reuse
+            - [ ] `getblk(vp, blkno, size, slpflag, slptimeo)`: get from cache or allocate.
+            - [ ] `bread(vp, blkno, size, cred, bpp)`: synchronous read (getblk + I/O + biowait).
+            - [ ] `breada(vp, blkno, size, rablkno, rabsize, cred, bpp)`: read-ahead variant.
+            - [ ] `bwrite(bp)`: synchronous write.
+            - [ ] `bawrite(bp)`: asynchronous write (initiate, return immediately).
+            - [ ] `bdwrite(bp)`: delayed write (mark B_DELWRI, release).
+            - [ ] `brelse(bp)`: release buffer to appropriate queue.
+            - [ ] `incore(vp, blkno)`: check if block is in cache.
         - [ ] **Synchronization:**
-            - [ ] Implement `biowait(bp)`.
-                - Files: `sys/vfs/bio.c`
-                - API: Sleep until B_DONE set
-                - Logic: Sleep on buffer, check B_ERROR on wake
-                - Tests: unit (wait for completion, error propagation)
-                - Docs: `biowait.9`
-                - Acceptance: Returns after I/O complete
-            - [ ] Implement `biodone(bp)`.
-                - Files: `sys/vfs/bio.c`
-                - API: Mark I/O complete, wake waiters
-                - Logic: Set B_DONE, call b_iodone callback, wakeup
-                - Tests: unit (waiters woken, callback invoked)
-                - Docs: `biodone.9`
-                - Acceptance: Completion signaled correctly
+            - [ ] `biowait(bp)`: sleep until B_DONE.
+            - [ ] `biodone(bp)`: mark complete, call `b_iodone`, wakeup.
+        - [ ] **Flushing:**
+            - [ ] `bufsync(freq)`: periodic daemon to write dirty buffers.
+            - [ ] `sync()` syscall: flush all dirty buffers.
+            - [ ] `update` daemon (`syncer` kthread): periodic sync every 30 seconds.
+
     - [ ] **VM Integration (Unified Buffer Cache):**
         - [ ] **VNode Pager:**
-            - [ ] Implement `vnode_pager_getpages()`.
-                - Files: `sys/vm/vnode_pager.c` (new)
-                - API: Read pages from vnode into vm_page array
-                - Logic: Use VOP_READ or direct buffer cache
-                - Tests: integration (page fault triggers read)
-                - Docs: `vnode_pager.9`
-                - Acceptance: Pages populated from file
-            - [ ] Implement `vnode_pager_putpages()`.
-                - Files: `sys/vm/vnode_pager.c`
-                - API: Write dirty pages to vnode
-                - Logic: Use VOP_WRITE or direct buffer cache
-                - Tests: integration (pageout writes to file)
-                - Docs: `vnode_pager.9`
-                - Acceptance: Dirty pages written to disk
+            - [ ] `vnode_pager_getpages()`: read pages from vnode into `vm_page` array.
+            - [ ] `vnode_pager_putpages()`: write dirty pages to vnode.
+            - [ ] Integrate with buffer cache (shared backing pages).
         - [ ] **Page Cache Integration:**
-            - [ ] Use `vm_page_t` for buffer backing store.
-                - Files: `sys/vfs/bio.c`, `sys/vm/vm_page.c`
-                - Logic: Buffer data backed by vm_page, not kmalloc
-                - Tests: unit (buffer uses vm_page, page reclaim works)
-                - Docs: `buffer_vm_integration.9`
-                - Acceptance: Unified memory management
-            - [ ] Implement zero-copy I/O paths for mmap.
-                - Files: `sys/vm/vnode_pager.c`, `sys/vfs/bio.c`
-                - Logic: mmap shares pages with buffer cache
-                - Tests: integration (mmap sees buffer cache data)
-                - Docs: `zero_copy_io.9`
-                - Acceptance: No data copy between mmap and read/write
-    - [ ] **Concurrency & Locking:**
-        - [ ] **VNode Locks:**
-            - [ ] Implement `lockmgr` for vnode locking.
-                - Files: `sys/kern/lockmgr.c` (new), `sys/kern/lock.h`
-                - API: `lockmgr(lkp, flags, interlock, p)`
-                - Modes: shared/exclusive/upgrade/downgrade/drain
-                - Tests: unit (all lock modes, deadlock detection)
-                - Docs: `lockmgr.9`
-                - Acceptance: Lock manager with priority inheritance
-            - [ ] Implement `LK_SHARED` concurrent readers.
-                - Files: `sys/kern/lockmgr.c`
-                - Logic: Multiple readers, block writers
-                - Tests: unit (multiple readers concurrent)
-                - Docs: `lockmgr.9`
-                - Acceptance: Multiple readers allowed
-            - [ ] Implement `LK_EXCLUSIVE` single writer.
-                - Files: `sys/kern/lockmgr.c`
-                - Logic: Single writer, block all others
-                - Tests: unit (exclusive blocks readers and writers)
-                - Docs: `lockmgr.9`
-                - Acceptance: Exclusive access enforced
-            - [ ] Implement `LK_NOWAIT` non-blocking.
-                - Files: `sys/kern/lockmgr.c`
-                - Logic: Return EBUSY instead of blocking
-                - Tests: unit (nowait returns immediately)
-                - Docs: `lockmgr.9`
-                - Acceptance: Non-blocking acquisition works
-        - [ ] **Interlock:**
-            - [ ] Implement `v_interlock` mutex for vnode fields.
-                - Files: `sys/vfs/vnode.h`, `sys/vfs/vnode.c`
-                - Logic: Protect v_usecount, v_flag, v_numoutput
-                - Tests: unit (field update atomicity)
-                - Docs: `vnode_interlock.9`
-                - Acceptance: No race conditions on vnode fields
-        - [ ] **Mount Lock:**
-            - [ ] Implement `mnt_lock` for mount point stability.
-                - Files: `sys/vfs/mount.h`, `sys/vfs/vfs_mount.c`
-                - Logic: Prevent unmount during vnode operations
-                - Tests: unit (mount busy during operations)
-                - Docs: `mount_lock.9`
-                - Acceptance: Mount stable during file access
-        - [ ] **Namecache Lock:**
-            - [ ] Implement reader-writer lock for `nchash`.
-                - Files: `sys/vfs/namecache.c`
-                - Logic: Concurrent lookups, exclusive updates
-                - Tests: unit (concurrent lookups, update blocks lookups)
-                - Docs: `namecache_lock.9`
-                - Acceptance: Namecache scalable under load
-- [ ] **Legacy/Feature Gaps:**
-    - [ ] **Write Support:** Ensure all existing FS drivers implement complete write paths.
-    - [ ] **FSCK:** Port e2fsprogs or implement native consistency checker.
-- [ ] **EXT2 (Native Filesystem):**
-    - [x] Implement Inode and Block allocation/freeing.
-    - [x] Implement Directory entry creation/deletion.
-- [ ] **FAT16/32:**
-    - [x] Implement File Allocation Table parsing and chain following.
-    - [x] Implement Long File Name (LFN) support.
-- [ ] **UDF (Universal Disk Format):**
-    - [ ] **On-Disk Structures (`sys/fs/udf/udf.h`):**
-        - [x] Define `udf_tag` (Descriptor Tag - 16 bytes).
-        - [x] Define `udf_avdp` (Anchor Volume Descriptor Pointer).
-        - [x] Define `udf_pvd` (Primary Volume Descriptor).
-        - [x] Define `udf_pd` (Partition Descriptor).
-        - [x] Define `udf_lvd` (Logical Volume Descriptor).
-        - [x] Define `udf_fsd` (File Set Descriptor).
-        - [x] Define `udf_fe`/`udf_efe` (File Entry / Extended File Entry).
-        - [x] Define `udf_fid` (File Identifier Descriptor).
-        - [x] Define `udf_short_ad`/`udf_long_ad` (Allocation Descriptors).
-    - [ ] **Read-Only Support (`sys/fs/udf/udf.c`):**
-        - [x] Implement `udf_read_tag()` - Tag CRC verification.
-        - [x] Implement `udf_find_avdp()` - Locate Anchor at sector 256.
-        - [x] Implement `udf_read_vds()` - Parse Volume Descriptor Sequence.
-        - [x] Implement `udf_read_partition()` - Parse Partition Descriptor.
-        - [x] Implement `udf_read_lvd()` - Parse Logical Volume Descriptor.
-        - [x] Implement `udf_read_fsd()` - Parse File Set Descriptor.
-        - [x] Implement `udf_read_fe()` - Read File Entry (inode).
-        - [x] Implement `udf_read_file()` - Read file data via allocation descriptors.
-        - [x] Implement `udf_readdir()` - Iterate directory FIDs.
-        - [x] Implement `udf_finddir()` - Lookup by name.
-        - [x] Implement `udf_mount()` - VFS mount integration.
-    - [x] **Write Support (`sys/fs/udf/udf_write.c`):**
-        - [x] Implement `udf_read_space_bitmap()` - Parse unallocated space.
-        - [x] Implement `udf_alloc_block()` - Allocate from space bitmap.
-        - [x] Implement `udf_free_block()` - Return block to space bitmap.
-        - [x] Implement `udf_create_fe()` - Create new File Entry.
-        - [x] Implement `udf_write_file()` - Write file data.
-        - [x] Implement `udf_add_fid()` - Add directory entry.
-        - [x] Implement `udf_remove_fid()` - Remove directory entry.
-        - [x] Implement `udf_truncate()` - Truncate/extend file.
-    - [x] **Testing:**
-        - [x] Unit tests (`sys/tests/test_udf.c`).
-        - [x] Property tests for allocation/deallocation.
-        - [ ] Fuzzing tests for descriptor parsing.
-    - [x] **Documentation:**
-        - [x] Create `man/man5/udf.5` (filesystem description).
-        - [x] Create `man/man4/udf.4` (kernel driver).
-- [ ] **DevFS (`/dev`):**
-    - [x] Device Registry: Mechanism for drivers to register Character/Block devices.
-    - [x] **VFS Glue:** Auto-generate VFS nodes when registering devices.
-    - [ ] **Nodes:**
-        - [x] Support `null`.
-        - [x] Support `zero`.
-        - [x] Support `full`.
-        - [x] Support `random`.
-        - [x] Support `tty` (proxy to current process TTY).
-        - [x] Support `mem` / `kmem` (Physical/Kernel memory access).
-        - [x] Support `port` (I/O port access).
-        - [x] Support `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/X`).
-        - [x] Support `urandom` (CSPRNG vs true RNG).
-- [ ] **ProcFS (`/proc`):**
-    - [x] **Process Info:**
-        - [x] Expose `cmdline`.
-        - [x] Expose `maps`.
-        - [x] Expose `status`.
-        - [x] Expose `fd` per PID.
-    - [x] **System Info:**
-        - [x] Expose `cpuinfo`.
-        - [x] Expose `meminfo`.
-        - [x] Expose `uptime`.
-    - [x] **Dynamic generation:** Generate content on `read()` (virtual files).
-    - [x] **Personality Awareness:** Detect caller personality (Linux/FreeBSD) and adjust file contents/formats dynamically (e.g., `status` file structure).
-- [ ] **SysFS (`/sys`):**
-    - [x] **KObject Hierarchy:** Represent kernel objects (drivers, buses, devices).
-    - [x] **Attributes:** Map kernel variables to readable/writable files.
-- [ ] **Kernel Configuration Plane (`sysctl` Core):**
-    - [ ] **Tree & ABI Model:**
-        - [ ] Define canonical `sysctl_oid` structure (number, name, kind, handler, arg pointers, format, description, version).
-        - [ ] Define canonical `sysctl_oid_list` container type and root list ownership rules.
-        - [ ] Define typed value kinds: node, int, uint, long, ulong, quad, uquad, string, opaque, struct.
-        - [ ] Define public flag bits for read-only, read-write, secure-write, boot-tunable, runtime-mutable, and deprecated nodes.
-        - [ ] Define explicit ABI stability classes (private, evolving, stable, obsolete) for exported OIDs.
-        - [ ] Add compile-time assertions for `sysctl` type-width ABI on i386 and planned x86_64.
-        - [ ] Reserve stable top-level numeric IDs (`kern`, `vm`, `vfs`, `net`, `hw`, `security`, `debug`, `compat`) and document allocation map.
-        - [ ] Add explicit "no renumbering" policy for stable exported MIB leaves.
-    - [ ] **Lookup, Traversal, and Metadata:**
-        - [ ] Implement lock-safe name lookup (`dot.path` to OID chain) with strict token validation.
-        - [ ] Implement lock-safe MIB lookup (`int[]` to OID chain) with bounds checks.
-        - [ ] Implement child enumeration primitive for a parent OID.
-        - [ ] Implement metadata query primitive exposing type, flags, format, ownership, and ABI class.
-        - [ ] Implement optional human-readable description export for each public node.
-        - [ ] Implement stable subtree walk order guarantees for tooling and regression tests.
-    - [ ] **Concurrency & Lifetime:**
-        - [ ] Define global locking hierarchy for tree traversal, registration mutation, and handler execution.
-        - [ ] Add tree read-side lock (or epoch/RCU equivalent) for high-frequency lookups.
-        - [ ] Add tree write-side lock for registration and deregistration paths.
-        - [ ] Add in-flight handler reference tracking to prevent use-after-free during deregistration.
-        - [ ] Add deferred reclamation queue for dynamically removed OIDs after reader quiescence.
-        - [ ] Add lock-order assertions in debug builds for recursion and re-entrant handler patterns.
-    - [ ] **Registration API (Kernel + Modules):**
-        - [ ] Define static registration macros for compile-time OID declarations.
-        - [ ] Implement linker-set (or equivalent table) ingestion for static OIDs during boot.
-        - [ ] Define dynamic registration API for subsystems/modules (`register`, `register_node`, `register_proc` variants).
-        - [ ] Define dynamic deregistration API with owner token validation.
-        - [ ] Add owner/lifetime metadata tying each OID to subsystem/module identity.
-        - [ ] Add duplicate detection for name and numeric collisions with deterministic error codes.
-        - [ ] Add namespace ownership rules so subsystems cannot overwrite foreign stable nodes.
-        - [ ] Add teardown barrier so module unload blocks until active handlers drain.
-    - [ ] **Boot-Time Tunables & Runtime Separation:**
-        - [ ] Bring up minimal read-only `sysctl` root before full VM/scheduler initialization.
-        - [ ] Parse bootloader/kernel command-line `sysctl.<name>=<value>` entries into early tunable buffer.
-        - [ ] Apply buffered early tunables when target nodes become registered.
-        - [ ] Enforce write-once semantics for boot-only tunables after late init transition.
-        - [ ] Expose node metadata bit distinguishing boot-only vs runtime-mutable behavior.
-        - [ ] Emit explicit diagnostics for rejected boot tunables (unknown name/type/range).
-    - [ ] **VM/Proc/IPC Configuration Namespaces:**
-        - [ ] Define stable `vm.*` subtree skeleton for VM policy and telemetry nodes.
-        - [ ] Define stable `kern.proc.*` subtree skeleton for process-limit and process-model nodes.
-        - [ ] Define stable `kern.ipc.*` subtree skeleton for SysV/POSIX IPC limits and defaults.
-        - [ ] Define mapping rules between procfs/sysfs-only metrics and mirrored `sysctl` metrics.
-        - [ ] Add per-subsystem ownership documentation for each namespace branch.
-    - [ ] **Security, Permissions, and Isolation:**
-        - [ ] Define common access-control hook signature for `sysctl` read/write authorization.
-        - [ ] Implement UID/GID baseline policy for read and write decisions.
-        - [ ] Integrate capability-aware privileged-write policy (forward-compatible with capability framework).
-        - [ ] Add per-node read-mask and write-mask controls.
-        - [ ] Add per-node personality visibility mask for selective exposure by ABI personality.
-        - [ ] Harden copyin/copyout paths against length overflow and kernel-pointer leaks.
-        - [ ] Add typed write validators (range, enum, bitmask, struct-size) and enforce them centrally.
-    - [ ] **Observability & Tooling Readiness:**
-        - [ ] Implement canonical size-probe behavior (`oldp == NULL`) for all readable node types.
-        - [ ] Implement canonical partial-read behavior for oversized user buffers.
-        - [ ] Implement tree snapshot generation primitive for future `sysctl(8)` consumers.
-        - [ ] Add kernel self-check routine validating OID tree parent/child invariants at boot.
-        - [ ] Add optional debug dump (`sysctl.debug.dump_tree`) for development diagnostics.
-    - [ ] **Testing & Validation (Kernel Side):**
-        - [ ] Add unit tests for insert/lookup/remove invariants in core OID tree structures.
-        - [ ] Add unit tests for type dispatch and flag enforcement across all node kinds.
-        - [ ] Add unit tests for boot-tunable write-once and runtime rejection behavior.
-        - [ ] Add concurrency stress tests for parallel lookup/read/write/register/unregister on SMP.
-        - [ ] Add property tests for random MIB/name inputs preserving memory safety and deterministic errors.
-        - [ ] Add fuzz harness for malformed user buffers and edge-case size transitions.
-        - [ ] Add ABI regression tests pinning stable MIB numeric assignments and metadata contracts.
-    - [ ] **Kernel Documentation:**
-        - [ ] Write `docs/kernel/sysctl_design.md` covering architecture, locking model, and lifecycle.
-        - [ ] Write `docs/kernel/sysctl_registration.md` with subsystem/module integration rules.
-        - [ ] Write `docs/kernel/sysctl_stability.md` with ABI stability/deprecation policy.
-        - [ ] Add "how to add a node" checklist with required tests/docs before merge.
-- [ ] **FUSE (`/dev/fuse`):**
-    - [x] **Device Interface:** Implement `/dev/fuse` char device for control.
-    - [ ] **Protocol Dispatch:**
-        - [ ] Opcode dispatch loop
-        - [ ] User-kernel shared memory buffer
-    - [x] **VFS Bridge:** Forward VFS calls to the FUSE device queue.
-    - [ ] **Network Filesystems:**
-        - [ ] **9P (9P2000.L):**
-            - [x] **Client:** Implement 9P client for VFS integration.
-            - [ ] **Transport:** Support virtio (for QEMU) and TCP transports.
-            - [ ] **Protocol:**
-                - [ ] Implement Tversion/Rversion
-                - [ ] Implement Tauth/Rauth
-                - [ ] Implement Tattach/Rattach
-                - [ ] Implement Twalk/Rwalk
-                - [ ] Implement Topen/Ropen
-                - [ ] Implement Tread/Twrite
-                - [ ] Implement Tclunk
+            - [ ] Buffer data backed by `vm_page_t` (not `kmalloc`).
+            - [ ] Unified memory accounting for file cache and buffer cache.
+            - [ ] Zero-copy I/O: mmap shares pages with buffer cache.
 
+    - [ ] **Concurrency & Locking:**
+        - [ ] **VNode Locks (`lockmgr`):**
+            - [ ] `lockmgr(lkp, flags, interlock, p)`: unified lock manager.
+            - [ ] Modes: `LK_SHARED`, `LK_EXCLUSIVE`, `LK_UPGRADE`, `LK_DOWNGRADE`, `LK_DRAIN`.
+            - [ ] `LK_NOWAIT`: non-blocking (return EBUSY).
+            - [ ] Priority inheritance for blocked threads.
+            - [ ] Multiple concurrent readers, single exclusive writer.
+        - [ ] **Interlock:** `v_interlock` mutex for vnode fields (v_usecount, v_flag, v_numoutput).
+        - [ ] **Mount Lock:** `mnt_lock` prevents unmount during vnode operations.
+        - [ ] **Namecache Lock:** reader/writer lock on `nchash` for concurrent lookups.
+        - [ ] **Buffer Lock:** per-buffer `B_BUSY` flag with sleep/wakeup.
+
+    - [ ] **Testing:**
+        - [ ] Unit: vnode lifecycle — `getnewvnode`, `vref`, `vrele`, `vput`, `vget`, `vgone`.
+        - [ ] Unit: name cache — `cache_lookup` hit/miss, `cache_enter`, `cache_purge`, negative entries.
+        - [ ] Unit: namei — simple path, `.`/`..`, mount crossing, symlink resolution, MAXSYMLINKS.
+        - [ ] Unit: vop_create/remove/mkdir/rmdir on ext2.
+        - [ ] Unit: vop_rename same-dir and cross-dir.
+        - [ ] Unit: vop_read/write/fsync round-trip.
+        - [ ] Unit: buffer cache — getblk/bread/bwrite/brelse lifecycle.
+        - [ ] Unit: buffer cache — bdwrite delayed write, then sync flushes.
+        - [ ] Unit: lockmgr — shared/exclusive/upgrade/downgrade/nowait.
+        - [ ] Property: vnode refcount never goes negative.
+        - [ ] Property: no buffer leaks after mount/unmount cycle.
+        - [ ] Integration: mount ext2 → create file → write → read → unlink → unmount.
+        - [ ] Integration: mount FAT32 → readdir → LFN resolution.
+    - [ ] **Documentation:**
+        - [ ] Man pages: `vnode(9)`, `namei(9)`, `VOP_LOOKUP(9)`, `VOP_READ(9)`, `VOP_WRITE(9)`.
+        - [ ] Man pages: `bread(9)`, `bwrite(9)`, `getblk(9)`, `brelse(9)`, `biodone(9)`.
+        - [ ] Man pages: `lockmgr(9)`, `VFS_MOUNT(9)`, `VFS_UNMOUNT(9)`.
+        - [ ] Internal doc: VFS architecture (vnode→mount→vfs_ops→vnode_ops).
+        - [ ] Internal doc: buffer cache lifecycle (getblk→bread→bdwrite→sync).
+
+- [ ] **Legacy/Feature Gaps:**
+    - [ ] Ensure all FS drivers implement complete write paths.
+    - [ ] **`fsck`:** port e2fsprogs or implement native consistency checker.
+    - [ ] **Quotas:** per-user/group disk quotas (UFS/ext2).
+
+- [ ] **EXT2 (Native Filesystem):**
+
+    > **Files:** `sys/fs/ext2/ext2.c`, `ext2.h`, `ext2_vfsops.c`, `ext2_vnops.c`.
+
+    - [ ] Inode allocation/freeing (bitmap-based).
+    - [ ] Block allocation/freeing (bitmap-based, block groups).
+    - [ ] Directory entry creation/deletion.
+    - [ ] **Extended Features:**
+        - [ ] ext2 revision 1: variable inode size, file type in dir entry.
+        - [ ] Sparse superblock: superblock copies only in select block groups.
+        - [ ] Large file support (>2 GB via triple-indirect blocks).
+    - [ ] **VFS Integration:**
+        - [ ] Implement `ext2_mount` / `ext2_unmount` / `ext2_root` / `ext2_statfs`.
+        - [ ] Implement `ext2_lookup` / `ext2_create` / `ext2_remove` / `ext2_rename`.
+        - [ ] Implement `ext2_read` / `ext2_write` / `ext2_fsync`.
+        - [ ] Implement `ext2_readdir` / `ext2_mkdir` / `ext2_rmdir`.
+        - [ ] Implement `ext2_link` / `ext2_symlink` / `ext2_readlink`.
+    - [ ] **Testing:**
+        - [ ] Unit: inode/block alloc/free round-trip.
+        - [ ] Unit: directory entry CRUD.
+        - [ ] Integration: create ext2 image, mount, file ops, unmount, fsck verify.
+        - [ ] Fuzz: mount corrupted ext2 images (malformed superblock, bitmap, inodes).
+
+- [ ] **FAT16/32:**
+
+    > **Files:** `sys/fs/fat/fat.c`, `fat.h`.
+
+    - [ ] FAT parsing and cluster chain following.
+    - [ ] Long File Name (LFN) support (VFAT entries).
+    - [ ] **FAT12 Support:** for floppy disk images.
+    - [ ] **VFS Integration:**
+        - [ ] Implement `fat_mount` / `fat_unmount` / `fat_root` / `fat_statfs`.
+        - [ ] Implement `fat_lookup` / `fat_create` / `fat_remove` / `fat_rename`.
+        - [ ] Implement `fat_read` / `fat_write`.
+        - [ ] Implement `fat_readdir` (8.3 + LFN merging).
+        - [ ] Implement `fat_mkdir` / `fat_rmdir`.
+    - [ ] **Write Support:**
+        - [ ] FAT table update (both copies).
+        - [ ] Cluster allocation/freeing.
+        - [ ] Directory entry creation with LFN slots.
+        - [ ] File truncation (free cluster chain).
+    - [ ] **Testing:**
+        - [ ] Unit: FAT chain parsing (FAT12, FAT16, FAT32).
+        - [ ] Unit: LFN slot reassembly.
+        - [ ] Integration: create FAT image, mount, file ops, unmount, verify with `dosfsck`.
+        - [ ] Fuzz: mount corrupted FAT images.
+
+- [ ] **UDF (Universal Disk Format):**
+
+    > **Files:** `sys/fs/udf/udf.h`, `udf.c`, `udf_write.c`.
+
+    - [ ] **On-Disk Structures (`udf.h`):**
+        - [ ] `udf_tag` (Descriptor Tag — 16 bytes, CRC).
+        - [ ] `udf_avdp` (Anchor Volume Descriptor Pointer).
+        - [ ] `udf_pvd` (Primary Volume Descriptor).
+        - [ ] `udf_pd` (Partition Descriptor).
+        - [ ] `udf_lvd` (Logical Volume Descriptor).
+        - [ ] `udf_fsd` (File Set Descriptor).
+        - [ ] `udf_fe` / `udf_efe` (File Entry / Extended File Entry).
+        - [ ] `udf_fid` (File Identifier Descriptor).
+        - [ ] `udf_short_ad` / `udf_long_ad` (Allocation Descriptors).
+    - [ ] **Read-Only Support (`udf.c`):**
+        - [ ] `udf_read_tag()`: tag CRC verification.
+        - [ ] `udf_find_avdp()`: locate Anchor at sector 256.
+        - [ ] `udf_read_vds()`: parse Volume Descriptor Sequence.
+        - [ ] `udf_read_partition()` / `udf_read_lvd()` / `udf_read_fsd()`.
+        - [ ] `udf_read_fe()`: read File Entry (inode equivalent).
+        - [ ] `udf_read_file()`: read file data via allocation descriptors.
+        - [ ] `udf_readdir()`: iterate directory FIDs.
+        - [ ] `udf_finddir()`: lookup by name.
+        - [ ] `udf_mount()`: VFS mount integration.
+    - [ ] **Write Support (`udf_write.c`):**
+        - [ ] `udf_read_space_bitmap()`: parse unallocated space.
+        - [ ] `udf_alloc_block()` / `udf_free_block()`: space bitmap management.
+        - [ ] `udf_create_fe()`: create new File Entry.
+        - [ ] `udf_write_file()`: write file data.
+        - [ ] `udf_add_fid()` / `udf_remove_fid()`: directory entry management.
+        - [ ] `udf_truncate()`: truncate/extend file.
+    - [ ] **Testing:**
+        - [ ] Unit: tag CRC verification.
+        - [ ] Unit: allocation/deallocation round-trip.
+        - [ ] Property: alloc→free→alloc returns same block.
+        - [ ] Fuzz: mount corrupted UDF images (bad descriptors, invalid CRCs).
+    - [ ] **Documentation:**
+        - [ ] Man pages: `udf(5)` (filesystem description), `udf(4)` (kernel driver).
+
+- [ ] **ISO 9660 / CD-ROM (future):**
+    - [ ] Primary Volume Descriptor parsing.
+    - [ ] Rock Ridge extensions (POSIX metadata).
+    - [ ] Joliet extensions (Unicode filenames).
+    - [ ] Multi-session support.
+    - [ ] El Torito boot catalog parsing (informational).
+
+- [ ] **DevFS (`/dev`):**
+    - [ ] Device Registry: drivers register character/block devices.
+    - [ ] VFS glue: auto-generate vnode nodes on device registration.
+    - [ ] **Device Nodes:**
+        - [ ] `null`, `zero`, `full` (data sink/source/full-error).
+        - [ ] `random` / `urandom` (CSPRNG).
+        - [ ] `tty` (proxy to current process controlling terminal).
+        - [ ] `mem` / `kmem` (physical/kernel memory access).
+        - [ ] `port` (I/O port access).
+        - [ ] `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/0,1,2`).
+        - [ ] `console` (system console).
+        - [ ] `ptmx` (pseudo-terminal master multiplexer).
+    - [ ] **Dynamic Updates:**
+        - [ ] Hot-plug: add/remove nodes on device attach/detach.
+        - [ ] Permissions: default mode from driver, overridable via `devfs.rules`.
+    - [ ] **Testing:**
+        - [ ] Unit: register/unregister device nodes.
+        - [ ] Unit: read from `/dev/zero`, write to `/dev/null`, read from `/dev/random`.
+        - [ ] Unit: `/dev/full` returns ENOSPC on write.
+
+- [ ] **ProcFS (`/proc`):**
+    - [ ] **Per-Process:**
+        - [ ] `/proc/[pid]/stat`: process state (Linux-compatible format).
+        - [ ] `/proc/[pid]/status`: human-readable status.
+        - [ ] `/proc/[pid]/maps`: memory map regions.
+        - [ ] `/proc/[pid]/cmdline`: NUL-separated command line.
+        - [ ] `/proc/[pid]/environ`: NUL-separated environment.
+        - [ ] `/proc/[pid]/fd/`: open FD symlinks.
+        - [ ] `/proc/[pid]/cwd`, `/proc/[pid]/exe`, `/proc/[pid]/root`: symlinks.
+        - [ ] `/proc/[pid]/task/`: per-thread subdirectories.
+    - [ ] **System-wide:**
+        - [ ] `/proc/cpuinfo`, `/proc/meminfo`, `/proc/uptime`, `/proc/loadavg`.
+        - [ ] `/proc/vmstat`: VM statistics counters.
+        - [ ] `/proc/filesystems`: registered filesystem types.
+        - [ ] `/proc/mounts`: mounted filesystems.
+        - [ ] `/proc/partitions`: block device partitions.
+    - [ ] `/proc/self`: symlink to calling process PID.
+    - [ ] Dynamic content generation: virtual files populated on `read()`.
+    - [ ] Personality awareness: detect caller (Linux/FreeBSD) and adjust format.
+    - [ ] **Testing:**
+        - [ ] Unit: each `/proc` file returns valid parseable content.
+        - [ ] Unit: `/proc/self` resolves to calling PID.
+        - [ ] Integration: `ps` and `top` read from procfs correctly.
+
+- [ ] **SysFS (`/sys`):**
+    - [ ] KObject hierarchy: represent kernel objects (drivers, buses, devices).
+    - [ ] Attributes: map kernel variables to readable/writable files.
+    - [ ] `/sys/class/net/`: network interface properties.
+    - [ ] `/sys/block/`: block device attributes.
+    - [ ] `/sys/devices/system/cpu/`: CPU topology.
+    - [ ] `/sys/kernel/`: misc kernel tunables.
+    - [ ] **Testing:**
+        - [ ] Unit: kobj create/register/unregister.
+        - [ ] Unit: attribute read/write.
+
+- [ ] **9P Filesystem (Plan 9):**
+
+    > **Files:** `sys/fs/9p/`.
+
+    - [ ] **Protocol:**
+        - [ ] Tversion/Rversion (protocol negotiation).
+        - [ ] Tattach/Rattach (mount).
+        - [ ] Twalk/Rwalk (path traversal).
+        - [ ] Topen/Ropen (file open).
+        - [ ] Tread/Rread / Twrite/Rwrite (data transfer).
+        - [ ] Tclunk/Rclunk (close FID).
+        - [ ] Tstat/Rstat / Twstat/Rwstat (metadata).
+        - [ ] Tcreate/Rcreate (create file/directory).
+        - [ ] Tremove/Rremove (remove file/directory).
+    - [ ] **VFS Integration:**
+        - [ ] `p9fs_mount` / `p9fs_unmount`.
+        - [ ] `p9fs_lookup` / `p9fs_readdir`.
+        - [ ] `p9fs_read` / `p9fs_write`.
+    - [ ] **Transport:**
+        - [ ] VirtIO-9P transport (via `virtio_9p` driver).
+        - [ ] TCP transport (for networked 9P).
+    - [ ] **Testing:**
+        - [ ] Integration: mount 9P share from QEMU host, read/write files.
 ### 5. System Calls & Personalities
 - [ ] **System Call ABI (64-bit Clean):**
     - [x] **Type Definitions:**
@@ -5284,176 +5016,352 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - Docs: define required sign-off artifacts and rollback criteria.
                 - Acceptance: release is blocked until all ship-gate checks are green and documented.
 - [ ] **System Interface Libraries:**
+
     - [ ] **Native Kernel Introspection (`libsys` / `libkernel`):**
+
+        > **Files:** `lib/sys/`, `lib/sys/include/sys/sysinfo.h`.
+        >
+        > **Architecture:** Thin wrapper over syscalls + structured parsing
+        > of `/proc` and `/sys`. Thread-safe with per-thread error state.
+
         - [ ] **Core Architecture:**
             - [ ] Define `libsys` as the canonical native interface to kernel internals.
-            - [ ] Design as a thin wrapper over syscalls + structured parsing of `/proc` and `/sys`.
-            - [ ] Support both sync and async query modes (for monitoring tools).
-            - [ ] Thread-safe design with per-thread error state.
+            - [ ] Thin wrapper over syscalls + structured `/proc` and `/sys` parsing.
+            - [ ] Sync and async query modes (for monitoring tools).
+            - [ ] Thread-safe design with per-thread error state (`errno`-like).
+            - [ ] Versioned ABI with `libsys.so.1` soname.
         - [ ] **Data Sources:**
-            - [ ] **`sysctl` MIBs (System Control) - Detailed:**
+            - [ ] **`sysctl` MIBs (System Control):**
                 - [ ] **`kern` (Kernel):**
-                    - [ ] `kern.ostype` (string): OS Name (e.g. "Substrate").
-                    - [ ] `kern.osrelease` (string): Release version.
-                    - [ ] `kern.osrevision` (int): Revision number.
-                    - [ ] `kern.version` (string): Full version string.
-                    - [ ] `kern.hostname` (string): System hostname (RW).
+                    - [ ] `kern.ostype` (string): OS name (e.g., "Substrate").
+                    - [ ] `kern.osrelease` (string): release version.
+                    - [ ] `kern.osrevision` (int): revision number.
+                    - [ ] `kern.version` (string): full version string.
+                    - [ ] `kern.hostname` (string): system hostname (RW).
                     - [ ] `kern.domainname` (string): NIS domain name (RW).
-                    - [ ] `kern.boottime` (struct timeval): System boot timestamp.
-                    - [ ] `kern.maxproc` (int): Maximum number of processes.
-                    - [ ] `kern.maxfiles` (int): Maximum open files system-wide.
+                    - [ ] `kern.boottime` (struct timeval): boot timestamp.
+                    - [ ] `kern.maxproc` (int): maximum processes.
+                    - [ ] `kern.maxfiles` (int): maximum open files system-wide.
+                    - [ ] `kern.securelevel` (int): security level (RW, monotonically increasing).
+                    - [ ] `kern.argmax` (int): maximum `exec` argument length.
+                    - [ ] `kern.ngroups` (int): maximum supplementary groups.
                 - [ ] **`hw` (Hardware):**
-                    - [ ] `hw.machine` (string): Machine architecture (e.g. "i386").
+                    - [ ] `hw.machine` (string): machine architecture (e.g., "i386").
                     - [ ] `hw.model` (string): CPU model name.
-                    - [ ] `hw.ncpu` (int): Number of active CPUs.
+                    - [ ] `hw.ncpu` (int): number of active CPUs.
+                    - [ ] `hw.ncpuonline` (int): number of online CPUs.
                     - [ ] `hw.byteorder` (int): 4321 (big) or 1234 (little).
-                    - [ ] `hw.physmem` (long): Total physical memory in bytes.
-                    - [ ] `hw.usermem` (long): Non-kernel memory.
-                    - [ ] `hw.pagesize` (int): System page size (4096).
+                    - [ ] `hw.physmem` (long): total physical memory bytes.
+                    - [ ] `hw.usermem` (long): non-kernel memory bytes.
+                    - [ ] `hw.pagesize` (int): system page size (4096).
+                    - [ ] `hw.disknames` (string): comma-separated disk device names.
+                    - [ ] `hw.sensors` (struct): hardware sensor data (temperature, fan, voltage).
                 - [ ] **`vm` (Virtual Memory):**
                     - [ ] `vm.loadavg` (struct loadavg): 1, 5, 15 min load averages.
-                    - [ ] `vm.swap_usage` (struct swap_stat): Swap total, used, free.
-                    - [ ] `vm.vmtotal` (struct vmtotal): System-wide virtual memory statistics.
-                    - [ ] `vm.overcommit` (int): Memory overcommit policy.
+                    - [ ] `vm.swap_usage` (struct swap_stat): swap total/used/free.
+                    - [ ] `vm.vmtotal` (struct vmtotal): system-wide VM statistics.
+                    - [ ] `vm.overcommit` (int): memory overcommit policy.
+                    - [ ] `vm.swappiness` (int): page-out aggressiveness.
+                    - [ ] `vm.vfs_cache_pressure` (int): VFS inode/dentry cache reclaim pressure.
                 - [ ] **`net` (Network):**
                     - [ ] `net.inet.ip.stats` (struct ipstat): IP packet counters.
-                    - [ ] `net.inet.ip.forwarding` (int): IPv4 forwarding enabled/disabled.
+                    - [ ] `net.inet.ip.forwarding` (int): IPv4 forwarding enabled.
                     - [ ] `net.inet.tcp.stats` (struct tcpstat): TCP connection stats.
                     - [ ] `net.inet.udp.stats` (struct udpstat): UDP packet stats.
-                    - [ ] `net.link.generic.system.ifcount` (int): Number of interfaces.            - [ ] **`procfs` Structures (Process Filesystem):**
-                - [ ] `/proc/[pid]/stat`: Process state, stats, metrics (Linux compatible).
-                - [ ] `/proc/[pid]/status`: Human-readable status info.
-                - [ ] `/proc/[pid]/maps`: Memory map regions and permissions.
-                - [ ] `/proc/[pid]/cmdline`: Command line arguments.
-                - [ ] `/proc/[pid]/environ`: Environment variables.
-                - [ ] `/proc/[pid]/fd/`: Open file descriptors (symlinks).
-                - [ ] `/proc/meminfo`: Global memory usage.
+                    - [ ] `net.link.generic.system.ifcount` (int): interface count.
+                    - [ ] `net.inet.icmp.stats` (struct icmpstat): ICMP packet stats.
+                - [ ] **`debug` (Debugging):**
+                    - [ ] `debug.klog` (string): kernel log ring buffer.
+                    - [ ] `debug.traceflags` (int): kernel tracing flags.
+            - [ ] **`procfs` Structures (Process Filesystem):**
+                - [ ] `/proc/[pid]/stat`: process state, stats, metrics (Linux-compatible format).
+                - [ ] `/proc/[pid]/status`: human-readable status info.
+                - [ ] `/proc/[pid]/maps`: memory map regions and permissions.
+                - [ ] `/proc/[pid]/cmdline`: command line arguments (NUL-separated).
+                - [ ] `/proc/[pid]/environ`: environment variables (NUL-separated).
+                - [ ] `/proc/[pid]/fd/`: open file descriptors (symlinks to paths).
+                - [ ] `/proc/[pid]/cwd`: symlink to current working directory.
+                - [ ] `/proc/[pid]/exe`: symlink to executable.
+                - [ ] `/proc/[pid]/root`: symlink to root directory.
+                - [ ] `/proc/[pid]/task/`: per-thread subdirectories.
+                - [ ] `/proc/meminfo`: global memory usage.
                 - [ ] `/proc/cpuinfo`: CPU capabilities and model info.
+                - [ ] `/proc/uptime`: system uptime and idle time.
+                - [ ] `/proc/loadavg`: load averages and process counts.
+                - [ ] `/proc/vmstat`: VM statistics counters.
+                - [ ] `/proc/self`: symlink to calling process's `/proc/[pid]`.
             - [ ] **`sysfs` Structures (System Filesystem):**
-                - [ ] `/sys/class/net/`: Network interface properties.
-                - [ ] `/sys/block/`: Block device attributes (`size`, `stat`).
-                - [ ] `/sys/devices/system/cpu/`: CPU topology.
+                - [ ] `/sys/class/net/`: network interface properties.
+                - [ ] `/sys/block/`: block device attributes (`size`, `stat`, `queue/`).
+                - [ ] `/sys/devices/system/cpu/`: CPU topology and frequency scaling.
+                - [ ] `/sys/devices/system/memory/`: memory block hotplug.
+                - [ ] `/sys/kernel/`: misc kernel tunables.
             - [ ] **Netlink Sockets (Linux Compatibility):**
-                - [ ] `NETLINK_ROUTE`: Interface/Address/Route management (`RTM_*`).
-                - [ ] `NETLINK_KOBJECT_UEVENT`: Hotplug/Device events.
+                - [ ] `NETLINK_ROUTE`: interface/address/route management (`RTM_*` messages).
+                - [ ] `NETLINK_KOBJECT_UEVENT`: hotplug/device events.
+                - [ ] `NETLINK_GENERIC`: generic netlink families.
             - [ ] **Direct Standard Syscalls:**
-                - [x] `sysinfo()`: System uptime, total RAM, free RAM.
-                - [ ] `uname()`: System identification.
-                - [ ] `getrlimit()`: Process resource limits.
-                - [ ] `clock_gettime()`: High-resolution system clocks.
-        - [x] **Process Information API (`lib/sys`):**
-            - [x] `sys_proc_count()` - Get total number of processes.
-            - [x] `sys_proc_list(pid_t *pids, size_t *count)` - List all PIDs.
-            - [x] `sys_proc_info(pid_t pid, sys_procinfo_t *info)` - Get detailed process info (including `bitness`).
-            - [x] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)` - List threads.
-            - [x] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)` - List open file descriptors.
-            - [x] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)` - Get memory mappings.
-            - [x] `sys_proc_cwd(pid_t pid, char *buf, size_t len)` - Get current working directory.
-            - [x] `sys_proc_exe(pid_t pid, char *buf, size_t len)` - Get executable path.
-            - [x] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)` - Get command line.
-            - [x] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)` - Get environment.
-        - [x] **Memory Statistics API (`lib/sys`):** (stubs)
-            - [x] `sys_vm_stats(sys_vmstat_t *stats)` - Global VM statistics.
-            - [x] `sys_vm_info(sys_vminfo_t *info)` - Memory zone info (DMA, Normal, HighMem).
-            - [x] `sys_vm_swap(sys_swapinfo_t *swap)` - Swap usage statistics.
-            - [x] `sys_vm_buffers(sys_bufinfo_t *buf)` - Buffer cache statistics.
-            - [x] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)` - Slab allocator stats.
-        - [x] **CPU Information API (`lib/sys`):** (stubs)
-            - [x] `sys_cpu_count()` - Number of CPUs (online/possible/present).
-            - [x] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)` - Per-CPU info (model, MHz, cache).
-            - [x] `sys_cpu_times(int cpu, sys_cputimes_t *times)` - Per-CPU time accounting.
-            - [x] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)` - Load averages.
-        - [x] **System Information API (`lib/sys`):** (stubs)
-            - [x] `sys_uptime(struct timespec *ts)` - System uptime.
-            - [x] `sys_boottime(struct timespec *ts)` - Boot timestamp.
-            - [x] `sys_hostname(char *buf, size_t len)` - System hostname.
-            - [x] `sys_domainname(char *buf, size_t len)` - NIS/YP domain name.
-            - [x] `sys_kernel_version(sys_version_t *ver)` - Kernel version info.
-        - [x] **Network Information API (`lib/sys`):** (stubs)
-            - [x] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)` - List network interfaces.
-            - [x] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)` - Interface addresses.
-            - [x] `sys_net_stats(const char *ifname, sys_netstats_t *stats)` - Interface statistics.
-            - [x] `sys_net_routes(sys_route_t *routes, size_t *count)` - Routing table.
-        - [x] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
-            - [x] `sys_procinfo_t` - pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
-            - [x] `sys_vmstat_t` - total, free, available, buffers, cached, swap_total, swap_free.
-            - [x] `sys_cpuinfo_t` - vendor, model, family, stepping, mhz, cache_size, flags.
-            - [x] `sys_netif_t` - name, index, flags, mtu, hwaddr, type.
+                - [ ] `sysinfo()`: system uptime, total RAM, free RAM, procs.
+                - [ ] `uname()`: system identification (sysname, nodename, release, version, machine).
+                - [ ] `getrlimit()` / `setrlimit()`: process resource limits.
+                - [ ] `clock_gettime()`: high-resolution system clocks.
+                - [ ] `sysctl()`: generic MIB interface.
+        - [ ] **Process Information API (`lib/sys`):**
+            - [ ] `sys_proc_count()`: total number of processes.
+            - [ ] `sys_proc_list(pid_t *pids, size_t *count)`: list all PIDs.
+            - [ ] `sys_proc_info(pid_t pid, sys_procinfo_t *info)`: detailed process info (incl. `bitness`).
+            - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)`: list threads.
+            - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)`: list open FDs.
+            - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)`: memory mappings.
+            - [ ] `sys_proc_cwd(pid_t pid, char *buf, size_t len)`: current working directory.
+            - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)`: executable path.
+            - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)`: command line.
+            - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)`: environment.
+        - [ ] **Memory Statistics API (`lib/sys`):**
+            - [ ] `sys_vm_stats(sys_vmstat_t *stats)`: global VM statistics.
+            - [ ] `sys_vm_info(sys_vminfo_t *info)`: memory zone info (DMA, Normal, HighMem).
+            - [ ] `sys_vm_swap(sys_swapinfo_t *swap)`: swap usage statistics.
+            - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)`: buffer cache statistics.
+            - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)`: slab allocator stats.
+        - [ ] **CPU Information API (`lib/sys`):**
+            - [ ] `sys_cpu_count()`: number of CPUs (online/possible/present).
+            - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)`: per-CPU info (model, MHz, cache).
+            - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)`: per-CPU time accounting.
+            - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)`: load averages.
+            - [ ] `sys_cpu_topology(int cpu, sys_cputopo_t *topo)`: socket/core/thread topology.
+        - [ ] **System Information API (`lib/sys`):**
+            - [ ] `sys_uptime(struct timespec *ts)`: system uptime.
+            - [ ] `sys_boottime(struct timespec *ts)`: boot timestamp.
+            - [ ] `sys_hostname(char *buf, size_t len)`: system hostname.
+            - [ ] `sys_domainname(char *buf, size_t len)`: NIS/YP domain name.
+            - [ ] `sys_kernel_version(sys_version_t *ver)`: kernel version info.
+        - [ ] **Network Information API (`lib/sys`):**
+            - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)`: list interfaces.
+            - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)`: addresses.
+            - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)`: interface statistics.
+            - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)`: routing table.
+            - [ ] `sys_net_arp(sys_arpentry_t *entries, size_t *count)`: ARP table.
+        - [ ] **Disk / Storage Information API (`lib/sys`):**
+            - [ ] `sys_disk_list(sys_diskinfo_t *disks, size_t *count)`: list block devices.
+            - [ ] `sys_disk_stats(const char *dev, sys_diskstat_t *stats)`: I/O stats per device.
+            - [ ] `sys_mount_list(sys_mountinfo_t *mounts, size_t *count)`: mounted filesystems.
+        - [ ] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
+            - [ ] `sys_procinfo_t`: pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
+            - [ ] `sys_vmstat_t`: total, free, available, buffers, cached, swap_total, swap_free.
+            - [ ] `sys_cpuinfo_t`: vendor, model, family, stepping, mhz, cache_size, flags.
+            - [ ] `sys_cputopo_t`: socket_id, core_id, thread_id, numa_node.
+            - [ ] `sys_netif_t`: name, index, flags, mtu, hwaddr, type.
+            - [ ] `sys_diskinfo_t`: name, size, sector_size, model, serial.
+            - [ ] `sys_mountinfo_t`: device, mountpoint, fstype, flags.
+
     - [ ] **BSD Compatibility Shim (`libkvm`):**
+
+        > **Architecture:** Userspace-only implementation using `libsys` —
+        > no `/dev/kmem` access. Source-level compatibility with FreeBSD/
+        > NetBSD/OpenBSD `libkvm` API.
+
         - [ ] **Design Goals:**
-            - [ ] Provide FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility.
-            - [ ] Implement entirely in userspace using `libsys` (no `/dev/kmem` access).
-            - [ ] Support for `kinfo_proc`, `kinfo_vmentry`, `kinfo_file` structures.
+            - [ ] FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility.
+            - [ ] Implement entirely in userspace using `libsys`.
+            - [ ] Support `kinfo_proc`, `kinfo_vmentry`, `kinfo_file` structures.
+            - [ ] Maintain BSD ABI for source-level portability.
         - [ ] **Wrapper Layer:**
             - [ ] Map `kvm_*` calls to equivalent `libsys` functions.
-            - [ ] Handle structure translation between native and BSD formats.
-            - [ ] Maintain BSD ABI compatibility for source-level portability.
+            - [ ] Structure translation between native `sys_procinfo_t` and BSD `kinfo_proc`.
+            - [ ] Error message buffering (`kvm_geterr`).
         - [ ] **Core Functions:**
-            - [ ] `kvm_open(execfile, corefile, swapfile, flags, errstr)` - Initialize KVM context.
-            - [ ] `kvm_openfiles(...)` - Extended open with more options.
-            - [ ] `kvm_close(kd)` - Close KVM context and free resources.
-            - [ ] `kvm_geterr(kd)` - Get error message from last failed operation.
+            - [ ] `kvm_open(execfile, corefile, swapfile, flags, errstr)`: initialize context.
+            - [ ] `kvm_openfiles(...)`: extended open.
+            - [ ] `kvm_close(kd)`: close and free.
+            - [ ] `kvm_geterr(kd)`: error message from last failure.
         - [ ] **Process Functions:**
-            - [ ] `kvm_getprocs(kd, op, arg, cnt)` - Get process list as `kinfo_proc` array.
-            - [ ] `kvm_getargv(kd, kp, nchr)` - Get command line arguments for process.
-            - [ ] `kvm_getenvv(kd, kp, nchr)` - Get environment for process.
-            - [ ] `kvm_getproc2(kd, op, arg, elem_size, cnt)` - Extended proc info.
+            - [ ] `kvm_getprocs(kd, op, arg, cnt)`: process list as `kinfo_proc` array.
+                - [ ] `KERN_PROC_ALL`: all processes.
+                - [ ] `KERN_PROC_PID`: specific PID.
+                - [ ] `KERN_PROC_PGRP`: by process group.
+                - [ ] `KERN_PROC_SESSION`: by session.
+                - [ ] `KERN_PROC_UID`: by user ID.
+                - [ ] `KERN_PROC_RUID`: by real user ID.
+                - [ ] `KERN_PROC_TTY`: by controlling terminal.
+            - [ ] `kvm_getargv(kd, kp, nchr)`: command line arguments.
+            - [ ] `kvm_getenvv(kd, kp, nchr)`: environment variables.
+            - [ ] `kvm_getproc2(kd, op, arg, elem_size, cnt)`: extended proc info.
         - [ ] **Virtual Memory Functions:**
-            - [ ] `kvm_getfiles(kd, op, arg, cnt)` - Get open file list.
-            - [ ] `kvm_getvmmap(kd, kp, cnt)` - Get VM mappings for process.
+            - [ ] `kvm_getfiles(kd, op, arg, cnt)`: open file list.
+            - [ ] `kvm_getvmmap(kd, kp, cnt)`: VM mappings for process.
         - [ ] **Kernel Symbol Functions:**
-            - [ ] `kvm_nlist(kd, nl)` - Look up kernel symbols from `/proc/kallsyms` or kernel ELF.
-            - [ ] `kvm_read(kd, addr, buf, len)` - Read kernel memory (via `/proc/kcore` if available).
-            - [ ] `kvm_write(kd, addr, buf, len)` - Write kernel memory (requires privileges).
+            - [ ] `kvm_nlist(kd, nl)`: look up kernel symbols from `/proc/kallsyms` or kernel ELF.
+            - [ ] `kvm_read(kd, addr, buf, len)`: read kernel memory (via `/proc/kcore`).
+            - [ ] `kvm_write(kd, addr, buf, len)`: write kernel memory (privileged).
         - [ ] **Data Structures (BSD-compatible):**
-            - [ ] `struct kinfo_proc` - BSD process information structure.
-            - [ ] `struct kinfo_vmentry` - BSD VM mapping structure.
-            - [ ] `struct kinfo_file` - BSD open file structure.
-            - [ ] `struct nlist` - Symbol lookup request/response.
+            - [ ] `struct kinfo_proc`: BSD process info (ki_pid, ki_ppid, ki_pgid, ki_uid, ki_comm, ki_stat, etc.).
+            - [ ] `struct kinfo_vmentry`: BSD VM mapping (kve_start, kve_end, kve_protection, kve_path).
+            - [ ] `struct kinfo_file`: BSD open file (kf_fd, kf_type, kf_offset, kf_path).
+            - [ ] `struct nlist`: symbol lookup request/response (n_name, n_type, n_value).
+
     - [ ] **Linux Compatibility Shim (`libproc`):**
-        - [ ] Provide `libprocps` / `procps-ng` compatible API.
-        - [ ] `openproc()` / `closeproc()` - Process enumeration context.
-        - [ ] `readproc()` / `readproctab()` - Read process information.
-        - [ ] `look_up_our_self()` - Get info about calling process.
-        - [ ] `get_proc_stats()` - System-wide /proc/stat parsing.
+
+        > **Architecture:** `libprocps`/`procps-ng` compatible API backed by
+        > `libsys` and `/proc` parsing.
+
+        - [ ] `openproc(flags, ...)`: process enumeration context with filtering.
+            - [ ] `PROC_FILLMEM`: fill memory statistics.
+            - [ ] `PROC_FILLCOM`: fill command name.
+            - [ ] `PROC_FILLARG`: fill command line arguments.
+            - [ ] `PROC_FILLENV`: fill environment.
+            - [ ] `PROC_FILLSTATUS`: fill status info.
+            - [ ] `PROC_FILLUSR`: fill user/group names.
+            - [ ] `PROC_PID`: filter by PID list.
+            - [ ] `PROC_UID`: filter by UID list.
+        - [ ] `closeproc(pt)`: close context and free resources.
+        - [ ] `readproc(pt, p)`: read next process entry.
+        - [ ] `readproctab(flags, ...)`: read all processes into array.
+        - [ ] `look_up_our_self(p)`: get info about calling process.
+        - [ ] `get_proc_stats(pid, ps)`: per-process `/proc/[pid]/stat` parsing.
+        - [ ] **`proc_t` Structure:**
+            - [ ] PID, PPID, PGID, SID, TPGID.
+            - [ ] State, priority, nice.
+            - [ ] User/system/start times.
+            - [ ] RSS, VSize, shared, text, data.
+            - [ ] Command name, command line.
+        - [ ] **System-wide:**
+            - [ ] `meminfo()`: parse `/proc/meminfo`.
+            - [ ] `cpuinfo()`: parse `/proc/cpuinfo`.
+            - [ ] `uptime(uptime, idle)`: parse `/proc/uptime`.
+            - [ ] `loadavg(av1, av5, av15)`: parse `/proc/loadavg`.
+
     - [ ] **Dependencies:**
-        - [ ] System Call Interfaces for inspection (avoiding `/dev/kmem` reading).
-        - [ ] `/proc` filesystem implementation with full Linux-compatible structure.
-        - [ ] `/sys` filesystem implementation for hardware introspection.
-        - [ ] Kernel symbol export mechanism for `kvm_nlist()` support.
+        - [ ] Kernel syscall interfaces for introspection (no `/dev/kmem`).
+        - [ ] `/proc` filesystem with Linux-compatible structure.
+        - [ ] `/sys` filesystem for hardware introspection.
+        - [ ] Kernel symbol export mechanism for `kvm_nlist()`.
+
     - [ ] **Testing:**
-        - [ ] Unit tests for each `libsys` function.
-        - [ ] Compatibility tests against BSD `libkvm` applications.
-        - [ ] Performance benchmarks for high-frequency queries.
-        - [ ] Thread safety stress tests.
+        - [ ] **libsys:**
+            - [ ] Unit: each `sys_proc_*` function against known process state.
+            - [ ] Unit: each `sys_vm_*` function returns sane values.
+            - [ ] Unit: each `sys_cpu_*` function with multi-CPU QEMU.
+            - [ ] Unit: each `sys_net_*` function with loopback interface.
+            - [ ] Unit: `sysctl` MIB reads for all `kern.*`, `hw.*`, `vm.*` nodes.
+            - [ ] Property: `sys_proc_list` count matches `sys_proc_count`.
+            - [ ] Thread safety: concurrent calls from 8 threads.
+            - [ ] Performance: 10000 `sys_proc_info` calls latency benchmark.
+        - [ ] **libkvm:**
+            - [ ] Unit: `kvm_open` / `kvm_close` lifecycle.
+            - [ ] Unit: `kvm_getprocs` with each `KERN_PROC_*` filter.
+            - [ ] Unit: `kvm_getargv` / `kvm_getenvv` string retrieval.
+            - [ ] Unit: `kvm_nlist` symbol lookup.
+            - [ ] Compatibility: compile and run BSD `top`, `ps`, `fstat` against libkvm.
+        - [ ] **libproc:**
+            - [ ] Unit: `openproc` / `readproc` / `closeproc` cycle.
+            - [ ] Unit: filter flags (PROC_PID, PROC_UID) correctness.
+            - [ ] Compatibility: compile and run `procps-ng` tools (ps, top, free, vmstat).
+    - [ ] **Documentation:**
+        - [ ] Man pages: `libsys(3)`, `sysctl(3)`, `kvm_open(3)`, `kvm_getprocs(3)`.
+        - [ ] Man pages: `openproc(3)`, `readproc(3)`, `readproctab(3)`.
+        - [ ] Internal doc: libsys → libkvm → libproc layering.
+
     - [ ] **User Authentication Library (`lib/auth/`):**
+
+        > **Files:** `lib/auth/passwd.c`, `lib/auth/shadow.c`,
+        > `lib/auth/crypt.c`, `lib/auth/group.c`, `lib/auth/auth.c`.
+
         - [ ] **Password Database (`/etc/passwd`):**
-            - [ ] **Structures:** Define `struct passwd`.
-            - [ ] **Parser:** Tokenize `user:pwd:uid:gid:gecos:home:shell`.
+            - [ ] **Structures:** `struct passwd` (pw_name, pw_passwd, pw_uid, pw_gid, pw_gecos, pw_dir, pw_shell).
+            - [ ] **Parser:** tokenize `user:pwd:uid:gid:gecos:home:shell` (colon-delimited).
             - [ ] **Lookup API:**
-                - [ ] `getpwnam(const char *name)`: Map name to struct.
-                - [ ] `getpwuid(uid_t uid)`: Map ID to struct.
-            - [ ] **Iteration API:** `setpwent()`, `getpwent()`, `endpwent()`.
-            - [ ] **Thread Safety:** Implement `_r` reentrant variants.
+                - [ ] `getpwnam(const char *name)`: look up by name.
+                - [ ] `getpwuid(uid_t uid)`: look up by UID.
+            - [ ] **Iteration API:**
+                - [ ] `setpwent()`: open/rewind passwd database.
+                - [ ] `getpwent()`: get next entry.
+                - [ ] `endpwent()`: close database.
+            - [ ] **Thread Safety:**
+                - [ ] `getpwnam_r(name, pwd, buf, buflen, result)`: reentrant variant.
+                - [ ] `getpwuid_r(uid, pwd, buf, buflen, result)`: reentrant variant.
+                - [ ] `getpwent_r(pwd, buf, buflen, result)`: reentrant variant.
+            - [ ] **Edge Cases:**
+                - [ ] Handle malformed lines (missing fields, non-numeric uid/gid).
+                - [ ] Handle NIS/YP `+` entries (stub or pass-through).
+                - [ ] Handle entries with empty gecos or shell fields.
+
+        - [ ] **Group Database (`/etc/group`):**
+            - [ ] **Structures:** `struct group` (gr_name, gr_passwd, gr_gid, gr_mem).
+            - [ ] **Parser:** tokenize `name:passwd:gid:member1,member2,...`.
+            - [ ] **Lookup API:**
+                - [ ] `getgrnam(const char *name)`: look up by name.
+                - [ ] `getgrgid(gid_t gid)`: look up by GID.
+            - [ ] **Iteration API:** `setgrent()`, `getgrent()`, `endgrent()`.
+            - [ ] **Thread Safety:** `getgrnam_r()`, `getgrgid_r()`, `getgrent_r()`.
+            - [ ] **Supplementary Groups:**
+                - [ ] `getgrouplist(user, group, groups, ngroups)`: enumerate memberships.
+                - [ ] `initgroups(user, group)`: set supplementary groups for process.
+
         - [ ] **Shadow Database (`/etc/shadow`):**
-            - [ ] **Structures:** Define `struct spwd`.
-            - [ ] **Parser:** Tokenize `user:hash:lastchg:min:max:warn:inact:expire:flag`.
-            - [ ] **API:** `getspnam()`, `setspent()`, `endspent()`.
-            - [ ] **Security:** Ensure file open fails if euid != 0.
+            - [ ] **Structures:** `struct spwd` (sp_namp, sp_pwdp, sp_lstchg, sp_min, sp_max, sp_warn, sp_inact, sp_expire, sp_flag).
+            - [ ] **Parser:** tokenize `user:hash:lastchg:min:max:warn:inact:expire:flag`.
+            - [ ] **API:** `getspnam(name)`, `setspent()`, `getspent()`, `endspent()`.
+            - [ ] **Thread Safety:** `getspnam_r()`, `getspent_r()`.
+            - [ ] **Security:**
+                - [ ] File permissions: readable only by root (mode 0600).
+                - [ ] Refuse to open if euid ≠ 0.
+                - [ ] Lock file during writes (advisory locking).
+
         - [ ] **Cryptography (Password Hashing):**
             - [ ] **`crypt(key, salt)` Interface:**
-                - [ ] Detect hash type by salt prefix ($1$, $5$, $6$).
-                - [ ] Fallback to DES for legacy salts.
+                - [ ] Detect hash type by salt prefix (`$1$`, `$5$`, `$6$`, `$2b$`).
+                - [ ] Legacy DES for salts without `$` prefix.
+                - [ ] Return hash string in thread-local static buffer.
+            - [ ] **`crypt_r(key, salt, data)` Reentrant:**
+                - [ ] Thread-safe version with caller-provided `struct crypt_data`.
             - [ ] **Algorithms:**
-                - [ ] **DES:** Legacy support (optional).
-                - [ ] **MD5 ($1$):** Standard Unix MD5.
-                - [ ] **SHA-256 ($5$) / SHA-512 ($6$):** Modern standard.
+                - [ ] **DES:** legacy support (8-char key limit, 2-char salt).
+                - [ ] **MD5 (`$1$`):** BSD/Linux standard, 1000 rounds.
+                - [ ] **SHA-256 (`$5$`):** configurable rounds (default 5000).
+                - [ ] **SHA-512 (`$6$`):** configurable rounds (default 5000), preferred.
+                - [ ] **Bcrypt (`$2b$`):** cost-factor based, memory-hard (optional).
+            - [ ] **Salt Generation:**
+                - [ ] `crypt_gensalt(prefix, count, rbytes, nrbytes)`: generate random salt.
+                - [ ] Use `/dev/urandom` for entropy.
+                - [ ] Base64 encoding for salt string.
+
         - [ ] **High-Level Authentication:**
             - [ ] `auth_verify_password(user, clear_text)`:
-                - [ ] Retrieve shadow entry (requires privileges).
-                - [ ] Extract salt.
-                - [ ] Hash clear_text with extracted salt.
-                - [ ] Constant-time comparison of hashes.
+                - [ ] Retrieve shadow entry (requires root or shadow group).
+                - [ ] Extract salt from stored hash.
+                - [ ] Hash clear_text with extracted salt via `crypt()`.
+                - [ ] Constant-time comparison of computed vs stored hash.
+                - [ ] Return 0 on success, -1 on failure (no timing leak).
+            - [ ] `auth_check_expiry(user)`:
+                - [ ] Check password expiry (`sp_max`, `sp_lstchg`).
+                - [ ] Check account expiry (`sp_expire`).
+                - [ ] Check inactive days (`sp_inact`).
+                - [ ] Return status: OK, WARN, EXPIRED, LOCKED.
+
+        - [ ] **PAM Integration (future):**
+            - [ ] Define PAM module interface (`pam_sm_authenticate`, etc.).
+            - [ ] Implement `pam_unix.so` using `lib/auth` functions.
+            - [ ] Configuration via `/etc/pam.d/` or `/etc/pam.conf`.
+
+        - [ ] **Testing:**
+            - [ ] Unit: `getpwnam` / `getpwuid` with known `/etc/passwd` content.
+            - [ ] Unit: `getgrnam` / `getgrgid` with known `/etc/group` content.
+            - [ ] Unit: `getspnam` with known `/etc/shadow` content.
+            - [ ] Unit: `crypt()` produces correct hash for each algorithm ($1$, $5$, $6$).
+            - [ ] Unit: `crypt_gensalt` produces valid salts.
+            - [ ] Unit: `auth_verify_password` correct + incorrect passwords.
+            - [ ] Unit: `auth_check_expiry` for OK, WARN, EXPIRED, LOCKED states.
+            - [ ] Unit: reentrant `_r` variants are thread-safe.
+            - [ ] Property: `getpwent` iteration covers all entries in `/etc/passwd`.
+            - [ ] Property: constant-time comparison — timing does not vary with input.
+            - [ ] Security: `getspnam` fails if euid ≠ 0.
+            - [ ] Fuzz: parser handles malformed `/etc/passwd`, `/etc/group`, `/etc/shadow`.
+        - [ ] **Documentation:**
+            - [ ] Man pages: `getpwnam(3)`, `getpwuid(3)`, `getpwent(3)`.
+            - [ ] Man pages: `getgrnam(3)`, `getgrgid(3)`, `getgrent(3)`.
+            - [ ] Man pages: `getspnam(3)`, `shadow(5)`.
+            - [ ] Man pages: `crypt(3)`, `crypt_gensalt(3)`.
+            - [ ] Man pages: `passwd(5)`, `group(5)`.
 
 ### 6a. System Call Wrapper Library (`lib/sys`)
 - [x] **Foundation:**
