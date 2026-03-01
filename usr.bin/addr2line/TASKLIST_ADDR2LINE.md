@@ -265,10 +265,10 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 - [x] Multiple addresses: verify each resolved independently.
 
 ### 10b. Function Name Tests **(FR‑24, FR‑25, FR‑26, FR‑53)**
-- [ ] `-f`: verify function name printed before file:line.
-- [ ] DWARF `DW_AT_linkage_name`: verify mangled name shown without `-C`.
-- [ ] `-f -C`: verify demangled C++ function name.
-- [ ] Fallback to `.symtab` when `.debug_info` absent: verify function name.
+- [x] `-f`: verify function name printed before file:line.
+- [x] DWARF `DW_AT_linkage_name`: verify mangled name shown without `-C`.
+- [x] `-f -C`: verify demangled C++ function name.
+- [x] Fallback to `.symtab` when `.debug_info` absent: verify function name.
 
 ### 10c. Inline Frame Tests **(FR‑30, FR‑31)**
 - [ ] `-i`: verify multiple frames for inlined call site.

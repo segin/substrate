@@ -51,6 +51,22 @@ SRC
     cc $cflags -g $dwarf -no-pie -o "$out" "$TMP/sample.c"
 }
 
+build_fixture_cpp() {
+    out=$1
+    dwarf=$2
+    cat > "$TMP/sample.cpp" <<'SRC'
+namespace Ns {
+int FooBar(int x) { return x + 3; }
+}
+int main() { return Ns::FooBar(7); }
+SRC
+    c++ -g $dwarf -no-pie -o "$out" "$TMP/sample.cpp"
+}
+
+first_line() {
+    printf '%s\n' "$1" | sed -n '1p'
+}
+
 addr_of() {
     obj=$1
     sym=$2
@@ -99,6 +115,36 @@ SRC
     OUTM=$($BIN -e "$TMP/exec64_v5" 0x$A0 0x$A5 0x$AM)
     LINES=$(printf '%s\n' "$OUTM" | wc -l | tr -d ' ')
     expect_eq "10a-4" "$LINES" "3"
+
+    # 10b-1: -f prints function before file:line
+    OUTF=$($BIN -f -e "$TMP/exec64_v5" 0x$A5)
+    FN_LINE=$(first_line "$OUTF")
+    expect_eq "10b-1" "$FN_LINE" "f1"
+
+    # 10b-2: DW_AT_linkage_name shown without -C
+    require_cmd c++
+    build_fixture_cpp "$TMP/cpp_v4" "-gdwarf-4"
+    CPP_MANGLED=$(nm -n "$TMP/cpp_v4" | awk '$3=="_ZN2Ns6FooBarEi" {print $1; exit}')
+    [ -n "$CPP_MANGLED" ] || fail "10b-2 mangled symbol not found"
+    OUT_CPP_RAW=$($BIN -f -e "$TMP/cpp_v4" 0x$CPP_MANGLED)
+    CPP_RAW_FN=$(first_line "$OUT_CPP_RAW")
+    expect_eq "10b-2" "$CPP_RAW_FN" "_ZN2Ns6FooBarEi"
+
+    # 10b-3: -f -C prints demangled C++ function
+    OUT_CPP_DEM=$($BIN -f -C -e "$TMP/cpp_v4" 0x$CPP_MANGLED)
+    CPP_DEM_FN=$(first_line "$OUT_CPP_DEM")
+    expect_nonempty_match "10b-3" "$CPP_DEM_FN" '^Ns::FooBar\(int\)$'
+
+    # 10b-4: fallback to .symtab when .debug_info absent
+    objcopy --remove-section .debug_info \
+            --remove-section .debug_abbrev \
+            --remove-section .debug_str \
+            --remove-section .debug_rnglists \
+            --remove-section .debug_ranges \
+            "$TMP/exec64_v5" "$TMP/exec64_symtab_only"
+    OUT_SYM=$($BIN -f -e "$TMP/exec64_symtab_only" 0x$A5)
+    SYM_FN=$(first_line "$OUT_SYM")
+    expect_eq "10b-4" "$SYM_FN" "f1"
 
     pass "all"
 }
