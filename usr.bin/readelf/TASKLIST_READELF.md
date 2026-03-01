@@ -189,10 +189,10 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 
 ## 15. Core File Display (`-c` option or auto-detect `ET_CORE`)
 
-- [ ] Display core file notes: `NT_PRSTATUS`, `NT_PRPSINFO`, `NT_FPREGSET`, `NT_AUXV`, `NT_FILE`.
-- [ ] Decode register sets per architecture.
-- [ ] Display signal information from `NT_PRSTATUS`.
-- [ ] Display mapped files from `NT_FILE`.
+- [x] Display core file notes: `NT_PRSTATUS`, `NT_PRPSINFO`, `NT_FPREGSET`, `NT_AUXV`, `NT_FILE`.
+- [x] Decode register sets per architecture.
+- [x] Display signal information from `NT_PRSTATUS`.
+- [x] Display mapped files from `NT_FILE`.
 
 ## 16. Display Options
 
