@@ -91,9 +91,13 @@ typedef struct {
     int target_has_sse;
     int target_has_sse2;
     int target_has_mmx;
+    int target_has_avx;
+    int target_has_avx2;
     int target_supports_sse;
     int target_supports_sse2;
     int target_supports_mmx;
+    int target_supports_avx;
+    int target_supports_avx2;
     int enable_trigraphs;
     int std_version;
     int std_is_c11;
@@ -1303,6 +1307,16 @@ static int add_builtin_macros(pp_state_t *st) {
                 return -1;
             }
         }
+        if (st->target_has_avx) {
+            if (macro_set(&st->macros, "__AVX__", 0, 0, NULL, 0, "1") != 0) {
+                return -1;
+            }
+        }
+        if (st->target_has_avx2) {
+            if (macro_set(&st->macros, "__AVX2__", 0, 0, NULL, 0, "1") != 0) {
+                return -1;
+            }
+        }
     } else {
         if (macro_set(&st->macros, "__x86_64__", 0, 0, NULL, 0, "1") != 0) {
             return -1;
@@ -1322,6 +1336,16 @@ static int add_builtin_macros(pp_state_t *st) {
         if (macro_set(&st->macros, "__SSE2__", 0, 0, NULL, 0, "1") != 0) {
             return -1;
         }
+        if (st->target_has_avx) {
+            if (macro_set(&st->macros, "__AVX__", 0, 0, NULL, 0, "1") != 0) {
+                return -1;
+            }
+        }
+        if (st->target_has_avx2) {
+            if (macro_set(&st->macros, "__AVX2__", 0, 0, NULL, 0, "1") != 0) {
+                return -1;
+            }
+        }
     }
     if (st->std_is_gnu) {
         if (macro_set(&st->macros, "__BLOCKS__", 0, 0, NULL, 0, "1") != 0) {
@@ -1338,17 +1362,25 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
     st->target_has_sse = 0;
     st->target_has_sse2 = 1;
     st->target_has_mmx = 1;
+    st->target_has_avx = 0;
+    st->target_has_avx2 = 0;
     st->target_supports_sse = 1;
     st->target_supports_sse2 = 1;
     st->target_supports_mmx = 1;
+    st->target_supports_avx = 1;
+    st->target_supports_avx2 = 1;
 
     if (st->target_bits == 32) {
         st->target_has_sse = 0;
         st->target_has_sse2 = 0;
         st->target_has_mmx = 1;
+        st->target_has_avx = 0;
+        st->target_has_avx2 = 0;
         st->target_supports_sse = 0;
         st->target_supports_sse2 = 0;
         st->target_supports_mmx = 1;
+        st->target_supports_avx = 0;
+        st->target_supports_avx2 = 0;
     }
 
     for (i = 0; i < flag_count; ++i) {
@@ -1359,18 +1391,26 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;
                 st->target_has_mmx = 1;
+                st->target_has_avx = 0;
+                st->target_has_avx2 = 0;
                 st->target_supports_sse = 0;
                 st->target_supports_sse2 = 0;
                 st->target_supports_mmx = 1;
+                st->target_supports_avx = 0;
+                st->target_supports_avx2 = 0;
             }
         } else if (strcmp(f, "-m64") == 0) {
             st->target_bits = 64;
             st->target_has_sse = 1;
             st->target_has_sse2 = 1;
             st->target_has_mmx = 1;
+            st->target_has_avx = 0;
+            st->target_has_avx2 = 0;
             st->target_supports_sse = 1;
             st->target_supports_sse2 = 1;
             st->target_supports_mmx = 1;
+            st->target_supports_avx = 1;
+            st->target_supports_avx2 = 1;
         } else if ((strcmp(f, "-march") == 0 || strcmp(f, "-mcpu") == 0) && i + 1 < flag_count) {
             const char *name = flags[++i];
             arch_explicit = 1;
@@ -1378,46 +1418,76 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;
                 st->target_has_mmx = 0;
+                st->target_has_avx = 0;
+                st->target_has_avx2 = 0;
                 st->target_supports_sse = 0;
                 st->target_supports_sse2 = 0;
                 st->target_supports_mmx = 0;
+                st->target_supports_avx = 0;
+                st->target_supports_avx2 = 0;
             } else if (strcmp(name, "i586") == 0 || strcmp(name, "pentium") == 0) {
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;
                 st->target_has_mmx = 0;
+                st->target_has_avx = 0;
+                st->target_has_avx2 = 0;
                 st->target_supports_sse = 0;
                 st->target_supports_sse2 = 0;
                 st->target_supports_mmx = 1;
+                st->target_supports_avx = 0;
+                st->target_supports_avx2 = 0;
             } else if (strcmp(name, "pentium-mmx") == 0) {
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;
                 st->target_has_mmx = 1;
+                st->target_has_avx = 0;
+                st->target_has_avx2 = 0;
                 st->target_supports_sse = 0;
                 st->target_supports_sse2 = 0;
                 st->target_supports_mmx = 1;
+                st->target_supports_avx = 0;
+                st->target_supports_avx2 = 0;
             } else if (strcmp(name, "i686") == 0 || strcmp(name, "pentiumpro") == 0 || strcmp(name, "pentium2") == 0) {
                 st->target_has_sse = 0;
                 st->target_has_sse2 = 0;
                 st->target_has_mmx = 1;
+                st->target_has_avx = 0;
+                st->target_has_avx2 = 0;
                 st->target_supports_sse = 0;
                 st->target_supports_sse2 = 0;
                 st->target_supports_mmx = 1;
+                st->target_supports_avx = 0;
+                st->target_supports_avx2 = 0;
             } else if (strcmp(name, "pentium3") == 0) {
                 st->target_has_sse = 1;
                 st->target_has_sse2 = 0;
                 st->target_has_mmx = 1;
+                st->target_has_avx = 0;
+                st->target_has_avx2 = 0;
                 st->target_supports_sse = 1;
                 st->target_supports_sse2 = 0;
                 st->target_supports_mmx = 1;
+                st->target_supports_avx = 0;
+                st->target_supports_avx2 = 0;
             } else if (strcmp(name, "pentium4") == 0 || strcmp(name, "prescott") == 0 || strcmp(name, "nocona") == 0 ||
                        strcmp(name, "core2") == 0 || strcmp(name, "x86-64") == 0 || strcmp(name, "x86-64-v1") == 0 ||
                        strcmp(name, "x86-64-v2") == 0 || strcmp(name, "x86-64-v3") == 0 || strcmp(name, "x86-64-v4") == 0) {
                 st->target_has_sse = 1;
                 st->target_has_sse2 = 0;
                 st->target_has_mmx = 1;
+                st->target_has_avx = 0;
+                st->target_has_avx2 = 0;
                 st->target_supports_sse = 1;
                 st->target_supports_sse2 = 1;
                 st->target_supports_mmx = 1;
+                st->target_supports_avx = 0;
+                st->target_supports_avx2 = 0;
+                if (strcmp(name, "x86-64-v3") == 0 || strcmp(name, "x86-64-v4") == 0) {
+                    st->target_has_avx = 1;
+                    st->target_has_avx2 = 1;
+                    st->target_supports_avx = 1;
+                    st->target_supports_avx2 = 1;
+                }
             }
         } else if (strncmp(f, "-march=", 7) == 0 || strncmp(f, "-mcpu=", 6) == 0) {
             const char *name = strchr(f, '=');
@@ -1445,6 +1515,20 @@ static void scan_target_flags(pp_state_t *st, const char *const *flags, size_t f
             }
         } else if (strcmp(f, "-mno-mmx") == 0) {
             st->target_has_mmx = 0;
+        } else if (strcmp(f, "-mavx") == 0) {
+            if (st->target_supports_avx) {
+                st->target_has_avx = 1;
+            }
+        } else if (strcmp(f, "-mno-avx") == 0) {
+            st->target_has_avx = 0;
+            st->target_has_avx2 = 0;
+        } else if (strcmp(f, "-mavx2") == 0) {
+            if (st->target_supports_avx2) {
+                st->target_has_avx = 1;
+                st->target_has_avx2 = 1;
+            }
+        } else if (strcmp(f, "-mno-avx2") == 0) {
+            st->target_has_avx2 = 0;
         }
     }
 }

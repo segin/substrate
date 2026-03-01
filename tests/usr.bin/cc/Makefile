@@ -594,6 +594,7 @@ test:
 	sh run_pp_gnu_ext.sh
 	sh run_pp_clang_feature_probe.sh
 	sh run_pp_clang_pragma.sh
+	sh run_simd_intrinsics.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_break.c -o /tmp/cc_native_bad_break.o
@@ -746,3 +747,5 @@ clean:
 	      /tmp/cc_pp_s5_named_va.i /tmp/cc_pp_s5_named_va_c99.i /tmp/cc_pp_s5_dynmac.i /tmp/cc_pp_s5_include_next.i /tmp/cc_pp_s5_pragma.i \
 	      /tmp/cc_pp_s4_host_gcc.i /tmp/cc_pp_s4_host_clang.i /tmp/cc_pp_s4_host_gcc.ab /tmp/cc_pp_s4_host_clang.ab \
 	      /tmp/cc_pp_s4_ours.ab
+	rm -f /tmp/cc_native_c99_simd_intrinsics /tmp/cc_native_c99_simd_intrinsics_32.o \
+	      /tmp/cc_simd_macro_probe.c /tmp/cc_simd_macro_none.i /tmp/cc_simd_macro_avx.i /tmp/cc_simd_macro_avx2.i

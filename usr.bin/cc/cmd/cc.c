@@ -363,6 +363,8 @@ static void usage(const char *prog) {
             "  -msse2/-mno-sse2   i386 SSE2 opcode enable/disable\n"
             "  -msse/-mno-sse     i386 SSE opcode enable/disable\n"
             "  -mmmx/-mno-mmx     i386 MMX opcode enable/disable\n"
+            "  -mavx/-mno-avx     x86 AVX feature macro enable/disable\n"
+            "  -mavx2/-mno-avx2   x86 AVX2 feature macro enable/disable\n"
             "  -mfpmath=sse|387   i386 scalar FP lowering mode\n"
             "  -g                 debug info\n"
             "  -Wall -Werror      warnings\n"
@@ -796,6 +798,13 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
                 o->i386_has_mmx = 1;
             } else {
                 o->i386_has_mmx = 0;
+            }
+            continue;
+        }
+        if (strcmp(a, "-mavx") == 0 || strcmp(a, "-mno-avx") == 0 || strcmp(a, "-mavx2") == 0 ||
+            strcmp(a, "-mno-avx2") == 0) {
+            if (strvec_push(&o->c_flags, a) != 0 || strvec_push(&o->cpp_flags, a) != 0) {
+                return -1;
             }
             continue;
         }
