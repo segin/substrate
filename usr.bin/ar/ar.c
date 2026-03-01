@@ -105,6 +105,7 @@ static void move_members(char **members, int count);
 static void print_members(char **members, int count);
 static void ranlib(void);
 static void drop_symbol_tables(void);
+static void touch_symbol_table_member(void);
 static bool parse_numeric_field(const char *field, size_t field_len, int base, long long *out);
 static char *parse_ar_name_field(const struct ar_hdr *hdr, bool *is_special);
 static void store_be32(unsigned char *dst, uint32_t value);
@@ -123,12 +124,24 @@ int main(int argc, char *argv[])
     progname = get_basename(argv[0]);
 
     if (strstr(progname, "ranlib")) {
-        if (argc < 2) usage();
+        bool touch_only = false;
+        int argi = 1;
+
+        while (argi < argc && argv[argi][0] == '-') {
+            if (strcmp(argv[argi], "-t") == 0) {
+                touch_only = true;
+                argi++;
+                continue;
+            }
+            usage();
+        }
+        if (argi >= argc) usage();
         operation = AR_TABLE;
-        archive_name = argv[1];
+        archive_name = argv[argi];
         if (access(archive_name, F_OK) != 0) err(1, "%s", archive_name);
         read_archive(archive_name);
-        ranlib();
+        if (touch_only) touch_symbol_table_member();
+        else ranlib();
         write_archive(archive_name);
         return 0;
     }
@@ -761,6 +774,30 @@ static void read_archive(const char *path) {
             cur->next = m;
         }
     }
+
+    struct ar_memb *cur = head;
+    time_t sym_mtime = 0;
+    time_t max_member_mtime = 0;
+    bool have_sym = false;
+    while (cur != NULL) {
+        time_t mt = 0;
+        if (parse_mtime_field(cur, &mt) == 0) {
+            if (strcmp(cur->name, RANLIBMAG) == 0 ||
+                strcmp(cur->name, RANLIBSORT) == 0 ||
+                strcmp(cur->name, "/") == 0 ||
+                strcmp(cur->name, "/SYM64/") == 0) {
+                sym_mtime = mt;
+                have_sym = true;
+            } else if (mt > max_member_mtime) {
+                max_member_mtime = mt;
+            }
+        }
+        cur = cur->next;
+    }
+    if (have_sym && max_member_mtime > sym_mtime) {
+        warnx("%s: stale symbol table", path);
+    }
+
     close(fd);
 }
 
@@ -1175,7 +1212,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
      * Non-ELF archive members are legal. If parsing fails, skip symbol
      * extraction without failing the archive operation.
      */
-    open_err = elf_open_memory(m->data, m->size, &obj);
+    open_err = elf_open_memory_with_options(m->data, m->size, ELFOBJ_OPEN_NOCOPY, &obj);
     if (open_err != ELF_OK || obj == NULL) {
         return;
     }
@@ -1185,6 +1222,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
         elf_symbol_t *symbol;
         const char *name;
         uint8_t bind;
+        uint8_t type;
         uint16_t shndx;
 
         symbol = elf_symbol_at(obj, i);
@@ -1194,6 +1232,10 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
 
         bind = elf_symbol_bind(symbol);
         if (bind != STB_GLOBAL && bind != STB_WEAK) {
+            continue;
+        }
+        type = elf_symbol_type(symbol);
+        if (type == STT_FILE || type == STT_SECTION) {
             continue;
         }
 
@@ -1259,6 +1301,23 @@ static void drop_symbol_tables(void) {
     }
 }
 
+static void touch_symbol_table_member(void) {
+    struct ar_memb *cur = head;
+    while (cur != NULL) {
+        if (strcmp(cur->name, RANLIBMAG) == 0 ||
+            strcmp(cur->name, RANLIBSORT) == 0 ||
+            strcmp(cur->name, "/") == 0 ||
+            strcmp(cur->name, "/SYM64/") == 0) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%-12ld", (long)time(NULL));
+            memcpy(cur->hdr.ar_date, buf, 12);
+            cur->dirty = true;
+            return;
+        }
+        cur = cur->next;
+    }
+}
+
 static void ranlib(void) {
     struct ar_memb *cur = head;
     drop_symbol_tables();
@@ -1306,7 +1365,7 @@ static void ranlib(void) {
     /* We'll fill offsets in write_archive */
 
     struct ar_memb *m = malloc(sizeof(struct ar_memb));
-    m->name = strdup(archive_format == ARFMT_GNU ? "/" : RANLIBMAG);
+    m->name = strdup(archive_format == ARFMT_GNU ? "/" : RANLIBSORT);
     m->data = data;
     m->size = total_size;
     m->thin_path = NULL;

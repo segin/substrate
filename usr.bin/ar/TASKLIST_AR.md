@@ -87,17 +87,17 @@ Goal: implement a production `ar` where ELF member inspection/parsing comes from
 
 ## 6. Symbol Table (`ranlib` / `s` modifier)
 
-- [ ] Replace inline ELF parsing in `ranlib()` with `libelfobj` calls.
-- [ ] Use `elf_open_memory_with_options(ELFOBJ_OPEN_NOCOPY)` for zero‑copy symbol scan.
-- [ ] Generate sorted BSD `__.SYMDEF SORTED` by default (current code uses `__.SYMDEF`).
-- [ ] Correctly compute member offsets in `write_archive()` — current two‑pass approach leaks sym_entry lists and misses extended‑name size adjustments.
-- [ ] Support GNU `/` symbol table format when writing GNU archives.
-- [ ] Handle archives with no ELF members (e.g. text files) — write archive without symbol table, no error.
-- [ ] Handle `WEAK` vs `GLOBAL` binding: include both in symbol table (current behavior is correct, verify).
-- [ ] Handle `COMMON` symbols (`SHN_COMMON`): include in symbol table with offset.
-- [ ] Skip `STT_FILE` and `STT_SECTION` symbols (currently filtered by bind, verify no edge cases).
-- [ ] `ranlib -t` (touch): update symbol table timestamp without rebuilding.
-- [ ] Detect stale symbol table on read and warn (`ar` should still proceed).
+- [x] Replace inline ELF parsing in `ranlib()` with `libelfobj` calls.
+- [x] Use `elf_open_memory_with_options(ELFOBJ_OPEN_NOCOPY)` for zero‑copy symbol scan.
+- [x] Generate sorted BSD `__.SYMDEF SORTED` by default (current code uses `__.SYMDEF`).
+- [x] Correctly compute member offsets in `write_archive()` — current two‑pass approach leaks sym_entry lists and misses extended‑name size adjustments.
+- [x] Support GNU `/` symbol table format when writing GNU archives.
+- [x] Handle archives with no ELF members (e.g. text files) — write archive without symbol table, no error.
+- [x] Handle `WEAK` vs `GLOBAL` binding: include both in symbol table (current behavior is correct, verify).
+- [x] Handle `COMMON` symbols (`SHN_COMMON`): include in symbol table with offset.
+- [x] Skip `STT_FILE` and `STT_SECTION` symbols (currently filtered by bind, verify no edge cases).
+- [x] `ranlib -t` (touch): update symbol table timestamp without rebuilding.
+- [x] Detect stale symbol table on read and warn (`ar` should still proceed).
 
 ## 7. Error Handling and Diagnostics
 
