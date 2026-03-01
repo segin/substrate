@@ -261,9 +261,9 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] Unknown notes display hex dump.
 
 ### 19g. ARM-Specific Tests
-- [ ] ARM unwind table decoded.
-- [ ] ARM build attributes: all standard tags decoded with human-readable values.
-- [ ] `Tag_CPU_arch` shows architecture name, not just number.
+- [x] ARM unwind table decoded.
+- [x] ARM build attributes: all standard tags decoded with human-readable values.
+- [x] `Tag_CPU_arch` shows architecture name, not just number.
 
 ### 19h. Compatibility Tests
 - [ ] Output matches GNU `readelf` for same input on key sections.
