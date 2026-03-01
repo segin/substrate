@@ -379,7 +379,7 @@ static cc_value_type_t type_to_val(cc_type_t t) {
 }
 
 static int is_pointer_type(cc_type_t t) {
-    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
+    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
 }
 
 static cc_type_t ptr_base_type(cc_type_t t);
@@ -540,6 +540,30 @@ static cc_type_t ptr_base_type(cc_type_t t) {
         return CC_TYPE_PTR_PTR_PTR_FLOAT;
     case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
         return CC_TYPE_PTR_PTR_PTR_DOUBLE;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID:
+        return CC_TYPE_PTR_PTR_PTR_PTR_VOID;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL:
+        return CC_TYPE_PTR_PTR_PTR_PTR_BOOL;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_CHAR;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_UCHAR;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_SHORT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_USHORT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_INT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_UINT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_FLOAT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE:
+        return CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
     default:
         return CC_TYPE_VOID;
     }
@@ -637,6 +661,18 @@ static long type_size_bytes(cc_type_t t) {
     case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
     case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
     case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE:
         return g_pointer_size_bytes;
     default:
         return -1;
@@ -1360,9 +1396,13 @@ typedef enum {
     BUILTIN_UNPREDICTABLE,
     BUILTIN_CLZ,
     BUILTIN_CTZ,
+    BUILTIN_POPCOUNT,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
     BUILTIN_MUL_OVERFLOW,
+    BUILTIN_ADD_OVERFLOW_P,
+    BUILTIN_SUB_OVERFLOW_P,
+    BUILTIN_MUL_OVERFLOW_P,
     BUILTIN_OBJECT_SIZE,
     BUILTIN_MEMCPY,
     BUILTIN_MEMMOVE,
@@ -1438,6 +1478,10 @@ static builtin_kind_t builtin_kind(const char *name) {
         strcmp(name, "__builtin_ctzll") == 0) {
         return BUILTIN_CTZ;
     }
+    if (strcmp(name, "__builtin_popcount") == 0 || strcmp(name, "__builtin_popcountl") == 0 ||
+        strcmp(name, "__builtin_popcountll") == 0) {
+        return BUILTIN_POPCOUNT;
+    }
     if (strcmp(name, "__builtin_add_overflow") == 0) {
         return BUILTIN_ADD_OVERFLOW;
     }
@@ -1446,6 +1490,15 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_mul_overflow") == 0) {
         return BUILTIN_MUL_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_add_overflow_p") == 0) {
+        return BUILTIN_ADD_OVERFLOW_P;
+    }
+    if (strcmp(name, "__builtin_sub_overflow_p") == 0) {
+        return BUILTIN_SUB_OVERFLOW_P;
+    }
+    if (strcmp(name, "__builtin_mul_overflow_p") == 0) {
+        return BUILTIN_MUL_OVERFLOW_P;
     }
     if (strcmp(name, "__builtin_object_size") == 0) {
         return BUILTIN_OBJECT_SIZE;
@@ -3343,12 +3396,231 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (bk == BUILTIN_NANF || bk == BUILTIN_NAN || bk == BUILTIN_NANL) {
             return emit_const_f64_instr(sf, NAN);
         }
-        if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
+        if (bk == BUILTIN_POPCOUNT) {
+            int av;
+            int v;
+            long mem_size;
+            cc_ssa_instr_t bin;
+
+            if (e->arg_count != 1 || e->args[0] == NULL) {
+                set_diag(diag, "__builtin_popcount lowering expects 1 argument");
+                return -1;
+            }
+            av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+            if (av < 0) {
+                return -1;
+            }
+            av = cast_value(sf, av, CC_VAL_I64, diag);
+            if (av < 0) {
+                return -1;
+            }
+            mem_size = type_size_bytes_with_struct(tu, e->args[0]->value_type, e->args[0]->struct_id);
+            if (mem_size <= 0 || mem_size > 8) {
+                mem_size = 8;
+            }
+            v = av;
+            if (mem_size < 8) {
+                unsigned long long mask_u = (1ULL << (mem_size * 8)) - 1ULL;
+                int mask = emit_const_i64_instr(sf, (long)mask_u);
+                if (mask < 0) {
+                    return -1;
+                }
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_AND;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = mask;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                v = bin.dst;
+            }
+            {
+                int c5555 = emit_const_i64_instr(sf, (long)0x5555555555555555ULL);
+                int c3333 = emit_const_i64_instr(sf, (long)0x3333333333333333ULL);
+                int c0f0f = emit_const_i64_instr(sf, (long)0x0F0F0F0F0F0F0F0FULL);
+                int c7f = emit_const_i64_instr(sf, 0x7F);
+                int t1, t2;
+                if (c5555 < 0 || c3333 < 0 || c0f0f < 0 || c7f < 0) {
+                    return -1;
+                }
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_SHR;
+                bin.is_unsigned = 1;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = emit_const_i64_instr(sf, 1);
+                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                t1 = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_AND;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = t1;
+                bin.rhs = c5555;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                t1 = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_SUB;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = t1;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                v = bin.dst;
+
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_AND;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = c3333;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                t1 = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_SHR;
+                bin.is_unsigned = 1;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = emit_const_i64_instr(sf, 2);
+                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                t2 = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_AND;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = t2;
+                bin.rhs = c3333;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                t2 = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_ADD;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = t1;
+                bin.rhs = t2;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                v = bin.dst;
+
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_SHR;
+                bin.is_unsigned = 1;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = emit_const_i64_instr(sf, 4);
+                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                t1 = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_ADD;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = t1;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                v = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_AND;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = c0f0f;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                v = bin.dst;
+
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_SHR;
+                bin.is_unsigned = 1;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = emit_const_i64_instr(sf, 8);
+                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                t1 = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_ADD;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = t1;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                v = bin.dst;
+
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_SHR;
+                bin.is_unsigned = 1;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = emit_const_i64_instr(sf, 16);
+                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                t1 = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_ADD;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = t1;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                v = bin.dst;
+
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_SHR;
+                bin.is_unsigned = 1;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = emit_const_i64_instr(sf, 32);
+                if (bin.rhs < 0 || bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                t1 = bin.dst;
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_ADD;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = t1;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                v = bin.dst;
+
+                memset(&bin, 0, sizeof(bin));
+                bin.op = CC_SSA_AND;
+                bin.dst = new_value(sf, CC_VAL_I64);
+                bin.lhs = v;
+                bin.rhs = c7f;
+                if (bin.dst < 0 || push_instr(sf, bin) != 0) {
+                    return -1;
+                }
+                v = bin.dst;
+            }
+            return v;
+        }
+        if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW ||
+            bk == BUILTIN_ADD_OVERFLOW_P || bk == BUILTIN_SUB_OVERFLOW_P || bk == BUILTIN_MUL_OVERFLOW_P) {
             int av;
             int bv;
-            int pv;
+            int pv = -1;
             int rv;
             int ov = -1;
+            int overflow_op;
+            int has_store;
             cc_type_t out_type;
             long mem_size;
             cc_ssa_instr_t bin;
@@ -3357,21 +3629,35 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 set_diag(diag, "overflow builtin lowering expects 3 arguments");
                 return -1;
             }
+            has_store = (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW);
+            overflow_op = (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_ADD_OVERFLOW_P)
+                              ? 0
+                              : ((bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW_P) ? 1 : 2);
             av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
             bv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag);
-            pv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag);
-            if (av < 0 || bv < 0 || pv < 0) {
+            if (av < 0 || bv < 0) {
                 return -1;
+            }
+            if (has_store) {
+                pv = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag);
+                if (pv < 0) {
+                    return -1;
+                }
             }
             av = cast_value(sf, av, CC_VAL_I64, diag);
             bv = cast_value(sf, bv, CC_VAL_I64, diag);
-            pv = cast_value(sf, pv, CC_VAL_I64, diag);
-            if (av < 0 || bv < 0 || pv < 0) {
+            if (av < 0 || bv < 0) {
                 return -1;
+            }
+            if (has_store) {
+                pv = cast_value(sf, pv, CC_VAL_I64, diag);
+                if (pv < 0) {
+                    return -1;
+                }
             }
 
             memset(&bin, 0, sizeof(bin));
-            bin.op = (bk == BUILTIN_ADD_OVERFLOW) ? CC_SSA_ADD : ((bk == BUILTIN_SUB_OVERFLOW) ? CC_SSA_SUB : CC_SSA_MUL);
+            bin.op = (overflow_op == 0) ? CC_SSA_ADD : ((overflow_op == 1) ? CC_SSA_SUB : CC_SSA_MUL);
             bin.dst = new_value(sf, CC_VAL_I64);
             bin.lhs = av;
             bin.rhs = bv;
@@ -3380,33 +3666,40 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             rv = bin.dst;
 
-            out_type = ptr_base_type(e->args[2]->value_type);
-            if (out_type == CC_TYPE_VOID) {
-                out_type = CC_TYPE_INT;
-            }
-            mem_size = pointer_elem_size_bytes(tu, e->args[2]->value_type, e->args[2]->struct_id);
-            if (mem_size <= 0) {
+            if (has_store) {
+                out_type = ptr_base_type(e->args[2]->value_type);
+                if (out_type == CC_TYPE_VOID) {
+                    out_type = CC_TYPE_INT;
+                }
+                mem_size = pointer_elem_size_bytes(tu, e->args[2]->value_type, e->args[2]->struct_id);
+                if (mem_size <= 0) {
+                    mem_size = type_size_bytes_with_struct(tu, out_type, e->args[2]->struct_id);
+                }
+                if (mem_size <= 0) {
+                    mem_size = g_pointer_size_bytes;
+                }
+            } else {
+                out_type = e->args[2]->value_type;
                 mem_size = type_size_bytes_with_struct(tu, out_type, e->args[2]->struct_id);
-            }
-            if (mem_size <= 0) {
-                mem_size = g_pointer_size_bytes;
             }
 
             rv = cast_value(sf, rv, type_to_val(out_type), diag);
             if (rv < 0) {
                 return -1;
             }
-            memset(&in, 0, sizeof(in));
-            in.op = CC_SSA_STORE;
-            in.lhs = pv;
-            in.rhs = rv;
-            in.imm = mem_size;
-            if (push_instr(sf, in) != 0) {
-                return -1;
+            if (has_store) {
+                memset(&in, 0, sizeof(in));
+                in.op = CC_SSA_STORE;
+                in.lhs = pv;
+                in.rhs = rv;
+                in.imm = mem_size;
+                if (push_instr(sf, in) != 0) {
+                    return -1;
+                }
             }
 
             if (is_unsigned_integral_type(out_type)) {
-                if (bk == BUILTIN_MUL_OVERFLOW) {
+                if (overflow_op == 2) {
                     int z = emit_const_i64_instr(sf, 0);
                     int cmp_nz;
                     int qv;
@@ -3458,17 +3751,17 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 } else {
                     memset(&bin, 0, sizeof(bin));
                     bin.op = CC_SSA_CMP;
-                    bin.cmp_kind = (bk == BUILTIN_SUB_OVERFLOW) ? CC_CMP_LT : CC_CMP_LT;
+                    bin.cmp_kind = CC_CMP_LT;
                     bin.is_unsigned = 1;
                     bin.dst = new_value(sf, CC_VAL_I64);
-                    bin.lhs = (bk == BUILTIN_SUB_OVERFLOW) ? av : rv;
-                    bin.rhs = (bk == BUILTIN_SUB_OVERFLOW) ? bv : av;
+                    bin.lhs = (overflow_op == 1) ? av : rv;
+                    bin.rhs = (overflow_op == 1) ? bv : av;
                     if (bin.dst < 0 || push_instr(sf, bin) != 0) {
                         return -1;
                     }
                     ov = bin.dst;
                 }
-            } else if (bk == BUILTIN_MUL_OVERFLOW) {
+            } else if (overflow_op == 2) {
                 int z = emit_const_i64_instr(sf, 0);
                 int cmp_nz;
                 int qv;
@@ -3554,7 +3847,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 sign_b = bin.dst;
                 memset(&bin, 0, sizeof(bin));
                 bin.op = CC_SSA_CMP;
-                bin.cmp_kind = (bk == BUILTIN_ADD_OVERFLOW) ? CC_CMP_EQ : CC_CMP_NE;
+                bin.cmp_kind = (overflow_op == 0) ? CC_CMP_EQ : CC_CMP_NE;
                 bin.dst = new_value(sf, CC_VAL_I64);
                 bin.lhs = sign_a;
                 bin.rhs = sign_b;
@@ -7898,6 +8191,101 @@ static void store_const_bytes(unsigned char *buf, long off, long size, unsigned 
     }
 }
 
+static char *global_char_list_to_quoted_string(const cc_translation_unit_t *tu, const cc_expr_t *list) {
+    size_t cap;
+    size_t len = 0;
+    size_t i;
+    char *out;
+
+    if (list == NULL || list->kind != CC_EXPR_INIT_LIST) {
+        return NULL;
+    }
+    cap = list->arg_count * 4 + 8;
+    out = (char *)malloc(cap);
+    if (out == NULL) {
+        return NULL;
+    }
+    out[len++] = '"';
+    for (i = 0; i < list->arg_count; ++i) {
+        long iv = 0;
+        double fv = 0.0;
+        int isf = 0;
+        char *sym = NULL;
+        unsigned char ch;
+        const cc_expr_t *item = list->args[i];
+        if (item != NULL && item->kind == CC_EXPR_INIT_LIST) {
+            item = unwrap_scalar_initializer_expr(item, NULL);
+            if (item == NULL) {
+                free(out);
+                return NULL;
+            }
+        }
+        if (eval_global_init_expr(tu, item, &iv, &fv, &isf, &sym) != 0 || isf || sym != NULL) {
+            free(sym);
+            free(out);
+            return NULL;
+        }
+        free(sym);
+        if (iv < 0 || iv > 255) {
+            free(out);
+            return NULL;
+        }
+        ch = (unsigned char)iv;
+        if (len + 5 >= cap) {
+            size_t ncap = cap * 2;
+            char *tmp = (char *)realloc(out, ncap);
+            if (tmp == NULL) {
+                free(out);
+                return NULL;
+            }
+            out = tmp;
+            cap = ncap;
+        }
+        switch (ch) {
+        case '\\':
+            out[len++] = '\\';
+            out[len++] = '\\';
+            break;
+        case '"':
+            out[len++] = '\\';
+            out[len++] = '"';
+            break;
+        case '\n':
+            out[len++] = '\\';
+            out[len++] = 'n';
+            break;
+        case '\r':
+            out[len++] = '\\';
+            out[len++] = 'r';
+            break;
+        case '\t':
+            out[len++] = '\\';
+            out[len++] = 't';
+            break;
+        case '\0':
+            out[len++] = '\\';
+            out[len++] = '0';
+            out[len++] = '0';
+            out[len++] = '0';
+            break;
+        default:
+            if (ch < 32 || ch >= 127) {
+                static const char hex[] = "0123456789ABCDEF";
+                out[len++] = '\\';
+                out[len++] = 'x';
+                out[len++] = hex[(ch >> 4) & 0xF];
+                out[len++] = hex[ch & 0xF];
+            } else {
+                out[len++] = (char)ch;
+            }
+            break;
+        }
+    }
+    out[len++] = '"';
+    out[len] = '\0';
+    return out;
+}
+
 static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t type, int struct_id, long field_size,
                                     const cc_expr_t *expr, unsigned char *buf, long buf_size, long off,
                                     global_reloc_t **relocs, size_t *reloc_count, cc_diag_t *diag) {
@@ -7932,6 +8320,21 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
         }
         return 0;
     }
+    if (expr != NULL && expr->kind == CC_EXPR_CAST && expr->lhs != NULL && expr->lhs->kind == CC_EXPR_INIT_LIST &&
+        (expr->aux_type == CC_TYPE_PTR_CHAR || expr->aux_type == CC_TYPE_PTR_UCHAR)) {
+        char *quoted = global_char_list_to_quoted_string(tu, expr->lhs);
+        if (quoted != NULL) {
+            if (is_pointer_type(type) && field_size == g_pointer_size_bytes) {
+                if (append_global_string_reloc(relocs, reloc_count, off, field_size, quoted, diag) != 0) {
+                    free(quoted);
+                    return -1;
+                }
+                free(quoted);
+                return 0;
+            }
+            free(quoted);
+        }
+    }
 
     if (eval_global_init_expr(tu, expr, &iv, &fv, &isf, &sym) != 0) {
         free(sym);
@@ -7948,9 +8351,15 @@ static int store_scalar_global_init(const cc_translation_unit_t *tu, cc_type_t t
     }
 
     if (sym != NULL) {
-        if (!is_pointer_type(type) || field_size != g_pointer_size_bytes) {
+        int ptr_sized_integral = is_integral_type(type) && field_size == g_pointer_size_bytes;
+        if ((!is_pointer_type(type) && !ptr_sized_integral) || field_size != g_pointer_size_bytes) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "symbol initializer requires pointer-sized field (sym=%s type=%d size=%ld expr_kind=%d at %zu:%zu)",
+                         sym, (int)type, field_size, expr != NULL ? (int)expr->kind : -1, expr != NULL ? expr->line : 0,
+                         expr != NULL ? expr->col : 0);
+            }
             free(sym);
-            set_diag(diag, "symbol initializer requires pointer-sized pointer field");
             return -1;
         }
         if (append_global_reloc(relocs, reloc_count, off, field_size, sym, diag) != 0) {
@@ -8686,9 +9095,6 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
             return 1;
         }
     }
-    if ((f->storage & CC_STORAGE_EXTERN) != 0 && (f->storage & CC_STORAGE_INLINE) != 0) {
-        return 1;
-    }
     if ((f->storage & CC_STORAGE_STATIC) == 0) {
         return 0;
     }
@@ -8741,6 +9147,13 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             out->globals[i].storage = tu->globals[i].storage;
             out->globals[i].attr_flags = tu->globals[i].attr_flags;
             out->globals[i].attr_align = tu->globals[i].attr_align;
+            if (getenv("CC_DEBUG_GLOBAL_TYPE") != NULL && tu->globals[i].name != NULL &&
+                strcmp(tu->globals[i].name, "sort_functions") == 0) {
+                fprintf(stderr, "cc-debug: sort_functions type=%d array_ndim=%d dims=%ld,%ld,%ld,%ld len=%ld\n",
+                        (int)tu->globals[i].type, tu->globals[i].array_ndim, tu->globals[i].array_dims[0],
+                        tu->globals[i].array_dims[1], tu->globals[i].array_dims[2], tu->globals[i].array_dims[3],
+                        tu->globals[i].array_len);
+            }
             if (tu->globals[i].attr_section != NULL) {
                 out->globals[i].attr_section = xstrdup(tu->globals[i].attr_section);
                 if (out->globals[i].attr_section == NULL) {

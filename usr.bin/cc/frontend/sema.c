@@ -811,7 +811,7 @@ static int type_carries_struct_id(cc_type_t t) {
     if (t == CC_TYPE_VOID) {
         return 1;
     }
-    if (t < CC_TYPE_PTR_VOID || t > CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE) {
+    if (t < CC_TYPE_PTR_VOID || t > CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE) {
         return 0;
     }
     return ((int)t - (int)CC_TYPE_PTR_VOID) % 12 == 0;
@@ -948,7 +948,7 @@ static int is_float_type(cc_type_t t) {
 }
 
 static int is_pointer_type(cc_type_t t) {
-    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
+    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
 }
 
 static cc_type_t ptr_base_type(cc_type_t t);
@@ -1004,7 +1004,9 @@ static void expr_clear_array_meta(cc_expr_t *e) {
 static void expr_set_array_meta_decl(cc_expr_t *e, long array_len, int array_ndim,
                                      const long array_dims[CC_MAX_ARRAY_DIMS]) {
     int i;
-    expr_clear_array_meta(e);
+    if (e->kind != CC_EXPR_CAST) {
+        expr_clear_array_meta(e);
+    }
     if (e == NULL || array_ndim <= 0 || array_dims == NULL) {
         return;
     }
@@ -1133,6 +1135,30 @@ static cc_type_t ptr_of_type(cc_type_t t) {
         return CC_TYPE_PTR_PTR_PTR_PTR_FLOAT;
     case CC_TYPE_PTR_PTR_PTR_DOUBLE:
         return CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
+    case CC_TYPE_PTR_PTR_PTR_PTR_VOID:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID;
+    case CC_TYPE_PTR_PTR_PTR_PTR_BOOL:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL;
+    case CC_TYPE_PTR_PTR_PTR_PTR_CHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR;
+    case CC_TYPE_PTR_PTR_PTR_PTR_UCHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR;
+    case CC_TYPE_PTR_PTR_PTR_PTR_SHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_USHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_INT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_UINT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
     default:
         return CC_TYPE_VOID;
     }
@@ -1236,6 +1262,30 @@ static cc_type_t ptr_base_type(cc_type_t t) {
         return CC_TYPE_PTR_PTR_PTR_FLOAT;
     case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
         return CC_TYPE_PTR_PTR_PTR_DOUBLE;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID:
+        return CC_TYPE_PTR_PTR_PTR_PTR_VOID;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL:
+        return CC_TYPE_PTR_PTR_PTR_PTR_BOOL;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_CHAR;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_UCHAR;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_SHORT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_USHORT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_INT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_UINT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_FLOAT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE:
+        return CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
     default:
         return CC_TYPE_VOID;
     }
@@ -1624,9 +1674,13 @@ typedef enum {
     BUILTIN_UNPREDICTABLE,
     BUILTIN_CLZ,
     BUILTIN_CTZ,
+    BUILTIN_POPCOUNT,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
     BUILTIN_MUL_OVERFLOW,
+    BUILTIN_ADD_OVERFLOW_P,
+    BUILTIN_SUB_OVERFLOW_P,
+    BUILTIN_MUL_OVERFLOW_P,
     BUILTIN_OBJECT_SIZE,
     BUILTIN_RETURN_ADDRESS,
     BUILTIN_FRAME_ADDRESS,
@@ -1696,6 +1750,10 @@ static builtin_kind_t builtin_kind(const char *name) {
         strcmp(name, "__builtin_ctzll") == 0) {
         return BUILTIN_CTZ;
     }
+    if (strcmp(name, "__builtin_popcount") == 0 || strcmp(name, "__builtin_popcountl") == 0 ||
+        strcmp(name, "__builtin_popcountll") == 0) {
+        return BUILTIN_POPCOUNT;
+    }
     if (strcmp(name, "__builtin_add_overflow") == 0) {
         return BUILTIN_ADD_OVERFLOW;
     }
@@ -1704,6 +1762,15 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_mul_overflow") == 0) {
         return BUILTIN_MUL_OVERFLOW;
+    }
+    if (strcmp(name, "__builtin_add_overflow_p") == 0) {
+        return BUILTIN_ADD_OVERFLOW_P;
+    }
+    if (strcmp(name, "__builtin_sub_overflow_p") == 0) {
+        return BUILTIN_SUB_OVERFLOW_P;
+    }
+    if (strcmp(name, "__builtin_mul_overflow_p") == 0) {
+        return BUILTIN_MUL_OVERFLOW_P;
     }
     if (strcmp(name, "__builtin_object_size") == 0) {
         return BUILTIN_OBJECT_SIZE;
@@ -1839,6 +1906,18 @@ static long type_size_bytes(cc_type_t t) {
     case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
     case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
     case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT:
+    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE:
         return g_pointer_size_bytes;
     default:
         return -1;
@@ -1977,7 +2056,8 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
 static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
                                     var_entry_t *vars, size_t var_count, int depth, cc_diag_t *diag);
 static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, cc_type_t array_type,
-                                   int array_struct_id, long array_len, cc_expr_t *init, var_entry_t *vars,
+                                   int array_struct_id, long array_len, int array_ndim, const long *array_dims,
+                                   cc_expr_t *init, var_entry_t *vars,
                                    size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag);
 static cc_expr_t *unwrap_scalar_initializer_expr(cc_expr_t *init, cc_diag_t *diag);
 static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t **vars, size_t *var_count, int depth,
@@ -2005,7 +2085,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         set_diag(diag, "null expression in semantic analysis");
         return -1;
     }
-    expr_clear_array_meta(e);
+    if (e->kind != CC_EXPR_CAST) {
+        expr_clear_array_meta(e);
+    }
 
     switch (e->kind) {
     case CC_EXPR_INT:
@@ -2558,6 +2640,22 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = -1;
             return 0;
         }
+        if (bk == BUILTIN_POPCOUNT) {
+            if (e->arg_count != 1) {
+                set_diag(diag, "__builtin_popcount expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_integral_type(e->args[0]->value_type)) {
+                set_diag(diag, "__builtin_popcount argument must be integral");
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
+            e->struct_id = -1;
+            return 0;
+        }
         if (bk == BUILTIN_ADD_OVERFLOW || bk == BUILTIN_SUB_OVERFLOW || bk == BUILTIN_MUL_OVERFLOW) {
             cc_type_t out_elem;
             if (e->arg_count != 3) {
@@ -2580,6 +2678,25 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             if (!is_integral_type(e->args[0]->value_type) || !is_integral_type(e->args[1]->value_type)) {
                 set_diag(diag, "overflow builtin operands must be integers");
+                return -1;
+            }
+            e->value_type = CC_TYPE_INT;
+            e->struct_id = -1;
+            return 0;
+        }
+        if (bk == BUILTIN_ADD_OVERFLOW_P || bk == BUILTIN_SUB_OVERFLOW_P || bk == BUILTIN_MUL_OVERFLOW_P) {
+            if (e->arg_count != 3) {
+                set_diag(diag, "__builtin_*_overflow_p expects exactly 3 arguments");
+                return -1;
+            }
+            for (i = 0; i < 3; ++i) {
+                if (check_expr(tu, e->args[i], vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+            }
+            if (!is_integral_type(e->args[0]->value_type) || !is_integral_type(e->args[1]->value_type) ||
+                !is_integral_type(e->args[2]->value_type)) {
+                set_diag(diag, "overflow_p builtin operands must be integral");
                 return -1;
             }
             e->value_type = CC_TYPE_INT;
@@ -3097,10 +3214,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             expr_copy_array_meta(e, e->lhs->lhs);
             return 0;
         }
-        if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL && find_function(tu, e->lhs->ident) != NULL) {
-            e->value_type = e->lhs->value_type;
-            e->struct_id = e->lhs->struct_id;
-            return 0;
+        if (e->lhs->kind == CC_EXPR_IDENT && e->lhs->ident != NULL) {
+            int vidx = vars_find_visible(vars, var_count, e->lhs->ident, depth);
+            if (vidx < 0 && find_function(tu, e->lhs->ident) != NULL) {
+                e->value_type = e->lhs->value_type;
+                e->struct_id = e->lhs->struct_id;
+                return 0;
+            }
         }
         if (e->lhs->kind == CC_EXPR_CAST && e->lhs->value_type == CC_TYPE_VOID && e->lhs->struct_id >= 0) {
             e->value_type = CC_TYPE_PTR_VOID;
@@ -3229,11 +3349,40 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     }
 
     case CC_EXPR_CAST:
+        if (!(e->lhs != NULL && e->lhs->kind == CC_EXPR_INIT_LIST && e->array_ndim > 0 && is_pointer_type(e->aux_type))) {
+            expr_clear_array_meta(e);
+        }
         if (e->lhs == NULL) {
             set_diag(diag, "malformed cast expression");
             return -1;
         }
         if (e->lhs->kind == CC_EXPR_INIT_LIST) {
+            if (e->array_ndim > 0 && is_pointer_type(e->aux_type)) {
+                long cast_array_len = e->array_dims[0] > 0 ? e->array_dims[0] : 0;
+                long inferred_len = -1;
+                if (check_array_initializer(tu, "<compound-literal>", e->aux_type, e->aux_struct_id, cast_array_len,
+                                            e->array_ndim, e->array_dims, e->lhs, vars, var_count, depth, &inferred_len,
+                                            diag) != 0) {
+                    return -1;
+                }
+                if (cast_array_len == 0 && inferred_len > 0) {
+                    e->array_dims[0] = inferred_len;
+                }
+                e->value_type = e->aux_type;
+                e->struct_id = e->aux_struct_id;
+                return 0;
+            }
+            if (is_pointer_type(e->aux_type)) {
+                long inferred_len = -1;
+                long fallback_dims[CC_MAX_ARRAY_DIMS] = {0, 0, 0, 0};
+                if (check_array_initializer(tu, "<compound-literal>", e->aux_type, e->aux_struct_id, 0, 1, fallback_dims,
+                                            e->lhs, vars, var_count, depth, &inferred_len, diag) != 0) {
+                    return -1;
+                }
+                e->value_type = e->aux_type;
+                e->struct_id = e->aux_struct_id;
+                return 0;
+            }
             if (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) {
                 if (check_struct_initializer(tu, "<compound-literal>", e->aux_struct_id, e->lhs, vars, var_count,
                                              depth, diag) != 0) {
@@ -3790,8 +3939,8 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
         if (is_array_object_type(m->type, m->array_len, m->array_ndim)) {
             cc_type_t elem_type = ptr_base_type(m->type);
             if (item->kind == CC_EXPR_INIT_LIST) {
-                if (check_array_initializer(tu, name, m->type, m->type_struct_id, m->array_len, item, vars, var_count,
-                                            depth, NULL, diag) != 0) {
+                if (check_array_initializer(tu, name, m->type, m->type_struct_id, m->array_len, m->array_ndim,
+                                            m->array_dims, item, vars, var_count, depth, NULL, diag) != 0) {
                     return -1;
                 }
                 continue;
@@ -3843,7 +3992,8 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
 }
 
 static int check_array_initializer(const cc_translation_unit_t *tu, const char *name, cc_type_t array_type,
-                                   int array_struct_id, long array_len, cc_expr_t *init, var_entry_t *vars,
+                                   int array_struct_id, long array_len, int array_ndim, const long *array_dims,
+                                   cc_expr_t *init, var_entry_t *vars,
                                    size_t var_count, int depth, long *out_inferred_len, cc_diag_t *diag) {
     size_t i;
     cc_type_t elem_type;
@@ -3882,6 +4032,22 @@ static int check_array_initializer(const cc_translation_unit_t *tu, const char *
     }
     for (i = 0; i < init->arg_count; ++i) {
         cc_expr_t *item = init->args[i];
+        if (array_ndim > 1) {
+            long child_len = 0;
+            if (array_dims != NULL && array_ndim - 1 < CC_MAX_ARRAY_DIMS) {
+                child_len = array_dims[1];
+            }
+            if (item->kind != CC_EXPR_INIT_LIST) {
+                set_diag(diag, "nested array initializer must use braces");
+                return -1;
+            }
+            if (check_array_initializer(tu, name, elem_type, array_struct_id, child_len, array_ndim - 1,
+                                        array_dims != NULL ? array_dims + 1 : NULL, item, vars, var_count, depth, NULL,
+                                        diag) != 0) {
+                return -1;
+            }
+            continue;
+        }
         if (elem_type == CC_TYPE_VOID && array_struct_id >= 0) {
             if (item->kind != CC_EXPR_INIT_LIST) {
                 /*
@@ -4053,8 +4219,9 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
                     if (is_pointer_type(s->type) && s->array_len >= 0) {
                         long inferred_len = -1;
-                        if (check_array_initializer(tu, s->decl_name, s->type, s->type_struct_id, s->array_len, s->expr,
-                                                    *vars, *var_count, depth, &inferred_len, diag) != 0) {
+                        if (check_array_initializer(tu, s->decl_name, s->type, s->type_struct_id, s->array_len,
+                                                    s->array_ndim, s->array_dims, s->expr, *vars, *var_count, depth,
+                                                    &inferred_len, diag) != 0) {
                             free((*vars)[*var_count - 1].name);
                             (*var_count)--;
                             return -1;
@@ -4764,8 +4931,8 @@ int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag) {
             if (g->init->kind == CC_EXPR_INIT_LIST) {
                 if (is_pointer_type(g->type) && g->array_len >= 0) {
                     long inferred_len = -1;
-                    if (check_array_initializer(tu, g->name, g->type, g->type_struct_id, g->array_len, g->init, NULL,
-                                                0, 0, &inferred_len, diag) != 0) {
+                    if (check_array_initializer(tu, g->name, g->type, g->type_struct_id, g->array_len, g->array_ndim,
+                                                g->array_dims, g->init, NULL, 0, 0, &inferred_len, diag) != 0) {
                         goto fail_global_item;
                     }
                     if (g->array_len == 0 && inferred_len > 0) {

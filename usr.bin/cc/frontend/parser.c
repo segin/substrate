@@ -246,6 +246,11 @@ typedef struct {
 
 static int next_tok(parser_t *p);
 
+static void set_ptr_depth_diag(parser_t *p, int marker_line) {
+    (void)marker_line;
+    set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+}
+
 static const cc_function_t *parser_find_function_decl(parser_t *p, const char *name) {
     const cc_function_t *best = NULL;
     int best_score = -1;
@@ -840,7 +845,7 @@ static void parser_free_enum_tags(parser_t *p) {
 }
 
 static int is_pointer_type(cc_type_t t) {
-    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
+    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
 }
 
 static int type_carries_struct_id(cc_type_t t) {
@@ -1924,7 +1929,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     while (is_ptr_declarator_tok(p->tok.kind)) {
                         mtype = ptr_of_type(mtype);
                         if (mtype == CC_TYPE_VOID) {
-                            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                            set_ptr_depth_diag(p, __LINE__);
                             return -1;
                         }
                         if (next_tok(p) != 0) {
@@ -1943,7 +1948,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         while (is_ptr_declarator_tok(p->tok.kind)) {
                             mtype = ptr_of_type(mtype);
                             if (mtype == CC_TYPE_VOID) {
-                                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                                set_ptr_depth_diag(p, __LINE__);
                                 return -1;
                             }
                             if (next_tok(p) != 0) {
@@ -2747,6 +2752,30 @@ static cc_type_t ptr_of_type(cc_type_t t) {
         return CC_TYPE_PTR_PTR_PTR_PTR_FLOAT;
     case CC_TYPE_PTR_PTR_PTR_DOUBLE:
         return CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
+    case CC_TYPE_PTR_PTR_PTR_PTR_VOID:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID;
+    case CC_TYPE_PTR_PTR_PTR_PTR_BOOL:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL;
+    case CC_TYPE_PTR_PTR_PTR_PTR_CHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR;
+    case CC_TYPE_PTR_PTR_PTR_PTR_UCHAR:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR;
+    case CC_TYPE_PTR_PTR_PTR_PTR_SHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_USHORT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_INT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_UINT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG;
+    case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT;
+    case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
+        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
     default:
         return CC_TYPE_VOID;
     }
@@ -2920,7 +2949,7 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
     while (is_ptr_declarator_tok(p->tok.kind)) {
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+            set_ptr_depth_diag(p, __LINE__);
             return -1;
         }
         if (next_tok(p) != 0) {
@@ -2946,7 +2975,7 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         while (is_ptr_declarator_tok(p->tok.kind)) {
             ty = ptr_of_type(ty);
             if (ty == CC_TYPE_VOID) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                set_ptr_depth_diag(p, __LINE__);
                 return -1;
             }
             if (next_tok(p) != 0) {
@@ -3230,8 +3259,11 @@ static int parse_array_suffix(parser_t *p, cc_type_t *io_type, long *out_array_l
         int saw_const_n = 0;
         cc_type_t ty = ptr_of_type(*io_type);
         if (ty == CC_TYPE_VOID) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
-            return -1;
+            /*
+             * Array rank is tracked separately; saturate pointer encoding
+             * when the element type is already at max representable depth.
+             */
+            ty = *io_type;
         }
         *io_type = ty;
         if (parse_array_extent(p, &n, &saw_const_n) != 0) {
@@ -4248,7 +4280,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     while (is_ptr_declarator_tok(p->tok.kind)) {
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+            set_ptr_depth_diag(p, __LINE__);
             return -1;
         }
         if (next_tok(p) != 0) {
@@ -4290,7 +4322,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         while (is_ptr_declarator_tok(p->tok.kind)) {
             ty = ptr_of_type(ty);
             if (ty == CC_TYPE_VOID) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                set_ptr_depth_diag(p, __LINE__);
                 return -1;
             }
             if (next_tok(p) != 0) {
@@ -4310,7 +4342,7 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         while (p->tok.kind == TOK_LBRACK) {
             ty = ptr_of_type(ty);
             if (ty == CC_TYPE_VOID) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                set_ptr_depth_diag(p, __LINE__);
                 return -1;
             }
             if (next_tok(p) != 0) {
@@ -4352,7 +4384,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
     while (is_ptr_declarator_tok(p->tok.kind)) {
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+            set_ptr_depth_diag(p, __LINE__);
             return -1;
         }
         if (next_tok(p) != 0) {
@@ -4378,7 +4410,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         while (is_ptr_declarator_tok(p->tok.kind)) {
             ty = ptr_of_type(ty);
             if (ty == CC_TYPE_VOID) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                set_ptr_depth_diag(p, __LINE__);
                 return -1;
             }
             if (next_tok(p) != 0) {
@@ -4410,7 +4442,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         while (p->tok.kind == TOK_LBRACK) {
             ty = ptr_of_type(ty);
             if (ty == CC_TYPE_VOID) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                set_ptr_depth_diag(p, __LINE__);
                 free(*out_name);
                 *out_name = NULL;
                 return -1;
@@ -4466,7 +4498,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
     while (p->tok.kind == TOK_LBRACK) {
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
-            set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+            set_ptr_depth_diag(p, __LINE__);
             free(*out_name);
             *out_name = NULL;
             return -1;
@@ -4504,7 +4536,7 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         if (!grouped_ptr_decl) {
             ty = ptr_of_type(ty);
             if (ty == CC_TYPE_VOID) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                set_ptr_depth_diag(p, __LINE__);
                 free(*out_name);
                 *out_name = NULL;
                 return -1;
@@ -5246,7 +5278,7 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
         while (p->tok.kind == TOK_LBRACK || p->tok.kind == TOK_LPAREN) {
             assoc.type = ptr_of_type(assoc.type);
             if (assoc.type == CC_TYPE_VOID) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                set_ptr_depth_diag(p, __LINE__);
                 free_expr(control);
                 free(items);
                 return NULL;
@@ -6684,7 +6716,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             while (is_ptr_declarator_tok(p->tok.kind)) {
                 cc_type_t pty = ptr_of_type(e->aux_type);
                 if (pty == CC_TYPE_VOID) {
-                    set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                    set_ptr_depth_diag(p, __LINE__);
                     free_expr(e);
                     return NULL;
                 }
@@ -6719,6 +6751,13 @@ static cc_expr_t *parse_unary(parser_t *p) {
             if (parse_array_suffix(p, &e->aux_type, &arr_len, &arr_ndim, arr_dims) != 0) {
                 free_expr(e);
                 return NULL;
+            }
+            if (arr_ndim > 0) {
+                int ai;
+                e->array_ndim = arr_ndim;
+                for (ai = 0; ai < arr_ndim; ++ai) {
+                    e->array_dims[ai] = arr_dims[ai];
+                }
             }
         }
         if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
@@ -7560,7 +7599,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             while (is_ptr_declarator_tok(p->tok.kind)) {
                 s.type = ptr_of_type(s.type);
                 if (s.type == CC_TYPE_VOID) {
-                    set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                    set_ptr_depth_diag(p, __LINE__);
                     free_stmt(&s);
                     return -1;
                 }
@@ -7586,7 +7625,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             while (is_ptr_declarator_tok(p->tok.kind)) {
                 s.type = ptr_of_type(s.type);
                 if (s.type == CC_TYPE_VOID) {
-                    set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                    set_ptr_depth_diag(p, __LINE__);
                     free_stmt(&s);
                     return -1;
                 }
@@ -7610,7 +7649,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 while (is_ptr_declarator_tok(p->tok.kind)) {
                     s.type = ptr_of_type(s.type);
                     if (s.type == CC_TYPE_VOID) {
-                        set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                        set_ptr_depth_diag(p, __LINE__);
                         free_stmt(&s);
                         return -1;
                     }
@@ -7686,7 +7725,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 if (saw_nested_wrapped) {
                     s.type = ptr_of_type(s.type);
                     if (s.type == CC_TYPE_VOID) {
-                        set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                        set_ptr_depth_diag(p, __LINE__);
                         free_stmt(&s);
                         return -1;
                     }
@@ -8723,7 +8762,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
         while (is_ptr_declarator_tok(p->tok.kind)) {
             f->ret_type = ptr_of_type(f->ret_type);
             if (f->ret_type == CC_TYPE_VOID) {
-                set_diag(p->diag, p->tok.line, p->tok.col, "pointer depth > 4 is not yet supported");
+                set_ptr_depth_diag(p, __LINE__);
                 decl_attrs_clear(&spec_attrs);
                 return -1;
             }
