@@ -26,11 +26,13 @@ sys/kernel.bin
 # Logs
 *.log
 
-# Userland binaries (specific ignores based on directory structure)
-# It's better to ignore by path if possible or clean before commit, 
-# but here are common patterns for this project structure:
+# Userland binaries — ignore everything inside bin/ and sbin/ subdirs
+# except source files.  bin/* hides the directory entries, !bin/*/
+# re-includes subdirs, then bin/*/* hides the FILES inside them,
+# and the negation patterns re-include only source artifacts.
 bin/*
 !bin/*/
+bin/*/*
 !bin/*/Makefile
 !bin/*/*.c
 !bin/*/*.h
@@ -39,6 +41,7 @@ bin/*
 
 sbin/*
 !sbin/*/
+sbin/*/*
 !sbin/*/Makefile
 !sbin/*/*.c
 !sbin/*/*.h
