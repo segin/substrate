@@ -488,539 +488,616 @@ This document tracks the progress and remaining tasks for the Substrate operatin
                 - [ ] Internal doc: x86_64 pmap architecture (4-level, PCID, NX).
                 - [ ] Internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros).
                 - [ ] Internal doc: large page promotion/demotion strategy.
-        - [x] **VM Subsystem (Machine Independent - Massive Refactor):** <!-- vm_map.c (309), vm_fault.c (157), vm_object.c (3039), vm_page.c (17685), vm_pager.c (4915), vm_swap.c (4972), uma_core.c (705) -->
-            - [x] **Rewrite:** **VM Map:** `vm_map` structure representing an address space.
-            - [x] **Rewrite:** **VM Entries:** `vm_map_entry` representing regions (text, data, stack).
-            - [x] **Rewrite:** **VM Objects:** `vm_object` abstracting backing store (Anonymous, VNode/File).
-            - [x] **Rewrite:** **Fault Handler:** High-level `vm_fault` resolving faults against VM Objects.
-            - [x] **Rewrite:** **Copy-on-Write (CoW):** Implement `vm_fault` logic for shared writable pages.
-            - [x] **Rewrite:** **Swap Subsystem:**
-                - [x] **Pager:** Implement a swap pager to move pages to/from disk.
-                - [x] **Backing Store:** Support swap files or partitions.
-                - [x] **Policy:** Implement page replacement algorithm (Clock/LRU).
-            - [x] **Rewrite:** **Verification:** Implement Kernel-side Unit and Property tests for CoW and Swap.
-            - [x] **Advanced Features:**
-                - [x] **File-backed mmap (`MAP_FILE`):**
-                    - [x] **VNode Pager:** Interface to trigger VFS `read` operations on missing pages.
-                    - [x] **Write-back:** Track dirty pages and implement `msync` to flush to disk.
-                - [x] **Reference Counting & Shared Memory:**
-                    - [x] **vm_page_t Refcounts:** Track number of mappings pointing to physical frames.
-                    - [x] **vm_object Refcounts:** Track number of regions sharing the same backing store.
-                    - [x] **Shared Mappings (`MAP_SHARED`):** write-through logic for multi-process memory sharing.
-                - [x] **Copy-on-Write (COW):**
-                    - [x] **Write-Protection:** Mark pages read-only (`!PTE_RW`) in child on fork.
-                    - [x] **Fault Handling:**
-                        - [x] Detect write fault on present, read-only CoW page.
-                        - [x] Allocate new frame.
-                        - [x] Copy content from original frame.
-                        - [x] Update PTE to point to new frame with `PTE_RW`.
-                        - [x] Decrement refcount on original frame.
-                - [x] **Lazy Faulting Improvements:**
-                    - [x] **Demand Paging:** Only allocate frames when accessed (Zero-fill on demand).
-                    - [x] **Prefaulting:** Heuristic to load surrounding pages during IO to reduce disk seeks.
-    - [x] **Kernel Allocator (UMA/Zone):**
-    - [x] **Kernel Allocator (UMA/Slab Refactor):**
-        - [x] **UMA Core (`uma_core.c`):**
-            - [x] **Per-CPU Caches:** Implement "magazine" layer for lockless fast-path allocations.
-            - [x] **Alignment/Coloring:** CPU cache line alignment and page coloring.
-            - [x] **Constructors/Destructors:** Callbacks for object initialization/teardown.
-            - [x] **Reclamation:** Shrinker callbacks to free unused slabs under memory pressure.
-        - [x] **Debugging & Safety:**
-            - [x] **Redzones:** Guard bytes to detect buffer checking.
-            - [x] **Poisoning:** Fill freed memory with patterns (0xDEADBEEF) to catch use-after-free.
-            - [x] **Leak Detection:** Tracking active allocations.
-        - [x] **General Allocator (`kmem` / `malloc`):**
-            - [x] **Power-of-Two Zones:** Back `malloc` with UMA zones for sizes 16, 32, ... 4096.
-            - [x] **Large Allocations:** Bypass UMA for >4KB allocs (direct `vm_map` allocation).
-            - [x] **Statistics:** Track memory usage by `malloc_type` (subsystem).
-        - [x] **Technical Debt & Optimization (Audit Findings):**
-            - [x] **Refactor `uma_find_slab()`:** Replace O(N) linear search with hash table or RB-tree.
-            - [x] **Safety:** Add protection against freeing foreign pointers (pointer tracking).
-            - [x] **Redzones:** Enhance redzones with canary values for corruption detection.
-            - [x] **Reclamation:** Implement bucket draining back to slabs.
-            - [x] **Pressure:** Implement true memory pressure feedback (active reclamation).
-    - [x] **User Memory:**
-        - [x] Implement `mmap`, `munmap`, `brk` system calls.
-    - [x] **SMP & Interrupts:**
-        - [x] **Discovery:** Parse ACPI MADT (APIC) or MP Tables to find cores.
-        - [x] **Local APIC (LAPIC):****
-            - [x] **Initialization:** Map LAPIC MMIO base (usually 0xFEE00000).
-            - [x] **Spurious Interrupts:** Set Spurious Interrupt Vector Register (SVR).
-            - [x] **Timer:****
-                - [x] Calibrate against PIT or ACPI PM Timer.
-                - [x] Set Divider Configuration Register (DCR).
-                - [x] Implement Periodic Mode (for scheduler).
-                - [x] Implement One-Shot Mode (for high-res sleeps).
-            - [x] **Error Handling:** Setup Error Status Register (ESR) and LVT Error vector.
-            - [x] **IPI:** Implement ICR (Interrupt Command Register) writing logic.
-        - [x] **IO-APIC:**
-            - [x] **Enumeration:** Find IO-APIC(s) from MADT.
-            - [x] **Access:** Implement `ioapic_read`/`ioapic_write` (Index/Window registers).
-            - [x] **Redirection Table:**
-                - [x] Mask/Unmask IRQs.
-                - [x] Set Delivery Mode (Fixed/Lowest Priority).
-                - [x] Set Destination (Physical/Logical).
-                - [x] Set Polarity and Trigger Mode (Active High/Low, Edge/Level).
-            - [x] **Legacy Mapping:** Map ISA IRQs (0-15) to Global System Interrupts (GSIs).
-        - [x] **SMP Support:**
-            - [x] **Boot Logic:** Ensure Single Processor (BSP) boot works flawlessly by default.
-            - [x] **AP Bootstrap:**
-                - [x] Allocate low-memory trampoline page (under 1MB).
-                - [x] Copy 16-bit real mode entry code to trampoline.
-                - [x] Send INIT IPI -> Wait -> SIPI -> Wait -> SIPI sequence.
-            - [x] **Per-CPU Data:**
-                - [x] implement `gs_base` (or `fs`) storage for CPU-local variables.
-                - [x] Per-CPU Scheduler Runqueues.
-                - [x] Per-CPU GDTs and TSSs.
-            - [x] **Synchronization:**
-                - [x] Validate Spinlock implementation (ticket locks or MCS locks).
-                - [x] Audit all global data structures for race conditions.
-        - [x] **Locking:** Implement spinlocks with `lock` prefix and deadlock detection.
-- [x] **Scheduling (Scheduler Refactor):**
-    - [x] **Algorithm (ULE/MLFQ):****
-        - [x] **Multilevel Queues:** Separate queues for Realtime, Timeshare, and Idle priority classes.
-        - [x] **Interactiveness:** Heuristics to boost interactive I/O-bound threads.
-        - [x] **Decay:** Handling priority decay for CPU handling threads.
-    - [x] **SMP Scalability:****
-        - [x] **Per-CPU Runqueues:** Remove global scheduler lock; lock individual runqueues.
-        - [x] **Load Balancing:** "Work Stealing" logic when a CPU goes idle.
-        - [x] **Affinity:** Respect `sched_setaffinity` masks.
-        - [x] **IPI:** Inter-Processor Interrupts for preemption of remote CPUs.
-    - [x] **Synchronization Primitives:****
-        - [x] **Turnstiles:** Priority Inheritance implementation for Mutexes (prevent inversion).
-        - [x] **Sleep Queues:** Hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
-    - [x] **Context Switching:****
-        - [x] **FPU Lazy Save:** `Unordered` exception logic for FPU context.
-        - [x] **PCB:** Refine Process Control Block for thread/process split.
-    - [x] **Kernel Process (PID 0):**
-    - [x] **Process Bitness Tracking:**
-        - [x] **Definition:** Define `enum proc_bitness` (16/32/64) and add field to process struct. <!-- proc.h, sysinfo.h -->
-        - [x] **API:** Implement `proc_set_bitness()` and `proc_get_bitness()` with permission checks. <!-- pm.h, process.c -->
-        - [x] **Tests:** Unit/Integration tests for bitness inheritance and transitions. <!-- test_bitness.c -->
-        - [x] **Swapper/Idle:** The kernel itself is PID 0.
-        - [x] **Responsibilities:** Pageout daemon work, Scheduler idle loop.
-        - [x] **Context:** Ensures a valid process context always exists (never switch to NULL).
-- [x] **Synchronization:** <!-- Spinlocks, Mutexes, Semaphores, Futex all complete -->
-    - [x] Implement Spinlocks, Mutexes, and Semaphores.
-    - [x] **Userspace Synchronization (Futex):** <!-- Core, Advanced, Performance all complete -->
-        - [x] **Core Operations:** <!-- FUTEX_WAIT, FUTEX_WAKE, FUTEX_REQUEUE all implemented in futex.c -->
-            - [x] `FUTEX_WAIT`: Atomic compare-and-sleep.
-            - [x] `FUTEX_WAKE`: Wakeup N waiters.
-            - [x] `FUTEX_REQUEUE`: Move waiters to another lock.
-        - [x] **Advanced Features:** <!-- ROBUST_LIST and PI implemented in futex.c -->
-            - [x] `FUTEX_ROBUST_LIST`: Handle owner death (cleanup). <!-- futex.c:futex_exit_cleanup, sys_set_robust_list, sys_get_robust_list -->
-            - [x] `FUTEX_PI`: Priority Inheritance support. <!-- futex.c:futex_lock_pi, futex_unlock_pi, pi_boost_owner, pi_deboost_owner -->
-        - [x] **Performance:** <!-- validated CMPXCHG and hash table bucketing -->
-            - [x] Validated user-space access (CMPXCHG). <!-- futex.c:futex_cmpxchg_user, futex_read_user, validate_uaddr -->
-            - [x] Hash table bucketing for wait queues.
-    - [x] **NTSYNC Driver (Windows NT Sync Primitives):** <!-- ntsync.h, ntsync.c, test_ntsync.c -->
-        - [x] **Core Infrastructure:** <!-- ntsync.c:ntsync_init, ntsync_device -->
-            - [x] Create `/dev/ntsync` char device with instance-based isolation. <!-- ntsync.c:ntsync_init, devfs_register_device -->
-            - [x] Implement ntsync_instance structure (per open file description). <!-- ntsync.c:ntsync_instance_t, ntsync_open_callback -->
-            - [x] Object handle management (object FDs returned from ioctls). <!-- ntsync.c:ntsync_create_object -->
-        - [x] **Semaphore Object:** <!-- ntsync.c:NTSYNC_OBJ_SEM -->
-            - [x] `NTSYNC_IOC_CREATE_SEM`: Create semaphore (count, max). <!-- ntsync.c:ntsync_create_object -->
-            - [x] `NTSYNC_IOC_SEM_POST`: Increment semaphore count. <!-- ntsync.c:ntsync_sem_post -->
-            - [x] `NTSYNC_IOC_READ_SEM`: Query semaphore state. <!-- ntsync.c:ntsync_read_sem -->
-        - [x] **Mutex Object:** <!-- ntsync.c:NTSYNC_OBJ_MUTEX -->
-            - [x] `NTSYNC_IOC_CREATE_MUTEX`: Create mutex (owner, count). <!-- ntsync.c:ntsync_create_object -->
-            - [x] `NTSYNC_IOC_MUTEX_UNLOCK`: Release mutex ownership. <!-- ntsync.c:ntsync_mutex_unlock -->
-            - [x] `NTSYNC_IOC_READ_MUTEX`: Query mutex state. <!-- ntsync.c:ntsync_read_mutex -->
-            - [x] `NTSYNC_IOC_KILL_OWNER`: Mark mutex as abandoned. <!-- ntsync.c:ntsync_kill_owner -->
-        - [x] **Event Object:** <!-- ntsync.c:NTSYNC_OBJ_EVENT -->
-            - [x] `NTSYNC_IOC_CREATE_EVENT`: Create event (signaled, manual/auto). <!-- ntsync.c:ntsync_create_object -->
-            - [x] `NTSYNC_IOC_SET_EVENT`: Signal event. <!-- ntsync.c:ntsync_set_event -->
-            - [x] `NTSYNC_IOC_RESET_EVENT`: Designal event. <!-- ntsync.c:ntsync_reset_event -->
-            - [x] `NTSYNC_IOC_PULSE_EVENT`: Signal then immediately reset. <!-- ntsync.c:ntsync_pulse_event -->
-            - [x] `NTSYNC_IOC_READ_EVENT`: Query event state. <!-- ntsync.c:ntsync_read_event -->
-        - [x] **Wait Operations:** <!-- ntsync.c:ntsync_wait_any, ntsync_wait_all -->
-            - [x] `NTSYNC_IOC_WAIT_ANY`: Wait for any of N objects. <!-- ntsync.c:ntsync_wait_any -->
-            - [x] `NTSYNC_IOC_WAIT_ALL`: Wait for all of N objects simultaneously. <!-- ntsync.c:ntsync_wait_all -->
-            - [x] Alert event support (optional extra wakeup source). <!-- ntsync.c:ntsync_wait_args.alert handling -->
-            - [x] Timeout handling (MONOTONIC/REALTIME clocks). <!-- ntsync.h:NTSYNC_WAIT_REALTIME, basic framework -->
-        - [x] **Internal Mechanics:** <!-- ntsync.c core implementation -->
-            - [x] Wait queue per object with priority ordering. <!-- ntsync.c:waiter_enqueue (priority ordered) -->
-            - [x] Atomic acquisition semantics. <!-- ntsync.c:ntsync_acquire with spinlocks -->
-            - [x] Cross-object atomicity for WAIT_ALL. <!-- ntsync.c:ntsync_wait_all multi-lock -->
-- [ ] **Signals:**
-    - [x] **Signal Infrastructure:** <!-- proc.h, signal.h, sigprop.c -->
-        - [x] **Per-Process Signal State (`process_t`):** <!-- proc.h:55-57 -->
-            - [x] `sig_actions[NSIG]`: Array of `struct sigaction` for each signal. <!-- proc.h:55, test_signal.c -->
-            - [x] `sig_catch`: Bitmask of signals with handlers (not SIG_DFL/SIG_IGN). <!-- proc.h:56, signal.c:sys_sigaction -->
-            - [x] `sig_ignore`: Bitmask of signals set to SIG_IGN. <!-- proc.h:57, signal.c:sys_sigaction -->
-        - [x] **Per-Thread Signal State (`thread_t`):** <!-- proc.h:149-153 -->
-            - [x] `sig_pending`: Bitmask of pending signals for this thread. <!-- proc.h:150 -->
-            - [x] `sig_mask`: Current signal mask (blocked signals). <!-- proc.h:151 -->
-            - [x] `sig_alt_stack`: Alternative signal stack (`stack_t`). <!-- proc.h:152 -->
-            - [x] `sig_on_stack`: Flag indicating currently executing on alt stack. <!-- proc.h:153 -->
-        - [x] **Signal Properties Table:** <!-- sigprop.c, signal.h:63-74 -->
-            - [x] Default action table: Terminate, Core, Stop, Ignore, Continue. <!-- sigprop.c:22-52 -->
-            - [x] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT. <!-- signal.h:63-72, sigprop.c:22 -->
-            - [x] Unmaskable signals: SIGKILL, SIGSTOP always have effect. <!-- sigprop.c:33,40 SA_CANTMASK -->
-    - [ ] **Signal Syscalls:**
-        - [ ] **`sys_sigaction(sig, act, oact)`:** <!-- signal.c:14-37 implemented -->
-            - [x] Validate signal number (1 <= sig <= NSIG, not SIGKILL/SIGSTOP). <!-- signal.c:15 -->
-            - [x] Return old action in `oact` if non-NULL. <!-- signal.c:19 -->
-            - [x] Install new action from `act` if non-NULL. <!-- signal.c:21-22 -->
-            - [x] Update `sig_catch`/`sig_ignore` bitmasks. <!-- signal.c:24-35 -->
-            - [x] Handle `SA_RESETHAND` (one-shot handler). <!-- signal.c:237 -->
-            - [x] Handle `SA_NODEFER` (don't block signal during handler). <!-- signal.c:231 -->
-            - [x] Handle `SA_RESTART` (restart interrupted syscalls). <!-- signal.c:278-318, syscall.c:341-347,455-459 -->
-            - [x] Handle `SA_NOCLDSTOP` (don't send SIGCHLD for stopped children). <!-- signal.c:83-86,237-241, process.c:283-296 -->
-            - [x] Handle `SA_NOCLDWAIT` (don't create zombies for children). <!-- process.c:281-303 -->
-        - [x] **`sys_sigprocmask(how, set, oset)`:** <!-- signal.c:40-50 implemented -->
-            - [x] Return old mask in `oset` if non-NULL. <!-- signal.c:41 -->
-            - [x] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK. <!-- signal.c:45-47 -->
-            - [x] Filter out SIGKILL/SIGSTOP from mask (cannot be blocked). <!-- signal.c:44 -->
-        - [x] **`sys_sigpending(set)`:** <!-- signal.c:52-55 implemented -->
-            - [x] Return pending & ~masked signals for current thread. <!-- signal.c:53, test_signal.c test_sigpending_masking -->
-        - [x] **`sys_sigsuspend(mask)`:** <!-- signal.c:57-68 implemented -->
-            - [x] Atomically set mask and sleep until signal arrives. <!-- signal.c:62-63 -->
-            - [x] Restore original mask on return. <!-- signal.c:66 -->
-            - [x] Always return -1 (EINTR). <!-- signal.c:67 -->
-        - [x] **`sys_sigaltstack(ss, oss)`:** <!-- signal.c:232-247 implemented -->
-            - [x] Return current alt stack in `oss`. <!-- signal.c:234 -->
-            - [x] Install new alt stack from `ss`. <!-- signal.c:241 -->
-            - [x] Validate `ss_size >= MINSIGSTKSZ`. <!-- signal.c:243 -->
-            - [x] Handle `SS_DISABLE` flag. <!-- signal.c:239 -->
-            - [x] Error if currently executing on alt stack. <!-- signal.c:238 -->
-        - [x] **`sys_kill(pid, sig)`:** <!-- signal.c:129-169 implemented -->
-            - [x] `pid > 0`: Send to specific process. <!-- signal.c:133 -->
-            - [x] `pid == 0`: Send to current process group. <!-- signal.c:149 -->
-            - [x] `pid == -1`: Send to all processes (except init). <!-- signal.c:155 -->
-            - [x] `pid < -1`: Send to process group `-pid`. <!-- signal.c:166 -->
-            - [x] `sig == 0`: Permission check only (existence check). <!-- signal.c:143 -->
-            - [x] Permission checks: Same UID or CAP_KILL. <!-- signal.c:145 -->
-        - [x] **`sys_sigreturn(scp)`:** <!-- arch/i386/signal.c:94-128 implemented -->
-            - [x] Validate `sigcontext` pointer is in user space. <!-- signal.c:96 -->
-            - [x] Verify `cs` and `ss` have RPL=3 (user mode). <!-- signal.c:105 -->
-            - [x] Restore all general-purpose registers. <!-- signal.c:109-120 -->
-            - [x] Restore `eflags` (mask sensitive bits: IOPL, VM, RF). <!-- signal.c:123 -->
-            - [x] Restore `eip` to original program counter. <!-- signal.c:121 -->
-            - [x] Restore signal mask from context. <!-- signal.c:132 -->
-        - [x] **`sys_sigwait(set, sig)`:** <!-- signal.c:78-118 -->
-            - [x] Wait for any signal in `set` to become pending. <!-- signal.c:89-105 -->
-            - [x] Remove signal from pending and return it in `sig`. <!-- signal.c:98-102 -->
-            - [x] Do not invoke handler. <!-- Synchronous consumption, no handler -->
-        - [x] **`sys_sigtimedwait(set, info, timeout)`:** <!-- signal.c:127-185 -->
-            - [x] Like `sigwait` but with timeout. <!-- signal.c:150-152 -->
-            - [x] Fill `siginfo_t` with signal details. <!-- signal.c:174-182 -->
-    - [x] **Signal Generation:**
-        - [x] **`psignal(p, sig)` - Send to Process:** <!-- signal.c:190-278 -->
-            - [x] Validate process pointer and signal number. <!-- signal.c:202 -->
-            - [x] Init protection: Block SIGKILL/SIGTERM/SIGSTOP to PID 1. <!-- signal.c:205-207 -->
-            - [x] For each thread in process: <!-- signal.c:223-268 -->
-                - [x] If SIGCONT and thread is stopped, wake it up. <!-- signal.c:231-233 -->
-                - [x] Set pending bit in `thread->sig_pending`. <!-- signal.c:236 -->
-                - [x] If thread is sleeping interruptibly, wake it. <!-- signal.c:262-264 -->
-            - [x] Select best thread for delivery (not masked). <!-- signal.c:238-260 priority-based selection -->
-        - [x] **`pgsignal(pgrp, sig)` - Send to Process Group:** <!-- signal.c:280-292 -->
-            - [x] Look up `struct pgrp` by ID. <!-- signal.c:288 -->
-            - [x] Call `pgrp_signal()` to iterate members. <!-- signal.c:290 -->
-            - [x] Call `psignal()` for each process in group. <!-- pgrp.c pgrp_signal() -->
-        - [x] **`trapsignal(p, sig, code)` - Synchronous Trap Signal:** <!-- signal.c:294-330 -->
-            - [x] Generate signal from exception handler. <!-- signal.c:294 -->
-            - [x] Pass `code` via `siginfo_t` (si_code). <!-- signal.c:320-321 trap_signo/trap_code -->
-            - [x] Force delivery to current thread (not any thread). <!-- signal.c:317-324 -->
-            - [x] Typical sources: Page Fault (SIGSEGV), Division by Zero (SIGFPE), Illegal Instruction (SIGILL). <!-- signal.c:302-309 -->
-        - [x] **`sigexit(p, sig)` - Terminate with Signal:** <!-- signal.c:332-370 -->
-            - [x] Set exit status to indicate signal termination. <!-- signal.c:356-361 -->
-            - [x] If core dump required (SA_CORE), call `coredump()`. <!-- signal.c:347-353 -->
-            - [x] Call `proc_exit()` with signal exit status. <!-- signal.c:365-367 -->
-        - [x] **Terminal Signals (TTY):** <!-- tty.c -->
-            - [x] `SIGINT`: Ctrl+C to foreground process group. <!-- tty.c:252 -->
-            - [x] `SIGQUIT`: Ctrl+\ to foreground process group. <!-- tty.c:253 -->
-            - [x] `SIGTSTP`: Ctrl+Z to foreground process group. <!-- tty.c:254 -->
-            - [x] `SIGTTIN`: Background process reads from TTY. <!-- tty.c:300 -->
-            - [x] `SIGTTOU`: Background process writes to TTY (if TOSTOP). <!-- tty.c:317 -->
-            - [x] `SIGHUP`: Controlling terminal hangup. <!-- tty.c:472-492 tty_hangup() -->
-    - [/] **Signal Delivery (Architecture-Specific `sendsig`):** <!-- arch/i386/signal.c:27-89 -->
-        - [x] **Frame Construction:**
-            - [x] Calculate user stack pointer from `regs->useresp`.
-            - [x] Subtract `sizeof(struct sigframe)`.
-            - [x] Align stack to 16-byte boundary (System V ABI).
-        - [x] **`struct sigframe` Layout:** <!-- signal_arch.h:53-75 -->
-            - [x] `retaddr`: Return address pointing to trampoline.
-            - [x] `sig`: Signal number (first argument to handler).
-            - [x] `sc`: `struct sigcontext` with saved registers.
-        - [x] **`struct sigcontext` Population:** <!-- signal_arch.h:17-37 -->
-            - [x] Save all segment registers: gs, fs, es, ds.
-            - [x] Save general registers: edi, esi, ebp, esp, ebx, edx, ecx, eax.
-            - [x] Save trap info: trapno, err.
-            - [x] Save control registers: eip, cs, eflags.
-            - [x] Save user stack: user_esp, user_ss.
-        - [x] **Handler Invocation:**
-            - [x] `copyout()` frame to user stack (with fault handling).
-            - [x] Set `regs->useresp` to new stack frame address.
-            - [x] Set `regs->eip` to signal handler address.
-        - [x] **SA_SIGINFO Extended Frame:** <!-- signal.c:sendsig SA_SIGINFO path, signal_arch.h structures -->
-            - [x] Construct `struct siginfo` (si_signo, si_code, si_addr, etc.). <!-- signal.c:populate_siginfo -->
-            - [x] Construct `struct ucontext` with machine context. <!-- signal.c:populate_ucontext, signal_arch.h:ucontext_t -->
-            - [x] Pass handler: `void handler(int sig, siginfo_t *info, void *ucontext)`. <!-- signal.c:sendsig SA_SIGINFO path -->
-        - [x] **Alt Stack Handling:**
-            - [x] If `SA_ONSTACK` and alt stack configured and not already on it:
-                - [x] Use `sig_alt_stack.ss_sp + ss_size` as stack pointer.
-                - [x] Set `sig_on_stack` flag.
-    - [ ] **Signal Trampoline:**
-        - [ ] **Trampoline Page:**
-            - [x] Refactor `linux_sys_ioctl` dispatch (TTY, Block, etc.) `[sys/exec/perso/perso_linux.c]`
-    - [x] **Refactor kmain**
-        - [x] Move early i386 boot code to `sys/arch/i386/early_boot.c`
-        - [x] Create `init_memory` helper
-        - [x] Create `init_root_fs` helper
-        - [x] Clean up `kmain` flow
-    - [x] **Kernel Core Maintenance:**
-        - [x] Refactor `spinlock.c` to use GCC C11 atomic builtins.
-        - [x] Rewrite `swapper.c` idle loop (race-free implementation).
-        - [x] Cleanup `sleepq.c` formatting and style.
-        - [x] Remove obsolete `sys/kern/stubs.c`.
-        - [x] Modularize `sys/kern/lib.c` into `sys/lib/`.
-        - [x] Audit `mutex.c` and `semaphore.c` for race conditions (implemented `sleepq`).
-        - [x] Fix `sched_smp.c` CPU ID assumption.
-    - [ ] **Update Kernel Documentation**
-        - [ ] Document Console/UART subsystem changes
-        - [ ] Document kmain initialization flow
-        - [ ] Update ARCHITECTURE.md
-            - [x] Map trampoline code at fixed address (e.g., 0xFFFF1000).
-            - [x] Page must be user-readable, executable, not writable.
-            - [x] Contains minimal code: `mov $SYS_sigreturn, %eax; int $0x80`.
-        - [x] **Trampoline Code (i386):**
-            - [x] `lea 4(%esp), %eax` - Get pointer to sigcontext.
-            - [x] `push %eax` - Push as syscall argument.
-            - [x] `mov $119, %eax` - SYS_sigreturn.
-            - [x] `int $0x80` - Invoke kernel.
-        - [ ] **VDSO Integration (Future):**
-            - [ ] Embed trampoline in VDSO page.
-            - [ ] Use `AT_SYSINFO` to locate trampoline.
-    - [x] **Signal Mask Management:**
-        - [x] **During Handler Execution:**
-            - [x] Block current signal (unless SA_NODEFER).
-            - [x] Block signals in `sa_mask`.
-            - [x] Restore original mask in `sys_sigreturn`.
-        - [x] **Inheritance:**
-            - [x] On `fork()`: Child inherits pending signals and mask.
-            - [x] On `exec()`: Reset all handlers to SIG_DFL (except SIG_IGN).
-    - [x] **Signal Checking Points:**
-        - [x] **Return from Interrupt/Exception:**
-            - [x] `signal_handle_pending()` called from `isr_handler()` if returning to user mode. <!-- signal.c:157-211, idt.c -->
-        - [x] **Return from Syscall:**
-            - [x] Check pending signals after syscall completion.
-            - [x] If signal pending and syscall interruptible, return EINTR.
-        - [x] **Sleep Wakeup:**
-            - [x] `sched_sleep()` returns if signal pending (EINTR-style).
-    - [x] **Special Signal Handling:**
-        - [x] **SIGKILL:**
-            - [x] Cannot be caught, blocked, or ignored.
-            - [x] Always terminates the process immediately.
-            - [x] Wake all stopped threads before terminating.
-        - [x] **SIGSTOP:**
-            - [x] Cannot be caught, blocked, or ignored.
-            - [x] Stops all threads in the process.
-            - [x] Process transitions to SSTOP state.
-        - [x] **SIGCONT:**
-            - [x] Resume stopped process.
-            - [x] Clear pending SIGSTOP/SIGTSTP/SIGTTIN/SIGTTOU.
-            - [x] If handler installed, also deliver to handler.
-            - [x] Set P_CONTINUED flag for `waitpid(WCONTINUED)`.
-        - [x] **SIGCHLD:**
-            - [x] Sent when child exits, stops, or continues.
-            - [x] If SA_NOCLDSTOP, don't send for stop/continue.
-            - [x] If SA_NOCLDWAIT, auto-reap children (no zombies).
-        - [x] **Job Control Stops (SIGTSTP/SIGTTIN/SIGTTOU):**
-            - [x] Can be caught or ignored.
-            - [x] Default action: Stop the process.
-            - [x] Orphaned process groups ignore these signals.
-    - [x] **PID 1 (Init) Protection:**
-        - [x] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler installed.
-        - [x] If init exits, system halts or panics.
-        - [x] Init adopts all orphaned processes.
-    - [ ] **Core Dump (Future):**
-        - [ ] Signals with SA_CORE action: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
-        - [ ] `coredump()`: Write process memory and registers to file.
-        - [ ] Create `/cores/core.PID` with ELF core format.
-        - [ ] Respect `RLIMIT_CORE` resource limit.
-- [ ] **Process Lifecycle & Job Control:**
-    - [ ] **Process Termination (`exit`, `_exit`):**
-        - [x] **Entry Points:**
-            - [x] `sys_exit(status)`: Libc-callable exit with cleanup.
-            - [x] `sys__exit(status)`: Immediate exit, no libc cleanup.
-            - [x] Both call internal `proc_exit(code)`. <!-- pm/process.c:230-291 -->
-        - [x] **Phase 1: State Transition (RUNNING → DYING):**
-            - [x] Set `p_state` to `SDYING`. <!-- process.c:237 -->
-            - [x] Record exit status in `p_xstat`. <!-- process.c:238 -->
-            - [x] Prevent further scheduling of process threads.
-        - [x] **Phase 2: Resource Release (Critical Section):**
-            - [x] **File Descriptors:**
-                - [x] `fd_close_all(p)`: Close all open file descriptors. <!-- process.c:163-180, 243 -->
-                - [x] For each fd: decrement refcount, call `close_fs()` if last ref.
-                - [x] Clear `fds[]` array.
-            - [x] **Virtual Memory:**
-                - [x] Detach from current pmap: `pmap_release(p->pmap)`. <!-- process.c:249-256 -->
-                - [x] Free all user page tables (pmap garbage collection).
-                - [x] Switch to kernel pmap before freeing.
-                - [x] Release `vm_map` and all `vm_map_entry` structures.
-            - [x] **Current Working Directory:**
-                - [x] `close_fs(p->cwd_node)`: Decrement cwd vnode refcount.
-            - [x] **Root Directory (chroot):**
-                - [x] `close_fs(p->root_node)`: Decrement root vnode refcount.
-            - [x] **Controlling Terminal:**
-                - [x] If session leader: send SIGHUP to foreground group.
-                - [x] Clear `tty->session` and `tty->pgrp` pointers.
-                - [x] Revoke TTY access for entire session.
-            - [x] **Pending Signals:**
-                - [x] Clear all pending signals (no longer deliverable).
-            - [x] **Timers:**
-                - [x] Cancel `ITIMER_REAL`, `ITIMER_VIRTUAL`, `ITIMER_PROF`.
-                - [x] Cancel any pending `alarm()`.
-            - [x] **System V IPC:**
-                - [x] Detach from all shared memory segments (`shmdt`).
-                - [x] Adjust semaphore values (SEM_UNDO).
-                - [x] Remove owned message queues if IPC_RMID pending.
-            - [x] **POSIX IPC:**
-                - [x] Unlink any POSIX semaphores/shared memory owned.
-            - [x] **Futex Cleanup:**
-                - [x] Process robust mutex list.
-                - [x] Mark owned futexes as FUTEX_OWNER_DIED.
-                - [x] Wake waiters on robust list entries.
-            - [x] **Locks Held:**
-                - [x] Release any kernel mutexes held by threads.
-                - [x] Cancel pending lock requests.
-        - [x] **Phase 3: Thread Termination:**
-            - [x] For each thread in process:
-                - [x] Set `t->state = THREAD_ZOMBIE`.
-                - [x] If not current thread, interrupt and terminate.
-                - [x] Wait for all threads to reach zombie state.
-                - [x] Free thread stacks and thread structures.
-            - [x] Current thread becomes the "reaper thread".
-        - [ ] **Phase 4: Resource Usage Finalization:**
-            - [ ] `rusage_finalize(p)`: Calculate final resource usage. <!-- process.c:277-278 -->
-            - [ ] Accumulate all thread times into `p->rusage`.
-            - [ ] Record max RSS, page faults, context switches.
-            - [ ] Fields: `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`.
-        - [ ] **Phase 5: Orphan Reparenting:**
-            - [ ] `proc_reparent_children(p)`: Handle orphaned children. <!-- process.c:183-228 -->
-            - [ ] Acquire `proctree_lock`. <!-- process.c:191 -->
-            - [ ] Iterate `p->p_children` list.
-            - [ ] For each child:
-                - [ ] Set `child->p_parent = init`.
-                - [ ] Move to `init->p_children` list.
-                - [ ] If child is zombie, wake init immediately.
-            - [ ] Clear `p->p_children`.
-            - [ ] If init is dying, reparent to swapper (PID 0) or panic.
-            - [ ] Unlock `proctree_lock`. <!-- process.c:224 -->
-            - [ ] `sched_wakeup(&init->p_children)`: Wake init if waiting.
-        - [ ] **Phase 6: Process Group and Session Cleanup:**
-            - [ ] Remove process from its process group.
-            - [ ] If last member of pgrp, free `struct pgrp`.
-            - [ ] If session leader:
-                - [ ] Send SIGHUP to foreground pgrp.
-                - [ ] Revoke controlling terminal.
-                - [ ] Mark session as having no leader.
-            - [ ] Check for orphaned process groups (send SIGHUP+SIGCONT).
-        - [ ] **Phase 7: Parent Notification:**
-            - [ ] `psignal(p->p_parent, SIGCHLD)`: Send SIGCHLD to parent. <!-- process.c:264-265 -->
-            - [ ] If SA_NOCLDWAIT in parent, auto-reap (no zombie).
-            - [ ] `sched_wakeup(&parent->p_children)`: Wake parent if waiting. <!-- process.c:268 -->
-        - [ ] **Phase 8: Zombie State (DYING → ZOMBIE):**
-            - [ ] Set `p_state` to `SZOMB`. <!-- process.c:281 -->
-            - [ ] Process slot retained for parent to reap.
-            - [ ] Only `pid`, `ppid`, `p_xstat`, `p_rusage` remain valid.
-            - [ ] All other resources freed.
-        - [ ] **Phase 9: Final Context Switch:**
-            - [ ] Mark `current_thread->state = THREAD_ZOMBIE`. <!-- process.c:285 -->
-            - [ ] `sched_yield()`: Never returns. <!-- process.c:287 -->
-            - [ ] Scheduler will never select zombie thread.
-        - [ ] **Accounting:**
-            - [ ] `acct_process(code)`: Write accounting record. <!-- process.c:239-240 -->
-            - [ ] Record: command name, user time, system time, elapsed time, exit status.
-            - [ ] Write to accounting file if enabled.
-    - [ ] **Edge Cases and Error Handling:**
-        - [x] **Init (PID 1) Exit:**
-            - [x] If init exits normally, kernel halts/panics. <!-- process.c:231-234 -->
-            - [x] Log warning and enter idle loop.
-        - [x] **Killed by Signal During Exit:**
-            - [x] Ignore all signals once in SDYING state.
-            - [x] Cannot be interrupted during exit cleanup.
-        - [ ] **Exit While Holding Locks:**
-            - [ ] Kernel must handle lock abandonment.
-            - [ ] Log warning if locks still held.
-        - [ ] **Out of Memory During Exit:**
-            - [ ] Must not allocate during exit (only free).
-            - [ ] Use pre-allocated structures for notifications.
-        - [ ] **Vfork Exit:**
-            - [ ] Special handling: wake parent immediately.
-            - [ ] Parent was blocked waiting for child exec/exit.
-        - [x] **Thread Group Exit:**
-            - [x] If any thread calls `exit()`, entire process exits.
-            - [x] All threads receive internal termination signal.
-            - [x] Process-wide exit semantics (BSD `exit()` behavior).
+        - [ ] **VM Subsystem (Machine Independent):**
 
-    - [x] **Wait Subsystem (`wait4`, `waitpid`):**
-        - [x] **Search Logic (`find_zombie`):** <!-- Now find_waitable_child -->
-            - [x] Match based on `pid` argument:
-                - [x] `pid > 0`: Wait for specific child.
-                - [x] `pid == -1`: Wait for any child.
-                - [x] `pid == 0`: Wait for any child in same process group.
-                - [x] `pid < -1`: Wait for any child in group `|pid|`.
-        - [x] **Non-Blocking Check (`WNOHANG`):**
-            - [x] If no zombies match but children exist, return 0 immediately.
-            - [x] If no children exist, return `ECHILD`.
-        - [x] **Blocking Wait:**
-            - [x] Implementation: `sleepq_wait(&current_proc->p_children, Priority)` (Used `sched_sleep`).
-            - [x] Handle `EINTR` (interrupted by signal).
-            - [x] Re-scan children list on wakeup.
-        - [x] **Reaping (ZOMBIE -> FREE):**
-            - [x] Copy `p_xstat` and `p_rusage` to user buffer. <!-- Implemented rusage accumulation to parent -->
-            - [x] Remove from siblings list. <!-- Already implemented in wait.c lines 103-110 -->
-            - [x] Remove from process group. <!-- Clears pgrp/session fields; full struct pgrp later -->
-            - [x] Free `struct process` memory (`uma_zfree`). <!-- Uses static array with pid=-1 marking (BSD style) -->
-        - [x] **Job Control Integration (`WUNTRACED`, `WCONTINUED`):** <!-- Implemented in find_waitable_child -->
-            - [x] Check `p_stat` for `SSTOP` (stopped). <!-- find_waitable_child checks child->state == SSTOP -->
-            - [x] Use `p_flag` for `P_CONTINUED` status. <!-- Added P_CONTINUED flag to proc.h, checked in find_waitable_child -->
-            - [x] Reset `P_CONTINUED` flag after reporting. <!-- sys_wait4 clears P_CONTINUED after returning -->
+            > **Files:** `sys/vm/vm_map.c`, `vm_fault.c`, `vm_object.c`,
+            > `vm_page.c`, `vm_pager.c`, `vm_swap.c`, `uma_core.c`.
+            >
+            > **Architecture:** BSD/Mach-inspired VM with vm_map → vm_map_entry →
+            > vm_object → vm_page hierarchy. Shadow objects for COW.
 
+            - [ ] **VM Map (`vm_map`):**
+                - [ ] `vm_map` structure representing a process's virtual address space.
+                - [ ] Red-black tree of `vm_map_entry` for O(log N) lookup by VA.
+                - [ ] Linked list of entries for sequential traversal.
+                - [ ] `vm_map_create(pmap, min, max)`: create new map.
+                - [ ] `vm_map_destroy(map)`: tear down entire map.
+                - [ ] `vm_map_lock` / `vm_map_unlock`: reader/writer locking.
+            - [ ] **VM Map Entries (`vm_map_entry`):**
+                - [ ] Represent contiguous virtual regions (text, data, stack, mmap).
+                - [ ] Fields: `start`, `end`, `offset`, `protection`, `max_protection`.
+                - [ ] `object`: backing `vm_object` (anonymous or vnode-backed).
+                - [ ] `inheritance`: share, copy, none (for fork behavior).
+                - [ ] `wired_count`: prevent pageout for this region.
+                - [ ] `vm_map_insert(map, object, offset, start, end, prot)`.
+                - [ ] `vm_map_remove(map, start, end)`: remove entries in range.
+                - [ ] `vm_map_lookup(map, va, &entry)`: find entry containing VA.
+                - [ ] `vm_map_protect(map, start, end, new_prot)`.
+                - [ ] `vm_map_inherit(map, start, end, inheritance)`.
+                - [ ] Entry merging: coalesce adjacent entries with same attributes.
+            - [ ] **VM Objects (`vm_object`):**
+                - [ ] Abstract backing store (anonymous memory, vnode/file, device).
+                - [ ] `resident_pages`: radix tree or hash of `vm_page_t` by page index.
+                - [ ] `ref_count`: number of map entries referencing this object.
+                - [ ] `shadow`: pointer to shadow object (for COW chains).
+                - [ ] `pager`: associated pager (swap, vnode, device, default).
+                - [ ] `vm_object_allocate(size)`: create anonymous object.
+                - [ ] `vm_object_reference(obj)` / `vm_object_deallocate(obj)`.
+                - [ ] `vm_object_page_lookup(obj, pindex)`: find resident page.
+                - [ ] `vm_object_page_insert(obj, page, pindex)`.
+                - [ ] `vm_object_shadow(obj, offset, size)`: create shadow for COW.
+                - [ ] `vm_object_collapse(obj)`: collapse shadow chain when possible.
+            - [ ] **Fault Handler (`vm_fault`):**
+                - [ ] High-level page fault resolution.
+                - [ ] `vm_fault(map, va, fault_type)`: main entry point.
+                - [ ] Look up `vm_map_entry` for faulting VA.
+                - [ ] Check protection against fault type.
+                - [ ] Walk shadow object chain to find page or pager.
+                - [ ] If page found in object: map it via `pmap_enter`.
+                - [ ] If page not found: call pager to fetch from backing store.
+                - [ ] **Zero-fill on demand:** anonymous pages filled with zeros on first access.
+                - [ ] **Prefaulting:** heuristic to load surrounding pages during I/O.
+            - [ ] **Copy-on-Write (COW):**
+                - [ ] `vm_fault` logic for write to read-only shared page.
+                - [ ] Create shadow object on fork.
+                - [ ] Mark parent entries as copy-on-write.
+                - [ ] On write fault: allocate new page, copy contents, update PTE.
+                - [ ] Decrement original page refcount.
+                - [ ] Shadow chain collapse: when shadow has all pages, absorb parent.
+            - [ ] **Swap Subsystem:**
+                - [ ] **Swap Pager (`vm_pager`):**
+                    - [ ] Generic pager interface: `pager_get(obj, pindex)`, `pager_put(obj, pindex)`.
+                    - [ ] Swap pager: move pages to/from swap device.
+                    - [ ] Vnode pager: read/write file-backed pages via VFS.
+                    - [ ] Device pager: direct mapping of device memory (framebuffer, MMIO).
+                    - [ ] Default pager: zero-fill for anonymous memory.
+                - [ ] **Backing Store (`vm_swap`):**
+                    - [ ] Support swap partitions and swap files.
+                    - [ ] Swap space allocation bitmap.
+                    - [ ] `swapon(path)` / `swapoff(path)` syscalls.
+                    - [ ] Per-page swap block tracking.
+                - [ ] **Page Replacement Policy:**
+                    - [ ] Clock/LRU algorithm using A/D bits.
+                    - [ ] Integration with page daemon and page queues.
+            - [ ] **Advanced Features:**
+                - [ ] **File-backed mmap (`MAP_FILE`):**
+                    - [ ] Vnode pager triggers VFS `read` on page fault.
+                    - [ ] Dirty page tracking and `msync` writeback.
+                    - [ ] `MAP_PRIVATE`: COW on write (shadow object).
+                    - [ ] `MAP_SHARED`: write-through to file.
+                - [ ] **Reference Counting & Shared Memory:**
+                    - [ ] `vm_page_t` refcounts: track mappings to each physical frame.
+                    - [ ] `vm_object` refcounts: track regions sharing backing store.
+                    - [ ] `MAP_SHARED` write-through for multi-process shared memory.
+                - [ ] **Lazy Faulting:**
+                    - [ ] Demand paging: allocate frames only on access (zero-fill on demand).
+                    - [ ] Prefaulting: heuristic to load surrounding pages during I/O.
+                    - [ ] Read-ahead for sequential file access patterns.
+            - [ ] **Testing:**
+                - [ ] Unit: vm_map insert/remove/lookup/protect.
+                - [ ] Unit: vm_object create/reference/deallocate/shadow/collapse.
+                - [ ] Unit: vm_fault resolution for anonymous, file-backed, and COW pages.
+                - [ ] Unit: swap pager round-trip (page out → page in).
+                - [ ] Property: vm_map entries are non-overlapping and sorted.
+                - [ ] Property: vm_object refcount reaches 0 only when no entries reference it.
+                - [ ] Integration: mmap anonymous memory, write, fork, verify COW isolation.
+                - [ ] Integration: mmap file, read, modify, msync, verify on-disk.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: VM hierarchy (map → entry → object → page).
+                - [ ] Internal doc: COW shadow chain and collapse algorithm.
+                - [ ] Internal doc: pager interface contract.
 
-    - [x] **Process Groups & Sessions (Job Control):** <!-- Implemented in pgrp.c, tty.c, signal.c -->
-        - [x] **Core Structures:**
-            - [x] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr). <!-- session.h, proc.h updated -->
-            - [x] `struct session`: `s_id`, `s_leader` (ptr), `s_ttyvp` (vnode), `s_login` (name). <!-- session.h -->
-            - [x] **Invariants:** <!-- Enforced by struct relationships -->
-                - [x] Every process belongs to exactly one group. <!-- process->p_pgrp pointer -->
-                - [x] Every group belongs to exactly one session. <!-- pgrp->pg_session pointer -->
-                - [x] Session leader determines the Controlling TTY (CTTY). <!-- session->s_ttyvp -->
-        - [x] **Session Management:** <!-- Implemented in pgrp.c -->
-            - [x] `sys_setsid()`:
-                - [x] Check: Return `EPERM` if already a group leader. <!-- pgrp.c:180-184 -->
-                - [x] Allocate new `struct session` and `struct pgrp`. <!-- pgrp.c:186-194 -->
-                - [x] Set `p_pgid` = `p_pid`, `s_sid` = `p_pid`. <!-- pgrp.c:199-200 -->
-                - [x] Detach current CTTY (if any). <!-- pgrp.c:202-203 -->
-            - [x] `sys_getsid(pid)`: Return session ID of process. <!-- pgrp.c:215-239 -->
-        - [x] **Group Management:** <!-- Implemented in pgrp.c -->
-            - [x] `sys_setpgid(pid, pgid)`: <!-- pgrp.c:277-345 -->
-                - [x] Logic: Join existing group or create new one. <!-- pgrp.c:321-343 -->
-                - [x] Constraint: Must be in same session. <!-- pgrp.c:298-318 -->
-                - [x] Constraint: Cannot change if `exec` call pending (rare race). <!-- Not implemented - rare edge case -->
-            - [x] `sys_getpgid(pid)`: Return process group ID. <!-- pgrp.c:247-268 -->
-        - [x] **Controlling Terminal (CTTY):** <!-- tty.c ioctls -->
-            - [x] **Assignment (`TIOCSCTTY`):** <!-- tty.c:340-366 -->
-                - [x] Caller must be session leader. <!-- tty.c:344-354 checks p_pgrp->pg_session->s_leader -->
-                - [x] Session must not already have CTTY. <!-- tty.c:357 checks process->tty -->
-                - [x] TTY must not already be owned by another session. <!-- Simplified - sets unconditionally -->
-            - [x] **Release (`TIOCNOTTY`):** <!-- tty.c:369-381 -->
-                - [x] Clear `s_ttyvp` in session. <!-- tty.c:376-377 clears tty->session/pgrp -->
-                - [x] Send `SIGHUP` / `SIGCONT` to foreground group. <!-- TODO: Add signal sending -->
-            - [x] **Foreground Group (`tcsetpgrp`/`tcgetpgrp`):** <!-- TIOCSPGRP/TIOCGPGRP -->
-                - [x] TTY driver stores `t_pgrp`. <!-- tty->pgrp field, tty.c:334-338 -->
-                - [x] Check `SIGTTOU` if background process tries `tcsetpgrp`. <!-- tty_check_write L248-257 -->
-        - [x] **Job Control Signals:** <!-- tty.c, signal.c, pgrp.c -->
-            - [x] **Stop generation:** `SIGTSTP` (Ctrl-Z), `SIGSTOP`. <!-- tty.c:202 VSUSP, signal.c:192 handles SIGSTOP -->
-            - [x] **TTY Signals:**
-                - [x] `SIGINT` (Ctrl-C), `SIGQUIT` (Ctrl-\).
-                - [x] `SIGTTIN`: Background read.
-                - [x] `SIGTTOU`: Background write (if `TOSTOP` set).
-            - [x] **Orphaned Process Groups:** <!-- pgrp.c:386-403, 411-431 -->
-                - [x] Definition: A group where no member has a parent in a different group in the same session. <!-- pgrp_is_orphaned -->
-                - [x] Action: If a group becomes orphaned and has stopped members, send `SIGHUP` + `SIGCONT`. <!-- pgrp_check_orphan -->
+    - [ ] **Kernel Allocator (UMA/Slab):**
+
+        > **Files:** `sys/vm/uma_core.c`, `sys/vm/vm_kmem.c`.
+
+        - [ ] **UMA Core (`uma_core.c`):**
+            - [ ] Zone creation: `uma_zcreate(name, size, ctor, dtor, init, fini, align, flags)`.
+            - [ ] Zone destruction: `uma_zdestroy(zone)`.
+            - [ ] `uma_zalloc(zone, flags)`: allocate object from zone.
+            - [ ] `uma_zfree(zone, item)`: free object to zone.
+            - [ ] **Per-CPU Caches (Magazines):**
+                - [ ] Lockless fast-path allocations via per-CPU magazine layer.
+                - [ ] Magazine swap on empty/full (loaded ↔ previous).
+                - [ ] Depot layer: global pool of full/empty magazines.
+            - [ ] **Slab Management:**
+                - [ ] Slab allocation from VM (page-sized).
+                - [ ] Free list within slab for object tracking.
+                - [ ] Partial/full/empty slab lists per zone.
+            - [ ] **Alignment/Coloring:**
+                - [ ] CPU cache line alignment for objects.
+                - [ ] Slab coloring to reduce cache set conflicts.
+            - [ ] **Constructors/Destructors:**
+                - [ ] `ctor` callback on allocation (after init).
+                - [ ] `dtor` callback on free (before fini).
+                - [ ] `init` once per slab object lifetime.
+                - [ ] `fini` once when slab freed.
+            - [ ] **Reclamation:**
+                - [ ] Shrinker callbacks to free unused slabs under memory pressure.
+                - [ ] Bucket draining back to slabs.
+                - [ ] Memory pressure feedback integration with page daemon.
+        - [ ] **Debugging & Safety:**
+            - [ ] **Redzones:** guard bytes before/after objects with canary values.
+            - [ ] **Poisoning:** fill freed memory with 0xDEADBEEF to catch use-after-free.
+            - [ ] **Leak Detection:** track active allocations per zone.
+            - [ ] **Foreign Pointer Protection:** validate pointer belongs to zone on free.
+            - [ ] **`uma_find_slab()` Optimization:** replace O(N) linear search with hash table.
+        - [ ] **General Allocator (`kmalloc`/`kfree`):**
+            - [ ] Power-of-two zones: back `kmalloc` with UMA zones for sizes 16, 32, 64, ..., 4096.
+            - [ ] Large allocations: bypass UMA for >4 KB (direct `vm_map` allocation).
+            - [ ] `krealloc(ptr, size)`: resize allocation.
+            - [ ] Statistics: track memory usage by `malloc_type` (subsystem).
+        - [ ] **Testing:**
+            - [ ] Unit: zone create/alloc/free/destroy lifecycle.
+            - [ ] Unit: per-CPU cache hit/miss paths.
+            - [ ] Unit: slab allocation and free list integrity.
+            - [ ] Unit: ctor/dtor/init/fini callback ordering.
+            - [ ] Unit: redzone corruption detection.
+            - [ ] Unit: poison detection on use-after-free.
+            - [ ] Property: total allocated + free = zone capacity.
+            - [ ] Stress: 10000 alloc/free cycles across multiple zones.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: UMA architecture (zone → slab → magazine → per-CPU cache).
+            - [ ] Internal doc: `kmalloc` power-of-two zone selection.
+
+    - [ ] **User Memory Syscalls:**
+        - [ ] `sys_mmap(addr, len, prot, flags, fd, offset)`: map memory.
+            - [ ] `MAP_ANONYMOUS`: zero-fill anonymous mapping.
+            - [ ] `MAP_PRIVATE`: file-backed COW mapping.
+            - [ ] `MAP_SHARED`: file-backed write-through mapping.
+            - [ ] `MAP_FIXED`: map at exact address (unmap existing).
+            - [ ] Alignment to page boundary.
+        - [ ] `sys_munmap(addr, len)`: unmap region.
+        - [ ] `sys_mprotect(addr, len, prot)`: change protection.
+        - [ ] `sys_brk(addr)` / `sys_sbrk(incr)`: adjust data segment.
+        - [ ] `sys_msync(addr, len, flags)`: sync dirty pages to backing store.
+
+    - [ ] **SMP & Interrupts:**
+
+        > **Files:** `sys/arch/i386/apic.c`, `sys/arch/i386/ioapic.c`,
+        > `sys/arch/i386/smp.c`, `sys/kern/percpu.c`.
+
+        - [ ] **Discovery:**
+            - [ ] Parse ACPI MADT (APIC) to find processor entries.
+            - [ ] Fallback: parse MP Tables (Intel MultiProcessor Spec).
+            - [ ] Record BSP and AP LAPIC IDs.
+        - [ ] **Local APIC (LAPIC):**
+            - [ ] Map LAPIC MMIO base (default 0xFEE00000).
+            - [ ] Set Spurious Interrupt Vector Register (SVR): enable APIC, set vector.
+            - [ ] **Timer:**
+                - [ ] Calibrate against PIT or ACPI PM Timer.
+                - [ ] Set Divider Configuration Register (DCR).
+                - [ ] Periodic mode for scheduler tick.
+                - [ ] One-shot mode for high-resolution sleeps.
+            - [ ] Error Status Register (ESR) and LVT Error vector.
+            - [ ] **IPI (Inter-Processor Interrupt):**
+                - [ ] ICR (Interrupt Command Register) writing logic.
+                - [ ] Send fixed, lowest priority, NMI, INIT, SIPI IPIs.
+                - [ ] Wait for delivery status (busy bit clear).
+        - [ ] **I/O APIC:**
+            - [ ] Enumerate I/O APICs from MADT.
+            - [ ] `ioapic_read` / `ioapic_write` via index/window registers.
+            - [ ] **Redirection Table:**
+                - [ ] Mask/unmask IRQs.
+                - [ ] Set delivery mode (fixed, lowest priority).
+                - [ ] Set destination (physical/logical).
+                - [ ] Set polarity and trigger mode (active high/low, edge/level).
+            - [ ] Legacy ISA IRQ (0–15) → Global System Interrupt (GSI) mapping.
+        - [ ] **AP Bootstrap:**
+            - [ ] Allocate low-memory trampoline page (under 1 MB).
+            - [ ] Copy 16-bit real mode entry code to trampoline.
+            - [ ] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence.
+            - [ ] AP enters protected mode, enables paging, jumps to C entry.
+        - [ ] **Per-CPU Data:**
+            - [ ] GS-base (or FS-base) for CPU-local variable access.
+            - [ ] Per-CPU GDTs and TSSs.
+            - [ ] Per-CPU scheduler runqueues.
+            - [ ] Per-CPU interrupt stacks.
+        - [ ] **Synchronization:**
+            - [ ] Spinlock implementation (ticket locks or MCS locks).
+            - [ ] `lock` prefix for atomic operations.
+            - [ ] Deadlock detection (lock ordering validation).
+            - [ ] Audit all global data structures for race conditions.
+        - [ ] **Testing:**
+            - [ ] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`.
+            - [ ] Unit: LAPIC timer calibration accuracy.
+            - [ ] Unit: IPI send/receive between CPUs.
+            - [ ] Unit: per-CPU data isolation.
+
+    - [ ] **Scheduling (MLFQ Scheduler):**
+
+        > **Files:** `sys/kern/sched.c`, `sys/kern/sched_smp.c`,
+        > `sys/kern/turnstile.c`, `sys/kern/sleepq.c`.
+
+        - [ ] **Algorithm (ULE/MLFQ):**
+            - [ ] Multilevel queues: Realtime, Timeshare, Idle priority classes.
+            - [ ] Interactiveness heuristics: boost I/O-bound threads.
+            - [ ] Priority decay for CPU-bound threads.
+            - [ ] Time slice assignment based on priority class.
+        - [ ] **SMP Scalability:**
+            - [ ] Per-CPU runqueues (eliminate global scheduler lock).
+            - [ ] Work-stealing load balancing when a CPU goes idle.
+            - [ ] CPU affinity (`sched_setaffinity` masks).
+            - [ ] IPI-based preemption of remote CPUs.
+        - [ ] **Synchronization Primitives:**
+            - [ ] **Turnstiles:** priority inheritance for mutexes (prevent priority inversion).
+            - [ ] **Sleep Queues:** hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
+        - [ ] **Context Switching:**
+            - [ ] FPU lazy save: CR0.TS exception for deferred FPU context.
+            - [ ] PCB: refined for thread/process separation.
+            - [ ] `switch_to(old, new)`: save/restore callee-saved registers, swap stacks.
+        - [ ] **Kernel Process (PID 0 — Swapper/Idle):**
+            - [ ] Pageout daemon work in idle loop.
+            - [ ] Ensures valid process context always exists.
+        - [ ] **Process Bitness Tracking:**
+            - [ ] `enum proc_bitness` (16/32/64) field in process struct.
+            - [ ] `proc_set_bitness()` / `proc_get_bitness()` with permission checks.
+            - [ ] Bitness inheritance on fork, transition on exec.
+        - [ ] **Testing:**
+            - [ ] Unit: priority queue insertion/removal ordering.
+            - [ ] Unit: turnstile priority inheritance chain.
+            - [ ] Unit: sleep queue hash distribution.
+            - [ ] Integration: verify load balancing with CPU-intensive workload.
+            - [ ] Integration: verify interactiveness boost for I/O workload.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: MLFQ algorithm and priority classes.
+            - [ ] Internal doc: SMP load balancing and work stealing.
+
+    - [ ] **Synchronization:**
+
+        - [ ] **Kernel Primitives:**
+            - [ ] Spinlocks (with GCC C11 atomic builtins).
+            - [ ] Mutexes (backed by sleep queues).
+            - [ ] Semaphores (counting, backed by sleep queues).
+            - [ ] Reader/writer locks.
+
+        - [ ] **Userspace Synchronization (Futex):**
+
+            > **Files:** `sys/kern/futex.c`, `sys/kern/futex.h`.
+
+            - [ ] **Core Operations:**
+                - [ ] `FUTEX_WAIT`: atomic compare-and-sleep on user-space word.
+                    - [ ] `futex_cmpxchg_user()`: validated userspace CMPXCHG.
+                    - [ ] `validate_uaddr()`: ensure address is in user space.
+                - [ ] `FUTEX_WAKE`: wake up N waiters on a futex word.
+                - [ ] `FUTEX_REQUEUE`: move waiters from one futex to another.
+                    - [ ] Atomic compare before requeue (`FUTEX_CMP_REQUEUE`).
+            - [ ] **Advanced Features:**
+                - [ ] `FUTEX_ROBUST_LIST`: handle owner death.
+                    - [ ] `sys_set_robust_list()` / `sys_get_robust_list()`.
+                    - [ ] `futex_exit_cleanup()`: walk robust list on process exit.
+                    - [ ] Mark owned futexes as `FUTEX_OWNER_DIED`.
+                - [ ] `FUTEX_PI`: priority inheritance support.
+                    - [ ] `futex_lock_pi()` / `futex_unlock_pi()`.
+                    - [ ] `pi_boost_owner()` / `pi_deboost_owner()`.
+                    - [ ] Lock holder inherits waiter's priority.
+            - [ ] **Performance:**
+                - [ ] Hash table bucketing for wait queues (O(1) lookup by address).
+                - [ ] Per-bucket spinlocks.
+            - [ ] **Testing:**
+                - [ ] Unit: FUTEX_WAIT/WAKE basic handshake.
+                - [ ] Unit: FUTEX_REQUEUE moves waiters correctly.
+                - [ ] Unit: robust list cleanup on exit.
+                - [ ] Unit: PI inheritance — low priority holder boosted.
+                - [ ] Property: no orphaned waiters after process exit.
+
+        - [ ] **NTSYNC Driver (Windows NT Sync Primitives):**
+
+            > **Files:** `sys/kern/ntsync.c`, `sys/kern/ntsync.h`.
+
+            - [ ] **Core Infrastructure:**
+                - [ ] `/dev/ntsync` char device with instance-based isolation.
+                - [ ] `ntsync_instance` structure per open file description.
+                - [ ] Object handle management (object FDs returned from ioctls).
+            - [ ] **Semaphore Object:**
+                - [ ] `NTSYNC_IOC_CREATE_SEM`: create semaphore (count, max).
+                - [ ] `NTSYNC_IOC_SEM_POST`: increment semaphore count.
+                - [ ] `NTSYNC_IOC_READ_SEM`: query semaphore state.
+            - [ ] **Mutex Object:**
+                - [ ] `NTSYNC_IOC_CREATE_MUTEX`: create mutex (owner, count).
+                - [ ] `NTSYNC_IOC_MUTEX_UNLOCK`: release mutex ownership.
+                - [ ] `NTSYNC_IOC_READ_MUTEX`: query mutex state.
+                - [ ] `NTSYNC_IOC_KILL_OWNER`: mark mutex as abandoned.
+            - [ ] **Event Object:**
+                - [ ] `NTSYNC_IOC_CREATE_EVENT`: create event (signaled, manual/auto-reset).
+                - [ ] `NTSYNC_IOC_SET_EVENT` / `NTSYNC_IOC_RESET_EVENT` / `NTSYNC_IOC_PULSE_EVENT`.
+                - [ ] `NTSYNC_IOC_READ_EVENT`: query event state.
+            - [ ] **Wait Operations:**
+                - [ ] `NTSYNC_IOC_WAIT_ANY`: wait for any of N objects.
+                - [ ] `NTSYNC_IOC_WAIT_ALL`: wait for all N objects simultaneously.
+                - [ ] Alert event support (optional extra wakeup source).
+                - [ ] Timeout handling (MONOTONIC/REALTIME clocks).
+            - [ ] **Internal Mechanics:**
+                - [ ] Wait queue per object with priority ordering.
+                - [ ] Atomic acquisition semantics (spinlock-protected).
+                - [ ] Cross-object atomicity for WAIT_ALL (multi-lock).
+            - [ ] **Testing:**
+                - [ ] Unit: semaphore create/post/read lifecycle.
+                - [ ] Unit: mutex create/lock/unlock/abandon.
+                - [ ] Unit: event set/reset/pulse.
+                - [ ] Unit: WAIT_ANY with mixed object types.
+                - [ ] Unit: WAIT_ALL atomicity (all-or-nothing).
+                - [ ] Unit: timeout expiry (WNOHANG equivalent).
+
+    - [ ] **Signals:**
+
+        > **Files:** `sys/kern/signal.c`, `sys/kern/sigprop.c`,
+        > `sys/arch/i386/signal.c` (arch-specific delivery).
+
+        - [ ] **Signal Infrastructure:**
+            - [ ] **Per-Process State (`process_t`):**
+                - [ ] `sig_actions[NSIG]`: array of `struct sigaction` per signal.
+                - [ ] `sig_catch`: bitmask of signals with handlers.
+                - [ ] `sig_ignore`: bitmask of signals set to SIG_IGN.
+            - [ ] **Per-Thread State (`thread_t`):**
+                - [ ] `sig_pending`: bitmask of pending signals.
+                - [ ] `sig_mask`: current signal mask (blocked signals).
+                - [ ] `sig_alt_stack`: alternative signal stack (`stack_t`).
+                - [ ] `sig_on_stack`: flag for currently executing on alt stack.
+            - [ ] **Signal Properties Table (`sigprop.c`):**
+                - [ ] Default actions: Terminate, Core, Stop, Ignore, Continue.
+                - [ ] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT.
+                - [ ] Unmaskable: SIGKILL, SIGSTOP (SA_CANTMASK).
+
+        - [ ] **Signal Syscalls:**
+            - [ ] **`sys_sigaction(sig, act, oact)`:**
+                - [ ] Validate signal number (1 ≤ sig ≤ NSIG, not SIGKILL/SIGSTOP).
+                - [ ] Return old action in `oact`, install new from `act`.
+                - [ ] Update `sig_catch`/`sig_ignore` bitmasks.
+                - [ ] Handle flags: `SA_RESETHAND`, `SA_NODEFER`, `SA_RESTART`, `SA_NOCLDSTOP`, `SA_NOCLDWAIT`, `SA_SIGINFO`, `SA_ONSTACK`.
+            - [ ] **`sys_sigprocmask(how, set, oset)`:**
+                - [ ] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK.
+                - [ ] Filter out SIGKILL/SIGSTOP from mask.
+            - [ ] **`sys_sigpending(set)`:** return pending & ~masked signals.
+            - [ ] **`sys_sigsuspend(mask)`:** atomically set mask and sleep; restore on return; always EINTR.
+            - [ ] **`sys_sigaltstack(ss, oss)`:**
+                - [ ] Install/query alternative signal stack.
+                - [ ] Validate `ss_size ≥ MINSIGSTKSZ`.
+                - [ ] Handle `SS_DISABLE`; error if on alt stack.
+            - [ ] **`sys_kill(pid, sig)`:**
+                - [ ] `pid > 0`: specific process.
+                - [ ] `pid == 0`: current process group.
+                - [ ] `pid == -1`: all processes (except init).
+                - [ ] `pid < -1`: process group `|pid|`.
+                - [ ] `sig == 0`: permission check only.
+                - [ ] Permission: same UID or CAP_KILL.
+            - [ ] **`sys_sigreturn(scp)`:**
+                - [ ] Validate sigcontext pointer.
+                - [ ] Verify CS/SS have RPL=3 (user mode).
+                - [ ] Restore GPRs, eflags (mask IOPL/VM/RF), eip.
+                - [ ] Restore signal mask from context.
+            - [ ] **`sys_sigwait(set, sig)`:** synchronous signal consumption (no handler).
+            - [ ] **`sys_sigtimedwait(set, info, timeout)`:** like sigwait with timeout + siginfo.
+
+        - [ ] **Signal Generation:**
+            - [ ] `psignal(p, sig)`: send to process.
+                - [ ] Init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1.
+                - [ ] Select best thread for delivery (not masked).
+                - [ ] If SIGCONT, wake stopped threads; clear pending stops.
+                - [ ] If sleeping interruptibly, wake thread.
+            - [ ] `pgsignal(pgrp, sig)`: send to process group.
+            - [ ] `trapsignal(p, sig, code)`: synchronous trap signal (from exception handler).
+                - [ ] Pass `code` via `siginfo_t` (`si_code`).
+                - [ ] Sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL.
+            - [ ] `sigexit(p, sig)`: terminate with signal.
+                - [ ] Core dump if SA_CORE: call `coredump()`.
+                - [ ] Set exit status to indicate signal termination.
+            - [ ] **Terminal Signals (TTY):**
+                - [ ] SIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp.
+                - [ ] SIGTSTP (Ctrl+Z) to foreground pgrp.
+                - [ ] SIGTTIN: background process reads from TTY.
+                - [ ] SIGTTOU: background process writes to TTY (if TOSTOP).
+                - [ ] SIGHUP: controlling terminal hangup.
+
+        - [ ] **Signal Delivery (Architecture-Specific — i386):**
+            - [ ] **`sendsig()` — Frame Construction:**
+                - [ ] Calculate user stack pointer from `regs->useresp`.
+                - [ ] Subtract `sizeof(struct sigframe)`.
+                - [ ] Align stack to 16-byte boundary (System V ABI).
+            - [ ] **`struct sigframe` Layout:**
+                - [ ] `retaddr`: return address pointing to trampoline.
+                - [ ] `sig`: signal number (first handler argument).
+                - [ ] `sc`: `struct sigcontext` with saved registers.
+            - [ ] **`struct sigcontext` Population:**
+                - [ ] Save segment registers (gs, fs, es, ds).
+                - [ ] Save GPRs (edi, esi, ebp, esp, ebx, edx, ecx, eax).
+                - [ ] Save trap info (trapno, err).
+                - [ ] Save control (eip, cs, eflags, user_esp, user_ss).
+            - [ ] **Handler Invocation:**
+                - [ ] `copyout()` frame to user stack (with fault handling).
+                - [ ] Set `regs->useresp` and `regs->eip` to frame/handler.
+            - [ ] **SA_SIGINFO Extended Frame:**
+                - [ ] Construct `siginfo_t` (si_signo, si_code, si_addr, etc.).
+                - [ ] Construct `ucontext_t` with machine context.
+                - [ ] Handler signature: `void handler(int, siginfo_t *, void *)`.
+            - [ ] **Alt Stack Handling:**
+                - [ ] If `SA_ONSTACK` and alt stack configured: use alt stack SP.
+                - [ ] Set `sig_on_stack` flag.
+
+        - [ ] **Signal Trampoline:**
+            - [ ] Map trampoline page at fixed address (e.g., 0xFFFF1000).
+            - [ ] Page: user-readable, executable, not writable.
+            - [ ] Code: `mov $SYS_sigreturn, %eax; int $0x80`.
+            - [ ] **VDSO Integration (future):**
+                - [ ] Embed trampoline in VDSO page.
+                - [ ] Use `AT_SYSINFO` auxiliary vector entry.
+
+        - [ ] **Signal Mask Management:**
+            - [ ] During handler: block current signal (unless SA_NODEFER) + `sa_mask`.
+            - [ ] Restore original mask in `sys_sigreturn`.
+            - [ ] **Inheritance:**
+                - [ ] `fork()`: child inherits pending signals and mask.
+                - [ ] `exec()`: reset all handlers to SIG_DFL (except SIG_IGN).
+
+        - [ ] **Signal Checking Points:**
+            - [ ] Return from interrupt/exception: `signal_handle_pending()` if returning to user mode.
+            - [ ] Return from syscall: check pending, return EINTR if interruptible.
+            - [ ] Sleep wakeup: `sched_sleep()` returns on signal (EINTR).
+
+        - [ ] **Special Signal Handling:**
+            - [ ] SIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads.
+            - [ ] SIGSTOP: cannot be caught/blocked/ignored; stops all threads.
+            - [ ] SIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED.
+            - [ ] SIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics.
+            - [ ] Job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore.
+
+        - [ ] **PID 1 (Init) Protection:**
+            - [ ] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler.
+            - [ ] If init exits, system halts/panics.
+            - [ ] Init adopts orphaned processes.
+
+        - [ ] **Core Dump (future):**
+            - [ ] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
+            - [ ] `coredump()`: write ELF core format (`/cores/core.PID`).
+            - [ ] Respect `RLIMIT_CORE`.
+
+        - [ ] **Testing:**
+            - [ ] Unit: `sys_sigaction` install/replace/reset handler.
+            - [ ] Unit: `sys_sigprocmask` block/unblock/setmask.
+            - [ ] Unit: `sys_kill` to specific PID, pgrp, all.
+            - [ ] Unit: `psignal` thread selection (prefer unmasked).
+            - [ ] Unit: `sendsig` frame construction and `sigreturn` restoration.
+            - [ ] Unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU.
+            - [ ] Unit: SA_RESTART — interrupted syscall restarted.
+            - [ ] Unit: SA_SIGINFO — extended frame with siginfo + ucontext.
+            - [ ] Property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant).
+            - [ ] Integration: fork, send SIGINT to child, verify termination.
+            - [ ] Integration: job control stop/continue cycle.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: signal lifecycle (generation → delivery → handler → sigreturn).
+            - [ ] Internal doc: i386 signal frame layout.
+            - [ ] Internal doc: signal checking points and SA_RESTART logic.
+
+    - [ ] **Refactor kmain:**
+        - [ ] Move early i386 boot code to `sys/arch/i386/early_boot.c`.
+        - [ ] Create `init_memory` helper.
+        - [ ] Create `init_root_fs` helper.
+        - [ ] Clean up `kmain` flow.
+
+    - [ ] **Kernel Core Maintenance:**
+        - [ ] Refactor `spinlock.c` to use GCC C11 atomic builtins.
+        - [ ] Rewrite `swapper.c` idle loop (race-free).
+        - [ ] Cleanup `sleepq.c` formatting and style.
+        - [ ] Remove obsolete `sys/kern/stubs.c`.
+        - [ ] Modularize `sys/kern/lib.c` into `sys/lib/`.
+        - [ ] Audit `mutex.c` and `semaphore.c` for race conditions.
+        - [ ] Fix `sched_smp.c` CPU ID assumption.
+
+    - [ ] **Update Kernel Documentation:**
+        - [ ] Document Console/UART subsystem changes.
+        - [ ] Document kmain initialization flow.
+        - [ ] Update ARCHITECTURE.md.
+
+    - [ ] **Process Lifecycle & Job Control:**
+
+        - [ ] **Process Termination (`exit` / `_exit`):**
+
+            > `sys_exit(status)` and `sys__exit(status)` both call internal `proc_exit(code)`.
+
+            - [ ] **Phase 1 — State Transition (RUNNING → DYING):**
+                - [ ] Set `p_state` = SDYING.
+                - [ ] Record exit status in `p_xstat`.
+                - [ ] Prevent further scheduling.
+            - [ ] **Phase 2 — Resource Release:**
+                - [ ] **File Descriptors:** `fd_close_all(p)` — close all, decrement refcounts.
+                - [ ] **Virtual Memory:** `pmap_release(p->pmap)` — free user page tables, switch to kernel pmap.
+                - [ ] **VM Map:** release `vm_map` and all `vm_map_entry` structures.
+                - [ ] **CWD / Root:** decrement cwd and root vnode refcounts.
+                - [ ] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY.
+                - [ ] **Pending Signals:** clear all.
+                - [ ] **Timers:** cancel ITIMER_REAL/VIRTUAL/PROF and alarm().
+                - [ ] **System V IPC:** detach shmem, undo semaphores, remove owned msg queues.
+                - [ ] **POSIX IPC:** unlink owned semaphores/shared memory.
+                - [ ] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters.
+                - [ ] **Kernel Locks:** release held mutexes, cancel pending lock requests.
+            - [ ] **Phase 3 — Thread Termination:**
+                - [ ] Set `t->state = THREAD_ZOMBIE` for each thread.
+                - [ ] Interrupt non-current threads, wait for zombie state.
+                - [ ] Free thread stacks and structures.
+                - [ ] Current thread becomes reaper.
+            - [ ] **Phase 4 — Resource Usage Finalization:**
+                - [ ] `rusage_finalize(p)`: accumulate thread times.
+                - [ ] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`.
+            - [ ] **Phase 5 — Orphan Reparenting:**
+                - [ ] `proc_reparent_children(p)`: move children to init.
+                - [ ] Acquire `proctree_lock`.
+                - [ ] For each child: set `p_parent = init`, move to init's children list.
+                - [ ] Wake init if child is zombie.
+                - [ ] If init dying: reparent to swapper (PID 0) or panic.
+            - [ ] **Phase 6 — Process Group / Session Cleanup:**
+                - [ ] Remove from process group; free `struct pgrp` if last member.
+                - [ ] If session leader: SIGHUP to foreground, revoke TTY, mark no leader.
+                - [ ] Check for orphaned process groups → SIGHUP + SIGCONT.
+            - [ ] **Phase 7 — Parent Notification:**
+                - [ ] `psignal(parent, SIGCHLD)`.
+                - [ ] If SA_NOCLDWAIT: auto-reap (no zombie).
+                - [ ] Wake parent on `p_children` channel.
+            - [ ] **Phase 8 — Zombie State (DYING → ZOMBIE):**
+                - [ ] Set `p_state` = SZOMB.
+                - [ ] Only pid, ppid, xstat, rusage remain valid.
+            - [ ] **Phase 9 — Final Context Switch:**
+                - [ ] `current_thread->state = THREAD_ZOMBIE`.
+                - [ ] `sched_yield()` — never returns.
+            - [ ] **Accounting:**
+                - [ ] `acct_process(code)`: write accounting record (command, times, status).
+
+        - [ ] **Edge Cases:**
+            - [ ] Init (PID 1) exit: kernel halts/panics with warning.
+            - [ ] Killed by signal during exit: ignore signals once SDYING.
+            - [ ] Locks held during exit: log warning, force release.
+            - [ ] OOM during exit: must not allocate (only free).
+            - [ ] Vfork exit: wake parent immediately.
+            - [ ] Thread group exit: all threads terminated on any `exit()`.
+
+        - [ ] **Wait Subsystem (`wait4` / `waitpid`):**
+            - [ ] **Search Logic:**
+                - [ ] `pid > 0`: specific child.
+                - [ ] `pid == -1`: any child.
+                - [ ] `pid == 0`: same process group.
+                - [ ] `pid < -1`: process group `|pid|`.
+            - [ ] **WNOHANG:** return 0 if no zombies, ECHILD if no children.
+            - [ ] **Blocking Wait:** `sched_sleep(&p_children)`, handle EINTR, re-scan.
+            - [ ] **Reaping (ZOMBIE → FREE):**
+                - [ ] Copy xstat and rusage to user buffer.
+                - [ ] Remove from siblings list and process group.
+                - [ ] Free process structure.
+            - [ ] **Job Control (`WUNTRACED` / `WCONTINUED`):**
+                - [ ] Report stopped children (SSTOP).
+                - [ ] Report continued children (P_CONTINUED flag).
+
+        - [ ] **Process Groups & Sessions:**
+            - [ ] **Core Structures:**
+                - [ ] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr).
+                - [ ] `struct session`: `s_id`, `s_leader`, `s_ttyvp`, `s_login`.
+                - [ ] Invariants: every process → one group → one session.
+            - [ ] **Session Management:**
+                - [ ] `sys_setsid()`: create new session + pgrp; EPERM if already leader; detach CTTY.
+                - [ ] `sys_getsid(pid)`: return session ID.
+            - [ ] **Group Management:**
+                - [ ] `sys_setpgid(pid, pgid)`: join/create group; must be same session.
+                - [ ] `sys_getpgid(pid)`: return group ID.
+            - [ ] **Controlling Terminal (CTTY):**
+                - [ ] `TIOCSCTTY`: assign CTTY (session leader, no existing CTTY, TTY unowned).
+                - [ ] `TIOCNOTTY`: release CTTY, SIGHUP to foreground group.
+                - [ ] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check).
+            - [ ] **Orphaned Process Groups:**
+                - [ ] Detection: no member with parent in different group of same session.
+                - [ ] Action: SIGHUP + SIGCONT to stopped members.
+
+        - [ ] **Testing:**
+            - [ ] Unit: proc_exit phases 1–9 ordering and resource cleanup.
+            - [ ] Unit: wait4 search logic (specific, any, pgrp).
+            - [ ] Unit: WNOHANG returns 0 / ECHILD correctly.
+            - [ ] Unit: orphan reparenting to init.
+            - [ ] Unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY.
+            - [ ] Unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery.
+            - [ ] Property: no zombie leaks (all zombies eventually reaped or auto-reaped).
+            - [ ] Integration: fork → exec → exit → waitpid cycle.
+            - [ ] Integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: process exit 9-phase teardown.
+            - [ ] Internal doc: wait4 search semantics and blocking.
+            - [ ] Internal doc: session/pgrp lifecycle and CTTY ownership.
 
 ### 2. Architecture (`sys/arch`)
 - [x] **i386:**
