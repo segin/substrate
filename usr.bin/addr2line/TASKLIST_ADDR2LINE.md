@@ -259,10 +259,10 @@ Goal: implement `addr2line` using `libelfobj` for ELF loading and raw
 ## 10. Testing
 
 ### 10a. Basic Lookup Tests **(FR‑20, FR‑21, FR‑22, FR‑23)**
-- [ ] Known `ET_EXEC` ELF32 with DWARF v4: address → `file:line` verified.
-- [ ] Known `ET_EXEC` ELF64 with DWARF v4: address → `file:line` verified.
-- [ ] Known ELF with DWARF v5: address → `file:line` verified.
-- [ ] Multiple addresses: verify each resolved independently.
+- [x] Known `ET_EXEC` ELF32 with DWARF v4: address → `file:line` verified.
+- [x] Known `ET_EXEC` ELF64 with DWARF v4: address → `file:line` verified.
+- [x] Known ELF with DWARF v5: address → `file:line` verified.
+- [x] Multiple addresses: verify each resolved independently.
 
 ### 10b. Function Name Tests **(FR‑24, FR‑25, FR‑26, FR‑53)**
 - [ ] `-f`: verify function name printed before file:line.
