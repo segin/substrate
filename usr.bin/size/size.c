@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 #define SIZE_VERSION "0.1.0"
 #define AR_MAGIC "!<arch>\n"
@@ -953,6 +954,12 @@ static int process_operand(const char *path, size_format_t format, size_classify
     if (err != ELF_OK) {
         if (err == ELF_ERR_FORMAT) {
             fprintf(stderr, "%s: %s: file format not recognized\n", progname, path);
+        } else if (err == ELF_ERR_IO) {
+            if (access(path, R_OK) != 0 && errno == EACCES) {
+                fprintf(stderr, "%s: %s: Permission denied\n", progname, path);
+            } else {
+                fprintf(stderr, "%s: %s: %s\n", progname, path, elf_errstr(err));
+            }
         } else {
             fprintf(stderr, "%s: %s: %s\n", progname, path, elf_errstr(err));
         }

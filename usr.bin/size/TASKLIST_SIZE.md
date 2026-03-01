@@ -73,9 +73,9 @@ Goal: implement `size` using section accounting from `libelfobj`.
 
 ## 7. Error Handling
 
-- [ ] Non‑ELF input: `size: <file>: file format not recognized`, exit 1.
-- [ ] Permission denied: report, continue to next file.
-- [ ] Set exit code 1 if any file fails.
+- [x] Non‑ELF input: `size: <file>: file format not recognized`, exit 1.
+- [x] Permission denied: report, continue to next file.
+- [x] Set exit code 1 if any file fails.
 
 ## 8. Build System
 
