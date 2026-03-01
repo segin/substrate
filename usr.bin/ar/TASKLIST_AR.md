@@ -80,10 +80,10 @@ Goal: implement a production `ar` where ELF member inspection/parsing comes from
 - [x] On write: add `--format={bsd,gnu}` flag (default to GNU for toolchain compat with `ld`).
 
 ### 5c. Thin Archives
-- [ ] Implement thin archive magic (`!<thin>\n`).
-- [ ] Store relative paths instead of file content.
-- [ ] On extract/print: read file content from the referenced path at access time.
-- [ ] Thin archives must not embed a symbol table (symbols come from the on‑disk objects).
+- [x] Implement thin archive magic (`!<thin>\n`).
+- [x] Store relative paths instead of file content.
+- [x] On extract/print: read file content from the referenced path at access time.
+- [x] Thin archives must not embed a symbol table (symbols come from the on‑disk objects).
 
 ## 6. Symbol Table (`ranlib` / `s` modifier)
 
