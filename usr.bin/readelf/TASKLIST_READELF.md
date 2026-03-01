@@ -225,9 +225,9 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 ## 19. Testing
 
 ### 19a. Header Tests
-- [ ] Display headers for i386, x86-64, ARMv7, AArch64 objects.
-- [ ] ARM `e_flags` decoded correctly (EABI version, float ABI).
-- [ ] Verify all field values against known-good `readelf -h` output.
+- [x] Display headers for i386, x86-64, ARMv7, AArch64 objects.
+- [x] ARM `e_flags` decoded correctly (EABI version, float ABI).
+- [x] Verify all field values against known-good `readelf -h` output.
 
 ### 19b. Section/Segment Tests
 - [ ] All section types display with correct names.
