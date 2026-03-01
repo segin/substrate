@@ -4688,45 +4688,436 @@ This document tracks the progress and remaining tasks for the Substrate operatin
         - [x] Man page: `sysctl(2)`.
 
 ### 6b. Editline Library (`lib/edit`)
-- [x] **Core Foundation:**
+
+> **Files:** `editline.c`, `readline.c`, `history.c`, `terminal.c`,
+> `el.h` (internal), `histedit.h` (public API in `lib/edit/` and
+> `include/histedit.h`).
+>
+> **Current state:** skeletal — `el_init`/`el_end`/`el_reset`/`el_set`/
+> `el_get`/`el_line` exist. `el_gets` handles basic insert, backspace,
+> `^C`, `^D`, `^L`, and arrow‑key cursor movement + history nav.
+> History supports `H_ENTER`/`H_FIRST`/`H_LAST`/`H_PREV`/`H_NEXT`/
+> `H_SETSIZE`. Terminal supports raw/orig mode switching.
+
+- [x] **Core Foundation (`editline.c`, `el.h`, `histedit.h`):**
     - [x] Create `lib/edit/` directory structure.
-    - [x] Implement `el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr)`: Initialize editline state.
-    - [x] Implement `el_end(EditLine *el)`: Clean up editline state.
-    - [x] Implement `el_reset(EditLine *el)`: Reset state to defaults.
-    - [x] Define internal structures for line state, terminal state, and key-bindings.
-- [ ] **Line Editing Engine:**
-    - [x] Implement line buffer management (insertion, deletion, navigation).
-    - [x] Implement Emacs-style key-bindings (default).
-    - [ ] Implement Vi-style navigation and insertion modes.
-    - [ ] Implement UTF-8 support for line editing and navigation.
-- [x] **Terminal & I/O Handling:**
-    - [x] Implement basic termcap/terminfo query support for cursor movement and clearing.
-    - [x] Implement raw mode switching for the tty.
-    - [ ] Handle window resize signals (`SIGWINCH`) and recalculate layout.
-    - [ ] Implement signal handling (SIGINT, SIGQUIT, SIGTSTP) during `el_gets`.
-- [ ] **Command & Variable Interface:**
-    - [x] Implement `el_set()` and `el_get()` for configuration (e.g., editors, prompts, signals).
-    - [ ] Implement `el_source()` to parse and execute `.editrc` commands.
-    - [x] Implement builtin editor commands (backward-char, forward-word, etc.).
-- [x] **History Management:**
-    - [x] Implement `history_init()` and `history_end()`.
-    - [x] Implement `history()` interface for adding, searching, and traversing history.
-    - [ ] Support loading and saving history to/from files.
+    - [x] Implement `el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr)`: allocate `EditLine`, initialize line buffer (1024‑byte default), store streams.
+    - [x] Implement `el_end(EditLine *el)`: restore terminal, free line buffer and state.
+    - [x] Implement `el_reset(EditLine *el)`: zero `len`/`cursor`, NUL‑terminate buffer.
+    - [x] Implement `el_line(EditLine *el)`: return `LineInfo` with `buffer`/`cursor`/`lastchar` pointers.
+    - [x] Define `struct editline` (streams, terminal, line, history, prompt).
+    - [x] Define `struct line` (buffer, cap, len, cursor, `LineInfo`).
+    - [x] Define `struct terminal` (orig/raw `termios`, `is_raw` flag).
+    - [ ] Add `prog` name storage for error messages.
+    - [ ] Add `editor_mode` field to `struct editline` (enum: `ED_EMACS`, `ED_VI`).
+    - [ ] Add `signal_state` field to `struct editline` (saved dispositions + mask).
+    - [ ] Add `completion` callback pointer and client data to `struct editline`.
+    - [ ] Add `rprompt` (right‑prompt) pointer to `struct editline`.
+    - [ ] Dynamic line‑buffer growth: `realloc` when `len + 1 >= cap` (double strategy, capped at 1 MiB).
+    - [ ] Implement `el_resize(EditLine *el)`: force terminal size re‑query and redraw.
+    - [ ] Thread‑safety: document that `EditLine` is not thread‑safe (single‑thread contract).
+
+- [ ] **Line Editing Engine (`readline.c`):**
+    - [x] **Character Insertion:**
+        - [x] Insert printable ASCII at cursor with `memmove` rightward shift.
+        - [ ] Reject insertion when buffer is at capacity (grow or beep).
+        - [ ] Support overwrite/replace mode toggle (Insert key).
+    - [x] **Deletion:**
+        - [x] Backspace (`^H` / 0x7F): delete char before cursor.
+        - [x] Delete (`^D`): delete char at cursor (or EOF on empty line).
+        - [ ] `kill-line` (`^K`): delete from cursor to end of line, save to kill ring.
+        - [ ] `backward-kill-line` (`^U`): delete from start to cursor, save to kill ring.
+        - [ ] `kill-word` (`M-d`): delete from cursor to end of word, save to kill ring.
+        - [ ] `backward-kill-word` (`M-^H` / `M-DEL`): delete word before cursor, save to kill ring.
+        - [ ] `delete-char-or-list` (configurable `^D` variant): list completions if at end, else delete.
+    - [x] **Cursor Navigation:**
+        - [x] Left/Right arrow keys (ESC `[D` / ESC `[C`).
+        - [ ] `beginning-of-line` (`^A`): move to column 0.
+        - [ ] `end-of-line` (`^E`): move to `lastchar`.
+        - [ ] `forward-word` (`M-f`): skip to next word boundary.
+        - [ ] `backward-word` (`M-b`): skip to previous word boundary.
+        - [ ] Home / End keys (ESC `[H`, ESC `[F`, and alternate sequences ESC `[1~` / ESC `[4~`).
+    - [x] **Screen Refresh (`refresh_line`):**
+        - [x] `\\r` + `CSI K` + prompt + buffer + cursor reposition via `CSI %dD`.
+        - [ ] Handle multi‑line buffers: track physical rows, scroll window.
+        - [ ] Calculate visible width accounting for prompt length and terminal columns.
+        - [ ] Handle lines wider than terminal width (horizontal scrolling or wrapping).
+        - [ ] Optimize refresh: track dirty region and only redraw changed portion.
+    - [x] **History Navigation:**
+        - [x] Up arrow (`ESC [A`): `H_PREV` — load previous history entry.
+        - [x] Down arrow (`ESC [B`): `H_NEXT` — load next or reset to empty.
+        - [ ] Save current input before first history navigation; restore on down‑past‑end.
+        - [ ] `history-search-backward` (`^R`): incremental reverse search.
+        - [ ] `history-search-forward` (`^S`): incremental forward search.
+        - [ ] `beginning-of-history` (`M-<`): jump to oldest entry.
+        - [ ] `end-of-history` (`M->`): jump to newest / current input.
+    - [x] **Special Keys:**
+        - [x] `^C`: print `^C`, reset line, reprint prompt.
+        - [x] `^L`: clear screen (`CSI H` + `CSI 2J`), refresh line.
+        - [x] Enter (`\\n` / `\\r`): accept line, restore terminal, return buffer.
+        - [ ] `^T` (`transpose-chars`): swap char at cursor with previous.
+        - [ ] `^W` (`unix-word-rubout`): kill word backward (whitespace‑delimited).
+        - [ ] `^Y` (`yank`): paste most recent kill‑ring entry.
+        - [ ] `M-y` (`yank-pop`): cycle through kill ring after yank.
+        - [ ] `^_` (`undo`): undo last editing operation.
+    - [x] **Escape Sequence Decoding:**
+        - [x] Two‑byte CSI: `ESC [` + final byte.
+        - [ ] Three‑byte CSI with numeric parameter: `ESC [ <digit> ~` (Delete, Insert, PgUp, PgDn).
+        - [ ] SS3 sequences: `ESC O A`/`B`/`C`/`D` (alternate arrow encoding).
+        - [ ] Extended CSI: `ESC [ 1 ; <mod> <final>` (Shift/Ctrl/Alt + arrow/Home/End).
+        - [ ] Timeout on incomplete escape (avoid blocking on bare ESC).
+    - [ ] **Kill Ring:**
+        - [ ] Circular buffer (8 entries default).
+        - [ ] `kill-line`, `kill-word`, `backward-kill-word`, `backward-kill-line` all push to ring.
+        - [ ] Consecutive kills append to the same ring entry.
+        - [ ] `yank` inserts most recent; `yank-pop` rotates.
+    - [ ] **Undo System:**
+        - [ ] Record each editing operation (insert, delete, cursor move) as an undo entry.
+        - [ ] `^_` pops the undo stack and reverts the operation.
+        - [ ] Limit undo stack depth (256 entries default).
+
+- [ ] **Emacs Key‑Binding Map:**
+    - [x] **Implemented:**
+        - [x] Printable self‑insert (0x20–0x7E).
+        - [x] Backspace / Delete.
+        - [x] `^C` (interrupt), `^D` (delete/EOF), `^L` (clear screen).
+        - [x] Arrow keys (cursor movement + history).
+    - [ ] **Required Additions:**
+        - [ ] `^A` — `beginning-of-line`.
+        - [ ] `^B` — `backward-char`.
+        - [ ] `^E` — `end-of-line`.
+        - [ ] `^F` — `forward-char`.
+        - [ ] `^K` — `kill-line`.
+        - [ ] `^N` — `next-history` (alias for down‑arrow).
+        - [ ] `^P` — `previous-history` (alias for up‑arrow).
+        - [ ] `^R` — `reverse-search-history`.
+        - [ ] `^S` — `forward-search-history`.
+        - [ ] `^T` — `transpose-chars`.
+        - [ ] `^U` — `unix-line-discard`.
+        - [ ] `^W` — `unix-word-rubout`.
+        - [ ] `^Y` — `yank`.
+        - [ ] `^_` — `undo`.
+        - [ ] `M-b` — `backward-word`.
+        - [ ] `M-c` — `capitalize-word`.
+        - [ ] `M-d` — `kill-word`.
+        - [ ] `M-f` — `forward-word`.
+        - [ ] `M-l` — `downcase-word`.
+        - [ ] `M-u` — `upcase-word`.
+        - [ ] `M-y` — `yank-pop`.
+        - [ ] `M-<` — `beginning-of-history`.
+        - [ ] `M->` — `end-of-history`.
+        - [ ] `M-.` — `yank-last-arg` (insert last arg of previous command).
+        - [ ] `Tab` (`^I`) — `complete` (filename completion).
+
+- [ ] **Vi Mode (`EL_EDITOR "vi"`):**
+    - [ ] **Mode State Machine:**
+        - [ ] Insert mode (default on entry): self‑insert, ESC → command mode.
+        - [ ] Command mode: motion, edit, and search commands.
+        - [ ] Replace mode (`R`): overwrite characters, ESC → command mode.
+        - [ ] Track mode in `struct editline` (`vi_mode` enum: `VI_INSERT`, `VI_COMMAND`, `VI_REPLACE`).
+    - [ ] **Insert‑Mode Keys:**
+        - [ ] `ESC` — switch to command mode.
+        - [ ] `^H` / Backspace — delete backward.
+        - [ ] `^W` — delete word backward.
+        - [ ] `^U` — delete to start of line.
+        - [ ] `^D` — EOF / delete char.
+    - [ ] **Command‑Mode Motion:**
+        - [ ] `h` / `l` — left / right one char.
+        - [ ] `w` / `W` — forward word / WORD.
+        - [ ] `b` / `B` — backward word / WORD.
+        - [ ] `e` / `E` — end of word / WORD.
+        - [ ] `0` — beginning of line.
+        - [ ] `$` — end of line.
+        - [ ] `^` — first non‑blank character.
+        - [ ] `f<c>` / `F<c>` — find char forward / backward.
+        - [ ] `t<c>` / `T<c>` — find char till forward / backward.
+        - [ ] `;` / `,` — repeat / reverse last find.
+    - [ ] **Command‑Mode Editing:**
+        - [ ] `i` — enter insert mode at cursor.
+        - [ ] `a` — enter insert mode after cursor.
+        - [ ] `I` — insert at beginning of line.
+        - [ ] `A` — insert at end of line.
+        - [ ] `x` — delete char at cursor.
+        - [ ] `X` — delete char before cursor.
+        - [ ] `r<c>` — replace char at cursor with `<c>`.
+        - [ ] `R` — enter replace mode.
+        - [ ] `d<motion>` — delete over motion (e.g., `dw`, `d$`, `dd`).
+        - [ ] `c<motion>` — change over motion (delete + insert mode).
+        - [ ] `D` — delete to end of line (`d$`).
+        - [ ] `C` — change to end of line (`c$`).
+        - [ ] `s` — substitute char (delete + insert).
+        - [ ] `S` — substitute entire line.
+        - [ ] `y<motion>` — yank over motion.
+        - [ ] `p` / `P` — paste after / before cursor.
+        - [ ] `u` — undo last change.
+        - [ ] `.` — repeat last edit command.
+        - [ ] `~` — toggle case of char at cursor.
+    - [ ] **Command‑Mode History:**
+        - [ ] `j` / `k` — next / previous history.
+        - [ ] `/pattern` — search history backward.
+        - [ ] `?pattern` — search history forward.
+        - [ ] `n` / `N` — repeat search / reverse.
+    - [ ] **Command‑Mode Misc:**
+        - [ ] `v` — invoke `$VISUAL` or `$EDITOR` on current line.
+        - [ ] `#` — comment out line (prepend `#`, accept).
+        - [ ] Count prefixes: `3dw` = delete 3 words.
+
+- [ ] **Terminal Abstraction (`terminal.c`):**
+    - [x] **Raw Mode:**
+        - [x] `terminal_set_raw(EditLine *el)`: save orig termios, set raw (no echo, no canon, no signals, CS8, VMIN=1, VTIME=0).
+        - [x] `terminal_set_orig(EditLine *el)`: restore saved termios.
+    - [ ] **Capability Queries:**
+        - [ ] Query terminal dimensions via `ioctl(TIOCGWINSZ)`.
+        - [ ] Fallback to `$COLUMNS` / `$LINES` environment variables.
+        - [ ] Fallback to 80×24 default.
+        - [ ] Cache dimensions; invalidate on `SIGWINCH`.
+    - [ ] **Termcap/Terminfo Support:**
+        - [ ] Query `$TERM` and look up capabilities.
+        - [ ] Support cursor motion: `cm` (absolute), `le`/`nd`/`up`/`do` (relative).
+        - [ ] Support clear: `cl` (screen), `ce` (to end of line), `cd` (to end of screen).
+        - [ ] Support insert/delete: `ic`/`dc` (char), `al`/`dl` (line).
+        - [ ] Support attributes: `md` (bold), `me` (reset), `so`/`se` (standout).
+        - [ ] Support scrolling: `sr` (reverse), `sf` (forward).
+        - [ ] Hardcoded ANSI/VT100 fallback when termcap unavailable.
+    - [ ] **Output Buffering:**
+        - [ ] Buffer terminal writes and flush in batches (reduce syscall overhead).
+        - [ ] Ensure flush on prompt display and before blocking reads.
+
+- [ ] **Signal Handling:**
+    - [ ] **`SIGWINCH` Handler:**
+        - [ ] Install handler in `el_gets`; remove on return.
+        - [ ] On receipt: re‑query `TIOCGWINSZ`, update stored dimensions, force full redraw.
+    - [ ] **`SIGINT` Handler:**
+        - [ ] If `EL_SIGNAL` is set: install handler in `el_gets`.
+        - [ ] On receipt: discard current line, print `^C\\n`, reset buffer, reprint prompt (do not exit).
+    - [ ] **`SIGQUIT` Handler:**
+        - [ ] If `EL_SIGNAL` is set: install handler, ignore `SIGQUIT` during editing.
+    - [ ] **`SIGTSTP` / `SIGCONT` Handler:**
+        - [ ] `SIGTSTP`: restore terminal, send `SIGTSTP` to self.
+        - [ ] `SIGCONT`: re‑enter raw mode, redraw prompt + buffer.
+    - [ ] **`SIGTERM` / `SIGHUP` Handler:**
+        - [ ] Restore terminal, propagate signal (allow clean shell exit).
+    - [ ] **Signal Mask Discipline:**
+        - [ ] Save old signal dispositions in `el_gets` entry, restore on exit.
+        - [ ] Use `sigaction` (not `signal`) for reliable semantics.
+        - [ ] Set `SA_RESTART` where appropriate.
+
+- [ ] **Key Map Subsystem:**
+    - [ ] **Key Map Structure:**
+        - [ ] Define `el_keymap_t` as a 256‑entry table mapping byte → action (function pointer or nested map pointer).
+        - [ ] Support multi‑byte key sequences via chained keymaps (e.g., ESC → sub‑map).
+        - [ ] Default keymaps: `emacs_keymap`, `vi_insert_keymap`, `vi_command_keymap`.
+    - [ ] **Key Binding API:**
+        - [ ] `el_set(el, EL_BIND, key_sequence, command_name)`: bind key to named command.
+        - [ ] `el_set(el, EL_BIND, key_sequence, NULL)`: unbind key.
+        - [ ] Parse key sequence notation: `^A`, `\\e`, `\\M-`, `\\C-`, `\\e[A`, literal chars.
+    - [ ] **Action Registry:**
+        - [ ] Register all built‑in editing commands with string names.
+        - [ ] Support user‑defined custom action callbacks via `el_set(el, EL_ADDFN, name, help, func)`.
+        - [ ] `el_set(el, EL_BIND, "-a", ...)`: bind in vi alternate (command) keymap.
+
+- [ ] **Programmable Completion:**
+    - [ ] **Completion Callback:**
+        - [ ] `el_set(el, EL_ADDFN, "complete", "Complete", completion_fn)`: register custom completion function.
+        - [ ] Callback signature: `unsigned char fn(EditLine *el, int ch)`.
+        - [ ] Default: filename completion (glob + opendir scan).
+    - [ ] **Filename Completion Engine:**
+        - [ ] Extract word under cursor (back to whitespace or special char).
+        - [ ] Expand `~` prefix before lookup.
+        - [ ] `opendir` + `readdir` scan for matching prefixes.
+        - [ ] If single match: insert remainder + trailing space (or `/` for directory).
+        - [ ] If multiple matches: insert common prefix, then list alternatives on second tab.
+        - [ ] Display alternatives in columns (use terminal width).
+    - [ ] **Integration with Shell:**
+        - [ ] Shell provides custom completion callback that understands builtins, paths, variables, hostnames.
+        - [ ] Document callback interface in `editline(3)`.
+
+- [ ] **Tokenizer (`tok_init` / `tok_str` / `tok_end`):**
+    - [ ] `tok_init(const char *ifs)`: create tokenizer context with IFS string.
+    - [ ] `tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv)`: tokenize line content into argv.
+    - [ ] `tok_reset(Tokenizer *tok)`: reset tokenizer state.
+    - [ ] `tok_end(Tokenizer *tok)`: free tokenizer resources.
+    - [ ] Handle single‑quoting, double‑quoting, and backslash‑escaping.
+    - [ ] Handle continuation (incomplete quotes → return continuation status).
+    - [ ] Add `Tokenizer` typedef and API to `histedit.h`.
+
+- [ ] **`el_set()` / `el_get()` Operations:**
+    - [x] `EL_PROMPT` (0): set/get prompt string pointer. **(Implemented)**
+    - [ ] `EL_PROMPT_ESC`: set prompt function with escape‑char marking (for non‑printing sequences).
+    - [x] `EL_TERMINAL` (1): set terminal type string. **(Stub, unused)**
+    - [x] `EL_EDITOR` (2): set editor mode (`"emacs"` or `"vi"`). **(Stub — sets field but no vi mode)**
+    - [x] `EL_SIGNAL` (3): enable/disable signal handling during `el_gets`. **(Stub)**
+    - [ ] `EL_BIND` (4): bind key sequence → editor command.
+    - [ ] `EL_ECHOTC` (5): echo a termcap string.
+    - [ ] `EL_SETTC` (6): set a termcap value.
+    - [x] `EL_REFRESH` (7): force screen refresh. **(Stub)**
+    - [x] `EL_HIST` (8): set history function + context. **(Implemented — stores `History *`)**
+    - [ ] `EL_ADDFN`: register user‑defined editing function.
+    - [ ] `EL_SETFN`: replace an existing named function.
+    - [ ] `EL_RPROMPT`: set right‑side prompt string/function.
+    - [ ] `EL_CLIENTDATA`: set/get opaque user pointer.
+    - [ ] `EL_SETTY`: set tty mode and character assignments.
+    - [ ] `EL_GETFP`: get FILE * (in/out/err).
+    - [ ] `EL_SETFP`: set FILE * (in/out/err).
+    - [ ] `EL_EDITMODE`: enable/disable editing (passthrough mode).
+
+- [ ] **`el_source()` and `.editrc` Parsing:**
+    - [ ] `el_source(EditLine *el, const char *file)`: read and execute editrc commands.
+    - [ ] Default path: `~/.editrc` if `file` is `NULL`.
+    - [ ] **Supported `.editrc` Commands:**
+        - [ ] `bind [-a] [-e] [-v] [-s] [key [command]]`: bind key to command.
+        - [ ] `echotc cap [arg ...]`: execute termcap string.
+        - [ ] `edit [on|off]`: enable/disable editing.
+        - [ ] `settc cap value`: set termcap variable.
+        - [ ] `setty [-a] [-d] [-q] [-x] mode ...`: set tty modes.
+    - [ ] Comment lines (`#`) and blank lines.
+    - [ ] Per‑program sections: `prog:command args` (match `prog` against `el->prog`).
+    - [ ] Error reporting: print line number and diagnostic on parse errors, continue.
+
+- [ ] **History Management (`history.c`):**
+    - [x] **Core (Implemented):**
+        - [x] `history_init()`: allocate `History` with linked list, default max 100.
+        - [x] `history_end(History *h)`: free all nodes and list.
+        - [x] `H_SETSIZE` (1): set maximum entries; evict oldest on overflow.
+        - [x] `H_ENTER` (10): add entry (skip duplicates of tail).
+        - [x] `H_FIRST` (3): set cursor to head.
+        - [x] `H_LAST` (4): set cursor to tail.
+        - [x] `H_PREV` (5): move cursor backward (toward oldest).
+        - [x] `H_NEXT` (6): move cursor forward (toward newest).
+    - [ ] **Missing Operations:**
+        - [ ] `H_GETSIZE` (2): return current entry count via `HistEvent.num`.
+        - [ ] `H_CURR` (7): return current entry without moving cursor.
+        - [ ] `H_SET` (8): set cursor to entry by number.
+        - [ ] `H_ADD` (9): append text to current entry (multi‑line continuation).
+        - [ ] `H_APPEND` (11): append string to last entry.
+        - [ ] `H_END` (12): move cursor past end (sentinel, `ev.str = NULL`).
+        - [ ] `H_NEXT_STR` (13): search forward for entry containing string.
+        - [ ] `H_PREV_STR` (14): search backward for entry containing string.
+        - [ ] `H_NEXT_EVENT` (15): move to next entry matching event number.
+        - [ ] `H_PREV_EVENT` (16): move to previous entry matching event number.
+        - [ ] `H_LOAD` (17): load history from file (one entry per line).
+        - [ ] `H_SAVE` (18): save history to file.
+        - [ ] `H_CLEAR` (19): clear all entries.
+    - [ ] **History Numbering:**
+        - [ ] Assign monotonically increasing event numbers to entries.
+        - [ ] Set `HistEvent.num` on all operations that return an entry.
+    - [ ] **Unique History (Dedup):**
+        - [ ] Option to suppress consecutive duplicate entries (already done for tail).
+        - [ ] Option to remove all duplicates on insert (keep most recent).
+    - [ ] **Timestamp Support:**
+        - [ ] Store entry timestamp (for save/load fidelity with extended format).
+    - [ ] **File Format:**
+        - [ ] Simple format: one entry per line, newlines escaped as `\\n`.
+        - [ ] Write atomically (tmp + rename) to prevent corruption.
+
+- [ ] **Readline Compatibility Layer (`readline.c` — extended):**
+    - [x] **Implemented:**
+        - [x] `el_gets(EditLine *el, int *count)`: main read loop with raw mode, insert, backspace, arrows, history, `^C`, `^D`, `^L`.
+    - [ ] **API Shim Functions (for applications using readline(3)):**
+        - [ ] `readline(const char *prompt)`: wrapper that creates/reuses `EditLine`, calls `el_gets`, returns `strdup`'d result.
+        - [ ] `add_history(const char *line)`: wrapper around `history(h, &ev, H_ENTER, line)`.
+        - [ ] `rl_bind_key(int key, rl_command_func_t *function)`: map to `el_set(EL_BIND, ...)`.
+        - [ ] `rl_set_prompt(const char *prompt)`: map to `el_set(EL_PROMPT, ...)`.
+        - [ ] `rl_on_new_line()`: map to refresh.
+        - [ ] `rl_forced_update_display()`: map to `el_set(EL_REFRESH)`.
+    - [ ] **Readline Variables (Global Shims):**
+        - [ ] `rl_line_buffer`: pointer to current line buffer.
+        - [ ] `rl_point`: cursor position.
+        - [ ] `rl_end`: end of buffer position.
+        - [ ] `rl_readline_name`: application name.
+        - [ ] `rl_attempted_completion_function`: completion callback.
+    - [ ] **Header:** provide `readline/readline.h` and `readline/history.h` compatibility headers.
+
+- [ ] **UTF‑8 / Wide‑Character Support:**
+    - [ ] **Input Decoding:**
+        - [ ] Decode multi‑byte UTF‑8 sequences on input into `wchar_t` codepoints.
+        - [ ] Validate sequences: reject overlong encodings, surrogates, values > U+10FFFF.
+        - [ ] Handle incomplete sequences at read boundary (buffer and re‑read).
+    - [ ] **Display Width:**
+        - [ ] Use `wcwidth()` / project‑local equivalent to determine display width of each codepoint.
+        - [ ] Handle zero‑width combining characters (display width 0).
+        - [ ] Handle CJK double‑width characters (display width 2).
+        - [ ] Handle non‑printable characters (display as `^X` or `\uXXXX`).
+    - [ ] **Cursor Navigation:**
+        - [ ] `forward-char` / `backward-char` move by codepoint, not byte.
+        - [ ] `forward-word` / `backward-word` recognize Unicode word boundaries (letter/digit vs punctuation).
+        - [ ] Delete/backspace remove entire multi‑byte codepoint.
+    - [ ] **Line Buffer:**
+        - [ ] Store as UTF‑8 bytes internally (no wchar_t buffer).
+        - [ ] Cursor and length track byte positions; convert to character positions for display.
+    - [ ] **Locale Integration:**
+        - [ ] Detect locale encoding via `nl_langinfo(CODESET)` or `$LC_CTYPE`.
+        - [ ] Fall back to ASCII‑only mode if locale is not UTF‑8.
+
+- [ ] **Multi‑Line Editing:**
+    - [ ] Detect `\\n` within line buffer (e.g., from continuation or `el_insertstr`).
+    - [ ] Track logical lines vs physical screen rows.
+    - [ ] Up/Down arrow within multi‑line buffer: move between logical lines (not history).
+    - [ ] Correct cursor positioning across wrapped physical lines.
+    - [ ] `el_gets` continuation support: return continuation indicator for incomplete input (unmatched quotes, trailing `\\`).
+
 - [ ] **Testing:**
-    - [ ] **Unit Tests:**
-        - [ ] Test line buffer manipulation logic (independent of terminal).
-        - [ ] Test history traversal and search algorithms.
-        - [ ] Test `.editrc` command parsing.
+    - [ ] **Unit Tests (`tests/lib/edit/`):**
+        - [ ] **Line Buffer Tests:**
+            - [ ] Insert at beginning, middle, end.
+            - [ ] Delete at beginning, middle, end.
+            - [ ] Cursor movement: forward/backward char, word, begin/end of line.
+            - [ ] Buffer growth: insert beyond initial capacity.
+            - [ ] Kill and yank: `^K`, `^U`, `^Y`.
+            - [ ] Undo: verify each operation reverts.
+        - [ ] **History Tests:**
+            - [ ] `H_ENTER` respects max size eviction.
+            - [ ] `H_PREV` / `H_NEXT` traverse entire list correctly.
+            - [ ] `H_NEXT_STR` / `H_PREV_STR` find correct entries.
+            - [ ] `H_LOAD` / `H_SAVE` round‑trip (write then read back, compare).
+            - [ ] `H_CLEAR` empties all entries.
+            - [ ] Duplicate suppression: consecutive and all‑duplicates modes.
+        - [ ] **Key Map Tests:**
+            - [ ] Bind, unbind, rebind a key; verify action dispatches correctly.
+            - [ ] Multi‑byte sequence binding (ESC `[A` → `previous-history`).
+            - [ ] Per‑program `.editrc` binding.
+        - [ ] **Tokenizer Tests:**
+            - [ ] Simple whitespace splitting.
+            - [ ] Quoted strings (single, double).
+            - [ ] Backslash escaping within quotes.
+            - [ ] Continuation detection (incomplete quotes).
+        - [ ] **`.editrc` Parser Tests:**
+            - [ ] Valid `bind` commands.
+            - [ ] Comment and blank line handling.
+            - [ ] Program‑specific sections.
+            - [ ] Malformed line: error message + continue.
+        - [ ] **Emacs Binding Tests:**
+            - [ ] Verify all `^A`–`^Z` and `M-*` bindings dispatch to correct actions.
+        - [ ] **Vi Mode Tests:**
+            - [ ] Insert → command → insert transitions.
+            - [ ] Motion commands (`w`, `b`, `e`, `$`, `0`).
+            - [ ] Edit commands (`d`, `c`, `x`, `r`, `p`).
+            - [ ] Count prefixes (`3dw`).
+            - [ ] Search (`/`, `?`, `n`, `N`).
     - [ ] **Property Tests:**
-        - [ ] Verify line buffer invariants during randomized editing operations.
-        - [ ] Verify history consistency across multiple additions and removals.
+        - [ ] Line buffer invariants: `0 <= cursor <= len < cap`, buffer NUL‑terminated.
+        - [ ] History invariants: `size <= max_size`, doubly‑linked list consistency.
+        - [ ] Randomized editing sequences (insert, delete, move, undo) never crash or corrupt.
+        - [ ] Kill ring: yank always produces previously killed text.
+    - [ ] **Fuzz Tests:**
+        - [ ] Fuzz `el_gets` input stream with random bytes (harness: in‑memory `FILE *`).
+        - [ ] Fuzz `.editrc` parser with random config files.
+        - [ ] Fuzz tokenizer with random line buffers.
     - [ ] **Integration Tests:**
-        - [ ] Mock terminal interaction tests verifying escape sequence generation.
+        - [ ] Drive `el_gets` via PTY: send escape sequences, verify output bytes.
+        - [ ] History file round‑trip: save, load, compare.
+        - [ ] Readline-compat: build a minimal readline app against `libedit`, verify prompt + completion.
+
 - [ ] **Documentation:**
-    - [x] Man page: `editline(3)`.
-    - [x] Man page: `el_init(3)`, `el_gets(3)`, etc. (individual or consolidated).
-    - [x] Man page: `editrc(5)`.
-    - [x] Man page: `history(3)`.
+    - [x] Man page: `editline(3)` — overview of the library. **(Exists)**
+    - [x] Man page: `el_init(3)`, `el_gets(3)`, `el_set(3)`, `el_get(3)`, `el_line(3)`, `el_end(3)`, `el_reset(3)`, `el_source(3)`, `el_resize(3)` — API reference. **(Exists)**
+    - [x] Man page: `editrc(5)` — `.editrc` file format and commands. **(Exists)**
+    - [x] Man page: `history(3)` — history API (`history_init`, `history_end`, `H_*` ops). **(Exists)**
+    - [ ] Man page: `tok_init(3)` — tokenizer API.
+    - [ ] Update `editline(3)` with vi mode documentation.
+    - [ ] Update `editline(3)` with completion callback documentation.
+    - [ ] Update `history(3)` with `H_LOAD` / `H_SAVE` / timestamps documentation.
+    - [ ] Document readline compatibility layer and header shim.
 
 ### 7. Userland Binaries (`bin/`)
 - [ ] **Shell (`sh`):**
