@@ -63,9 +63,14 @@ EditLine *el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr) {
 }
 
 void el_end(EditLine *el) {
+    size_t i;
+
     if (!el) return;
     terminal_set_orig(el);
     if (el->line.buffer) free(el->line.buffer);
+    for (i = 0; i < EL_KILL_RING_SIZE; i++) {
+        if (el->kill_ring[i]) free(el->kill_ring[i]);
+    }
     if (el->prog) free(el->prog);
     free(el);
 }

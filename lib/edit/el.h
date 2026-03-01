@@ -6,6 +6,8 @@
 #include <signal.h>
 #include <histedit.h>
 
+#define EL_KILL_RING_SIZE 8
+
 enum editor_mode {
     ED_EMACS = 0,
     ED_VI = 1
@@ -53,6 +55,10 @@ struct editline {
     void *completion_data;
     void *client_data;
     int overwrite_mode;
+    char *kill_ring[EL_KILL_RING_SIZE];
+    size_t kill_ring_count;
+    size_t kill_ring_head;
+    int last_cmd_was_kill;
 };
 
 /* Internal functions */

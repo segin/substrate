@@ -1014,33 +1014,201 @@ This document tracks the progress and remaining tasks for the Substrate operatin
 - [ ] **Partitioning & DevFS:**
     - [x] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c -->
     - [x] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS. <!-- geom_subr.c -->
-- [x] **Input:** <!-- ps2.c, keyboard.c, mouse.c, input.h -->
-    - [x] **Keyboard (PS/2):** <!-- keyboard.c -->
-        - [x] **Controller:** <!-- ps2.c -->
-            - [x] Initialize PS/2 Controller (i8042). <!-- ps2.c:ps2_init -->
-            - [x] Disable ports. <!-- ps2.c:112-119 (Step 1) -->
-            - [x] Perform self-test. <!-- ps2.c:143-154 (Step 4) -->
-        - [x] **Interrupts:** <!-- idt.c:186-187 -->
-            - [x] Handle IRQ1. <!-- idt.c:186-187 calls keyboard_handler -->
-            - [x] Read status/data ports. <!-- keyboard.c:65 reads 0x60 -->
-        - [x] **Scancodes:** <!-- keyboard.c:62-76 -->
-            - [x] Implement state machine for Set 1 (or 2) decoding. <!-- kbd_extended flag -->
-        - [x] **Keymap:** <!-- keyboard.c:28-42 -->
-            - [x] Map scancodes to ASCII/Unicode characters (US Layout). <!-- kbd_us[], kbd_us_shifted[] -->
-            - [x] Add support for shift, ctrl, alt modifiers. <!-- kbd_shift, kbd_ctrl, kbd_alt -->
-        - [x] **Buffer:** <!-- keyboard.c:7-18 -->
-            - [x] Implement a circular buffer for raw keystrokes. <!-- kbd_buffer[], kbd_push() -->
-        - [x] **Mouse (PS/2):** <!-- mouse.c -->
-            - [x] **Initialization:** <!-- ps2.c:231-252 (Step 9) -->
-                - [x] Enable auxiliary device (IRQ12). <!-- idt.c:188-189 -->
-                - [x] Set sample rate/resolution. <!-- Uses defaults after reset -->
-        - [x] **Packet Parsing:** <!-- mouse.c:47-93 -->
-            - [x] Decode 3-byte (or 4-byte) movement/button packets. <!-- mouse_handler state machine -->
-        - [x] **Event Queue:** <!-- mouse.c:9-22 -->
-            - [x] Push mouse events (dx, dy, buttons) to a system queue. <!-- mouse_q_push() -->
-    - [x] **Input Subsystem:** <!-- sys/input.h, keyboard.c, mouse.c -->
-        - [x] Abstract `input_event` structure (type, code, value). <!-- input.h -->
-        - [x] `/dev/input` interface for userspace access. <!-- input_register_device, input_report_* -->
+- [ ] **Input:** <!-- ps2.c, keyboard.c, mouse.c, input.h -->
+
+    - [ ] **PS/2 Controller (`sys/drivers/input/ps2.c`, `ps2.h`):**
+
+        > **Files:** `ps2.c` (controller driver), `ps2.h` (registers,
+        > commands, status bits, device commands).
+
+        - [ ] **I/O Primitives:**
+            - [ ] `ps2_wait_write()`: spin on status port bit 1 (input buffer empty), timeout guard.
+            - [ ] `ps2_wait_read()`: spin on status port bit 0 (output buffer full), timeout guard.
+            - [ ] `ps2_write_command(cmd)`: wait‑then‑write to port 0x64.
+            - [ ] `ps2_write_data(data)`: wait‑then‑write to port 0x60.
+            - [ ] `ps2_read_data()`: wait‑then‑read from port 0x60 (return 0xFF on timeout).
+            - [ ] `ps2_read_data_timeout(data, loops)`: bounded read with explicit loop count.
+            - [ ] `ps2_flush()`: drain up to 16 stale bytes from output buffer.
+            - [ ] `ps2_write_aux(data)`: write to port 2 device via `0xD4` prefix.
+            - [ ] `ps2_send_command_with_response(cmd, response)`: write command, read single response byte.
+        - [ ] **Initialization Sequence (`ps2_init`):**
+            - [ ] Step 1: Disable both ports (`0xAD`, `0xA7`) to prevent IRQs during setup.
+            - [ ] Step 2: Flush output buffer (`ps2_flush()`).
+            - [ ] Step 3: Read configuration byte (`0x20`), disable IRQs (bits 0‑1), enable translation (bit 6), set system flag (bit 2), write back (`0x60`).
+            - [ ] Step 4: Controller self‑test (`0xAA`) — expect `0x55`; abort on failure/timeout.
+            - [ ] Step 4b: Re‑write configuration byte (self‑test may reset it).
+            - [ ] Step 5: Dual‑channel detection — enable port 2 (`0xA8`), re‑read config, check bit 5 (P2 clock); disable port 2 again.
+            - [ ] Step 6: Interface tests — `0xAB` (port 1), `0xA9` (port 2 if dual), expect `0x00`.
+            - [ ] Step 7: Enable ports (`0xAE`, `0xA8`).
+            - [ ] Step 8: Enable IRQs — set config bits 0 (and 1 if dual).
+            - [ ] Step 9: Mouse init on port 2 — reset (`0xFF`), wait ACK (`0xFA`) + BAT (`0xAA`) + device ID, enable data reporting (`0xF4`).
+        - [ ] **Error Recovery:**
+            - [ ] Retry self‑test once on failure (some controllers need two attempts).
+            - [ ] Log port test failure codes to kernel console.
+            - [ ] Continue with single‑channel if port 2 test fails.
+            - [ ] Timeout constants tuned per real hardware profiles (QEMU, Bochs, real i8042).
+
+    - [ ] **Keyboard Driver (`sys/drivers/input/keyboard.c`, `keyboard.h`):**
+
+        > **Files:** `keyboard.c` (IRQ1 handler, scancode decoder, key
+        > buffer), `keyboard.h` (public API).
+
+        - [ ] **IRQ1 Handler (`keyboard_handler`):**
+            - [ ] Read scancode from port 0x60.
+            - [ ] Harvest entropy from TSC + scancode into RNG pool.
+            - [ ] Dispatch to scancode decoder state machine.
+            - [ ] Send EOI (or rely on IDT dispatcher).
+        - [ ] **Scancode Set Decoding:**
+            - [ ] **Set 1 (XT‑compatible, default with translation):**
+                - [ ] Single‑byte make codes (0x01–0x58).
+                - [ ] Single‑byte break codes (make | 0x80).
+                - [ ] Extended prefix `0xE0` → two‑byte sequences:
+                    - [ ] Right Ctrl (E0 1D / E0 9D), Right Alt (E0 38 / E0 B8).
+                    - [ ] Arrow keys (E0 48/50/4B/4D).
+                    - [ ] Insert (E0 52), Delete (E0 53), Home (E0 47), End (E0 4F).
+                    - [ ] Page Up (E0 49), Page Down (E0 51).
+                    - [ ] Print Screen (E0 2A E0 37 / E0 B7 E0 AA).
+                    - [ ] Pause/Break (E1 1D 45 E1 9D C5 — three‑byte E1 sequence).
+                - [ ] Discard spurious `0xE1` prefix after handling Pause.
+            - [ ] **Set 2 (AT) — Optional Future:**
+                - [ ] Stub for native Set 2 decoding (for controllers without translation).
+                - [ ] `0xF0` break prefix instead of bit 7.
+        - [ ] **Scancode‑to‑Keycode Translation:**
+            - [ ] Define `KEY_*` keycodes independent of scancode set (internal enum/defines).
+            - [ ] Map Set 1 scancodes to keycodes via lookup table.
+            - [ ] Separate table for extended (E0‑prefixed) scancodes.
+        - [ ] **Modifier Tracking:**
+            - [ ] Track left/right independently: `kbd_lshift`/`kbd_rshift`, `kbd_lctrl`/`kbd_rctrl`, `kbd_lalt`/`kbd_ralt`.
+            - [ ] Aggregate flags: `kbd_shift`, `kbd_ctrl`, `kbd_alt`.
+            - [ ] Caps Lock toggle state (latch on make, ignore break).
+            - [ ] Num Lock toggle state.
+            - [ ] Scroll Lock toggle state.
+            - [ ] Update LED indicator state to match lock toggles (see LED Control below).
+        - [ ] **Keymap (Scancode/Keycode → Character):**
+            - [ ] **US QWERTY layout tables:**
+                - [ ] `kbd_us[128]`: unshifted ASCII mapping.
+                - [ ] `kbd_us_shifted[128]`: shifted ASCII mapping.
+                - [ ] Caps Lock interaction: uppercase letters but not symbols.
+                - [ ] Num Lock interaction: numpad keys → digits vs navigation.
+            - [ ] **Ctrl character generation:**
+                - [ ] `Ctrl+A..Z` → 0x01..0x1A.
+                - [ ] `Ctrl+[` → ESC (0x1B), `Ctrl+\` → FS (0x1C), `Ctrl+]` → GS (0x1D).
+            - [ ] **Alt character generation:**
+                - [ ] Alt sets bit 7 (traditional) or generates ESC prefix (VT convention).
+            - [ ] **Dead key / Compose key support (deferred):** stub interface.
+            - [ ] **Switchable keymap infrastructure:**
+                - [ ] `struct keymap` with base, shift, ctrl, altgr tables.
+                - [ ] Runtime keymap switching API (`keyboard_set_keymap()`).
+                - [ ] Additional layouts: DE, FR, UK (deferred — provide registration API only).
+        - [ ] **Function Key and Special Key Handling:**
+            - [ ] F1–F12 → generate escape sequences (VT100: `ESC O P`..`ESC O [` or `ESC [ 11~`..`ESC [ 24~`).
+            - [ ] Arrow keys → `ESC [ A/B/C/D`.
+            - [ ] Home/End/Ins/Del/PgUp/PgDn → `ESC [ 1~/2~/3~/4~/5~/6~` (or xterm variants).
+            - [ ] Alt+F1..F12 → VT switching (`vt_activate(n)`).
+            - [ ] Ctrl+F9 → debug process dump.
+            - [ ] SysRq / Print Screen → kernel debug hook (deferred).
+        - [ ] **Key Repeat (Typematic):**
+            - [ ] Send `0xF3` command to keyboard device with delay/rate parameters.
+            - [ ] Default: 250 ms delay, 30 Hz repeat (or use BIOS defaults).
+            - [ ] Alternatively implement software repeat via timer tick (deferred).
+        - [ ] **LED Control:**
+            - [ ] Send `0xED` command to keyboard device with LED status byte.
+            - [ ] Bit 0 = Scroll Lock, Bit 1 = Num Lock, Bit 2 = Caps Lock.
+            - [ ] Update LEDs on lock key toggle.
+            - [ ] Handle ACK (`0xFA`) / Resend (`0xFE`) responses.
+        - [ ] **Key Buffer (`kbd_buffer`):**
+            - [ ] Circular buffer (256 entries).
+            - [ ] `kbd_push(c)`: enqueue translated character.
+            - [ ] `keyboard_getc()`: dequeue character (returns 0 if empty).
+            - [ ] Overflow policy: drop newest keystrokes (preserve existing behavior).
+            - [ ] Consider expanding to store raw `input_event` structs instead of chars.
+        - [ ] **Input Subsystem Integration:**
+            - [ ] Register `input_dev_t` with `name="PS/2 Keyboard"`, `caps=EV_KEY`.
+            - [ ] Call `input_report_key(dev, keycode, 1)` on key press.
+            - [ ] Call `input_report_key(dev, keycode, 0)` on key release (currently missing).
+            - [ ] Call `input_sync(dev)` after each event.
+        - [ ] **VT/TTY Integration:**
+            - [ ] Push translated character to active VT's TTY via `tty_flip_buffer_push()`.
+            - [ ] Fallback to `console_push_char()` if no TTY attached.
+            - [ ] Respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it).
+
+    - [ ] **Mouse Driver (`sys/drivers/input/mouse.c`, `mouse.h`):**
+
+        > **Files:** `mouse.c` (IRQ12 handler, packet decoder, event
+        > queue), `mouse.h` (structures, public API).
+
+        - [ ] **IRQ12 Handler (`mouse_handler`):**
+            - [ ] Read status port to confirm data available (bit 0).
+            - [ ] Read data byte from port 0x60.
+            - [ ] Harvest entropy from TSC + data byte.
+            - [ ] Feed byte to packet state machine.
+        - [ ] **Packet Decoding:**
+            - [ ] **Standard PS/2 Mouse (3‑byte):**
+                - [ ] Byte 0: buttons (bits 0–2), sign bits (bits 4–5), overflow (bits 6–7), alignment bit 3 (always 1).
+                - [ ] Byte 1: X movement (signed 9‑bit with sign from byte 0 bit 4).
+                - [ ] Byte 2: Y movement (signed 9‑bit with sign from byte 0 bit 5, Y‑axis inverted).
+                - [ ] Realignment: if byte 0 bit 3 != 1, resync by discarding bytes.
+            - [ ] **IntelliMouse Extension (4‑byte) — deferred:**
+                - [ ] Detect via magic sample‑rate sequence (200, 100, 80 → ID 0x03).
+                - [ ] Byte 3: Z‑axis (scroll wheel), signed 4‑bit.
+            - [ ] **IntelliMouse Explorer (5‑button) — deferred:**
+                - [ ] Detect via magic sequence (200, 200, 80 → ID 0x04).
+                - [ ] Byte 3: Z‑axis (bits 0–3), buttons 4–5 (bits 4–5).
+            - [ ] **Overflow Handling:**
+                - [ ] If overflow bits (byte 0 bits 6–7) are set, clamp movement to max delta.
+        - [ ] **Mouse State:**
+            - [ ] Track cumulative `mouse_x`, `mouse_y` (absolute position for cursor).
+            - [ ] Track button state (`mouse_buttons`, bits 0=left, 1=right, 2=middle).
+            - [ ] Configurable resolution/acceleration (deferred).
+        - [ ] **Event Queue:**
+            - [ ] Circular buffer of `mouse_event_t` (64 entries).
+            - [ ] `mouse_q_push(dx, dy, buttons)`: enqueue relative event.
+            - [ ] `mouse_get_event(ev)`: dequeue event (returns 0 if empty).
+            - [ ] `mouse_get_state(x, y, buttons)`: poll current absolute position + buttons.
+        - [ ] **Input Subsystem Integration:**
+            - [ ] Register `input_dev_t` with `name="PS/2 Mouse"`, `caps=EV_REL|EV_KEY`.
+            - [ ] Report `REL_X`, `REL_Y`, `REL_WHEEL` (when supported).
+            - [ ] Report `BTN_LEFT` (0x110), `BTN_RIGHT` (0x111), `BTN_MIDDLE` (0x112).
+            - [ ] `input_sync()` after each complete packet.
+
+    - [ ] **Input Subsystem (`sys/input.h`):**
+        - [ ] Abstract `input_event` structure (type, code, value, timestamp).
+        - [ ] `input_register_device(dev)` / `input_unregister_device(dev)`.
+        - [ ] `input_report_key()`, `input_report_rel()`, `input_report_abs()`.
+        - [ ] `input_sync()` — event boundary marker.
+        - [ ] `/dev/input/eventN` character device interface for userspace.
+        - [ ] Event filtering: consumers subscribe to device + event type.
+
+    - [ ] **Hot‑Plug Detection (deferred):**
+        - [ ] Monitor controller status for device insertion/removal.
+        - [ ] Re‑run device identification (`0xF2`) on port activity change.
+        - [ ] (De)register input devices dynamically.
+
+    - [ ] **Testing:**
+        - [ ] **Unit Tests:**
+            - [ ] Scancode Set 1 decoding: verify all single‑byte and E0‑extended codes.
+            - [ ] Modifier tracking: all combinations of shift/ctrl/alt/capslock/numlock.
+            - [ ] Keymap: verify ASCII output for full US‑QWERTY layout (unshifted, shifted, ctrl).
+            - [ ] Key buffer: fill, overflow, drain, verify FIFO order.
+            - [ ] Mouse packet decoding: standard 3‑byte packets with known dx/dy/buttons.
+            - [ ] Mouse packet realignment: inject byte with bit 3 clear, verify resync.
+            - [ ] Mouse overflow: inject overflow bits, verify clamping.
+            - [ ] Mouse event queue: fill, overflow, drain.
+        - [ ] **Property Tests:**
+            - [ ] Key buffer invariant: `0 <= head, tail < KBD_BUFFER_SIZE`, head == tail ↔ empty.
+            - [ ] Mouse queue invariant: `0 <= head, tail < MOUSE_QUEUE_SIZE`.
+            - [ ] Randomized scancode sequences never crash handler or corrupt state.
+        - [ ] **Integration Tests:**
+            - [ ] Boot kernel in QEMU, inject keyboard scancodes via monitor (`sendkey`), verify TTY output.
+            - [ ] Boot kernel, inject mouse events, verify `mouse_get_state()` returns expected position.
+            - [ ] Alt+F1..F12 switches VT correctly.
+            - [ ] Ctrl+C / Ctrl+D / Ctrl+Z generate correct control characters.
+
+    - [ ] **Documentation:**
+        - [ ] Internal doc: PS/2 controller initialization sequence and error handling.
+        - [ ] Internal doc: scancode set 1 table and extended key mapping.
+        - [ ] Internal doc: input subsystem event model and device registration.
+
 - [ ] **Console Subsystem (`sys/console`):**
     - [ ] **TTY Subsystem (Core):**
         - [ ] **Structures (`tty_t`):**
@@ -4725,11 +4893,11 @@ This document tracks the progress and remaining tasks for the Substrate operatin
     - [x] **Deletion:**
         - [x] Backspace (`^H` / 0x7F): delete char before cursor.
         - [x] Delete (`^D`): delete char at cursor (or EOF on empty line).
-        - [ ] `kill-line` (`^K`): delete from cursor to end of line, save to kill ring.
-        - [ ] `backward-kill-line` (`^U`): delete from start to cursor, save to kill ring.
-        - [ ] `kill-word` (`M-d`): delete from cursor to end of word, save to kill ring.
-        - [ ] `backward-kill-word` (`M-^H` / `M-DEL`): delete word before cursor, save to kill ring.
-        - [ ] `delete-char-or-list` (configurable `^D` variant): list completions if at end, else delete.
+        - [x] `kill-line` (`^K`): delete from cursor to end of line, save to kill ring.
+        - [x] `backward-kill-line` (`^U`): delete from start to cursor, save to kill ring.
+        - [x] `kill-word` (`M-d`): delete from cursor to end of word, save to kill ring.
+        - [x] `backward-kill-word` (`M-^H` / `M-DEL`): delete word before cursor, save to kill ring.
+        - [x] `delete-char-or-list` (configurable `^D` variant): list completions if at end, else delete.
     - [x] **Cursor Navigation:**
         - [x] Left/Right arrow keys (ESC `[D` / ESC `[C`).
         - [ ] `beginning-of-line` (`^A`): move to column 0.
