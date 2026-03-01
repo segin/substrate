@@ -24,6 +24,9 @@ int main(void) {
     CHECK(elf_reloc_is_tls_for_machine(EM_ARM, R_ARM_TLS_TPOFF32) == 1);
     CHECK(elf_reloc_is_tls_for_machine(EM_AARCH64, R_AARCH64_TLS_TPREL64) == 1);
     CHECK(elf_reloc_is_pc_relative_for_machine(EM_AARCH64, R_AARCH64_CALL26) == 1);
+    CHECK(strcmp(elf_reloc_name_for_machine(EM_X86_64, R_X86_64_PC32), "R_X86_64_PC32") == 0);
+    CHECK(strcmp(elf_reloc_name_for_machine(EM_386, R_386_PC8), "R_386_PC8") == 0);
+    CHECK(strncmp(elf_reloc_name_for_machine(EM_386, 9999), "UNKNOWN(", 8) == 0);
 
     arm = elf_init_arm();
     CHECK(arm != NULL);
@@ -49,6 +52,12 @@ int main(void) {
                                    GNU_PROPERTY_X86_FEATURE_1_IBT) == ELF_OK);
     CHECK((elf_x86_isa_level(x64) & GNU_PROPERTY_X86_ISA_1_V2) != 0);
     CHECK((elf_x86_feature_flags(x64) & GNU_PROPERTY_X86_FEATURE_1_IBT) != 0);
+    {
+        uint64_t outv = 0;
+        CHECK(elf_apply_relocation_value(x64, R_X86_64_PC16, 0x1000, 0x1010, 0, &outv) == ELF_OK);
+        CHECK(outv == 0x10);
+        CHECK(elf_apply_relocation_value(x64, R_X86_64_PC8, 0x1000, 0x1080, 0, &outv) == ELF_ERR_RELOC);
+    }
 
     {
         const uint8_t *build_id = NULL;
