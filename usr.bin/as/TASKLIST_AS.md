@@ -209,11 +209,11 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] **Opmask:** `KMOV{B,W,D,Q}`, `KAND/OR/XOR/XNOR/NOT/ANDN{B,W,D,Q}`, `KORTEST/KTEST{B,W,D,Q}`, `KSHIFTL/R{B,W,D,Q}`, `KUNPCK{BW,WD,DQ}`, `KADD{W,D,Q}`
 
 ### 5b. AVX-512BW (Byte/Word)
-- [ ] 512-bit byte/word arithmetic, pack, unpack, shuffle, shift, compare-to-mask
-- [ ] `VPSLLVW`, `VPSRLVW`, `VPSRAVW`, `VDBPSADBW`
-- [ ] `VPCMPB/W/UB/UW → k`, `VPMOVB2M/W2M`, `VPMOVM2B/W`
-- [ ] `VPERMW`, `VPERMI2W`, `VPERMT2W`, `VPBLENDMB/MW`
-- [ ] `VPTESTNMB/MW`
+- [x] 512-bit byte/word arithmetic, pack, unpack, shuffle, shift, compare-to-mask
+- [x] `VPSLLVW`, `VPSRLVW`, `VPSRAVW`, `VDBPSADBW`
+- [x] `VPCMPB/W/UB/UW → k`, `VPMOVB2M/W2M`, `VPMOVM2B/W`
+- [x] `VPERMW`, `VPERMI2W`, `VPERMT2W`, `VPBLENDMB/MW`
+- [x] `VPTESTNMB/MW`
 
 ### 5c. AVX-512CD (Conflict Detection)
 - [ ] `VPCONFLICTD/Q`, `VPLZCNTD/Q`, `VPBROADCASTMB2Q`, `VPBROADCASTMW2D`
