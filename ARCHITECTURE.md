@@ -192,6 +192,7 @@ These components are essential for booting and basic system operation.
   - VEX (AVX-class) prefix encoding is staged in `usr.bin/as/as_x86_vex.c` with automatic `C5`/`C4` selection and explicit `L/W/pp/vvvv` field handling for 3-operand forms; regression coverage lives in `tests/usr.bin/as/test_x86_vex_encode.sh`.
   - EVEX (AVX-512 class) prefix encoding is staged in `usr.bin/as/as_x86_evex.c` with explicit `P0/P1/P2` field packing (`R/X/B/R'`, `W/vvvv/pp`, `z/L'L/b/V'/aaa`) and coverage for opmask/zeroing/broadcast/rounding/SAE semantics in `tests/usr.bin/as/test_x86_evex_encode.sh`.
   - x86 relocation kind mapping/emission lives in `usr.bin/as/as_x86_reloc.c`, covering i386 and x86-64 relocation families used by assembler emission paths; regression coverage lives in `tests/usr.bin/as/test_x86_reloc_core.sh`.
+  - x86-64-v2 core opcode support (`lahf`, `sahf`, `popcnt`, and dedicated `cmpxchg16b` form) is staged in `usr.bin/as/as_x86_v2.c` with byte-exact coverage in `tests/usr.bin/as/test_x86_v2_core.sh`.
   - CLI compatibility surface now includes `-msyntax=att|intel`, warning controls (`-W/--warn/--no-warn/--fatal-warnings`), `--defsym`, `-al` listings, `--statistics`, and `--target-help` with regression coverage in `tests/usr.bin/as/test_cli_extended.sh`.
   - For complete ISA coverage during migration, it still forwards final assembly to host GCC/GAS (`-m32`/`-m64`) and validates ELF class/machine/type through `libelfobj`.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).

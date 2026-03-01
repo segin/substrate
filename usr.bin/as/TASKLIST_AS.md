@@ -120,9 +120,9 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 > CMPXCHG16B, LAHF/SAHF (long mode), POPCNT, SSE3, SSSE3, SSE4.1, SSE4.2.
 
 ### 3a. CMPXCHG16B / LAHF / SAHF / POPCNT
-- [ ] `CMPXCHG16B m128` — `0F C7 /1` + REX.W
-- [ ] `LAHF` — `9F`, `SAHF` — `9E`
-- [ ] `POPCNT r16/r32/r64, r/m16/32/64` — `F3 0F B8 /r`
+- [x] `CMPXCHG16B m128` — `0F C7 /1` + REX.W
+- [x] `LAHF` — `9F`, `SAHF` — `9E`
+- [x] `POPCNT r16/r32/r64, r/m16/32/64` — `F3 0F B8 /r`
 
 ### 3b. SSE3
 - [ ] `ADDSUBPD`, `ADDSUBPS`, `HADDPD`, `HADDPS`, `HSUBPD`, `HSUBPS`
