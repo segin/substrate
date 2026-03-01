@@ -151,20 +151,20 @@ Goal: implement a full-featured `readelf` utility using `libelfobj` for all ELF 
 - [x] Handle `EXIDX_CANTUNWIND` entries.
 
 ### 12b. ARM Build Attributes (`-A` / `--arch-specific`)
-- [ ] Parse and display `.ARM.attributes` (`SHT_ARM_ATTRIBUTES`) section.
-- [ ] Decode vendor subsections (primarily `aeabi`).
-- [ ] Decode all standard tags:
-    - [ ] `Tag_CPU_name` (4), `Tag_CPU_arch` (6), `Tag_CPU_arch_profile` (7).
-    - [ ] `Tag_ARM_ISA_use` (8), `Tag_THUMB_ISA_use` (9).
-    - [ ] `Tag_FP_arch` (10), `Tag_WMMX_arch` (11), `Tag_Advanced_SIMD_arch` (12).
-    - [ ] `Tag_ABI_PCS_*` (13–17), `Tag_ABI_PCS_wchar_t` (18).
-    - [ ] `Tag_ABI_FP_*` (19–23), `Tag_ABI_align_*` (24–25).
-    - [ ] `Tag_ABI_enum_size` (26), `Tag_ABI_HardFP_use` (27), `Tag_ABI_VFP_args` (28).
-    - [ ] `Tag_CPU_unaligned_access` (34), `Tag_FP_HP_extension` (36).
-    - [ ] `Tag_MPExtension_use` (42), `Tag_DIV_use` (44), `Tag_DSP_extension` (46).
-    - [ ] `Tag_Virtualization_use` (68).
-- [ ] Display tag values with human-readable interpretations (e.g., `Tag_CPU_arch: v7` not just `10`).
-- [ ] Handle unknown vendor subsections gracefully.
+- [x] Parse and display `.ARM.attributes` (`SHT_ARM_ATTRIBUTES`) section.
+- [x] Decode vendor subsections (primarily `aeabi`).
+- [x] Decode all standard tags:
+    - [x] `Tag_CPU_name` (4), `Tag_CPU_arch` (6), `Tag_CPU_arch_profile` (7).
+    - [x] `Tag_ARM_ISA_use` (8), `Tag_THUMB_ISA_use` (9).
+    - [x] `Tag_FP_arch` (10), `Tag_WMMX_arch` (11), `Tag_Advanced_SIMD_arch` (12).
+    - [x] `Tag_ABI_PCS_*` (13–17), `Tag_ABI_PCS_wchar_t` (18).
+    - [x] `Tag_ABI_FP_*` (19–23), `Tag_ABI_align_*` (24–25).
+    - [x] `Tag_ABI_enum_size` (26), `Tag_ABI_HardFP_use` (27), `Tag_ABI_VFP_args` (28).
+    - [x] `Tag_CPU_unaligned_access` (34), `Tag_FP_HP_extension` (36).
+    - [x] `Tag_MPExtension_use` (42), `Tag_DIV_use` (44), `Tag_DSP_extension` (46).
+    - [x] `Tag_Virtualization_use` (68).
+- [x] Display tag values with human-readable interpretations (e.g., `Tag_CPU_arch: v7` not just `10`).
+- [x] Handle unknown vendor subsections gracefully.
 
 ## 13. Hex/String Dump (`-x` / `-p`)
 

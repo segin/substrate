@@ -2198,6 +2198,167 @@ static void print_arm_unwind(const elf_view_t *view, const elf_header_t *hdr) {
     }
 }
 
+static int read_uleb(const uint8_t *buf, size_t size, size_t *off, uint64_t *out) {
+    uint64_t v = 0;
+    unsigned shift = 0;
+    size_t i = *off;
+
+    while (i < size) {
+        uint8_t b = buf[i++];
+        v |= (uint64_t)(b & 0x7f) << shift;
+        if ((b & 0x80) == 0) {
+            *off = i;
+            *out = v;
+            return 0;
+        }
+        shift += 7;
+        if (shift > 63) {
+            return -1;
+        }
+    }
+    return -1;
+}
+
+static const char *arm_attr_tag_name(uint64_t tag) {
+    switch (tag) {
+        case 4: return "Tag_CPU_name";
+        case 6: return "Tag_CPU_arch";
+        case 7: return "Tag_CPU_arch_profile";
+        case 8: return "Tag_ARM_ISA_use";
+        case 9: return "Tag_THUMB_ISA_use";
+        case 10: return "Tag_FP_arch";
+        case 11: return "Tag_WMMX_arch";
+        case 12: return "Tag_Advanced_SIMD_arch";
+        case 13: return "Tag_ABI_PCS_config";
+        case 14: return "Tag_ABI_PCS_R9_use";
+        case 15: return "Tag_ABI_PCS_RW_data";
+        case 16: return "Tag_ABI_PCS_RO_data";
+        case 17: return "Tag_ABI_PCS_GOT_use";
+        case 18: return "Tag_ABI_PCS_wchar_t";
+        case 19: return "Tag_ABI_FP_rounding";
+        case 20: return "Tag_ABI_FP_denormal";
+        case 21: return "Tag_ABI_FP_exceptions";
+        case 22: return "Tag_ABI_FP_user_exceptions";
+        case 23: return "Tag_ABI_FP_number_model";
+        case 24: return "Tag_ABI_align_needed";
+        case 25: return "Tag_ABI_align_preserved";
+        case 26: return "Tag_ABI_enum_size";
+        case 27: return "Tag_ABI_HardFP_use";
+        case 28: return "Tag_ABI_VFP_args";
+        case 34: return "Tag_CPU_unaligned_access";
+        case 36: return "Tag_FP_HP_extension";
+        case 42: return "Tag_MPExtension_use";
+        case 44: return "Tag_DIV_use";
+        case 46: return "Tag_DSP_extension";
+        case 68: return "Tag_Virtualization_use";
+        default: return NULL;
+    }
+}
+
+static const char *arm_cpu_arch_name(uint64_t v) {
+    switch (v) {
+        case 0: return "pre-v4";
+        case 1: return "v4";
+        case 2: return "v4T";
+        case 3: return "v5T";
+        case 4: return "v5TE";
+        case 5: return "v5TEJ";
+        case 6: return "v6";
+        case 7: return "v6KZ";
+        case 8: return "v6T2";
+        case 9: return "v6K";
+        case 10: return "v7";
+        case 11: return "v6-M";
+        case 12: return "v6S-M";
+        case 13: return "v7E-M";
+        case 14: return "v8";
+        default: return NULL;
+    }
+}
+
+static void print_arm_attributes(const elf_view_t *view, const elf_header_t *hdr) {
+    uint64_t shnum = shnum_resolved(hdr);
+    uint64_t i;
+
+    (void)hdr;
+    for (i = 0; i < shnum; ++i) {
+        section_header_t sh;
+        const uint8_t *buf;
+        size_t size;
+        size_t off;
+
+        if (read_shdr(view, hdr, (size_t)i, &sh) != 0) break;
+        if (sh.type != SHT_ARM_ATTRIBUTES || sh.off + sh.size > view->size || sh.size < 6) continue;
+
+        buf = view->data + sh.off;
+        size = (size_t)sh.size;
+        if (buf[0] != 'A') {
+            continue;
+        }
+        printf("\nARM Attributes section:\n");
+        off = 1;
+        while (off + 4 <= size) {
+            uint32_t sect_len = (uint32_t)buf[off] |
+                                ((uint32_t)buf[off + 1] << 8) |
+                                ((uint32_t)buf[off + 2] << 16) |
+                                ((uint32_t)buf[off + 3] << 24);
+            size_t vend_off = off + 4;
+            size_t vend_end = vend_off;
+            size_t sub_off;
+            if (sect_len == 0 || off + sect_len > size) break;
+            while (vend_end < off + sect_len && buf[vend_end] != '\0') {
+                ++vend_end;
+            }
+            if (vend_end >= off + sect_len) break;
+            printf("  Vendor: %s\n", (const char *)(buf + vend_off));
+            if (strcmp((const char *)(buf + vend_off), "aeabi") != 0) {
+                printf("    (unknown vendor subsection, raw parse skipped)\n");
+                off += sect_len;
+                continue;
+            }
+            sub_off = vend_end + 1;
+            while (sub_off + 5 <= off + sect_len) {
+                uint8_t tag = buf[sub_off];
+                uint32_t sub_len = (uint32_t)buf[sub_off + 1] |
+                                   ((uint32_t)buf[sub_off + 2] << 8) |
+                                   ((uint32_t)buf[sub_off + 3] << 16) |
+                                   ((uint32_t)buf[sub_off + 4] << 24);
+                size_t p = sub_off + 5;
+                if (sub_len < 5 || sub_off + sub_len > off + sect_len) break;
+                printf("    Subsection tag %u\n", tag);
+                while (p < sub_off + sub_len) {
+                    uint64_t atag = 0;
+                    uint64_t aval = 0;
+                    const char *name;
+                    if (read_uleb(buf, sub_off + sub_len, &p, &atag) != 0) break;
+                    name = arm_attr_tag_name(atag);
+                    if (atag == 4) {
+                        const char *s = (const char *)(buf + p);
+                        size_t sl = strlen(s);
+                        printf("      %s: %s\n", name ? name : "Tag", s);
+                        p += sl + 1;
+                    } else {
+                        const char *desc = NULL;
+                        if (read_uleb(buf, sub_off + sub_len, &p, &aval) != 0) break;
+                        if (atag == 6) {
+                            desc = arm_cpu_arch_name(aval);
+                        }
+                        if (desc != NULL) {
+                            printf("      %s: %s (%llu)\n", name ? name : "Tag", desc,
+                                   (unsigned long long)aval);
+                        } else {
+                            printf("      %s: %llu\n", name ? name : "Tag",
+                                   (unsigned long long)aval);
+                        }
+                    }
+                }
+                sub_off += sub_len;
+            }
+            off += sect_len;
+        }
+    }
+}
+
 static int read_header(const elf_view_t *view, elf_header_t *out) {
     size_t need;
 
@@ -2650,6 +2811,9 @@ static int process_file(const char *path, const readelf_opts_t *opts, int multip
     }
     if (opts->show_unwind) {
         print_arm_unwind(&view, &hdr);
+    }
+    if (opts->show_arch_specific) {
+        print_arm_attributes(&view, &hdr);
     }
 
 out:
