@@ -40,10 +40,10 @@ Goal: implement `size` using section accounting from `libelfobj`.
 - [x] Same as Berkeley but with wider columns.
 
 ### 3d. Radix Options
-- [ ] `-d` / `--radix=10`: decimal (default).
-- [ ] `-o` / `--radix=8`: octal.
-- [ ] `-x` / `--radix=16`: hexadecimal.
-- [ ] `--radix=10` applies to all numeric columns in all formats.
+- [x] `-d` / `--radix=10`: decimal (default).
+- [x] `-o` / `--radix=8`: octal.
+- [x] `-x` / `--radix=16`: hexadecimal.
+- [x] `--radix=10` applies to all numeric columns in all formats.
 
 ## 4. Multi‑File and Archive Support
 

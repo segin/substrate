@@ -41,7 +41,10 @@ typedef enum {
 static const char *progname = "size";
 
 static void usage(FILE *out) {
-    fprintf(out, "usage: %s [-A|-B|--format={sysv,berkeley,gnu}] <file>...\n", progname);
+    fprintf(out,
+            "usage: %s [-A|-B|--format={sysv,berkeley,gnu}] "
+            "[-d|-o|-x|--radix={8,10,16}] <file>...\n",
+            progname);
 }
 
 static char *xstrdup(const char *s) {
@@ -99,6 +102,35 @@ static int push_row(size_report_t *report, const char *name, uint64_t size, uint
     report->rows[report->row_count].addr = addr;
     report->row_count++;
     return 0;
+}
+
+static int parse_radix(const char *arg) {
+    if (arg == NULL) {
+        return -1;
+    }
+    if (strcmp(arg, "8") == 0) {
+        return 8;
+    }
+    if (strcmp(arg, "10") == 0) {
+        return 10;
+    }
+    if (strcmp(arg, "16") == 0) {
+        return 16;
+    }
+    return -1;
+}
+
+static void format_value(uint64_t value, int radix, char *buf, size_t buflen) {
+    if (buf == NULL || buflen == 0) {
+        return;
+    }
+    if (radix == 8) {
+        (void)snprintf(buf, buflen, "%llo", (unsigned long long)value);
+    } else if (radix == 16) {
+        (void)snprintf(buf, buflen, "%llx", (unsigned long long)value);
+    } else {
+        (void)snprintf(buf, buflen, "%llu", (unsigned long long)value);
+    }
 }
 
 static void classify_section(const elf_section_t *sec, size_totals_t *totals,
@@ -200,49 +232,87 @@ static int analyze_elf(const char *path, size_report_t *report, size_classify_mo
     return 0;
 }
 
-static void print_row(const char *path, const size_totals_t *totals) {
+static void print_row(const char *path, const size_totals_t *totals, int radix, int radix_explicit) {
     uint64_t total;
     int hex_width;
+    char text_buf[32];
+    char data_buf[32];
+    char bss_buf[32];
+    char total_a_buf[32];
+    char total_b_buf[32];
 
     total = totals->text + totals->data + totals->bss;
     hex_width = (totals->cls == ELFOBJ_CLASS_64) ? 16 : 8;
-    printf("%7llu %7llu %7llu %7llu %0*llx %s\n",
-           (unsigned long long)totals->text,
-           (unsigned long long)totals->data,
-           (unsigned long long)totals->bss,
-           (unsigned long long)total,
-           hex_width,
-           (unsigned long long)total,
-           path);
+    format_value(totals->text, radix, text_buf, sizeof(text_buf));
+    format_value(totals->data, radix, data_buf, sizeof(data_buf));
+    format_value(totals->bss, radix, bss_buf, sizeof(bss_buf));
+    format_value(total, radix, total_a_buf, sizeof(total_a_buf));
+    if (radix_explicit) {
+        format_value(total, radix, total_b_buf, sizeof(total_b_buf));
+        printf("%7s %7s %7s %7s %*s %s\n",
+               text_buf,
+               data_buf,
+               bss_buf,
+               total_a_buf,
+               hex_width,
+               total_b_buf,
+               path);
+    } else {
+        (void)snprintf(total_b_buf, sizeof(total_b_buf), "%0*llx",
+                       hex_width,
+                       (unsigned long long)total);
+        printf("%7s %7s %7s %7s %*s %s\n",
+               text_buf,
+               data_buf,
+               bss_buf,
+               total_a_buf,
+               hex_width,
+               total_b_buf,
+               path);
+    }
 }
 
-static void print_gnu_row(const char *path, const size_totals_t *totals) {
+static void print_gnu_row(const char *path, const size_totals_t *totals, int radix) {
     uint64_t total;
+    char text_buf[32];
+    char data_buf[32];
+    char bss_buf[32];
+    char total_buf[32];
 
     total = totals->text + totals->data + totals->bss;
-    printf("%10llu %10llu %10llu %10llu %s\n",
-           (unsigned long long)totals->text,
-           (unsigned long long)totals->data,
-           (unsigned long long)totals->bss,
-           (unsigned long long)total,
+    format_value(totals->text, radix, text_buf, sizeof(text_buf));
+    format_value(totals->data, radix, data_buf, sizeof(data_buf));
+    format_value(totals->bss, radix, bss_buf, sizeof(bss_buf));
+    format_value(total, radix, total_buf, sizeof(total_buf));
+    printf("%10s %10s %10s %10s %s\n",
+           text_buf,
+           data_buf,
+           bss_buf,
+           total_buf,
            path);
 }
 
-static void print_sysv_table(const char *path, const size_report_t *report) {
+static void print_sysv_table(const char *path, const size_report_t *report, int radix) {
     size_t i;
     uint64_t total = 0;
+    char size_buf[32];
+    char addr_buf[32];
+    char total_buf[32];
 
     printf("%s  :\n", path);
     printf("section              size             addr\n");
     for (i = 0; i < report->row_count; ++i) {
         const size_section_row_t *row = &report->rows[i];
         total += row->size;
-        printf("%-18s %10llu %16llu\n",
+        format_value(row->size, radix, size_buf, sizeof(size_buf));
+        format_value(row->addr, radix, addr_buf, sizeof(addr_buf));
+        printf("%-18s %10s %16s\n",
                row->name,
-               (unsigned long long)row->size,
-               (unsigned long long)row->addr);
+               size_buf,
+               addr_buf);
     }
-    printf("Total                %10llu\n\n", (unsigned long long)total);
+    format_value(total, radix, total_buf, sizeof(total_buf));
+    printf("Total                %10s\n\n", total_buf);
 }
 
 int main(int argc, char **argv) {
@@ -251,6 +321,8 @@ int main(int argc, char **argv) {
     int printed = 0;
     int file_count = 0;
     int first_file = 1;
+    int radix = 10;
+    int radix_explicit = 0;
     size_format_t format = SIZE_FORMAT_BERKELEY;
     size_classify_mode_t classify_mode = SIZE_CLASSIFY_BERKELEY;
     size_totals_t grand;
@@ -271,6 +343,31 @@ int main(int argc, char **argv) {
         if (strcmp(argv[i], "--format=gnu") == 0) {
             format = SIZE_FORMAT_GNU;
             classify_mode = SIZE_CLASSIFY_BERKELEY;
+            continue;
+        }
+        if (strcmp(argv[i], "-d") == 0) {
+            radix = 10;
+            radix_explicit = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-o") == 0) {
+            radix = 8;
+            radix_explicit = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-x") == 0) {
+            radix = 16;
+            radix_explicit = 1;
+            continue;
+        }
+        if (strncmp(argv[i], "--radix=", 8) == 0) {
+            int parsed = parse_radix(argv[i] + 8);
+            if (parsed < 0) {
+                usage(stderr);
+                return 1;
+            }
+            radix = parsed;
+            radix_explicit = 1;
             continue;
         }
         if (strcmp(argv[i], "-B") == 0 || strcmp(argv[i], "--format=berkeley") == 0) {
@@ -320,12 +417,12 @@ int main(int argc, char **argv) {
             if (!first_file) {
                 printf("\n");
             }
-            print_sysv_table(argv[i], &report);
+            print_sysv_table(argv[i], &report, radix);
             first_file = 0;
         } else if (format == SIZE_FORMAT_GNU) {
-            print_gnu_row(argv[i], &report.totals);
+            print_gnu_row(argv[i], &report.totals, radix);
         } else {
-            print_row(argv[i], &report.totals);
+            print_row(argv[i], &report.totals, radix, radix_explicit);
         }
         printed++;
 
@@ -341,9 +438,9 @@ int main(int argc, char **argv) {
 
     if (printed > 1) {
         if (format == SIZE_FORMAT_BERKELEY) {
-            print_row("total", &grand);
+            print_row("total", &grand, radix, radix_explicit);
         } else if (format == SIZE_FORMAT_GNU) {
-            print_gnu_row("total", &grand);
+            print_gnu_row("total", &grand, radix);
         }
     }
 
