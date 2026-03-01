@@ -236,13 +236,13 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 ## 6. ARMv7 (AArch32) Encoding Engine
 
 ### 6a. ARM State Encoding Infrastructure
-- [ ] 32-bit ARM instruction encoding (condition field, opcode classes).
-- [ ] Condition codes: EQ/NE/CS/CC/MI/PL/VS/VC/HI/LS/GE/LT/GT/LE/AL/NV.
-- [ ] Addressing modes: immediate, register, scaled register, pre/post-indexed, LDM/STM modes (IA/IB/DA/DB/FD/FA/ED/EA).
-- [ ] Barrel shifter operands: LSL/LSR/ASR/ROR/RRX (immediate and register).
-- [ ] S-suffix (set flags), conditional execution on all instructions.
-- [ ] ARM/Thumb interwork: `.arm`, `.thumb`, `.thumb_func`, BX/BLX interwork.
-- [ ] IT blocks (Thumb-2): `IT{T,E}{T,E}{T,E}` (up to 4 conditional instructions).
+- [x] 32-bit ARM instruction encoding (condition field, opcode classes).
+- [x] Condition codes: EQ/NE/CS/CC/MI/PL/VS/VC/HI/LS/GE/LT/GT/LE/AL/NV.
+- [x] Addressing modes: immediate, register, scaled register, pre/post-indexed, LDM/STM modes (IA/IB/DA/DB/FD/FA/ED/EA).
+- [x] Barrel shifter operands: LSL/LSR/ASR/ROR/RRX (immediate and register).
+- [x] S-suffix (set flags), conditional execution on all instructions.
+- [x] ARM/Thumb interwork: `.arm`, `.thumb`, `.thumb_func`, BX/BLX interwork.
+- [x] IT blocks (Thumb-2): `IT{T,E}{T,E}{T,E}` (up to 4 conditional instructions).
 
 ### 6b. Thumb / Thumb-2 Encoding
 - [ ] 16-bit narrow Thumb encoding for basic operations.
