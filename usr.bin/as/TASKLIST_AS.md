@@ -451,11 +451,11 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] Expression evaluation: arithmetic, forward references, absolute vs. relocatable.
 
 ### 8b. Integration Tests
-- [ ] `as -o test.o test.s` → `readelf -a test.o` validates headers/sections/symbols.
-- [ ] `as` + `ld` → running executable for each target arch.
-- [ ] Cross-arch rejection: x86 source fails cleanly under ARM mode.
-- [ ] Round-trip: disassemble with `objdump` → reassemble → bit-identical output.
-- [ ] Compatibility: Substrate `as` output linkable by GNU `ld`, and vice versa.
+- [x] `as -o test.o test.s` → `readelf -a test.o` validates headers/sections/symbols.
+- [x] `as` + `ld` → running executable for each target arch.
+- [x] Cross-arch rejection: x86 source fails cleanly under ARM mode.
+- [x] Round-trip: disassemble with `objdump` → reassemble → bit-identical output.
+- [x] Compatibility: Substrate `as` output linkable by GNU `ld`, and vice versa.
 
 ### 8c. Fuzz Testing
 - [ ] Grammar-aware fuzzer for instruction parser.

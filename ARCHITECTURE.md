@@ -231,7 +231,7 @@ These components are essential for booting and basic system operation.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).
   - Exposes optional safety limits (`--max-input-bytes`, `--max-line-bytes`, `--max-token-length`, `--max-macro-depth`, `--max-include-depth`) and optional structured wrapper diagnostics via `AS_ERROR_CODES=1`.
   - Spec and rollout docs are maintained under `docs/specs/as_spec.md` and `docs/specs/as_rollout.md`.
-  - Regression coverage lives in `tests/usr.bin/as/` including compatibility, relocation/ELF, diagnostics, determinism, fuzz-smoke, rollout integration harnesses, and the `tests/usr.bin/as/test_unit_matrix.sh` per-arch unit matrix runner.
+  - Regression coverage lives in `tests/usr.bin/as/` including compatibility, relocation/ELF, diagnostics, determinism, fuzz-smoke, rollout integration harnesses, the `tests/usr.bin/as/test_unit_matrix.sh` per-arch unit matrix runner, and `tests/usr.bin/as/test_integration_matrix.sh` for cross-arch/round-trip/toolchain-interoperability checks.
 - **`ld`**: linker prototype built on `libelfobj`.
   - Merges objects/archives and emits ET_REL/ET_EXEC/ET_DYN outputs.
   - Current limitation: `libelfobj` validator can reject some compiler-style relocation layouts; full relocation+layout validation is pending.
