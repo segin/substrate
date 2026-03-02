@@ -1115,19 +1115,19 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] TLS: `R_ALPHA_TLSGD` (25), `R_ALPHA_TLSLDM` (26), `R_ALPHA_DTPMOD64` (27), `R_ALPHA_GOTDTPREL` (28), `R_ALPHA_DTPREL64` (29), `R_ALPHA_DTPRELHI` (30), `R_ALPHA_DTPRELLO` (31), `R_ALPHA_DTPREL16` (32), `R_ALPHA_GOTTPREL` (33), `R_ALPHA_TPREL64` (34), `R_ALPHA_TPRELHI` (35), `R_ALPHA_TPRELLO` (36), `R_ALPHA_TPREL16` (37)
 
 ### 23c. Alpha Relocation Backend
-- [ ] `alpha_reloc_size()` for all Alpha relocation types.
-- [ ] `alpha_is_pc_relative()`: BRADDR, HINT, SREL16/32/64.
-- [ ] `alpha_is_tls()`: all TLS types.
-- [ ] `alpha_apply()`: REFLONG (S + A, 32-bit), REFQUAD (S + A, 64-bit).
-- [ ] `alpha_apply()`: BRADDR (21-bit signed PC-relative branch, bits[20:0]).
-- [ ] `alpha_apply()`: HINT (14-bit hint for JMP/JSR).
-- [ ] `alpha_apply()`: GPREL32 (S + A − GP).
-- [ ] `alpha_apply()`: LITERAL/LITUSE (GOT slot + optimization hints).
-- [ ] `alpha_apply()`: GPDISP (GP displacement pair).
-- [ ] `alpha_apply()`: SREL16/32/64 (S + A − P).
-- [ ] `alpha_apply()`: All TLS relocations.
-- [ ] Register under `EM_ALPHA`.
-- [ ] Relocation name strings for all Alpha types.
+- [x] `alpha_reloc_size()` for all Alpha relocation types.
+- [x] `alpha_is_pc_relative()`: BRADDR, HINT, SREL16/32/64.
+- [x] `alpha_is_tls()`: all TLS types.
+- [x] `alpha_apply()`: REFLONG (S + A, 32-bit), REFQUAD (S + A, 64-bit).
+- [x] `alpha_apply()`: BRADDR (21-bit signed PC-relative branch, bits[20:0]).
+- [x] `alpha_apply()`: HINT (14-bit hint for JMP/JSR).
+- [x] `alpha_apply()`: GPREL32 (S + A − GP).
+- [x] `alpha_apply()`: LITERAL/LITUSE (GOT slot + optimization hints).
+- [x] `alpha_apply()`: GPDISP (GP displacement pair).
+- [x] `alpha_apply()`: SREL16/32/64 (S + A − P).
+- [x] `alpha_apply()`: All TLS relocations.
+- [x] Register under `EM_ALPHA`.
+- [x] Relocation name strings for all Alpha types.
 
 ### 23d. Alpha Validation
 - [ ] Accept `EM_ALPHA` with `ELFCLASS64` only.

@@ -1579,6 +1579,147 @@ static int ppc64_apply(const elfobj_reloc_ctx_t *ctx,
     }
 }
 
+static int alpha_reloc_size(uint32_t type) {
+    switch (type) {
+        case R_ALPHA_NONE:
+            return 0;
+        case R_ALPHA_REFQUAD:
+        case R_ALPHA_SREL64:
+        case R_ALPHA_DTPMOD64:
+        case R_ALPHA_DTPREL64:
+        case R_ALPHA_TPREL64:
+            return 8;
+        case R_ALPHA_SREL16:
+        case R_ALPHA_GPREL16:
+        case R_ALPHA_DTPREL16:
+        case R_ALPHA_TPREL16:
+            return 2;
+        default:
+            return 4;
+    }
+}
+
+static int alpha_is_pc_relative(uint32_t type) {
+    switch (type) {
+        case R_ALPHA_BRADDR:
+        case R_ALPHA_HINT:
+        case R_ALPHA_SREL16:
+        case R_ALPHA_SREL32:
+        case R_ALPHA_SREL64:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int alpha_is_tls(uint32_t type) {
+    switch (type) {
+        case R_ALPHA_TLSGD:
+        case R_ALPHA_TLSLDM:
+        case R_ALPHA_DTPMOD64:
+        case R_ALPHA_GOTDTPREL:
+        case R_ALPHA_DTPREL64:
+        case R_ALPHA_DTPRELHI:
+        case R_ALPHA_DTPRELLO:
+        case R_ALPHA_DTPREL16:
+        case R_ALPHA_GOTTPREL:
+        case R_ALPHA_TPREL64:
+        case R_ALPHA_TPRELHI:
+        case R_ALPHA_TPRELLO:
+        case R_ALPHA_TPREL16:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int alpha_apply(const elfobj_reloc_ctx_t *ctx,
+                       uint32_t type,
+                       uint64_t place,
+                       uint64_t sym_value,
+                       int64_t addend,
+                       uint64_t *out_value) {
+    elf_swide_t v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+    elf_swide_t rel = v - (elf_swide_t)place;
+    (void)ctx;
+    switch (type) {
+        case R_ALPHA_NONE:
+            *out_value = 0;
+            return 0;
+        case R_ALPHA_REFLONG:
+        case R_ALPHA_GPREL32:
+        case R_ALPHA_LITERAL:
+        case R_ALPHA_LITUSE:
+        case R_ALPHA_GPDISP:
+        case R_ALPHA_COPY:
+        case R_ALPHA_GLOB_DAT:
+        case R_ALPHA_JMP_SLOT:
+        case R_ALPHA_RELATIVE:
+        case R_ALPHA_TLSGD:
+        case R_ALPHA_TLSLDM:
+        case R_ALPHA_GOTDTPREL:
+        case R_ALPHA_DTPRELHI:
+        case R_ALPHA_DTPRELLO:
+        case R_ALPHA_GOTTPREL:
+        case R_ALPHA_TPRELHI:
+        case R_ALPHA_TPRELLO:
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_ALPHA_REFQUAD:
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        case R_ALPHA_BRADDR:
+            if ((rel & 3) != 0 || !swide_in_signed_bits(rel, 23)) {
+                return -2;
+            }
+            *out_value = (uint64_t)((uint64_t)(rel >> 2) & 0x001fffffu);
+            return 0;
+        case R_ALPHA_HINT:
+            if (!swide_in_signed_bits(rel, 16)) {
+                return -2;
+            }
+            *out_value = (uint64_t)((uint64_t)(rel >> 2) & 0x3fffu);
+            return 0;
+        case R_ALPHA_SREL16:
+            if (!swide_in_signed_bits(rel, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(rel, 16);
+            return 0;
+        case R_ALPHA_SREL32:
+            if (!swide_in_signed_bits(rel, 32)) {
+                return -2;
+            }
+            *out_value = swide_to_width(rel, 32);
+            return 0;
+        case R_ALPHA_SREL64:
+            *out_value = swide_to_width(rel, 64);
+            return 0;
+        case R_ALPHA_GPRELHIGH:
+            *out_value = (uint64_t)(((uint64_t)v >> 16) & 0xffffu);
+            return 0;
+        case R_ALPHA_GPRELLOW:
+            *out_value = (uint64_t)((uint64_t)v & 0xffffu);
+            return 0;
+        case R_ALPHA_GPREL16:
+        case R_ALPHA_DTPREL16:
+        case R_ALPHA_TPREL16:
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_ALPHA_DTPMOD64:
+        case R_ALPHA_DTPREL64:
+        case R_ALPHA_TPREL64:
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        default:
+            if (alpha_is_tls(type)) {
+                *out_value = swide_to_width(v, 64);
+                return 0;
+            }
+            return -1;
+    }
+}
+
 static int arm_reloc_size(uint32_t type) {
     switch (type) {
         case R_ARM_NONE:
@@ -2342,6 +2483,13 @@ static void register_builtin_backends_locked(void) {
     b.is_pc_relative = ppc64_is_pc_relative;
     g_backends[g_backend_count++] = b;
 
+    memset(&b, 0, sizeof(b));
+    b.machine = EM_ALPHA;
+    b.apply_reloc = alpha_apply;
+    b.reloc_size = alpha_reloc_size;
+    b.is_pc_relative = alpha_is_pc_relative;
+    g_backends[g_backend_count++] = b;
+
     g_builtin_backends_ready = 1;
 }
 
@@ -2581,6 +2729,9 @@ int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type) {
     }
     if (machine == EM_PPC64) {
         return ppc64_is_tls(type);
+    }
+    if (machine == EM_ALPHA) {
+        return alpha_is_tls(type);
     }
     return 0;
 }
@@ -2992,6 +3143,43 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
                 case R_PPC64_GOT_TPREL16_HI: return "R_PPC64_GOT_TPREL16_HI";
                 case R_PPC64_GOT_TPREL16_HA: return "R_PPC64_GOT_TPREL16_HA";
                 case R_PPC64_IRELATIVE: return "R_PPC64_IRELATIVE";
+                default: break;
+            }
+            break;
+        case EM_ALPHA:
+            switch (type) {
+                case R_ALPHA_NONE: return "R_ALPHA_NONE";
+                case R_ALPHA_REFLONG: return "R_ALPHA_REFLONG";
+                case R_ALPHA_REFQUAD: return "R_ALPHA_REFQUAD";
+                case R_ALPHA_GPREL32: return "R_ALPHA_GPREL32";
+                case R_ALPHA_LITERAL: return "R_ALPHA_LITERAL";
+                case R_ALPHA_LITUSE: return "R_ALPHA_LITUSE";
+                case R_ALPHA_GPDISP: return "R_ALPHA_GPDISP";
+                case R_ALPHA_BRADDR: return "R_ALPHA_BRADDR";
+                case R_ALPHA_HINT: return "R_ALPHA_HINT";
+                case R_ALPHA_SREL16: return "R_ALPHA_SREL16";
+                case R_ALPHA_SREL32: return "R_ALPHA_SREL32";
+                case R_ALPHA_SREL64: return "R_ALPHA_SREL64";
+                case R_ALPHA_GPRELHIGH: return "R_ALPHA_GPRELHIGH";
+                case R_ALPHA_GPRELLOW: return "R_ALPHA_GPRELLOW";
+                case R_ALPHA_GPREL16: return "R_ALPHA_GPREL16";
+                case R_ALPHA_COPY: return "R_ALPHA_COPY";
+                case R_ALPHA_GLOB_DAT: return "R_ALPHA_GLOB_DAT";
+                case R_ALPHA_JMP_SLOT: return "R_ALPHA_JMP_SLOT";
+                case R_ALPHA_RELATIVE: return "R_ALPHA_RELATIVE";
+                case R_ALPHA_TLSGD: return "R_ALPHA_TLSGD";
+                case R_ALPHA_TLSLDM: return "R_ALPHA_TLSLDM";
+                case R_ALPHA_DTPMOD64: return "R_ALPHA_DTPMOD64";
+                case R_ALPHA_GOTDTPREL: return "R_ALPHA_GOTDTPREL";
+                case R_ALPHA_DTPREL64: return "R_ALPHA_DTPREL64";
+                case R_ALPHA_DTPRELHI: return "R_ALPHA_DTPRELHI";
+                case R_ALPHA_DTPRELLO: return "R_ALPHA_DTPRELLO";
+                case R_ALPHA_DTPREL16: return "R_ALPHA_DTPREL16";
+                case R_ALPHA_GOTTPREL: return "R_ALPHA_GOTTPREL";
+                case R_ALPHA_TPREL64: return "R_ALPHA_TPREL64";
+                case R_ALPHA_TPRELHI: return "R_ALPHA_TPRELHI";
+                case R_ALPHA_TPRELLO: return "R_ALPHA_TPRELLO";
+                case R_ALPHA_TPREL16: return "R_ALPHA_TPREL16";
                 default: break;
             }
             break;
