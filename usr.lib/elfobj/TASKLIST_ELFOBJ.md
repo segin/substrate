@@ -777,13 +777,13 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] MIPS CFA: frame pointer $fp ($30) or $sp ($29).
 
 ### 17h. MIPS Testing
-- [ ] Unit tests for all MIPS relocation types.
-- [ ] HI16/LO16 pairing correctness.
-- [ ] N64 compound relocation handling.
-- [ ] ABIFLAGS parsing and merge tests.
-- [ ] Round-trip read/write for MIPS32 and MIPS64 objects.
-- [ ] Validation: class/endian checks.
-- [ ] Fuzz MIPS ELF parsing → crash-free.
+- [x] Unit tests for all MIPS relocation types.
+- [x] HI16/LO16 pairing correctness.
+- [x] N64 compound relocation handling.
+- [x] ABIFLAGS parsing and merge tests.
+- [x] Round-trip read/write for MIPS32 and MIPS64 objects.
+- [x] Validation: class/endian checks.
+- [x] Fuzz MIPS ELF parsing → crash-free.
 
 ---
 
