@@ -42,13 +42,13 @@ Status key:
 ## 1) C Language Features: C99 Baseline (must finish first)
 
 ### 1.1 Lexical model and tokens
-- [ ] Phase-1/2 behavior: trigraphs (mode-gated), escaped-newline splicing.
-- [ ] Universal character names in identifiers.
-- [ ] C99 tokenization compatibility for pp-tokens and tokens.
-- [ ] `//` comments.
-- [ ] Integer literals: decimal/octal/hex forms and suffix typing rules.
-- [ ] Floating literals: decimal/hex float forms, suffix typing rules.
-- [ ] Character/string literal escapes, concatenation rules, wide/narrow handling in C99 mode.
+- [x] Phase-1/2 behavior: trigraphs (mode-gated), escaped-newline splicing.
+- [x] Universal character names in identifiers.
+- [x] C99 tokenization compatibility for pp-tokens and tokens.
+- [x] `//` comments.
+- [x] Integer literals: decimal/octal/hex forms and suffix typing rules.
+- [x] Floating literals: decimal/hex float forms, suffix typing rules.
+- [x] Character/string literal escapes, concatenation rules, wide/narrow handling in C99 mode.
 
 ### 1.2 Declarations and type system
 - [ ] No implicit `int` (diagnose).

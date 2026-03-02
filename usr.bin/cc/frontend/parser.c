@@ -5588,10 +5588,18 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             if (part_ty != str_ty) {
-                free(part);
-                free_expr(e);
-                set_diag(p->diag, p->tok.line, p->tok.col, "cannot concatenate narrow and wide string literals");
-                return NULL;
+                /* C99: adjacent narrow + wide literals are permitted; result uses wide element type. */
+                if ((str_ty == CC_TYPE_CHAR && part_ty == CC_TYPE_INT) ||
+                    (str_ty == CC_TYPE_INT && part_ty == CC_TYPE_CHAR)) {
+                    str_ty = CC_TYPE_CHAR;
+                    e->aux_type = CC_TYPE_CHAR;
+                    e->value_type = CC_TYPE_PTR_CHAR;
+                } else {
+                    free(part);
+                    free_expr(e);
+                    set_diag(p->diag, p->tok.line, p->tok.col, "cannot concatenate narrow and wide string literals");
+                    return NULL;
+                }
             }
             alen = strlen(e->ident);
             plen = strlen(part);
