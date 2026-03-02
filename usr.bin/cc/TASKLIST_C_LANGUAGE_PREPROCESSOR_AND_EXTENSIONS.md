@@ -30,10 +30,10 @@ Status key:
 - [x] `CC_TYPE_LONG` / `CC_TYPE_ULONG` — distinct from `int` and `long long`.
 - [x] `CC_TYPE_SCHAR` — `signed char` as a distinct type from `char`.
 - [x] `CC_TYPE_LDOUBLE` — `long double` (80-bit x87 / 128-bit).
-- [ ] `CC_TYPE_ENUM` — enum as a distinct tracked type (not just aliased to int).
-- [ ] `CC_TYPE_COMPLEX` / `CC_TYPE_IMAGINARY` — C99 complex type wrapper.
-- [ ] `CC_TYPE_BITINT` — `_BitInt(N)` with arbitrary width tracking.
-- [ ] `CC_TYPE_DECIMAL32` / `CC_TYPE_DECIMAL64` / `CC_TYPE_DECIMAL128`.
+- [x] `CC_TYPE_ENUM` — enum as a distinct tracked type (not just aliased to int).
+- [x] `CC_TYPE_COMPLEX` / `CC_TYPE_IMAGINARY` — C99 complex type wrapper.
+- [x] `CC_TYPE_BITINT` — `_BitInt(N)` with arbitrary width tracking.
+- [x] `CC_TYPE_DECIMAL32` / `CC_TYPE_DECIMAL64` / `CC_TYPE_DECIMAL128`.
 - [ ] `CC_TYPE_ATOMIC` — `_Atomic` type qualifier wrapper.
 - [ ] `CC_TYPE_FUNC` — function-pointer type (currently smuggled through `CC_TYPE_PTR_VOID`).
 

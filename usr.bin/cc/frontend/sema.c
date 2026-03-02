@@ -953,7 +953,12 @@ static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) 
 }
 
 static int is_float_type(cc_type_t t) {
-    return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE;
+    return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE || t == CC_TYPE_DECIMAL32 ||
+           t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128;
+}
+
+static int is_complex_type(cc_type_t t) {
+    return t == CC_TYPE_COMPLEX || t == CC_TYPE_IMAGINARY;
 }
 
 static int is_pointer_type(cc_type_t t) {
@@ -979,7 +984,7 @@ static int is_integral_type(cc_type_t t) {
 }
 
 static int is_numeric_type(cc_type_t t) {
-    return is_integral_type(t) || is_float_type(t);
+    return is_integral_type(t) || is_float_type(t) || is_complex_type(t);
 }
 
 static int is_scalar_type(cc_type_t t) {
@@ -1397,6 +1402,21 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
     if (a == CC_TYPE_VOID || b == CC_TYPE_VOID) {
         return CC_TYPE_VOID;
     }
+    if (a == CC_TYPE_COMPLEX || b == CC_TYPE_COMPLEX) {
+        return CC_TYPE_COMPLEX;
+    }
+    if (a == CC_TYPE_IMAGINARY || b == CC_TYPE_IMAGINARY) {
+        return CC_TYPE_IMAGINARY;
+    }
+    if (a == CC_TYPE_DECIMAL128 || b == CC_TYPE_DECIMAL128) {
+        return CC_TYPE_DECIMAL128;
+    }
+    if (a == CC_TYPE_DECIMAL64 || b == CC_TYPE_DECIMAL64) {
+        return CC_TYPE_DECIMAL64;
+    }
+    if (a == CC_TYPE_DECIMAL32 || b == CC_TYPE_DECIMAL32) {
+        return CC_TYPE_DECIMAL32;
+    }
     if (a == CC_TYPE_LDOUBLE || b == CC_TYPE_LDOUBLE) {
         return CC_TYPE_LDOUBLE;
     }
@@ -1699,6 +1719,12 @@ static long type_size_bytes(cc_type_t t) {
 }
 
 static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
+    if (t == CC_TYPE_BITINT) {
+        if (struct_id <= 0) {
+            return -1;
+        }
+        return (struct_id + 7) / 8;
+    }
     long n = type_size_bytes(t);
     if (n > 0) {
         return n;
@@ -1872,7 +1898,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         return 0;
 
     case CC_EXPR_FLOAT:
-        e->value_type = CC_TYPE_DOUBLE;
+        if (!is_float_type(e->value_type)) {
+            e->value_type = CC_TYPE_DOUBLE;
+        }
         e->struct_id = -1;
         return 0;
 

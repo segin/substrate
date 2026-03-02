@@ -84,6 +84,8 @@ test:
 	/tmp/cc_native_c99_complex_decl
 	$(TOP)/usr.bin/cc/cc native_c99_imaginary_decl.c -o /tmp/cc_native_c99_imaginary_decl
 	/tmp/cc_native_c99_imaginary_decl
+	$(TOP)/usr.bin/cc/cc native_c99_complex_types.c -o /tmp/cc_native_c99_complex_types
+	/tmp/cc_native_c99_complex_types
 	$(TOP)/usr.bin/cc/cc native_c99_param_array_qual.c -o /tmp/cc_native_c99_param_array_qual
 	/tmp/cc_native_c99_param_array_qual
 	$(TOP)/usr.bin/cc/cc native_c99_vla_decl.c -o /tmp/cc_native_c99_vla_decl
@@ -706,7 +708,7 @@ clean:
 	      /tmp/cc_native_bad_attr_format_nonvariadic.o /tmp/cc_native_bad_attr_nonnull_empty.o \
 	      /tmp/cc_native_bad_attr_nonnull_call.o
 	rm -f /tmp/cc_native_c99_integer_literals /tmp/cc_native_c99_hex_float_suffix /tmp/cc_native_c99_wide_literals \
-	      /tmp/cc_native_c99_complex_decl /tmp/cc_native_c99_imaginary_decl /tmp/cc_native_c99_param_array_qual /tmp/cc_native_c99_vla_decl /tmp/cc_native_c90_oldstyle /tmp/cc_native_c90_unproto_call_promotions /tmp/cc_native_c90_unproto_call_promotions.s \
+	      /tmp/cc_native_c99_complex_decl /tmp/cc_native_c99_imaginary_decl /tmp/cc_native_c99_complex_types /tmp/cc_native_c99_param_array_qual /tmp/cc_native_c99_vla_decl /tmp/cc_native_c90_oldstyle /tmp/cc_native_c90_unproto_call_promotions /tmp/cc_native_c90_unproto_call_promotions.s \
 	      /tmp/cc_native_c99_integer_literals_32.s /tmp/cc_native_c99_hex_float_suffix_32.s /tmp/cc_native_c99_wide_literals_32.s \
 	      /tmp/cc_native_c99_complex_decl_32.s /tmp/cc_native_c99_imaginary_decl_32.s /tmp/cc_native_c99_param_array_qual_32.s /tmp/cc_native_c99_vla_decl_32.s /tmp/cc_native_c90_oldstyle_32.s /tmp/cc_native_c90_unproto_call_promotions_32.s \
 	      /tmp/cc_native_bad_c99_implicit_function.o /tmp/cc_native_bad_no_implicit_int.o /tmp/cc_native_bad_c99_file_scope_auto.o /tmp/cc_native_bad_c99_extern_local_init.o /tmp/cc_native_bad_c99_flexible_array_init.o /tmp/cc_native_bad_c99_union_init.o /tmp/cc_native_bad_c99_array_assign.o /tmp/cc_native_bad_c99_array_update.o /tmp/cc_native_bad_c99_return_void_value.o /tmp/cc_native_bad_c99_return_missing_value.o /tmp/cc_native_bad_c99_variadic_too_few.o /tmp/cc_native_bad_c99_pragma_stdc_bad.o /tmp/cc_native_c90_oldstyle_c99_bad.o
@@ -719,8 +721,8 @@ clean:
 	      /tmp/cc_native_bad_c11_thread_local_local.o /tmp/cc_native_c17_register /tmp/cc_native_c11_pp_version.i \
 	      /tmp/cc_native_c17_pp_version.i \
 	      /tmp/cc_native_c23_keywords /tmp/cc_native_c23_nullptr /tmp/cc_native_c23_typeof \
-	      /tmp/cc_native_c23_bitint /tmp/cc_native_c23_binary_sep /tmp/cc_native_c23_empty_init \
-	      /tmp/cc_native_c23_enum_underlying /tmp/cc_native_c23_label_decl /tmp/cc_native_c23_constexpr_auto_decimal \
+	      /tmp/cc_native_c23_bitint /tmp/cc_native_c23_bitint_size /tmp/cc_native_c23_binary_sep /tmp/cc_native_c23_empty_init \
+	      /tmp/cc_native_c23_enum_underlying /tmp/cc_native_c23_label_decl /tmp/cc_native_c23_constexpr_auto_decimal /tmp/cc_native_c23_decimal_sizes \
 	      /tmp/cc_native_bad_c23_auto_no_init.o /tmp/cc_native_bad_c23_bitint_zero.o \
 	      /tmp/cc_native_bad_c23_static_assert_single_fail.o /tmp/cc_native_c23_pp_version.i \
 	      /tmp/cc_native_c23_attr_std /tmp/cc_native_c23_attr_std.log /tmp/cc_native_c23_attr_std_werror \

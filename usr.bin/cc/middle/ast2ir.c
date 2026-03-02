@@ -375,7 +375,10 @@ static void set_diag(cc_diag_t *d, const char *msg) {
 }
 
 static cc_value_type_t type_to_val(cc_type_t t) {
-    return (t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE) ? CC_VAL_F64 : CC_VAL_I64;
+    return (t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE || t == CC_TYPE_COMPLEX ||
+            t == CC_TYPE_IMAGINARY || t == CC_TYPE_DECIMAL32 || t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128)
+               ? CC_VAL_F64
+               : CC_VAL_I64;
 }
 
 static int is_pointer_type(cc_type_t t) {
@@ -407,7 +410,9 @@ static int is_integral_type(cc_type_t t) {
 }
 
 static int is_numeric_type(cc_type_t t) {
-    return is_integral_type(t) || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE;
+    return is_integral_type(t) || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE ||
+           t == CC_TYPE_COMPLEX || t == CC_TYPE_IMAGINARY || t == CC_TYPE_DECIMAL32 || t == CC_TYPE_DECIMAL64 ||
+           t == CC_TYPE_DECIMAL128;
 }
 
 static int is_unsigned_load_type(cc_type_t t) {
@@ -529,6 +534,12 @@ static long type_size_bytes(cc_type_t t) {
 }
 
 static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
+    if (t == CC_TYPE_BITINT) {
+        if (struct_id <= 0) {
+            return -1;
+        }
+        return (struct_id + 7) / 8;
+    }
     long n = type_size_bytes(t);
     if (n > 0) {
         return n;
@@ -541,6 +552,12 @@ static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type
 }
 
 static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
+    if (t == CC_TYPE_BITINT) {
+        if (struct_id <= 0) {
+            return -1;
+        }
+        return (struct_id + 7) / 8;
+    }
     long n = type_size_bytes(t);
     if (n > 0) {
         return n;
@@ -10217,10 +10234,11 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             cc_ssa_module_free(out);
             return -1;
         }
-        sf->ret_type =
-            (af->ret_type == CC_TYPE_FLOAT || af->ret_type == CC_TYPE_DOUBLE || af->ret_type == CC_TYPE_LDOUBLE)
-                ? CC_VAL_F64
-                : CC_VAL_I64;
+        sf->ret_type = (af->ret_type == CC_TYPE_FLOAT || af->ret_type == CC_TYPE_DOUBLE ||
+                        af->ret_type == CC_TYPE_LDOUBLE || af->ret_type == CC_TYPE_DECIMAL32 ||
+                        af->ret_type == CC_TYPE_DECIMAL64 || af->ret_type == CC_TYPE_DECIMAL128)
+                           ? CC_VAL_F64
+                           : CC_VAL_I64;
         sf->storage = af->storage;
         sf->attr_flags = eff_attr_flags;
         sf->attr_align = eff_attr_align;

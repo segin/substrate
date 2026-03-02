@@ -887,6 +887,9 @@ static int parser_types_compatible(const parser_t *p, cc_type_t lhs_t, int lhs_s
     if (lhs_t != rhs_t) {
         return 0;
     }
+    if (lhs_t == CC_TYPE_BITINT) {
+        return lhs_sid == rhs_sid;
+    }
     if (!type_carries_struct_id(lhs_t)) {
         return 1;
     }
@@ -918,6 +921,10 @@ static long scalar_type_size_bytes(cc_type_t t) {
         return 16;
     case CC_TYPE_ENUM:
         return 4;
+    case CC_TYPE_COMPLEX:
+        return 16;
+    case CC_TYPE_IMAGINARY:
+        return 8;
     default:
         return -1;
     }
@@ -954,6 +961,12 @@ static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id
     long n;
     if (is_pointer_type(t)) {
         return g_parser_pointer_size_bytes;
+    }
+    if (t == CC_TYPE_BITINT) {
+        if (struct_id <= 0) {
+            return -1;
+        }
+        return (struct_id + 7) / 8;
     }
     n = scalar_type_size_bytes(t);
     if (n > 0) {
@@ -1405,6 +1418,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     int seen_typedef = 0;
     int seen_alias = 0;
     int seen_bitint = 0;
+    int seen_decimal = 0;
     int seen_enum = 0;
     int enum_known_type = 0;
     int enum_has_values = 0;
@@ -1418,6 +1432,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     int seen_struct_id = -1;
     cc_type_t alias_type = CC_TYPE_VOID;
     cc_type_t enum_type = CC_TYPE_INT;
+    cc_type_t decimal_type = CC_TYPE_DECIMAL64;
     long alias_array_len = -1;
     int alias_array_ndim = 0;
     long alias_array_dims[CC_MAX_ARRAY_DIMS];
@@ -1667,7 +1682,14 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 (tok_is_ident(p, "_Decimal32") || tok_is_ident(p, "_Decimal64") || tok_is_ident(p, "_Decimal128"))) {
                 seen = 1;
                 seen_type = 1;
-                seen_double = 1;
+                seen_decimal = 1;
+                if (tok_is_ident(p, "_Decimal32")) {
+                    decimal_type = CC_TYPE_DECIMAL32;
+                } else if (tok_is_ident(p, "_Decimal64")) {
+                    decimal_type = CC_TYPE_DECIMAL64;
+                } else {
+                    decimal_type = CC_TYPE_DECIMAL128;
+                }
                 if (next_tok(p) != 0) {
                     return -1;
                 }
@@ -2507,10 +2529,13 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width must be positive");
             return -1;
         }
-        *out_type = bitint_width <= 32 ? (seen_unsigned ? CC_TYPE_UINT : CC_TYPE_INT)
-                                       : (seen_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG);
+        if (bitint_width > INT_MAX) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "_BitInt width is too large");
+            return -1;
+        }
+        *out_type = CC_TYPE_BITINT;
         if (out_struct_id != NULL) {
-            *out_struct_id = -1;
+            *out_struct_id = (int)bitint_width;
         }
         if (out_typedef != NULL) {
             *out_typedef = seen_typedef;
@@ -2549,7 +2574,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     }
 
     if ((seen_signed || seen_unsigned) &&
-        (seen_float || seen_double || seen_complex || seen_imaginary || seen_bool || seen_void)) {
+        (seen_float || seen_double || seen_decimal || seen_complex || seen_imaginary || seen_bool || seen_void)) {
         set_diag(p->diag, p->tok.line, p->tok.col, "invalid signed/unsigned type combination");
         return -1;
     }
@@ -2574,7 +2599,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
 
     if (seen_complex || seen_imaginary) {
         if (seen_void || seen_bool || seen_char || seen_int || seen_short || seen_signed || seen_unsigned ||
-            seen_opaque_tag) {
+            seen_opaque_tag || seen_decimal) {
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid complex/imaginary type combination");
             return -1;
         }
@@ -2582,7 +2607,21 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             set_diag(p->diag, p->tok.line, p->tok.col, "invalid complex/imaginary long type combination");
             return -1;
         }
-        *out_type = seen_float ? CC_TYPE_FLOAT : CC_TYPE_DOUBLE;
+        *out_type = seen_complex ? CC_TYPE_COMPLEX : CC_TYPE_IMAGINARY;
+        if (out_struct_id != NULL) {
+            *out_struct_id = -1;
+        }
+        if (out_typedef != NULL) {
+            *out_typedef = seen_typedef;
+        } else if (seen_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef not allowed here");
+            return -1;
+        }
+        RETURN_OK();
+    }
+
+    if (seen_decimal) {
+        *out_type = decimal_type;
         if (out_struct_id != NULL) {
             *out_struct_id = -1;
         }
