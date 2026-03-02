@@ -444,11 +444,11 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 ## 8. Testing
 
 ### 8a. Unit Tests (per-arch)
-- [ ] Encode each instruction, verify machine code bytes match reference.
-- [ ] Operand range limits: reject out-of-range immediates.
-- [ ] Relocation emission: correct type and addend for each pattern.
-- [ ] Relaxation: verify short→long branch promotion.
-- [ ] Expression evaluation: arithmetic, forward references, absolute vs. relocatable.
+- [x] Encode each instruction, verify machine code bytes match reference.
+- [x] Operand range limits: reject out-of-range immediates.
+- [x] Relocation emission: correct type and addend for each pattern.
+- [x] Relaxation: verify short→long branch promotion.
+- [x] Expression evaluation: arithmetic, forward references, absolute vs. relocatable.
 
 ### 8b. Integration Tests
 - [ ] `as -o test.o test.s` → `readelf -a test.o` validates headers/sections/symbols.
