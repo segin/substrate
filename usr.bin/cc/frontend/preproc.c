@@ -3584,17 +3584,6 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                 i = j;
                 continue;
             }
-            if (strcmp(name, "__func__") == 0 || strcmp(name, "__FUNCTION__") == 0 ||
-                strcmp(name, "__PRETTY_FUNCTION__") == 0) {
-                if (sb_append(&out, "\"__func__\"") != 0) {
-                    free(name);
-                    sb_free(&out);
-                    return NULL;
-                }
-                free(name);
-                i = j;
-                continue;
-            }
             if (strcmp(name, "__FILE_NAME__") == 0) {
                 sb_t lit;
                 memset(&lit, 0, sizeof(lit));
@@ -4366,8 +4355,10 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     i = k;
                     continue;
                 }
-                if ((j - i) == strlen("__has_include") &&
-                    strncmp(expr + i, "__has_include", strlen("__has_include")) == 0) {
+                if (((j - i) == strlen("__has_include") &&
+                     strncmp(expr + i, "__has_include", strlen("__has_include")) == 0) ||
+                    ((j - i) == strlen("__has_include_next") &&
+                     strncmp(expr + i, "__has_include_next", strlen("__has_include_next")) == 0)) {
                     size_t k = j;
                     char inc_spec[PATH_MAX];
                     char inc_path[PATH_MAX];
@@ -4375,6 +4366,7 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                     int quoted = 0;
                     int is_system = 0;
                     int enabled = st->std_is_c23 || st->std_is_gnu;
+                    int use_next = ((j - i) == strlen("__has_include_next"));
                     while (expr[k] == ' ' || expr[k] == '\t' || expr[k] == '\r' || expr[k] == '\n') {
                         k++;
                     }
@@ -4416,7 +4408,9 @@ static int eval_condition(pp_state_t *st, const char *expr, const char *file, in
                         return -1;
                     }
                     k++;
-                    if (enabled && resolve_include(st, file, inc_spec, quoted, inc_path, &is_system) == 0) {
+                    if (enabled &&
+                        ((use_next && resolve_include_next(st, file, inc_spec, quoted, inc_path, &is_system) == 0) ||
+                         (!use_next && resolve_include(st, file, inc_spec, quoted, inc_path, &is_system) == 0))) {
                         if (sb_append(&out, "1") != 0) {
                             sb_free(&out);
                             return -1;

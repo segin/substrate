@@ -686,6 +686,7 @@ static int emit_mov_instr(cc_ssa_function_t *sf, int dst, int src);
 static int emit_const_i64_instr(cc_ssa_function_t *sf, long v);
 static int emit_const_f64_instr(cc_ssa_function_t *sf, double v);
 static int emit_memcpy_instr(cc_ssa_function_t *sf, int dst_ptr, int src_ptr, long size, cc_diag_t *diag);
+static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, long size, cc_diag_t *diag);
 static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
 static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
 static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag);
@@ -2372,7 +2373,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             const cc_function_t *fn;
             int gaddr;
             long mem_size;
-            if (e->ident != NULL && strcmp(e->ident, "__func__") == 0) {
+            if (e->ident != NULL &&
+                (strcmp(e->ident, "__func__") == 0 || strcmp(e->ident, "__FUNCTION__") == 0 ||
+                 strcmp(e->ident, "__PRETTY_FUNCTION__") == 0)) {
                 char *lit = quote_c_string((ctx != NULL && ctx->fn != NULL && ctx->fn->name != NULL) ? ctx->fn->name : "");
                 in.op = CC_SSA_STR;
                 in.dst = new_value(sf, CC_VAL_I64);
@@ -2839,7 +2842,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
              * not the loaded first element value.
              */
             if (ptr_expr != NULL && ptr_expr->kind == CC_EXPR_DEREF && ptr_expr->lhs != NULL &&
-                is_pointer_type(ptr_expr->value_type) &&
+                is_pointer_type(ptr_expr->value_type) && ptr_expr->array_ndim > 0 &&
                 expr_is_array_pointer_chain(tu, vars, var_count, depth, ptr_expr->lhs)) {
                 int basev = lower_expr(tu, sf, ctx, vars, var_count, depth, ptr_expr->lhs, diag);
                 if (basev < 0) {
@@ -5553,6 +5556,49 @@ static int emit_memcpy_instr(cc_ssa_function_t *sf, int dst_ptr, int src_ptr, lo
     return 0;
 }
 
+static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, long size, cc_diag_t *diag) {
+    cc_ssa_instr_t call_in;
+    int bytev;
+    int sizev;
+
+    if (size <= 0) {
+        set_diag(diag, "invalid memset size in lowering");
+        return -1;
+    }
+    bytev = emit_const_i64_instr(sf, fill_byte);
+    if (bytev < 0) {
+        return -1;
+    }
+    sizev = emit_const_i64_instr(sf, size);
+    if (sizev < 0) {
+        return -1;
+    }
+
+    memset(&call_in, 0, sizeof(call_in));
+    call_in.op = CC_SSA_CALL;
+    call_in.call_is_variadic = 0;
+    call_in.sym = xstrdup("memset");
+    call_in.arg_count = 3;
+    call_in.args = (int *)calloc(3, sizeof(*call_in.args));
+    call_in.dst = new_value(sf, CC_VAL_I64);
+    if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
+        free(call_in.sym);
+        free(call_in.args);
+        set_diag(diag, "out of memory emitting memset call");
+        return -1;
+    }
+    call_in.args[0] = dst_ptr;
+    call_in.args[1] = bytev;
+    call_in.args[2] = sizev;
+    if (push_instr(sf, call_in) != 0) {
+        free(call_in.sym);
+        free(call_in.args);
+        set_diag(diag, "out of memory appending memset call");
+        return -1;
+    }
+    return 0;
+}
+
 static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
     cc_ssa_instr_t in;
     int zero;
@@ -6749,6 +6795,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             if (s->expr != NULL) {
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
+                    if (emit_memset_instr(sf, varv, 0, sz, diag) != 0) {
+                        return -1;
+                    }
                     if (lower_struct_init_to_ptr(tu, sf, ctx, *vars, *var_count, depth, varv, s->type_struct_id,
                                                  s->expr, diag) != 0) {
                         return -1;
@@ -6803,6 +6852,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
 
             if (s->expr != NULL) {
+                if (emit_memset_instr(sf, varv, 0, total_size, diag) != 0) {
+                    return -1;
+                }
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
                     size_t ii;
                     int handled_string_init = 0;

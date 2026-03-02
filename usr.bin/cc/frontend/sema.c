@@ -993,6 +993,16 @@ static int is_scalar_type(cc_type_t t) {
     return is_numeric_type(t) || is_pointer_type(t);
 }
 
+/*
+ * Qualifier tracking currently stores const/volatile/restrict at declaration
+ * granularity, without full top-level vs pointee qualifier separation.
+ * Apply object mutability diagnostics only to non-pointer objects to avoid
+ * rejecting valid updates such as `const char *p; p++;`.
+ */
+static int const_storage_applies_to_object(cc_type_t t) {
+    return !is_pointer_type(t);
+}
+
 static void unwrap_atomic_expr_type(cc_type_t *t, int *sid) {
     if (t == NULL || sid == NULL) {
         return;
@@ -1988,7 +1998,9 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
             return 0;
         }
-        if (e->ident != NULL && strcmp(e->ident, "__func__") == 0) {
+        if (e->ident != NULL &&
+            (strcmp(e->ident, "__func__") == 0 || strcmp(e->ident, "__FUNCTION__") == 0 ||
+             strcmp(e->ident, "__PRETTY_FUNCTION__") == 0)) {
             e->value_type = CC_TYPE_PTR_CHAR;
             e->struct_id = -1;
             return 0;
@@ -2969,7 +2981,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             set_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
             return -1;
         }
-        if ((dst_storage & CC_STORAGE_CONST) != 0) {
+        if ((dst_storage & CC_STORAGE_CONST) != 0 && const_storage_applies_to_object(dst_type)) {
             if (diag != NULL && diag->message[0] == '\0') {
                 if (e->ident != NULL) {
                     snprintf(diag->message, sizeof(diag->message), "cannot assign to const-qualified object: %s",
@@ -3178,7 +3190,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             set_diag(diag, "array object is not a modifiable lvalue for ++/--");
             return -1;
         }
-        if ((t_storage & CC_STORAGE_CONST) != 0) {
+        if ((t_storage & CC_STORAGE_CONST) != 0 && const_storage_applies_to_object(t)) {
             set_diag(diag, "cannot modify const-qualified object with ++/--");
             return -1;
         }
@@ -3738,6 +3750,14 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
         const cc_struct_member_t *m;
         size_t member_idx = next_member;
 
+        if (sd->is_union && i > 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message), "too many initializers for union %s",
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
+        }
+
         if (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL) {
             int didx = find_struct_member_index(tu, struct_id, raw->ident);
             if (didx < 0) {
@@ -3782,8 +3802,12 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             next_member = struct_next_init_member(sd, member_idx);
         }
         if (sd->has_flexible_array && member_idx + 1 == sd->member_count) {
-            /* GNU-compatible extension: accept and ignore flexible-array initializers. */
-            continue;
+            if (diag != NULL && diag->message[0] == '\0') {
+                snprintf(diag->message, sizeof(diag->message),
+                         "flexible array member cannot be initialized: %s",
+                         name != NULL ? name : "<anon>");
+            }
+            return -1;
         }
         if (is_array_object_type(m->type, m->array_len, m->array_ndim)) {
             cc_type_t elem_type = ptr_base_type(m->type);
