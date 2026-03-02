@@ -98,31 +98,31 @@ Status key:
 - [x] Effective type / aliasing baseline behavior.
 
 ### 1.5 Statements and control flow
-- [ ] Block scope, nested scopes, and shadowing rules.
-- [ ] Mixed declarations and statements.
-- [ ] `if`/`else`.
-- [ ] `switch` with `case`/`default`, duplicate diagnostics.
-- [ ] `while`, `do`, `for`.
-- [ ] `for` with declaration init.
-- [ ] `break`, `continue`.
-- [ ] Labels and `goto`.
-- [ ] Null statement and label+statement forms.
-- [ ] `return` constraints and conversions.
+- [x] Block scope, nested scopes, and shadowing rules.
+- [x] Mixed declarations and statements.
+- [x] `if`/`else`.
+- [x] `switch` with `case`/`default`, duplicate diagnostics.
+- [x] `while`, `do`, `for`.
+- [x] `for` with declaration init.
+- [x] `break`, `continue`.
+- [x] Labels and `goto`.
+- [x] Null statement and label+statement forms.
+- [x] `return` constraints and conversions.
 
 ### 1.6 Function calls and ABI-facing semantics
-- [ ] Default argument promotions for unprototyped calls where permitted.
-- [ ] Variadic function semantics.
-- [ ] `<stdarg.h>` lowering: `va_start`, `va_arg`, `va_end`, `va_copy`.
-- [ ] Calling convention correctness for x86-64 SysV (scalar/pointer args).
-- [ ] Calling convention correctness for i386 SysV (scalar/pointer args).
-- [ ] Struct/union pass-by-value in function calls (SysV ABI aggregate rules).
-- [ ] Struct/union return-by-value in function returns (SysV ABI aggregate rules).
+- [x] Default argument promotions for unprototyped calls where permitted.
+- [x] Variadic function semantics.
+- [x] `<stdarg.h>` lowering: `va_start`, `va_arg`, `va_end`, `va_copy`.
+- [x] Calling convention correctness for x86-64 SysV (scalar/pointer args).
+- [x] Calling convention correctness for i386 SysV (scalar/pointer args).
+- [x] Struct/union pass-by-value in function calls (SysV ABI aggregate rules).
+- [x] Struct/union return-by-value in function returns (SysV ABI aggregate rules).
 
 ### 1.7 C99 standard library-facing language hooks
-- [ ] `__func__`.
-- [ ] C99 pragma handling: `STDC FP_CONTRACT`.
-- [ ] C99 pragma handling: `STDC FENV_ACCESS`.
-- [ ] C99 pragma handling: `STDC CX_LIMITED_RANGE`.
+- [x] `__func__`.
+- [x] C99 pragma handling: `STDC FP_CONTRACT`.
+- [x] C99 pragma handling: `STDC FENV_ACCESS`.
+- [x] C99 pragma handling: `STDC CX_LIMITED_RANGE`.
 
 ### 1.8 C99 diagnostics and conformance
 - [ ] Constraint diagnostics with line/column.

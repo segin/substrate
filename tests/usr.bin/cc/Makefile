@@ -234,6 +234,10 @@ test:
 	/tmp/cc_native_c99_struct_array_init
 	$(TOP)/usr.bin/cc/cc native_c99_struct_copy_init.c -o /tmp/cc_native_c99_struct_copy_init
 	/tmp/cc_native_c99_struct_copy_init
+	$(TOP)/usr.bin/cc/cc native_c99_struct_pass_value.c -o /tmp/cc_native_c99_struct_pass_value
+	/tmp/cc_native_c99_struct_pass_value
+	$(TOP)/usr.bin/cc/cc native_c99_struct_return_value.c -o /tmp/cc_native_c99_struct_return_value
+	/tmp/cc_native_c99_struct_return_value
 	$(TOP)/usr.bin/cc/cc native_c99_void_pointer.c -o /tmp/cc_native_c99_void_pointer
 	/tmp/cc_native_c99_void_pointer
 	$(TOP)/usr.bin/cc/cc native_c99_pointer_cmp.c -o /tmp/cc_native_c99_pointer_cmp
@@ -566,6 +570,10 @@ test:
 	grep -q "call calloc" /tmp/cc_native_c99_struct_array_init_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_copy_init.c -o /tmp/cc_native_c99_struct_copy_init_32.s
 	grep -q "call memcpy" /tmp/cc_native_c99_struct_copy_init_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_pass_value.c -o /tmp/cc_native_c99_struct_pass_value_32.s
+	grep -q "call sum_pair" /tmp/cc_native_c99_struct_pass_value_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_return_value.c -o /tmp/cc_native_c99_struct_return_value_32.s
+	grep -q "call mk_pair" /tmp/cc_native_c99_struct_return_value_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_deref_postfix_update.c -o /tmp/cc_native_c99_deref_postfix_update_32.s
 	grep -q "addl" /tmp/cc_native_c99_deref_postfix_update_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_proto_extern.c -o /tmp/cc_native_c99_proto_extern_32.s

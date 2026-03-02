@@ -3064,6 +3064,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (bk == BUILTIN_VA_COPY) {
             int dst_idx;
             int srcv;
+            int copy_src;
+            int copy_dst;
             if (e->arg_count != 2 || e->args[0] == NULL || e->args[1] == NULL || e->args[0]->kind != CC_EXPR_IDENT) {
                 set_diag(diag, "__builtin_va_copy lowering expects destination identifier");
                 return -1;
@@ -3080,6 +3082,24 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             srcv = cast_value(sf, srcv, CC_VAL_I64, diag);
             if (srcv < 0) {
                 return -1;
+            }
+
+            /*
+             * On SysV x86-64 we model va_list as a pointer to the ABI state
+             * record ({gp_offset, fp_offset, overflow_arg_area, reg_save_area}).
+             * va_copy must duplicate that record so advancing one list does not
+             * mutate the other.
+             */
+            if (g_pointer_size_bytes == 8) {
+                copy_src = srcv;
+                copy_dst = emit_local_storage_alloc(sf, 24, diag);
+                if (copy_dst < 0) {
+                    return -1;
+                }
+                if (emit_memcpy_instr(sf, copy_dst, copy_src, 24, diag) != 0) {
+                    return -1;
+                }
+                srcv = copy_dst;
             }
             if (emit_mov_instr(sf, vars[dst_idx].value, srcv) != 0) {
                 set_diag(diag, "out of memory appending va_copy move");
