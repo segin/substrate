@@ -868,8 +868,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 19. LoongArch Support (LA32 / LA64)
 
 ### 19a. Machine Types and Constants
-- [ ] Define `EM_LOONGARCH` (258).
-- [ ] Define LoongArch `e_flags`: `EF_LARCH_ABI_MODIFIER_MASK`, `EF_LARCH_ABI_SOFT_FLOAT` (0x1), `EF_LARCH_ABI_SINGLE_FLOAT` (0x2), `EF_LARCH_ABI_DOUBLE_FLOAT` (0x3), `EF_LARCH_OBJABI_V1` (0x40).
+- [x] Define `EM_LOONGARCH` (258).
+- [x] Define LoongArch `e_flags`: `EF_LARCH_ABI_MODIFIER_MASK`, `EF_LARCH_ABI_SOFT_FLOAT` (0x1), `EF_LARCH_ABI_SINGLE_FLOAT` (0x2), `EF_LARCH_ABI_DOUBLE_FLOAT` (0x3), `EF_LARCH_OBJABI_V1` (0x40).
 
 ### 19b. LoongArch Relocation Type Constants
 - [ ] `R_LARCH_NONE` (0), `R_LARCH_32` (1), `R_LARCH_64` (2), `R_LARCH_RELATIVE` (3)
