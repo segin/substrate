@@ -926,8 +926,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 20. Motorola 68000 (M68K) Support
 
 ### 20a. Machine Types and Constants
-- [ ] Define `EM_68K` (4).
-- [ ] M68K has no mandatory `e_flags`; validate flags is 0 or recognized.
+- [x] Define `EM_68K` (4).
+- [x] M68K has no mandatory `e_flags`; validate flags is 0 or recognized.
 
 ### 20b. M68K Relocation Type Constants
 - [ ] `R_68K_NONE` (0), `R_68K_32` (1), `R_68K_16` (2), `R_68K_8` (3)
