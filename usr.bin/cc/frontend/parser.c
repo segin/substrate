@@ -1407,7 +1407,8 @@ static int is_declspec_tok(cc_tok_kind_t k) {
 
 static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                           long *out_array_len, int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS],
-                          int allow_void, const char *what, int *out_typedef, decl_attrs_t *out_attrs) {
+                          int allow_void, const char *what, int *out_typedef, int *out_saw_restrict,
+                          decl_attrs_t *out_attrs) {
     int storage_flags = 0;
     int seen = 0;
     int seen_type = 0;
@@ -1430,6 +1431,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     int seen_bitint = 0;
     int seen_decimal = 0;
     int seen_enum = 0;
+    int seen_restrict = 0;
     int enum_known_type = 0;
     int enum_has_values = 0;
     long enum_min = 0;
@@ -1460,6 +1462,9 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 *out_struct_id = (int)__atomic_base_type;                                                            \
             }                                                                                                         \
         }                                                                                                             \
+        if (out_saw_restrict != NULL) {                                                                              \
+            *out_saw_restrict = seen_restrict;                                                                       \
+        }                                                                                                             \
         p->last_storage = storage_flags;                                                                             \
         return 0;                                                                                                    \
     } while (0)
@@ -1467,6 +1472,9 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     p->last_storage = 0;
     if (out_typedef != NULL) {
         *out_typedef = 0;
+    }
+    if (out_saw_restrict != NULL) {
+        *out_saw_restrict = 0;
     }
     if (out_struct_id != NULL) {
         *out_struct_id = -1;
@@ -1921,6 +1929,12 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         case TOK_KW_INLINE:
             storage_flags |= CC_STORAGE_INLINE;
             break;
+        case TOK_KW_CONST:
+        case TOK_KW_VOLATILE:
+            break;
+        case TOK_KW_RESTRICT:
+            seen_restrict = 1;
+            break;
         case TOK_KW_STRUCT:
         case TOK_KW_UNION: {
             int sid;
@@ -2029,7 +2043,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     continue;
                 }
                 if (parse_declspec(p, &mbase, &mbase_sid, &mbase_arr_len, &mbase_arr_ndim, mbase_arr_dims, 1,
-                                   "expected member declaration type", &mtypedef, NULL) != 0) {
+                                   "expected member declaration type", &mtypedef, NULL, NULL) != 0) {
                     decl_attrs_clear(&struct_attrs);
                     return -1;
                 }
@@ -2830,6 +2844,18 @@ static int is_decl_qual_at_token(parser_t *p) {
     return is_decl_qual_tok(p->tok.kind) || tok_is_ident(p, "_Atomic");
 }
 
+static int consume_decl_quals(parser_t *p, int *saw_restrict) {
+    while (is_decl_qual_at_token(p)) {
+        if (p->tok.kind == TOK_KW_RESTRICT && saw_restrict != NULL) {
+            *saw_restrict = 1;
+        }
+        if (next_tok(p) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static cc_type_t ptr_of_type(cc_type_t t) {
     return cc_type_make_pointer(t);
 }
@@ -2996,9 +3022,13 @@ static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type,
 }
 
 static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *out_type, char **out_name,
-                                  const char *name_err) {
+                                  const char *name_err, int *out_saw_restrict) {
     cc_type_t ty = base_type;
     int wrapped = 0;
+    int saw_restrict = 0;
+    if (out_saw_restrict != NULL) {
+        *out_saw_restrict = 0;
+    }
     while (is_ptr_declarator_tok(p->tok.kind)) {
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
@@ -3008,10 +3038,8 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         if (next_tok(p) != 0) {
             return -1;
         }
-        while (is_decl_qual_at_token(p)) {
-            if (next_tok(p) != 0) {
-                return -1;
-            }
+        if (consume_decl_quals(p, &saw_restrict) != 0) {
+            return -1;
         }
     }
     while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
@@ -3034,10 +3062,8 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             if (next_tok(p) != 0) {
                 return -1;
             }
-            while (is_decl_qual_at_token(p)) {
-                if (next_tok(p) != 0) {
-                    return -1;
-                }
+            if (consume_decl_quals(p, &saw_restrict) != 0) {
+                return -1;
             }
         }
         while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
@@ -3067,6 +3093,9 @@ static int parse_named_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             *out_name = NULL;
             return -1;
         }
+    }
+    if (out_saw_restrict != NULL) {
+        *out_saw_restrict = saw_restrict;
     }
     return 0;
 }
@@ -4341,7 +4370,7 @@ static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs) {
 static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, int allow_void, const char *what) {
     cc_type_t ty;
     int sid = -1;
-    if (parse_declspec(p, &ty, &sid, NULL, NULL, NULL, allow_void, what, NULL, NULL) != 0) {
+    if (parse_declspec(p, &ty, &sid, NULL, NULL, NULL, allow_void, what, NULL, NULL, NULL) != 0) {
         return -1;
     }
     while (is_ptr_declarator_tok(p->tok.kind)) {
@@ -4444,10 +4473,15 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     return 0;
 }
 
-static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *out_type, char **out_name) {
+static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *out_type, char **out_name,
+                                  int *out_saw_restrict) {
     cc_type_t ty = base_type;
     int grouped_ptr_decl = 0;
+    int saw_restrict = 0;
     *out_name = NULL;
+    if (out_saw_restrict != NULL) {
+        *out_saw_restrict = 0;
+    }
     while (is_ptr_declarator_tok(p->tok.kind)) {
         ty = ptr_of_type(ty);
         if (ty == CC_TYPE_VOID) {
@@ -4457,10 +4491,8 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         if (next_tok(p) != 0) {
             return -1;
         }
-        while (is_decl_qual_at_token(p)) {
-            if (next_tok(p) != 0) {
-                return -1;
-            }
+        if (consume_decl_quals(p, &saw_restrict) != 0) {
+            return -1;
         }
     }
     while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
@@ -4483,10 +4515,8 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
             if (next_tok(p) != 0) {
                 return -1;
             }
-            while (is_decl_qual_at_token(p)) {
-                if (next_tok(p) != 0) {
-                    return -1;
-                }
+            if (consume_decl_quals(p, &saw_restrict) != 0) {
+                return -1;
             }
         }
         while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
@@ -4525,6 +4555,9 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                     free(*out_name);
                     *out_name = NULL;
                     return -1;
+                }
+                if (p->tok.kind == TOK_KW_RESTRICT) {
+                    saw_restrict = 1;
                 }
                 if (next_tok(p) != 0) {
                     free(*out_name);
@@ -4622,6 +4655,9 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
                 *out_name = NULL;
                 return -1;
             }
+            if (p->tok.kind == TOK_KW_RESTRICT) {
+                saw_restrict = 1;
+            }
             if (next_tok(p) != 0) {
                 free(*out_name);
                 *out_name = NULL;
@@ -4651,6 +4687,9 @@ static int parse_param_declarator(parser_t *p, cc_type_t base_type, cc_type_t *o
         }
     }
     *out_type = ty;
+    if (out_saw_restrict != NULL) {
+        *out_saw_restrict = saw_restrict;
+    }
     return 0;
 }
 
@@ -7522,6 +7561,8 @@ static int apply_auto_type_deduction(parser_t *p, cc_stmt_t *s) {
 
 static int __attribute__((unused)) parse_decl_stmt(parser_t *p, cc_stmt_t *s, int need_semi) {
     int is_typedef = 0;
+    int spec_saw_restrict = 0;
+    int decl_saw_restrict = 0;
     int decl_storage = 0;
     int struct_id = -1;
     long alias_array_len = -1;
@@ -7544,7 +7585,7 @@ static int __attribute__((unused)) parse_decl_stmt(parser_t *p, cc_stmt_t *s, in
     decl_attrs_reset(&suffix_attrs);
     decl_attrs_reset(&merged_attrs);
     if (parse_declspec(p, &s->type, &struct_id, &alias_array_len, &alias_array_ndim, alias_array_dims, 1,
-                       "expected declaration type", &is_typedef, &decl_attrs) != 0) {
+                       "expected declaration type", &is_typedef, &spec_saw_restrict, &decl_attrs) != 0) {
         return -1;
     }
     decl_storage = p->last_storage;
@@ -7558,7 +7599,8 @@ static int __attribute__((unused)) parse_decl_stmt(parser_t *p, cc_stmt_t *s, in
         decl_attrs_clear(&decl_attrs);
         return -1;
     }
-    if (parse_named_declarator(p, s->type, &s->type, &s->decl_name, "expected identifier after declaration type") !=
+    if (parse_named_declarator(p, s->type, &s->type, &s->decl_name, "expected identifier after declaration type",
+                               &decl_saw_restrict) !=
         0) {
         decl_attrs_clear(&decl_attrs);
         return -1;
@@ -7570,6 +7612,11 @@ static int __attribute__((unused)) parse_decl_stmt(parser_t *p, cc_stmt_t *s, in
     if (prepend_array_info(&s->array_len, &s->array_ndim, s->array_dims, suffix_array_len, suffix_array_ndim,
                            suffix_array_dims) != 0) {
         set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
+        decl_attrs_clear(&decl_attrs);
+        return -1;
+    }
+    if ((spec_saw_restrict || decl_saw_restrict) && !is_pointer_type(s->type)) {
+        set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer type");
         decl_attrs_clear(&decl_attrs);
         return -1;
     }
@@ -7632,13 +7679,14 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
     int base_array_ndim = 0;
     long base_array_dims[CC_MAX_ARRAY_DIMS];
     int is_typedef = 0;
+    int base_saw_restrict = 0;
     int decl_storage = 0;
     decl_attrs_t base_attrs;
 
     decl_attrs_reset(&base_attrs);
     memset(base_array_dims, 0, sizeof(base_array_dims));
     if (parse_declspec(p, &base_type, &base_struct_id, &base_array_len, &base_array_ndim, base_array_dims, 1,
-                       "expected declaration type", &is_typedef, &base_attrs) != 0) {
+                       "expected declaration type", &is_typedef, &base_saw_restrict, &base_attrs) != 0) {
         return -1;
     }
     decl_storage = p->last_storage;
@@ -7676,6 +7724,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
 
     for (;;) {
         cc_stmt_t s;
+        int decl_saw_restrict = 0;
         int complex_fn_ptr_decl = 0;
         int is_fn_decl = 0;
         int track_var = 0;
@@ -7730,11 +7779,9 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                     free_stmt(&s);
                     return -1;
                 }
-                while (is_decl_qual_at_token(p)) {
-                    if (next_tok(p) != 0) {
-                        free_stmt(&s);
-                        return -1;
-                    }
+                if (consume_decl_quals(p, &decl_saw_restrict) != 0) {
+                    free_stmt(&s);
+                    return -1;
                 }
             }
         }
@@ -7756,11 +7803,9 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                     free_stmt(&s);
                     return -1;
                 }
-                while (is_decl_qual_at_token(p)) {
-                    if (next_tok(p) != 0) {
-                        free_stmt(&s);
-                        return -1;
-                    }
+                if (consume_decl_quals(p, &decl_saw_restrict) != 0) {
+                    free_stmt(&s);
+                    return -1;
                 }
             }
             if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
@@ -7780,11 +7825,9 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                         free_stmt(&s);
                         return -1;
                     }
-                    while (is_decl_qual_at_token(p)) {
-                        if (next_tok(p) != 0) {
-                            free_stmt(&s);
-                            return -1;
-                        }
+                    if (consume_decl_quals(p, &decl_saw_restrict) != 0) {
+                        free_stmt(&s);
+                        return -1;
                     }
                 }
                 if (p->tok.kind != TOK_IDENT) {
@@ -7856,7 +7899,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             }
             complex_fn_ptr_decl = 1;
         } else if (parse_named_declarator(p, base_type, &s.type, &s.decl_name,
-                                           "expected identifier after declaration type") != 0) {
+                                          "expected identifier after declaration type", &decl_saw_restrict) != 0) {
             free_stmt(&s);
             return -1;
         }
@@ -7893,6 +7936,11 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                  */
                 s.array_len = -1;
             }
+            if ((base_saw_restrict || decl_saw_restrict) && !is_pointer_type(s.type)) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer type");
+                free_stmt(&s);
+                return -1;
+            }
         } else {
             long suffix_array_len = -1;
             int suffix_array_ndim = 0;
@@ -7905,6 +7953,11 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             if (prepend_array_info(&s.array_len, &s.array_ndim, s.array_dims, suffix_array_len, suffix_array_ndim,
                                    suffix_array_dims) != 0) {
                 set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
+                free_stmt(&s);
+                return -1;
+            }
+            if ((base_saw_restrict || decl_saw_restrict) && !is_pointer_type(s.type)) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer type");
                 free_stmt(&s);
                 return -1;
             }
@@ -8762,6 +8815,8 @@ static int parse_params(parser_t *p, cc_function_t *f) {
         int ptype_sid = -1;
         cc_type_t dty;
         char *pname = NULL;
+        int ptype_restrict = 0;
+        int dty_restrict = 0;
         char anon_buf[32];
 
         if (p->tok.kind == TOK_ELLIPSIS) {
@@ -8773,10 +8828,16 @@ static int parse_params(parser_t *p, cc_function_t *f) {
             break;
         }
 
-        if (parse_declspec(p, &ptype, &ptype_sid, NULL, NULL, NULL, 1, "expected parameter type", NULL, NULL) != 0) {
+        if (parse_declspec(p, &ptype, &ptype_sid, NULL, NULL, NULL, 1, "expected parameter type", NULL,
+                           &ptype_restrict, NULL) != 0) {
             return -1;
         }
-        if (parse_param_declarator(p, ptype, &dty, &pname) != 0) {
+        if (parse_param_declarator(p, ptype, &dty, &pname, &dty_restrict) != 0) {
+            return -1;
+        }
+        if ((ptype_restrict || dty_restrict) && !is_pointer_type(dty)) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "restrict qualifier requires a pointer parameter type");
+            free(pname);
             return -1;
         }
         if (skip_decl_gnu_suffix(p, NULL) != 0) {
@@ -8865,7 +8926,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     decl_attrs_reset(&merged_attrs);
 
     if (parse_declspec(p, &ftype, &ftype_sid, NULL, NULL, NULL, 1, "expected function return type", &is_typedef,
-                       &spec_attrs) != 0) {
+                       NULL, &spec_attrs) != 0) {
         return -1;
     }
     fn_storage = p->last_storage;
@@ -8913,7 +8974,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
             decl_attrs_clear(&spec_attrs);
             return -1;
         }
-    } else if (parse_named_declarator(p, ftype, &f->ret_type, &f->name, "expected function name") != 0) {
+    } else if (parse_named_declarator(p, ftype, &f->ret_type, &f->name, "expected function name", NULL) != 0) {
         decl_attrs_clear(&spec_attrs);
         return -1;
     }
@@ -9169,7 +9230,7 @@ static int probe_is_function_head(parser_t *p) {
     q.enum_tags = NULL;
     q.enum_tag_count = 0;
     q.enum_tag_cap = 0;
-    if (parse_declspec(&q, &ty, &ty_sid, NULL, NULL, NULL, 1, "", &is_typedef, NULL) != 0) {
+    if (parse_declspec(&q, &ty, &ty_sid, NULL, NULL, NULL, 1, "", &is_typedef, NULL, NULL) != 0) {
         goto done;
     }
     if (is_typedef) {
@@ -9224,7 +9285,7 @@ static int probe_is_function_head(parser_t *p) {
         }
         rc = (q.tok.kind == TOK_LPAREN);
     } else {
-        if (parse_named_declarator(&q, ty, &ty, &name, "") != 0) {
+        if (parse_named_declarator(&q, ty, &ty, &name, "", NULL) != 0) {
             goto done;
         }
         if (prefixed_fn_ptr) {

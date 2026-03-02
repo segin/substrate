@@ -51,20 +51,20 @@ Status key:
 - [x] Character/string literal escapes, concatenation rules, wide/narrow handling in C99 mode.
 
 ### 1.2 Declarations and type system
-- [ ] No implicit `int` (diagnose).
-- [ ] No implicit function declarations (diagnose).
-- [ ] Full declaration-specifier grammar for C99 (all specifier combos including `long`, `signed char`, `long double`).
-- [ ] `long long` / `unsigned long long`.
-- [ ] `_Bool`.
-- [ ] `_Complex` — keyword recognized, no type representation or arithmetic codegen.
-- [ ] `_Imaginary` — keyword recognized, no type representation or codegen.
-- [ ] `restrict` qualifiers and semantic constraints.
+- [x] No implicit `int` (diagnose).
+- [x] No implicit function declarations (diagnose).
+- [x] Full declaration-specifier grammar for C99 (all specifier combos including `long`, `signed char`, `long double`).
+- [x] `long long` / `unsigned long long`.
+- [x] `_Bool`.
+- [x] `_Complex` — keyword recognized, no type representation or arithmetic codegen.
+- [x] `_Imaginary` — keyword recognized, no type representation or codegen.
+- [x] `restrict` qualifiers and semantic constraints.
 - [ ] `inline` semantics per C99 linkage rules.
-- [ ] Typedef handling in all declarator positions.
-- [ ] Pointer declarators and deep pointer nesting (currently capped at 5 levels).
-- [ ] Array declarators including VLA and variably-modified types — fixed arrays work, VLAs have no `alloca`-style codegen.
-- [ ] Function declarators including prototypes and old-style forms accepted/rejected per mode.
-- [ ] Function parameter array qualifiers (`static`, qualifiers in brackets).
+- [x] Typedef handling in all declarator positions.
+- [x] Pointer declarators and deep pointer nesting (currently capped at 5 levels).
+- [x] Array declarators including VLA and variably-modified types — fixed arrays work, VLAs have no `alloca`-style codegen.
+- [x] Function declarators including prototypes and old-style forms accepted/rejected per mode.
+- [x] Function parameter array qualifiers (`static`, qualifiers in brackets).
 - [ ] Qualifier propagation and compatibility checks.
 - [ ] Composite type formation rules.
 

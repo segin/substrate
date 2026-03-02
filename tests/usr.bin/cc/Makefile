@@ -88,6 +88,8 @@ test:
 	/tmp/cc_native_c99_complex_types
 	$(TOP)/usr.bin/cc/cc native_c99_param_array_qual.c -o /tmp/cc_native_c99_param_array_qual
 	/tmp/cc_native_c99_param_array_qual
+	$(TOP)/usr.bin/cc/cc native_c99_restrict_ptr.c -o /tmp/cc_native_c99_restrict_ptr
+	/tmp/cc_native_c99_restrict_ptr
 	$(TOP)/usr.bin/cc/cc native_c99_vla_decl.c -o /tmp/cc_native_c99_vla_decl
 	/tmp/cc_native_c99_vla_decl
 	$(TOP)/usr.bin/cc/cc -std=c90 native_c90_oldstyle.c -o /tmp/cc_native_c90_oldstyle
@@ -454,6 +456,8 @@ test:
 	grep -Eq "cvtts[sd]2sil" /tmp/cc_native_c99_imaginary_decl_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_param_array_qual.c -o /tmp/cc_native_c99_param_array_qual_32.s
 	grep -q "main:" /tmp/cc_native_c99_param_array_qual_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_restrict_ptr.c -o /tmp/cc_native_c99_restrict_ptr_32.s
+	grep -q "\\.code32" /tmp/cc_native_c99_restrict_ptr_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_vla_decl.c -o /tmp/cc_native_c99_vla_decl_32.s
 	grep -q "main:" /tmp/cc_native_c99_vla_decl_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -std=c90 -S native_c90_oldstyle.c -o /tmp/cc_native_c90_oldstyle_32.s
@@ -651,6 +655,7 @@ test:
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_nonnull_call.c -o /tmp/cc_native_bad_attr_nonnull_call.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_implicit_function.c -o /tmp/cc_native_bad_c99_implicit_function.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_no_implicit_int.c -o /tmp/cc_native_bad_no_implicit_int.o
+	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_restrict_nonptr.c -o /tmp/cc_native_bad_c99_restrict_nonptr.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_file_scope_auto.c -o /tmp/cc_native_bad_c99_file_scope_auto.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_extern_local_init.c -o /tmp/cc_native_bad_c99_extern_local_init.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_flexible_array_init.c -o /tmp/cc_native_bad_c99_flexible_array_init.o
@@ -708,10 +713,10 @@ clean:
 	      /tmp/cc_native_bad_attr_format_nonvariadic.o /tmp/cc_native_bad_attr_nonnull_empty.o \
 	      /tmp/cc_native_bad_attr_nonnull_call.o
 	rm -f /tmp/cc_native_c99_integer_literals /tmp/cc_native_c99_hex_float_suffix /tmp/cc_native_c99_wide_literals \
-	      /tmp/cc_native_c99_complex_decl /tmp/cc_native_c99_imaginary_decl /tmp/cc_native_c99_complex_types /tmp/cc_native_c99_param_array_qual /tmp/cc_native_c99_vla_decl /tmp/cc_native_c90_oldstyle /tmp/cc_native_c90_unproto_call_promotions /tmp/cc_native_c90_unproto_call_promotions.s \
+	      /tmp/cc_native_c99_complex_decl /tmp/cc_native_c99_imaginary_decl /tmp/cc_native_c99_complex_types /tmp/cc_native_c99_param_array_qual /tmp/cc_native_c99_restrict_ptr /tmp/cc_native_c99_vla_decl /tmp/cc_native_c90_oldstyle /tmp/cc_native_c90_unproto_call_promotions /tmp/cc_native_c90_unproto_call_promotions.s \
 	      /tmp/cc_native_c99_integer_literals_32.s /tmp/cc_native_c99_hex_float_suffix_32.s /tmp/cc_native_c99_wide_literals_32.s \
-	      /tmp/cc_native_c99_complex_decl_32.s /tmp/cc_native_c99_imaginary_decl_32.s /tmp/cc_native_c99_param_array_qual_32.s /tmp/cc_native_c99_vla_decl_32.s /tmp/cc_native_c90_oldstyle_32.s /tmp/cc_native_c90_unproto_call_promotions_32.s \
-	      /tmp/cc_native_bad_c99_implicit_function.o /tmp/cc_native_bad_no_implicit_int.o /tmp/cc_native_bad_c99_file_scope_auto.o /tmp/cc_native_bad_c99_extern_local_init.o /tmp/cc_native_bad_c99_flexible_array_init.o /tmp/cc_native_bad_c99_union_init.o /tmp/cc_native_bad_c99_array_assign.o /tmp/cc_native_bad_c99_array_update.o /tmp/cc_native_bad_c99_return_void_value.o /tmp/cc_native_bad_c99_return_missing_value.o /tmp/cc_native_bad_c99_variadic_too_few.o /tmp/cc_native_bad_c99_pragma_stdc_bad.o /tmp/cc_native_c90_oldstyle_c99_bad.o
+	      /tmp/cc_native_c99_complex_decl_32.s /tmp/cc_native_c99_imaginary_decl_32.s /tmp/cc_native_c99_param_array_qual_32.s /tmp/cc_native_c99_restrict_ptr_32.s /tmp/cc_native_c99_vla_decl_32.s /tmp/cc_native_c90_oldstyle_32.s /tmp/cc_native_c90_unproto_call_promotions_32.s \
+	      /tmp/cc_native_bad_c99_implicit_function.o /tmp/cc_native_bad_no_implicit_int.o /tmp/cc_native_bad_c99_restrict_nonptr.o /tmp/cc_native_bad_c99_file_scope_auto.o /tmp/cc_native_bad_c99_extern_local_init.o /tmp/cc_native_bad_c99_flexible_array_init.o /tmp/cc_native_bad_c99_union_init.o /tmp/cc_native_bad_c99_array_assign.o /tmp/cc_native_bad_c99_array_update.o /tmp/cc_native_bad_c99_return_void_value.o /tmp/cc_native_bad_c99_return_missing_value.o /tmp/cc_native_bad_c99_variadic_too_few.o /tmp/cc_native_bad_c99_pragma_stdc_bad.o /tmp/cc_native_c90_oldstyle_c99_bad.o
 	rm -f /tmp/cc_native_warn_assign_cond.o /tmp/cc_native_warn_assign_cond.log /tmp/cc_native_warn_assign_cond_werror.o \
 	      /tmp/cc_native_c99_computed_goto_pedantic.o /tmp/cc_native_c99_computed_goto_pedantic.log /tmp/cc_native_c99_computed_goto_pedantic_errors.o \
 	      /tmp/cc_native_bad_ptr_add_ptr_loc.o /tmp/cc_native_bad_ptr_add_ptr_loc.log \
