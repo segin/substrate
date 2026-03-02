@@ -34,8 +34,8 @@ Status key:
 - [x] `CC_TYPE_COMPLEX` / `CC_TYPE_IMAGINARY` — C99 complex type wrapper.
 - [x] `CC_TYPE_BITINT` — `_BitInt(N)` with arbitrary width tracking.
 - [x] `CC_TYPE_DECIMAL32` / `CC_TYPE_DECIMAL64` / `CC_TYPE_DECIMAL128`.
-- [ ] `CC_TYPE_ATOMIC` — `_Atomic` type qualifier wrapper.
-- [ ] `CC_TYPE_FUNC` — function-pointer type (currently smuggled through `CC_TYPE_PTR_VOID`).
+- [x] `CC_TYPE_ATOMIC` — `_Atomic` type qualifier wrapper.
+- [x] `CC_TYPE_FUNC` — function-pointer type (currently smuggled through `CC_TYPE_PTR_VOID`).
 
 ---
 

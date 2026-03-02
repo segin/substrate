@@ -169,11 +169,13 @@ static inline int cc_type_is_dynamic_pointer(cc_type_t t) {
 }
 
 static inline int cc_type_is_pointer(cc_type_t t) {
+    if (t == CC_TYPE_FUNC) return(1);
     if (t >= CC_LEGACY_PTR_L1_MIN && t <= CC_LEGACY_PTR_L5_MAX) return(1);
     return(cc_type_is_dynamic_pointer(t));
 }
 
 static inline unsigned int cc_type_pointer_depth(cc_type_t t) {
+    if (t == CC_TYPE_FUNC) return(1u);
     if (t >= CC_LEGACY_PTR_L1_MIN && t <= CC_LEGACY_PTR_L5_MAX) {
         return((unsigned int)(t - CC_LEGACY_PTR_L1_MIN) / CC_LEGACY_BASE_COUNT + 1u);
     }
@@ -184,6 +186,7 @@ static inline unsigned int cc_type_pointer_depth(cc_type_t t) {
 }
 
 static inline cc_type_t cc_type_pointer_base(cc_type_t t) {
+    if (t == CC_TYPE_FUNC) return(CC_TYPE_VOID);
     if (t >= CC_LEGACY_PTR_L1_MIN && t <= CC_LEGACY_PTR_L5_MAX) {
         unsigned int idx = (unsigned int)(t - CC_LEGACY_PTR_L1_MIN) % CC_LEGACY_BASE_COUNT;
         return((cc_type_t)(CC_LEGACY_BASE_MIN + (cc_type_t)idx));

@@ -887,6 +887,9 @@ static int parser_types_compatible(const parser_t *p, cc_type_t lhs_t, int lhs_s
     if (lhs_t != rhs_t) {
         return 0;
     }
+    if (lhs_t == CC_TYPE_ATOMIC) {
+        return lhs_sid == rhs_sid;
+    }
     if (lhs_t == CC_TYPE_BITINT) {
         return lhs_sid == rhs_sid;
     }
@@ -961,6 +964,12 @@ static long parser_type_size_bytes(const parser_t *p, cc_type_t t, int struct_id
     long n;
     if (is_pointer_type(t)) {
         return g_parser_pointer_size_bytes;
+    }
+    if (t == CC_TYPE_ATOMIC) {
+        if (struct_id <= 0) {
+            return -1;
+        }
+        return parser_type_size_bytes(p, (cc_type_t)struct_id, -1);
     }
     if (t == CC_TYPE_BITINT) {
         if (struct_id <= 0) {
@@ -1417,6 +1426,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     int seen_opaque_tag = 0;
     int seen_typedef = 0;
     int seen_alias = 0;
+    int seen_atomic = 0;
     int seen_bitint = 0;
     int seen_decimal = 0;
     int seen_enum = 0;
@@ -1436,10 +1446,22 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     long alias_array_len = -1;
     int alias_array_ndim = 0;
     long alias_array_dims[CC_MAX_ARRAY_DIMS];
-#define RETURN_OK()          \
-    do {                     \
-        p->last_storage = storage_flags; \
-        return 0;            \
+#define RETURN_OK()                                                                                                  \
+    do {                                                                                                             \
+        if (seen_atomic && out_type != NULL && *out_type != CC_TYPE_ATOMIC) {                                       \
+            cc_type_t __atomic_base_type = *out_type;                                                                \
+            int __atomic_base_sid = (out_struct_id != NULL) ? *out_struct_id : -1;                                  \
+            if (__atomic_base_type == CC_TYPE_VOID && __atomic_base_sid >= 0) {                                     \
+                set_diag(p->diag, p->tok.line, p->tok.col, "_Atomic of aggregate type is not yet supported");      \
+                return -1;                                                                                            \
+            }                                                                                                         \
+            *out_type = CC_TYPE_ATOMIC;                                                                              \
+            if (out_struct_id != NULL) {                                                                             \
+                *out_struct_id = (int)__atomic_base_type;                                                            \
+            }                                                                                                         \
+        }                                                                                                             \
+        p->last_storage = storage_flags;                                                                             \
+        return 0;                                                                                                    \
     } while (0)
 
     p->last_storage = 0;
@@ -1648,6 +1670,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         return -1;
                     }
                     seen_type = 1;
+                    seen_atomic = 1;
                     seen_alias = 1;
                     alias_type = aty;
                     alias_struct_id = asid;
@@ -1656,6 +1679,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     memset(alias_array_dims, 0, sizeof(alias_array_dims));
                     continue;
                 }
+                seen_atomic = 1;
                 if (next_tok(p) != 0) {
                     return -1;
                 }

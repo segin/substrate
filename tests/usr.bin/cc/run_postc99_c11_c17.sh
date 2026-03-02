@@ -17,6 +17,9 @@ INC_DIR="-I$ROOT/include"
 "$CC_BIN" -std=c11 $INC_DIR native_c11_atomic.c -o /tmp/cc_native_c11_atomic
 /tmp/cc_native_c11_atomic
 
+"$CC_BIN" -std=c11 native_c11_atomic_wrapper_type.c -o /tmp/cc_native_c11_atomic_wrapper_type
+/tmp/cc_native_c11_atomic_wrapper_type
+
 "$CC_BIN" -std=c11 native_c11_unicode_literals.c -o /tmp/cc_native_c11_unicode_literals
 /tmp/cc_native_c11_unicode_literals
 

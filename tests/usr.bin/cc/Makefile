@@ -717,7 +717,7 @@ clean:
 	      /tmp/cc_native_bad_ptr_add_ptr_loc.o /tmp/cc_native_bad_ptr_add_ptr_loc.log \
 	      /tmp/cc_conformance_pass.log /tmp/cc_conformance_xfail.log /tmp/cc_diff_host.log /tmp/cc_diff_ours.log
 	rm -f /tmp/cc_native_c11_static_assert /tmp/cc_native_c11_generic /tmp/cc_native_c11_align_thread_noreturn \
-	      /tmp/cc_native_c11_atomic /tmp/cc_native_c11_unicode_literals /tmp/cc_native_bad_c11_static_assert_fail.o \
+	      /tmp/cc_native_c11_atomic /tmp/cc_native_c11_atomic_wrapper_type /tmp/cc_native_c11_unicode_literals /tmp/cc_native_bad_c11_static_assert_fail.o \
 	      /tmp/cc_native_bad_c11_thread_local_local.o /tmp/cc_native_c17_register /tmp/cc_native_c11_pp_version.i \
 	      /tmp/cc_native_c17_pp_version.i \
 	      /tmp/cc_native_c23_keywords /tmp/cc_native_c23_nullptr /tmp/cc_native_c23_typeof \

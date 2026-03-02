@@ -412,7 +412,7 @@ static int is_integral_type(cc_type_t t) {
 static int is_numeric_type(cc_type_t t) {
     return is_integral_type(t) || t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE ||
            t == CC_TYPE_COMPLEX || t == CC_TYPE_IMAGINARY || t == CC_TYPE_DECIMAL32 || t == CC_TYPE_DECIMAL64 ||
-           t == CC_TYPE_DECIMAL128;
+           t == CC_TYPE_DECIMAL128 || t == CC_TYPE_ATOMIC;
 }
 
 static int is_unsigned_load_type(cc_type_t t) {
@@ -534,6 +534,12 @@ static long type_size_bytes(cc_type_t t) {
 }
 
 static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
+    if (t == CC_TYPE_ATOMIC) {
+        if (struct_id <= 0) {
+            return -1;
+        }
+        return type_size_bytes_with_struct(tu, (cc_type_t)struct_id, -1);
+    }
     if (t == CC_TYPE_BITINT) {
         if (struct_id <= 0) {
             return -1;
@@ -552,6 +558,12 @@ static long type_size_bytes_with_struct(const cc_translation_unit_t *tu, cc_type
 }
 
 static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
+    if (t == CC_TYPE_ATOMIC) {
+        if (struct_id <= 0) {
+            return -1;
+        }
+        return type_size_bytes_struct(tu, (cc_type_t)struct_id, -1);
+    }
     if (t == CC_TYPE_BITINT) {
         if (struct_id <= 0) {
             return -1;

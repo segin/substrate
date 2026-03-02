@@ -984,11 +984,21 @@ static int is_integral_type(cc_type_t t) {
 }
 
 static int is_numeric_type(cc_type_t t) {
-    return is_integral_type(t) || is_float_type(t) || is_complex_type(t);
+    return is_integral_type(t) || is_float_type(t) || is_complex_type(t) || t == CC_TYPE_ATOMIC;
 }
 
 static int is_scalar_type(cc_type_t t) {
     return is_numeric_type(t) || is_pointer_type(t);
+}
+
+static void unwrap_atomic_expr_type(cc_type_t *t, int *sid) {
+    if (t == NULL || sid == NULL) {
+        return;
+    }
+    if (*t == CC_TYPE_ATOMIC && *sid >= 0) {
+        *t = (cc_type_t)*sid;
+        *sid = -1;
+    }
 }
 
 static int is_array_object_type(cc_type_t t, long array_len, int array_ndim) {
@@ -1719,6 +1729,12 @@ static long type_size_bytes(cc_type_t t) {
 }
 
 static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
+    if (t == CC_TYPE_ATOMIC) {
+        if (struct_id <= 0) {
+            return -1;
+        }
+        return type_size_bytes_struct(tu, (cc_type_t)struct_id, -1);
+    }
     if (t == CC_TYPE_BITINT) {
         if (struct_id <= 0) {
             return -1;
@@ -1966,6 +1982,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (idx >= 0) {
             e->value_type = vars[idx].type;
             e->struct_id = vars[idx].struct_id;
+            unwrap_atomic_expr_type(&e->value_type, &e->struct_id);
             expr_set_array_meta_decl(e, vars[idx].array_len, vars[idx].array_ndim, vars[idx].array_dims);
             return 0;
         }
@@ -1979,6 +1996,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (g != NULL) {
                 e->value_type = g->type;
                 e->struct_id = g->type_struct_id;
+                unwrap_atomic_expr_type(&e->value_type, &e->struct_id);
                 expr_set_array_meta_decl(e, g->array_len, g->array_ndim, g->array_dims);
                 if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
                     return -1;
@@ -1986,7 +2004,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return 0;
             }
             if (find_function(tu, e->ident) != NULL) {
-                e->value_type = CC_TYPE_PTR_VOID;
+                e->value_type = CC_TYPE_FUNC;
                 e->struct_id = -1;
                 if (maybe_warn_deprecated_symbol(tu, e->ident, e->line, e->col, diag) != 0) {
                     return -1;
