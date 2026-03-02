@@ -29,6 +29,7 @@ int main(void) {
     elfobj_t *ppc32 = NULL;
     elfobj_t *ppc64 = NULL;
     elfobj_t *alpha = NULL;
+    elfobj_t *ia64 = NULL;
 
     CHECK(elf_reloc_size_for_machine(EM_ARM, R_ARM_CALL) == 4);
     CHECK(elf_reloc_size_for_machine(EM_AARCH64, R_AARCH64_CALL26) == 4);
@@ -62,6 +63,9 @@ int main(void) {
     CHECK(elf_reloc_size_for_machine(EM_ALPHA, R_ALPHA_REFLONG) == 4);
     CHECK(elf_reloc_is_pc_relative_for_machine(EM_ALPHA, R_ALPHA_BRADDR) == 1);
     CHECK(elf_reloc_is_tls_for_machine(EM_ALPHA, R_ALPHA_DTPMOD64) == 1);
+    CHECK(elf_reloc_size_for_machine(EM_IA_64, R_IA64_IMM64) == 4);
+    CHECK(elf_reloc_is_pc_relative_for_machine(EM_IA_64, R_IA64_PCREL21B) == 1);
+    CHECK(elf_reloc_is_tls_for_machine(EM_IA_64, R_IA64_DTPMOD64MSB) == 1);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_X86_64, R_X86_64_PC32), "R_X86_64_PC32") == 0);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_386, R_386_PC8), "R_386_PC8") == 0);
     CHECK(strncmp(elf_reloc_name_for_machine(EM_386, 9999), "UNKNOWN(", 8) == 0);
@@ -490,6 +494,81 @@ int main(void) {
             elf_close(fz);
         }
     }
+    ia64 = elf_init_ia64();
+    CHECK(ia64 != NULL);
+    CHECK(elf_machine(ia64) == EM_IA_64);
+    CHECK(elf_class(ia64) == ELFOBJ_CLASS_64);
+    CHECK(elf_endian(ia64) == ELFOBJ_ENDIAN_LE);
+    {
+        static const uint32_t ia64_types[] = {R_IA64_NONE,      R_IA64_IMM14,      R_IA64_IMM22,
+                                              R_IA64_IMM64,     R_IA64_PCREL21B,   R_IA64_PCREL21M,
+                                              R_IA64_PCREL21F,  R_IA64_DIR64LSB,   R_IA64_GPREL22,
+                                              R_IA64_LTOFF22,   R_IA64_FPTR64I,    R_IA64_REL64LSB,
+                                              R_IA64_LTOFF_DTPMOD22, R_IA64_TPREL64LSB};
+        size_t i;
+        for (i = 0; i < (sizeof(ia64_types) / sizeof(ia64_types[0])); ++i) {
+            CHECK(strncmp(elf_reloc_name_for_machine(EM_IA_64, ia64_types[i]), "UNKNOWN(", 8) != 0);
+        }
+    }
+    {
+        uint64_t outv = 0;
+        CHECK(elf_apply_relocation_value(ia64, R_IA64_IMM14, 0, 0x100, 0, &outv) == ELF_OK);
+        CHECK(elf_apply_relocation_value(ia64, R_IA64_IMM22, 0, 0x200, 0, &outv) == ELF_OK);
+        CHECK(elf_apply_relocation_value(ia64, R_IA64_IMM64, 0, 0x12345678, 0, &outv) == ELF_OK);
+        CHECK(elf_apply_relocation_value(ia64, R_IA64_PCREL21B, 0x1000, 0x1800, 0, &outv) == ELF_OK);
+        CHECK(elf_apply_relocation_value(ia64, R_IA64_PCREL21B, 0x1000, 0x9000000, 0, &outv) ==
+              ELF_ERR_RELOC);
+    }
+    {
+        elf_section_t *text = elf_find_section(ia64, ".text");
+        elf_symbol_t *sym = elf_add_symbol(ia64, "ia64_sym", 0, 0, STB_GLOBAL, STT_OBJECT);
+        elfobj_t *reopen = NULL;
+        elfobj_t *bad = NULL;
+        size_t i;
+        CHECK(text != NULL);
+        CHECK(sym != NULL);
+        CHECK(elf_symbol_define(sym, text, 0x60) == ELF_OK);
+        CHECK(elf_add_relocation(text, 0x0, sym, R_IA64_DIR64LSB, 0) == ELF_OK);
+        CHECK(elf_write_file(ia64, "tmp_ia64_le.o") == ELF_OK);
+        CHECK(elf_open("tmp_ia64_le.o", &reopen) == ELF_OK);
+        CHECK(elf_machine(reopen) == EM_IA_64);
+        CHECK(elf_class(reopen) == ELFOBJ_CLASS_64);
+        CHECK(elf_endian(reopen) == ELFOBJ_ENDIAN_LE);
+        CHECK(elf_find_section(reopen, ".rela.text") != NULL);
+        elf_close(reopen);
+
+        bad = elf_create(ET_REL, EM_IA_64, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+        CHECK(bad != NULL);
+        CHECK(elf_validate(bad, NULL) == ELF_ERR_FORMAT);
+        elf_close(bad);
+
+        bad = elf_create(ET_REL, EM_IA_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_BE);
+        CHECK(bad != NULL);
+        CHECK(elf_set_flags(bad, EF_IA_64_ABI64 | 0x01000000u) == ELF_OK);
+        CHECK(elf_validate(bad, NULL) == ELF_OK);
+        elf_close(bad);
+
+        for (i = 0; i < 64; ++i) {
+            unsigned char fuzz[128] = {0};
+            elfobj_t *fz = NULL;
+            fuzz[0] = 0x7f;
+            fuzz[1] = 'E';
+            fuzz[2] = 'L';
+            fuzz[3] = 'F';
+            fuzz[4] = 2; /* ELFCLASS64 */
+            fuzz[5] = (i & 1) ? 1 : 2;
+            fuzz[6] = 1;
+            fuzz[16] = 0;
+            fuzz[17] = ET_REL;
+            fuzz[18] = 0;
+            fuzz[19] = EM_IA_64;
+            fuzz[20] = 0;
+            fuzz[21] = 1;
+            fuzz[56 + (i % 48)] = (unsigned char)(i * 11u);
+            (void)elf_open_memory(fuzz, sizeof(fuzz), &fz);
+            elf_close(fz);
+        }
+    }
 
     elf_close(arm);
     elf_close(aa64);
@@ -505,6 +584,7 @@ int main(void) {
     elf_close(ppc32);
     elf_close(ppc64);
     elf_close(alpha);
+    elf_close(ia64);
     puts("ok");
     return 0;
 }

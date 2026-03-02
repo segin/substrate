@@ -1210,12 +1210,12 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] IA-64 CFA: frame pointer GR12 (SP), return address BR0 (RP).
 
 ### 24g. IA-64 Testing
-- [ ] Unit tests for all IA-64 relocation types.
-- [ ] Bundle slot encoding/decoding correctness.
-- [ ] IMM22/IMM64/IMM14 immediate insertion.
-- [ ] PCREL21B branch range checks.
-- [ ] GP-relative and LTOFF relocations.
-- [ ] FPTR function descriptor handling.
-- [ ] Round-trip read/write for IA-64 ELF64 objects.
-- [ ] Validation: reject ELFCLASS32, e_flags checks.
-- [ ] Fuzz IA-64 ELF parsing → crash-free.
+- [x] Unit tests for all IA-64 relocation types.
+- [x] Bundle slot encoding/decoding correctness.
+- [x] IMM22/IMM64/IMM14 immediate insertion.
+- [x] PCREL21B branch range checks.
+- [x] GP-relative and LTOFF relocations.
+- [x] FPTR function descriptor handling.
+- [x] Round-trip read/write for IA-64 ELF64 objects.
+- [x] Validation: reject ELFCLASS32, e_flags checks.
+- [x] Fuzz IA-64 ELF parsing → crash-free.
