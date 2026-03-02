@@ -317,12 +317,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] **Accumulate:** `VPADAL`, `VPADDL`, `VCNT`, `VCLZ`, `VCLS`
 
 ### 6i. ARMv7 Relocations
-- [ ] `R_ARM_ABS32`, `R_ARM_REL32`, `R_ARM_PC24`, `R_ARM_CALL`, `R_ARM_JUMP24`
-- [ ] `R_ARM_THM_CALL`, `R_ARM_THM_JUMP24`, `R_ARM_THM_JUMP11`, `R_ARM_THM_JUMP8`
-- [ ] `R_ARM_MOVW_ABS_NC`, `R_ARM_MOVT_ABS`, `R_ARM_THM_MOVW_ABS_NC`, `R_ARM_THM_MOVT_ABS`
-- [ ] `R_ARM_GOT_BREL`, `R_ARM_PLT32`, `R_ARM_GOTOFF32`, `R_ARM_GOTPC`
-- [ ] `R_ARM_TLS_GD32`, `R_ARM_TLS_LDM32`, `R_ARM_TLS_IE32`, `R_ARM_TLS_LE32`
-- [ ] `R_ARM_PREL31` (exception tables)
+- [x] `R_ARM_ABS32`, `R_ARM_REL32`, `R_ARM_PC24`, `R_ARM_CALL`, `R_ARM_JUMP24`
+- [x] `R_ARM_THM_CALL`, `R_ARM_THM_JUMP24`, `R_ARM_THM_JUMP11`, `R_ARM_THM_JUMP8`
+- [x] `R_ARM_MOVW_ABS_NC`, `R_ARM_MOVT_ABS`, `R_ARM_THM_MOVW_ABS_NC`, `R_ARM_THM_MOVT_ABS`
+- [x] `R_ARM_GOT_BREL`, `R_ARM_PLT32`, `R_ARM_GOTOFF32`, `R_ARM_GOTPC`
+- [x] `R_ARM_TLS_GD32`, `R_ARM_TLS_LDM32`, `R_ARM_TLS_IE32`, `R_ARM_TLS_LE32`
+- [x] `R_ARM_PREL31` (exception tables)
 
 ---
 
