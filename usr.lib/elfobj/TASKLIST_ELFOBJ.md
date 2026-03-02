@@ -1135,9 +1135,9 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Validate `e_flags`.
 
 ### 23e. Alpha ELF Read/Write/Create
-- [ ] Recognize `EM_ALPHA` as valid machine type.
-- [ ] Parse/write RELA relocations (Alpha uses RELA).
-- [ ] `elf_init_alpha()`: ELF64/EM_ALPHA/ELFDATA2LSB.
+- [x] Recognize `EM_ALPHA` as valid machine type.
+- [x] Parse/write RELA relocations (Alpha uses RELA).
+- [x] `elf_init_alpha()`: ELF64/EM_ALPHA/ELFDATA2LSB.
 
 ### 23f. Alpha DWARF
 - [ ] Alpha DWARF register mapping: $0–$30 → 0–30, $f0–$f30 → 32–62, $sp → 30, $ra → 26.

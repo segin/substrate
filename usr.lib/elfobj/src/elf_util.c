@@ -532,6 +532,16 @@ elfobj_t *elf_init_ppc64(void) {
     return obj;
 }
 
+elfobj_t *elf_init_alpha(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_ALPHA, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return NULL;
+    }
+    obj->flags = 0;
+    init_default_sections(obj, 8, 8);
+    return obj;
+}
+
 elf_section_t *elf_add_arm_exidx(elfobj_t *obj) {
     elf_section_t *exidx;
     elf_section_t *extab;
