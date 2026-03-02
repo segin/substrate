@@ -1085,17 +1085,17 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] PPC CFA: frame pointer R1 (SP), return address LR (R108).
 
 ### 22i. PowerPC Testing
-- [ ] Unit tests for all PPC32 relocation types.
-- [ ] Unit tests for all PPC64 relocation types.
-- [ ] HA carry adjustment correctness.
-- [ ] REL24 branch range checks.
-- [ ] TOC16 DS-form alignment checks.
-- [ ] PCREL34 encoding (PCRel ABI).
-- [ ] `.opd` parsing for ELFv1 objects.
-- [ ] ELFv2 local entry point offset decoding.
-- [ ] Round-trip read/write for PPC32 (BE) and PPC64 (LE + BE) objects.
-- [ ] Validation: class/endian checks, ELFv1/v2 flag validation.
-- [ ] Fuzz PPC32 and PPC64 ELF parsing → crash-free.
+- [x] Unit tests for all PPC32 relocation types.
+- [x] Unit tests for all PPC64 relocation types.
+- [x] HA carry adjustment correctness.
+- [x] REL24 branch range checks.
+- [x] TOC16 DS-form alignment checks.
+- [x] PCREL34 encoding (PCRel ABI).
+- [x] `.opd` parsing for ELFv1 objects.
+- [x] ELFv2 local entry point offset decoding.
+- [x] Round-trip read/write for PPC32 (BE) and PPC64 (LE + BE) objects.
+- [x] Validation: class/endian checks, ELFv1/v2 flag validation.
+- [x] Fuzz PPC32 and PPC64 ELF parsing → crash-free.
 
 ---
 

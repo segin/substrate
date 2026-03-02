@@ -26,6 +26,8 @@ int main(void) {
     elfobj_t *la64 = NULL;
     elfobj_t *m68k = NULL;
     elfobj_t *vax = NULL;
+    elfobj_t *ppc32 = NULL;
+    elfobj_t *ppc64 = NULL;
 
     CHECK(elf_reloc_size_for_machine(EM_ARM, R_ARM_CALL) == 4);
     CHECK(elf_reloc_size_for_machine(EM_AARCH64, R_AARCH64_CALL26) == 4);
@@ -50,6 +52,12 @@ int main(void) {
     CHECK(elf_reloc_size_for_machine(EM_VAX, R_VAX_16) == 2);
     CHECK(elf_reloc_size_for_machine(EM_VAX, R_VAX_8) == 1);
     CHECK(elf_reloc_is_pc_relative_for_machine(EM_VAX, R_VAX_PC32) == 1);
+    CHECK(elf_reloc_size_for_machine(EM_PPC, R_PPC_REL24) == 4);
+    CHECK(elf_reloc_is_pc_relative_for_machine(EM_PPC, R_PPC_REL24) == 1);
+    CHECK(elf_reloc_is_tls_for_machine(EM_PPC, R_PPC_DTPMOD32) == 1);
+    CHECK(elf_reloc_size_for_machine(EM_PPC64, R_PPC64_ADDR64) == 8);
+    CHECK(elf_reloc_is_pc_relative_for_machine(EM_PPC64, R_PPC64_PCREL34) == 1);
+    CHECK(elf_reloc_is_tls_for_machine(EM_PPC64, R_PPC64_DTPMOD64) == 1);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_X86_64, R_X86_64_PC32), "R_X86_64_PC32") == 0);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_386, R_386_PC8), "R_386_PC8") == 0);
     CHECK(strncmp(elf_reloc_name_for_machine(EM_386, 9999), "UNKNOWN(", 8) == 0);
@@ -312,6 +320,93 @@ int main(void) {
             elf_close(fz);
         }
     }
+    ppc32 = elf_init_ppc32();
+    CHECK(ppc32 != NULL);
+    CHECK(elf_machine(ppc32) == EM_PPC);
+    CHECK(elf_class(ppc32) == ELFOBJ_CLASS_32);
+    CHECK(elf_endian(ppc32) == ELFOBJ_ENDIAN_BE);
+    {
+        uint64_t outv = 0;
+        CHECK(elf_apply_relocation_value(ppc32, R_PPC_ADDR16_HA, 0, 0x12345678, 0, &outv) == ELF_OK);
+        CHECK(outv == (((0x12345678ull + 0x8000ull) >> 16) & 0xffffull));
+        CHECK(elf_apply_relocation_value(ppc32, R_PPC_REL24, 0x1000, 0x1100, 0, &outv) == ELF_OK);
+        CHECK(elf_apply_relocation_value(ppc32, R_PPC_REL24, 0x1000, 0x9000000, 0, &outv) == ELF_ERR_RELOC);
+    }
+    {
+        elf_section_t *text = elf_find_section(ppc32, ".text");
+        elf_symbol_t *sym = elf_add_symbol(ppc32, "ppc32_sym", 0, 0, STB_GLOBAL, STT_OBJECT);
+        elfobj_t *reopen = NULL;
+        CHECK(text != NULL);
+        CHECK(sym != NULL);
+        CHECK(elf_symbol_define(sym, text, 0x30) == ELF_OK);
+        CHECK(elf_add_relocation(text, 0x0, sym, R_PPC_REL32, 0) == ELF_OK);
+        CHECK(elf_write_file(ppc32, "tmp_ppc32_be.o") == ELF_OK);
+        CHECK(elf_open("tmp_ppc32_be.o", &reopen) == ELF_OK);
+        CHECK(elf_machine(reopen) == EM_PPC);
+        CHECK(elf_endian(reopen) == ELFOBJ_ENDIAN_BE);
+        CHECK(elf_find_section(reopen, ".rela.text") != NULL);
+        elf_close(reopen);
+    }
+    ppc64 = elf_init_ppc64();
+    CHECK(ppc64 != NULL);
+    CHECK(elf_machine(ppc64) == EM_PPC64);
+    CHECK(elf_class(ppc64) == ELFOBJ_CLASS_64);
+    CHECK(elf_endian(ppc64) == ELFOBJ_ENDIAN_LE);
+    {
+        uint64_t outv = 0;
+        CHECK(elf_apply_relocation_value(ppc64, R_PPC64_ADDR16_DS, 0, 0x1000, 0, &outv) == ELF_OK);
+        CHECK(elf_apply_relocation_value(ppc64, R_PPC64_ADDR16_DS, 0, 0x1002, 0, &outv) == ELF_ERR_RELOC);
+        CHECK(elf_apply_relocation_value(ppc64, R_PPC64_PCREL34, 0x1000, 0x2000, 0, &outv) == ELF_OK);
+        CHECK(elf_apply_relocation_value(ppc64, R_PPC64_ENTRY, 0, 0x20, 4, &outv) == ELF_OK);
+    }
+    {
+        elf_section_t *opd = elf_add_section(ppc64, ".opd", SHT_PPC64_OPD, SHF_ALLOC);
+        unsigned char fd[24] = {0};
+        elfobj_t *reopen = NULL;
+        elfobj_t *bad = NULL;
+        size_t i;
+        CHECK(opd != NULL);
+        CHECK(elf_section_set_data(opd, fd, sizeof(fd)) == ELF_OK);
+        CHECK(elf_set_flags(ppc64, EF_PPC64_ABI_V1) == ELF_OK);
+        CHECK(elf_validate(ppc64, NULL) == ELF_OK);
+        CHECK(elf_write_file(ppc64, "tmp_ppc64_le.o") == ELF_OK);
+        CHECK(elf_open("tmp_ppc64_le.o", &reopen) == ELF_OK);
+        CHECK(elf_machine(reopen) == EM_PPC64);
+        CHECK(elf_endian(reopen) == ELFOBJ_ENDIAN_LE);
+        CHECK(elf_find_section(reopen, ".opd") != NULL);
+        elf_close(reopen);
+
+        bad = elf_create(ET_REL, EM_PPC, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_BE);
+        CHECK(bad != NULL);
+        CHECK(elf_validate(bad, NULL) == ELF_ERR_FORMAT);
+        elf_close(bad);
+        bad = elf_create(ET_REL, EM_PPC64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_BE);
+        CHECK(bad != NULL);
+        CHECK(elf_set_flags(bad, 3) == ELF_OK);
+        CHECK(elf_validate(bad, NULL) != ELF_ERR_FORMAT);
+        elf_close(bad);
+
+        for (i = 0; i < 64; ++i) {
+            unsigned char fuzz[96] = {0};
+            elfobj_t *fz = NULL;
+            fuzz[0] = 0x7f;
+            fuzz[1] = 'E';
+            fuzz[2] = 'L';
+            fuzz[3] = 'F';
+            fuzz[4] = (i & 1) ? 1 : 2;
+            fuzz[5] = (i & 1) ? 2 : 1;
+            fuzz[6] = 1;
+            fuzz[16] = 0;
+            fuzz[17] = ET_REL;
+            fuzz[18] = 0;
+            fuzz[19] = (i & 1) ? EM_PPC : EM_PPC64;
+            fuzz[20] = 0;
+            fuzz[21] = 1;
+            fuzz[40 + (i % 40)] = (unsigned char)(i * 19u);
+            (void)elf_open_memory(fuzz, sizeof(fuzz), &fz);
+            elf_close(fz);
+        }
+    }
 
     elf_close(arm);
     elf_close(aa64);
@@ -324,6 +419,8 @@ int main(void) {
     elf_close(la64);
     elf_close(m68k);
     elf_close(vax);
+    elf_close(ppc32);
+    elf_close(ppc64);
     puts("ok");
     return 0;
 }
