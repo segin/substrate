@@ -1080,9 +1080,9 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Endian-correct output for both LE and BE variants.
 
 ### 22h. PowerPC DWARF
-- [ ] PPC32 DWARF register mapping: R0–R31 → 0–31, F0–F31 → 32–63, LR → 108, CTR → 109, CR → 68–75.
-- [ ] PPC64 DWARF register mapping: same base + V0–V31 → 77–108 (VMX/AltiVec).
-- [ ] PPC CFA: frame pointer R1 (SP), return address LR (R108).
+- [x] PPC32 DWARF register mapping: R0–R31 → 0–31, F0–F31 → 32–63, LR → 108, CTR → 109, CR → 68–75.
+- [x] PPC64 DWARF register mapping: same base + V0–V31 → 77–108 (VMX/AltiVec).
+- [x] PPC CFA: frame pointer R1 (SP), return address LR (R108).
 
 ### 22i. PowerPC Testing
 - [ ] Unit tests for all PPC32 relocation types.
