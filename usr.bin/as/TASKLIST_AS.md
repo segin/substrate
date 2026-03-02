@@ -356,12 +356,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `CCMN/CCMP` (conditional compare)
 
 ### 7d. Branch Instructions
-- [ ] `B label` (±128MB), `BL label` (±128MB)
-- [ ] `B.cond label` (±1MB)
-- [ ] `BR Xn`, `BLR Xn`, `RET {Xn}`
-- [ ] `CBZ/CBNZ Xt, label` (±1MB)
-- [ ] `TBZ/TBNZ Xt, #bit, label` (±32KB)
-- [ ] `SVC #imm16`, `HVC #imm16`, `SMC #imm16`, `BRK #imm16`, `HLT #imm16`
+- [x] `B label` (±128MB), `BL label` (±128MB)
+- [x] `B.cond label` (±1MB)
+- [x] `BR Xn`, `BLR Xn`, `RET {Xn}`
+- [x] `CBZ/CBNZ Xt, label` (±1MB)
+- [x] `TBZ/TBNZ Xt, #bit, label` (±32KB)
+- [x] `SVC #imm16`, `HVC #imm16`, `SMC #imm16`, `BRK #imm16`, `HLT #imm16`
 
 ### 7e. Load/Store Instructions
 - [ ] `LDR/STR` (byte/half/word/dword): immediate offset, pre/post-index, register offset
