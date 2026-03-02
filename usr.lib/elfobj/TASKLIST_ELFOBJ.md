@@ -1130,9 +1130,9 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Relocation name strings for all Alpha types.
 
 ### 23d. Alpha Validation
-- [ ] Accept `EM_ALPHA` with `ELFCLASS64` only.
-- [ ] Accept `ELFDATA2LSB` only (Alpha is little-endian).
-- [ ] Validate `e_flags`.
+- [x] Accept `EM_ALPHA` with `ELFCLASS64` only.
+- [x] Accept `ELFDATA2LSB` only (Alpha is little-endian).
+- [x] Validate `e_flags`.
 
 ### 23e. Alpha ELF Read/Write/Create
 - [ ] Recognize `EM_ALPHA` as valid machine type.

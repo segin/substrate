@@ -630,6 +630,14 @@ static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
             break;
         }
         case EM_ALPHA:
+            if (obj->cls != ELFOBJ_CLASS_64) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_ALPHA requires ELFCLASS64");
+            }
+            if (obj->endian != ELFOBJ_ENDIAN_LE) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_ALPHA requires little-endian");
+            }
             if (obj->flags != 0) {
                 return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
                                    "EM_ALPHA has unknown e_flags bits");
