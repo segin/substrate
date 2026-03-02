@@ -758,11 +758,11 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] ABIFLAGS merge rules across link inputs.
 
 ### 17e. MIPS Validation
-- [ ] Accept `EM_MIPS` with `ELFCLASS32` (O32/N32) or `ELFCLASS64` (N64).
-- [ ] Accept both `ELFDATA2LSB` (MIPSEL) and `ELFDATA2MSB` (MIPS).
-- [ ] Validate `e_flags` ISA level and ABI fields.
-- [ ] Validate `.MIPS.abiflags` section if present.
-- [ ] Validate N64 compound relocation entries.
+- [x] Accept `EM_MIPS` with `ELFCLASS32` (O32/N32) or `ELFCLASS64` (N64).
+- [x] Accept both `ELFDATA2LSB` (MIPSEL) and `ELFDATA2MSB` (MIPS).
+- [x] Validate `e_flags` ISA level and ABI fields.
+- [x] Validate `.MIPS.abiflags` section if present.
+- [x] Validate N64 compound relocation entries.
 
 ### 17f. MIPS ELF Read/Write/Create
 - [ ] Recognize `EM_MIPS` as valid machine type.

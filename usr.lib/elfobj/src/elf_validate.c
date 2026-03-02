@@ -487,6 +487,7 @@ static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
         case EM_MIPS: {
             elf_mips_abiflags_t af;
             uint32_t arch = obj->flags & 0xf0000000u;
+            uint32_t abi = obj->flags & 0x0000f000u;
             if (obj->cls != ELFOBJ_CLASS_32 && obj->cls != ELFOBJ_CLASS_64) {
                 return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
                                    "EM_MIPS requires ELFCLASS32/ELFCLASS64");
@@ -494,6 +495,13 @@ static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
             if (obj->endian != ELFOBJ_ENDIAN_LE && obj->endian != ELFOBJ_ENDIAN_BE) {
                 return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
                                    "EM_MIPS requires valid endian encoding");
+            }
+            if (abi != 0 && abi != EF_MIPS_ABI_O32 && abi != EF_MIPS_ABI_O64 &&
+                abi != EF_MIPS_ABI_EABI32 && abi != EF_MIPS_ABI_EABI64) {
+                if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                "MIPS e_flags ABI field is not recognized")) {
+                    return 1;
+                }
             }
             if (elf_mips_abiflags(obj, &af)) {
                 if (af.isa_level == 0) {
@@ -657,6 +665,26 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
             if (report_diag_fmt(&ctx, ELF_DIAG_WARNING, ELF_ERR_UNSUPPORTED, i,
                                 "unrecognized relocation type idx=", i)) {
                 goto done;
+            }
+        }
+        if (obj->machine == EM_MIPS && r->section != NULL) {
+            if (obj->cls == ELFOBJ_CLASS_32 && r->has_addend) {
+                if (report_diag(&ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
+                                "MIPS32 relocation should use REL format")) {
+                    goto done;
+                }
+            }
+            if (obj->cls == ELFOBJ_CLASS_64 && !r->has_addend) {
+                if (report_diag(&ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
+                                "MIPS64 relocation should use RELA format")) {
+                    goto done;
+                }
+            }
+            if (obj->cls == ELFOBJ_CLASS_64 && r->type > 255u) {
+                if (report_diag(&ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
+                                "MIPS64 compound relocation encoding detected")) {
+                    goto done;
+                }
             }
         }
         if (relsz > 0 && r->section->type != SHT_NOBITS) {
