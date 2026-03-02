@@ -433,12 +433,12 @@ Beyond the currently-implemented core set, add the full x86 relocation roster:
 
 ## 7. ELF Creation (`elf_util.c`)
 
-- [ ] `elf_init_arm()` convenience: set up ELF32/EM_ARM/ELFDATA2LSB with EABI v5 flags, default `.text`/`.data`/`.bss` sections.
-- [ ] `elf_init_aarch64()` convenience: set up ELF64/EM_AARCH64/ELFDATA2LSB with empty flags.
-- [ ] `elf_set_flags()` / `elf_flags()` for manipulating `e_flags`.
-- [ ] `elf_add_arm_exidx()` helper for creating `.ARM.exidx` + `.ARM.extab` section pairs.
-- [ ] `elf_add_arm_attributes()` helper for adding build attributes.
-- [ ] `elf_add_gnu_property_aarch64()` helper for BTI/PAC feature bits.
+- [x] `elf_init_arm()` convenience: set up ELF32/EM_ARM/ELFDATA2LSB with EABI v5 flags, default `.text`/`.data`/`.bss` sections.
+- [x] `elf_init_aarch64()` convenience: set up ELF64/EM_AARCH64/ELFDATA2LSB with empty flags.
+- [x] `elf_set_flags()` / `elf_flags()` for manipulating `e_flags`.
+- [x] `elf_add_arm_exidx()` helper for creating `.ARM.exidx` + `.ARM.extab` section pairs.
+- [x] `elf_add_arm_attributes()` helper for adding build attributes.
+- [x] `elf_add_gnu_property_aarch64()` helper for BTI/PAC feature bits.
 
 ---
 
