@@ -54,6 +54,29 @@ static int parse_aarch64_feature_bits(const struct elf_section *sec, uint32_t *o
     return 0;
 }
 
+static uint64_t ppc64_local_entry_offset(uint8_t other) {
+    uint8_t v = (uint8_t)((other & STO_PPC64_LOCAL_MASK) >> STO_PPC64_LOCAL_BIT);
+    uint64_t off = (uint64_t)1u << v;
+    return (off >> 2) << 2;
+}
+
+static elf_err_t ppc64_validate_opd(const elfobj_t *obj) {
+    const struct elf_section *opd = elf_find_section((elfobj_t *)obj, ".opd");
+    if (opd == NULL) {
+        return ELF_OK;
+    }
+    if (opd->size == 0) {
+        return ELF_OK;
+    }
+    if (opd->entsize == 0 && (opd->size % 24u) != 0) {
+        return ELF_ERR_FORMAT;
+    }
+    if (opd->entsize != 0 && opd->entsize != 24u) {
+        return ELF_ERR_FORMAT;
+    }
+    return ELF_OK;
+}
+
 static elf_err_t merge_arch_metadata(elfobj_t *out, const elfobj_t *in) {
     if (out->machine == EM_ARM) {
         if (arm_float_conflict(out->flags, in->flags)) {
@@ -102,6 +125,36 @@ static elf_err_t merge_arch_metadata(elfobj_t *out, const elfobj_t *in) {
             return ELF_ERR_FORMAT;
         }
         out->flags |= in->flags & (EF_RISCV_RVC | EF_RISCV_RVE | EF_RISCV_TSO);
+    }
+    if (out->machine == EM_PPC64) {
+        uint32_t out_abi = out->flags & EF_PPC64_ABI;
+        uint32_t in_abi = in->flags & EF_PPC64_ABI;
+        if (out_abi != 0 && in_abi != 0 && out_abi != in_abi) {
+            elf__set_err(out, ELF_ERR_FORMAT, "PPC64 ELFv1/ELFv2 ABI conflict across link inputs");
+            return ELF_ERR_FORMAT;
+        }
+        if (out_abi == 0) {
+            out->flags = (out->flags & ~EF_PPC64_ABI) | in_abi;
+            out_abi = in_abi;
+        }
+        if (in_abi == EF_PPC64_ABI_V1 && ppc64_validate_opd(in) != ELF_OK) {
+            elf__set_err(out, ELF_ERR_FORMAT, "invalid PPC64 .opd function descriptor section");
+            return ELF_ERR_FORMAT;
+        }
+        if (out_abi == EF_PPC64_ABI_V1 && ppc64_validate_opd(out) != ELF_OK) {
+            elf__set_err(out, ELF_ERR_FORMAT, "invalid PPC64 .opd function descriptor section");
+            return ELF_ERR_FORMAT;
+        }
+        if (out_abi == EF_PPC64_ABI_V2) {
+            const struct elf_section *toc = elf_find_section(out, ".toc");
+            if (toc == NULL) {
+                toc = elf_find_section(out, ".got");
+            }
+            if (toc != NULL) {
+                (void)elf__diag_append(out, ELF_DIAG_INFO, ELF_OK, UINT64_MAX,
+                                       "PPC64 ELFv2 TOC base derived from .toc/.got");
+            }
+        }
     }
     return ELF_OK;
 }
@@ -394,6 +447,13 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
                 }
                 shndx = (uint16_t)(dst_sec->index + 1);
                 sec_name = dst_sec->name != NULL ? dst_sec->name : "";
+            }
+        }
+        if (out->machine == EM_PPC64 && (out->flags & EF_PPC64_ABI) == EF_PPC64_ABI_V2 &&
+            sym->type == STT_FUNC) {
+            uint64_t le_off = ppc64_local_entry_offset(sym->other);
+            if (!elf__u64_add(value, le_off, &value)) {
+                return ELF_ERR_BOUNDS;
             }
         }
 

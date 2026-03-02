@@ -1061,9 +1061,9 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Relocation name strings for all PPC32 and PPC64 types.
 
 ### 22e. PowerPC64 OPD and TOC Handling
-- [ ] Parse `.opd` section for ELFv1 function descriptors (3-word entries: address, TOC, environment).
-- [ ] Handle ELFv2 local entry point offsets (encoded in `st_other`).
-- [ ] TOC base calculation for ELFv2 linking.
+- [x] Parse `.opd` section for ELFv1 function descriptors (3-word entries: address, TOC, environment).
+- [x] Handle ELFv2 local entry point offsets (encoded in `st_other`).
+- [x] TOC base calculation for ELFv2 linking.
 
 ### 22f. PowerPC Validation
 - [ ] Accept `EM_PPC` with `ELFCLASS32` only.

@@ -325,6 +325,8 @@ typedef enum {
 #define EF_PPC64_ABI_V1 0x1u
 #define EF_PPC64_ABI_V2 0x2u
 #define EF_PPC64_ABI (EF_PPC64_ABI_V1 | EF_PPC64_ABI_V2)
+#define STO_PPC64_LOCAL_BIT 5
+#define STO_PPC64_LOCAL_MASK (7u << STO_PPC64_LOCAL_BIT)
 #endif
 
 #ifndef SHT_PPC_TAGS
