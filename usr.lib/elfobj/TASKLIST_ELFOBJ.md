@@ -980,10 +980,10 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] VAX has no mandatory `e_flags`; validate flags is 0.
 
 ### 21b. VAX Relocation Type Constants
-- [ ] `R_VAX_NONE` (0), `R_VAX_32` (1), `R_VAX_16` (2), `R_VAX_8` (3)
-- [ ] `R_VAX_PC32` (4), `R_VAX_PC16` (5), `R_VAX_PC8` (6)
-- [ ] `R_VAX_GOT32` (7), `R_VAX_PLT32` (13)
-- [ ] `R_VAX_COPY` (19), `R_VAX_GLOB_DAT` (20), `R_VAX_JMP_SLOT` (21), `R_VAX_RELATIVE` (22)
+- [x] `R_VAX_NONE` (0), `R_VAX_32` (1), `R_VAX_16` (2), `R_VAX_8` (3)
+- [x] `R_VAX_PC32` (4), `R_VAX_PC16` (5), `R_VAX_PC8` (6)
+- [x] `R_VAX_GOT32` (7), `R_VAX_PLT32` (13)
+- [x] `R_VAX_COPY` (19), `R_VAX_GLOB_DAT` (20), `R_VAX_JMP_SLOT` (21), `R_VAX_RELATIVE` (22)
 
 ### 21c. VAX Relocation Backend
 - [ ] `vax_reloc_size()` for all VAX relocation types.
