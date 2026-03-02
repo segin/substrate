@@ -898,9 +898,9 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Relocation name strings for all LoongArch types.
 
 ### 19d. LoongArch Validation
-- [ ] Accept `EM_LOONGARCH` with `ELFCLASS32` (LA32) or `ELFCLASS64` (LA64).
-- [ ] Reject `ELFDATA2MSB` (LoongArch is little-endian only).
-- [ ] Validate `e_flags` ABI modifier and float ABI.
+- [x] Accept `EM_LOONGARCH` with `ELFCLASS32` (LA32) or `ELFCLASS64` (LA64).
+- [x] Reject `ELFDATA2MSB` (LoongArch is little-endian only).
+- [x] Validate `e_flags` ABI modifier and float ABI.
 
 ### 19e. LoongArch ELF Read/Write/Create
 - [ ] Recognize `EM_LOONGARCH` as valid machine type.
