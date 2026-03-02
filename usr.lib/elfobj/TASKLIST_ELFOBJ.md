@@ -1073,11 +1073,11 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Validate `.opd` section structure for ELFv1.
 
 ### 22g. PowerPC ELF Read/Write/Create
-- [ ] Recognize `EM_PPC` and `EM_PPC64` as valid machine types.
-- [ ] PPC32: parse/write RELA relocations (ELF32). PPC64: parse/write RELA relocations (ELF64).
-- [ ] `elf_init_ppc32()`: ELF32/EM_PPC/ELFDATA2MSB.
-- [ ] `elf_init_ppc64()`: ELF64/EM_PPC64/ELFDATA2LSB with ELFv2 flags.
-- [ ] Endian-correct output for both LE and BE variants.
+- [x] Recognize `EM_PPC` and `EM_PPC64` as valid machine types.
+- [x] PPC32: parse/write RELA relocations (ELF32). PPC64: parse/write RELA relocations (ELF64).
+- [x] `elf_init_ppc32()`: ELF32/EM_PPC/ELFDATA2MSB.
+- [x] `elf_init_ppc64()`: ELF64/EM_PPC64/ELFDATA2LSB with ELFv2 flags.
+- [x] Endian-correct output for both LE and BE variants.
 
 ### 22h. PowerPC DWARF
 - [ ] PPC32 DWARF register mapping: R0–R31 → 0–31, F0–F31 → 32–63, LR → 108, CTR → 109, CR → 68–75.
