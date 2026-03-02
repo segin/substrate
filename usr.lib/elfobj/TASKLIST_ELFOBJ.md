@@ -653,46 +653,46 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 15. x86-Specific Tests
 
 ### 15a. Expanded i386 Relocation Tests
-- [ ] `R_386_16` and `R_386_PC16`: verify 16-bit relocations.
-- [ ] `R_386_8` and `R_386_PC8`: verify 8-bit relocations.
-- [ ] `R_386_SIZE32`: verify symbol size relocation.
-- [ ] `R_386_GOT32X`: verify relaxable GOT reference.
-- [ ] `R_386_IRELATIVE`: verify indirect function.
-- [ ] `R_386_TLS_DTPMOD32`/`DTPOFF32`: verify TLS relocations.
-- [ ] All dynamic relocations (COPY/GLOB_DAT/JMP_SLOT/RELATIVE): verify.
+- [x] `R_386_16` and `R_386_PC16`: verify 16-bit relocations.
+- [x] `R_386_8` and `R_386_PC8`: verify 8-bit relocations.
+- [x] `R_386_SIZE32`: verify symbol size relocation.
+- [x] `R_386_GOT32X`: verify relaxable GOT reference.
+- [x] `R_386_IRELATIVE`: verify indirect function.
+- [x] `R_386_TLS_DTPMOD32`/`DTPOFF32`: verify TLS relocations.
+- [x] All dynamic relocations (COPY/GLOB_DAT/JMP_SLOT/RELATIVE): verify.
 
 ### 15b. Expanded x86-64 Relocation Tests
-- [ ] `R_X86_64_PC64`: verify 64-bit PC-relative.
-- [ ] `R_X86_64_GOTOFF64`/`GOTPC32`: verify GOT-relative.
-- [ ] `R_X86_64_SIZE32`/`SIZE64`: verify size relocations.
-- [ ] `R_X86_64_GOTPCRELX`/`REX_GOTPCRELX`: verify relaxable GOT references.
-- [ ] `R_X86_64_IRELATIVE`: verify indirect function.
-- [ ] `R_X86_64_TLSLD`/`DTPOFF32`: verify Local Dynamic TLS.
-- [ ] `R_X86_64_GOTPC32_TLSDESC`/`TLSDESC_CALL`/`TLSDESC`: verify TLSDESC relocations.
-- [ ] All 16-bit and 8-bit relocations: verify.
+- [x] `R_X86_64_PC64`: verify 64-bit PC-relative.
+- [x] `R_X86_64_GOTOFF64`/`GOTPC32`: verify GOT-relative.
+- [x] `R_X86_64_SIZE32`/`SIZE64`: verify size relocations.
+- [x] `R_X86_64_GOTPCRELX`/`REX_GOTPCRELX`: verify relaxable GOT references.
+- [x] `R_X86_64_IRELATIVE`: verify indirect function.
+- [x] `R_X86_64_TLSLD`/`DTPOFF32`: verify Local Dynamic TLS.
+- [x] `R_X86_64_GOTPC32_TLSDESC`/`TLSDESC_CALL`/`TLSDESC`: verify TLSDESC relocations.
+- [x] All 16-bit and 8-bit relocations: verify.
 
 ### 15c. GNU Property Tests
-- [ ] Read x86-64 object with `.note.gnu.property` → extract ISA level bits.
-- [ ] Read AArch64 object → extract BTI/PAC flags.
-- [ ] Create object → add GNU property → write → read back → verify.
-- [ ] Property with ISA_1_V4 → `elf_x86_isa_level()` returns correct bitmask.
-- [ ] Object without `.note.gnu.property` → `elf_x86_isa_level()` returns 0.
-- [ ] Merge two objects with different ISA levels → OR result.
-- [ ] Merge two objects with FEATURE_1_AND → AND result.
+- [x] Read x86-64 object with `.note.gnu.property` → extract ISA level bits.
+- [x] Read AArch64 object → extract BTI/PAC flags.
+- [x] Create object → add GNU property → write → read back → verify.
+- [x] Property with ISA_1_V4 → `elf_x86_isa_level()` returns correct bitmask.
+- [x] Object without `.note.gnu.property` → `elf_x86_isa_level()` returns 0.
+- [x] Merge two objects with different ISA levels → OR result.
+- [x] Merge two objects with FEATURE_1_AND → AND result.
 
 ### 15d. Relocation Name Tests
-- [ ] Every i386 relocation type → correct name string.
-- [ ] Every x86-64 relocation type → correct name string.
-- [ ] Every ARM relocation type → correct name string.
-- [ ] Every AArch64 relocation type → correct name string.
-- [ ] Unknown type → `"UNKNOWN(N)"` format.
+- [x] Every i386 relocation type → correct name string.
+- [x] Every x86-64 relocation type → correct name string.
+- [x] Every ARM relocation type → correct name string.
+- [x] Every AArch64 relocation type → correct name string.
+- [x] Unknown type → `"UNKNOWN(N)"` format.
 
 ### 15e. x86 Validation Tests
-- [ ] EM_386 with ELFCLASS64 → rejected.
-- [ ] EM_X86_64 with ELFCLASS32 → rejected.
-- [ ] x86 with ELFDATA2MSB → rejected.
-- [ ] `.note.gnu.property` with bad alignment → diagnostic.
-- [ ] `.note.gnu.property` with unknown property type → warning (not error).
+- [x] EM_386 with ELFCLASS64 → rejected.
+- [x] EM_X86_64 with ELFCLASS32 → rejected.
+- [x] x86 with ELFDATA2MSB → rejected.
+- [x] `.note.gnu.property` with bad alignment → diagnostic.
+- [x] `.note.gnu.property` with unknown property type → warning (not error).
 
 ---
 
