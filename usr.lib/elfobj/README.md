@@ -6,7 +6,6 @@
 - Parse ELF32/ELF64 in little-endian and big-endian modes.
 - Support ET_REL, ET_EXEC, ET_DYN, and read-only ET_CORE parsing.
 - Build/modify sections, symbols, and relocations.
-- Apply relocations through architecture backends (i386/x86_64) with overflow and TLS checks.
 - Apply relocations through architecture backends (i386/x86_64/ARM/AArch64) with overflow and TLS checks.
 - Emit valid ELF objects with generated string/symbol/relocation tables.
 - Provide linker-facing object merge API and validation diagnostics.
@@ -27,6 +26,11 @@
 
 ## Install
 - `make -C usr.lib/elfobj install DESTDIR=...`
+
+## Spec Location Convention
+- During active implementation, keep the working spec at `usr.lib/elfobj/SPEC.md`.
+- At task completion, move it to `docs/specs/elfobj/SPEC.md` (not `docs/specs/SPEC.md`).
+- This per-module destination avoids cross-project spec filename collisions.
 
 ## API
 Public API is defined in `include/elfobj.h`.
