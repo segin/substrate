@@ -599,6 +599,36 @@ static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
                                    "EM_VAX has unknown e_flags bits");
             }
             break;
+        case EM_PPC:
+            if (obj->cls != ELFOBJ_CLASS_32) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_PPC requires ELFCLASS32");
+            }
+            if (obj->endian != ELFOBJ_ENDIAN_LE && obj->endian != ELFOBJ_ENDIAN_BE) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_PPC requires valid endian encoding");
+            }
+            break;
+        case EM_PPC64: {
+            uint32_t abi = obj->flags & EF_PPC64_ABI;
+            if (obj->cls != ELFOBJ_CLASS_64) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_PPC64 requires ELFCLASS64");
+            }
+            if (obj->endian != ELFOBJ_ENDIAN_LE && obj->endian != ELFOBJ_ENDIAN_BE) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_PPC64 requires valid endian encoding");
+            }
+            if (abi != 0 && abi != EF_PPC64_ABI_V1 && abi != EF_PPC64_ABI_V2) {
+                return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "PPC64 e_flags ABI field is not recognized");
+            }
+            if ((obj->flags & ~(uint32_t)EF_PPC64_ABI) != 0) {
+                return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "PPC64 e_flags contain unknown bits");
+            }
+            break;
+        }
         default:
             break;
     }
@@ -705,6 +735,17 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
             s->name != NULL && strcmp(s->name, ".eh_frame") == 0) {
             if (validate_eh_frame_ra(&ctx, s, i)) {
                 goto done;
+            }
+        }
+        if (obj->machine == EM_PPC64 && (obj->flags & EF_PPC64_ABI) == EF_PPC64_ABI_V1) {
+            if ((s->type == SHT_PPC64_OPD || (s->name != NULL && strcmp(s->name, ".opd") == 0)) &&
+                s->size != 0) {
+                if ((s->entsize != 0 && s->entsize != 24) || (s->size % 24u) != 0) {
+                    if (report_diag(&ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, i,
+                                    "PPC64 ELFv1 .opd entries must be 24 bytes")) {
+                        goto done;
+                    }
+                }
             }
         }
     }

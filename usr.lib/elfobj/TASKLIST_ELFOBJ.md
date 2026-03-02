@@ -1066,11 +1066,11 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] TOC base calculation for ELFv2 linking.
 
 ### 22f. PowerPC Validation
-- [ ] Accept `EM_PPC` with `ELFCLASS32` only.
-- [ ] Accept `EM_PPC64` with `ELFCLASS64` only.
-- [ ] Accept both `ELFDATA2LSB` (PPC64LE) and `ELFDATA2MSB` (PPC/PPC64).
-- [ ] Validate `e_flags` ELFv1/ELFv2 ABI version for PPC64.
-- [ ] Validate `.opd` section structure for ELFv1.
+- [x] Accept `EM_PPC` with `ELFCLASS32` only.
+- [x] Accept `EM_PPC64` with `ELFCLASS64` only.
+- [x] Accept both `ELFDATA2LSB` (PPC64LE) and `ELFDATA2MSB` (PPC/PPC64).
+- [x] Validate `e_flags` ELFv1/ELFv2 ABI version for PPC64.
+- [x] Validate `.opd` section structure for ELFv1.
 
 ### 22g. PowerPC ELF Read/Write/Create
 - [ ] Recognize `EM_PPC` and `EM_PPC64` as valid machine types.
