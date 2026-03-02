@@ -637,16 +637,16 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 
 ## 14. GNU Property / Note API
 
-- [ ] `elf_note_count(obj)` → number of notes across all note sections.
-- [ ] `elf_note_at(obj, index)` → `{name, type, desc_data, desc_size}`.
-- [ ] `elf_gnu_property_count(obj)` → number of GNU properties in `.note.gnu.property`.
-- [ ] `elf_gnu_property_at(obj, index)` → `{type, data, data_size}`.
-- [ ] `elf_x86_isa_level(obj)` → bitmask of `GNU_PROPERTY_X86_ISA_1_NEEDED` (0 if absent).
-- [ ] `elf_x86_feature_flags(obj)` → bitmask of `GNU_PROPERTY_X86_FEATURE_1_AND` (0 if absent).
-- [ ] `elf_aarch64_feature_flags(obj)` → bitmask of `GNU_PROPERTY_AARCH64_FEATURE_1_AND` (0 if absent).
-- [ ] `elf_add_gnu_property_x86(obj, isa_needed, isa_used, feature_1)` → create/update `.note.gnu.property`.
-- [ ] `elf_add_gnu_property_aarch64(obj, feature_1)` → create/update `.note.gnu.property`.
-- [ ] `elf_build_id(obj, out_data, out_size)` → extract `.note.gnu.build-id` contents.
+- [x] `elf_note_count(obj)` → number of notes across all note sections.
+- [x] `elf_note_at(obj, index)` → `{name, type, desc_data, desc_size}`.
+- [x] `elf_gnu_property_count(obj)` → number of GNU properties in `.note.gnu.property`.
+- [x] `elf_gnu_property_at(obj, index)` → `{type, data, data_size}`.
+- [x] `elf_x86_isa_level(obj)` → bitmask of `GNU_PROPERTY_X86_ISA_1_NEEDED` (0 if absent).
+- [x] `elf_x86_feature_flags(obj)` → bitmask of `GNU_PROPERTY_X86_FEATURE_1_AND` (0 if absent).
+- [x] `elf_aarch64_feature_flags(obj)` → bitmask of `GNU_PROPERTY_AARCH64_FEATURE_1_AND` (0 if absent).
+- [x] `elf_add_gnu_property_x86(obj, isa_needed, isa_used, feature_1)` → create/update `.note.gnu.property`.
+- [x] `elf_add_gnu_property_aarch64(obj, feature_1)` → create/update `.note.gnu.property`.
+- [x] `elf_build_id(obj, out_data, out_size)` → extract `.note.gnu.build-id` contents.
 
 ---
 
