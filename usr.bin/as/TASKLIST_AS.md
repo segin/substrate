@@ -276,14 +276,14 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `TBB`, `TBH` (Thumb-2, table branch byte/halfword)
 
 ### 6e. Load/Store Instructions
-- [ ] `LDR/STR` (word, byte, halfword, signed byte, signed halfword, doubleword)
-- [ ] `LDRB/STRB`, `LDRH/STRH`, `LDRSB`, `LDRSH`, `LDRD/STRD`
-- [ ] Pre-indexed, post-indexed, offset addressing with immediate/register offsets
-- [ ] `LDM/STM` (IA/IB/DA/DB variants), `PUSH/POP`
-- [ ] `LDREX/STREX`, `LDREXB/STREXB`, `LDREXH/STREXH`, `LDREXD/STREXD` (exclusive)
-- [ ] `LDR` pseudo-instruction (literal pool generation)
-- [ ] `LDRT/STRT`, `LDRBT/STRBT`, `LDRHT/STRHT` (user-mode access)
-- [ ] `PLD`, `PLDW`, `PLI` (preload)
+- [x] `LDR/STR` (word, byte, halfword, signed byte, signed halfword, doubleword)
+- [x] `LDRB/STRB`, `LDRH/STRH`, `LDRSB`, `LDRSH`, `LDRD/STRD`
+- [x] Pre-indexed, post-indexed, offset addressing with immediate/register offsets
+- [x] `LDM/STM` (IA/IB/DA/DB variants), `PUSH/POP`
+- [x] `LDREX/STREX`, `LDREXB/STREXB`, `LDREXH/STREXH`, `LDREXD/STREXD` (exclusive)
+- [x] `LDR` pseudo-instruction (literal pool generation)
+- [x] `LDRT/STRT`, `LDRBT/STRBT`, `LDRHT/STRHT` (user-mode access)
+- [x] `PLD`, `PLDW`, `PLI` (preload)
 
 ### 6f. Coprocessor and System
 - [ ] `SVC`/`SWI`, `BKPT`, `HLT`
