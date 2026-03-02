@@ -1,1 +1,23 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_SET_INCREMENTAL_HOOK 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_set_incremental_hook
+.Nd install incremental-note callback for a link plan
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_plan_set_incremental_hook "elf_link_plan_t *plan" "elf_link_incremental_hook_t hook" "void *user"
+.Sh DESCRIPTION
+Registers incremental note callback used by
+.Fn elf_link_plan_note_incremental
+and internal merge notifications.
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success, otherwise
+.Dv ELF_ERR_STATE .
+.Sh SEE ALSO
+.Xr elf_link_plan_note_incremental 3

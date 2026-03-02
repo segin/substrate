@@ -1,1 +1,22 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_DESTROY 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_destroy
+.Nd free a link plan and all plan-owned storage
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft void
+.Fn elf_link_plan_destroy "elf_link_plan_t *plan"
+.Sh DESCRIPTION
+.Fn elf_link_plan_destroy
+releases
+.Fa plan
+and all internal arrays/strings owned by the plan.
+Passing
+.Dv NULL
+is safe.
+.Sh SEE ALSO
+.Xr elf_link_plan_create 3

@@ -1,1 +1,22 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_CREATE 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_create
+.Nd allocate a new link plan
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_link_plan_t *
+.Fn elf_link_plan_create void
+.Sh DESCRIPTION
+.Fn elf_link_plan_create
+allocates and initializes an empty link plan object.
+Release it with
+.Fn elf_link_plan_destroy .
+.Sh RETURN VALUES
+Returns a non-NULL plan on success, or NULL on allocation failure.
+.Sh SEE ALSO
+.Xr elf_link_plan_destroy 3 ,
+.Xr elf_link_plan_link 3

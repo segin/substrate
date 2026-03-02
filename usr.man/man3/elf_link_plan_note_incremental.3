@@ -1,1 +1,30 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_NOTE_INCREMENTAL 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_note_incremental
+.Nd emit one incremental-note event through a link plan callback
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_plan_note_incremental "elf_link_plan_t *plan" "const char *key" "const char *value"
+.Sh DESCRIPTION
+If an incremental hook is installed,
+.Fn elf_link_plan_note_incremental
+invokes it with
+.Fa key
+and
+.Fa value
+(or empty strings for NULL arguments).
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success, or
+.Dv ELF_ERR_STATE
+if
+.Fa plan
+is NULL.
+.Sh SEE ALSO
+.Xr elf_link_plan_set_incremental_hook 3

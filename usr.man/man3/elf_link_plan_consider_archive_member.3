@@ -1,1 +1,25 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_CONSIDER_ARCHIVE_MEMBER 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_consider_archive_member
+.Nd ask a link plan whether an archive member should be extracted
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_plan_consider_archive_member "elf_link_plan_t *plan" "const char *archive_path" "const char *member_name" "int *should_extract_out"
+.Sh DESCRIPTION
+Evaluates archive extraction policy for a candidate member.
+If no archive hook is installed, extraction defaults to true.
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success and writes decision to
+.Fa *should_extract_out .
+Returns
+.Dv ELF_ERR_STATE
+for invalid arguments.
+.Sh SEE ALSO
+.Xr elf_link_plan_set_archive_hook 3

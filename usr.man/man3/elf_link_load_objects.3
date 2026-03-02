@@ -1,1 +1,33 @@
-.so man3/elf_link_utils.3
+.Dd March 2, 2026
+.Dt ELF_LINK_LOAD_OBJECTS 3
+.Os
+.Sh NAME
+.Nm elf_link_load_objects
+.Nd open multiple ELF input files for linker processing
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_load_objects "const char **paths" "size_t count" "elfobj_t ***out_objs" "size_t *out_count"
+.Sh DESCRIPTION
+.Fn elf_link_load_objects
+opens each path in
+.Fa paths
+and returns an allocated array of
+.Vt elfobj_t *
+in
+.Fa *out_objs .
+Use
+.Fn elf_link_unload_objects
+to release the result.
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success.
+On failure returns an
+.Vt elf_err_t
+code and releases partially opened inputs.
+.Sh SEE ALSO
+.Xr elf_link_unload_objects 3 ,
+.Xr elf_open 3

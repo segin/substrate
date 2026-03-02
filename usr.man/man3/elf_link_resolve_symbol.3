@@ -1,1 +1,28 @@
-.so man3/elf_link_utils.3
+.Dd March 2, 2026
+.Dt ELF_LINK_RESOLVE_SYMBOL 3
+.Os
+.Sh NAME
+.Nm elf_link_resolve_symbol
+.Nd resolve the best matching symbol across multiple input objects
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_symbol_t *
+.Fn elf_link_resolve_symbol "elfobj_t **inputs" "size_t count" "const char *name" "size_t *input_index_out"
+.Sh DESCRIPTION
+.Fn elf_link_resolve_symbol
+searches
+.Fa inputs
+for
+.Fa name
+and returns the highest-ranked match.
+Current precedence prefers defined global symbols, then defined weak,
+then undefined global, then undefined weak symbols.
+If non-NULL,
+.Fa input_index_out
+receives the winning input index.
+.Sh RETURN VALUES
+Returns a matching symbol handle, or NULL when no candidate is found.
+.Sh SEE ALSO
+.Xr elf_symbol 3

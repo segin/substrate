@@ -1,1 +1,22 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_MAP_COUNT 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_map_count
+.Nd return count of plan symbol-map entries after linking
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft size_t
+.Fn elf_link_plan_map_count "const elf_link_plan_t *plan"
+.Sh DESCRIPTION
+.Fn elf_link_plan_map_count
+returns number of map entries currently available in
+.Fa plan .
+.Sh RETURN VALUES
+Returns the map entry count, or 0 when
+.Fa plan
+is NULL.
+.Sh SEE ALSO
+.Xr elf_link_plan_map_entry 3

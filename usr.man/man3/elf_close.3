@@ -1,1 +1,25 @@
-.so man3/elf_open.3
+.Dd March 2, 2026
+.Dt ELF_CLOSE 3
+.Os
+.Sh NAME
+.Nm elf_close
+.Nd release a libelfobj object handle and associated resources
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft void
+.Fn elf_close "elfobj_t *obj"
+.Sh DESCRIPTION
+.Fn elf_close
+releases all memory and internal state owned by
+.Fa obj .
+If
+.Fa obj
+was opened with memory mapping enabled, mapped regions are unmapped.
+Passing
+.Dv NULL
+is safe and has no effect.
+.Sh SEE ALSO
+.Xr elf_open 3 ,
+.Xr elf_open_memory 3

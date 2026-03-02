@@ -1,1 +1,26 @@
-.so man3/elf_link_utils.3
+.Dd March 2, 2026
+.Dt ELF_LINK_ADD_GOT_SECTION 3
+.Os
+.Sh NAME
+.Nm elf_link_add_got_section
+.Nd create or extend .got with additional entries
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_section_t *
+.Fn elf_link_add_got_section "elfobj_t *obj" "size_t entries"
+.Sh DESCRIPTION
+.Fn elf_link_add_got_section
+ensures a
+.Pa .got
+section exists on
+.Fa obj
+and appends zero-initialized slots for
+.Fa entries .
+Slot width follows ELF class (4 bytes for ELF32, 8 bytes for ELF64).
+.Sh RETURN VALUES
+Returns a section handle on success, or NULL on failure.
+.Sh SEE ALSO
+.Xr elf_link_add_plt_section 3 ,
+.Xr elf_section 3

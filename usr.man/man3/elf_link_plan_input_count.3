@@ -1,1 +1,22 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_INPUT_COUNT 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_input_count
+.Nd return number of inputs currently in a link plan
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft size_t
+.Fn elf_link_plan_input_count "const elf_link_plan_t *plan"
+.Sh DESCRIPTION
+.Fn elf_link_plan_input_count
+returns how many input objects were added to
+.Fa plan .
+.Sh RETURN VALUES
+Returns the input count, or 0 if
+.Fa plan
+is NULL.
+.Sh SEE ALSO
+.Xr elf_link_plan_add_input 3

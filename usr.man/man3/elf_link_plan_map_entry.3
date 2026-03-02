@@ -1,1 +1,24 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_MAP_ENTRY 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_map_entry
+.Nd fetch one link-plan map entry by index
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft int
+.Fn elf_link_plan_map_entry "const elf_link_plan_t *plan" "size_t index" "elf_link_map_entry_t *out_entry"
+.Sh DESCRIPTION
+.Fn elf_link_plan_map_entry
+copies one mapping record (symbol/section/input provenance metadata)
+into
+.Fa *out_entry .
+.Sh RETURN VALUES
+Returns 1 on success.
+Returns 0 when arguments are invalid or
+.Fa index
+is out of range.
+.Sh SEE ALSO
+.Xr elf_link_plan_map_count 3

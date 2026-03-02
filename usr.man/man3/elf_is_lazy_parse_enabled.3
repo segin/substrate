@@ -1,1 +1,23 @@
-.so man3/elf_open.3
+.Dd March 2, 2026
+.Dt ELF_IS_LAZY_PARSE_ENABLED 3
+.Os
+.Sh NAME
+.Nm elf_is_lazy_parse_enabled
+.Nd query whether lazy parsing is enabled for an object
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft int
+.Fn elf_is_lazy_parse_enabled "const elfobj_t *obj"
+.Sh DESCRIPTION
+.Fn elf_is_lazy_parse_enabled
+reports whether
+.Fa obj
+was opened with
+.Dv ELFOBJ_OPEN_LAZY_PARSE
+semantics.
+.Sh RETURN VALUES
+Returns non-zero when lazy parsing is enabled, 0 otherwise.
+.Sh SEE ALSO
+.Xr elf_open_with_options 3

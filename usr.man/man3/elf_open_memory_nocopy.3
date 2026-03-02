@@ -1,1 +1,34 @@
-.so man3/elf_open.3
+.Dd March 2, 2026
+.Dt ELF_OPEN_MEMORY_NOCOPY 3
+.Os
+.Sh NAME
+.Nm elf_open_memory_nocopy
+.Nd open an ELF object from memory without copying the backing buffer
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_open_memory_nocopy "const void *buf" "size_t size" "elfobj_t **out"
+.Sh DESCRIPTION
+.Fn elf_open_memory_nocopy
+parses ELF data directly from
+.Fa buf
+without taking ownership or copying input bytes.
+The caller must keep the buffer valid until
+.Fn elf_close
+is called on the resulting object.
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success, otherwise an
+.Vt elf_err_t
+code.
+.Sh ERRORS
+Possible errors include
+.Dv ELF_ERR_STATE ,
+.Dv ELF_ERR_OOM ,
+and ELF parse/format errors.
+.Sh SEE ALSO
+.Xr elf_close 3 ,
+.Xr elf_open_memory 3

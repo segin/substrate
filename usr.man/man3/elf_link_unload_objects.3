@@ -1,1 +1,22 @@
-.so man3/elf_link_utils.3
+.Dd March 2, 2026
+.Dt ELF_LINK_UNLOAD_OBJECTS 3
+.Os
+.Sh NAME
+.Nm elf_link_unload_objects
+.Nd close and free an object array returned by elf_link_load_objects
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft void
+.Fn elf_link_unload_objects "elfobj_t **objs" "size_t count"
+.Sh DESCRIPTION
+.Fn elf_link_unload_objects
+calls
+.Fn elf_close
+on each non-NULL element in
+.Fa objs
+and then frees the array itself.
+Passing NULL is safe.
+.Sh SEE ALSO
+.Xr elf_link_load_objects 3

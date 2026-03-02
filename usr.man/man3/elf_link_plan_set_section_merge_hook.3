@@ -1,1 +1,26 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_SET_SECTION_MERGE_HOOK 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_set_section_merge_hook
+.Nd install section merge policy callback for a link plan
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_plan_set_section_merge_hook "elf_link_plan_t *plan" "elf_link_section_merge_hook_t hook" "void *user"
+.Sh DESCRIPTION
+Associates section merge callback
+.Fa hook
+and user cookie
+.Fa user
+with
+.Fa plan .
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success, otherwise
+.Dv ELF_ERR_STATE .
+.Sh SEE ALSO
+.Xr elf_link_plan_link 3

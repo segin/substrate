@@ -1,1 +1,36 @@
-.so man3/elf_open.3
+.Dd March 2, 2026
+.Dt ELF_OPEN_MEMORY 3
+.Os
+.Sh NAME
+.Nm elf_open_memory
+.Nd open and parse an ELF object from a caller-provided memory buffer
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_open_memory "const void *buf" "size_t size" "elfobj_t **out"
+.Sh DESCRIPTION
+.Fn elf_open_memory
+parses ELF bytes from
+.Fa buf
+and
+.Fa size .
+The default behavior copies input bytes into object-owned storage.
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success and stores the resulting object in
+.Fa *out .
+Returns an
+.Vt elf_err_t
+on failure.
+.Sh ERRORS
+Possible errors include
+.Dv ELF_ERR_STATE ,
+.Dv ELF_ERR_OOM ,
+and ELF format/parse errors.
+.Sh SEE ALSO
+.Xr elf_open 3 ,
+.Xr elf_open_memory_nocopy 3 ,
+.Xr elf_open_memory_with_options 3

@@ -1,1 +1,22 @@
-.so man3/elf_hash.3
+.Dd March 2, 2026
+.Dt ELF_HASH_GNU 3
+.Os
+.Sh NAME
+.Nm elf_hash_gnu
+.Nd compute the GNU ELF symbol hash value
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft uint32_t
+.Fn elf_hash_gnu "const char *name"
+.Sh DESCRIPTION
+.Fn elf_hash_gnu
+computes the GNU hash used by
+.Pa .gnu.hash
+lookup tables.
+.Sh RETURN VALUES
+Returns the hash value for
+.Fa name .
+.Sh SEE ALSO
+.Xr elf_hash_sysv 3

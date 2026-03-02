@@ -1,1 +1,36 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_LINK 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_link
+.Nd execute a prepared link plan and produce merged output
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_plan_link "elf_link_plan_t *plan" "elfobj_t **output"
+.Sh DESCRIPTION
+.Fn elf_link_plan_link
+validates plan state, merges plan inputs in order, and emits a new object in
+.Fa *output .
+Inputs must be ABI-compatible (machine/class/endian).
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success.
+On failure returns an
+.Vt elf_err_t
+code and leaves
+.Fa *output
+unchanged.
+.Sh ERRORS
+Common failures include
+.Dv ELF_ERR_STATE ,
+.Dv ELF_ERR_OOM ,
+.Dv ELF_ERR_UNSUPPORTED ,
+and relocation/merge errors.
+.Sh SEE ALSO
+.Xr elf_link 3 ,
+.Xr elf_link_plan_add_input 3 ,
+.Xr elf_link_plan_map_count 3

@@ -1,1 +1,34 @@
-.so man3/elf_link_utils.3
+.Dd March 2, 2026
+.Dt ELF_LINK_ADD_DYNAMIC_ENTRY 3
+.Os
+.Sh NAME
+.Nm elf_link_add_dynamic_entry
+.Nd append one .dynamic tag/value record to an object
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_add_dynamic_entry "elfobj_t *obj" "int64_t tag" "uint64_t value"
+.Sh DESCRIPTION
+.Fn elf_link_add_dynamic_entry
+ensures
+.Pa .dynamic
+exists and appends one entry with
+.Fa tag
+and
+.Fa value .
+Entry size follows ELF class (8 bytes total on ELF32, 16 on ELF64).
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success, otherwise an
+.Vt elf_err_t
+code.
+.Sh ERRORS
+Typical failures include
+.Dv ELF_ERR_STATE
+for invalid arguments and allocation/append failures.
+.Sh SEE ALSO
+.Xr elf_link_add_got_section 3 ,
+.Xr elf_link_add_plt_section 3

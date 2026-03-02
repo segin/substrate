@@ -1,1 +1,22 @@
-.so man3/elf_link_plan.3
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN_SET_ARCHIVE_HOOK 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_set_archive_hook
+.Nd install archive-member extraction callback for a link plan
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_plan_set_archive_hook "elf_link_plan_t *plan" "elf_link_archive_hook_t hook" "void *user"
+.Sh DESCRIPTION
+Sets archive selection callback state used by
+.Fn elf_link_plan_consider_archive_member .
+.Sh RETURN VALUES
+Returns
+.Dv ELF_OK
+on success, otherwise
+.Dv ELF_ERR_STATE .
+.Sh SEE ALSO
+.Xr elf_link_plan_consider_archive_member 3

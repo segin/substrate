@@ -1,1 +1,23 @@
-.so man3/elf_link_utils.3
+.Dd March 2, 2026
+.Dt ELF_LINK_ADD_PLT_SECTION 3
+.Os
+.Sh NAME
+.Nm elf_link_add_plt_section
+.Nd create or extend .plt with additional stub entries
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_section_t *
+.Fn elf_link_add_plt_section "elfobj_t *obj" "size_t entries"
+.Sh DESCRIPTION
+.Fn elf_link_add_plt_section
+ensures a
+.Pa .plt
+section exists and appends placeholder stub bytes for
+.Fa entries
+(16 bytes per entry).
+.Sh RETURN VALUES
+Returns a section handle on success, or NULL on failure.
+.Sh SEE ALSO
+.Xr elf_link_add_got_section 3

@@ -1,1 +1,21 @@
-.so man3/elf_open.3
+.Dd March 2, 2026
+.Dt ELF_USES_MMAP 3
+.Os
+.Sh NAME
+.Nm elf_uses_mmap
+.Nd query whether an opened object is backed by mmap
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft int
+.Fn elf_uses_mmap "const elfobj_t *obj"
+.Sh DESCRIPTION
+.Fn elf_uses_mmap
+returns whether
+.Fa obj
+is backed by a memory-mapped input image.
+.Sh RETURN VALUES
+Returns non-zero when mmap-backed, 0 otherwise.
+.Sh SEE ALSO
+.Xr elf_open_with_options 3
