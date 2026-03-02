@@ -274,6 +274,8 @@ test:
 	/tmp/cc_native_gnu_typeof_alt
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_builtins.c -o /tmp/cc_native_gnu_builtins
 	/tmp/cc_native_gnu_builtins
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_function_macros.c -o /tmp/cc_native_gnu_function_macros
+	/tmp/cc_native_gnu_function_macros
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_stmt_expr.c -o /tmp/cc_native_gnu_stmt_expr
 	/tmp/cc_native_gnu_stmt_expr
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_stmt_expr.c -o /tmp/cc_native_gnu_stmt_expr.s

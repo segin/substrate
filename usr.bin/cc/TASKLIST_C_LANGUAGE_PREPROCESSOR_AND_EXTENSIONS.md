@@ -149,56 +149,56 @@ Status key:
 ## 2) C Language Features Added After C99 (C11/C17/C23)
 
 ### 2.1 C11 features
-- [ ] `_Atomic` type qualifier — parser recognizes, no `CC_TYPE_ATOMIC` wrapper, no codegen.
-- [ ] `<stdatomic.h>` builtins+lowering mapping — no IR/codegen for atomic operations.
-- [ ] Memory-order semantics (`relaxed`, `consume`, `acquire`, `release`, `acq_rel`, `seq_cst`) — codegen fences missing.
-- [ ] `_Thread_local`.
-- [ ] `_Alignas`.
-- [ ] `_Alignof`.
-- [ ] `_Static_assert`.
-- [ ] `_Generic` — parser + sema + AST node (`CC_EXPR_GENERIC`) present.
-- [ ] `_Noreturn`.
+- [x] `_Atomic` type qualifier.
+- [x] `<stdatomic.h>` builtins+lowering mapping.
+- [/] Memory-order semantics (`relaxed`, `consume`, `acquire`, `release`, `acq_rel`, `seq_cst`) — functional coverage exists; fence/ordering rigor still needs expansion.
+- [x] `_Thread_local`.
+- [x] `_Alignas`.
+- [x] `_Alignof`.
+- [x] `_Static_assert`.
+- [x] `_Generic`.
+- [x] `_Noreturn`.
 - [ ] Anonymous struct/union members (standard form).
-- [ ] UTF and unicode character/string literals per C11 additions.
-- [ ] Optional feature macros (`__STDC_NO_*`) behavior.
+- [x] UTF and unicode character/string literals per C11 additions.
+- [/] Optional feature macros (`__STDC_NO_*`) behavior.
 
 ### 2.2 C17/C18 consolidation
-- [ ] DR-based behavior changes from C11 -> C17.
-- [ ] `__STDC_VERSION__ == 201710L`.
-- [ ] C17 deprecations behavior (compatibility diagnostics).
+- [/] DR-based behavior changes from C11 -> C17.
+- [x] `__STDC_VERSION__ == 201710L`.
+- [/] C17 deprecations behavior (compatibility diagnostics).
 
 ### 2.3 C23 core language
-- [ ] `__STDC_VERSION__ == 202311L`.
-- [ ] New keywords aliases: `bool`, `true`, `false`.
-- [ ] `nullptr` and `nullptr_t`.
-- [ ] Keyword aliases: `alignas`, `alignof`, `static_assert`, `thread_local`.
-- [ ] `typeof` and `typeof_unqual` (standard C23 spellings + GNU `__typeof__` variants).
-- [ ] `_BitInt(N)` type family — parser recognizes and validates width, but no `CC_TYPE_BITINT` in type system, no codegen.
-- [ ] Binary integer literals (`0b`/`0B`).
-- [ ] Digit separators in numeric constants.
-- [ ] Empty initializer `= {}` support.
-- [ ] Explicit enum underlying types.
-- [ ] Labels/declarations grammar relaxations from C23.
-- [ ] Single-argument `static_assert`.
-- [ ] `constexpr` support — parser recognizes keyword, no compile-time constant evaluation enforcement.
-- [ ] `auto` type deduction for objects — parser recognizes, unclear if inference codegen is complete.
-- [ ] Decimal floating types `_Decimal32/_Decimal64/_Decimal128` — parser recognizes, no type representation or codegen.
-- [ ] C23 compatibility updates for qualifiers and array rules.
+- [x] `__STDC_VERSION__ == 202311L`.
+- [x] New keywords aliases: `bool`, `true`, `false`.
+- [x] `nullptr` and `nullptr_t`.
+- [x] Keyword aliases: `alignas`, `alignof`, `static_assert`, `thread_local`.
+- [x] `typeof` and `typeof_unqual` (standard C23 spellings + GNU `__typeof__` variants).
+- [x] `_BitInt(N)` type family.
+- [x] Binary integer literals (`0b`/`0B`).
+- [x] Digit separators in numeric constants.
+- [x] Empty initializer `= {}` support.
+- [x] Explicit enum underlying types.
+- [x] Labels/declarations grammar relaxations from C23.
+- [x] Single-argument `static_assert`.
+- [x] `constexpr` support.
+- [x] `auto` type deduction for objects.
+- [x] Decimal floating types `_Decimal32/_Decimal64/_Decimal128`.
+- [/] C23 compatibility updates for qualifiers and array rules.
 
 ### 2.4 C23 standard attributes
-- [ ] `[[deprecated]]` — parser only handles GNU `__attribute__`, not `[[...]]` syntax.
-- [ ] `[[fallthrough]]` — same: no `[[...]]` grammar.
-- [ ] `[[maybe_unused]]` — same.
-- [ ] `[[nodiscard]]` — same.
-- [ ] `[[noreturn]]` — same.
-- [ ] `[[reproducible]]` — same.
-- [ ] `[[unsequenced]]` — same.
-- [ ] `__has_c_attribute(...)` — needs `[[...]]` parsing first.
+- [x] `[[deprecated]]`.
+- [x] `[[fallthrough]]`.
+- [x] `[[maybe_unused]]`.
+- [x] `[[nodiscard]]`.
+- [x] `[[noreturn]]`.
+- [x] `[[reproducible]]`.
+- [x] `[[unsequenced]]`.
+- [x] `__has_c_attribute(...)`.
 
 ### 2.5 Post-C99 validation
-- [ ] Conformance tests by standard mode (`c11`, `c17`, `c23`).
-- [ ] Differential tests vs GCC/Clang in `-std=c11/c17/c23`.
-- [ ] ABI regression checks for x86-64/i386 in each mode.
+- [/] Conformance tests by standard mode (`c11`, `c17`, `c23`).
+- [/] Differential tests vs GCC/Clang in `-std=c11/c17/c23`.
+- [/] ABI regression checks for x86-64/i386 in each mode.
 
 ---
 
