@@ -125,24 +125,24 @@ Status key:
 - [x] C99 pragma handling: `STDC CX_LIMITED_RANGE`.
 
 ### 1.8 C99 diagnostics and conformance
-- [ ] Constraint diagnostics with line/column.
-- [ ] Warning families for suspicious but valid constructs.
-- [ ] Pedantic mode behavior for strict C99.
-- [ ] C99 conformance suite integration and expected-fail tracking — partial, many failures remain.
-- [ ] Differential tests vs GCC/Clang in `-std=c99` — partial.
+- [x] Constraint diagnostics with line/column.
+- [x] Warning families for suspicious but valid constructs.
+- [x] Pedantic mode behavior for strict C99.
+- [/] C99 conformance suite integration and expected-fail tracking — partial, many failures remain.
+- [/] Differential tests vs GCC/Clang in `-std=c99` — partial.
 
 ### 1.9 Struct/Union/Bitfield support
-- [ ] Struct/union declaration and member access (`.` and `->`).
-- [ ] Struct/union size and alignment calculation.
+- [x] Struct/union declaration and member access (`.` and `->`).
+- [x] Struct/union size and alignment calculation.
 - [ ] Anonymous struct/union members.
 - [ ] Bitfield declarations — parser recognizes, but `cc_struct_member_t` has no bit-offset/bit-width fields.
 - [ ] Bitfield layout and packing rules (C99 implementation-defined behavior).
 - [ ] Bitfield read/write codegen (mask/shift operations).
 - [ ] Bitfield interaction with `sizeof` and `_Alignof`.
-- [ ] Struct/union pass-by-value (see §1.6).
-- [ ] Struct/union return-by-value (see §1.6).
-- [ ] Struct/union assignment codegen (`memcpy`-style or register-based).
-- [ ] Struct/union compound literals with aggregate codegen.
+- [x] Struct/union pass-by-value (see §1.6).
+- [x] Struct/union return-by-value (see §1.6).
+- [x] Struct/union assignment codegen (`memcpy`-style or register-based).
+- [x] Struct/union compound literals with aggregate codegen.
 
 ---
 
