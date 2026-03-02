@@ -270,10 +270,10 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `USAD8`, `USADA8`, `SEL`
 
 ### 6d. Branch Instructions
-- [ ] `B`, `BL` (immediate offset, conditional)
-- [ ] `BX`, `BLX` (register, Thumb interwork)
-- [ ] `CBZ`, `CBNZ` (Thumb-2, compare-and-branch)
-- [ ] `TBB`, `TBH` (Thumb-2, table branch byte/halfword)
+- [x] `B`, `BL` (immediate offset, conditional)
+- [x] `BX`, `BLX` (register, Thumb interwork)
+- [x] `CBZ`, `CBNZ` (Thumb-2, compare-and-branch)
+- [x] `TBB`, `TBH` (Thumb-2, table branch byte/halfword)
 
 ### 6e. Load/Store Instructions
 - [ ] `LDR/STR` (word, byte, halfword, signed byte, signed halfword, doubleword)
