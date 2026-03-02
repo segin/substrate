@@ -414,6 +414,190 @@ static int x64_apply(const elfobj_reloc_ctx_t *ctx,
     }
 }
 
+static int mips_reloc_size(uint32_t type) {
+    switch (type) {
+        case R_MIPS_NONE:
+            return 0;
+        case R_MIPS_64:
+        case R_MIPS_TLS_DTPMOD64:
+        case R_MIPS_TLS_DTPREL64:
+        case R_MIPS_TLS_TPREL64:
+            return 8;
+        case R_MIPS_16:
+        case R_MIPS_GPREL16:
+        case R_MIPS_LITERAL:
+        case R_MIPS_GOT16:
+        case R_MIPS_PC16:
+        case R_MIPS_CALL16:
+        case R_MIPS_HI16:
+        case R_MIPS_LO16:
+        case R_MIPS_GOT_HI16:
+        case R_MIPS_GOT_LO16:
+        case R_MIPS_CALL_HI16:
+        case R_MIPS_CALL_LO16:
+        case R_MIPS_TLS_DTPREL_HI16:
+        case R_MIPS_TLS_DTPREL_LO16:
+        case R_MIPS_TLS_TPREL_HI16:
+        case R_MIPS_TLS_TPREL_LO16:
+            return 2;
+        default:
+            return 4;
+    }
+}
+
+static int mips_is_pc_relative(uint32_t type) {
+    switch (type) {
+        case R_MIPS_PC16:
+        case R_MIPS_REL16:
+        case R_MIPS_REL32:
+        case R_MICROMIPS_PC7_S1:
+        case R_MICROMIPS_PC10_S1:
+        case R_MICROMIPS_PC16_S1:
+        case R_MICROMIPS_PC23_S2:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int mips_is_tls(uint32_t type) {
+    switch (type) {
+        case R_MIPS_TLS_DTPMOD32:
+        case R_MIPS_TLS_DTPREL32:
+        case R_MIPS_TLS_DTPMOD64:
+        case R_MIPS_TLS_DTPREL64:
+        case R_MIPS_TLS_GD:
+        case R_MIPS_TLS_LDM:
+        case R_MIPS_TLS_DTPREL_HI16:
+        case R_MIPS_TLS_DTPREL_LO16:
+        case R_MIPS_TLS_GOTTPREL:
+        case R_MIPS_TLS_TPREL32:
+        case R_MIPS_TLS_TPREL64:
+        case R_MIPS_TLS_TPREL_HI16:
+        case R_MIPS_TLS_TPREL_LO16:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int mips_apply(const elfobj_reloc_ctx_t *ctx,
+                      uint32_t type,
+                      uint64_t place,
+                      uint64_t sym_value,
+                      int64_t addend,
+                      uint64_t *out_value) {
+    elf_swide_t v;
+    (void)ctx;
+
+    switch (type) {
+        case R_MIPS_NONE:
+            *out_value = 0;
+            return 0;
+        case R_MIPS_32:
+        case R_MIPS_REL32:
+        case R_MIPS_COPY:
+        case R_MIPS_GLOB_DAT:
+        case R_MIPS_JUMP_SLOT:
+        case R_MIPS_GPREL32:
+        case R_MIPS_GOT_DISP:
+        case R_MIPS_GOT_PAGE:
+        case R_MIPS_GOT_OFST:
+        case R_MIPS_RELGOT:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 32)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_MIPS_64:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        case R_MIPS_16:
+        case R_MIPS_GPREL16:
+        case R_MIPS_LITERAL:
+        case R_MIPS_GOT16:
+        case R_MIPS_CALL16:
+        case R_MIPS_TLS_DTPREL_LO16:
+        case R_MIPS_TLS_TPREL_LO16:
+        case R_MICROMIPS_HI16:
+        case R_MICROMIPS_LO16:
+        case R_MICROMIPS_GPREL16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_signed_bits(v, 16) && !swide_in_unsigned_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_MIPS_PC16:
+        case R_MIPS_REL16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if (!swide_in_signed_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_MIPS_HI16:
+        case R_MIPS_GOT_HI16:
+        case R_MIPS_CALL_HI16:
+        case R_MIPS_TLS_DTPREL_HI16:
+        case R_MIPS_TLS_TPREL_HI16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            *out_value = swide_to_width((v + 0x8000) >> 16, 16);
+            return 0;
+        case R_MIPS_LO16:
+        case R_MIPS_GOT_LO16:
+        case R_MIPS_CALL_LO16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_MIPS_26:
+        case R_MICROMIPS_26_S1:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if ((v & 3) != 0) {
+                return -2;
+            }
+            *out_value = swide_to_width(v >> 2, 26);
+            return 0;
+        case R_MICROMIPS_PC7_S1:
+            v = ((elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place) >> 1;
+            if (!swide_in_signed_bits(v, 7)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 7);
+            return 0;
+        case R_MICROMIPS_PC10_S1:
+            v = ((elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place) >> 1;
+            if (!swide_in_signed_bits(v, 10)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 10);
+            return 0;
+        case R_MICROMIPS_PC16_S1:
+            v = ((elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place) >> 1;
+            if (!swide_in_signed_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_MICROMIPS_PC23_S2:
+            v = ((elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place) >> 2;
+            if (!swide_in_signed_bits(v, 23)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 23);
+            return 0;
+        default:
+            if (mips_is_tls(type)) {
+                v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+                *out_value = swide_to_width(v, 64);
+                return 0;
+            }
+            return -1;
+    }
+}
+
 static int arm_reloc_size(uint32_t type) {
     switch (type) {
         case R_ARM_NONE:
@@ -1128,6 +1312,13 @@ static void register_builtin_backends_locked(void) {
     b.is_pc_relative = aarch64_is_pc_relative;
     g_backends[g_backend_count++] = b;
 
+    memset(&b, 0, sizeof(b));
+    b.machine = EM_MIPS;
+    b.apply_reloc = mips_apply;
+    b.reloc_size = mips_reloc_size;
+    b.is_pc_relative = mips_is_pc_relative;
+    g_backends[g_backend_count++] = b;
+
     g_builtin_backends_ready = 1;
 }
 
@@ -1350,6 +1541,9 @@ int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type) {
     if (machine == EM_AARCH64) {
         return aarch64_is_tls(type);
     }
+    if (machine == EM_MIPS) {
+        return mips_is_tls(type);
+    }
     return 0;
 }
 
@@ -1433,6 +1627,63 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
         case EM_ARM:
             if (type <= 255) {
                 return "R_ARM_*";
+            }
+            break;
+        case EM_MIPS:
+            switch (type) {
+                case R_MIPS_NONE: return "R_MIPS_NONE";
+                case R_MIPS_16: return "R_MIPS_16";
+                case R_MIPS_32: return "R_MIPS_32";
+                case R_MIPS_REL32: return "R_MIPS_REL32";
+                case R_MIPS_26: return "R_MIPS_26";
+                case R_MIPS_HI16: return "R_MIPS_HI16";
+                case R_MIPS_LO16: return "R_MIPS_LO16";
+                case R_MIPS_GPREL16: return "R_MIPS_GPREL16";
+                case R_MIPS_LITERAL: return "R_MIPS_LITERAL";
+                case R_MIPS_GOT16: return "R_MIPS_GOT16";
+                case R_MIPS_PC16: return "R_MIPS_PC16";
+                case R_MIPS_CALL16: return "R_MIPS_CALL16";
+                case R_MIPS_GPREL32: return "R_MIPS_GPREL32";
+                case R_MIPS_64: return "R_MIPS_64";
+                case R_MIPS_GOT_DISP: return "R_MIPS_GOT_DISP";
+                case R_MIPS_GOT_PAGE: return "R_MIPS_GOT_PAGE";
+                case R_MIPS_GOT_OFST: return "R_MIPS_GOT_OFST";
+                case R_MIPS_GOT_HI16: return "R_MIPS_GOT_HI16";
+                case R_MIPS_GOT_LO16: return "R_MIPS_GOT_LO16";
+                case R_MIPS_SUB: return "R_MIPS_SUB";
+                case R_MIPS_HIGHER: return "R_MIPS_HIGHER";
+                case R_MIPS_HIGHEST: return "R_MIPS_HIGHEST";
+                case R_MIPS_CALL_HI16: return "R_MIPS_CALL_HI16";
+                case R_MIPS_CALL_LO16: return "R_MIPS_CALL_LO16";
+                case R_MIPS_REL16: return "R_MIPS_REL16";
+                case R_MIPS_PJUMP: return "R_MIPS_PJUMP";
+                case R_MIPS_RELGOT: return "R_MIPS_RELGOT";
+                case R_MIPS_JALR: return "R_MIPS_JALR";
+                case R_MIPS_TLS_DTPMOD32: return "R_MIPS_TLS_DTPMOD32";
+                case R_MIPS_TLS_DTPREL32: return "R_MIPS_TLS_DTPREL32";
+                case R_MIPS_TLS_DTPMOD64: return "R_MIPS_TLS_DTPMOD64";
+                case R_MIPS_TLS_DTPREL64: return "R_MIPS_TLS_DTPREL64";
+                case R_MIPS_TLS_GD: return "R_MIPS_TLS_GD";
+                case R_MIPS_TLS_LDM: return "R_MIPS_TLS_LDM";
+                case R_MIPS_TLS_DTPREL_HI16: return "R_MIPS_TLS_DTPREL_HI16";
+                case R_MIPS_TLS_DTPREL_LO16: return "R_MIPS_TLS_DTPREL_LO16";
+                case R_MIPS_TLS_GOTTPREL: return "R_MIPS_TLS_GOTTPREL";
+                case R_MIPS_TLS_TPREL32: return "R_MIPS_TLS_TPREL32";
+                case R_MIPS_TLS_TPREL64: return "R_MIPS_TLS_TPREL64";
+                case R_MIPS_TLS_TPREL_HI16: return "R_MIPS_TLS_TPREL_HI16";
+                case R_MIPS_TLS_TPREL_LO16: return "R_MIPS_TLS_TPREL_LO16";
+                case R_MIPS_GLOB_DAT: return "R_MIPS_GLOB_DAT";
+                case R_MIPS_COPY: return "R_MIPS_COPY";
+                case R_MIPS_JUMP_SLOT: return "R_MIPS_JUMP_SLOT";
+                case R_MICROMIPS_26_S1: return "R_MICROMIPS_26_S1";
+                case R_MICROMIPS_HI16: return "R_MICROMIPS_HI16";
+                case R_MICROMIPS_LO16: return "R_MICROMIPS_LO16";
+                case R_MICROMIPS_GPREL16: return "R_MICROMIPS_GPREL16";
+                case R_MICROMIPS_PC7_S1: return "R_MICROMIPS_PC7_S1";
+                case R_MICROMIPS_PC10_S1: return "R_MICROMIPS_PC10_S1";
+                case R_MICROMIPS_PC16_S1: return "R_MICROMIPS_PC16_S1";
+                case R_MICROMIPS_PC23_S2: return "R_MICROMIPS_PC23_S2";
+                default: break;
             }
             break;
         case EM_AARCH64:

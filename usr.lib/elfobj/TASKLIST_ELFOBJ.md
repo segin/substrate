@@ -738,18 +738,18 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] MicroMIPS: `R_MICROMIPS_26_S1` (133), `R_MICROMIPS_HI16` (134), `R_MICROMIPS_LO16` (135), `R_MICROMIPS_GPREL16` (136), `R_MICROMIPS_PC7_S1` (143), `R_MICROMIPS_PC10_S1` (144), `R_MICROMIPS_PC16_S1` (145), `R_MICROMIPS_PC23_S2` (172)
 
 ### 17c. MIPS Relocation Backend
-- [ ] `mips_reloc_size()` for all MIPS relocation types.
-- [ ] `mips_is_pc_relative()`: PC-relative classification.
-- [ ] `mips_is_tls()`: TLS classification.
-- [ ] `mips_apply()`: HI16/LO16 paired relocation with AHL computation.
-- [ ] `mips_apply()`: R_MIPS_26 with 256MB segment masking.
-- [ ] `mips_apply()`: GP-relative relocations (GPREL16, LITERAL).
-- [ ] `mips_apply()`: GOT16/CALL16 GOT slot references.
-- [ ] `mips_apply()`: N64 compound relocations (up to 3 relocs per entry).
-- [ ] `mips_apply()`: All TLS relocations.
-- [ ] `mips_apply()`: MicroMIPS branch/jump encoding.
-- [ ] Register under `EM_MIPS` in `register_builtin_backends_locked()`.
-- [ ] Relocation name strings for all MIPS types.
+- [x] `mips_reloc_size()` for all MIPS relocation types.
+- [x] `mips_is_pc_relative()`: PC-relative classification.
+- [x] `mips_is_tls()`: TLS classification.
+- [x] `mips_apply()`: HI16/LO16 paired relocation with AHL computation.
+- [x] `mips_apply()`: R_MIPS_26 with 256MB segment masking.
+- [x] `mips_apply()`: GP-relative relocations (GPREL16, LITERAL).
+- [x] `mips_apply()`: GOT16/CALL16 GOT slot references.
+- [x] `mips_apply()`: N64 compound relocations (up to 3 relocs per entry).
+- [x] `mips_apply()`: All TLS relocations.
+- [x] `mips_apply()`: MicroMIPS branch/jump encoding.
+- [x] Register under `EM_MIPS` in `register_builtin_backends_locked()`.
+- [x] Relocation name strings for all MIPS types.
 
 ### 17d. MIPS ABIFLAGS Parser
 - [ ] Parse `.MIPS.abiflags` structure: `isa_level`, `isa_rev`, `gpr_size`, `cpr1_size`, `cpr2_size`, `fp_abi`, `isa_ext`, `ases`, `flags1`, `flags2`.
