@@ -835,11 +835,11 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] ISA string compatibility checking across link inputs.
 
 ### 18e. RISC-V Validation
-- [ ] Accept `EM_RISCV` with `ELFCLASS32` (RV32) or `ELFCLASS64` (RV64/RV128).
-- [ ] Reject `ELFDATA2MSB` (RISC-V is little-endian only).
-- [ ] Validate `e_flags` float ABI, RVC, RVE, TSO flags.
-- [ ] Validate `.riscv.attributes` section if present.
-- [ ] Check for conflicting float ABI across link inputs.
+- [x] Accept `EM_RISCV` with `ELFCLASS32` (RV32) or `ELFCLASS64` (RV64/RV128).
+- [x] Reject `ELFDATA2MSB` (RISC-V is little-endian only).
+- [x] Validate `e_flags` float ABI, RVC, RVE, TSO flags.
+- [x] Validate `.riscv.attributes` section if present.
+- [x] Check for conflicting float ABI across link inputs.
 
 ### 18f. RISC-V ELF Read/Write/Create
 - [ ] Recognize `EM_RISCV` as valid machine type.

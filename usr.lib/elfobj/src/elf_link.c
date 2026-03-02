@@ -94,6 +94,15 @@ static elf_err_t merge_arch_metadata(elfobj_t *out, const elfobj_t *in) {
             return ELF_ERR_FORMAT;
         }
     }
+    if (out->machine == EM_RISCV) {
+        uint32_t a = out->flags & EF_RISCV_FLOAT_ABI_QUAD;
+        uint32_t b = in->flags & EF_RISCV_FLOAT_ABI_QUAD;
+        if (a != b) {
+            elf__set_err(out, ELF_ERR_FORMAT, "RISC-V float ABI conflict across link inputs");
+            return ELF_ERR_FORMAT;
+        }
+        out->flags |= in->flags & (EF_RISCV_RVC | EF_RISCV_RVE | EF_RISCV_TSO);
+    }
     return ELF_OK;
 }
 

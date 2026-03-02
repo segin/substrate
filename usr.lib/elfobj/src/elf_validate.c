@@ -519,6 +519,33 @@ static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
             }
             break;
         }
+        case EM_RISCV: {
+            uint32_t known = EF_RISCV_RVC | EF_RISCV_FLOAT_ABI_SINGLE | EF_RISCV_FLOAT_ABI_DOUBLE |
+                             EF_RISCV_FLOAT_ABI_QUAD | EF_RISCV_RVE | EF_RISCV_TSO;
+            uint32_t f_abi = obj->flags & EF_RISCV_FLOAT_ABI_QUAD;
+            if (obj->cls != ELFOBJ_CLASS_32 && obj->cls != ELFOBJ_CLASS_64) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_RISCV requires ELFCLASS32/ELFCLASS64");
+            }
+            if (obj->endian != ELFOBJ_ENDIAN_LE) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_RISCV requires little-endian");
+            }
+            if ((obj->flags & ~known) != 0) {
+                if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                "RISC-V e_flags contain unknown bits")) {
+                    return 1;
+                }
+            }
+            if (f_abi != EF_RISCV_FLOAT_ABI_SOFT && f_abi != EF_RISCV_FLOAT_ABI_SINGLE &&
+                f_abi != EF_RISCV_FLOAT_ABI_DOUBLE && f_abi != EF_RISCV_FLOAT_ABI_QUAD) {
+                if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                "RISC-V float ABI flags invalid")) {
+                    return 1;
+                }
+            }
+            break;
+        }
         default:
             break;
     }
@@ -594,6 +621,14 @@ elf_err_t elf_validate_ex(elfobj_t *obj, const elf_validate_options_t *options, 
         if (s->type == SHT_STRTAB && (s->flags & SHF_EXECINSTR) != 0) {
             if (report_diag_fmt(&ctx, strictness_level(&ctx), ELF_ERR_FORMAT, i,
                                 "string table has executable flag index=", i)) goto done;
+        }
+        if (obj->machine == EM_RISCV && s->type == SHT_RISCV_ATTRIBUTES) {
+            if (s->data == NULL || s->data_size == 0 || s->data[0] != 'A') {
+                if (report_diag(&ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
+                                "RISC-V attributes section malformed")) {
+                    goto done;
+                }
+            }
         }
         if (obj->machine == EM_386 && s->type == SHT_RELA) {
             if (report_diag(&ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, i,
