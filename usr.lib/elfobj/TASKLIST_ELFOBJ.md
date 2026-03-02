@@ -790,9 +790,9 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 18. RISC-V Support (RV32 / RV64 / RV128)
 
 ### 18a. Machine Types and Constants
-- [ ] Define `EM_RISCV` (243).
-- [ ] Define RISC-V `e_flags`: `EF_RISCV_RVC` (0x0001), `EF_RISCV_FLOAT_ABI_SOFT` (0x0000), `EF_RISCV_FLOAT_ABI_SINGLE` (0x0002), `EF_RISCV_FLOAT_ABI_DOUBLE` (0x0004), `EF_RISCV_FLOAT_ABI_QUAD` (0x0006), `EF_RISCV_RVE` (0x0008), `EF_RISCV_TSO` (0x0010).
-- [ ] Define RISC-V section types: `SHT_RISCV_ATTRIBUTES` (0x70000003).
+- [x] Define `EM_RISCV` (243).
+- [x] Define RISC-V `e_flags`: `EF_RISCV_RVC` (0x0001), `EF_RISCV_FLOAT_ABI_SOFT` (0x0000), `EF_RISCV_FLOAT_ABI_SINGLE` (0x0002), `EF_RISCV_FLOAT_ABI_DOUBLE` (0x0004), `EF_RISCV_FLOAT_ABI_QUAD` (0x0006), `EF_RISCV_RVE` (0x0008), `EF_RISCV_TSO` (0x0010).
+- [x] Define RISC-V section types: `SHT_RISCV_ATTRIBUTES` (0x70000003).
 
 ### 18b. RISC-V Relocation Type Constants
 - [ ] `R_RISCV_NONE` (0), `R_RISCV_32` (1), `R_RISCV_64` (2)
