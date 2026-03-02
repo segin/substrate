@@ -66,7 +66,7 @@ Status key:
 - [x] Function declarators including prototypes and old-style forms accepted/rejected per mode.
 - [x] Function parameter array qualifiers (`static`, qualifiers in brackets).
 - [ ] Qualifier propagation and compatibility checks.
-- [ ] Composite type formation rules.
+- [x] Composite type formation rules.
 
 ### 1.3 Objects, initialization, and storage
 - [ ] Storage durations and linkage (auto/static/extern/register).
