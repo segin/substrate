@@ -1002,7 +1002,7 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] `elf_init_vax()`: ELF32/EM_VAX/ELFDATA2LSB.
 
 ### 21f. VAX DWARF
-- [ ] VAX DWARF register mapping: R0–R15 → 0–15, AP → 12, FP → 13, SP → 14, PC → 15.
+- [x] VAX DWARF register mapping: R0–R15 → 0–15, AP → 12, FP → 13, SP → 14, PC → 15.
 
 ### 21g. VAX Testing
 - [ ] Unit tests for all VAX relocation types.
