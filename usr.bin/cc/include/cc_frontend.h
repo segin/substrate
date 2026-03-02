@@ -125,8 +125,110 @@ typedef enum {
     CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG,
     CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG,
     CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT,
-    CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE
+    CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE,
+    /* New scalar/type-class ids appended without changing legacy pointer ids. */
+    CC_TYPE_SCHAR,
+    CC_TYPE_LONG,
+    CC_TYPE_ULONG,
+    CC_TYPE_LDOUBLE,
+    CC_TYPE_ENUM,
+    CC_TYPE_COMPLEX,
+    CC_TYPE_IMAGINARY,
+    CC_TYPE_BITINT,
+    CC_TYPE_DECIMAL32,
+    CC_TYPE_DECIMAL64,
+    CC_TYPE_DECIMAL128,
+    CC_TYPE_ATOMIC,
+    CC_TYPE_FUNC
 } cc_type_t;
+
+#define CC_LEGACY_BASE_MIN CC_TYPE_VOID
+#define CC_LEGACY_BASE_MAX CC_TYPE_DOUBLE
+#define CC_LEGACY_BASE_COUNT 12u
+#define CC_LEGACY_PTR_L1_MIN CC_TYPE_PTR_VOID
+#define CC_LEGACY_PTR_L5_MAX CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE
+#define CC_LEGACY_PTR_MAX_DEPTH 5u
+
+/*
+ * Dynamic pointer encoding for arbitrary nesting:
+ *   bits[31:24] = 0x7F tag
+ *   bits[23:8]  = depth (1..65535)
+ *   bits[7:0]   = base cc_type_t id
+ */
+#define CC_TYPE_PTR_DYN_TAG 0x7F000000u
+#define CC_TYPE_PTR_DYN_DEPTH_SHIFT 8u
+#define CC_TYPE_PTR_DYN_DEPTH_MASK 0x00FFFF00u
+#define CC_TYPE_PTR_DYN_BASE_MASK 0x000000FFu
+
+static inline int cc_type_is_legacy_base(cc_type_t t) {
+    return t >= CC_LEGACY_BASE_MIN && t <= CC_LEGACY_BASE_MAX;
+}
+
+static inline int cc_type_is_dynamic_pointer(cc_type_t t) {
+    return (((unsigned int)t & 0xFF000000u) == CC_TYPE_PTR_DYN_TAG);
+}
+
+static inline int cc_type_is_pointer(cc_type_t t) {
+    if (t >= CC_LEGACY_PTR_L1_MIN && t <= CC_LEGACY_PTR_L5_MAX) return(1);
+    return(cc_type_is_dynamic_pointer(t));
+}
+
+static inline unsigned int cc_type_pointer_depth(cc_type_t t) {
+    if (t >= CC_LEGACY_PTR_L1_MIN && t <= CC_LEGACY_PTR_L5_MAX) {
+        return((unsigned int)(t - CC_LEGACY_PTR_L1_MIN) / CC_LEGACY_BASE_COUNT + 1u);
+    }
+    if (cc_type_is_dynamic_pointer(t)) {
+        return(((unsigned int)t & CC_TYPE_PTR_DYN_DEPTH_MASK) >> CC_TYPE_PTR_DYN_DEPTH_SHIFT);
+    }
+    return(0u);
+}
+
+static inline cc_type_t cc_type_pointer_base(cc_type_t t) {
+    if (t >= CC_LEGACY_PTR_L1_MIN && t <= CC_LEGACY_PTR_L5_MAX) {
+        unsigned int idx = (unsigned int)(t - CC_LEGACY_PTR_L1_MIN) % CC_LEGACY_BASE_COUNT;
+        return((cc_type_t)(CC_LEGACY_BASE_MIN + (cc_type_t)idx));
+    }
+    if (cc_type_is_dynamic_pointer(t)) {
+        return((cc_type_t)((unsigned int)t & CC_TYPE_PTR_DYN_BASE_MASK));
+    }
+    return(CC_TYPE_VOID);
+}
+
+static inline cc_type_t cc_type_deref_once(cc_type_t t) {
+    unsigned int depth;
+    cc_type_t base;
+    if (!cc_type_is_pointer(t)) return(CC_TYPE_VOID);
+    depth = cc_type_pointer_depth(t);
+    base = cc_type_pointer_base(t);
+    if (depth <= 1u) return(base);
+    if (cc_type_is_legacy_base(base) && (depth - 1u) <= CC_LEGACY_PTR_MAX_DEPTH) {
+        return((cc_type_t)(CC_LEGACY_PTR_L1_MIN + (base - CC_LEGACY_BASE_MIN) +
+                           ((depth - 2u) * CC_LEGACY_BASE_COUNT)));
+    }
+    return((cc_type_t)(CC_TYPE_PTR_DYN_TAG | ((depth - 1u) << CC_TYPE_PTR_DYN_DEPTH_SHIFT) |
+                       ((unsigned int)base & CC_TYPE_PTR_DYN_BASE_MASK)));
+}
+
+static inline cc_type_t cc_type_make_pointer(cc_type_t t) {
+    unsigned int depth;
+    cc_type_t base;
+    if (!cc_type_is_pointer(t)) {
+        if (cc_type_is_legacy_base(t)) {
+            return((cc_type_t)(CC_LEGACY_PTR_L1_MIN + (t - CC_LEGACY_BASE_MIN)));
+        }
+        return((cc_type_t)(CC_TYPE_PTR_DYN_TAG | (1u << CC_TYPE_PTR_DYN_DEPTH_SHIFT) | ((unsigned int)t & CC_TYPE_PTR_DYN_BASE_MASK)));
+    }
+    depth = cc_type_pointer_depth(t) + 1u;
+    base = cc_type_pointer_base(t);
+    if (cc_type_is_legacy_base(base) && depth <= CC_LEGACY_PTR_MAX_DEPTH) {
+        return((cc_type_t)(CC_LEGACY_PTR_L1_MIN + (base - CC_LEGACY_BASE_MIN) + ((depth - 1u) * CC_LEGACY_BASE_COUNT)));
+    }
+    if (depth > 0xFFFFu) {
+        depth = 0xFFFFu;
+    }
+    return((cc_type_t)(CC_TYPE_PTR_DYN_TAG | (depth << CC_TYPE_PTR_DYN_DEPTH_SHIFT) |
+                       ((unsigned int)base & CC_TYPE_PTR_DYN_BASE_MASK)));
+}
 
 typedef enum {
     CC_BIN_ADD = 0,

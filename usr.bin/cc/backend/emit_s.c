@@ -844,23 +844,11 @@ static void emit_compiler_stamp(FILE *fp) {
 }
 
 static int is_pointer_type(cc_type_t t) {
-    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
+    return cc_type_is_pointer(t);
 }
 
 static cc_type_t ptr_base_type(cc_type_t t) {
-    if (t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_DOUBLE) {
-        return (cc_type_t)(CC_TYPE_VOID + (t - CC_TYPE_PTR_VOID));
-    }
-    if (t >= CC_TYPE_PTR_PTR_VOID && t <= CC_TYPE_PTR_PTR_DOUBLE) {
-        return (cc_type_t)(CC_TYPE_PTR_VOID + (t - CC_TYPE_PTR_PTR_VOID));
-    }
-    if (t >= CC_TYPE_PTR_PTR_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_DOUBLE) {
-        return (cc_type_t)(CC_TYPE_PTR_PTR_VOID + (t - CC_TYPE_PTR_PTR_PTR_VOID));
-    }
-    if (t >= CC_TYPE_PTR_PTR_PTR_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE) {
-        return (cc_type_t)(CC_TYPE_PTR_PTR_PTR_VOID + (t - CC_TYPE_PTR_PTR_PTR_PTR_VOID));
-    }
-    return CC_TYPE_VOID;
+    return cc_type_deref_once(t);
 }
 
 static void emit_visibility_attr(FILE *fp, const char *name, int attr_flags) {
@@ -877,12 +865,13 @@ static void emit_visibility_attr(FILE *fp, const char *name, int attr_flags) {
 }
 
 static long global_type_size_bytes(cc_type_t t, int pointer_size) {
-    if (t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE) {
+    if (cc_type_is_pointer(t)) {
         return pointer_size;
     }
     switch (t) {
     case CC_TYPE_BOOL:
     case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
     case CC_TYPE_UCHAR:
         return 1;
     case CC_TYPE_SHORT:
@@ -892,10 +881,32 @@ static long global_type_size_bytes(cc_type_t t, int pointer_size) {
     case CC_TYPE_UINT:
     case CC_TYPE_FLOAT:
         return 4;
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+        return pointer_size;
     case CC_TYPE_LONG_LONG:
     case CC_TYPE_ULONG_LONG:
     case CC_TYPE_DOUBLE:
         return 8;
+    case CC_TYPE_LDOUBLE:
+        return 16;
+    case CC_TYPE_ENUM:
+        return 4;
+    case CC_TYPE_COMPLEX:
+        return 16;
+    case CC_TYPE_IMAGINARY:
+        return 8;
+    case CC_TYPE_BITINT:
+        return pointer_size;
+    case CC_TYPE_DECIMAL32:
+        return 4;
+    case CC_TYPE_DECIMAL64:
+        return 8;
+    case CC_TYPE_DECIMAL128:
+        return 16;
+    case CC_TYPE_ATOMIC:
+    case CC_TYPE_FUNC:
+        return pointer_size;
     default:
         return -1;
     }
@@ -947,6 +958,9 @@ static size_t decoded_c_string_len(const char *literal) {
 }
 
 static long global_object_size_bytes(const cc_ssa_global_t *g, int pointer_size) {
+    if (g->size_bytes > 0) {
+        return g->size_bytes;
+    }
     long sz = global_type_size_bytes(g->type, pointer_size);
     if (g->array_len >= 0 && is_pointer_type(g->type)) {
         cc_type_t base = ptr_base_type(g->type);
@@ -2426,6 +2440,12 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             va_regsave_off = -(raw_frame + 176);
             raw_frame += 176;
         }
+        /*
+         * SysV AMD64 call-site rule: before executing "call", %rsp must be
+         * 8 mod 16 (so the callee entry %rsp is 16-byte aligned).
+         * After "push %rbp", %rsp is already 8 mod 16, so keep frame size a
+         * multiple of 16 to preserve that alignment at internal call sites.
+         */
         frame = (raw_frame + 15) & ~15;
 
         fprintf(fp, "\n");

@@ -820,10 +820,10 @@ static int type_carries_struct_id(cc_type_t t) {
     if (t == CC_TYPE_VOID) {
         return 1;
     }
-    if (t < CC_TYPE_PTR_VOID || t > CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE) {
+    if (!cc_type_is_pointer(t)) {
         return 0;
     }
-    return ((int)t - (int)CC_TYPE_PTR_VOID) % 12 == 0;
+    return cc_type_pointer_base(t) == CC_TYPE_VOID;
 }
 
 static int struct_ids_compatible_depth(const cc_translation_unit_t *tu, int lhs, int rhs, int depth);
@@ -953,33 +953,29 @@ static int func_decl_compatible(const cc_function_t *a, const cc_function_t *b) 
 }
 
 static int is_float_type(cc_type_t t) {
-    return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE;
+    return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE;
 }
 
 static int is_pointer_type(cc_type_t t) {
-    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
+    return cc_type_is_pointer(t);
 }
 
 static cc_type_t ptr_base_type(cc_type_t t);
 static long type_size_bytes(cc_type_t t);
 
 static int pointer_depth(cc_type_t t) {
-    int d = 0;
-    while (is_pointer_type(t)) {
-        t = ptr_base_type(t);
-        d++;
-    }
-    return d;
+    return (int)cc_type_pointer_depth(t);
 }
 
 static int is_unsigned_integral_type(cc_type_t t) {
-    return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
+    return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG ||
+           t == CC_TYPE_ULONG_LONG;
 }
 
 static int is_integral_type(cc_type_t t) {
-    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
-           t == CC_TYPE_USHORT || t == CC_TYPE_INT || t == CC_TYPE_UINT || t == CC_TYPE_LONG_LONG ||
-           t == CC_TYPE_ULONG_LONG;
+    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_SCHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
+           t == CC_TYPE_USHORT || t == CC_TYPE_INT || t == CC_TYPE_UINT || t == CC_TYPE_LONG || t == CC_TYPE_ULONG ||
+           t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG || t == CC_TYPE_ENUM || t == CC_TYPE_BITINT;
 }
 
 static int is_numeric_type(cc_type_t t) {
@@ -1047,257 +1043,11 @@ static void expr_copy_array_meta(cc_expr_t *dst, const cc_expr_t *src) {
 }
 
 static cc_type_t ptr_of_type(cc_type_t t) {
-    switch (t) {
-    case CC_TYPE_VOID:
-        return CC_TYPE_PTR_VOID;
-    case CC_TYPE_BOOL:
-        return CC_TYPE_PTR_BOOL;
-    case CC_TYPE_CHAR:
-        return CC_TYPE_PTR_CHAR;
-    case CC_TYPE_UCHAR:
-        return CC_TYPE_PTR_UCHAR;
-    case CC_TYPE_SHORT:
-        return CC_TYPE_PTR_SHORT;
-    case CC_TYPE_USHORT:
-        return CC_TYPE_PTR_USHORT;
-    case CC_TYPE_INT:
-        return CC_TYPE_PTR_INT;
-    case CC_TYPE_UINT:
-        return CC_TYPE_PTR_UINT;
-    case CC_TYPE_LONG_LONG:
-        return CC_TYPE_PTR_LONG_LONG;
-    case CC_TYPE_ULONG_LONG:
-        return CC_TYPE_PTR_ULONG_LONG;
-    case CC_TYPE_FLOAT:
-        return CC_TYPE_PTR_FLOAT;
-    case CC_TYPE_DOUBLE:
-        return CC_TYPE_PTR_DOUBLE;
-    case CC_TYPE_PTR_VOID:
-        return CC_TYPE_PTR_PTR_VOID;
-    case CC_TYPE_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_INT:
-        return CC_TYPE_PTR_PTR_INT;
-    case CC_TYPE_PTR_UINT:
-        return CC_TYPE_PTR_PTR_UINT;
-    case CC_TYPE_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
-    default:
-        return CC_TYPE_VOID;
-    }
+    return cc_type_make_pointer(t);
 }
 
 static cc_type_t ptr_base_type(cc_type_t t) {
-    switch (t) {
-    case CC_TYPE_PTR_VOID:
-        return CC_TYPE_VOID;
-    case CC_TYPE_PTR_BOOL:
-        return CC_TYPE_BOOL;
-    case CC_TYPE_PTR_CHAR:
-        return CC_TYPE_CHAR;
-    case CC_TYPE_PTR_UCHAR:
-        return CC_TYPE_UCHAR;
-    case CC_TYPE_PTR_SHORT:
-        return CC_TYPE_SHORT;
-    case CC_TYPE_PTR_USHORT:
-        return CC_TYPE_USHORT;
-    case CC_TYPE_PTR_INT:
-        return CC_TYPE_INT;
-    case CC_TYPE_PTR_UINT:
-        return CC_TYPE_UINT;
-    case CC_TYPE_PTR_LONG_LONG:
-        return CC_TYPE_LONG_LONG;
-    case CC_TYPE_PTR_ULONG_LONG:
-        return CC_TYPE_ULONG_LONG;
-    case CC_TYPE_PTR_FLOAT:
-        return CC_TYPE_FLOAT;
-    case CC_TYPE_PTR_DOUBLE:
-        return CC_TYPE_DOUBLE;
-    case CC_TYPE_PTR_PTR_VOID:
-        return CC_TYPE_PTR_VOID;
-    case CC_TYPE_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_INT:
-        return CC_TYPE_PTR_INT;
-    case CC_TYPE_PTR_PTR_UINT:
-        return CC_TYPE_PTR_UINT;
-    case CC_TYPE_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
-    default:
-        return CC_TYPE_VOID;
-    }
+    return cc_type_deref_once(t);
 }
 
 static int is_null_ptr_constant(const cc_expr_t *e) {
@@ -1633,7 +1383,7 @@ static const cc_function_t *infer_callee_function_expr(const cc_translation_unit
 }
 
 static cc_type_t integral_promo_type(cc_type_t t) {
-    if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
+    if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_SCHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
         t == CC_TYPE_USHORT) {
         return CC_TYPE_INT;
     }
@@ -1665,6 +1415,15 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
             return CC_TYPE_ULONG_LONG;
         }
         return CC_TYPE_LONG_LONG;
+    }
+    if (ap == CC_TYPE_ULONG || bp == CC_TYPE_ULONG) {
+        return CC_TYPE_ULONG;
+    }
+    if (ap == CC_TYPE_LONG || bp == CC_TYPE_LONG) {
+        if (is_unsigned_integral_type(ap) || is_unsigned_integral_type(bp)) {
+            return CC_TYPE_ULONG;
+        }
+        return CC_TYPE_LONG;
     }
     if (ap == CC_TYPE_UINT || bp == CC_TYPE_UINT) {
         return CC_TYPE_UINT;
@@ -1888,9 +1647,13 @@ static builtin_kind_t builtin_kind(const char *name) {
 }
 
 static long type_size_bytes(cc_type_t t) {
+    if (cc_type_is_pointer(t)) {
+        return g_pointer_size_bytes;
+    }
     switch (t) {
     case CC_TYPE_BOOL:
     case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
     case CC_TYPE_UCHAR:
         return 1;
     case CC_TYPE_SHORT:
@@ -1900,70 +1663,32 @@ static long type_size_bytes(cc_type_t t) {
     case CC_TYPE_UINT:
     case CC_TYPE_FLOAT:
         return 4;
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+        return g_pointer_size_bytes;
     case CC_TYPE_LONG_LONG:
     case CC_TYPE_ULONG_LONG:
     case CC_TYPE_DOUBLE:
         return 8;
-    case CC_TYPE_PTR_VOID:
-    case CC_TYPE_PTR_BOOL:
-    case CC_TYPE_PTR_CHAR:
-    case CC_TYPE_PTR_UCHAR:
-    case CC_TYPE_PTR_SHORT:
-    case CC_TYPE_PTR_USHORT:
-    case CC_TYPE_PTR_INT:
-    case CC_TYPE_PTR_UINT:
-    case CC_TYPE_PTR_LONG_LONG:
-    case CC_TYPE_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_FLOAT:
-    case CC_TYPE_PTR_DOUBLE:
-    case CC_TYPE_PTR_PTR_VOID:
-    case CC_TYPE_PTR_PTR_BOOL:
-    case CC_TYPE_PTR_PTR_CHAR:
-    case CC_TYPE_PTR_PTR_UCHAR:
-    case CC_TYPE_PTR_PTR_SHORT:
-    case CC_TYPE_PTR_PTR_USHORT:
-    case CC_TYPE_PTR_PTR_INT:
-    case CC_TYPE_PTR_PTR_UINT:
-    case CC_TYPE_PTR_PTR_LONG_LONG:
-    case CC_TYPE_PTR_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_PTR_FLOAT:
-    case CC_TYPE_PTR_PTR_DOUBLE:
-    case CC_TYPE_PTR_PTR_PTR_VOID:
-    case CC_TYPE_PTR_PTR_PTR_BOOL:
-    case CC_TYPE_PTR_PTR_PTR_CHAR:
-    case CC_TYPE_PTR_PTR_PTR_UCHAR:
-    case CC_TYPE_PTR_PTR_PTR_SHORT:
-    case CC_TYPE_PTR_PTR_PTR_USHORT:
-    case CC_TYPE_PTR_PTR_PTR_INT:
-    case CC_TYPE_PTR_PTR_PTR_UINT:
-    case CC_TYPE_PTR_PTR_PTR_LONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_FLOAT:
-    case CC_TYPE_PTR_PTR_PTR_DOUBLE:
-    case CC_TYPE_PTR_PTR_PTR_PTR_VOID:
-    case CC_TYPE_PTR_PTR_PTR_PTR_BOOL:
-    case CC_TYPE_PTR_PTR_PTR_PTR_CHAR:
-    case CC_TYPE_PTR_PTR_PTR_PTR_UCHAR:
-    case CC_TYPE_PTR_PTR_PTR_PTR_SHORT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_USHORT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_INT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_UINT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE:
+    case CC_TYPE_LDOUBLE:
+        return 16;
+    case CC_TYPE_ENUM:
+        return 4;
+    case CC_TYPE_COMPLEX:
+        return 16;
+    case CC_TYPE_IMAGINARY:
+        return 8;
+    case CC_TYPE_BITINT:
+        return g_pointer_size_bytes;
+    case CC_TYPE_DECIMAL32:
+        return 4;
+    case CC_TYPE_DECIMAL64:
+        return 8;
+    case CC_TYPE_DECIMAL128:
+        return 16;
+    case CC_TYPE_ATOMIC:
+        return g_pointer_size_bytes;
+    case CC_TYPE_FUNC:
         return g_pointer_size_bytes;
     default:
         return -1;

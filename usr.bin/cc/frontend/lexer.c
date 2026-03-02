@@ -114,6 +114,7 @@ typedef struct {
     int float_is_single;
     int float_is_long;
     int int_is_unsigned;
+    int int_is_long;
     int int_is_longlong;
     const char *file;
     size_t line;
@@ -431,6 +432,7 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
     out->float_is_single = 0;
     out->float_is_long = 0;
     out->int_is_unsigned = 0;
+    out->int_is_long = 0;
     out->int_is_longlong = 0;
     out->file = lx->logical_file;
     out->line = lx->line;
@@ -925,23 +927,44 @@ int cc_lexer_next(cc_lexer_t *lx, cc_token_t *out) {
             out->num = (long)val_u;
             if (seen_u) {
                 out->int_is_unsigned = 1;
-                out->int_is_longlong = (seen_l >= 1) || val_u > 0xffffffffULL;
+                if (seen_l >= 2) {
+                    out->int_is_longlong = 1;
+                } else if (seen_l == 1) {
+                    out->int_is_long = 1;
+                } else if (val_u > 0xffffffffULL) {
+                    if (val_u <= (unsigned long long)ULONG_MAX) {
+                        out->int_is_long = 1;
+                    } else {
+                        out->int_is_longlong = 1;
+                    }
+                }
             } else if (seen_l >= 1) {
                 out->int_is_unsigned = 0;
-                out->int_is_longlong = 1;
+                if (seen_l >= 2) {
+                    out->int_is_longlong = 1;
+                } else {
+                    out->int_is_long = 1;
+                }
             } else if (base == 10) {
                 out->int_is_unsigned = 0;
-                out->int_is_longlong = val_u > 0x7fffffffULL;
+                if (val_u > 0x7fffffffULL) {
+                    if (val_u <= (unsigned long long)LONG_MAX) {
+                        out->int_is_long = 1;
+                    } else {
+                        out->int_is_longlong = 1;
+                    }
+                }
             } else {
                 if (val_u <= 0x7fffffffULL) {
                     out->int_is_unsigned = 0;
-                    out->int_is_longlong = 0;
                 } else if (val_u <= 0xffffffffULL) {
                     out->int_is_unsigned = 1;
-                    out->int_is_longlong = 0;
                 } else if (val_u <= (unsigned long long)LONG_MAX) {
                     out->int_is_unsigned = 0;
-                    out->int_is_longlong = 1;
+                    out->int_is_long = 1;
+                } else if (val_u <= (unsigned long long)ULONG_MAX) {
+                    out->int_is_unsigned = 1;
+                    out->int_is_long = 1;
                 } else {
                     out->int_is_unsigned = 1;
                     out->int_is_longlong = 1;

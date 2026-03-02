@@ -115,6 +115,7 @@ typedef struct {
     int float_is_single;
     int float_is_long;
     int int_is_unsigned;
+    int int_is_long;
     int int_is_longlong;
     const char *file;
     size_t line;
@@ -847,24 +848,21 @@ static void parser_free_enum_tags(parser_t *p) {
 }
 
 static int is_pointer_type(cc_type_t t) {
-    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
+    return cc_type_is_pointer(t);
 }
 
 static int type_carries_struct_id(cc_type_t t) {
     if (t == CC_TYPE_VOID) {
         return 1;
     }
-    if (!is_pointer_type(t)) {
+    if (!cc_type_is_pointer(t)) {
         return 0;
     }
-    return ((int)t - (int)CC_TYPE_PTR_VOID) % 12 == 0;
+    return cc_type_pointer_base(t) == CC_TYPE_VOID;
 }
 
 static cc_type_t ptr_deref_type(cc_type_t t) {
-    if (!is_pointer_type(t)) {
-        return CC_TYPE_VOID;
-    }
-    return (cc_type_t)((int)t - ((int)CC_TYPE_PTR_VOID - (int)CC_TYPE_VOID));
+    return cc_type_deref_once(t);
 }
 
 static int struct_ids_compatible(const parser_t *p, int lhs, int rhs) {
@@ -899,6 +897,7 @@ static long scalar_type_size_bytes(cc_type_t t) {
     switch (t) {
     case CC_TYPE_BOOL:
     case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
     case CC_TYPE_UCHAR:
         return 1;
     case CC_TYPE_SHORT:
@@ -908,10 +907,17 @@ static long scalar_type_size_bytes(cc_type_t t) {
     case CC_TYPE_UINT:
     case CC_TYPE_FLOAT:
         return 4;
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+        return g_parser_pointer_size_bytes;
     case CC_TYPE_LONG_LONG:
     case CC_TYPE_ULONG_LONG:
     case CC_TYPE_DOUBLE:
         return 8;
+    case CC_TYPE_LDOUBLE:
+        return 16;
+    case CC_TYPE_ENUM:
+        return 4;
     default:
         return -1;
     }
@@ -1216,6 +1222,51 @@ static int tok_is_floatn_spelling(parser_t *p) {
            tok_is_ident(p, "_Float128x") || tok_is_ident(p, "__float128");
 }
 
+static int builtin_typedef_type_n(const char *name, size_t len, cc_type_t *out_type) {
+    cc_type_t uptr = g_parser_pointer_size_bytes <= 4 ? CC_TYPE_UINT : CC_TYPE_ULONG;
+    cc_type_t sptr = g_parser_pointer_size_bytes <= 4 ? CC_TYPE_INT : CC_TYPE_LONG;
+    if (name == NULL || out_type == NULL) {
+        return 0;
+    }
+    if (len == 6 && strncmp(name, "wint_t", 6) == 0) {
+        *out_type = CC_TYPE_INT;
+        return 1;
+    }
+    if (len == 7 && strncmp(name, "wchar_t", 7) == 0) {
+        *out_type = CC_TYPE_INT;
+        return 1;
+    }
+    if (len == 6 && strncmp(name, "size_t", 6) == 0) {
+        *out_type = uptr;
+        return 1;
+    }
+    if (len == 7 && strncmp(name, "ssize_t", 7) == 0) {
+        *out_type = sptr;
+        return 1;
+    }
+    if (len == 9 && strncmp(name, "ptrdiff_t", 9) == 0) {
+        *out_type = sptr;
+        return 1;
+    }
+    if (len == 8 && strncmp(name, "intptr_t", 8) == 0) {
+        *out_type = sptr;
+        return 1;
+    }
+    if (len == 9 && strncmp(name, "uintptr_t", 9) == 0) {
+        *out_type = uptr;
+        return 1;
+    }
+    if (len == 8 && strncmp(name, "char16_t", 8) == 0) {
+        *out_type = CC_TYPE_USHORT;
+        return 1;
+    }
+    if (len == 8 && strncmp(name, "char32_t", 8) == 0) {
+        *out_type = CC_TYPE_UINT;
+        return 1;
+    }
+    return 0;
+}
+
 static int is_declspec_ident(parser_t *p) {
     if (tok_is_ident(p, "_Atomic") || tok_is_ident(p, "_Thread_local") || tok_is_ident(p, "_Alignas") ||
         tok_is_ident(p, "_Noreturn") || tok_is_ident(p, "_BitInt") || tok_is_ident(p, "_Decimal32") ||
@@ -1243,8 +1294,10 @@ static int is_declspec_ident(parser_t *p) {
 }
 
 static int is_declspec_start(parser_t *p) {
+    cc_type_t bty;
     return is_declspec_tok(p->tok.kind) || is_declspec_ident(p) ||
            (p->tok.kind == TOK_IDENT && typedef_find_visible_n(p, p->tok.start, p->tok.len) >= 0) ||
+           (p->tok.kind == TOK_IDENT && builtin_typedef_type_n(p->tok.start, p->tok.len, &bty)) ||
            tok_is_gnu_attribute_kw(p) ||
            (p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK);
 }
@@ -1262,7 +1315,11 @@ static int is_type_name_start_after_lparen(parser_t *p) {
         return 1;
     }
     if (t.kind == TOK_IDENT) {
+        cc_type_t bty;
         if (typedef_find_visible_n(p, t.start, t.len) >= 0) {
+            return 1;
+        }
+        if (builtin_typedef_type_n(t.start, t.len, &bty)) {
             return 1;
         }
         if (token_is_gnu_attribute_kw(&t)) {
@@ -1715,6 +1772,26 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 }
                 continue;
             }
+            {
+                cc_type_t bty;
+                if (builtin_typedef_type_n(p->tok.start, p->tok.len, &bty)) {
+                    if (seen_type) {
+                        break;
+                    }
+                    seen = 1;
+                    seen_type = 1;
+                    seen_alias = 1;
+                    alias_type = bty;
+                    alias_struct_id = -1;
+                    alias_array_len = -1;
+                    alias_array_ndim = 0;
+                    memset(alias_array_dims, 0, sizeof(alias_array_dims));
+                    if (next_tok(p) != 0) {
+                        return -1;
+                    }
+                    continue;
+                }
+            }
         }
         if (!is_declspec_tok(p->tok.kind)) {
             break;
@@ -1867,7 +1944,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             while (p->tok.kind != TOK_RBRACE) {
                 cc_type_t mbase;
                 int mbase_sid = -1;
+                long mbase_arr_len = -1;
+                int mbase_arr_ndim = 0;
+                long mbase_arr_dims[CC_MAX_ARRAY_DIMS];
                 int mtypedef = 0;
+                memset(mbase_arr_dims, 0, sizeof(mbase_arr_dims));
                 if (p->structs[sid].has_flexible_array) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "flexible array member must be the last member");
                     decl_attrs_clear(&struct_attrs);
@@ -1901,8 +1982,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     }
                     continue;
                 }
-                if (parse_declspec(p, &mbase, &mbase_sid, NULL, NULL, NULL, 1, "expected member declaration type",
-                                   &mtypedef, NULL) != 0) {
+                if (parse_declspec(p, &mbase, &mbase_sid, &mbase_arr_len, &mbase_arr_ndim, mbase_arr_dims, 1,
+                                   "expected member declaration type", &mtypedef, NULL) != 0) {
                     decl_attrs_clear(&struct_attrs);
                     return -1;
                 }
@@ -1915,10 +1996,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     cc_type_t mtype = mbase;
                     int mstruct = mbase_sid;
                     char *mname = NULL;
-                    long arr_count = 1;
-                    int arr_saw = 0;
-                    int arr_unsized = 0;
-                    int arr_ndim = 0;
+                    long arr_count = mbase_arr_len >= 0 ? mbase_arr_len : 1;
+                    int arr_saw = mbase_arr_ndim > 0 ? 1 : 0;
+                    int arr_unsized = (mbase_arr_ndim > 0 && mbase_arr_len == 0) ? 1 : 0;
+                    int arr_ndim = mbase_arr_ndim;
+                    int arr_suffix_ndim = 0;
                     long arr_dims[CC_MAX_ARRAY_DIMS];
                     long msize;
                     long malign;
@@ -1928,6 +2010,9 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     decl_attrs_t mdecl_attrs;
                     decl_attrs_reset(&mdecl_attrs);
                     memset(arr_dims, 0, sizeof(arr_dims));
+                    if (mbase_arr_ndim > 0) {
+                        memcpy(arr_dims, mbase_arr_dims, sizeof(arr_dims));
+                    }
                     while (is_ptr_declarator_tok(p->tok.kind)) {
                         mtype = ptr_of_type(mtype);
                         if (mtype == CC_TYPE_VOID) {
@@ -2052,6 +2137,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                                 return -1;
                             }
                             arr_dims[arr_ndim++] = const_extent ? n : 0;
+                            arr_suffix_ndim++;
                         }
                     }
                     if (skip_decl_gnu_suffix(p, &mdecl_attrs) != 0) {
@@ -2094,11 +2180,18 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         malign = mdecl_attrs.align;
                     }
                     if (arr_saw) {
-                        cc_type_t ptype = ptr_of_type(mtype);
-                        if (ptype != CC_TYPE_VOID) {
-                            mtype = ptype;
-                        } else {
-                            mtype = CC_TYPE_PTR_VOID;
+                        /*
+                         * Base typedef arrays (e.g. `typedef T A[N]; A m;`) already
+                         * carry one pointer level in mtype. Only apply an extra
+                         * pointer level when this declarator adds bracket suffixes.
+                         */
+                        if (mbase_arr_ndim == 0 || arr_suffix_ndim > 0) {
+                            cc_type_t ptype = ptr_of_type(mtype);
+                            if (ptype != CC_TYPE_VOID) {
+                                mtype = ptype;
+                            } else {
+                                mtype = CC_TYPE_PTR_VOID;
+                            }
                         }
                         if (arr_unsized) {
                             if (is_union) {
@@ -2542,7 +2635,13 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         RETURN_OK();
     }
     if (seen_char) {
-        *out_type = seen_unsigned ? CC_TYPE_UCHAR : CC_TYPE_CHAR;
+        if (seen_unsigned) {
+            *out_type = CC_TYPE_UCHAR;
+        } else if (seen_signed) {
+            *out_type = CC_TYPE_SCHAR;
+        } else {
+            *out_type = CC_TYPE_CHAR;
+        }
         if (out_struct_id != NULL) {
             *out_struct_id = -1;
         }
@@ -2555,7 +2654,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         RETURN_OK();
     }
     if (seen_long > 0) {
-        *out_type = seen_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
+        if (seen_long > 1) {
+            *out_type = seen_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
+        } else {
+            *out_type = seen_unsigned ? CC_TYPE_ULONG : CC_TYPE_LONG;
+        }
         if (out_struct_id != NULL) {
             *out_struct_id = -1;
         }
@@ -2598,8 +2701,12 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 enum_known_type = 1;
             }
             *out_type = enum_type;
+            if (*out_type == CC_TYPE_INT || *out_type == CC_TYPE_UINT || *out_type == CC_TYPE_LONG_LONG ||
+                *out_type == CC_TYPE_ULONG_LONG) {
+                *out_type = CC_TYPE_ENUM;
+            }
             if (enum_defined && enum_tag_pending != NULL && enum_tag_pending_len > 0) {
-                if (enum_tag_set(p, enum_tag_pending, enum_tag_pending_len, enum_type, 1) != 0) {
+                if (enum_tag_set(p, enum_tag_pending, enum_tag_pending_len, CC_TYPE_ENUM, 1) != 0) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "out of memory tracking enum tag");
                     return -1;
                 }
@@ -2657,130 +2764,7 @@ static int is_decl_qual_at_token(parser_t *p) {
 }
 
 static cc_type_t ptr_of_type(cc_type_t t) {
-    switch (t) {
-    case CC_TYPE_VOID:
-        return CC_TYPE_PTR_VOID;
-    case CC_TYPE_BOOL:
-        return CC_TYPE_PTR_BOOL;
-    case CC_TYPE_CHAR:
-        return CC_TYPE_PTR_CHAR;
-    case CC_TYPE_UCHAR:
-        return CC_TYPE_PTR_UCHAR;
-    case CC_TYPE_SHORT:
-        return CC_TYPE_PTR_SHORT;
-    case CC_TYPE_USHORT:
-        return CC_TYPE_PTR_USHORT;
-    case CC_TYPE_INT:
-        return CC_TYPE_PTR_INT;
-    case CC_TYPE_UINT:
-        return CC_TYPE_PTR_UINT;
-    case CC_TYPE_LONG_LONG:
-        return CC_TYPE_PTR_LONG_LONG;
-    case CC_TYPE_ULONG_LONG:
-        return CC_TYPE_PTR_ULONG_LONG;
-    case CC_TYPE_FLOAT:
-        return CC_TYPE_PTR_FLOAT;
-    case CC_TYPE_DOUBLE:
-        return CC_TYPE_PTR_DOUBLE;
-    case CC_TYPE_PTR_VOID:
-        return CC_TYPE_PTR_PTR_VOID;
-    case CC_TYPE_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_INT:
-        return CC_TYPE_PTR_PTR_INT;
-    case CC_TYPE_PTR_UINT:
-        return CC_TYPE_PTR_PTR_UINT;
-    case CC_TYPE_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
-    default:
-        return CC_TYPE_VOID;
-    }
+    return cc_type_make_pointer(t);
 }
 
 static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id) {
@@ -5488,6 +5472,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
             e->int_val = p->tok.num;
             if (p->tok.int_is_longlong) {
                 e->value_type = p->tok.int_is_unsigned ? CC_TYPE_ULONG_LONG : CC_TYPE_LONG_LONG;
+            } else if (p->tok.int_is_long) {
+                e->value_type = p->tok.int_is_unsigned ? CC_TYPE_ULONG : CC_TYPE_LONG;
             } else {
                 e->value_type = p->tok.int_is_unsigned ? CC_TYPE_UINT : CC_TYPE_INT;
             }

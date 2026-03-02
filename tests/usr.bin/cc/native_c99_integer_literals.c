@@ -1,5 +1,7 @@
 int main(void) {
     unsigned long long maxu = 18446744073709551615ULL;
+    unsigned long ul = 1UL;
+    long sl = 1L;
 
     if (0xffffffff < 0) {
         return 1;
@@ -15,6 +17,27 @@ int main(void) {
     }
     if (maxu == 0ULL) {
         return 5;
+    }
+    if (sizeof(1L) != sizeof(sl)) {
+        return 6;
+    }
+    if (sizeof(1UL) != sizeof(ul)) {
+        return 7;
+    }
+    if (sizeof(long) == 8) {
+        if (sizeof(2147483648) != sizeof(long)) {
+            return 8;
+        }
+        if (sizeof(0x100000000) != sizeof(long)) {
+            return 9;
+        }
+    } else {
+        if (sizeof(2147483648) != sizeof(long long)) {
+            return 10;
+        }
+        if (sizeof(0x100000000) != sizeof(long long)) {
+            return 11;
+        }
     }
     return 0;
 }

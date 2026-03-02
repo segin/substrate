@@ -379,18 +379,13 @@ static cc_value_type_t type_to_val(cc_type_t t) {
 }
 
 static int is_pointer_type(cc_type_t t) {
-    return t >= CC_TYPE_PTR_VOID && t <= CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE;
+    return cc_type_is_pointer(t);
 }
 
 static cc_type_t ptr_base_type(cc_type_t t);
 
 static int pointer_depth(cc_type_t t) {
-    int d = 0;
-    while (is_pointer_type(t)) {
-        t = ptr_base_type(t);
-        d++;
-    }
-    return d;
+    return (int)cc_type_pointer_depth(t);
 }
 
 static int is_array_object_decl(cc_type_t t, long array_len, int array_ndim) {
@@ -401,12 +396,14 @@ static int is_array_object_decl(cc_type_t t, long array_len, int array_ndim) {
 }
 
 static int is_unsigned_integral_type(cc_type_t t) {
-    return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG_LONG;
+    return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT || t == CC_TYPE_ULONG ||
+           t == CC_TYPE_ULONG_LONG;
 }
 
 static int is_integral_type(cc_type_t t) {
-    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT || t == CC_TYPE_USHORT ||
-           t == CC_TYPE_INT || t == CC_TYPE_UINT || t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG;
+    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_SCHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
+           t == CC_TYPE_USHORT || t == CC_TYPE_INT || t == CC_TYPE_UINT || t == CC_TYPE_LONG || t == CC_TYPE_ULONG ||
+           t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG || t == CC_TYPE_ENUM || t == CC_TYPE_BITINT;
 }
 
 static int is_numeric_type(cc_type_t t) {
@@ -443,134 +440,11 @@ static int can_convert_type(cc_type_t dst, cc_type_t src) {
 }
 
 static cc_type_t ptr_base_type(cc_type_t t) {
-    switch (t) {
-    case CC_TYPE_PTR_VOID:
-        return CC_TYPE_VOID;
-    case CC_TYPE_PTR_BOOL:
-        return CC_TYPE_BOOL;
-    case CC_TYPE_PTR_CHAR:
-        return CC_TYPE_CHAR;
-    case CC_TYPE_PTR_UCHAR:
-        return CC_TYPE_UCHAR;
-    case CC_TYPE_PTR_SHORT:
-        return CC_TYPE_SHORT;
-    case CC_TYPE_PTR_USHORT:
-        return CC_TYPE_USHORT;
-    case CC_TYPE_PTR_INT:
-        return CC_TYPE_INT;
-    case CC_TYPE_PTR_UINT:
-        return CC_TYPE_UINT;
-    case CC_TYPE_PTR_LONG_LONG:
-        return CC_TYPE_LONG_LONG;
-    case CC_TYPE_PTR_ULONG_LONG:
-        return CC_TYPE_ULONG_LONG;
-    case CC_TYPE_PTR_FLOAT:
-        return CC_TYPE_FLOAT;
-    case CC_TYPE_PTR_DOUBLE:
-        return CC_TYPE_DOUBLE;
-    case CC_TYPE_PTR_PTR_VOID:
-        return CC_TYPE_PTR_VOID;
-    case CC_TYPE_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_INT:
-        return CC_TYPE_PTR_INT;
-    case CC_TYPE_PTR_PTR_UINT:
-        return CC_TYPE_PTR_UINT;
-    case CC_TYPE_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_DOUBLE;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID:
-        return CC_TYPE_PTR_PTR_PTR_PTR_VOID;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL:
-        return CC_TYPE_PTR_PTR_PTR_PTR_BOOL;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_CHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR:
-        return CC_TYPE_PTR_PTR_PTR_PTR_UCHAR;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_SHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_USHORT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_INT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_UINT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG:
-        return CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT:
-        return CC_TYPE_PTR_PTR_PTR_PTR_FLOAT;
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE:
-        return CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE;
-    default:
-        return CC_TYPE_VOID;
-    }
+    return cc_type_deref_once(t);
 }
 
 static cc_type_t integral_promo_type(cc_type_t t) {
-    if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
+    if (t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_SCHAR || t == CC_TYPE_UCHAR || t == CC_TYPE_SHORT ||
         t == CC_TYPE_USHORT) {
         return CC_TYPE_INT;
     }
@@ -590,6 +464,15 @@ static cc_type_t common_integral_type(cc_type_t a, cc_type_t b) {
         }
         return CC_TYPE_LONG_LONG;
     }
+    if (ap == CC_TYPE_ULONG || bp == CC_TYPE_ULONG) {
+        return CC_TYPE_ULONG;
+    }
+    if (ap == CC_TYPE_LONG || bp == CC_TYPE_LONG) {
+        if (is_unsigned_integral_type(ap) || is_unsigned_integral_type(bp)) {
+            return CC_TYPE_ULONG;
+        }
+        return CC_TYPE_LONG;
+    }
     if (ap == CC_TYPE_UINT || bp == CC_TYPE_UINT) {
         return CC_TYPE_UINT;
     }
@@ -597,9 +480,13 @@ static cc_type_t common_integral_type(cc_type_t a, cc_type_t b) {
 }
 
 static long type_size_bytes(cc_type_t t) {
+    if (cc_type_is_pointer(t)) {
+        return g_pointer_size_bytes;
+    }
     switch (t) {
     case CC_TYPE_BOOL:
     case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
     case CC_TYPE_UCHAR:
         return 1;
     case CC_TYPE_SHORT:
@@ -609,70 +496,32 @@ static long type_size_bytes(cc_type_t t) {
     case CC_TYPE_UINT:
     case CC_TYPE_FLOAT:
         return 4;
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+        return g_pointer_size_bytes;
     case CC_TYPE_LONG_LONG:
     case CC_TYPE_ULONG_LONG:
     case CC_TYPE_DOUBLE:
         return 8;
-    case CC_TYPE_PTR_VOID:
-    case CC_TYPE_PTR_BOOL:
-    case CC_TYPE_PTR_CHAR:
-    case CC_TYPE_PTR_UCHAR:
-    case CC_TYPE_PTR_SHORT:
-    case CC_TYPE_PTR_USHORT:
-    case CC_TYPE_PTR_INT:
-    case CC_TYPE_PTR_UINT:
-    case CC_TYPE_PTR_LONG_LONG:
-    case CC_TYPE_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_FLOAT:
-    case CC_TYPE_PTR_DOUBLE:
-    case CC_TYPE_PTR_PTR_VOID:
-    case CC_TYPE_PTR_PTR_BOOL:
-    case CC_TYPE_PTR_PTR_CHAR:
-    case CC_TYPE_PTR_PTR_UCHAR:
-    case CC_TYPE_PTR_PTR_SHORT:
-    case CC_TYPE_PTR_PTR_USHORT:
-    case CC_TYPE_PTR_PTR_INT:
-    case CC_TYPE_PTR_PTR_UINT:
-    case CC_TYPE_PTR_PTR_LONG_LONG:
-    case CC_TYPE_PTR_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_PTR_FLOAT:
-    case CC_TYPE_PTR_PTR_DOUBLE:
-    case CC_TYPE_PTR_PTR_PTR_VOID:
-    case CC_TYPE_PTR_PTR_PTR_BOOL:
-    case CC_TYPE_PTR_PTR_PTR_CHAR:
-    case CC_TYPE_PTR_PTR_PTR_UCHAR:
-    case CC_TYPE_PTR_PTR_PTR_SHORT:
-    case CC_TYPE_PTR_PTR_PTR_USHORT:
-    case CC_TYPE_PTR_PTR_PTR_INT:
-    case CC_TYPE_PTR_PTR_PTR_UINT:
-    case CC_TYPE_PTR_PTR_PTR_LONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_FLOAT:
-    case CC_TYPE_PTR_PTR_PTR_DOUBLE:
-    case CC_TYPE_PTR_PTR_PTR_PTR_VOID:
-    case CC_TYPE_PTR_PTR_PTR_PTR_BOOL:
-    case CC_TYPE_PTR_PTR_PTR_PTR_CHAR:
-    case CC_TYPE_PTR_PTR_PTR_PTR_UCHAR:
-    case CC_TYPE_PTR_PTR_PTR_PTR_SHORT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_USHORT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_INT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_UINT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_LONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_PTR_FLOAT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_DOUBLE:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_VOID:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_BOOL:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_CHAR:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UCHAR:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_SHORT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_USHORT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_INT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_UINT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_LONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_ULONG_LONG:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_FLOAT:
-    case CC_TYPE_PTR_PTR_PTR_PTR_PTR_DOUBLE:
+    case CC_TYPE_LDOUBLE:
+        return 16;
+    case CC_TYPE_ENUM:
+        return 4;
+    case CC_TYPE_COMPLEX:
+        return 16;
+    case CC_TYPE_IMAGINARY:
+        return 8;
+    case CC_TYPE_BITINT:
+        return g_pointer_size_bytes;
+    case CC_TYPE_DECIMAL32:
+        return 4;
+    case CC_TYPE_DECIMAL64:
+        return 8;
+    case CC_TYPE_DECIMAL128:
+        return 16;
+    case CC_TYPE_ATOMIC:
+        return g_pointer_size_bytes;
+    case CC_TYPE_FUNC:
         return g_pointer_size_bytes;
     default:
         return -1;
@@ -1313,7 +1162,13 @@ static int is_synthetic_struct_array_member(const cc_translation_unit_t *tu, con
     if (m == NULL || !is_pointer_type(m->type)) {
         return 0;
     }
-    return m->array_len >= 0;
+    if (m->array_ndim > 0 || m->array_len >= 0) {
+        return 1;
+    }
+    if (m->size > 0 && m->size != g_pointer_size_bytes) {
+        return 1;
+    }
+    return 0;
 }
 
 static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
@@ -1335,8 +1190,13 @@ static int expr_is_array_object_ref(const cc_translation_unit_t *tu, var_entry_t
                    is_array_object_decl(g->type, g->array_len, g->array_ndim);
         }
     }
-    if (e->kind == CC_EXPR_MEMBER && is_synthetic_struct_array_member(tu, e)) {
-        return 1;
+    if (e->kind == CC_EXPR_MEMBER) {
+        if (is_synthetic_struct_array_member(tu, e)) {
+            return 1;
+        }
+        if (is_pointer_type(e->value_type) && e->array_ndim > 0) {
+            return 1;
+        }
     }
     if (e->kind == CC_EXPR_CAST && e->lhs != NULL) {
         return expr_is_array_object_ref(tu, vars, var_count, depth, e->lhs);
@@ -2698,7 +2558,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         long mem_size = type_size_bytes(e->value_type);
         int ptrv;
-        if (is_synthetic_struct_array_member(tu, e)) {
+        if (expr_is_array_object_ref(tu, vars, var_count, depth, e)) {
             return lower_member_addr(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (mem_size <= 0) {
@@ -6478,6 +6338,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             g.type = s->type;
             g.type_struct_id = s->type_struct_id;
             g.array_len = is_array_obj ? s->array_len : -1;
+            g.size_bytes = obj_size;
             g.storage = CC_STORAGE_STATIC;
             g.attr_flags = s->attr_flags & (CC_ATTR_PACKED | CC_ATTR_ALIGNED | CC_ATTR_SECTION);
             g.attr_align = s->attr_align;
@@ -6525,6 +6386,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 guard.type = CC_TYPE_INT;
                 guard.type_struct_id = -1;
                 guard.array_len = -1;
+                guard.size_bytes = 4;
                 guard.storage = CC_STORAGE_STATIC;
                 guard.has_init = 0;
                 if (guard.name == NULL || append_synth_global(ctx->mod, &guard) != 0) {
@@ -6580,10 +6442,84 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 } else if (is_array_obj) {
                     if (s->expr != NULL && s->expr->kind == CC_EXPR_INIT_LIST) {
                         size_t ii;
+                        int handled_string_init = 0;
                         if (s->expr->arg_count > (size_t)arr_elems) {
                             set_diag(diag, "too many initializers for static local array");
                             return -1;
                         }
+                        if (s->expr->arg_count == 1) {
+                            const cc_expr_t *item_expr = unwrap_scalar_initializer_expr(s->expr->args[0], diag);
+                            if (item_expr == NULL) {
+                                return -1;
+                            }
+                            if (item_expr->kind == CC_EXPR_STR) {
+                                unsigned long *units = NULL;
+                                size_t unit_count = 0;
+                                size_t si;
+                                int wide = (item_expr->aux_type == CC_TYPE_INT || item_expr->aux_type == CC_TYPE_UINT ||
+                                            item_expr->aux_type == CC_TYPE_LONG_LONG ||
+                                            item_expr->aux_type == CC_TYPE_ULONG_LONG);
+                                if (decode_string_units(item_expr, wide, &units, &unit_count) != 0) {
+                                    set_diag(diag, "failed to decode static local array string initializer");
+                                    return -1;
+                                }
+                                if ((long)unit_count > arr_elems) {
+                                    free(units);
+                                    set_diag(diag, "string initializer exceeds static local array size");
+                                    return -1;
+                                }
+                                for (si = 0; si < unit_count + (unit_count < (size_t)arr_elems ? 1 : 0); ++si) {
+                                    int item_ptr = dst_addr;
+                                    cc_ssa_instr_t st_in;
+                                    int cval;
+                                    if (si > 0) {
+                                        int offv = emit_const_i64_instr(sf, (long)si * elem_size);
+                                        if (offv < 0) {
+                                            free(units);
+                                            return -1;
+                                        }
+                                        memset(&st_in, 0, sizeof(st_in));
+                                        st_in.op = CC_SSA_ADD;
+                                        st_in.dst = new_value(sf, CC_VAL_I64);
+                                        st_in.lhs = dst_addr;
+                                        st_in.rhs = offv;
+                                        if (st_in.dst < 0 || push_instr(sf, st_in) != 0) {
+                                            free(units);
+                                            set_diag(diag,
+                                                     "out of memory computing static local array string element address");
+                                            return -1;
+                                        }
+                                        item_ptr = st_in.dst;
+                                    }
+                                    cval = emit_const_i64_instr(sf, si < unit_count ? (long)units[si] : 0);
+                                    if (cval < 0) {
+                                        free(units);
+                                        return -1;
+                                    }
+                                    cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+                                    if (cval < 0) {
+                                        free(units);
+                                        return -1;
+                                    }
+                                    memset(&st_in, 0, sizeof(st_in));
+                                    st_in.op = CC_SSA_STORE;
+                                    st_in.dst = -1;
+                                    st_in.lhs = item_ptr;
+                                    st_in.rhs = cval;
+                                    st_in.imm = elem_size;
+                                    if (push_instr(sf, st_in) != 0) {
+                                        free(units);
+                                        set_diag(diag, "out of memory storing static local array string element");
+                                        return -1;
+                                    }
+                                }
+                                free(units);
+                                handled_string_init = 1;
+                            }
+                        }
+                        if (handled_string_init) {
+                            /* nothing else to emit */
+                        } else {
                         for (ii = 0; ii < s->expr->arg_count; ++ii) {
                             int item_ptr = dst_addr;
                             cc_ssa_instr_t st_in;
@@ -6649,6 +6585,68 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                                 }
                             }
                         }
+                        }
+                    } else if (s->expr->kind == CC_EXPR_STR) {
+                        unsigned long *units = NULL;
+                        size_t unit_count = 0;
+                        size_t si;
+                        int wide = (s->expr->aux_type == CC_TYPE_INT || s->expr->aux_type == CC_TYPE_UINT ||
+                                    s->expr->aux_type == CC_TYPE_LONG_LONG ||
+                                    s->expr->aux_type == CC_TYPE_ULONG_LONG);
+                        if (decode_string_units(s->expr, wide, &units, &unit_count) != 0) {
+                            set_diag(diag, "failed to decode static local array string initializer");
+                            return -1;
+                        }
+                        if ((long)unit_count > arr_elems) {
+                            free(units);
+                            set_diag(diag, "string initializer exceeds static local array size");
+                            return -1;
+                        }
+                        for (si = 0; si < unit_count + (unit_count < (size_t)arr_elems ? 1 : 0); ++si) {
+                            int item_ptr = dst_addr;
+                            cc_ssa_instr_t st_in;
+                            int cval;
+                            if (si > 0) {
+                                int offv = emit_const_i64_instr(sf, (long)si * elem_size);
+                                if (offv < 0) {
+                                    free(units);
+                                    return -1;
+                                }
+                                memset(&st_in, 0, sizeof(st_in));
+                                st_in.op = CC_SSA_ADD;
+                                st_in.dst = new_value(sf, CC_VAL_I64);
+                                st_in.lhs = dst_addr;
+                                st_in.rhs = offv;
+                                if (st_in.dst < 0 || push_instr(sf, st_in) != 0) {
+                                    free(units);
+                                    set_diag(diag, "out of memory computing static local array string element address");
+                                    return -1;
+                                }
+                                item_ptr = st_in.dst;
+                            }
+                            cval = emit_const_i64_instr(sf, si < unit_count ? (long)units[si] : 0);
+                            if (cval < 0) {
+                                free(units);
+                                return -1;
+                            }
+                            cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+                            if (cval < 0) {
+                                free(units);
+                                return -1;
+                            }
+                            memset(&st_in, 0, sizeof(st_in));
+                            st_in.op = CC_SSA_STORE;
+                            st_in.dst = -1;
+                            st_in.lhs = item_ptr;
+                            st_in.rhs = cval;
+                            st_in.imm = elem_size;
+                            if (push_instr(sf, st_in) != 0) {
+                                free(units);
+                                set_diag(diag, "out of memory storing static local array string element");
+                                return -1;
+                            }
+                        }
+                        free(units);
                     } else {
                         v = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
                         if (v < 0) {
@@ -6778,7 +6776,76 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (s->expr != NULL) {
                 if (s->expr->kind == CC_EXPR_INIT_LIST) {
                     size_t ii;
-                    for (ii = 0; ii < s->expr->arg_count; ++ii) {
+                    int handled_string_init = 0;
+                    if (s->expr->arg_count == 1) {
+                        const cc_expr_t *item_expr = unwrap_scalar_initializer_expr(s->expr->args[0], diag);
+                        if (item_expr == NULL) {
+                            return -1;
+                        }
+                        if (item_expr->kind == CC_EXPR_STR) {
+                            unsigned long *units = NULL;
+                            size_t unit_count = 0;
+                            size_t si;
+                            int wide = (item_expr->aux_type == CC_TYPE_INT || item_expr->aux_type == CC_TYPE_UINT ||
+                                        item_expr->aux_type == CC_TYPE_LONG_LONG ||
+                                        item_expr->aux_type == CC_TYPE_ULONG_LONG);
+                            if (decode_string_units(item_expr, wide, &units, &unit_count) != 0) {
+                                set_diag(diag, "failed to decode local array string initializer");
+                                return -1;
+                            }
+                            if ((long)unit_count > arr_elems) {
+                                free(units);
+                                set_diag(diag, "string initializer exceeds local array size");
+                                return -1;
+                            }
+                            for (si = 0; si < unit_count + (unit_count < (size_t)arr_elems ? 1 : 0); ++si) {
+                                int item_ptr = varv;
+                                int cval;
+                                if (si > 0) {
+                                    int offv = emit_const_i64_instr(sf, (long)si * elem_size);
+                                    if (offv < 0) {
+                                        free(units);
+                                        return -1;
+                                    }
+                                    memset(&st_in, 0, sizeof(st_in));
+                                    st_in.op = CC_SSA_ADD;
+                                    st_in.dst = new_value(sf, CC_VAL_I64);
+                                    st_in.lhs = varv;
+                                    st_in.rhs = offv;
+                                    if (st_in.dst < 0 || push_instr(sf, st_in) != 0) {
+                                        free(units);
+                                        set_diag(diag, "out of memory computing local array string element address");
+                                        return -1;
+                                    }
+                                    item_ptr = st_in.dst;
+                                }
+                                cval = emit_const_i64_instr(sf, si < unit_count ? (long)units[si] : 0);
+                                if (cval < 0) {
+                                    free(units);
+                                    return -1;
+                                }
+                                cval = cast_value(sf, cval, type_to_val(elem_type), diag);
+                                if (cval < 0) {
+                                    free(units);
+                                    return -1;
+                                }
+                                memset(&st_in, 0, sizeof(st_in));
+                                st_in.op = CC_SSA_STORE;
+                                st_in.dst = -1;
+                                st_in.lhs = item_ptr;
+                                st_in.rhs = cval;
+                                st_in.imm = elem_size;
+                                if (push_instr(sf, st_in) != 0) {
+                                    free(units);
+                                    set_diag(diag, "out of memory storing local array string element");
+                                    return -1;
+                                }
+                            }
+                            free(units);
+                            handled_string_init = 1;
+                        }
+                    }
+                    if (!handled_string_init) for (ii = 0; ii < s->expr->arg_count; ++ii) {
                         int item_ptr = varv;
                         if (ii > 0) {
                             int offv = emit_const_i64_instr(sf, (long)ii * elem_size);

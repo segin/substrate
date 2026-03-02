@@ -26,9 +26,9 @@ Status key:
 > [!CAUTION]
 > The `cc_type_t` enum is hardcoded and flat. This blocks progress on many features below.
 
-- [ ] Recursive pointer representation (remove hardcoded 5-level `CC_TYPE_PTR_*` enumeration).
-- [ ] `CC_TYPE_LONG` / `CC_TYPE_ULONG` — distinct from `int` and `long long`.
-- [ ] `CC_TYPE_SCHAR` — `signed char` as a distinct type from `char`.
+- [x] Recursive pointer representation (remove hardcoded 5-level `CC_TYPE_PTR_*` enumeration).
+- [x] `CC_TYPE_LONG` / `CC_TYPE_ULONG` — distinct from `int` and `long long`.
+- [x] `CC_TYPE_SCHAR` — `signed char` as a distinct type from `char`.
 - [ ] `CC_TYPE_LDOUBLE` — `long double` (80-bit x87 / 128-bit).
 - [ ] `CC_TYPE_ENUM` — enum as a distinct tracked type (not just aliased to int).
 - [ ] `CC_TYPE_COMPLEX` / `CC_TYPE_IMAGINARY` — C99 complex type wrapper.
