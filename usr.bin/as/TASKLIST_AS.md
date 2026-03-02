@@ -329,10 +329,10 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 ## 7. AArch64 (ARMv8.0 + ARMv8.1) Encoding Engine
 
 ### 7a. A64 Encoding Infrastructure
-- [ ] Fixed-width 32-bit instruction encoding.
-- [ ] Register file: X0–X30 (64-bit), W0–W30 (32-bit), SP, XZR/WZR, PC (not directly encodable).
-- [ ] Condition codes: EQ/NE/CS/CC/MI/PL/VS/VC/HI/LS/GE/LT/GT/LE/AL/NV.
-- [ ] Immediate encoding: logical immediates (bitmask), move-wide immediates, PC-relative (ADR/ADRP pages).
+- [x] Fixed-width 32-bit instruction encoding.
+- [x] Register file: X0–X30 (64-bit), W0–W30 (32-bit), SP, XZR/WZR, PC (not directly encodable).
+- [x] Condition codes: EQ/NE/CS/CC/MI/PL/VS/VC/HI/LS/GE/LT/GT/LE/AL/NV.
+- [x] Immediate encoding: logical immediates (bitmask), move-wide immediates, PC-relative (ADR/ADRP pages).
 
 ### 7b. Data Processing — Immediate
 - [ ] `ADD/SUB{S} Xd, Xn, #imm{, shift}` (12-bit immediate, optional LSL #12)
