@@ -1144,13 +1144,13 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Alpha CFA: frame pointer  (FP) or  (SP), return address  (RA).
 
 ### 23g. Alpha Testing
-- [ ] Unit tests for all Alpha relocation types.
-- [ ] BRADDR range check (±4MB).
-- [ ] GPREL/LITERAL/GPDISP GP-displacement correctness.
-- [ ] TLS relocation handling.
-- [ ] Round-trip read/write for Alpha ELF64 objects.
-- [ ] Validation: reject ELFCLASS32, reject ELFDATA2MSB.
-- [ ] Fuzz Alpha ELF parsing → crash-free.
+- [x] Unit tests for all Alpha relocation types.
+- [x] BRADDR range check (±4MB).
+- [x] GPREL/LITERAL/GPDISP GP-displacement correctness.
+- [x] TLS relocation handling.
+- [x] Round-trip read/write for Alpha ELF64 objects.
+- [x] Validation: reject ELFCLASS32, reject ELFDATA2MSB.
+- [x] Fuzz Alpha ELF parsing → crash-free.
 
 ---
 
