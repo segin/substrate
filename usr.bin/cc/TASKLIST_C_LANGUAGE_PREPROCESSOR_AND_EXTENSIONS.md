@@ -59,13 +59,13 @@ Status key:
 - [x] `_Complex` — keyword recognized, no type representation or arithmetic codegen.
 - [x] `_Imaginary` — keyword recognized, no type representation or codegen.
 - [x] `restrict` qualifiers and semantic constraints.
-- [ ] `inline` semantics per C99 linkage rules.
+- [x] `inline` semantics per C99 linkage rules.
 - [x] Typedef handling in all declarator positions.
 - [x] Pointer declarators and deep pointer nesting (currently capped at 5 levels).
 - [x] Array declarators including VLA and variably-modified types — fixed arrays work, VLAs have no `alloca`-style codegen.
 - [x] Function declarators including prototypes and old-style forms accepted/rejected per mode.
 - [x] Function parameter array qualifiers (`static`, qualifiers in brackets).
-- [ ] Qualifier propagation and compatibility checks.
+- [x] Qualifier propagation and compatibility checks.
 - [x] Composite type formation rules.
 
 ### 1.3 Objects, initialization, and storage

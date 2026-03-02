@@ -50,6 +50,7 @@ typedef struct {
     char *name;
     cc_type_t type;
     int struct_id;
+    int storage;
     long array_len;
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
@@ -284,7 +285,7 @@ static int vars_find_depth(var_entry_t *vars, size_t count, const char *name, in
 }
 
 static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_type_t type, int struct_id, long array_len,
-                     int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int depth) {
+                     int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], int storage, int depth) {
     var_entry_t *next;
     char *dup;
 
@@ -302,6 +303,7 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     (*vars)[*count].name = dup;
     (*vars)[*count].type = type;
     (*vars)[*count].struct_id = struct_id;
+    (*vars)[*count].storage = storage;
     (*vars)[*count].array_len = array_len;
     (*vars)[*count].array_ndim = array_ndim;
     if (array_dims != NULL) {
@@ -2933,6 +2935,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     case CC_EXPR_ASSIGN: {
         cc_type_t dst_type;
         int dst_struct_id = -1;
+        int dst_storage = 0;
         int dst_is_array_object = 0;
         int assign_ok;
         if (e->ident != NULL) {
@@ -2940,6 +2943,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (idx >= 0) {
                 dst_type = vars[idx].type;
                 dst_struct_id = vars[idx].struct_id;
+                dst_storage = vars[idx].storage;
                 dst_is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
@@ -2952,6 +2956,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 dst_type = g->type;
                 dst_struct_id = g->type_struct_id;
+                dst_storage = g->storage;
                 dst_is_array_object = is_array_object_type(g->type, g->array_len, g->array_ndim);
             }
         } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
@@ -2962,6 +2967,17 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             dst_struct_id = e->lhs->struct_id;
         } else {
             set_diag(diag, "assignment target must be identifier, dereference, or member lvalue");
+            return -1;
+        }
+        if ((dst_storage & CC_STORAGE_CONST) != 0) {
+            if (diag != NULL && diag->message[0] == '\0') {
+                if (e->ident != NULL) {
+                    snprintf(diag->message, sizeof(diag->message), "cannot assign to const-qualified object: %s",
+                             e->ident);
+                } else {
+                    snprintf(diag->message, sizeof(diag->message), "cannot assign to const-qualified object");
+                }
+            }
             return -1;
         }
         if (dst_is_array_object) {
@@ -3125,12 +3141,14 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     case CC_EXPR_UPDATE: {
         cc_type_t t;
         int t_struct_id = -1;
+        int t_storage = 0;
         int is_array_object = 0;
         if (e->ident != NULL) {
             int idx = vars_find_visible(vars, var_count, e->ident, depth);
             if (idx >= 0) {
                 t = vars[idx].type;
                 t_struct_id = vars[idx].struct_id;
+                t_storage = vars[idx].storage;
                 is_array_object = is_array_object_type(vars[idx].type, vars[idx].array_len, vars[idx].array_ndim);
             } else {
                 const cc_global_t *g = find_global(tu, e->ident);
@@ -3143,6 +3161,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
                 t = g->type;
                 t_struct_id = g->type_struct_id;
+                t_storage = g->storage;
                 is_array_object = is_array_object_type(g->type, g->array_len, g->array_ndim);
             }
         } else if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
@@ -3157,6 +3176,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (is_array_object) {
             set_diag(diag, "array object is not a modifiable lvalue for ++/--");
+            return -1;
+        }
+        if ((t_storage & CC_STORAGE_CONST) != 0) {
+            set_diag(diag, "cannot modify const-qualified object with ++/--");
             return -1;
         }
         if (is_pointer_type(t)) {
@@ -4044,7 +4067,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 return -1;
             }
             if (vars_push(vars, var_count, s->decl_name, s->type, s->type_struct_id, s->array_len, s->array_ndim,
-                          s->array_dims, depth) != 0) {
+                          s->array_dims, s->storage, depth) != 0) {
                 set_diag(diag, "out of memory adding local variable");
                 return -1;
             }
@@ -5028,7 +5051,7 @@ fail_decl:
                 goto fail_func;
             }
             if (vars_push(&vars, &var_count, f->params[j].name, f->params[j].type, f->params[j].type_struct_id, -1, 0,
-                          NULL, 0) != 0) {
+                          NULL, f->params[j].storage, 0) != 0) {
                 set_diag(diag, "out of memory adding parameter");
                 goto fail_func;
             }

@@ -20,6 +20,9 @@ typedef struct {
 #define CC_STORAGE_REGISTER (1 << 4)
 #define CC_STORAGE_THREAD_LOCAL (1 << 5)
 #define CC_STORAGE_AUTO_TYPE (1 << 6)
+#define CC_STORAGE_CONST (1 << 7)
+#define CC_STORAGE_VOLATILE (1 << 8)
+#define CC_STORAGE_RESTRICT (1 << 9)
 
 #define CC_ATTR_PACKED     (1 << 0)
 #define CC_ATTR_ALIGNED    (1 << 1)
@@ -381,6 +384,7 @@ typedef struct {
     char *name;
     cc_type_t type;
     int type_struct_id;
+    int storage;
 } cc_param_t;
 
 typedef struct {

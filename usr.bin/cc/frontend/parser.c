@@ -1930,10 +1930,14 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             storage_flags |= CC_STORAGE_INLINE;
             break;
         case TOK_KW_CONST:
+            storage_flags |= CC_STORAGE_CONST;
+            break;
         case TOK_KW_VOLATILE:
+            storage_flags |= CC_STORAGE_VOLATILE;
             break;
         case TOK_KW_RESTRICT:
             seen_restrict = 1;
+            storage_flags |= CC_STORAGE_RESTRICT;
             break;
         case TOK_KW_STRUCT:
         case TOK_KW_UNION: {
@@ -4790,7 +4794,7 @@ static int push_arg(cc_expr_t *call, cc_expr_t *arg) {
     return 0;
 }
 
-static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t n) {
+static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t n, int storage) {
     cc_param_t *next = (cc_param_t *)realloc(f->params, (f->param_count + 1) * sizeof(*next));
     if (next == NULL) {
         return -1;
@@ -4802,6 +4806,7 @@ static int push_param(cc_function_t *f, cc_type_t type, const char *name, size_t
     }
     f->params[f->param_count].type = type;
     f->params[f->param_count].type_struct_id = -1;
+    f->params[f->param_count].storage = storage;
     f->param_count++;
     return 0;
 }
@@ -8775,7 +8780,7 @@ void cc_tu_free(cc_translation_unit_t *tu) {
 }
 
 static int parse_params(parser_t *p, cc_function_t *f) {
-    if (g_parser_allow_oldstyle_funcdecl && p->tok.kind == TOK_IDENT &&
+        if (g_parser_allow_oldstyle_funcdecl && p->tok.kind == TOK_IDENT &&
         typedef_find_visible_n(p, p->tok.start, p->tok.len) < 0) {
         cc_tok_kind_t k = peek_kind(p);
         if (k == TOK_COMMA || k == TOK_RPAREN) {
@@ -8784,7 +8789,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
                     set_diag(p->diag, p->tok.line, p->tok.col, "expected old-style parameter name");
                     return -1;
                 }
-                if (push_param(f, CC_TYPE_INT, p->tok.start, p->tok.len) != 0) {
+                if (push_param(f, CC_TYPE_INT, p->tok.start, p->tok.len, 0) != 0) {
                     return -1;
                 }
                 if (next_tok(p) != 0) {
@@ -8815,6 +8820,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
         int ptype_sid = -1;
         cc_type_t dty;
         char *pname = NULL;
+        int param_storage = 0;
         int ptype_restrict = 0;
         int dty_restrict = 0;
         char anon_buf[32];
@@ -8832,6 +8838,7 @@ static int parse_params(parser_t *p, cc_function_t *f) {
                            &ptype_restrict, NULL) != 0) {
             return -1;
         }
+        param_storage = p->last_storage;
         if (parse_param_declarator(p, ptype, &dty, &pname, &dty_restrict) != 0) {
             return -1;
         }
@@ -8846,14 +8853,14 @@ static int parse_params(parser_t *p, cc_function_t *f) {
         }
         if (pname == NULL) {
             snprintf(anon_buf, sizeof(anon_buf), "__anon_param_%zu", f->param_count);
-            if (push_param(f, dty, anon_buf, strlen(anon_buf)) != 0) {
+            if (push_param(f, dty, anon_buf, strlen(anon_buf), param_storage) != 0) {
                 return -1;
             }
             if (f->param_count > 0) {
                 f->params[f->param_count - 1].type_struct_id = ptype_sid;
             }
         } else {
-            if (push_param(f, dty, pname, strlen(pname)) != 0) {
+            if (push_param(f, dty, pname, strlen(pname), param_storage) != 0) {
                 free(pname);
                 return -1;
             }
