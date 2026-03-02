@@ -1720,6 +1720,158 @@ static int alpha_apply(const elfobj_reloc_ctx_t *ctx,
     }
 }
 
+static int ia64_reloc_size(uint32_t type) {
+    switch (type) {
+        case R_IA64_NONE:
+            return 0;
+        case R_IA64_DIR64MSB:
+        case R_IA64_DIR64LSB:
+        case R_IA64_REL64MSB:
+        case R_IA64_REL64LSB:
+        case R_IA64_GPREL64MSB:
+        case R_IA64_GPREL64LSB:
+        case R_IA64_DTPREL64MSB:
+        case R_IA64_DTPREL64LSB:
+        case R_IA64_TPREL64MSB:
+        case R_IA64_TPREL64LSB:
+            return 8;
+        case R_IA64_IMM14:
+            return 2;
+        default:
+            return 4;
+    }
+}
+
+static int ia64_is_pc_relative(uint32_t type) {
+    switch (type) {
+        case R_IA64_PCREL21B:
+        case R_IA64_PCREL21M:
+        case R_IA64_PCREL21F:
+        case R_IA64_PCREL32MSB:
+        case R_IA64_PCREL32LSB:
+        case R_IA64_PCREL64MSB:
+        case R_IA64_PCREL64LSB:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int ia64_is_tls(uint32_t type) {
+    return type >= R_IA64_LTOFF_DTPMOD22 && type <= R_IA64_TPREL64LSB;
+}
+
+static int ia64_apply(const elfobj_reloc_ctx_t *ctx,
+                      uint32_t type,
+                      uint64_t place,
+                      uint64_t sym_value,
+                      int64_t addend,
+                      uint64_t *out_value) {
+    elf_swide_t v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+    elf_swide_t rel = v - (elf_swide_t)place;
+    (void)ctx;
+    switch (type) {
+        case R_IA64_NONE:
+            *out_value = 0;
+            return 0;
+        case R_IA64_DIR32MSB:
+        case R_IA64_DIR32LSB:
+        case R_IA64_GPREL32MSB:
+        case R_IA64_GPREL32LSB:
+        case R_IA64_SEGREL32MSB:
+        case R_IA64_SEGREL32LSB:
+        case R_IA64_SECREL32MSB:
+        case R_IA64_SECREL32LSB:
+        case R_IA64_REL32MSB:
+        case R_IA64_REL32LSB:
+        case R_IA64_DTPREL32MSB:
+        case R_IA64_DTPREL32LSB:
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_IA64_DIR64MSB:
+        case R_IA64_DIR64LSB:
+        case R_IA64_GPREL64MSB:
+        case R_IA64_GPREL64LSB:
+        case R_IA64_SEGREL64MSB:
+        case R_IA64_SEGREL64LSB:
+        case R_IA64_SECREL64MSB:
+        case R_IA64_SECREL64LSB:
+        case R_IA64_REL64MSB:
+        case R_IA64_REL64LSB:
+        case R_IA64_DTPMOD64MSB:
+        case R_IA64_DTPMOD64LSB:
+        case R_IA64_DTPREL64MSB:
+        case R_IA64_DTPREL64LSB:
+        case R_IA64_TPREL64MSB:
+        case R_IA64_TPREL64LSB:
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        case R_IA64_PCREL21B:
+        case R_IA64_PCREL21M:
+        case R_IA64_PCREL21F:
+            if (!swide_in_signed_bits(rel, 21)) {
+                return -2;
+            }
+            *out_value = swide_to_width(rel, 21);
+            return 0;
+        case R_IA64_PCREL32MSB:
+        case R_IA64_PCREL32LSB:
+            if (!swide_in_signed_bits(rel, 32)) {
+                return -2;
+            }
+            *out_value = swide_to_width(rel, 32);
+            return 0;
+        case R_IA64_PCREL64MSB:
+        case R_IA64_PCREL64LSB:
+            *out_value = swide_to_width(rel, 64);
+            return 0;
+        case R_IA64_IMM14:
+        case R_IA64_DTPREL14:
+        case R_IA64_TPREL14:
+            if (!swide_in_signed_bits(v, 14)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 14);
+            return 0;
+        case R_IA64_IMM22:
+        case R_IA64_GPREL22:
+        case R_IA64_LTOFF22:
+        case R_IA64_PLTOFF22:
+        case R_IA64_LTOFF_FPTR22:
+        case R_IA64_LTOFF_DTPMOD22:
+        case R_IA64_LTOFF_DTPREL22:
+        case R_IA64_LTOFF_TPREL22:
+        case R_IA64_TPREL22:
+            if (!swide_in_signed_bits(v, 22)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 22);
+            return 0;
+        case R_IA64_IMM64:
+        case R_IA64_GPREL64I:
+        case R_IA64_LTOFF64I:
+        case R_IA64_PLTOFF64I:
+        case R_IA64_FPTR64I:
+        case R_IA64_LTOFF_FPTR64I:
+        case R_IA64_DTPREL64I:
+        case R_IA64_TPREL64I:
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        case R_IA64_IPLTMSB:
+        case R_IA64_IPLTLSB:
+        case R_IA64_COPY:
+        case R_IA64_SUB:
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        default:
+            if (ia64_is_tls(type)) {
+                *out_value = swide_to_width(v, 64);
+                return 0;
+            }
+            return -1;
+    }
+}
+
 static int arm_reloc_size(uint32_t type) {
     switch (type) {
         case R_ARM_NONE:
@@ -2490,6 +2642,13 @@ static void register_builtin_backends_locked(void) {
     b.is_pc_relative = alpha_is_pc_relative;
     g_backends[g_backend_count++] = b;
 
+    memset(&b, 0, sizeof(b));
+    b.machine = EM_IA_64;
+    b.apply_reloc = ia64_apply;
+    b.reloc_size = ia64_reloc_size;
+    b.is_pc_relative = ia64_is_pc_relative;
+    g_backends[g_backend_count++] = b;
+
     g_builtin_backends_ready = 1;
 }
 
@@ -2732,6 +2891,9 @@ int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type) {
     }
     if (machine == EM_ALPHA) {
         return alpha_is_tls(type);
+    }
+    if (machine == EM_IA_64) {
+        return ia64_is_tls(type);
     }
     return 0;
 }
@@ -3180,6 +3342,81 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
                 case R_ALPHA_TPRELHI: return "R_ALPHA_TPRELHI";
                 case R_ALPHA_TPRELLO: return "R_ALPHA_TPRELLO";
                 case R_ALPHA_TPREL16: return "R_ALPHA_TPREL16";
+                default: break;
+            }
+            break;
+        case EM_IA_64:
+            switch (type) {
+                case R_IA64_NONE: return "R_IA64_NONE";
+                case R_IA64_IMM14: return "R_IA64_IMM14";
+                case R_IA64_IMM22: return "R_IA64_IMM22";
+                case R_IA64_IMM64: return "R_IA64_IMM64";
+                case R_IA64_DIR32MSB: return "R_IA64_DIR32MSB";
+                case R_IA64_DIR32LSB: return "R_IA64_DIR32LSB";
+                case R_IA64_DIR64MSB: return "R_IA64_DIR64MSB";
+                case R_IA64_DIR64LSB: return "R_IA64_DIR64LSB";
+                case R_IA64_GPREL22: return "R_IA64_GPREL22";
+                case R_IA64_GPREL64I: return "R_IA64_GPREL64I";
+                case R_IA64_GPREL32MSB: return "R_IA64_GPREL32MSB";
+                case R_IA64_GPREL32LSB: return "R_IA64_GPREL32LSB";
+                case R_IA64_GPREL64MSB: return "R_IA64_GPREL64MSB";
+                case R_IA64_GPREL64LSB: return "R_IA64_GPREL64LSB";
+                case R_IA64_LTOFF22: return "R_IA64_LTOFF22";
+                case R_IA64_LTOFF64I: return "R_IA64_LTOFF64I";
+                case R_IA64_PLTOFF22: return "R_IA64_PLTOFF22";
+                case R_IA64_PLTOFF64I: return "R_IA64_PLTOFF64I";
+                case R_IA64_PLTOFF64MSB: return "R_IA64_PLTOFF64MSB";
+                case R_IA64_PLTOFF64LSB: return "R_IA64_PLTOFF64LSB";
+                case R_IA64_FPTR64I: return "R_IA64_FPTR64I";
+                case R_IA64_FPTR32MSB: return "R_IA64_FPTR32MSB";
+                case R_IA64_FPTR32LSB: return "R_IA64_FPTR32LSB";
+                case R_IA64_FPTR64MSB: return "R_IA64_FPTR64MSB";
+                case R_IA64_FPTR64LSB: return "R_IA64_FPTR64LSB";
+                case R_IA64_PCREL21B: return "R_IA64_PCREL21B";
+                case R_IA64_PCREL21M: return "R_IA64_PCREL21M";
+                case R_IA64_PCREL21F: return "R_IA64_PCREL21F";
+                case R_IA64_PCREL32MSB: return "R_IA64_PCREL32MSB";
+                case R_IA64_PCREL32LSB: return "R_IA64_PCREL32LSB";
+                case R_IA64_PCREL64MSB: return "R_IA64_PCREL64MSB";
+                case R_IA64_PCREL64LSB: return "R_IA64_PCREL64LSB";
+                case R_IA64_LTOFF_FPTR22: return "R_IA64_LTOFF_FPTR22";
+                case R_IA64_LTOFF_FPTR64I: return "R_IA64_LTOFF_FPTR64I";
+                case R_IA64_LTOFF_FPTR32MSB: return "R_IA64_LTOFF_FPTR32MSB";
+                case R_IA64_LTOFF_FPTR32LSB: return "R_IA64_LTOFF_FPTR32LSB";
+                case R_IA64_LTOFF_FPTR64MSB: return "R_IA64_LTOFF_FPTR64MSB";
+                case R_IA64_LTOFF_FPTR64LSB: return "R_IA64_LTOFF_FPTR64LSB";
+                case R_IA64_SEGREL32MSB: return "R_IA64_SEGREL32MSB";
+                case R_IA64_SEGREL32LSB: return "R_IA64_SEGREL32LSB";
+                case R_IA64_SEGREL64MSB: return "R_IA64_SEGREL64MSB";
+                case R_IA64_SEGREL64LSB: return "R_IA64_SEGREL64LSB";
+                case R_IA64_SECREL32MSB: return "R_IA64_SECREL32MSB";
+                case R_IA64_SECREL32LSB: return "R_IA64_SECREL32LSB";
+                case R_IA64_SECREL64MSB: return "R_IA64_SECREL64MSB";
+                case R_IA64_SECREL64LSB: return "R_IA64_SECREL64LSB";
+                case R_IA64_REL32MSB: return "R_IA64_REL32MSB";
+                case R_IA64_REL32LSB: return "R_IA64_REL32LSB";
+                case R_IA64_REL64MSB: return "R_IA64_REL64MSB";
+                case R_IA64_REL64LSB: return "R_IA64_REL64LSB";
+                case R_IA64_IPLTMSB: return "R_IA64_IPLTMSB";
+                case R_IA64_IPLTLSB: return "R_IA64_IPLTLSB";
+                case R_IA64_COPY: return "R_IA64_COPY";
+                case R_IA64_SUB: return "R_IA64_SUB";
+                case R_IA64_LTOFF_DTPMOD22: return "R_IA64_LTOFF_DTPMOD22";
+                case R_IA64_DTPMOD64MSB: return "R_IA64_DTPMOD64MSB";
+                case R_IA64_DTPMOD64LSB: return "R_IA64_DTPMOD64LSB";
+                case R_IA64_DTPREL14: return "R_IA64_DTPREL14";
+                case R_IA64_LTOFF_DTPREL22: return "R_IA64_LTOFF_DTPREL22";
+                case R_IA64_DTPREL64I: return "R_IA64_DTPREL64I";
+                case R_IA64_DTPREL32MSB: return "R_IA64_DTPREL32MSB";
+                case R_IA64_DTPREL32LSB: return "R_IA64_DTPREL32LSB";
+                case R_IA64_DTPREL64MSB: return "R_IA64_DTPREL64MSB";
+                case R_IA64_DTPREL64LSB: return "R_IA64_DTPREL64LSB";
+                case R_IA64_LTOFF_TPREL22: return "R_IA64_LTOFF_TPREL22";
+                case R_IA64_TPREL14: return "R_IA64_TPREL14";
+                case R_IA64_TPREL22: return "R_IA64_TPREL22";
+                case R_IA64_TPREL64I: return "R_IA64_TPREL64I";
+                case R_IA64_TPREL64MSB: return "R_IA64_TPREL64MSB";
+                case R_IA64_TPREL64LSB: return "R_IA64_TPREL64LSB";
                 default: break;
             }
             break;

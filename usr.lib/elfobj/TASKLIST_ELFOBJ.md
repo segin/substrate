@@ -1177,22 +1177,22 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] TLS: `R_IA64_LTOFF_DTPMOD22` (0xAA), `R_IA64_DTPMOD64MSB` (0xAE), `R_IA64_DTPMOD64LSB` (0xAF), `R_IA64_LTOFF_DTPREL22` (0xB2), `R_IA64_DTPREL14` (0xB1), `R_IA64_DTPREL22` (0xB2), `R_IA64_DTPREL64I` (0xB3), `R_IA64_DTPREL32MSB` (0xB4), `R_IA64_DTPREL32LSB` (0xB5), `R_IA64_DTPREL64MSB` (0xB6), `R_IA64_DTPREL64LSB` (0xB7), `R_IA64_LTOFF_TPREL22` (0xBA), `R_IA64_TPREL14` (0xC1), `R_IA64_TPREL22` (0xC2), `R_IA64_TPREL64I` (0xC3), `R_IA64_TPREL64MSB` (0xC6), `R_IA64_TPREL64LSB` (0xC7)
 
 ### 24c. IA-64 Relocation Backend
-- [ ] `ia64_reloc_size()` for all IA-64 relocation types.
-- [ ] `ia64_is_pc_relative()`: PCREL21B/M/F, PCREL32MSB/LSB, PCREL64MSB/LSB.
-- [ ] `ia64_is_tls()`: all TLS types.
-- [ ] `ia64_apply()`: DIR32/64 MSB/LSB (S + A, 32/64-bit, both endiannesses).
-- [ ] `ia64_apply()`: PCREL21B (21-bit signed PC-relative branch in bundle slot).
-- [ ] `ia64_apply()`: PCREL21M/F (slot-specific PC-relative).
-- [ ] `ia64_apply()`: IMM22 (22-bit immediate in instruction slot).
-- [ ] `ia64_apply()`: IMM64 (64-bit immediate spread across MOVL bundle).
-- [ ] `ia64_apply()`: IMM14 (14-bit immediate in instruction slot).
-- [ ] `ia64_apply()`: GPREL22/64I/32/64 (GP-relative).
-- [ ] `ia64_apply()`: LTOFF22/64I (linkage table offset, GOT-relative).
-- [ ] `ia64_apply()`: FPTR (function pointer descriptor).
-- [ ] `ia64_apply()`: SEGREL/SECREL (segment/section relative).
-- [ ] Bundle slot decoding: extract template byte, identify slot positions, decode/encode instruction immediates.
-- [ ] Register under `EM_IA_64`.
-- [ ] Relocation name strings for all IA-64 types.
+- [x] `ia64_reloc_size()` for all IA-64 relocation types.
+- [x] `ia64_is_pc_relative()`: PCREL21B/M/F, PCREL32MSB/LSB, PCREL64MSB/LSB.
+- [x] `ia64_is_tls()`: all TLS types.
+- [x] `ia64_apply()`: DIR32/64 MSB/LSB (S + A, 32/64-bit, both endiannesses).
+- [x] `ia64_apply()`: PCREL21B (21-bit signed PC-relative branch in bundle slot).
+- [x] `ia64_apply()`: PCREL21M/F (slot-specific PC-relative).
+- [x] `ia64_apply()`: IMM22 (22-bit immediate in instruction slot).
+- [x] `ia64_apply()`: IMM64 (64-bit immediate spread across MOVL bundle).
+- [x] `ia64_apply()`: IMM14 (14-bit immediate in instruction slot).
+- [x] `ia64_apply()`: GPREL22/64I/32/64 (GP-relative).
+- [x] `ia64_apply()`: LTOFF22/64I (linkage table offset, GOT-relative).
+- [x] `ia64_apply()`: FPTR (function pointer descriptor).
+- [x] `ia64_apply()`: SEGREL/SECREL (segment/section relative).
+- [x] Bundle slot decoding: extract template byte, identify slot positions, decode/encode instruction immediates.
+- [x] Register under `EM_IA_64`.
+- [x] Relocation name strings for all IA-64 types.
 
 ### 24d. IA-64 Validation
 - [ ] Accept `EM_IA_64` with `ELFCLASS64` only.
