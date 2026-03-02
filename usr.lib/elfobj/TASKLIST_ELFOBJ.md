@@ -623,15 +623,15 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 
 ## 13. x86-Specific Validation (`elf_validate.c`)
 
-- [ ] Validate `EM_386` with `ELFCLASS32` only.
-- [ ] Validate `EM_X86_64` with `ELFCLASS64` only.
-- [ ] Both x86 variants: `ELFDATA2LSB` only (x86 is always little-endian).
-- [ ] Validate `.note.gnu.property` structure for x86: NT_GNU_PROPERTY_TYPE_0, correct alignment (4-byte for ELF32, 8-byte for ELF64).
-- [ ] Validate `GNU_PROPERTY_X86_ISA_1_NEEDED` bit values (only defined bits set).
-- [ ] Validate `GNU_PROPERTY_X86_FEATURE_1_AND` bit values (only IBT/SHSTK).
-- [ ] Warn on unknown GNU properties (forward compatibility).
-- [ ] Validate `SHT_REL` used for i386, `SHT_RELA` for x86-64.
-- [ ] Validate `.eh_frame` CIE return address register (8 for i386/RA, 16 for x86-64/RA).
+- [x] Validate `EM_386` with `ELFCLASS32` only.
+- [x] Validate `EM_X86_64` with `ELFCLASS64` only.
+- [x] Both x86 variants: `ELFDATA2LSB` only (x86 is always little-endian).
+- [x] Validate `.note.gnu.property` structure for x86: NT_GNU_PROPERTY_TYPE_0, correct alignment (4-byte for ELF32, 8-byte for ELF64).
+- [x] Validate `GNU_PROPERTY_X86_ISA_1_NEEDED` bit values (only defined bits set).
+- [x] Validate `GNU_PROPERTY_X86_FEATURE_1_AND` bit values (only IBT/SHSTK).
+- [x] Warn on unknown GNU properties (forward compatibility).
+- [x] Validate `SHT_REL` used for i386, `SHT_RELA` for x86-64.
+- [x] Validate `.eh_frame` CIE return address register (8 for i386/RA, 16 for x86-64/RA).
 
 ---
 
