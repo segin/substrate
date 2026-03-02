@@ -455,14 +455,14 @@ Beyond the currently-implemented core set, add the full x86 relocation roster:
 
 ## 9. Link Planning (`elf_link.c`)
 
-- [ ] Accept `EM_ARM` and `EM_AARCH64` inputs.
-- [ ] Reject class mismatches: ARM must be ELFCLASS32, AArch64 must be ELFCLASS64.
-- [ ] Merge `e_flags`: take union of float ABI flags; error on conflict.
-- [ ] Handle ARM/Thumb interwork symbol merging (symbol with T-bit → different treatment).
-- [ ] `.ARM.exidx` section merging: sort entries by covered address range.
-- [ ] `.ARM.attributes` merging: attribute compatibility checking per Build Attributes spec.
-- [ ] Section group/COMDAT handling for ARM is identical to x86.
-- [ ] AArch64 `.note.gnu.property` merging: AND of BTI/PAC bits across inputs.
+- [x] Accept `EM_ARM` and `EM_AARCH64` inputs.
+- [x] Reject class mismatches: ARM must be ELFCLASS32, AArch64 must be ELFCLASS64.
+- [x] Merge `e_flags`: take union of float ABI flags; error on conflict.
+- [x] Handle ARM/Thumb interwork symbol merging (symbol with T-bit → different treatment).
+- [x] `.ARM.exidx` section merging: sort entries by covered address range.
+- [x] `.ARM.attributes` merging: attribute compatibility checking per Build Attributes spec.
+- [x] Section group/COMDAT handling for ARM is identical to x86.
+- [x] AArch64 `.note.gnu.property` merging: AND of BTI/PAC bits across inputs.
 
 ---
 
