@@ -251,23 +251,23 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `.syntax unified` (default): single mnemonic for ARM/Thumb with `.w`/`.n` suffixes.
 
 ### 6c. Data Processing Instructions
-- [ ] `ADD`, `ADC`, `SUB`, `SBC`, `RSB`, `RSC` (immediate, register, shifted register)
-- [ ] `AND`, `ORR`, `EOR`, `BIC`, `ORN` (Thumb-2)
-- [ ] `MOV`, `MVN` (immediate, register); `MOVW`, `MOVT` (16-bit immediate)
-- [ ] `CMP`, `CMN`, `TST`, `TEQ`
-- [ ] `MUL`, `MLA`, `MLS`, `UMULL`, `UMLAL`, `SMULL`, `SMLAL`
-- [ ] `SMULBB/BT/TB/TT`, `SMLABB/BT/TB/TT`, `SMLALBB/BT/TB/TT`
-- [ ] `SMUAD/X`, `SMLAD/X`, `SMLALD/X`, `SMUSD/X`, `SMLSD/X`, `SMLSLD/X`
-- [ ] `UMAAL`, `SDIV`, `UDIV`
-- [ ] `CLZ`, `RBIT`, `REV`, `REV16`, `REVSH`
-- [ ] `PKH{BT,TB}`, `SSAT`, `USAT`, `SSAT16`, `USAT16`
-- [ ] `SBFX`, `UBFX`, `BFI`, `BFC`
-- [ ] `SXTB/H`, `UXTB/H`, `SXTAB/H`, `UXTAB/H`, `SXTB16`, `UXTB16`, `SXTAB16`, `UXTAB16`
-- [ ] `QADD`, `QDADD`, `QSUB`, `QDSUB`
-- [ ] `SADD8/16`, `UADD8/16`, `SSUB8/16`, `USUB8/16`, `SHADD8/16`, `UHADD8/16`, `SHSUB8/16`, `UHSUB8/16`
-- [ ] `QADD8/16`, `UQADD8/16`, `QSUB8/16`, `UQSUB8/16`
-- [ ] `SASX`, `UASX`, `SSAX`, `USAX`, `SHASX`, `UHASX`, `SHSAX`, `UHSAX`, `QASX`, `UQASX`, `QSAX`, `UQSAX`
-- [ ] `USAD8`, `USADA8`, `SEL`
+- [x] `ADD`, `ADC`, `SUB`, `SBC`, `RSB`, `RSC` (immediate, register, shifted register)
+- [x] `AND`, `ORR`, `EOR`, `BIC`, `ORN` (Thumb-2)
+- [x] `MOV`, `MVN` (immediate, register); `MOVW`, `MOVT` (16-bit immediate)
+- [x] `CMP`, `CMN`, `TST`, `TEQ`
+- [x] `MUL`, `MLA`, `MLS`, `UMULL`, `UMLAL`, `SMULL`, `SMLAL`
+- [x] `SMULBB/BT/TB/TT`, `SMLABB/BT/TB/TT`, `SMLALBB/BT/TB/TT`
+- [x] `SMUAD/X`, `SMLAD/X`, `SMLALD/X`, `SMUSD/X`, `SMLSD/X`, `SMLSLD/X`
+- [x] `UMAAL`, `SDIV`, `UDIV`
+- [x] `CLZ`, `RBIT`, `REV`, `REV16`, `REVSH`
+- [x] `PKH{BT,TB}`, `SSAT`, `USAT`, `SSAT16`, `USAT16`
+- [x] `SBFX`, `UBFX`, `BFI`, `BFC`
+- [x] `SXTB/H`, `UXTB/H`, `SXTAB/H`, `UXTAB/H`, `SXTB16`, `UXTB16`, `SXTAB16`, `UXTAB16`
+- [x] `QADD`, `QDADD`, `QSUB`, `QDSUB`
+- [x] `SADD8/16`, `UADD8/16`, `SSUB8/16`, `USUB8/16`, `SHADD8/16`, `UHADD8/16`, `SHSUB8/16`, `UHSUB8/16`
+- [x] `QADD8/16`, `UQADD8/16`, `QSUB8/16`, `UQSUB8/16`
+- [x] `SASX`, `UASX`, `SSAX`, `USAX`, `SHASX`, `UHASX`, `SHSAX`, `UHSAX`, `QASX`, `UQASX`, `QSAX`, `UQSAX`
+- [x] `USAD8`, `USADA8`, `SEL`
 
 ### 6d. Branch Instructions
 - [ ] `B`, `BL` (immediate offset, conditional)
