@@ -940,14 +940,14 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] TLS: `R_68K_TLS_GD32` (25), `R_68K_TLS_GD16` (26), `R_68K_TLS_GD8` (27), `R_68K_TLS_LDM32` (28), `R_68K_TLS_LDM16` (29), `R_68K_TLS_LDM8` (30), `R_68K_TLS_LDO32` (31), `R_68K_TLS_LDO16` (32), `R_68K_TLS_LDO8` (33), `R_68K_TLS_IE32` (34), `R_68K_TLS_IE16` (35), `R_68K_TLS_IE8` (36), `R_68K_TLS_LE32` (37), `R_68K_TLS_LE16` (38), `R_68K_TLS_LE8` (39), `R_68K_TLS_DTPMOD32` (40), `R_68K_TLS_DTPREL32` (41), `R_68K_TLS_TPREL32` (42)
 
 ### 20c. M68K Relocation Backend
-- [ ] `m68k_reloc_size()` for all M68K relocation types.
-- [ ] `m68k_is_pc_relative()`: PC32, PC16, PC8.
-- [ ] `m68k_is_tls()`: all TLS_* types.
-- [ ] `m68k_apply()`: S + A for absolute, S + A − P for PC-relative, with 8/16/32-bit overflow checks.
-- [ ] `m68k_apply()`: GOT/PLT slot references.
-- [ ] `m68k_apply()`: All TLS relocations.
-- [ ] Register under `EM_68K`.
-- [ ] Relocation name strings for all M68K types.
+- [x] `m68k_reloc_size()` for all M68K relocation types.
+- [x] `m68k_is_pc_relative()`: PC32, PC16, PC8.
+- [x] `m68k_is_tls()`: all TLS_* types.
+- [x] `m68k_apply()`: S + A for absolute, S + A − P for PC-relative, with 8/16/32-bit overflow checks.
+- [x] `m68k_apply()`: GOT/PLT slot references.
+- [x] `m68k_apply()`: All TLS relocations.
+- [x] Register under `EM_68K`.
+- [x] Relocation name strings for all M68K types.
 
 ### 20d. M68K Validation
 - [ ] Accept `EM_68K` with `ELFCLASS32` only.

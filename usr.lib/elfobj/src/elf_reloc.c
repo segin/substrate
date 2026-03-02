@@ -1010,6 +1010,167 @@ static int larch_apply(const elfobj_reloc_ctx_t *ctx,
     }
 }
 
+static int m68k_reloc_size(uint32_t type) {
+    switch (type) {
+        case R_68K_NONE:
+            return 0;
+        case R_68K_16:
+        case R_68K_PC16:
+        case R_68K_GOT16:
+        case R_68K_GOT16O:
+        case R_68K_PLT16:
+        case R_68K_PLT16O:
+        case R_68K_TLS_GD16:
+        case R_68K_TLS_LDM16:
+        case R_68K_TLS_LDO16:
+        case R_68K_TLS_IE16:
+        case R_68K_TLS_LE16:
+            return 2;
+        case R_68K_8:
+        case R_68K_PC8:
+        case R_68K_GOT8:
+        case R_68K_GOT8O:
+        case R_68K_PLT8:
+        case R_68K_PLT8O:
+        case R_68K_TLS_GD8:
+        case R_68K_TLS_LDM8:
+        case R_68K_TLS_LDO8:
+        case R_68K_TLS_IE8:
+        case R_68K_TLS_LE8:
+            return 1;
+        default:
+            return 4;
+    }
+}
+
+static int m68k_is_pc_relative(uint32_t type) {
+    return type == R_68K_PC32 || type == R_68K_PC16 || type == R_68K_PC8;
+}
+
+static int m68k_is_tls(uint32_t type) {
+    switch (type) {
+        case R_68K_TLS_GD32:
+        case R_68K_TLS_GD16:
+        case R_68K_TLS_GD8:
+        case R_68K_TLS_LDM32:
+        case R_68K_TLS_LDM16:
+        case R_68K_TLS_LDM8:
+        case R_68K_TLS_LDO32:
+        case R_68K_TLS_LDO16:
+        case R_68K_TLS_LDO8:
+        case R_68K_TLS_IE32:
+        case R_68K_TLS_IE16:
+        case R_68K_TLS_IE8:
+        case R_68K_TLS_LE32:
+        case R_68K_TLS_LE16:
+        case R_68K_TLS_LE8:
+        case R_68K_TLS_DTPMOD32:
+        case R_68K_TLS_DTPREL32:
+        case R_68K_TLS_TPREL32:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int m68k_apply(const elfobj_reloc_ctx_t *ctx,
+                      uint32_t type,
+                      uint64_t place,
+                      uint64_t sym_value,
+                      int64_t addend,
+                      uint64_t *out_value) {
+    elf_swide_t v;
+    (void)ctx;
+    switch (type) {
+        case R_68K_NONE:
+            *out_value = 0;
+            return 0;
+        case R_68K_32:
+        case R_68K_GOT32:
+        case R_68K_GOT32O:
+        case R_68K_PLT32:
+        case R_68K_PLT32O:
+        case R_68K_COPY:
+        case R_68K_GLOB_DAT:
+        case R_68K_JMP_SLOT:
+        case R_68K_RELATIVE:
+        case R_68K_TLS_GD32:
+        case R_68K_TLS_LDM32:
+        case R_68K_TLS_LDO32:
+        case R_68K_TLS_IE32:
+        case R_68K_TLS_LE32:
+        case R_68K_TLS_DTPMOD32:
+        case R_68K_TLS_DTPREL32:
+        case R_68K_TLS_TPREL32:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 32)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_68K_PC32:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if (!swide_in_signed_bits(v, 32)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_68K_16:
+        case R_68K_GOT16:
+        case R_68K_GOT16O:
+        case R_68K_PLT16:
+        case R_68K_PLT16O:
+        case R_68K_TLS_GD16:
+        case R_68K_TLS_LDM16:
+        case R_68K_TLS_LDO16:
+        case R_68K_TLS_IE16:
+        case R_68K_TLS_LE16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_signed_bits(v, 16) && !swide_in_unsigned_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_68K_PC16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if (!swide_in_signed_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_68K_8:
+        case R_68K_GOT8:
+        case R_68K_GOT8O:
+        case R_68K_PLT8:
+        case R_68K_PLT8O:
+        case R_68K_TLS_GD8:
+        case R_68K_TLS_LDM8:
+        case R_68K_TLS_LDO8:
+        case R_68K_TLS_IE8:
+        case R_68K_TLS_LE8:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 8)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 8);
+            return 0;
+        case R_68K_PC8:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if (!swide_in_signed_bits(v, 8)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 8);
+            return 0;
+        default:
+            if (m68k_is_tls(type)) {
+                v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+                *out_value = swide_to_width(v, 32);
+                return 0;
+            }
+            return -1;
+    }
+}
+
 static int arm_reloc_size(uint32_t type) {
     switch (type) {
         case R_ARM_NONE:
@@ -1745,6 +1906,13 @@ static void register_builtin_backends_locked(void) {
     b.is_pc_relative = larch_is_pc_relative;
     g_backends[g_backend_count++] = b;
 
+    memset(&b, 0, sizeof(b));
+    b.machine = EM_68K;
+    b.apply_reloc = m68k_apply;
+    b.reloc_size = m68k_reloc_size;
+    b.is_pc_relative = m68k_is_pc_relative;
+    g_backends[g_backend_count++] = b;
+
     g_builtin_backends_ready = 1;
 }
 
@@ -1976,6 +2144,9 @@ int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type) {
     if (machine == EM_LOONGARCH) {
         return larch_is_tls(type);
     }
+    if (machine == EM_68K) {
+        return m68k_is_tls(type);
+    }
     return 0;
 }
 
@@ -2194,6 +2365,52 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
                 case R_LARCH_SUB16: return "R_LARCH_SUB16";
                 case R_LARCH_SUB32: return "R_LARCH_SUB32";
                 case R_LARCH_SUB64: return "R_LARCH_SUB64";
+                default: break;
+            }
+            break;
+        case EM_68K:
+            switch (type) {
+                case R_68K_NONE: return "R_68K_NONE";
+                case R_68K_32: return "R_68K_32";
+                case R_68K_16: return "R_68K_16";
+                case R_68K_8: return "R_68K_8";
+                case R_68K_PC32: return "R_68K_PC32";
+                case R_68K_PC16: return "R_68K_PC16";
+                case R_68K_PC8: return "R_68K_PC8";
+                case R_68K_GOT32: return "R_68K_GOT32";
+                case R_68K_GOT16: return "R_68K_GOT16";
+                case R_68K_GOT8: return "R_68K_GOT8";
+                case R_68K_GOT32O: return "R_68K_GOT32O";
+                case R_68K_GOT16O: return "R_68K_GOT16O";
+                case R_68K_GOT8O: return "R_68K_GOT8O";
+                case R_68K_PLT32: return "R_68K_PLT32";
+                case R_68K_PLT16: return "R_68K_PLT16";
+                case R_68K_PLT8: return "R_68K_PLT8";
+                case R_68K_PLT32O: return "R_68K_PLT32O";
+                case R_68K_PLT16O: return "R_68K_PLT16O";
+                case R_68K_PLT8O: return "R_68K_PLT8O";
+                case R_68K_COPY: return "R_68K_COPY";
+                case R_68K_GLOB_DAT: return "R_68K_GLOB_DAT";
+                case R_68K_JMP_SLOT: return "R_68K_JMP_SLOT";
+                case R_68K_RELATIVE: return "R_68K_RELATIVE";
+                case R_68K_TLS_GD32: return "R_68K_TLS_GD32";
+                case R_68K_TLS_GD16: return "R_68K_TLS_GD16";
+                case R_68K_TLS_GD8: return "R_68K_TLS_GD8";
+                case R_68K_TLS_LDM32: return "R_68K_TLS_LDM32";
+                case R_68K_TLS_LDM16: return "R_68K_TLS_LDM16";
+                case R_68K_TLS_LDM8: return "R_68K_TLS_LDM8";
+                case R_68K_TLS_LDO32: return "R_68K_TLS_LDO32";
+                case R_68K_TLS_LDO16: return "R_68K_TLS_LDO16";
+                case R_68K_TLS_LDO8: return "R_68K_TLS_LDO8";
+                case R_68K_TLS_IE32: return "R_68K_TLS_IE32";
+                case R_68K_TLS_IE16: return "R_68K_TLS_IE16";
+                case R_68K_TLS_IE8: return "R_68K_TLS_IE8";
+                case R_68K_TLS_LE32: return "R_68K_TLS_LE32";
+                case R_68K_TLS_LE16: return "R_68K_TLS_LE16";
+                case R_68K_TLS_LE8: return "R_68K_TLS_LE8";
+                case R_68K_TLS_DTPMOD32: return "R_68K_TLS_DTPMOD32";
+                case R_68K_TLS_DTPREL32: return "R_68K_TLS_DTPREL32";
+                case R_68K_TLS_TPREL32: return "R_68K_TLS_TPREL32";
                 default: break;
             }
             break;
