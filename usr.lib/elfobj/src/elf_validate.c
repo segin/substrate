@@ -585,6 +585,12 @@ static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
                                    "EM_68K has unknown e_flags bits");
             }
             break;
+        case EM_VAX:
+            if (obj->flags != 0) {
+                return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_VAX has unknown e_flags bits");
+            }
+            break;
         default:
             break;
     }

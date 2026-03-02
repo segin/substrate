@@ -976,8 +976,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 21. VAX Support
 
 ### 21a. Machine Types and Constants
-- [ ] Define `EM_VAX` (75).
-- [ ] VAX has no mandatory `e_flags`; validate flags is 0.
+- [x] Define `EM_VAX` (75).
+- [x] VAX has no mandatory `e_flags`; validate flags is 0.
 
 ### 21b. VAX Relocation Type Constants
 - [ ] `R_VAX_NONE` (0), `R_VAX_32` (1), `R_VAX_16` (2), `R_VAX_8` (3)
