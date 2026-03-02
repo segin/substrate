@@ -564,3 +564,11 @@ The prior phase-1 implementation used delegated backend assembly (`gcc -c -x ass
 - Preserve deterministic object output and stable diagnostics as non-regression gates.
 - Maintain `ld` and `cc` pipeline interoperability as release gates throughout the transition.
 - Keep compatibility/documented-incompatibility behavior explicit in docs and regression tests.
+
+## Appendix B: Per-Architecture Reference and GNU Property Semantics
+
+- The per-architecture instruction-family appendix is maintained in `docs/specs/as_arch_reference.md`.
+- x86-64 ISA note semantics are tracked through `.note.gnu.property` with:
+  - Property type: `GNU_PROPERTY_X86_ISA_1_NEEDED` (`0xc0008002`).
+  - ISA bits: `GNU_PROPERTY_X86_ISA_1_BASELINE`, `GNU_PROPERTY_X86_ISA_1_V2`, `GNU_PROPERTY_X86_ISA_1_V3`, `GNU_PROPERTY_X86_ISA_1_V4`.
+- The note bitmask communicates minimum required ISA level for the object and is used by loader/tooling compatibility checks.

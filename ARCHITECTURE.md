@@ -230,7 +230,7 @@ These components are essential for booting and basic system operation.
   - For complete ISA coverage during migration, it still forwards final assembly to host GCC/GAS (`-m32`/`-m64`) and validates ELF class/machine/type through `libelfobj`.
   - Supports pass-through of common assembler options (`-I`, `-D`, `-Wa`, `-march`, `-mtune`, `-g`).
   - Exposes optional safety limits (`--max-input-bytes`, `--max-line-bytes`, `--max-token-length`, `--max-macro-depth`, `--max-include-depth`) and optional structured wrapper diagnostics via `AS_ERROR_CODES=1`.
-  - Spec and rollout docs are maintained under `docs/specs/as_spec.md` and `docs/specs/as_rollout.md`.
+  - Spec and rollout docs are maintained under `docs/specs/as_spec.md`, `docs/specs/as_rollout.md`, and the per-architecture appendix `docs/specs/as_arch_reference.md`.
   - Regression coverage lives in `tests/usr.bin/as/` including compatibility, relocation/ELF, diagnostics, determinism, fuzz-smoke, rollout integration harnesses, the `tests/usr.bin/as/test_unit_matrix.sh` per-arch unit matrix runner, `tests/usr.bin/as/test_integration_matrix.sh` for cross-arch/round-trip/toolchain-interoperability checks, and `tests/usr.bin/as/test_fuzz_matrix.sh` for grammar-aware/parser-fuzz + byte-level ELF mutation validation.
 - **`ld`**: linker prototype built on `libelfobj`.
   - Merges objects/archives and emits ET_REL/ET_EXEC/ET_DYN outputs.

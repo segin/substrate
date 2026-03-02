@@ -3,10 +3,10 @@
 .Os Substrate
 .Sh NAME
 .Nm as
-.Nd Substrate assembler driver
+.Nd Substrate assembler frontend
 .Sh SYNOPSIS
 .Nm
-.Op Fl 32 | Fl 64
+.Op Fl 32 | Fl 64 | Fl -32 | Fl -64
 .Op Fl c
 .Op Fl g
 .Op Fl I Ar dir
@@ -29,39 +29,41 @@
 .Ar input.s
 .Sh DESCRIPTION
 .Nm
-invokes a backend compiler driver
-.Pq usually
-.Xr gcc 1
-in assembler mode and validates the emitted object using
+is the Substrate assembler command-line frontend.
+It provides GNU-compatible assembler option handling, source preflight limits,
+and ELF post-validation through
 .Xr libelfobj 3 .
-The driver selects 32-bit or 64-bit mode, forwards compatible assembler
-options, and validates the generated object as ET_REL with expected class and
-machine.
 .Pp
-The executable aliases
+Current release behavior is a hybrid pipeline:
+.Nm
+forwards final assembly to a backend assembler toolchain
+.Pq usually via Xr gcc 1
+and then validates output object invariants
+.Pq ET_REL, class, and machine .
+In-tree native parser/encoder/relocation modules are staged and continuously
+validated by the assembler test suite.
+.Pp
+Alias binaries
 .Nm as.x86
 and
 .Nm as.x64
-select default 32-bit and 64-bit modes respectively.
-.Pp
-The tree also contains staged native assembler frontend/encoder modules for x86
-and ARM development/testing. Current normal
-.Nm
-CLI output flow remains backend-driver based.
+select 32-bit and 64-bit defaults respectively.
 .Sh OPTIONS
 .Bl -tag -width "--max-token-length"
-.It Fl 32 , Fl 64
-Select 32-bit or 64-bit mode.
+.It Fl 32 , Fl -32
+Select 32-bit mode (i386 output contract).
+.It Fl 64 , Fl -64
+Select 64-bit mode (x86-64 output contract).
 .It Fl c
-Accepted for compatibility; output is always an object file.
+Accepted for compatibility; output remains an object file.
 .It Fl g
-Request debug-capable assembly output from the backend.
+Request debug-capable assembly output from backend.
 .It Fl I Ar dir
 Add include search path.
 .It Fl D Ar macro Ns Op = Ns Ar value
 Define preprocessor symbol.
 .It Fl march Ar cpu
-Select target machine string.
+Select target machine/ISA level string.
 .It Fl mtune Ar cpu
 Select tuning target string.
 .It Fl msyntax Ns = Ns Ar att|intel
@@ -73,15 +75,16 @@ Disable warnings.
 .It Fl -fatal-warnings
 Treat warnings as errors.
 .It Fl al Ns Op = Ns Ar file
-Emit listing output. If
+Emit listing output.
+If
 .Ar file
-is omitted, output path defaults to
+is omitted, listing path defaults to
 .Ar output
 with
 .Pa .lst
 suffix.
 .It Fl -defsym Ar sym=val
-Define an absolute assembler symbol.
+Define absolute assembler symbol.
 .It Fl -statistics
 Print wall-clock/resource usage statistics.
 .It Fl -target-help
@@ -89,15 +92,15 @@ Print target summary and exit.
 .It Fl Wa Ar opts
 Pass comma-separated options to backend assembler.
 .It Fl -max-input-bytes Ar n
-Reject input larger than
+Reject source larger than
 .Ar n
 bytes.
 .It Fl -max-line-bytes Ar n
-Reject logical lines longer than
+Reject logical lines larger than
 .Ar n
 bytes.
 .It Fl -max-token-length Ar n
-Reject tokens longer than
+Reject tokens larger than
 .Ar n
 bytes.
 .It Fl -max-macro-depth Ar n
@@ -107,33 +110,98 @@ Reject macro nesting deeper than
 Reject include nesting deeper than
 .Ar n .
 .El
+.Sh DIRECTIVES
+.Nm
+tracks GNU-style directive families used by Substrate userland and toolchain flows,
+including:
+.Bl -tag -width ".cfi_startproc/.cfi_endproc"
+.It Data
+.Cm .byte , .short/.hword , .long/.int , .quad/.8byte , .float , .double ,
+.Cm .ascii , .asciz/.string , .zero/.space , .fill , .skip , .org , .incbin
+.It Sections and layout
+.Cm .text , .data , .bss , .rodata , .section , .pushsection , .popsection ,
+.Cm .previous , .subsection , .group , .align/.balign/.p2align
+.It Symbols
+.Cm .globl/.global , .local , .weak , .comm , .lcomm , .type , .size ,
+.Cm .hidden , .protected , .internal , .symver
+.It Conditionals and macros
+.Cm .if/.ifdef/.ifndef/.else/.endif , .macro/.endm , .rept/.endr , .irp/.irpc
+.It Debug/CFI
+.Cm .file , .loc , .cfi_*
+.El
+.Sh ARCHITECTURE SYNTAX
+.Bl -tag -width "AArch64 (ARMv8.0-v8.1)"
+.It x86 / x86-64
+AT&T syntax is default.
+Intel syntax is available with
+.Fl msyntax=intel .
+ISA-level gating is controlled by
+.Fl march
+.Pq x86-64-v1/v2/v3/v4 .
+.It ARMv7 (AArch32)
+Staged support includes
+.Cm .arm/.thumb/.thumb_func ,
+condition codes, IT blocks, register lists,
+VFP/NEON forms, and ARM relocation mappings.
+.It AArch64 (ARMv8.0-v8.1)
+Staged support includes A64 data-processing/branch/load-store/system,
+SIMD/FP, ARMv8.1 LSE/RDMA/LOR/system-register patterns,
+and AArch64 relocation mappings.
+.El
+.Pp
+See
+.Pa docs/specs/as_arch_reference.md
+for the per-architecture instruction-family appendix.
+.Sh NOTE.GNU.PROPERTY
+For x86-64 ISA level tagging,
+.Nm
+uses
+.Pa .note.gnu.property
+with GNU property type
+.Dv GNU_PROPERTY_X86_ISA_1_NEEDED
+.Pq 0xc0008002 .
+The ISA bitmask uses:
+.Bl -tag -width GNU_PROPERTY_X86_ISA_1_BASELINE
+.It Dv GNU_PROPERTY_X86_ISA_1_BASELINE
+Baseline x86-64 ISA.
+.It Dv GNU_PROPERTY_X86_ISA_1_V2
+x86-64-v2 requirement bit.
+.It Dv GNU_PROPERTY_X86_ISA_1_V3
+x86-64-v3 requirement bit.
+.It Dv GNU_PROPERTY_X86_ISA_1_V4
+x86-64-v4 requirement bit.
+.El
+When the selected/used ISA level is v2+,
+.Nm
+marks the highest required level via cumulative needed bits.
 .Sh ENVIRONMENT
 .Bl -tag -width AS_BACKEND
 .It Ev AS_BACKEND
-Path/name of backend compiler driver executable. If unset,
+Backend compiler/assembler driver path.
+If unset,
 .Nm
 uses
 .Ev CC
 or falls back to
 .Dq gcc .
 .It Ev AS_ERROR_CODES
-If set to a non-empty value,
+If non-empty,
 .Nm
-prefixes driver-originated diagnostics with a stable internal error code.
+prefixes driver-originated diagnostics with stable internal error IDs.
 .It Ev AS_MAX_INPUT_BYTES
-Default value for
+Default for
 .Fl -max-input-bytes .
 .It Ev AS_MAX_LINE_BYTES
-Default value for
+Default for
 .Fl -max-line-bytes .
 .It Ev AS_MAX_TOKEN_LENGTH
-Default value for
+Default for
 .Fl -max-token-length .
 .It Ev AS_MAX_MACRO_DEPTH
-Default value for
+Default for
 .Fl -max-macro-depth .
 .It Ev AS_MAX_INCLUDE_DEPTH
-Default value for
+Default for
 .Fl -max-include-depth .
 .El
 .Sh EXIT STATUS
@@ -141,12 +209,23 @@ Default value for
 .It 0
 Successful assembly and validation.
 .It 1
-Backend execution, validation, or internal driver failure.
+Backend execution, validation, or internal frontend failure.
 .It 2
-Usage or argument error.
+Usage/argument error.
+.El
+.Sh FILES
+.Bl -tag -width "docs/specs/as_arch_reference.md"
+.It Pa docs/specs/as_spec.md
+Assembler formal specification.
+.It Pa docs/specs/as_rollout.md
+Rollout and release gating matrix.
+.It Pa docs/specs/as_arch_reference.md
+Per-architecture instruction-family appendix.
 .El
 .Sh SEE ALSO
 .Xr cc 1 ,
 .Xr cpp 1 ,
 .Xr ld 1 ,
+.Xr objdump 1 ,
+.Xr readelf 1 ,
 .Xr libelfobj 3

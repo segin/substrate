@@ -463,9 +463,9 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] Crash-free guarantee on arbitrary input.
 
 ## 9. Documentation
-- [ ] `as.1` man page: all options, directives, per-arch syntax.
-- [ ] Per-arch instruction reference appendix.
-- [ ] `.note.gnu.property` x86-64 ISA level semantics.
+- [x] `as.1` man page: all options, directives, per-arch syntax.
+- [x] Per-arch instruction reference appendix.
+- [x] `.note.gnu.property` x86-64 ISA level semantics.
 
 ## 10. Build System
 - [ ] Recursive Makefile, `NATIVE_BUILD=1` for host testing.
