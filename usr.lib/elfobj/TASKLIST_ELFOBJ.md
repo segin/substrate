@@ -886,16 +886,16 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Content: `R_LARCH_ADD6/8/16/32/64`, `R_LARCH_SUB6/8/16/32/64`
 
 ### 19c. LoongArch Relocation Backend
-- [ ] `larch_reloc_size()` for all LoongArch relocation types.
-- [ ] `larch_is_pc_relative()`: B16/B21/B26, PCALA_HI20/LO12, GOT_PC_*, TLS_IE_PC_*, TLSDESC_PC_*.
-- [ ] `larch_is_tls()`: all TLS_* and TLSDESC_* types.
-- [ ] `larch_apply()`: 20-bit HI20 immediate insertion (bits[24:5]).
-- [ ] `larch_apply()`: 12-bit LO12 immediate insertion (bits[21:10]).
-- [ ] `larch_apply()`: Branch B16 (16-bit signed offset << 2), B21 (21-bit << 2), B26 (26-bit << 2).
-- [ ] `larch_apply()`: PCALA page-aligned PC-relative pair.
-- [ ] `larch_apply()`: ADD/SUB content relocations.
-- [ ] Register under `EM_LOONGARCH`.
-- [ ] Relocation name strings for all LoongArch types.
+- [x] `larch_reloc_size()` for all LoongArch relocation types.
+- [x] `larch_is_pc_relative()`: B16/B21/B26, PCALA_HI20/LO12, GOT_PC_*, TLS_IE_PC_*, TLSDESC_PC_*.
+- [x] `larch_is_tls()`: all TLS_* and TLSDESC_* types.
+- [x] `larch_apply()`: 20-bit HI20 immediate insertion (bits[24:5]).
+- [x] `larch_apply()`: 12-bit LO12 immediate insertion (bits[21:10]).
+- [x] `larch_apply()`: Branch B16 (16-bit signed offset << 2), B21 (21-bit << 2), B26 (26-bit << 2).
+- [x] `larch_apply()`: PCALA page-aligned PC-relative pair.
+- [x] `larch_apply()`: ADD/SUB content relocations.
+- [x] Register under `EM_LOONGARCH`.
+- [x] Relocation name strings for all LoongArch types.
 
 ### 19d. LoongArch Validation
 - [ ] Accept `EM_LOONGARCH` with `ELFCLASS32` (LA32) or `ELFCLASS64` (LA64).

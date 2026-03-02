@@ -791,6 +791,225 @@ static int riscv_apply(const elfobj_reloc_ctx_t *ctx,
     }
 }
 
+static int larch_reloc_size(uint32_t type) {
+    switch (type) {
+        case R_LARCH_NONE:
+            return 0;
+        case R_LARCH_64:
+        case R_LARCH_TLS_DTPMOD64:
+        case R_LARCH_TLS_DTPREL64:
+        case R_LARCH_TLS_TPREL64:
+        case R_LARCH_ADD64:
+        case R_LARCH_SUB64:
+            return 8;
+        case R_LARCH_ADD16:
+        case R_LARCH_SUB16:
+            return 2;
+        case R_LARCH_ADD8:
+        case R_LARCH_SUB8:
+            return 1;
+        default:
+            return 4;
+    }
+}
+
+static int larch_is_pc_relative(uint32_t type) {
+    switch (type) {
+        case R_LARCH_B16:
+        case R_LARCH_B21:
+        case R_LARCH_B26:
+        case R_LARCH_PCALA_HI20:
+        case R_LARCH_PCALA_LO12:
+        case R_LARCH_PCALA64_LO20:
+        case R_LARCH_PCALA64_HI12:
+        case R_LARCH_GOT_PC_HI20:
+        case R_LARCH_GOT_PC_LO12:
+        case R_LARCH_GOT64_PC_LO20:
+        case R_LARCH_GOT64_PC_HI12:
+        case R_LARCH_TLS_IE_PC_HI20:
+        case R_LARCH_TLS_IE_PC_LO12:
+        case R_LARCH_TLS_IE64_PC_LO20:
+        case R_LARCH_TLS_IE64_PC_HI12:
+        case R_LARCH_TLS_DESC_PC_HI20:
+        case R_LARCH_TLS_DESC_PC_LO12:
+        case R_LARCH_TLS_DESC64_PC_LO20:
+        case R_LARCH_TLS_DESC64_PC_HI12:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int larch_is_tls(uint32_t type) {
+    switch (type) {
+        case R_LARCH_TLS_DTPMOD32:
+        case R_LARCH_TLS_DTPMOD64:
+        case R_LARCH_TLS_DTPREL32:
+        case R_LARCH_TLS_DTPREL64:
+        case R_LARCH_TLS_TPREL32:
+        case R_LARCH_TLS_TPREL64:
+        case R_LARCH_TLS_LE_HI20:
+        case R_LARCH_TLS_LE_LO12:
+        case R_LARCH_TLS_LE64_LO20:
+        case R_LARCH_TLS_LE64_HI12:
+        case R_LARCH_TLS_IE_PC_HI20:
+        case R_LARCH_TLS_IE_PC_LO12:
+        case R_LARCH_TLS_IE64_PC_LO20:
+        case R_LARCH_TLS_IE64_PC_HI12:
+        case R_LARCH_TLS_LD_PC_HI20:
+        case R_LARCH_TLS_GD_PC_HI20:
+        case R_LARCH_TLS_DESC_PC_HI20:
+        case R_LARCH_TLS_DESC_PC_LO12:
+        case R_LARCH_TLS_DESC64_PC_LO20:
+        case R_LARCH_TLS_DESC64_PC_HI12:
+        case R_LARCH_TLS_DESC_HI20:
+        case R_LARCH_TLS_DESC_LO12:
+        case R_LARCH_TLS_DESC64_LO20:
+        case R_LARCH_TLS_DESC64_HI12:
+        case R_LARCH_TLS_DESC_LD:
+        case R_LARCH_TLS_DESC_CALL:
+        case R_LARCH_TLS_LE_HI20_R:
+        case R_LARCH_TLS_LE_ADD_R:
+        case R_LARCH_TLS_LE_LO12_R:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int larch_apply(const elfobj_reloc_ctx_t *ctx,
+                       uint32_t type,
+                       uint64_t place,
+                       uint64_t sym_value,
+                       int64_t addend,
+                       uint64_t *out_value) {
+    elf_swide_t v;
+    (void)ctx;
+    switch (type) {
+        case R_LARCH_NONE:
+        case R_LARCH_RELAX:
+            *out_value = 0;
+            return 0;
+        case R_LARCH_32:
+        case R_LARCH_RELATIVE:
+        case R_LARCH_COPY:
+        case R_LARCH_JUMP_SLOT:
+        case R_LARCH_ADD32:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 32)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_LARCH_64:
+        case R_LARCH_IRELATIVE:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        case R_LARCH_ABS_HI20:
+        case R_LARCH_PCALA_HI20:
+        case R_LARCH_GOT_PC_HI20:
+        case R_LARCH_TLS_LE_HI20:
+        case R_LARCH_TLS_IE_PC_HI20:
+        case R_LARCH_TLS_LD_PC_HI20:
+        case R_LARCH_TLS_GD_PC_HI20:
+        case R_LARCH_TLS_DESC_PC_HI20:
+        case R_LARCH_TLS_DESC_HI20:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (larch_is_pc_relative(type)) {
+                v -= (elf_swide_t)place;
+            }
+            *out_value = swide_to_width((v + 0x800) >> 12, 20);
+            return 0;
+        case R_LARCH_ABS_LO12:
+        case R_LARCH_PCALA_LO12:
+        case R_LARCH_GOT_PC_LO12:
+        case R_LARCH_TLS_LE_LO12:
+        case R_LARCH_TLS_IE_PC_LO12:
+        case R_LARCH_TLS_DESC_PC_LO12:
+        case R_LARCH_TLS_DESC_LO12:
+        case R_LARCH_TLS_LE_LO12_R:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (larch_is_pc_relative(type)) {
+                v -= (elf_swide_t)place;
+            }
+            *out_value = swide_to_width(v, 12);
+            return 0;
+        case R_LARCH_B16:
+            v = ((elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place) >> 2;
+            if (!swide_in_signed_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_LARCH_B21:
+            v = ((elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place) >> 2;
+            if (!swide_in_signed_bits(v, 21)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 21);
+            return 0;
+        case R_LARCH_B26:
+            v = ((elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place) >> 2;
+            if (!swide_in_signed_bits(v, 26)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 26);
+            return 0;
+        case R_LARCH_ADD6:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 6)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 6);
+            return 0;
+        case R_LARCH_ADD8:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 8)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 8);
+            return 0;
+        case R_LARCH_ADD16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_LARCH_SUB6:
+            v = (elf_swide_t)sym_value - (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 6)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 6);
+            return 0;
+        case R_LARCH_SUB8:
+            v = (elf_swide_t)sym_value - (elf_swide_t)addend;
+            *out_value = swide_to_width(v, 8);
+            return 0;
+        case R_LARCH_SUB16:
+            v = (elf_swide_t)sym_value - (elf_swide_t)addend;
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_LARCH_SUB32:
+            v = (elf_swide_t)sym_value - (elf_swide_t)addend;
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_LARCH_SUB64:
+            v = (elf_swide_t)sym_value - (elf_swide_t)addend;
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        default:
+            if (larch_is_tls(type)) {
+                v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+                *out_value = swide_to_width(v, 64);
+                return 0;
+            }
+            return -1;
+    }
+}
+
 static int arm_reloc_size(uint32_t type) {
     switch (type) {
         case R_ARM_NONE:
@@ -1519,6 +1738,13 @@ static void register_builtin_backends_locked(void) {
     b.is_pc_relative = riscv_is_pc_relative;
     g_backends[g_backend_count++] = b;
 
+    memset(&b, 0, sizeof(b));
+    b.machine = EM_LOONGARCH;
+    b.apply_reloc = larch_apply;
+    b.reloc_size = larch_reloc_size;
+    b.is_pc_relative = larch_is_pc_relative;
+    g_backends[g_backend_count++] = b;
+
     g_builtin_backends_ready = 1;
 }
 
@@ -1747,6 +1973,9 @@ int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type) {
     if (machine == EM_RISCV) {
         return riscv_is_tls(type);
     }
+    if (machine == EM_LOONGARCH) {
+        return larch_is_tls(type);
+    }
     return 0;
 }
 
@@ -1925,6 +2154,46 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
                 case R_RISCV_TPREL_LO12_I: return "R_RISCV_TPREL_LO12_I";
                 case R_RISCV_TPREL_LO12_S: return "R_RISCV_TPREL_LO12_S";
                 case R_RISCV_TPREL_ADD: return "R_RISCV_TPREL_ADD";
+                default: break;
+            }
+            break;
+        case EM_LOONGARCH:
+            switch (type) {
+                case R_LARCH_NONE: return "R_LARCH_NONE";
+                case R_LARCH_32: return "R_LARCH_32";
+                case R_LARCH_64: return "R_LARCH_64";
+                case R_LARCH_RELATIVE: return "R_LARCH_RELATIVE";
+                case R_LARCH_COPY: return "R_LARCH_COPY";
+                case R_LARCH_JUMP_SLOT: return "R_LARCH_JUMP_SLOT";
+                case R_LARCH_IRELATIVE: return "R_LARCH_IRELATIVE";
+                case R_LARCH_B16: return "R_LARCH_B16";
+                case R_LARCH_B21: return "R_LARCH_B21";
+                case R_LARCH_B26: return "R_LARCH_B26";
+                case R_LARCH_ABS_HI20: return "R_LARCH_ABS_HI20";
+                case R_LARCH_ABS_LO12: return "R_LARCH_ABS_LO12";
+                case R_LARCH_PCALA_HI20: return "R_LARCH_PCALA_HI20";
+                case R_LARCH_PCALA_LO12: return "R_LARCH_PCALA_LO12";
+                case R_LARCH_GOT_PC_HI20: return "R_LARCH_GOT_PC_HI20";
+                case R_LARCH_GOT_PC_LO12: return "R_LARCH_GOT_PC_LO12";
+                case R_LARCH_TLS_LE_HI20: return "R_LARCH_TLS_LE_HI20";
+                case R_LARCH_TLS_LE_LO12: return "R_LARCH_TLS_LE_LO12";
+                case R_LARCH_TLS_IE_PC_HI20: return "R_LARCH_TLS_IE_PC_HI20";
+                case R_LARCH_TLS_IE_PC_LO12: return "R_LARCH_TLS_IE_PC_LO12";
+                case R_LARCH_TLS_DESC_PC_HI20: return "R_LARCH_TLS_DESC_PC_HI20";
+                case R_LARCH_TLS_DESC_PC_LO12: return "R_LARCH_TLS_DESC_PC_LO12";
+                case R_LARCH_TLS_DESC_CALL: return "R_LARCH_TLS_DESC_CALL";
+                case R_LARCH_RELAX: return "R_LARCH_RELAX";
+                case R_LARCH_ALIGN: return "R_LARCH_ALIGN";
+                case R_LARCH_ADD6: return "R_LARCH_ADD6";
+                case R_LARCH_ADD8: return "R_LARCH_ADD8";
+                case R_LARCH_ADD16: return "R_LARCH_ADD16";
+                case R_LARCH_ADD32: return "R_LARCH_ADD32";
+                case R_LARCH_ADD64: return "R_LARCH_ADD64";
+                case R_LARCH_SUB6: return "R_LARCH_SUB6";
+                case R_LARCH_SUB8: return "R_LARCH_SUB8";
+                case R_LARCH_SUB16: return "R_LARCH_SUB16";
+                case R_LARCH_SUB32: return "R_LARCH_SUB32";
+                case R_LARCH_SUB64: return "R_LARCH_SUB64";
                 default: break;
             }
             break;
