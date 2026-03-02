@@ -364,15 +364,15 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `SVC #imm16`, `HVC #imm16`, `SMC #imm16`, `BRK #imm16`, `HLT #imm16`
 
 ### 7e. Load/Store Instructions
-- [ ] `LDR/STR` (byte/half/word/dword): immediate offset, pre/post-index, register offset
-- [ ] `LDRB/STRB`, `LDRH/STRH`, `LDRSB/LDRSH`, `LDRSW`
-- [ ] `LDP/STP` (pair load/store), `LDPSW`
-- [ ] `LDNP/STNP` (non-temporal pair)
-- [ ] `LDR Xt, =value` (literal pool), `LDR Xt, label` (PC-relative literal)
-- [ ] `LDXR/STXR`, `LDXRB/STXRB`, `LDXRH/STXRH`, `LDXP/STXP` (exclusive)
-- [ ] `LDAR/STLR`, `LDARB/STLRB`, `LDARH/STLRH` (acquire/release)
-- [ ] `LDAXR/STLXR`, `LDAXRB/STLXRB`, `LDAXRH/STLXRH`, `LDAXP/STLXP` (acquire-exclusive)
-- [ ] `PRFM` (prefetch memory)
+- [x] `LDR/STR` (byte/half/word/dword): immediate offset, pre/post-index, register offset
+- [x] `LDRB/STRB`, `LDRH/STRH`, `LDRSB/LDRSH`, `LDRSW`
+- [x] `LDP/STP` (pair load/store), `LDPSW`
+- [x] `LDNP/STNP` (non-temporal pair)
+- [x] `LDR Xt, =value` (literal pool), `LDR Xt, label` (PC-relative literal)
+- [x] `LDXR/STXR`, `LDXRB/STXRB`, `LDXRH/STXRH`, `LDXP/STXP` (exclusive)
+- [x] `LDAR/STLR`, `LDARB/STLRB`, `LDARH/STLRH` (acquire/release)
+- [x] `LDAXR/STLXR`, `LDAXRB/STLXRB`, `LDAXRH/STLXRH`, `LDAXP/STLXP` (acquire-exclusive)
+- [x] `PRFM` (prefetch memory)
 
 ### 7f. System Instructions
 - [ ] `MSR/MRS` (system register access)
