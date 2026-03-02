@@ -203,3 +203,7 @@ usr.bin/yacc/test_minimal.output
 # sbin binaries
 sbin/fsck/fsck
 sbin/mkfs/mkfs
+sys/gdb_script.txt
+usr.bin/as/aarch64-as
+usr.bin/as/arm-as
+usr.man/mandoc.db

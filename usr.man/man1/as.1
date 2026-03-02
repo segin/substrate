@@ -1,6 +1,6 @@
 .Dd March 2, 2026
 .Dt AS 1
-.Os Substrate
+.Os
 .Sh NAME
 .Nm as
 .Nd Substrate assembler frontend
@@ -32,12 +32,12 @@
 is the Substrate assembler command-line frontend.
 It provides GNU-compatible assembler option handling, source preflight limits,
 and ELF post-validation through
-.Xr libelfobj 3 .
+Li elfobj(3) .
 .Pp
 Current release behavior is a hybrid pipeline:
 .Nm
 forwards final assembly to a backend assembler toolchain
-.Pq usually via Xr gcc 1
+.Pq usually via Li gcc(1)
 and then validates output object invariants
 .Pq ET_REL, class, and machine .
 In-tree native parser/encoder/relocation modules are staged and continuously
@@ -112,8 +112,8 @@ Reject include nesting deeper than
 .El
 .Sh DIRECTIVES
 .Nm
-tracks GNU-style directive families used by Substrate userland and toolchain flows,
-including:
+tracks GNU-style directive families used by Substrate userland and
+toolchain flows, including:
 .Bl -tag -width ".cfi_startproc/.cfi_endproc"
 .It Data
 .Cm .byte , .short/.hword , .long/.int , .quad/.8byte , .float , .double ,
@@ -204,15 +204,6 @@ Default for
 Default for
 .Fl -max-include-depth .
 .El
-.Sh EXIT STATUS
-.Bl -tag -width "123"
-.It 0
-Successful assembly and validation.
-.It 1
-Backend execution, validation, or internal frontend failure.
-.It 2
-Usage/argument error.
-.El
 .Sh FILES
 .Bl -tag -width "docs/specs/as_arch_reference.md"
 .It Pa docs/specs/as_spec.md
@@ -222,10 +213,20 @@ Rollout and release gating matrix.
 .It Pa docs/specs/as_arch_reference.md
 Per-architecture instruction-family appendix.
 .El
+.Sh EXIT STATUS
+.Bl -tag -width "123"
+.It 0
+Successful assembly and validation.
+.It 1
+Backend execution, validation, or internal frontend failure.
+.It 2
+Usage/argument error.
+.El
 .Sh SEE ALSO
-.Xr cc 1 ,
-.Xr cpp 1 ,
-.Xr ld 1 ,
-.Xr objdump 1 ,
-.Xr readelf 1 ,
-.Xr libelfobj 3
+Li cpp(1) ,
+Li ld(1) ,
+Li objdump(1) ,
+Li readelf(1) ,
+Li elfobj(3) ,
+.Pa docs/specs/as_spec.md ,
+.Pa docs/specs/as_arch_reference.md
