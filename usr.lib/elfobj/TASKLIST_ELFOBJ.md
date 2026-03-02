@@ -965,11 +965,11 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] M68K CFA: frame pointer A6 (FP), return address on stack.
 
 ### 20g. M68K Testing
-- [ ] Unit tests for all M68K relocation types (8/16/32-bit absolute and PC-relative).
-- [ ] TLS relocation handling.
-- [ ] Big-endian round-trip read/write.
-- [ ] Validation: reject ELFCLASS64, reject ELFDATA2LSB.
-- [ ] Fuzz M68K ELF parsing → crash-free.
+- [x] Unit tests for all M68K relocation types (8/16/32-bit absolute and PC-relative).
+- [x] TLS relocation handling.
+- [x] Big-endian round-trip read/write.
+- [x] Validation: reject ELFCLASS64, reject ELFDATA2LSB.
+- [x] Fuzz M68K ELF parsing → crash-free.
 
 ---
 
