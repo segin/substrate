@@ -903,10 +903,10 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Validate `e_flags` ABI modifier and float ABI.
 
 ### 19e. LoongArch ELF Read/Write/Create
-- [ ] Recognize `EM_LOONGARCH` as valid machine type.
-- [ ] Parse/write RELA relocations.
-- [ ] `elf_init_loongarch32()`: ELF32/EM_LOONGARCH/ELFDATA2LSB.
-- [ ] `elf_init_loongarch64()`: ELF64/EM_LOONGARCH/ELFDATA2LSB.
+- [x] Recognize `EM_LOONGARCH` as valid machine type.
+- [x] Parse/write RELA relocations.
+- [x] `elf_init_loongarch32()`: ELF32/EM_LOONGARCH/ELFDATA2LSB.
+- [x] `elf_init_loongarch64()`: ELF64/EM_LOONGARCH/ELFDATA2LSB.
 
 ### 19f. LoongArch DWARF
 - [ ] LoongArch DWARF register mapping: $r0–$r31 → 0–31, $f0–$f31 → 32–63.
