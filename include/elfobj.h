@@ -320,6 +320,24 @@ typedef enum {
 #define EF_LARCH_OBJABI_V1 0x40u
 #endif
 
+#ifndef EF_PPC_EMB
+#define EF_PPC_EMB 0x80000000u
+#define EF_PPC64_ABI_V1 0x1u
+#define EF_PPC64_ABI_V2 0x2u
+#define EF_PPC64_ABI (EF_PPC64_ABI_V1 | EF_PPC64_ABI_V2)
+#endif
+
+#ifndef SHT_PPC_TAGS
+#define SHT_PPC_TAGS 0x70000000u
+#define SHT_PPC64_OPD 0x70000001u
+#endif
+
+#ifndef PT_PPC_GNU_MBIND
+#define PT_PPC_GNU_MBIND 0x70000000u
+#define PT_PPC_GNU_MBIND_LO 0x70000000u
+#define PT_PPC_GNU_MBIND_HI 0x70000001u
+#endif
+
 #ifndef SHT_ARM_EXIDX
 #define SHT_ARM_EXIDX 0x70000001u
 #define SHT_ARM_PREEMPTMAP 0x70000002u

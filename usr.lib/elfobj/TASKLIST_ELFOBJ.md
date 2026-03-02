@@ -1015,11 +1015,11 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 22. PowerPC / PowerPC64 Support
 
 ### 22a. Machine Types and Constants
-- [ ] Define `EM_PPC` (20), `EM_PPC64` (21).
-- [ ] Define PPC32 `e_flags`: `EF_PPC_EMB` (0x80000000).
-- [ ] Define PPC64 `e_flags`: `EF_PPC64_ABI_V1` (1), `EF_PPC64_ABI_V2` (2).
-- [ ] Define PPC section types: `SHT_PPC_TAGS` (0x70000000), `SHT_PPC64_OPD` (for `.opd` function descriptors).
-- [ ] Define PPC segment types: `PT_PPC_GNU_MBIND` variants if needed.
+- [x] Define `EM_PPC` (20), `EM_PPC64` (21).
+- [x] Define PPC32 `e_flags`: `EF_PPC_EMB` (0x80000000).
+- [x] Define PPC64 `e_flags`: `EF_PPC64_ABI_V1` (1), `EF_PPC64_ABI_V2` (2).
+- [x] Define PPC section types: `SHT_PPC_TAGS` (0x70000000), `SHT_PPC64_OPD` (for `.opd` function descriptors).
+- [x] Define PPC segment types: `PT_PPC_GNU_MBIND` variants if needed.
 
 ### 22b. PowerPC32 Relocation Type Constants
 - [ ] `R_PPC_NONE` (0), `R_PPC_ADDR32` (1), `R_PPC_ADDR24` (2), `R_PPC_ADDR16` (3)
