@@ -25,6 +25,7 @@ int main(void) {
     elfobj_t *la32 = NULL;
     elfobj_t *la64 = NULL;
     elfobj_t *m68k = NULL;
+    elfobj_t *vax = NULL;
 
     CHECK(elf_reloc_size_for_machine(EM_ARM, R_ARM_CALL) == 4);
     CHECK(elf_reloc_size_for_machine(EM_AARCH64, R_AARCH64_CALL26) == 4);
@@ -45,6 +46,10 @@ int main(void) {
     CHECK(elf_reloc_size_for_machine(EM_68K, R_68K_8) == 1);
     CHECK(elf_reloc_is_pc_relative_for_machine(EM_68K, R_68K_PC16) == 1);
     CHECK(elf_reloc_is_tls_for_machine(EM_68K, R_68K_TLS_TPREL32) == 1);
+    CHECK(elf_reloc_size_for_machine(EM_VAX, R_VAX_32) == 4);
+    CHECK(elf_reloc_size_for_machine(EM_VAX, R_VAX_16) == 2);
+    CHECK(elf_reloc_size_for_machine(EM_VAX, R_VAX_8) == 1);
+    CHECK(elf_reloc_is_pc_relative_for_machine(EM_VAX, R_VAX_PC32) == 1);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_X86_64, R_X86_64_PC32), "R_X86_64_PC32") == 0);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_386, R_386_PC8), "R_386_PC8") == 0);
     CHECK(strncmp(elf_reloc_name_for_machine(EM_386, 9999), "UNKNOWN(", 8) == 0);
@@ -233,6 +238,80 @@ int main(void) {
         size_t build_id_sz = 0;
         CHECK(elf_build_id(x64, &build_id, &build_id_sz) == 0);
     }
+    vax = elf_init_vax();
+    CHECK(vax != NULL);
+    CHECK(elf_machine(vax) == EM_VAX);
+    CHECK(elf_class(vax) == ELFOBJ_CLASS_32);
+    CHECK(elf_endian(vax) == ELFOBJ_ENDIAN_LE);
+    {
+        static const uint32_t vax_types[] = {R_VAX_NONE,    R_VAX_32,      R_VAX_16,
+                                             R_VAX_8,       R_VAX_PC32,    R_VAX_PC16,
+                                             R_VAX_PC8,     R_VAX_GOT32,   R_VAX_PLT32,
+                                             R_VAX_COPY,    R_VAX_GLOB_DAT, R_VAX_JMP_SLOT,
+                                             R_VAX_RELATIVE};
+        size_t i;
+        for (i = 0; i < (sizeof(vax_types) / sizeof(vax_types[0])); ++i) {
+            CHECK(strncmp(elf_reloc_name_for_machine(EM_VAX, vax_types[i]), "UNKNOWN(", 8) != 0);
+        }
+    }
+    {
+        uint64_t outv = 0;
+        CHECK(elf_apply_relocation_value(vax, R_VAX_32, 0x1000, 0x1234, 4, &outv) == ELF_OK);
+        CHECK(outv == 0x1238);
+        CHECK(elf_apply_relocation_value(vax, R_VAX_PC16, 0x1000, 0x1010, 0, &outv) == ELF_OK);
+        CHECK(outv == 0x10);
+        CHECK(elf_apply_relocation_value(vax, R_VAX_PC8, 0x1000, 0x1200, 0, &outv) == ELF_ERR_RELOC);
+    }
+    {
+        elf_section_t *text = elf_find_section(vax, ".text");
+        elf_symbol_t *sym = elf_add_symbol(vax, "vax_sym", 0, 0, STB_GLOBAL, STT_OBJECT);
+        elfobj_t *reopen = NULL;
+        elfobj_t *bad = NULL;
+        size_t i;
+        CHECK(text != NULL);
+        CHECK(sym != NULL);
+        CHECK(elf_symbol_define(sym, text, 0x18) == ELF_OK);
+        CHECK(elf_add_relocation(text, 0x0, sym, R_VAX_32, 2) == ELF_OK);
+        CHECK(elf_write_file(vax, "tmp_vax_le.o") == ELF_OK);
+        CHECK(elf_open("tmp_vax_le.o", &reopen) == ELF_OK);
+        CHECK(elf_machine(reopen) == EM_VAX);
+        CHECK(elf_class(reopen) == ELFOBJ_CLASS_32);
+        CHECK(elf_endian(reopen) == ELFOBJ_ENDIAN_LE);
+        CHECK(elf_reloc_count(reopen) >= 1);
+        CHECK(elf_find_section(reopen, ".rela.text") != NULL);
+        elf_close(reopen);
+
+        bad = elf_create(ET_REL, EM_VAX, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+        CHECK(bad != NULL);
+        CHECK(elf_validate(bad, NULL) == ELF_ERR_FORMAT);
+        elf_close(bad);
+
+        bad = elf_create(ET_REL, EM_VAX, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_BE);
+        CHECK(bad != NULL);
+        CHECK(elf_validate(bad, NULL) == ELF_ERR_FORMAT);
+        elf_close(bad);
+
+        for (i = 0; i < 64; ++i) {
+            unsigned char fuzz[64] = {0};
+            elfobj_t *fz = NULL;
+            fuzz[0] = 0x7f;
+            fuzz[1] = 'E';
+            fuzz[2] = 'L';
+            fuzz[3] = 'F';
+            fuzz[4] = 1; /* ELFCLASS32 */
+            fuzz[5] = 1; /* ELFDATA2LSB */
+            fuzz[6] = 1; /* EV_CURRENT */
+            fuzz[16] = 0;
+            fuzz[17] = ET_REL;
+            fuzz[18] = 0;
+            fuzz[19] = EM_VAX;
+            fuzz[20] = 0;
+            fuzz[21] = 1; /* EV_CURRENT */
+            fuzz[32 + (i % 24)] = (unsigned char)(i * 23u);
+            (void)elf_open_memory(fuzz, sizeof(fuzz), &fz);
+            elf_close(fz);
+        }
+    }
 
     elf_close(arm);
     elf_close(aa64);
@@ -244,6 +323,7 @@ int main(void) {
     elf_close(la32);
     elf_close(la64);
     elf_close(m68k);
+    elf_close(vax);
     puts("ok");
     return 0;
 }

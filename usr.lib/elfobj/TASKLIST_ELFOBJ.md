@@ -1005,10 +1005,10 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] VAX DWARF register mapping: R0–R15 → 0–15, AP → 12, FP → 13, SP → 14, PC → 15.
 
 ### 21g. VAX Testing
-- [ ] Unit tests for all VAX relocation types.
-- [ ] Round-trip read/write.
-- [ ] Validation: reject ELFCLASS64, reject ELFDATA2MSB.
-- [ ] Fuzz VAX ELF parsing → crash-free.
+- [x] Unit tests for all VAX relocation types.
+- [x] Round-trip read/write.
+- [x] Validation: reject ELFCLASS64, reject ELFDATA2MSB.
+- [x] Fuzz VAX ELF parsing → crash-free.
 
 ---
 
