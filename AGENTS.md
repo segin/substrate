@@ -128,6 +128,11 @@ pmm_free_block(virt);  // CORRECT - convert first
     - **EXAMPLE/EXAMPLES:** Use "EXAMPLE" for single, "EXAMPLES" for multiple.
 10. **Host Builds vs Target Builds (CRITICAL):**
 11. **Header & Macro Standards (CRITICAL):**
+12. **Autonomous Execution (CRITICAL):**
+    - Default to autonomous mode: do not stop for routine confirmations.
+    - Make best-effort decisions and continue immediately unless an operation is destructive (`reset`, `checkout --`, force-push) or truly blocked.
+    - In dirty worktrees, commit only files related to the active task and ignore unrelated modifications.
+    - Do not pause to report routine repo-state warnings; continue and summarize decisions in commit messages.
     - **No Manual Externs:** Never manually `extern` functions or variables in C files (especially syscalls). Always include the appropriate header.
     - **No Relative Includes:** Avoid relative include paths (e.g., `"../include/foo.h"`). Use include paths set in the Makefile and `<foo.h>`.
     - **Macros in Headers:** Do not define constants or macros in C files if they are arguably part of an interface or shared. Put them in headers.
