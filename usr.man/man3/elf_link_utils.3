@@ -1,0 +1,70 @@
+.Dd March 2, 2026
+.Dt ELF_LINK_UTILS 3
+.Os
+.Sh NAME
+.Nm elf_link_load_objects ,
+.Nm elf_link_unload_objects ,
+.Nm elf_link_resolve_symbol ,
+.Nm elf_link_add_got_section ,
+.Nm elf_link_add_plt_section ,
+.Nm elf_link_add_dynamic_entry
+.Nd helper routines for linker frontends using libelfobj
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_link_load_objects "const char **paths" "size_t count" "elfobj_t ***out_objs" "size_t *out_count"
+.Ft void
+.Fn elf_link_unload_objects "elfobj_t **objs" "size_t count"
+.Ft elf_symbol_t *
+.Fn elf_link_resolve_symbol "elfobj_t **inputs" "size_t count" "const char *name" "size_t *input_index_out"
+.Ft elf_section_t *
+.Fn elf_link_add_got_section "elfobj_t *obj" "size_t entries"
+.Ft elf_section_t *
+.Fn elf_link_add_plt_section "elfobj_t *obj" "size_t entries"
+.Ft elf_err_t
+.Fn elf_link_add_dynamic_entry "elfobj_t *obj" "int64_t tag" "uint64_t value"
+.Sh DESCRIPTION
+These functions support linker frontends that orchestrate object loading,
+symbol resolution, and dynamic-link support section construction.
+.Pp
+.Fn elf_link_load_objects
+opens multiple input files into an array of
+.Vt elfobj_t
+handles; release them with
+.Fn elf_link_unload_objects .
+.Pp
+.Fn elf_link_resolve_symbol
+searches inputs for a symbol and optionally reports the matching input index.
+.Pp
+.Fn elf_link_add_got_section
+and
+.Fn elf_link_add_plt_section
+create GOT/PLT helper sections sized for
+.Fa entries .
+.Fn elf_link_add_dynamic_entry
+appends one dynamic-table tag/value pair.
+.Sh RETURN VALUES
+.Fn elf_link_resolve_symbol
+returns NULL if no matching symbol is found.
+.Fn elf_link_add_got_section
+and
+.Fn elf_link_add_plt_section
+return NULL on failure.
+.Pp
+.Fn elf_link_load_objects
+and
+.Fn elf_link_add_dynamic_entry
+return
+.Dv ELF_OK
+on success and
+.Vt elf_err_t
+on failure.
+.Sh SEE ALSO
+.Xr elf_link 3 ,
+.Xr elf_link_plan 3 ,
+.Xr elf_open 3 ,
+.Xr elf_section 3 ,
+.Xr elf_symbol 3 ,
+.Xr elfobj 3

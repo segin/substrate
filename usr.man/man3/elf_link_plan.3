@@ -1,0 +1,87 @@
+.Dd March 2, 2026
+.Dt ELF_LINK_PLAN 3
+.Os
+.Sh NAME
+.Nm elf_link_plan_create ,
+.Nm elf_link_plan_destroy ,
+.Nm elf_link_plan_add_input ,
+.Nm elf_link_plan_input_count ,
+.Nm elf_link_plan_set_section_merge_hook ,
+.Nm elf_link_plan_set_archive_hook ,
+.Nm elf_link_plan_set_gc_hook ,
+.Nm elf_link_plan_set_incremental_hook ,
+.Nm elf_link_plan_set_version_hook ,
+.Nm elf_link_plan_consider_archive_member ,
+.Nm elf_link_plan_note_incremental ,
+.Nm elf_link_plan_link ,
+.Nm elf_link_plan_map_count ,
+.Nm elf_link_plan_map_entry
+.Nd programmable link-plan API for libelfobj
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_link_plan_t *
+.Fn elf_link_plan_create void
+.Ft void
+.Fn elf_link_plan_destroy "elf_link_plan_t *plan"
+.Ft elf_err_t
+.Fn elf_link_plan_add_input "elf_link_plan_t *plan" "elfobj_t *obj" "const char *name"
+.Ft size_t
+.Fn elf_link_plan_input_count "const elf_link_plan_t *plan"
+.Ft elf_err_t
+.Fn elf_link_plan_set_section_merge_hook "elf_link_plan_t *plan" "elf_link_section_merge_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_set_archive_hook "elf_link_plan_t *plan" "elf_link_archive_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_set_gc_hook "elf_link_plan_t *plan" "elf_link_gc_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_set_incremental_hook "elf_link_plan_t *plan" "elf_link_incremental_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_set_version_hook "elf_link_plan_t *plan" "elf_link_version_hook_t hook" "void *user"
+.Ft elf_err_t
+.Fn elf_link_plan_consider_archive_member "elf_link_plan_t *plan" "const char *archive_path" "const char *member_name" "int *should_extract_out"
+.Ft elf_err_t
+.Fn elf_link_plan_note_incremental "elf_link_plan_t *plan" "const char *key" "const char *value"
+.Ft elf_err_t
+.Fn elf_link_plan_link "elf_link_plan_t *plan" "elfobj_t **output"
+.Ft size_t
+.Fn elf_link_plan_map_count "const elf_link_plan_t *plan"
+.Ft int
+.Fn elf_link_plan_map_entry "const elf_link_plan_t *plan" "size_t index" "elf_link_map_entry_t *out_entry"
+.Sh DESCRIPTION
+The link-plan API provides explicit control over input ordering and policy hooks
+for section merge, archive extraction, garbage collection roots,
+incremental metadata, and symbol version handling.
+.Pp
+After inputs and hooks are configured, call
+.Fn elf_link_plan_link
+to produce a merged output object.
+.Pp
+Mapping functions expose deterministic input-to-output symbol provenance for
+post-link diagnostics and tooling.
+.Sh RETURN VALUES
+.Fn elf_link_plan_create
+returns NULL on allocation failure.
+.Pp
+.Fn elf_link_plan_input_count
+and
+.Fn elf_link_plan_map_count
+return counts.
+.Fn elf_link_plan_map_entry
+returns non-zero on success and 0 if
+.Fa index
+is out of range.
+.Pp
+Other plan APIs return
+.Dv ELF_OK
+on success and an
+.Vt elf_err_t
+code on failure.
+.Sh SEE ALSO
+.Xr elf_link 3 ,
+.Xr elf_link_utils 3 ,
+.Xr elf_reloc 3 ,
+.Xr elf_section 3 ,
+.Xr elf_symbol 3 ,
+.Xr elfobj 3

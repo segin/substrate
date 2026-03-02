@@ -1,1 +1,121 @@
-.so man3/elfobj.3
+.Dd March 2, 2026
+.Dt ELF_OPEN 3
+.Os
+.Sh NAME
+.Nm elf_open ,
+.Nm elf_open_with_options ,
+.Nm elf_open_memory ,
+.Nm elf_open_memory_with_options ,
+.Nm elf_open_memory_nocopy ,
+.Nm elf_close ,
+.Nm elf_uses_mmap ,
+.Nm elf_is_lazy_parse_enabled
+.Nd open and close ELF objects in libelfobj
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_err_t
+.Fn elf_open "const char *path" "elfobj_t **out"
+.Ft elf_err_t
+.Fn elf_open_with_options "const char *path" "uint32_t flags" "elfobj_t **out"
+.Ft elf_err_t
+.Fn elf_open_memory "const void *buf" "size_t size" "elfobj_t **out"
+.Ft elf_err_t
+.Fn elf_open_memory_with_options "const void *buf" "size_t size" "uint32_t flags" "elfobj_t **out"
+.Ft elf_err_t
+.Fn elf_open_memory_nocopy "const void *buf" "size_t size" "elfobj_t **out"
+.Ft void
+.Fn elf_close "elfobj_t *obj"
+.Ft int
+.Fn elf_uses_mmap "const elfobj_t *obj"
+.Ft int
+.Fn elf_is_lazy_parse_enabled "const elfobj_t *obj"
+.Sh DESCRIPTION
+These functions create read handles for ELF objects from files or in-memory
+buffers.
+.Pp
+.Fn elf_open
+parses an ELF file at
+.Fa path .
+.Fn elf_open_memory
+parses ELF bytes from
+.Fa buf
+and
+.Fa size .
+.Pp
+The
+.Fn *_with_options
+variants accept open flags:
+.Bl -tag -width ELFOBJ_OPEN_LAZY_PARSE
+.It Dv ELFOBJ_OPEN_NOCOPY
+Avoid an internal copy when possible.
+.It Dv ELFOBJ_OPEN_USE_MMAP
+Prefer memory mapping for file-backed input.
+.It Dv ELFOBJ_OPEN_LAZY_PARSE
+Defer expensive decoding until first access.
+.El
+.Pp
+.Fn elf_open_memory_nocopy
+is a convenience wrapper for in-memory no-copy parsing.
+The caller must keep
+.Fa buf
+valid for the lifetime of the returned
+.Vt elfobj_t .
+.Pp
+.Fn elf_close
+releases all resources associated with the object.
+.Pp
+.Fn elf_uses_mmap
+and
+.Fn elf_is_lazy_parse_enabled
+report how the object was opened.
+.Sh RETURN VALUES
+The open functions return
+.Dv ELF_OK
+on success and store the resulting object in
+.Fa *out .
+On failure, they return an
+.Vt elf_err_t
+error code and leave
+.Fa *out
+unmodified.
+.Pp
+.Fn elf_uses_mmap
+and
+.Fn elf_is_lazy_parse_enabled
+return non-zero when the feature is active, and 0 otherwise.
+.Sh EXAMPLES
+.Bd -literal -offset indent
+#include <elfobj.h>
+
+elfobj_t *obj = NULL;
+elf_err_t err = elf_open("input.o", &obj);
+if (err != ELF_OK) {
+    /* handle error */
+    return 1;
+}
+
+/* inspect object ... */
+elf_close(obj);
+.Ed
+.Sh ERRORS
+Common error codes include:
+.Bl -tag -width ELF_ERR_UNSUPPORTED
+.It Dv ELF_ERR_IO
+File open/read failure.
+.It Dv ELF_ERR_FORMAT
+Input is not a valid ELF object.
+.It Dv ELF_ERR_BOUNDS
+Input buffer/offset metadata is inconsistent or out of bounds.
+.It Dv ELF_ERR_UNSUPPORTED
+Requested open mode is unsupported for the source.
+.It Dv ELF_ERR_OOM
+Allocation failure.
+.El
+.Sh SEE ALSO
+.Xr elf_reloc 3 ,
+.Xr elf_section 3 ,
+.Xr elf_symbol 3 ,
+.Xr elf_validate 3 ,
+.Xr elfobj 3

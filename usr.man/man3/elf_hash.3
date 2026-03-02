@@ -1,1 +1,44 @@
-.so man3/elfobj.3
+.Dd March 2, 2026
+.Dt ELF_HASH 3
+.Os
+.Sh NAME
+.Nm elf_hash_sysv ,
+.Nm elf_hash_gnu
+.Nd compute ELF symbol hash values
+.Sh LIBRARY
+libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft uint32_t
+.Fn elf_hash_sysv "const char *name"
+.Ft uint32_t
+.Fn elf_hash_gnu "const char *name"
+.Sh DESCRIPTION
+These functions compute the standard ELF symbol hash values used by
+.Dv SHT_HASH
+(System V) and
+.Dv GNU_HASH
+lookups.
+.Pp
+.Fn elf_hash_sysv
+implements the classic ELF hash algorithm used by SysV hash tables.
+.Fn elf_hash_gnu
+implements the GNU hash algorithm used by
+.Pa .gnu.hash
+symbol tables.
+.Pp
+Both functions are deterministic and side-effect free.
+.Sh RETURN VALUES
+Both functions return the hash value for
+.Fa name .
+If
+.Fa name
+is NULL, the returned value is implementation-defined.
+.Sh EXAMPLES
+.Bd -literal -offset indent
+uint32_t h_sysv = elf_hash_sysv("printf");
+uint32_t h_gnu  = elf_hash_gnu("printf");
+.Ed
+.Sh SEE ALSO
+.Xr elf_symbol 3 ,
+.Xr elfobj 3

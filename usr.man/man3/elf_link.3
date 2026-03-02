@@ -1,111 +1,45 @@
-.Dd February 27, 2026
+.Dd March 2, 2026
 .Dt ELF_LINK 3
-.Os Substrate
+.Os
 .Sh NAME
-.Nm elf_link ,
-.Nm elf_link_plan_create ,
-.Nm elf_link_plan_destroy ,
-.Nm elf_link_plan_add_input ,
-.Nm elf_link_plan_input_count ,
-.Nm elf_link_plan_set_section_merge_hook ,
-.Nm elf_link_plan_set_archive_hook ,
-.Nm elf_link_plan_set_gc_hook ,
-.Nm elf_link_plan_set_incremental_hook ,
-.Nm elf_link_plan_set_version_hook ,
-.Nm elf_link_plan_consider_archive_member ,
-.Nm elf_link_plan_note_incremental ,
-.Nm elf_link_plan_link ,
-.Nm elf_link_plan_map_count ,
-.Nm elf_link_plan_map_entry ,
-.Nm elf_link_load_objects ,
-.Nm elf_link_unload_objects ,
-.Nm elf_link_resolve_symbol ,
-.Nm elf_link_add_got_section ,
-.Nm elf_link_add_plt_section ,
-.Nm elf_link_add_dynamic_entry
-.Nd linker-facing APIs for object merge, symbol resolution, and link planning
+.Nm elf_link
+.Nd merge multiple ELF objects into one output object
+.Sh LIBRARY
+libelfobj
 .Sh SYNOPSIS
 .In elfobj.h
 .Ft elf_err_t
 .Fn elf_link "elfobj_t **inputs" "size_t count" "elfobj_t **output"
-.Ft elf_link_plan_t *
-.Fn elf_link_plan_create void
-.Ft void
-.Fn elf_link_plan_destroy "elf_link_plan_t *plan"
-.Ft elf_err_t
-.Fn elf_link_plan_add_input "elf_link_plan_t *plan" "elfobj_t *obj" "const char *name"
-.Ft size_t
-.Fn elf_link_plan_input_count "const elf_link_plan_t *plan"
-.Ft elf_err_t
-.Fn elf_link_plan_set_section_merge_hook "elf_link_plan_t *plan" "elf_link_section_merge_hook_t hook" "void *user"
-.Ft elf_err_t
-.Fn elf_link_plan_set_archive_hook "elf_link_plan_t *plan" "elf_link_archive_hook_t hook" "void *user"
-.Ft elf_err_t
-.Fn elf_link_plan_set_gc_hook "elf_link_plan_t *plan" "elf_link_gc_hook_t hook" "void *user"
-.Ft elf_err_t
-.Fn elf_link_plan_set_incremental_hook "elf_link_plan_t *plan" "elf_link_incremental_hook_t hook" "void *user"
-.Ft elf_err_t
-.Fn elf_link_plan_set_version_hook "elf_link_plan_t *plan" "elf_link_version_hook_t hook" "void *user"
-.Ft elf_err_t
-.Fn elf_link_plan_consider_archive_member "elf_link_plan_t *plan" "const char *archive_path" "const char *member_name" "int *should_extract_out"
-.Ft elf_err_t
-.Fn elf_link_plan_note_incremental "elf_link_plan_t *plan" "const char *key" "const char *value"
-.Ft elf_err_t
-.Fn elf_link_plan_link "elf_link_plan_t *plan" "elfobj_t **output"
-.Ft size_t
-.Fn elf_link_plan_map_count "const elf_link_plan_t *plan"
-.Ft int
-.Fn elf_link_plan_map_entry "const elf_link_plan_t *plan" "size_t index" "elf_link_map_entry_t *out_entry"
-.Ft elf_err_t
-.Fn elf_link_load_objects "const char **paths" "size_t count" "elfobj_t ***out_objs" "size_t *out_count"
-.Ft void
-.Fn elf_link_unload_objects "elfobj_t **objs" "size_t count"
-.Ft elf_symbol_t *
-.Fn elf_link_resolve_symbol "elfobj_t **inputs" "size_t count" "const char *name" "size_t *input_index_out"
-.Ft elf_section_t *
-.Fn elf_link_add_got_section "elfobj_t *obj" "size_t entries"
-.Ft elf_section_t *
-.Fn elf_link_add_plt_section "elfobj_t *obj" "size_t entries"
-.Ft elf_err_t
-.Fn elf_link_add_dynamic_entry "elfobj_t *obj" "int64_t tag" "uint64_t value"
 .Sh DESCRIPTION
 .Fn elf_link
-performs direct merge/link of a set of input objects.
-The plan API is a structured form that lets callers attach policy callbacks
-for section merge behavior, archive extraction decisions, section GC roots,
-incremental link notes, and symbol version handling.
+performs a direct merge/link operation over
+.Fa count
+input objects.
+The resulting linked object is returned in
+.Fa *output
+on success.
 .Pp
-Plan map APIs expose a deterministic symbol mapping from merged output back to
-input origin (input index/name, section, and value).
-.Pp
-.Fn elf_link_load_objects
-and
-.Fn elf_link_unload_objects
-are utility helpers for bulk object lifecycle during linker front-end passes.
-.Pp
-.Fn elf_link_add_got_section ,
-.Fn elf_link_add_plt_section ,
-and
-.Fn elf_link_add_dynamic_entry
-provide builder helpers used when producing dynamic-link aware outputs.
+This entry point is intended for straightforward static merge flows.
+For policy-driven linking (archive extraction, merge hooks, map introspection),
+use the link-plan family documented in
+.Xr elf_link_plan 3 .
+For helper routines used by linker frontends, see
+.Xr elf_link_utils 3 .
 .Sh RETURN VALUES
-.Fn elf_link_plan_create
-returns NULL on allocation failure.
-.Pp
-.Fn elf_link_resolve_symbol
-returns NULL if the symbol cannot be resolved in inputs.
-.Pp
-.Fn elf_link_plan_map_entry
-returns non-zero on success and 0 for out-of-range index.
-.Pp
-Other APIs return
+Returns
 .Dv ELF_OK
-on success and an
+on success.
+On failure, returns an
 .Vt elf_err_t
-error code on failure.
+code and does not modify
+.Fa *output .
+.Sh ERRORS
+Common failure classes include invalid arguments, incompatible input objects,
+allocation failure, and unresolved merge state.
 .Sh SEE ALSO
+.Xr elf_link_plan 3 ,
+.Xr elf_link_utils 3 ,
 .Xr elf_reloc 3 ,
 .Xr elf_section 3 ,
 .Xr elf_symbol 3 ,
-.Xr elf_validate 3 ,
-.Xr elfobj 3
+.Xr elf_validate 3
