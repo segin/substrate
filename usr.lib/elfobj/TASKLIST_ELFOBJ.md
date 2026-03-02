@@ -1102,8 +1102,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 23. Alpha Support
 
 ### 23a. Machine Types and Constants
-- [ ] Define `EM_ALPHA` (0x9026).
-- [ ] Alpha has no mandatory `e_flags`; validate flags is 0.
+- [x] Define `EM_ALPHA` (0x9026).
+- [x] Alpha has no mandatory `e_flags`; validate flags is 0.
 
 ### 23b. Alpha Relocation Type Constants
 - [ ] `R_ALPHA_NONE` (0), `R_ALPHA_REFLONG` (1), `R_ALPHA_REFQUAD` (2)
