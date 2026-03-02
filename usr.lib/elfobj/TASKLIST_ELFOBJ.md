@@ -955,10 +955,10 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Validate `e_flags`.
 
 ### 20e. M68K ELF Read/Write/Create
-- [ ] Recognize `EM_68K` as valid machine type.
-- [ ] Parse/write RELA relocations (M68K uses RELA).
-- [ ] `elf_init_m68k()`: ELF32/EM_68K/ELFDATA2MSB.
-- [ ] Big-endian read/write.
+- [x] Recognize `EM_68K` as valid machine type.
+- [x] Parse/write RELA relocations (M68K uses RELA).
+- [x] `elf_init_m68k()`: ELF32/EM_68K/ELFDATA2MSB.
+- [x] Big-endian read/write.
 
 ### 20f. M68K DWARF
 - [ ] M68K DWARF register mapping: D0–D7 → 0–7, A0–A7 → 8–15, FP0–FP7 → 16–23.

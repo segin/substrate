@@ -492,6 +492,16 @@ elfobj_t *elf_init_loongarch64(void) {
     return obj;
 }
 
+elfobj_t *elf_init_m68k(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_68K, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_BE);
+    if (obj == NULL) {
+        return NULL;
+    }
+    obj->flags = 0;
+    init_default_sections(obj, 4, 4);
+    return obj;
+}
+
 elf_section_t *elf_add_arm_exidx(elfobj_t *obj) {
     elf_section_t *exidx;
     elf_section_t *extab;
