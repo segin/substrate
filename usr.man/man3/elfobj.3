@@ -1,4 +1,4 @@
-.Dd February 27, 2026
+.Dd March 2, 2026
 .Dt ELFOBJ 3
 .Os Substrate
 .Sh NAME
@@ -12,6 +12,18 @@
 .Nm elf_init_x86_64 ,
 .Nm elf_init_arm ,
 .Nm elf_init_aarch64 ,
+.Nm elf_init_mips32 ,
+.Nm elf_init_mips64 ,
+.Nm elf_init_riscv32 ,
+.Nm elf_init_riscv64 ,
+.Nm elf_init_loongarch32 ,
+.Nm elf_init_loongarch64 ,
+.Nm elf_init_m68k ,
+.Nm elf_init_vax ,
+.Nm elf_init_ppc32 ,
+.Nm elf_init_ppc64 ,
+.Nm elf_init_alpha ,
+.Nm elf_init_ia64 ,
 .Nm elf_write_file ,
 .Nm elf_finalize ,
 .Nm elf_close ,
@@ -33,6 +45,10 @@
 .Nm elf_arm_attribute_tag_at ,
 .Nm elf_arm_attribute_value_at ,
 .Nm elf_arm_attribute_string_at ,
+.Nm elf_riscv_attribute_count ,
+.Nm elf_riscv_attribute_tag_at ,
+.Nm elf_riscv_attribute_value_at ,
+.Nm elf_mips_abiflags ,
 .Nm elf_note_count ,
 .Nm elf_note_at ,
 .Nm elf_gnu_property_count ,
@@ -69,6 +85,30 @@
 .Fn elf_init_arm void
 .Ft elfobj_t *
 .Fn elf_init_aarch64 void
+.Ft elfobj_t *
+.Fn elf_init_mips32 void
+.Ft elfobj_t *
+.Fn elf_init_mips64 void
+.Ft elfobj_t *
+.Fn elf_init_riscv32 void
+.Ft elfobj_t *
+.Fn elf_init_riscv64 void
+.Ft elfobj_t *
+.Fn elf_init_loongarch32 void
+.Ft elfobj_t *
+.Fn elf_init_loongarch64 void
+.Ft elfobj_t *
+.Fn elf_init_m68k void
+.Ft elfobj_t *
+.Fn elf_init_vax void
+.Ft elfobj_t *
+.Fn elf_init_ppc32 void
+.Ft elfobj_t *
+.Fn elf_init_ppc64 void
+.Ft elfobj_t *
+.Fn elf_init_alpha void
+.Ft elfobj_t *
+.Fn elf_init_ia64 void
 .Ft elf_err_t
 .Fn elf_write_file "elfobj_t *obj" "const char *path"
 .Ft elf_err_t
@@ -111,6 +151,14 @@
 .Fn elf_arm_attribute_value_at "const elfobj_t *obj" "size_t index"
 .Ft const char *
 .Fn elf_arm_attribute_string_at "const elfobj_t *obj" "size_t index"
+.Ft size_t
+.Fn elf_riscv_attribute_count "const elfobj_t *obj"
+.Ft uint32_t
+.Fn elf_riscv_attribute_tag_at "const elfobj_t *obj" "size_t index"
+.Ft uint64_t
+.Fn elf_riscv_attribute_value_at "const elfobj_t *obj" "size_t index"
+.Ft int
+.Fn elf_mips_abiflags "const elfobj_t *obj" "elf_mips_abiflags_t *out"
 .Ft size_t
 .Fn elf_note_count "const elfobj_t *obj"
 .Ft int
@@ -170,6 +218,31 @@ before finalization to retag output type (for example, from
 to
 .Dv ET_DYN
 in custom pipelines).
+.Pp
+Architecture-specific constructors initialize writable ET_REL objects with
+target defaults:
+.Fn elf_init_mips32 ,
+.Fn elf_init_mips64 ,
+.Fn elf_init_riscv32 ,
+.Fn elf_init_riscv64 ,
+.Fn elf_init_loongarch32 ,
+.Fn elf_init_loongarch64 ,
+.Fn elf_init_m68k ,
+.Fn elf_init_vax ,
+.Fn elf_init_ppc32 ,
+.Fn elf_init_ppc64 ,
+.Fn elf_init_alpha ,
+and
+.Fn elf_init_ia64 .
+.Pp
+Machine metadata helpers include:
+.Fn elf_mips_abiflags
+for .MIPS.abiflags decoding and
+.Fn elf_riscv_attribute_count ,
+.Fn elf_riscv_attribute_tag_at ,
+and
+.Fn elf_riscv_attribute_value_at
+for .riscv.attributes inspection.
 .Pp
 High-level counters expose section/symbol/relocation/segment totals and parsed
 program-header count for reader-side inspection.

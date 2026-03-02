@@ -14,10 +14,12 @@
 .Nm elf_section_set_note_info ,
 .Nm elf_remove_section ,
 .Nm elf_reorder_section ,
+.Nm elf_section_get ,
 .Nm elf_section_count ,
 .Nm elf_section_name ,
 .Nm elf_section_type ,
 .Nm elf_section_flags ,
+.Nm elf_section_addr ,
 .Nm elf_section_size ,
 .Nm elf_section_data
 .Nd ELF section manipulation
@@ -94,6 +96,11 @@
 .Fo elf_section_count
 .Fa "const elfobj_t *obj"
 .Fc
+.Ft elf_section_t *
+.Fo elf_section_get
+.Fa "const elfobj_t *obj"
+.Fa "size_t index"
+.Fc
 .Ft const char *
 .Fo elf_section_name
 .Fa "const elf_section_t *section"
@@ -104,6 +111,10 @@
 .Fc
 .Ft uint64_t
 .Fo elf_section_flags
+.Fa "const elf_section_t *section"
+.Fc
+.Ft uint64_t
+.Fo elf_section_addr
 .Fa "const elf_section_t *section"
 .Fc
 .Ft uint64_t
@@ -234,6 +245,10 @@ Removes a section and compacts section indices.
 Moves a section to a new order position.
 .It Fn elf_section_count "obj"
 Returns the number of sections in the object.
+.It Fn elf_section_get "obj" "index"
+Returns the section at
+.Fa index ,
+or NULL when out of range.
 .It Fn elf_section_name "section"
 Returns the section name.
 The returned string is owned by the object and must not be freed.
@@ -243,6 +258,9 @@ Returns the section type
 .It Fn elf_section_flags "section"
 Returns the section flags
 .Pq a bitmask of SHF_* constants .
+.It Fn elf_section_addr "section"
+Returns the section virtual address
+.Pq sh_addr .
 .It Fn elf_section_size "section"
 Returns the section size in bytes.
 For
@@ -336,9 +354,15 @@ on success, or an appropriate error code on failure.
 .Fn elf_section_count
 returns the number of sections (may be 0 for an empty object).
 .Pp
+.Fn elf_section_get
+returns a section handle on success, or NULL when
+.Fa index
+is out of range.
+.Pp
 .Fn elf_section_name ,
 .Fn elf_section_type ,
 .Fn elf_section_flags ,
+.Fn elf_section_addr ,
 and
 .Fn elf_section_size
 return the requested attribute.
