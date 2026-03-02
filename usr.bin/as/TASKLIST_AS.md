@@ -468,7 +468,7 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `.note.gnu.property` x86-64 ISA level semantics.
 
 ## 10. Build System
-- [ ] Recursive Makefile, `NATIVE_BUILD=1` for host testing.
-- [ ] `install` to `$(DESTDIR)/usr/bin/as`.
-- [ ] Arch-specific symlinks or multi-call binary (`arm-as`, `aarch64-as`).
-- [ ] `libelfobj.a` dependency.
+- [x] Recursive Makefile, `NATIVE_BUILD=1` for host testing.
+- [x] `install` to `$(DESTDIR)/usr/bin/as`.
+- [x] Arch-specific symlinks or multi-call binary (`arm-as`, `aarch64-as`).
+- [x] `libelfobj.a` dependency.

@@ -21,8 +21,12 @@ install: install_aliases
 alias_links: $(PROG)
 	ln -sf $(PROG) as.x86
 	ln -sf $(PROG) as.x64
+	ln -sf $(PROG) arm-as
+	ln -sf $(PROG) aarch64-as
 
 install_aliases: $(PROG)
 	mkdir -p $(BINDIR)
 	ln -sf as $(BINDIR)/as.x86
 	ln -sf as $(BINDIR)/as.x64
+	ln -sf as $(BINDIR)/arm-as
+	ln -sf as $(BINDIR)/aarch64-as
