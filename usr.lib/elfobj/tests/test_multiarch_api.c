@@ -22,6 +22,8 @@ int main(void) {
     elfobj_t *mips64 = NULL;
     elfobj_t *rv32 = NULL;
     elfobj_t *rv64 = NULL;
+    elfobj_t *la32 = NULL;
+    elfobj_t *la64 = NULL;
 
     CHECK(elf_reloc_size_for_machine(EM_ARM, R_ARM_CALL) == 4);
     CHECK(elf_reloc_size_for_machine(EM_AARCH64, R_AARCH64_CALL26) == 4);
@@ -34,6 +36,9 @@ int main(void) {
     CHECK(elf_reloc_size_for_machine(EM_RISCV, R_RISCV_JAL) == 4);
     CHECK(elf_reloc_is_pc_relative_for_machine(EM_RISCV, R_RISCV_PCREL_HI20) == 1);
     CHECK(elf_reloc_is_tls_for_machine(EM_RISCV, R_RISCV_TLS_TPREL64) == 1);
+    CHECK(elf_reloc_size_for_machine(EM_LOONGARCH, R_LARCH_B26) == 4);
+    CHECK(elf_reloc_is_pc_relative_for_machine(EM_LOONGARCH, R_LARCH_PCALA_HI20) == 1);
+    CHECK(elf_reloc_is_tls_for_machine(EM_LOONGARCH, R_LARCH_TLS_DESC_CALL) == 1);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_X86_64, R_X86_64_PC32), "R_X86_64_PC32") == 0);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_386, R_386_PC8), "R_386_PC8") == 0);
     CHECK(strncmp(elf_reloc_name_for_machine(EM_386, 9999), "UNKNOWN(", 8) == 0);
@@ -112,6 +117,20 @@ int main(void) {
         CHECK(elf_riscv_attribute_value_at(rv64, 0) == 16);
         CHECK(elf_apply_relocation_value(rv64, R_RISCV_JAL, 0x1000, 0x1800, 0, &outv) == ELF_OK);
     }
+
+    la32 = elf_init_loongarch32();
+    CHECK(la32 != NULL);
+    CHECK(elf_machine(la32) == EM_LOONGARCH);
+    CHECK(elf_class(la32) == ELFOBJ_CLASS_32);
+
+    la64 = elf_init_loongarch64();
+    CHECK(la64 != NULL);
+    CHECK(elf_machine(la64) == EM_LOONGARCH);
+    CHECK(elf_class(la64) == ELFOBJ_CLASS_64);
+    {
+        uint64_t outv = 0;
+        CHECK(elf_apply_relocation_value(la64, R_LARCH_B26, 0x1000, 0x2000, 0, &outv) == ELF_OK);
+    }
     {
         uint64_t outv = 0;
         CHECK(elf_apply_relocation_value(x64, R_X86_64_PC16, 0x1000, 0x1010, 0, &outv) == ELF_OK);
@@ -132,6 +151,8 @@ int main(void) {
     elf_close(mips64);
     elf_close(rv32);
     elf_close(rv64);
+    elf_close(la32);
+    elf_close(la64);
     puts("ok");
     return 0;
 }

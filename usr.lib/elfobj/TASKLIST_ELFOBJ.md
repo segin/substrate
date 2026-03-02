@@ -913,13 +913,13 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] LoongArch CFA: frame pointer $fp ($r22) or $sp ($r3), return address $ra ($r1).
 
 ### 19g. LoongArch Testing
-- [ ] Unit tests for all LoongArch relocation types.
-- [ ] HI20/LO12 pair calculation.
-- [ ] Branch encoding (B16, B21, B26).
-- [ ] TLS and TLSDESC relocation handling.
-- [ ] Round-trip read/write for LA32 and LA64 objects.
-- [ ] Validation: class/endian checks.
-- [ ] Fuzz LoongArch ELF parsing → crash-free.
+- [x] Unit tests for all LoongArch relocation types.
+- [x] HI20/LO12 pair calculation.
+- [x] Branch encoding (B16, B21, B26).
+- [x] TLS and TLSDESC relocation handling.
+- [x] Round-trip read/write for LA32 and LA64 objects.
+- [x] Validation: class/endian checks.
+- [x] Fuzz LoongArch ELF parsing → crash-free.
 
 ---
 
