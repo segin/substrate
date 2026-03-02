@@ -909,8 +909,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] `elf_init_loongarch64()`: ELF64/EM_LOONGARCH/ELFDATA2LSB.
 
 ### 19f. LoongArch DWARF
-- [ ] LoongArch DWARF register mapping: $r0–$r31 → 0–31, $f0–$f31 → 32–63.
-- [ ] LoongArch CFA: frame pointer $fp ($r22) or $sp ($r3), return address $ra ($r1).
+- [x] LoongArch DWARF register mapping: $r0–$r31 → 0–31, $f0–$f31 → 32–63.
+- [x] LoongArch CFA: frame pointer $fp ($r22) or $sp ($r3), return address $ra ($r1).
 
 ### 19g. LoongArch Testing
 - [ ] Unit tests for all LoongArch relocation types.
