@@ -765,12 +765,12 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Validate N64 compound relocation entries.
 
 ### 17f. MIPS ELF Read/Write/Create
-- [ ] Recognize `EM_MIPS` as valid machine type.
-- [ ] MIPS32/N32: parse/write REL relocations. MIPS64/N64: parse/write RELA with compound entries.
-- [ ] Parse `SHT_MIPS_ABIFLAGS`, `PT_MIPS_ABIFLAGS`, `PT_MIPS_REGINFO`.
-- [ ] `elf_init_mips32()`: ELF32/EM_MIPS/ELFDATA2LSB with O32 flags.
-- [ ] `elf_init_mips64()`: ELF64/EM_MIPS/ELFDATA2LSB with N64 flags.
-- [ ] Endian-correct output for big-endian MIPS.
+- [x] Recognize `EM_MIPS` as valid machine type.
+- [x] MIPS32/N32: parse/write REL relocations. MIPS64/N64: parse/write RELA with compound entries.
+- [x] Parse `SHT_MIPS_ABIFLAGS`, `PT_MIPS_ABIFLAGS`, `PT_MIPS_REGINFO`.
+- [x] `elf_init_mips32()`: ELF32/EM_MIPS/ELFDATA2LSB with O32 flags.
+- [x] `elf_init_mips64()`: ELF64/EM_MIPS/ELFDATA2LSB with N64 flags.
+- [x] Endian-correct output for big-endian MIPS.
 
 ### 17g. MIPS DWARF
 - [ ] MIPS DWARF register mapping: $zero–$ra → 0–31, $f0–$f31 → 32–63, HI → 64, LO → 65.

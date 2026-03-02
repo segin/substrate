@@ -823,6 +823,8 @@ elfobj_t *elf_init_i386(void);
 elfobj_t *elf_init_x86_64(void);
 elfobj_t *elf_init_arm(void);
 elfobj_t *elf_init_aarch64(void);
+elfobj_t *elf_init_mips32(void);
+elfobj_t *elf_init_mips64(void);
 elf_err_t elf_finalize(elfobj_t *obj);
 elf_err_t elf_set_type(elfobj_t *obj, uint16_t type);
 elf_err_t elf_set_machine(elfobj_t *obj, uint16_t machine);
