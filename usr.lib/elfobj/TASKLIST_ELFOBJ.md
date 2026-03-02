@@ -961,8 +961,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Big-endian read/write.
 
 ### 20f. M68K DWARF
-- [ ] M68K DWARF register mapping: D0–D7 → 0–7, A0–A7 → 8–15, FP0–FP7 → 16–23.
-- [ ] M68K CFA: frame pointer A6 (FP), return address on stack.
+- [x] M68K DWARF register mapping: D0–D7 → 0–7, A0–A7 → 8–15, FP0–FP7 → 16–23.
+- [x] M68K CFA: frame pointer A6 (FP), return address on stack.
 
 ### 20g. M68K Testing
 - [ ] Unit tests for all M68K relocation types (8/16/32-bit absolute and PC-relative).
