@@ -296,13 +296,13 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `CLREX`
 
 ### 6g. VFPv3/v4 (Floating Point)
-- [ ] `VADD.F32/F64`, `VSUB`, `VMUL`, `VDIV`, `VNMUL`, `VMLA`, `VMLS`, `VNMLA`, `VNMLS`
-- [ ] `VFMA.F32/F64`, `VFMS`, `VFNMA`, `VFNMS` (VFPv4)
-- [ ] `VMOV` (imm, reg, between ARM/VFP), `VMRS`, `VMSR`
-- [ ] `VCMP`, `VCMPE`, `VCVT` (int↔float, float↔float, fixed-point), `VCVT{T,B}.F16.F32` (half-precision)
-- [ ] `VABS`, `VNEG`, `VSQRT`
-- [ ] `VLDR`, `VSTR`, `VLDM`, `VSTM`, `VPUSH`, `VPOP`
-- [ ] `VCVTA/M/N/P` (ARMv8 rounding modes)
+- [x] `VADD.F32/F64`, `VSUB`, `VMUL`, `VDIV`, `VNMUL`, `VMLA`, `VMLS`, `VNMLA`, `VNMLS`
+- [x] `VFMA.F32/F64`, `VFMS`, `VFNMA`, `VFNMS` (VFPv4)
+- [x] `VMOV` (imm, reg, between ARM/VFP), `VMRS`, `VMSR`
+- [x] `VCMP`, `VCMPE`, `VCVT` (int↔float, float↔float, fixed-point), `VCVT{T,B}.F16.F32` (half-precision)
+- [x] `VABS`, `VNEG`, `VSQRT`
+- [x] `VLDR`, `VSTR`, `VLDM`, `VSTM`, `VPUSH`, `VPOP`
+- [x] `VCVTA/M/N/P` (ARMv8 rounding modes)
 
 ### 6h. NEON (Advanced SIMD)
 - [ ] **Data types:** `.I8/.I16/.I32/.I64`, `.U8/.U16/.U32/.U64`, `.S8/.S16/.S32/.S64`, `.F16/.F32`, `.P8/.P16`
