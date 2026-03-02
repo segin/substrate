@@ -343,17 +343,17 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `EXTR Xd, Xn, Xm, #lsb` (extract/rotate)
 
 ### 7c. Data Processing — Register
-- [ ] `ADD/SUB{S} Xd, Xn, Xm{, shift #amount}` (LSL/LSR/ASR/ROR)
-- [ ] `ADD/SUB{S} Xd, Xn, Wm, extend{#amount}` (UXTB/UXTH/UXTW/UXTX/SXTB/SXTH/SXTW/SXTX)
-- [ ] `AND/ORR/EOR/ORN/EON/BIC/BICS/ANDS` (shifted register)
-- [ ] `ADC/SBC{S}` (add/sub with carry)
-- [ ] `MADD/MSUB` (multiply-add); aliases: `MUL`, `MNEG`
-- [ ] `SMADDL/SMSUBL/UMADDL/UMSUBL` (widening multiply-add); aliases: `SMULL`, `UMULL`
-- [ ] `SMULH`, `UMULH` (high multiply)
-- [ ] `SDIV`, `UDIV`
-- [ ] `CLS`, `CLZ`, `RBIT`, `REV`, `REV16`, `REV32`
-- [ ] `CSEL/CSINC/CSINV/CSNEG` (conditional select); aliases: `CINC`, `CINV`, `CNEG`, `CSET`, `CSETM`
-- [ ] `CCMN/CCMP` (conditional compare)
+- [x] `ADD/SUB{S} Xd, Xn, Xm{, shift #amount}` (LSL/LSR/ASR/ROR)
+- [x] `ADD/SUB{S} Xd, Xn, Wm, extend{#amount}` (UXTB/UXTH/UXTW/UXTX/SXTB/SXTH/SXTW/SXTX)
+- [x] `AND/ORR/EOR/ORN/EON/BIC/BICS/ANDS` (shifted register)
+- [x] `ADC/SBC{S}` (add/sub with carry)
+- [x] `MADD/MSUB` (multiply-add); aliases: `MUL`, `MNEG`
+- [x] `SMADDL/SMSUBL/UMADDL/UMSUBL` (widening multiply-add); aliases: `SMULL`, `UMULL`
+- [x] `SMULH`, `UMULH` (high multiply)
+- [x] `SDIV`, `UDIV`
+- [x] `CLS`, `CLZ`, `RBIT`, `REV`, `REV16`, `REV32`
+- [x] `CSEL/CSINC/CSINV/CSNEG` (conditional select); aliases: `CINC`, `CINV`, `CNEG`, `CSET`, `CSETM`
+- [x] `CCMN/CCMP` (conditional compare)
 
 ### 7d. Branch Instructions
 - [ ] `B label` (±128MB), `BL label` (±128MB)
