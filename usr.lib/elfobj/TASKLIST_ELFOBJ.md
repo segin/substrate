@@ -1140,8 +1140,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] `elf_init_alpha()`: ELF64/EM_ALPHA/ELFDATA2LSB.
 
 ### 23f. Alpha DWARF
-- [ ] Alpha DWARF register mapping: $0–$30 → 0–30, $f0–$f30 → 32–62, $sp → 30, $ra → 26.
-- [ ] Alpha CFA: frame pointer $15 (FP) or $30 (SP), return address $26 (RA).
+- [x] Alpha DWARF register mapping: -e– → 0–30, – → 32–62,  → 30,  → 26.
+- [x] Alpha CFA: frame pointer  (FP) or  (SP), return address  (RA).
 
 ### 23g. Alpha Testing
 - [ ] Unit tests for all Alpha relocation types.
