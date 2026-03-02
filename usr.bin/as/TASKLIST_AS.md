@@ -375,13 +375,13 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `PRFM` (prefetch memory)
 
 ### 7f. System Instructions
-- [ ] `MSR/MRS` (system register access)
-- [ ] `NOP`, `YIELD`, `WFE`, `WFI`, `SEV`, `SEVL`
-- [ ] `DMB`, `DSB`, `ISB` (barriers with domain: SY/ST/LD/ISH/ISHST/ISHLD/NSH/NSHST/NSHLD/OSH/OSHST/OSHLD)
-- [ ] `CLREX`
-- [ ] `SYS`, `SYSL` (generic system instruction)
-- [ ] `DC`, `IC`, `AT`, `TLBI` (cache/TLB maintenance aliases)
-- [ ] `HINT #imm`
+- [x] `MSR/MRS` (system register access)
+- [x] `NOP`, `YIELD`, `WFE`, `WFI`, `SEV`, `SEVL`
+- [x] `DMB`, `DSB`, `ISB` (barriers with domain: SY/ST/LD/ISH/ISHST/ISHLD/NSH/NSHST/NSHLD/OSH/OSHST/OSHLD)
+- [x] `CLREX`
+- [x] `SYS`, `SYSL` (generic system instruction)
+- [x] `DC`, `IC`, `AT`, `TLBI` (cache/TLB maintenance aliases)
+- [x] `HINT #imm`
 
 ### 7g. SIMD & FP (NEON / AArch64 Advanced SIMD)
 - [ ] Vector registers: V0–V31, Bn/Hn/Sn/Dn/Qn sub-register views
