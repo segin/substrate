@@ -470,41 +470,41 @@ Beyond the currently-implemented core set, add the full x86 relocation roster:
 
 Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 
-- [ ] Parse attribute section format: subsection headers, vendor name, tag-value pairs.
-- [ ] `Tag_CPU_name` (4): CPU name string (e.g., "Cortex-A15").
-- [ ] `Tag_CPU_arch` (6): architecture version (1=v4, 6=v6, 10=v7, 13=v7E-M, 14=v8).
-- [ ] `Tag_CPU_arch_profile` (7): 'A' (Application), 'R' (Real-time), 'M' (Microcontroller).
-- [ ] `Tag_ARM_ISA_use` (8): 0=no, 1=yes.
-- [ ] `Tag_THUMB_ISA_use` (9): 0=no, 1=Thumb, 2=Thumb-2, 3=Armv8-M.baseline.
-- [ ] `Tag_FP_arch` (10): 0=none, 1=VFPv1, 2=VFPv2, 3=VFPv3, 4=VFPv3-D16, 5=VFPv4, 6=VFPv4-D16.
-- [ ] `Tag_WMMX_arch` (11): Wireless MMX.
-- [ ] `Tag_Advanced_SIMD_arch` (12): 0=none, 1=NEONv1, 2=NEONv1+fused-MAC, 3=ARMv8 NEON.
-- [ ] `Tag_PCS_config` (13): calling convention.
-- [ ] `Tag_ABI_PCS_R9_use` (14): R9 usage.
-- [ ] `Tag_ABI_PCS_RW_data` (15): RW data addressing.
-- [ ] `Tag_ABI_PCS_RO_data` (16): RO data addressing.
-- [ ] `Tag_ABI_PCS_GOT_use` (17): GOT addressing.
-- [ ] `Tag_ABI_PCS_wchar_t` (18): wchar_t size.
-- [ ] `Tag_ABI_FP_rounding` (19): rounding mode.
-- [ ] `Tag_ABI_FP_denormal` (20): denormal handling.
-- [ ] `Tag_ABI_FP_exceptions` (21): exception model.
-- [ ] `Tag_ABI_FP_user_exceptions` (22): user-mode FP exceptions.
-- [ ] `Tag_ABI_FP_number_model` (23): IEEE 754 conformance.
-- [ ] `Tag_ABI_align_needed` (24): alignment requirements.
-- [ ] `Tag_ABI_align_preserved` (25): alignment guarantees.
-- [ ] `Tag_ABI_enum_size` (26): enum sizing.
-- [ ] `Tag_ABI_HardFP_use` (27): hard-float VFP register usage.
-- [ ] `Tag_ABI_VFP_args` (28): VFP argument passing convention.
-- [ ] `Tag_ABI_optimization_goals` (30): optimization priorities.
-- [ ] `Tag_CPU_unaligned_access` (34): unaligned access support.
-- [ ] `Tag_FP_HP_extension` (36): half-precision extension.
-- [ ] `Tag_ABI_FP_16bit_format` (38): FP16 format (IEEE754/alternative).
-- [ ] `Tag_MPExtension_use` (42): multiprocessing extensions.
-- [ ] `Tag_DIV_use` (44): integer divide instruction usage.
-- [ ] `Tag_DSP_extension` (46): DSP extension usage.
-- [ ] `Tag_Virtualization_use` (68): virtualization extensions.
-- [ ] API: `elf_arm_attribute_count()`, `elf_arm_attribute_tag_at()`, `elf_arm_attribute_value_at()`, `elf_arm_attribute_string_at()`.
-- [ ] Validation: check compatibility of `Tag_CPU_arch` + `Tag_FP_arch` across link inputs.
+- [x] Parse attribute section format: subsection headers, vendor name, tag-value pairs.
+- [x] `Tag_CPU_name` (4): CPU name string (e.g., "Cortex-A15").
+- [x] `Tag_CPU_arch` (6): architecture version (1=v4, 6=v6, 10=v7, 13=v7E-M, 14=v8).
+- [x] `Tag_CPU_arch_profile` (7): 'A' (Application), 'R' (Real-time), 'M' (Microcontroller).
+- [x] `Tag_ARM_ISA_use` (8): 0=no, 1=yes.
+- [x] `Tag_THUMB_ISA_use` (9): 0=no, 1=Thumb, 2=Thumb-2, 3=Armv8-M.baseline.
+- [x] `Tag_FP_arch` (10): 0=none, 1=VFPv1, 2=VFPv2, 3=VFPv3, 4=VFPv3-D16, 5=VFPv4, 6=VFPv4-D16.
+- [x] `Tag_WMMX_arch` (11): Wireless MMX.
+- [x] `Tag_Advanced_SIMD_arch` (12): 0=none, 1=NEONv1, 2=NEONv1+fused-MAC, 3=ARMv8 NEON.
+- [x] `Tag_PCS_config` (13): calling convention.
+- [x] `Tag_ABI_PCS_R9_use` (14): R9 usage.
+- [x] `Tag_ABI_PCS_RW_data` (15): RW data addressing.
+- [x] `Tag_ABI_PCS_RO_data` (16): RO data addressing.
+- [x] `Tag_ABI_PCS_GOT_use` (17): GOT addressing.
+- [x] `Tag_ABI_PCS_wchar_t` (18): wchar_t size.
+- [x] `Tag_ABI_FP_rounding` (19): rounding mode.
+- [x] `Tag_ABI_FP_denormal` (20): denormal handling.
+- [x] `Tag_ABI_FP_exceptions` (21): exception model.
+- [x] `Tag_ABI_FP_user_exceptions` (22): user-mode FP exceptions.
+- [x] `Tag_ABI_FP_number_model` (23): IEEE 754 conformance.
+- [x] `Tag_ABI_align_needed` (24): alignment requirements.
+- [x] `Tag_ABI_align_preserved` (25): alignment guarantees.
+- [x] `Tag_ABI_enum_size` (26): enum sizing.
+- [x] `Tag_ABI_HardFP_use` (27): hard-float VFP register usage.
+- [x] `Tag_ABI_VFP_args` (28): VFP argument passing convention.
+- [x] `Tag_ABI_optimization_goals` (30): optimization priorities.
+- [x] `Tag_CPU_unaligned_access` (34): unaligned access support.
+- [x] `Tag_FP_HP_extension` (36): half-precision extension.
+- [x] `Tag_ABI_FP_16bit_format` (38): FP16 format (IEEE754/alternative).
+- [x] `Tag_MPExtension_use` (42): multiprocessing extensions.
+- [x] `Tag_DIV_use` (44): integer divide instruction usage.
+- [x] `Tag_DSP_extension` (46): DSP extension usage.
+- [x] `Tag_Virtualization_use` (68): virtualization extensions.
+- [x] API: `elf_arm_attribute_count()`, `elf_arm_attribute_tag_at()`, `elf_arm_attribute_value_at()`, `elf_arm_attribute_string_at()`.
+- [x] Validation: check compatibility of `Tag_CPU_arch` + `Tag_FP_arch` across link inputs.
 
 ---
 
