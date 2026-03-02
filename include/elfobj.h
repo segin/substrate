@@ -893,6 +893,8 @@ elfobj_t *elf_init_arm(void);
 elfobj_t *elf_init_aarch64(void);
 elfobj_t *elf_init_mips32(void);
 elfobj_t *elf_init_mips64(void);
+elfobj_t *elf_init_riscv32(void);
+elfobj_t *elf_init_riscv64(void);
 elf_err_t elf_finalize(elfobj_t *obj);
 elf_err_t elf_set_type(elfobj_t *obj, uint16_t type);
 elf_err_t elf_set_machine(elfobj_t *obj, uint16_t machine);
@@ -971,6 +973,9 @@ size_t elf_arm_attribute_count(const elfobj_t *obj);
 uint32_t elf_arm_attribute_tag_at(const elfobj_t *obj, size_t index);
 uint64_t elf_arm_attribute_value_at(const elfobj_t *obj, size_t index);
 const char *elf_arm_attribute_string_at(const elfobj_t *obj, size_t index);
+size_t elf_riscv_attribute_count(const elfobj_t *obj);
+uint32_t elf_riscv_attribute_tag_at(const elfobj_t *obj, size_t index);
+uint64_t elf_riscv_attribute_value_at(const elfobj_t *obj, size_t index);
 
 typedef struct {
     const char *name;

@@ -449,3 +449,94 @@ const char *elf_arm_attribute_string_at(const elfobj_t *obj, size_t index) {
     g_last_attr_string = elf__strdup(item.str);
     return g_last_attr_string;
 }
+
+static size_t parse_riscv_attrs(const elfobj_t *obj, arm_attr_item_t *items, size_t max_items) {
+    const elf_section_t *s;
+    const uint8_t *p;
+    size_t size;
+    size_t off = 0;
+    size_t outn = 0;
+
+    if (obj == NULL) {
+        return 0;
+    }
+    s = elf_find_section((elfobj_t *)obj, ".riscv.attributes");
+    if (s == NULL || s->data == NULL || s->data_size < 5) {
+        return 0;
+    }
+    p = s->data;
+    size = s->data_size;
+    if (p[0] != 'A') {
+        return 0;
+    }
+    off = 1;
+    while (off + 4 <= size) {
+        uint32_t sect_len = elf__rd32(p + off, obj->endian);
+        size_t start = off;
+        size_t end;
+        if (sect_len < 5) {
+            break;
+        }
+        end = start + sect_len;
+        if (end > size) {
+            break;
+        }
+        off += 4;
+        while (off < end && p[off] != '\0') {
+            off++;
+        }
+        if (off >= end) {
+            break;
+        }
+        off++;
+        while (off < end) {
+            int ok = 0;
+            uint64_t tag = read_uleb128(p, end, &off, &ok);
+            uint64_t value = 0;
+            if (!ok) {
+                break;
+            }
+            if (tag == 5) { /* Tag_RISCV_arch is a string */
+                while (off < end && p[off] != '\0') {
+                    off++;
+                }
+                if (off < end) {
+                    off++;
+                }
+            } else {
+                value = read_uleb128(p, end, &off, &ok);
+                if (!ok) {
+                    break;
+                }
+            }
+            if (items != NULL && outn < max_items) {
+                items[outn].tag = (uint32_t)tag;
+                items[outn].value = value;
+                items[outn].str = NULL;
+            }
+            outn++;
+        }
+        off = end;
+    }
+    return outn;
+}
+
+size_t elf_riscv_attribute_count(const elfobj_t *obj) {
+    return parse_riscv_attrs(obj, NULL, 0);
+}
+
+uint32_t elf_riscv_attribute_tag_at(const elfobj_t *obj, size_t index) {
+    arm_attr_item_t item;
+    if (parse_riscv_attrs(obj, &item, index + 1) <= index) {
+        return 0;
+    }
+    return item.tag;
+}
+
+uint64_t elf_riscv_attribute_value_at(const elfobj_t *obj, size_t index) {
+    arm_attr_item_t item;
+    if (parse_riscv_attrs(obj, &item, index + 1) <= index) {
+        return 0;
+    }
+    return item.value;
+}

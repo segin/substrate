@@ -826,13 +826,13 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Relocation name strings for all RISC-V types.
 
 ### 18d. RISC-V Attributes Parser
-- [ ] Parse `.riscv.attributes` (`SHT_RISCV_ATTRIBUTES`).
-- [ ] Decode `Tag_RISCV_arch` ISA string (e.g., `"rv64i2p1_m2p0_a2p1_f2p2_d2p2_c2p0"`).
-- [ ] Decode `Tag_RISCV_stack_align` (stack alignment).
-- [ ] Decode `Tag_RISCV_unaligned_access` (unaligned access).
-- [ ] Decode `Tag_RISCV_priv_spec` / `Tag_RISCV_priv_spec_minor` / `Tag_RISCV_priv_spec_revision`.
-- [ ] API: `elf_riscv_attribute_count()`, `elf_riscv_attribute_tag_at()`, `elf_riscv_attribute_value_at()`.
-- [ ] ISA string compatibility checking across link inputs.
+- [x] Parse `.riscv.attributes` (`SHT_RISCV_ATTRIBUTES`).
+- [x] Decode `Tag_RISCV_arch` ISA string (e.g., `"rv64i2p1_m2p0_a2p1_f2p2_d2p2_c2p0"`).
+- [x] Decode `Tag_RISCV_stack_align` (stack alignment).
+- [x] Decode `Tag_RISCV_unaligned_access` (unaligned access).
+- [x] Decode `Tag_RISCV_priv_spec` / `Tag_RISCV_priv_spec_minor` / `Tag_RISCV_priv_spec_revision`.
+- [x] API: `elf_riscv_attribute_count()`, `elf_riscv_attribute_tag_at()`, `elf_riscv_attribute_value_at()`.
+- [x] ISA string compatibility checking across link inputs.
 
 ### 18e. RISC-V Validation
 - [ ] Accept `EM_RISCV` with `ELFCLASS32` (RV32) or `ELFCLASS64` (RV64/RV128).
