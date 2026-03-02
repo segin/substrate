@@ -1397,6 +1397,9 @@ static cc_type_t common_arith_type(cc_type_t a, cc_type_t b) {
     if (a == CC_TYPE_VOID || b == CC_TYPE_VOID) {
         return CC_TYPE_VOID;
     }
+    if (a == CC_TYPE_LDOUBLE || b == CC_TYPE_LDOUBLE) {
+        return CC_TYPE_LDOUBLE;
+    }
     if (a == CC_TYPE_DOUBLE || b == CC_TYPE_DOUBLE) {
         return CC_TYPE_DOUBLE;
     }

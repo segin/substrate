@@ -2596,7 +2596,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     }
 
     if (seen_double) {
-        *out_type = CC_TYPE_DOUBLE;
+        if (seen_long > 1) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "invalid long double type combination");
+            return -1;
+        }
+        *out_type = seen_long ? CC_TYPE_LDOUBLE : CC_TYPE_DOUBLE;
         if (out_struct_id != NULL) {
             *out_struct_id = -1;
         }
@@ -5463,7 +5467,13 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             e->float_val = p->tok.fnum;
-            e->value_type = p->tok.float_is_single ? CC_TYPE_FLOAT : CC_TYPE_DOUBLE;
+            if (p->tok.float_is_single) {
+                e->value_type = CC_TYPE_FLOAT;
+            } else if (p->tok.float_is_long) {
+                e->value_type = CC_TYPE_LDOUBLE;
+            } else {
+                e->value_type = CC_TYPE_DOUBLE;
+            }
         } else {
             e = new_expr(CC_EXPR_INT);
             if (e == NULL) {

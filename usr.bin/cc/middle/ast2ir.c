@@ -375,7 +375,7 @@ static void set_diag(cc_diag_t *d, const char *msg) {
 }
 
 static cc_value_type_t type_to_val(cc_type_t t) {
-    return (t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE) ? CC_VAL_F64 : CC_VAL_I64;
+    return (t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE) ? CC_VAL_F64 : CC_VAL_I64;
 }
 
 static int is_pointer_type(cc_type_t t) {
@@ -10217,7 +10217,10 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             cc_ssa_module_free(out);
             return -1;
         }
-        sf->ret_type = (af->ret_type == CC_TYPE_FLOAT || af->ret_type == CC_TYPE_DOUBLE) ? CC_VAL_F64 : CC_VAL_I64;
+        sf->ret_type =
+            (af->ret_type == CC_TYPE_FLOAT || af->ret_type == CC_TYPE_DOUBLE || af->ret_type == CC_TYPE_LDOUBLE)
+                ? CC_VAL_F64
+                : CC_VAL_I64;
         sf->storage = af->storage;
         sf->attr_flags = eff_attr_flags;
         sf->attr_align = eff_attr_align;
