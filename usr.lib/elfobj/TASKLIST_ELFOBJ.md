@@ -986,11 +986,11 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] `R_VAX_COPY` (19), `R_VAX_GLOB_DAT` (20), `R_VAX_JMP_SLOT` (21), `R_VAX_RELATIVE` (22)
 
 ### 21c. VAX Relocation Backend
-- [ ] `vax_reloc_size()` for all VAX relocation types.
-- [ ] `vax_is_pc_relative()`: PC32, PC16, PC8.
-- [ ] `vax_apply()`: S + A for absolute, S + A − P for PC-relative.
-- [ ] Register under `EM_VAX`.
-- [ ] Relocation name strings for all VAX types.
+- [x] `vax_reloc_size()` for all VAX relocation types.
+- [x] `vax_is_pc_relative()`: PC32, PC16, PC8.
+- [x] `vax_apply()`: S + A for absolute, S + A − P for PC-relative.
+- [x] Register under `EM_VAX`.
+- [x] Relocation name strings for all VAX types.
 
 ### 21d. VAX Validation
 - [ ] Accept `EM_VAX` with `ELFCLASS32` only.
