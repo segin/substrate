@@ -81,21 +81,21 @@ Status key:
 - [x] Zero-init semantics for static storage objects.
 
 ### 1.4 Expressions and conversions
-- [ ] Integer promotions.
-- [ ] Usual arithmetic conversions.
-- [ ] Arithmetic operators and assignment variants.
-- [ ] Shift/bitwise semantics and constraints.
-- [ ] Relational/equality semantics for arithmetic and pointer types.
-- [ ] Logical operators with short-circuit behavior.
-- [ ] Conditional operator `?:`.
-- [ ] Comma operator.
-- [ ] Cast semantics across scalar and pointer domains.
-- [ ] Lvalue/rvalue and modifiable-lvalue constraints.
-- [ ] `sizeof` on type and expression operands.
-- [ ] Address-of and indirection semantics.
-- [ ] Array-to-pointer and function-to-pointer decay.
-- [ ] Pointer arithmetic and pointer difference rules.
-- [ ] Effective type / aliasing baseline behavior.
+- [x] Integer promotions.
+- [x] Usual arithmetic conversions.
+- [x] Arithmetic operators and assignment variants.
+- [x] Shift/bitwise semantics and constraints.
+- [x] Relational/equality semantics for arithmetic and pointer types.
+- [x] Logical operators with short-circuit behavior.
+- [x] Conditional operator `?:`.
+- [x] Comma operator.
+- [x] Cast semantics across scalar and pointer domains.
+- [x] Lvalue/rvalue and modifiable-lvalue constraints.
+- [x] `sizeof` on type and expression operands.
+- [x] Address-of and indirection semantics.
+- [x] Array-to-pointer and function-to-pointer decay.
+- [x] Pointer arithmetic and pointer difference rules.
+- [x] Effective type / aliasing baseline behavior.
 
 ### 1.5 Statements and control flow
 - [ ] Block scope, nested scopes, and shadowing rules.
