@@ -444,12 +444,12 @@ Beyond the currently-implemented core set, add the full x86 relocation roster:
 
 ## 8. DWARF Support (`elf_dwarf.c`)
 
-- [ ] ARM DWARF register mapping: R0–R15 → 0–15, VFP D0–D31 → 256–287.
-- [ ] AArch64 DWARF register mapping: X0–X30 → 0–30, SP → 31, V0–V31 → 64–95.
-- [ ] ARM CFA rules: typical frame pointer is R11 (FP) or R13 (SP).
-- [ ] AArch64 CFA rules: frame pointer is X29, link register is X30.
-- [ ] Handle `.debug_frame` vs `.eh_frame` CIE augmentation differences per arch.
-- [ ] Parse ARM-specific DWARF extensions (if any vendor extensions present).
+- [x] ARM DWARF register mapping: R0–R15 → 0–15, VFP D0–D31 → 256–287.
+- [x] AArch64 DWARF register mapping: X0–X30 → 0–30, SP → 31, V0–V31 → 64–95.
+- [x] ARM CFA rules: typical frame pointer is R11 (FP) or R13 (SP).
+- [x] AArch64 CFA rules: frame pointer is X29, link register is X30.
+- [x] Handle `.debug_frame` vs `.eh_frame` CIE augmentation differences per arch.
+- [x] Parse ARM-specific DWARF extensions (if any vendor extensions present).
 
 ---
 
