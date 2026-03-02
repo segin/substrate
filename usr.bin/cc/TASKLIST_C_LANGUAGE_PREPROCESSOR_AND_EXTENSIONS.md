@@ -205,89 +205,89 @@ Status key:
 ## 3) Preprocessor Features: C99 Baseline (must finish first)
 
 ### 3.1 Directive parsing and execution
-- [ ] `#define` object-like macros.
-- [ ] `#define` function-like macros.
-- [ ] Variadic macros (`__VA_ARGS__`) in C99 mode.
-- [ ] `#undef`.
-- [ ] `#include` with quoted and angle forms.
-- [ ] `#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`.
-- [ ] `#line`.
-- [ ] `#error`.
-- [ ] `#pragma` pass-through + recognized standard pragmas.
+- [x] `#define` object-like macros.
+- [x] `#define` function-like macros.
+- [x] Variadic macros (`__VA_ARGS__`) in C99 mode.
+- [x] `#undef`.
+- [x] `#include` with quoted and angle forms.
+- [x] `#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`.
+- [x] `#line`.
+- [x] `#error`.
+- [x] `#pragma` pass-through + recognized standard pragmas.
 
 ### 3.2 Macro expansion semantics
-- [ ] Correct argument prescan expansion ordering.
-- [ ] Disabled-macro recursion prevention.
-- [ ] `#` stringification.
-- [ ] `##` token pasting.
-- [ ] Empty argument handling and comma edge cases per standard.
-- [ ] Macro re-expansion suppression correctness.
-- [ ] `defined` operator handling in `#if` expressions.
+- [x] Correct argument prescan expansion ordering.
+- [x] Disabled-macro recursion prevention.
+- [x] `#` stringification.
+- [x] `##` token pasting.
+- [x] Empty argument handling and comma edge cases per standard.
+- [x] Macro re-expansion suppression correctness.
+- [x] `defined` operator handling in `#if` expressions.
 
 ### 3.3 Expression evaluator for conditionals
-- [ ] Integer expression grammar and precedence in preprocessor context.
-- [ ] Replacement of undefined identifiers with `0`.
-- [ ] Short-circuit behavior in `&&` and `||`.
-- [ ] Overflow-consistent integer evaluation model.
-- [ ] Diagnostics for malformed conditional expressions.
+- [x] Integer expression grammar and precedence in preprocessor context.
+- [x] Replacement of undefined identifiers with `0`.
+- [x] Short-circuit behavior in `&&` and `||`.
+- [x] Overflow-consistent integer evaluation model.
+- [x] Diagnostics for malformed conditional expressions.
 
 ### 3.4 Include resolution and line mapping
-- [ ] Search order for `""` vs `<>`.
-- [ ] `-I`, `-isystem`, `-iquote`.
-- [ ] Built-in include dirs for host bootstrap.
-- [ ] `-nostdinc`.
-- [ ] Include depth limits and diagnostics.
-- [ ] `#pragma once`.
-- [ ] Correct `#line` output emission for downstream parser mapping.
-- [ ] `-P` behavior (suppress output line markers while preserving internal mapping).
+- [x] Search order for `""` vs `<>`.
+- [x] `-I`, `-isystem`, `-iquote`.
+- [x] Built-in include dirs for host bootstrap.
+- [x] `-nostdinc`.
+- [x] Include depth limits and diagnostics.
+- [x] `#pragma once`.
+- [x] Correct `#line` output emission for downstream parser mapping.
+- [x] `-P` behavior (suppress output line markers while preserving internal mapping).
 
 ### 3.5 Driver integration and CLI behavior
-- [ ] `cc -E` delegates fully to internal preprocessor path.
-- [ ] `-DNAME`, `-DNAME=VALUE`, `-UNAME`.
-- [ ] `-include file`.
-- [ ] `-imacros file`.
-- [ ] `-dM` macro dump mode.
-- [ ] `-v` include path dump mode.
-- [ ] Deterministic output guarantees for same input/options.
+- [x] `cc -E` delegates fully to internal preprocessor path.
+- [x] `-DNAME`, `-DNAME=VALUE`, `-UNAME`.
+- [x] `-include file`.
+- [x] `-imacros file`.
+- [x] `-dM` macro dump mode.
+- [x] `-v` include path dump mode.
+- [x] Deterministic output guarantees for same input/options.
 
 ### 3.6 Dependency generation
-- [ ] `-M`.
-- [ ] `-MM`.
-- [ ] `-MD`.
-- [ ] `-MMD`.
-- [ ] `-MF`.
-- [ ] `-MT`.
-- [ ] `-MQ`.
-- [ ] Escaping/continuation formatting compatible with make.
+- [x] `-M`.
+- [x] `-MM`.
+- [x] `-MD`.
+- [x] `-MMD`.
+- [x] `-MF`.
+- [x] `-MT`.
+- [x] `-MQ`.
+- [x] Escaping/continuation formatting compatible with make.
 
 ### 3.7 C99 preprocessor diagnostics and hardening
-- [ ] File:line:col diagnostics.
-- [ ] Include stack traces.
-- [ ] Macro expansion trace output for diagnostics.
-- [ ] Limits: include depth, macro depth, token growth, output size.
-- [ ] Fuzzing coverage for parser/expander include graph logic.
+- [x] File:line:col diagnostics.
+- [x] Include stack traces.
+- [x] Macro expansion trace output for diagnostics.
+- [/] Limits: include depth, macro depth, token growth, output size.
+- [x] Fuzzing coverage for parser/expander include graph logic.
 
 ---
 
 ## 4) Preprocessor Features Added After C99 (C11/C17/C23)
 
 ### 4.1 C11/C17 alignment
-- [ ] Standard macro updates by language version.
-- [ ] Behavior adjustments required by DRs and later standards.
+- [x] Standard macro updates by language version.
+- [/] Behavior adjustments required by DRs and later standards.
 
 ### 4.2 C23 preprocessor
-- [ ] `#elifdef`.
-- [ ] `#elifndef`.
-- [ ] `#warning` (standardized).
-- [ ] `#embed`.
-- [ ] `__has_include`.
-- [ ] `__has_embed`.
-- [ ] `__VA_OPT__`.
-- [ ] Version-gated semantics by `-std=` mode.
+- [x] `#elifdef`.
+- [x] `#elifndef`.
+- [x] `#warning` (standardized).
+- [x] `#embed`.
+- [x] `__has_include`.
+- [x] `__has_embed`.
+- [x] `__VA_OPT__`.
+- [x] Version-gated semantics by `-std=` mode.
 
 ### 4.3 Post-C99 preprocessor validation
-- [ ] Mode matrix tests (`c99`, `c11`, `c17`, `c23`, GNU dialects).
-- [ ] Differential output tests vs GCC/Clang for known-sensitive inputs.
+- [x] Mode matrix tests (`c99`, `c11`, `c17`, `c23`, GNU dialects).
+- [x] Differential output tests vs GCC/Clang for known-sensitive inputs.
 
 ---
 
@@ -335,26 +335,26 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [ ] Memory model mapping and codegen fences.
 
 ### 5.5 GNU preprocessor extensions
-- [ ] `#include_next`.
-- [ ] `,##__VA_ARGS__`.
-- [ ] Named varargs macros (`args...`) where in GNU mode.
-- [ ] `__COUNTER__`, `__BASE_FILE__`, `__FILE_NAME__`, `__INCLUDE_LEVEL__`, `__TIMESTAMP__`.
-- [ ] `#pragma GCC` forms used by kernel/userland.
+- [x] `#include_next`.
+- [x] `,##__VA_ARGS__`.
+- [x] Named varargs macros (`args...`) where in GNU mode.
+- [x] `__COUNTER__`, `__BASE_FILE__`, `__FILE_NAME__`, `__INCLUDE_LEVEL__`, `__TIMESTAMP__`.
+- [x] `#pragma GCC` forms used by kernel/userland.
 
 ---
 
 ## 6) Clang Extensions (must cover all relevant compatibility surface)
 
 ### 6.1 Feature probing and extension macros
-- [ ] `__has_feature`.
-- [ ] `__has_extension`.
-- [ ] `__has_builtin`.
-- [ ] `__has_include`.
-- [ ] `__has_attribute`.
-- [ ] `__has_c_attribute`.
-- [ ] `__has_declspec_attribute`.
-- [ ] `__has_warning`.
-- [ ] `__is_identifier`.
+- [x] `__has_feature`.
+- [x] `__has_extension`.
+- [x] `__has_builtin`.
+- [x] `__has_include`.
+- [x] `__has_attribute`.
+- [x] `__has_c_attribute`.
+- [x] `__has_declspec_attribute`.
+- [x] `__has_warning`.
+- [x] `__is_identifier`.
 
 ### 6.2 Clang language features used in real code
 - [ ] Blocks extension — no block-literal codegen or ABI.
