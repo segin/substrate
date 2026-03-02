@@ -20,6 +20,8 @@ int main(void) {
     elfobj_t *aa64 = NULL;
     elfobj_t *mips32 = NULL;
     elfobj_t *mips64 = NULL;
+    elfobj_t *rv32 = NULL;
+    elfobj_t *rv64 = NULL;
 
     CHECK(elf_reloc_size_for_machine(EM_ARM, R_ARM_CALL) == 4);
     CHECK(elf_reloc_size_for_machine(EM_AARCH64, R_AARCH64_CALL26) == 4);
@@ -29,6 +31,9 @@ int main(void) {
     CHECK(elf_reloc_size_for_machine(EM_MIPS, R_MIPS_32) == 4);
     CHECK(elf_reloc_is_tls_for_machine(EM_MIPS, R_MIPS_TLS_TPREL32) == 1);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_MIPS, R_MIPS_HI16), "R_MIPS_HI16") == 0);
+    CHECK(elf_reloc_size_for_machine(EM_RISCV, R_RISCV_JAL) == 4);
+    CHECK(elf_reloc_is_pc_relative_for_machine(EM_RISCV, R_RISCV_PCREL_HI20) == 1);
+    CHECK(elf_reloc_is_tls_for_machine(EM_RISCV, R_RISCV_TLS_TPREL64) == 1);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_X86_64, R_X86_64_PC32), "R_X86_64_PC32") == 0);
     CHECK(strcmp(elf_reloc_name_for_machine(EM_386, R_386_PC8), "R_386_PC8") == 0);
     CHECK(strncmp(elf_reloc_name_for_machine(EM_386, 9999), "UNKNOWN(", 8) == 0);
@@ -84,6 +89,29 @@ int main(void) {
         CHECK(af.isa_level == 64);
         CHECK(af.fp_abi == 1);
     }
+
+    rv32 = elf_init_riscv32();
+    CHECK(rv32 != NULL);
+    CHECK(elf_machine(rv32) == EM_RISCV);
+    CHECK(elf_class(rv32) == ELFOBJ_CLASS_32);
+
+    rv64 = elf_init_riscv64();
+    CHECK(rv64 != NULL);
+    CHECK(elf_machine(rv64) == EM_RISCV);
+    CHECK(elf_class(rv64) == ELFOBJ_CLASS_64);
+    {
+        static const unsigned char rv_attrs[] = {
+            'A', 0x0c, 0x00, 0x00, 0x00, 'r', 'i', 's', 'c', 'v', 0x00, 0x04, 0x10
+        };
+        elf_section_t *a = elf_add_section(rv64, ".riscv.attributes", SHT_RISCV_ATTRIBUTES, 0);
+        uint64_t outv = 0;
+        CHECK(a != NULL);
+        CHECK(elf_section_set_data(a, rv_attrs, sizeof(rv_attrs)) == ELF_OK);
+        CHECK(elf_riscv_attribute_count(rv64) >= 1);
+        CHECK(elf_riscv_attribute_tag_at(rv64, 0) == 4);
+        CHECK(elf_riscv_attribute_value_at(rv64, 0) == 16);
+        CHECK(elf_apply_relocation_value(rv64, R_RISCV_JAL, 0x1000, 0x1800, 0, &outv) == ELF_OK);
+    }
     {
         uint64_t outv = 0;
         CHECK(elf_apply_relocation_value(x64, R_X86_64_PC16, 0x1000, 0x1010, 0, &outv) == ELF_OK);
@@ -102,6 +130,8 @@ int main(void) {
     elf_close(x64);
     elf_close(mips32);
     elf_close(mips64);
+    elf_close(rv32);
+    elf_close(rv64);
     puts("ok");
     return 0;
 }

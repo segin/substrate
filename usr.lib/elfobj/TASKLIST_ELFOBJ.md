@@ -853,15 +853,15 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] RISC-V CFA: frame pointer x8 (s0/fp) or x2 (sp), return address x1 (ra).
 
 ### 18h. RISC-V Testing
-- [ ] Unit tests for all RISC-V relocation types.
-- [ ] B-type and J-type immediate encoding correctness.
-- [ ] CALL/CALL_PLT AUIPC+JALR pair calculation.
-- [ ] RVC branch/jump compressed encoding.
-- [ ] ADD/SUB content relocations.
-- [ ] `.riscv.attributes` parsing and ISA string decode.
-- [ ] Round-trip read/write for RV32 and RV64 objects.
-- [ ] Validation: class/endian checks, float ABI conflicts.
-- [ ] Fuzz RISC-V ELF parsing → crash-free.
+- [x] Unit tests for all RISC-V relocation types.
+- [x] B-type and J-type immediate encoding correctness.
+- [x] CALL/CALL_PLT AUIPC+JALR pair calculation.
+- [x] RVC branch/jump compressed encoding.
+- [x] ADD/SUB content relocations.
+- [x] `.riscv.attributes` parsing and ISA string decode.
+- [x] Round-trip read/write for RV32 and RV64 objects.
+- [x] Validation: class/endian checks, float ABI conflicts.
+- [x] Fuzz RISC-V ELF parsing → crash-free.
 
 ---
 
