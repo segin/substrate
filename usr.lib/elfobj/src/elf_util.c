@@ -452,6 +452,26 @@ elfobj_t *elf_init_mips64(void) {
     return obj;
 }
 
+elfobj_t *elf_init_riscv32(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_RISCV, ELFOBJ_CLASS_32, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return NULL;
+    }
+    obj->flags = EF_RISCV_FLOAT_ABI_SOFT;
+    init_default_sections(obj, 4, 4);
+    return obj;
+}
+
+elfobj_t *elf_init_riscv64(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_RISCV, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return NULL;
+    }
+    obj->flags = EF_RISCV_FLOAT_ABI_SOFT;
+    init_default_sections(obj, 8, 8);
+    return obj;
+}
+
 elf_section_t *elf_add_arm_exidx(elfobj_t *obj) {
     elf_section_t *exidx;
     elf_section_t *extab;

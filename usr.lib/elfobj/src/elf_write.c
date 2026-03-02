@@ -95,6 +95,8 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
         use_rela_default = 0;
     } else if (obj->machine == EM_AARCH64) {
         use_rela_default = 1;
+    } else if (obj->machine == EM_RISCV) {
+        use_rela_default = 1;
     }
 
     for (i = 0; i < target->reloc_count; ++i) {

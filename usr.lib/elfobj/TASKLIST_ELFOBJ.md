@@ -842,11 +842,11 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Check for conflicting float ABI across link inputs.
 
 ### 18f. RISC-V ELF Read/Write/Create
-- [ ] Recognize `EM_RISCV` as valid machine type.
-- [ ] RV32: parse/write RELA relocations (ELF32). RV64: parse/write RELA relocations (ELF64).
-- [ ] Parse `SHT_RISCV_ATTRIBUTES` sections.
-- [ ] `elf_init_riscv32()`: ELF32/EM_RISCV/ELFDATA2LSB.
-- [ ] `elf_init_riscv64()`: ELF64/EM_RISCV/ELFDATA2LSB.
+- [x] Recognize `EM_RISCV` as valid machine type.
+- [x] RV32: parse/write RELA relocations (ELF32). RV64: parse/write RELA relocations (ELF64).
+- [x] Parse `SHT_RISCV_ATTRIBUTES` sections.
+- [x] `elf_init_riscv32()`: ELF32/EM_RISCV/ELFDATA2LSB.
+- [x] `elf_init_riscv64()`: ELF64/EM_RISCV/ELFDATA2LSB.
 
 ### 18g. RISC-V DWARF
 - [ ] RISC-V DWARF register mapping: x0–x31 → 0–31, f0–f31 → 32–63.
