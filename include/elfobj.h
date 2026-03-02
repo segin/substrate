@@ -67,6 +67,27 @@ typedef enum {
 #ifndef EM_RISCV
 #define EM_RISCV 243
 #endif
+#ifndef EM_LOONGARCH
+#define EM_LOONGARCH 258
+#endif
+#ifndef EM_68K
+#define EM_68K 4
+#endif
+#ifndef EM_VAX
+#define EM_VAX 75
+#endif
+#ifndef EM_PPC
+#define EM_PPC 20
+#endif
+#ifndef EM_PPC64
+#define EM_PPC64 21
+#endif
+#ifndef EM_ALPHA
+#define EM_ALPHA 0x9026
+#endif
+#ifndef EM_IA_64
+#define EM_IA_64 50
+#endif
 #ifndef ELFOSABI_NONE
 #define ELFOSABI_NONE 0
 #endif
@@ -236,6 +257,45 @@ typedef enum {
 
 #ifndef EF_AARCH64_CHERI_PURECAP
 #define EF_AARCH64_CHERI_PURECAP 0x00000001u
+#endif
+
+#ifndef EF_MIPS_NOREORDER
+#define EF_MIPS_NOREORDER 0x00000001u
+#define EF_MIPS_PIC 0x00000002u
+#define EF_MIPS_CPIC 0x00000004u
+#define EF_MIPS_ABI_O32 0x00001000u
+#define EF_MIPS_ABI_O64 0x00002000u
+#define EF_MIPS_ABI_EABI32 0x00003000u
+#define EF_MIPS_ABI_EABI64 0x00004000u
+#define EF_MIPS_ARCH_1 0x00000000u
+#define EF_MIPS_ARCH_2 0x10000000u
+#define EF_MIPS_ARCH_3 0x20000000u
+#define EF_MIPS_ARCH_4 0x30000000u
+#define EF_MIPS_ARCH_5 0x40000000u
+#define EF_MIPS_ARCH_32 0x50000000u
+#define EF_MIPS_ARCH_64 0x60000000u
+#define EF_MIPS_ARCH_32R2 0x70000000u
+#define EF_MIPS_ARCH_64R2 0x80000000u
+#define EF_MIPS_ARCH_32R6 0x90000000u
+#define EF_MIPS_ARCH_64R6 0xa0000000u
+#define EF_MIPS_MIPS16 0x00000020u
+#define EF_MIPS_MICROMIPS 0x02000000u
+#define EF_MIPS_ARCH_ASE_MDMX 0x08000000u
+#define EF_MIPS_ARCH_ASE_M16 0x04000000u
+#define EF_MIPS_ARCH_ASE_DSP 0x04000000u
+#define EF_MIPS_ARCH_ASE_DSPR2 0x08000000u
+#define EF_MIPS_ARCH_ASE_MSA 0x20000000u
+#define EF_MIPS_FP64 0x00000200u
+#endif
+
+#ifndef SHT_MIPS_DWARF
+#define SHT_MIPS_DWARF 0x7000001eu
+#define SHT_MIPS_ABIFLAGS 0x7000002au
+#endif
+
+#ifndef PT_MIPS_REGINFO
+#define PT_MIPS_REGINFO 0x70000000u
+#define PT_MIPS_ABIFLAGS 0x70000003u
 #endif
 
 #ifndef SHT_ARM_EXIDX

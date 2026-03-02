@@ -711,13 +711,13 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 17. MIPS / MIPS64 Support
 
 ### 17a. Machine Types and Constants
-- [ ] Define `EM_MIPS` (8).
-- [ ] Define MIPS `e_flags`: `EF_MIPS_NOREORDER`, `EF_MIPS_PIC`, `EF_MIPS_CPIC`, `EF_MIPS_ABI_O32`, `EF_MIPS_ABI_O64`, `EF_MIPS_ABI_EABI32`, `EF_MIPS_ABI_EABI64`.
-- [ ] Define MIPS ISA flags: `EF_MIPS_ARCH_1` through `EF_MIPS_ARCH_64R6`.
-- [ ] Define MIPS ASE flags: `EF_MIPS_MIPS16`, `EF_MIPS_MICROMIPS`, `EF_MIPS_ARCH_ASE_MDMX`, `EF_MIPS_ARCH_ASE_M16`, `EF_MIPS_ARCH_ASE_DSP`, `EF_MIPS_ARCH_ASE_DSPR2`, `EF_MIPS_ARCH_ASE_MSA`.
-- [ ] Define MIPS FP mode: `EF_MIPS_FP64` (FR=1).
-- [ ] Define MIPS section types: `SHT_MIPS_DWARF` (0x7000001E), `SHT_MIPS_ABIFLAGS` (0x7000002A).
-- [ ] Define MIPS segment types: `PT_MIPS_ABIFLAGS` (0x70000003), `PT_MIPS_REGINFO` (0x70000000).
+- [x] Define `EM_MIPS` (8).
+- [x] Define MIPS `e_flags`: `EF_MIPS_NOREORDER`, `EF_MIPS_PIC`, `EF_MIPS_CPIC`, `EF_MIPS_ABI_O32`, `EF_MIPS_ABI_O64`, `EF_MIPS_ABI_EABI32`, `EF_MIPS_ABI_EABI64`.
+- [x] Define MIPS ISA flags: `EF_MIPS_ARCH_1` through `EF_MIPS_ARCH_64R6`.
+- [x] Define MIPS ASE flags: `EF_MIPS_MIPS16`, `EF_MIPS_MICROMIPS`, `EF_MIPS_ARCH_ASE_MDMX`, `EF_MIPS_ARCH_ASE_M16`, `EF_MIPS_ARCH_ASE_DSP`, `EF_MIPS_ARCH_ASE_DSPR2`, `EF_MIPS_ARCH_ASE_MSA`.
+- [x] Define MIPS FP mode: `EF_MIPS_FP64` (FR=1).
+- [x] Define MIPS section types: `SHT_MIPS_DWARF` (0x7000001E), `SHT_MIPS_ABIFLAGS` (0x7000002A).
+- [x] Define MIPS segment types: `PT_MIPS_ABIFLAGS` (0x70000003), `PT_MIPS_REGINFO` (0x70000000).
 
 ### 17b. MIPS Relocation Type Constants
 - [ ] `R_MIPS_NONE` (0), `R_MIPS_16` (1), `R_MIPS_32` (2), `R_MIPS_REL32` (3)
