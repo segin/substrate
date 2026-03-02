@@ -1,1 +1,67 @@
-.so man3/elfobj.3
+.Dd March 2, 2026
+.Dt ELF_INIT_MIPS32 3
+.Os Substrate
+.Sh NAME
+.Nm elf_init_mips32
+.Nd initialize a writable ELF relocatable object for MIPS32
+.Sh LIBRARY
+.Lb libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elfobj_t *
+.Fn elf_init_mips32 void
+.Sh DESCRIPTION
+The
+.Fn elf_init_mips32
+function creates a new mutable
+.Vt elfobj_t
+configured for MIPS32 relocatable objects.
+.Pp
+The returned object is initialized as:
+.Bl -tag -width "Machine"
+.It Type
+.Dv ET_REL
+.It Machine
+EM_MIPS
+.It Class
+ELFCLASS32
+.It Endian
+ELFDATA2LSB
+.It Flags
+EF_MIPS_ABI_O32 | EF_MIPS_ARCH_32R2
+.El
+.Pp
+The object includes default
+.Pa .text ,
+.Pa .data ,
+and
+.Pa .bss
+sections with architecture-appropriate alignment.
+.Sh RETURN VALUES
+The
+.Fn elf_init_mips32
+function returns a pointer to a new object on success.
+Otherwise, it returns NULL.
+.Sh ERRORS
+A NULL return indicates allocation or initialization failure.
+.Sh EXAMPLE
+.Bd -literal
+#include <elfobj.h>
+
+int
+main(void)
+{
+    elfobj_t *obj = elf_init_mips32();
+    if (obj == NULL)
+        return 1;
+
+    /* add sections/symbols/relocations, then write */
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elfobj 3 ,
+.Xr elf_section 3 ,
+.Xr elf_symbol 3 ,
+.Xr elf_reloc 3

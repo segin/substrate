@@ -1,1 +1,34 @@
-.so man3/elfobj.3
+.Dd March 2, 2026
+.Dt ELF_RISCV_ATTRIBUTE_TAG_AT 3
+.Os Substrate
+.Sh NAME
+.Nm elf_riscv_attribute_tag_at
+.Nd return the tag value of a parsed RISC-V attribute entry
+.Sh LIBRARY
+.Lb libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft uint32_t
+.Fn elf_riscv_attribute_tag_at "const elfobj_t *obj" "size_t index"
+.Sh DESCRIPTION
+The
+.Fn elf_riscv_attribute_tag_at
+function returns the tag identifier for the RISC-V attribute at
+.Fa index
+in
+.Fa obj .
+.Pp
+Use
+.Fn elf_riscv_attribute_count
+first to bound valid indices.
+.Sh RETURN VALUES
+Returns the tag value on success.
+Returns 0 when
+.Fa index
+is out of range or
+.Fa obj
+is NULL.
+.Sh SEE ALSO
+.Xr elf_riscv_attribute_count 3 ,
+.Xr elf_riscv_attribute_value_at 3 ,
+.Xr elfobj 3

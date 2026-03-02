@@ -1,1 +1,36 @@
-.so man3/elf_section.3
+.Dd March 2, 2026
+.Dt ELF_SECTION_GET 3
+.Os Substrate
+.Sh NAME
+.Nm elf_section_get
+.Nd return a section handle by stable index
+.Sh LIBRARY
+.Lb libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elf_section_t *
+.Fn elf_section_get "const elfobj_t *obj" "size_t index"
+.Sh DESCRIPTION
+The
+.Fn elf_section_get
+function returns the section handle at
+.Fa index
+from
+.Fa obj .
+.Pp
+This accessor is intended for deterministic section-table iteration by tooling
+such as
+.Xr size 1 ,
+.Xr objdump 1 ,
+and
+.Xr readelf 1 .
+.Sh RETURN VALUES
+Returns the section handle when
+.Fa index
+is valid.
+Returns NULL for out-of-range indices or NULL
+.Fa obj .
+.Sh SEE ALSO
+.Xr elf_section 3 ,
+.Xr elf_section_addr 3 ,
+.Xr elfobj 3

@@ -1,1 +1,67 @@
-.so man3/elfobj.3
+.Dd March 2, 2026
+.Dt ELF_INIT_M68K 3
+.Os Substrate
+.Sh NAME
+.Nm elf_init_m68k
+.Nd initialize a writable ELF relocatable object for Motorola 68000
+.Sh LIBRARY
+.Lb libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft elfobj_t *
+.Fn elf_init_m68k void
+.Sh DESCRIPTION
+The
+.Fn elf_init_m68k
+function creates a new mutable
+.Vt elfobj_t
+configured for Motorola 68000 relocatable objects.
+.Pp
+The returned object is initialized as:
+.Bl -tag -width "Machine"
+.It Type
+.Dv ET_REL
+.It Machine
+EM_68K
+.It Class
+ELFCLASS32
+.It Endian
+ELFDATA2MSB
+.It Flags
+0
+.El
+.Pp
+The object includes default
+.Pa .text ,
+.Pa .data ,
+and
+.Pa .bss
+sections with architecture-appropriate alignment.
+.Sh RETURN VALUES
+The
+.Fn elf_init_m68k
+function returns a pointer to a new object on success.
+Otherwise, it returns NULL.
+.Sh ERRORS
+A NULL return indicates allocation or initialization failure.
+.Sh EXAMPLE
+.Bd -literal
+#include <elfobj.h>
+
+int
+main(void)
+{
+    elfobj_t *obj = elf_init_m68k();
+    if (obj == NULL)
+        return 1;
+
+    /* add sections/symbols/relocations, then write */
+    elf_close(obj);
+    return 0;
+}
+.Ed
+.Sh SEE ALSO
+.Xr elfobj 3 ,
+.Xr elf_section 3 ,
+.Xr elf_symbol 3 ,
+.Xr elf_reloc 3

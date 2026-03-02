@@ -1,1 +1,31 @@
-.so man3/elfobj.3
+.Dd March 2, 2026
+.Dt ELF_MIPS_ABIFLAGS 3
+.Os Substrate
+.Sh NAME
+.Nm elf_mips_abiflags
+.Nd decode MIPS ABI flags from a .MIPS.abiflags section
+.Sh LIBRARY
+.Lb libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft int
+.Fn elf_mips_abiflags "const elfobj_t *obj" "elf_mips_abiflags_t *out"
+.Sh DESCRIPTION
+The
+.Fn elf_mips_abiflags
+function decodes MIPS ABI metadata from
+.Pa .MIPS.abiflags
+in
+.Fa obj
+into
+.Fa out .
+.Pp
+The output structure includes fields such as ISA level/revision, register
+widths, FP ABI, and ASE flags.
+.Sh RETURN VALUES
+Returns 1 when ABI flags are present and successfully decoded.
+Returns 0 if the section is absent, malformed, or
+.Fa obj
+is NULL.
+.Sh SEE ALSO
+.Xr elfobj 3

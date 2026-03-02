@@ -1,1 +1,29 @@
-.so man3/elf_section.3
+.Dd March 2, 2026
+.Dt ELF_SECTION_ADDR 3
+.Os Substrate
+.Sh NAME
+.Nm elf_section_addr
+.Nd return the section virtual address from the section header
+.Sh LIBRARY
+.Lb libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft uint64_t
+.Fn elf_section_addr "const elf_section_t *section"
+.Sh DESCRIPTION
+The
+.Fn elf_section_addr
+function returns the
+.Dv sh_addr
+field for
+.Fa section .
+This is the section virtual address used in loaded images.
+.Sh RETURN VALUES
+Returns the section address.
+For NULL
+.Fa section ,
+0 is returned.
+.Sh SEE ALSO
+.Xr elf_section 3 ,
+.Xr elf_section_get 3 ,
+.Xr elfobj 3

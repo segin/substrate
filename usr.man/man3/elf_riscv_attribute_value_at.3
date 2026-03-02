@@ -1,1 +1,30 @@
-.so man3/elfobj.3
+.Dd March 2, 2026
+.Dt ELF_RISCV_ATTRIBUTE_VALUE_AT 3
+.Os Substrate
+.Sh NAME
+.Nm elf_riscv_attribute_value_at
+.Nd return the numeric payload of a parsed RISC-V attribute entry
+.Sh LIBRARY
+.Lb libelfobj
+.Sh SYNOPSIS
+.In elfobj.h
+.Ft uint64_t
+.Fn elf_riscv_attribute_value_at "const elfobj_t *obj" "size_t index"
+.Sh DESCRIPTION
+The
+.Fn elf_riscv_attribute_value_at
+function returns the numeric value associated with the RISC-V attribute at
+.Fa index
+in
+.Fa obj .
+.Sh RETURN VALUES
+Returns the attribute value on success.
+Returns 0 when
+.Fa index
+is out of range or
+.Fa obj
+is NULL.
+.Sh SEE ALSO
+.Xr elf_riscv_attribute_count 3 ,
+.Xr elf_riscv_attribute_tag_at 3 ,
+.Xr elfobj 3
