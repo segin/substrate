@@ -3,7 +3,7 @@
 .Os Substrate
 .Sh NAME
 .Nm elf_riscv_attribute_tag_at
-.Nd return the tag value of a parsed RISC-V attribute entry
+.Nd return a parsed RISC-V attribute tag by index
 .Sh LIBRARY
 .Lb libelfobj
 .Sh SYNOPSIS
@@ -13,21 +13,33 @@
 .Sh DESCRIPTION
 The
 .Fn elf_riscv_attribute_tag_at
-function returns the tag identifier for the RISC-V attribute at
-.Fa index
-in
-.Fa obj .
+function parses
+.Pa .riscv.attributes
+from
+.Fa obj
+and returns the tag number for the entry at
+.Fa index .
 .Pp
 Use
-.Fn elf_riscv_attribute_count
-first to bound valid indices.
+.Xr elf_riscv_attribute_count 3
+first to determine the valid index range.
 .Sh RETURN VALUES
-Returns the tag value on success.
-Returns 0 when
-.Fa index
-is out of range or
+The
+.Fn elf_riscv_attribute_tag_at
+function returns the tag value for the requested entry.
+It returns 0 if
 .Fa obj
-is NULL.
+is
+.Dv NULL ,
+if
+.Fa index
+is out of range,
+or if parsing fails.
+.Sh CAVEATS
+A returned value of 0 can indicate failure or an actual attribute tag value of 0.
+Callers that need strict disambiguation should validate bounds with
+.Xr elf_riscv_attribute_count 3
+before indexing.
 .Sh SEE ALSO
 .Xr elf_riscv_attribute_count 3 ,
 .Xr elf_riscv_attribute_value_at 3 ,

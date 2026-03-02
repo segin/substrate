@@ -3,7 +3,7 @@
 .Os Substrate
 .Sh NAME
 .Nm elf_mips_abiflags
-.Nd decode MIPS ABI flags from a .MIPS.abiflags section
+.Nd read MIPS ABI flags from an ELF object
 .Sh LIBRARY
 .Lb libelfobj
 .Sh SYNOPSIS
@@ -13,19 +13,33 @@
 .Sh DESCRIPTION
 The
 .Fn elf_mips_abiflags
-function decodes MIPS ABI metadata from
-.Pa .MIPS.abiflags
-in
-.Fa obj
-into
-.Fa out .
+function locates and decodes MIPS ABI flags from
+.Fa obj .
+It accepts either a section of type
+.Dv SHT_MIPS_ABIFLAGS
+or a section named
+.Pa .MIPS.abiflags .
 .Pp
-The output structure includes fields such as ISA level/revision, register
-widths, FP ABI, and ASE flags.
+On success,
+.Fa out
+is filled with the decoded values:
+version, ISA level and revision, GPR/FPR/CPR sizes, floating-point ABI,
+ISA extension bits, ASE bits, and flags words.
+.Pp
+The section payload must contain at least 24 bytes in the object endianness.
 .Sh RETURN VALUES
-Returns 1 when ABI flags are present and successfully decoded.
-Returns 0 if the section is absent, malformed, or
+The
+.Fn elf_mips_abiflags
+function returns 1 on success.
+It returns 0 if
 .Fa obj
-is NULL.
+or
+.Fa out
+is
+.Dv NULL ,
+if no ABI flags section is present,
+or if the section is malformed or too short.
 .Sh SEE ALSO
+.Xr elf_init_mips32 3 ,
+.Xr elf_init_mips64 3 ,
 .Xr elfobj 3

@@ -3,7 +3,7 @@
 .Os Substrate
 .Sh NAME
 .Nm elf_riscv_attribute_value_at
-.Nd return the numeric payload of a parsed RISC-V attribute entry
+.Nd return a parsed RISC-V attribute value by index
 .Sh LIBRARY
 .Lb libelfobj
 .Sh SYNOPSIS
@@ -13,17 +13,32 @@
 .Sh DESCRIPTION
 The
 .Fn elf_riscv_attribute_value_at
-function returns the numeric value associated with the RISC-V attribute at
-.Fa index
-in
-.Fa obj .
-.Sh RETURN VALUES
-Returns the attribute value on success.
-Returns 0 when
-.Fa index
-is out of range or
+function parses
+.Pa .riscv.attributes
+from
 .Fa obj
-is NULL.
+and returns the integer value associated with the entry at
+.Fa index .
+.Pp
+Some attributes may be encoded as strings in the underlying format.
+Those entries do not yield a numeric payload through this accessor.
+.Sh RETURN VALUES
+The
+.Fn elf_riscv_attribute_value_at
+function returns the decoded integer value.
+It returns 0 if
+.Fa obj
+is
+.Dv NULL ,
+if
+.Fa index
+is out of range,
+if parsing fails,
+or when the selected attribute has no numeric payload.
+.Sh CAVEATS
+Because 0 is also a valid numeric attribute value, callers should use
+.Xr elf_riscv_attribute_count 3
+for range validation before indexing.
 .Sh SEE ALSO
 .Xr elf_riscv_attribute_count 3 ,
 .Xr elf_riscv_attribute_tag_at 3 ,

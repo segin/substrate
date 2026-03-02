@@ -3,7 +3,7 @@
 .Os Substrate
 .Sh NAME
 .Nm elf_init_m68k
-.Nd initialize a writable ELF relocatable object for Motorola 68000
+.Nd create a new ELF relocatable object configured for Motorola 68000
 .Sh LIBRARY
 .Lb libelfobj
 .Sh SYNOPSIS
@@ -13,55 +13,38 @@
 .Sh DESCRIPTION
 The
 .Fn elf_init_m68k
-function creates a new mutable
+function allocates a mutable
 .Vt elfobj_t
-configured for Motorola 68000 relocatable objects.
+and initializes it for m68k relocatable output.
 .Pp
-The returned object is initialized as:
-.Bl -tag -width "Machine"
-.It Type
+The created object uses:
+.Bl -tag -width "Architecture flags"
+.It ELF type
 .Dv ET_REL
 .It Machine
-EM_68K
+.Dv EM_68K
 .It Class
-ELFCLASS32
-.It Endian
-ELFDATA2MSB
-.It Flags
+.Dv ELFCLASS32
+.It Data encoding
+.Dv ELFDATA2MSB
+.It Architecture flags
 0
 .El
 .Pp
-The object includes default
-.Pa .text ,
-.Pa .data ,
-and
+Default sections are created as part of initialization:
+.Pa .text
+(alignment 4),
+.Pa .data
+(alignment 4), and
 .Pa .bss
-sections with architecture-appropriate alignment.
+(alignment 4).
 .Sh RETURN VALUES
 The
 .Fn elf_init_m68k
-function returns a pointer to a new object on success.
-Otherwise, it returns NULL.
-.Sh ERRORS
-A NULL return indicates allocation or initialization failure.
-.Sh EXAMPLE
-.Bd -literal
-#include <elfobj.h>
-
-int
-main(void)
-{
-    elfobj_t *obj = elf_init_m68k();
-    if (obj == NULL)
-        return 1;
-
-    /* add sections/symbols/relocations, then write */
-    elf_close(obj);
-    return 0;
-}
-.Ed
+function returns a pointer to a newly allocated object on success.
+On failure, it returns
+.Dv NULL .
 .Sh SEE ALSO
-.Xr elfobj 3 ,
-.Xr elf_section 3 ,
-.Xr elf_symbol 3 ,
-.Xr elf_reloc 3
+.Xr elf_finalize 3 ,
+.Xr elf_close 3 ,
+.Xr elfobj 3

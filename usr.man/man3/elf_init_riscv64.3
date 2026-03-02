@@ -3,7 +3,7 @@
 .Os Substrate
 .Sh NAME
 .Nm elf_init_riscv64
-.Nd initialize a writable ELF relocatable object for RISC-V 64-bit
+.Nd create a new ELF relocatable object configured for RV64
 .Sh LIBRARY
 .Lb libelfobj
 .Sh SYNOPSIS
@@ -13,55 +13,38 @@
 .Sh DESCRIPTION
 The
 .Fn elf_init_riscv64
-function creates a new mutable
+function allocates a mutable
 .Vt elfobj_t
-configured for RISC-V 64-bit relocatable objects.
+and initializes it for 64-bit RISC-V relocatable output.
 .Pp
-The returned object is initialized as:
-.Bl -tag -width "Machine"
-.It Type
+The created object uses:
+.Bl -tag -width "Architecture flags"
+.It ELF type
 .Dv ET_REL
 .It Machine
-EM_RISCV
+.Dv EM_RISCV
 .It Class
-ELFCLASS64
-.It Endian
-ELFDATA2LSB
-.It Flags
-EF_RISCV_FLOAT_ABI_SOFT
+.Dv ELFCLASS64
+.It Data encoding
+.Dv ELFDATA2LSB
+.It Architecture flags
+.Dv EF_RISCV_FLOAT_ABI_SOFT
 .El
 .Pp
-The object includes default
-.Pa .text ,
-.Pa .data ,
-and
+Default sections are created as part of initialization:
+.Pa .text
+(alignment 8),
+.Pa .data
+(alignment 8), and
 .Pa .bss
-sections with architecture-appropriate alignment.
+(alignment 8).
 .Sh RETURN VALUES
 The
 .Fn elf_init_riscv64
-function returns a pointer to a new object on success.
-Otherwise, it returns NULL.
-.Sh ERRORS
-A NULL return indicates allocation or initialization failure.
-.Sh EXAMPLE
-.Bd -literal
-#include <elfobj.h>
-
-int
-main(void)
-{
-    elfobj_t *obj = elf_init_riscv64();
-    if (obj == NULL)
-        return 1;
-
-    /* add sections/symbols/relocations, then write */
-    elf_close(obj);
-    return 0;
-}
-.Ed
+function returns a pointer to a newly allocated object on success.
+On failure, it returns
+.Dv NULL .
 .Sh SEE ALSO
-.Xr elfobj 3 ,
-.Xr elf_section 3 ,
-.Xr elf_symbol 3 ,
-.Xr elf_reloc 3
+.Xr elf_riscv_attribute_count 3 ,
+.Xr elf_finalize 3 ,
+.Xr elfobj 3

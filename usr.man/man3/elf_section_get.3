@@ -3,7 +3,7 @@
 .Os Substrate
 .Sh NAME
 .Nm elf_section_get
-.Nd return a section handle by stable index
+.Nd return a section handle by section-table index
 .Sh LIBRARY
 .Lb libelfobj
 .Sh SYNOPSIS
@@ -13,24 +13,30 @@
 .Sh DESCRIPTION
 The
 .Fn elf_section_get
-function returns the section handle at
+function returns the section object at
 .Fa index
-from
+in the section table of
 .Fa obj .
 .Pp
-This accessor is intended for deterministic section-table iteration by tooling
-such as
-.Xr size 1 ,
-.Xr objdump 1 ,
-and
-.Xr readelf 1 .
+The returned pointer refers to storage owned by
+.Fa obj
+and remains valid while the object exists.
 .Sh RETURN VALUES
-Returns the section handle when
+The
+.Fn elf_section_get
+function returns a non-null section pointer when
 .Fa index
-is valid.
-Returns NULL for out-of-range indices or NULL
-.Fa obj .
+is in range.
+It returns
+.Dv NULL
+if
+.Fa obj
+is
+.Dv NULL
+or if
+.Fa index
+is greater than or equal to the section count.
 .Sh SEE ALSO
-.Xr elf_section 3 ,
+.Xr elf_section_count 3 ,
 .Xr elf_section_addr 3 ,
-.Xr elfobj 3
+.Xr elf_section 3

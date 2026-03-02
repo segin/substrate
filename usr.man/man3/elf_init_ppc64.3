@@ -3,7 +3,7 @@
 .Os Substrate
 .Sh NAME
 .Nm elf_init_ppc64
-.Nd initialize a writable ELF relocatable object for PowerPC 64-bit
+.Nd create a new ELF relocatable object configured for 64-bit PowerPC
 .Sh LIBRARY
 .Lb libelfobj
 .Sh SYNOPSIS
@@ -13,55 +13,38 @@
 .Sh DESCRIPTION
 The
 .Fn elf_init_ppc64
-function creates a new mutable
+function allocates a mutable
 .Vt elfobj_t
-configured for PowerPC 64-bit relocatable objects.
+and initializes it for 64-bit PowerPC relocatable output.
 .Pp
-The returned object is initialized as:
-.Bl -tag -width "Machine"
-.It Type
+The created object uses:
+.Bl -tag -width "Architecture flags"
+.It ELF type
 .Dv ET_REL
 .It Machine
-EM_PPC64
+.Dv EM_PPC64
 .It Class
-ELFCLASS64
-.It Endian
-ELFDATA2LSB
-.It Flags
-EF_PPC64_ABI_V2
+.Dv ELFCLASS64
+.It Data encoding
+.Dv ELFDATA2LSB
+.It Architecture flags
+.Dv EF_PPC64_ABI_V2
 .El
 .Pp
-The object includes default
-.Pa .text ,
-.Pa .data ,
-and
+Default sections are created as part of initialization:
+.Pa .text
+(alignment 8),
+.Pa .data
+(alignment 8), and
 .Pa .bss
-sections with architecture-appropriate alignment.
+(alignment 8).
 .Sh RETURN VALUES
 The
 .Fn elf_init_ppc64
-function returns a pointer to a new object on success.
-Otherwise, it returns NULL.
-.Sh ERRORS
-A NULL return indicates allocation or initialization failure.
-.Sh EXAMPLE
-.Bd -literal
-#include <elfobj.h>
-
-int
-main(void)
-{
-    elfobj_t *obj = elf_init_ppc64();
-    if (obj == NULL)
-        return 1;
-
-    /* add sections/symbols/relocations, then write */
-    elf_close(obj);
-    return 0;
-}
-.Ed
+function returns a pointer to a newly allocated object on success.
+On failure, it returns
+.Dv NULL .
 .Sh SEE ALSO
-.Xr elfobj 3 ,
-.Xr elf_section 3 ,
-.Xr elf_symbol 3 ,
-.Xr elf_reloc 3
+.Xr elf_finalize 3 ,
+.Xr elf_close 3 ,
+.Xr elfobj 3

@@ -3,7 +3,7 @@
 .Os Substrate
 .Sh NAME
 .Nm elf_riscv_attribute_count
-.Nd return the number of parsed RISC-V attributes
+.Nd count parsed entries from .riscv.attributes
 .Sh LIBRARY
 .Lb libelfobj
 .Sh SYNOPSIS
@@ -13,17 +13,22 @@
 .Sh DESCRIPTION
 The
 .Fn elf_riscv_attribute_count
-function returns the number of RISC-V attributes parsed from the
+function parses the
 .Pa .riscv.attributes
 section in
-.Fa obj .
-.Pp
-If no RISC-V attribute section is present, zero is returned.
-.Sh RETURN VALUES
-Returns the number of parsed attributes.
-Returns 0 when no attributes are available or
 .Fa obj
-is NULL.
+and returns the number of attribute entries discovered.
+.Pp
+If the section is absent, malformed, or the object is not RISC-V,
+no entries are reported.
+.Sh RETURN VALUES
+The
+.Fn elf_riscv_attribute_count
+function returns the number of parsed attributes.
+It returns 0 if no attributes are available or
+.Fa obj
+is
+.Dv NULL .
 .Sh SEE ALSO
 .Xr elf_riscv_attribute_tag_at 3 ,
 .Xr elf_riscv_attribute_value_at 3 ,

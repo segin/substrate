@@ -3,7 +3,7 @@
 .Os Substrate
 .Sh NAME
 .Nm elf_section_addr
-.Nd return the section virtual address from the section header
+.Nd return the section virtual address field
 .Sh LIBRARY
 .Lb libelfobj
 .Sh SYNOPSIS
@@ -13,17 +13,26 @@
 .Sh DESCRIPTION
 The
 .Fn elf_section_addr
-function returns the
+function returns the section address field stored in
+.Fa section
+(the value corresponding to
 .Dv sh_addr
-field for
-.Fa section .
-This is the section virtual address used in loaded images.
+in the ELF section header).
+.Pp
+For relocatable objects, this value is commonly zero until final layout or
+linking assigns addresses.
 .Sh RETURN VALUES
-Returns the section address.
-For NULL
-.Fa section ,
-0 is returned.
+The
+.Fn elf_section_addr
+function returns the section address.
+It returns 0 if
+.Fa section
+is
+.Dv NULL .
+.Sh CAVEATS
+A return value of 0 may represent either a null input or a legitimate section
+address value.
 .Sh SEE ALSO
-.Xr elf_section 3 ,
 .Xr elf_section_get 3 ,
-.Xr elfobj 3
+.Xr elf_section_type 3 ,
+.Xr elf_section 3
