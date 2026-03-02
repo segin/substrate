@@ -993,8 +993,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Relocation name strings for all VAX types.
 
 ### 21d. VAX Validation
-- [ ] Accept `EM_VAX` with `ELFCLASS32` only.
-- [ ] Accept `ELFDATA2LSB` only (VAX is little-endian).
+- [x] Accept `EM_VAX` with `ELFCLASS32` only.
+- [x] Accept `ELFDATA2LSB` only (VAX is little-endian).
 
 ### 21e. VAX ELF Read/Write/Create
 - [ ] Recognize `EM_VAX` as valid machine type.
