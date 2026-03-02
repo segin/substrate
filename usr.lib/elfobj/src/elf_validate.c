@@ -571,6 +571,20 @@ static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
             }
             break;
         }
+        case EM_68K:
+            if (obj->cls != ELFOBJ_CLASS_32) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_68K requires ELFCLASS32");
+            }
+            if (obj->endian != ELFOBJ_ENDIAN_BE) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_68K requires big-endian");
+            }
+            if (obj->flags != 0) {
+                return report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_68K has unknown e_flags bits");
+            }
+            break;
         default:
             break;
     }

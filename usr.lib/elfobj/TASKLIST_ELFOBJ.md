@@ -950,9 +950,9 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Relocation name strings for all M68K types.
 
 ### 20d. M68K Validation
-- [ ] Accept `EM_68K` with `ELFCLASS32` only.
-- [ ] Accept `ELFDATA2MSB` only (M68K is big-endian).
-- [ ] Validate `e_flags`.
+- [x] Accept `EM_68K` with `ELFCLASS32` only.
+- [x] Accept `ELFDATA2MSB` only (M68K is big-endian).
+- [x] Validate `e_flags`.
 
 ### 20e. M68K ELF Read/Write/Create
 - [ ] Recognize `EM_68K` as valid machine type.
