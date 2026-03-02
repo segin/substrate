@@ -335,12 +335,12 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] Immediate encoding: logical immediates (bitmask), move-wide immediates, PC-relative (ADR/ADRP pages).
 
 ### 7b. Data Processing — Immediate
-- [ ] `ADD/SUB{S} Xd, Xn, #imm{, shift}` (12-bit immediate, optional LSL #12)
-- [ ] `AND/ORR/EOR/ANDS Xd, Xn, #bitmask` (logical immediate)
-- [ ] `MOVN/MOVZ/MOVK Xd, #imm16{, LSL #shift}` (16-bit wide move)
-- [ ] `ADR Xd, label` (PC-relative ±1MB), `ADRP Xd, label` (PC-relative ±4GB page)
-- [ ] `BFM/SBFM/UBFM` (bitfield move); aliases: `BFI`, `BFXIL`, `SBFX`, `UBFX`, `SXTB/H/W`, `UXTB/H`
-- [ ] `EXTR Xd, Xn, Xm, #lsb` (extract/rotate)
+- [x] `ADD/SUB{S} Xd, Xn, #imm{, shift}` (12-bit immediate, optional LSL #12)
+- [x] `AND/ORR/EOR/ANDS Xd, Xn, #bitmask` (logical immediate)
+- [x] `MOVN/MOVZ/MOVK Xd, #imm16{, LSL #shift}` (16-bit wide move)
+- [x] `ADR Xd, label` (PC-relative ±1MB), `ADRP Xd, label` (PC-relative ±4GB page)
+- [x] `BFM/SBFM/UBFM` (bitfield move); aliases: `BFI`, `BFXIL`, `SBFX`, `UBFX`, `SXTB/H/W`, `UXTB/H`
+- [x] `EXTR Xd, Xn, Xm, #lsb` (extract/rotate)
 
 ### 7c. Data Processing — Register
 - [ ] `ADD/SUB{S} Xd, Xn, Xm{, shift #amount}` (LSL/LSR/ASR/ROR)
