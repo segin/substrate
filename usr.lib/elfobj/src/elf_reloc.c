@@ -598,6 +598,199 @@ static int mips_apply(const elfobj_reloc_ctx_t *ctx,
     }
 }
 
+static int riscv_reloc_size(uint32_t type) {
+    switch (type) {
+        case R_RISCV_NONE:
+            return 0;
+        case R_RISCV_64:
+        case R_RISCV_TLS_DTPMOD64:
+        case R_RISCV_TLS_DTPREL64:
+        case R_RISCV_TLS_TPREL64:
+        case R_RISCV_ADD64:
+        case R_RISCV_SUB64:
+            return 8;
+        case R_RISCV_ADD16:
+        case R_RISCV_SUB16:
+            return 2;
+        case R_RISCV_ADD8:
+        case R_RISCV_SUB8:
+            return 1;
+        default:
+            return 4;
+    }
+}
+
+static int riscv_is_pc_relative(uint32_t type) {
+    switch (type) {
+        case R_RISCV_BRANCH:
+        case R_RISCV_JAL:
+        case R_RISCV_CALL:
+        case R_RISCV_CALL_PLT:
+        case R_RISCV_PCREL_HI20:
+        case R_RISCV_PCREL_LO12_I:
+        case R_RISCV_PCREL_LO12_S:
+        case R_RISCV_RVC_BRANCH:
+        case R_RISCV_RVC_JUMP:
+        case R_RISCV_32_PCREL:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int riscv_is_tls(uint32_t type) {
+    switch (type) {
+        case R_RISCV_TLS_DTPMOD32:
+        case R_RISCV_TLS_DTPMOD64:
+        case R_RISCV_TLS_DTPREL32:
+        case R_RISCV_TLS_DTPREL64:
+        case R_RISCV_TLS_TPREL32:
+        case R_RISCV_TLS_TPREL64:
+        case R_RISCV_TLS_GOT_HI20:
+        case R_RISCV_TLS_GD_HI20:
+        case R_RISCV_TPREL_HI20:
+        case R_RISCV_TPREL_LO12_I:
+        case R_RISCV_TPREL_LO12_S:
+        case R_RISCV_TPREL_ADD:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int riscv_apply(const elfobj_reloc_ctx_t *ctx,
+                       uint32_t type,
+                       uint64_t place,
+                       uint64_t sym_value,
+                       int64_t addend,
+                       uint64_t *out_value) {
+    elf_swide_t v;
+    (void)ctx;
+    switch (type) {
+        case R_RISCV_NONE:
+        case R_RISCV_RELAX:
+            *out_value = 0;
+            return 0;
+        case R_RISCV_32:
+        case R_RISCV_RELATIVE:
+        case R_RISCV_COPY:
+        case R_RISCV_JUMP_SLOT:
+        case R_RISCV_ADD32:
+        case R_RISCV_SET32:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 32)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_RISCV_64:
+        case R_RISCV_IRELATIVE:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            *out_value = swide_to_width(v, 64);
+            return 0;
+        case R_RISCV_32_PCREL:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if (!swide_in_signed_bits(v, 32)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        case R_RISCV_BRANCH:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if ((v & 1) != 0 || !swide_in_signed_bits(v >> 1, 13)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v >> 1, 13);
+            return 0;
+        case R_RISCV_JAL:
+        case R_RISCV_CALL:
+        case R_RISCV_CALL_PLT:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if ((v & 1) != 0 || !swide_in_signed_bits(v >> 1, 21)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v >> 1, 21);
+            return 0;
+        case R_RISCV_PCREL_HI20:
+        case R_RISCV_HI20:
+        case R_RISCV_GOT_HI20:
+            v = (type == R_RISCV_HI20) ? (elf_swide_t)sym_value + (elf_swide_t)addend
+                                       : (elf_swide_t)sym_value + (elf_swide_t)addend -
+                                             (elf_swide_t)place;
+            *out_value = swide_to_width((v + 0x800) >> 12, 20);
+            return 0;
+        case R_RISCV_PCREL_LO12_I:
+        case R_RISCV_LO12_I:
+        case R_RISCV_TPREL_LO12_I:
+            v = (type == R_RISCV_LO12_I)
+                    ? (elf_swide_t)sym_value + (elf_swide_t)addend
+                    : (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            *out_value = swide_to_width(v, 12);
+            return 0;
+        case R_RISCV_PCREL_LO12_S:
+        case R_RISCV_LO12_S:
+        case R_RISCV_TPREL_LO12_S:
+            v = (type == R_RISCV_LO12_S)
+                    ? (elf_swide_t)sym_value + (elf_swide_t)addend
+                    : (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            *out_value = swide_to_width(v, 12);
+            return 0;
+        case R_RISCV_RVC_BRANCH:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if ((v & 1) != 0 || !swide_in_signed_bits(v >> 1, 9)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v >> 1, 9);
+            return 0;
+        case R_RISCV_RVC_JUMP:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend - (elf_swide_t)place;
+            if ((v & 1) != 0 || !swide_in_signed_bits(v >> 1, 12)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v >> 1, 12);
+            return 0;
+        case R_RISCV_RVC_LUI:
+        case R_RISCV_TPREL_HI20:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            *out_value = swide_to_width((v + 0x800) >> 12, 20);
+            return 0;
+        case R_RISCV_ADD8:
+        case R_RISCV_SET8:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 8)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 8);
+            return 0;
+        case R_RISCV_ADD16:
+        case R_RISCV_SET16:
+            v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+            if (!swide_in_unsigned_bits(v, 16)) {
+                return -2;
+            }
+            *out_value = swide_to_width(v, 16);
+            return 0;
+        case R_RISCV_SUB8:
+        case R_RISCV_SUB16:
+        case R_RISCV_SUB32:
+        case R_RISCV_SUB64:
+            v = (elf_swide_t)sym_value - (elf_swide_t)addend;
+            *out_value = swide_to_width(v, type == R_RISCV_SUB8
+                                              ? 8
+                                              : type == R_RISCV_SUB16 ? 16
+                                                                       : type == R_RISCV_SUB32 ? 32
+                                                                                               : 64);
+            return 0;
+        default:
+            if (riscv_is_tls(type)) {
+                v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+                *out_value = swide_to_width(v, 64);
+                return 0;
+            }
+            return -1;
+    }
+}
+
 static int arm_reloc_size(uint32_t type) {
     switch (type) {
         case R_ARM_NONE:
@@ -1319,6 +1512,13 @@ static void register_builtin_backends_locked(void) {
     b.is_pc_relative = mips_is_pc_relative;
     g_backends[g_backend_count++] = b;
 
+    memset(&b, 0, sizeof(b));
+    b.machine = EM_RISCV;
+    b.apply_reloc = riscv_apply;
+    b.reloc_size = riscv_reloc_size;
+    b.is_pc_relative = riscv_is_pc_relative;
+    g_backends[g_backend_count++] = b;
+
     g_builtin_backends_ready = 1;
 }
 
@@ -1544,6 +1744,9 @@ int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type) {
     if (machine == EM_MIPS) {
         return mips_is_tls(type);
     }
+    if (machine == EM_RISCV) {
+        return riscv_is_tls(type);
+    }
     return 0;
 }
 
@@ -1683,6 +1886,45 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
                 case R_MICROMIPS_PC10_S1: return "R_MICROMIPS_PC10_S1";
                 case R_MICROMIPS_PC16_S1: return "R_MICROMIPS_PC16_S1";
                 case R_MICROMIPS_PC23_S2: return "R_MICROMIPS_PC23_S2";
+                default: break;
+            }
+            break;
+        case EM_RISCV:
+            switch (type) {
+                case R_RISCV_NONE: return "R_RISCV_NONE";
+                case R_RISCV_32: return "R_RISCV_32";
+                case R_RISCV_64: return "R_RISCV_64";
+                case R_RISCV_RELATIVE: return "R_RISCV_RELATIVE";
+                case R_RISCV_COPY: return "R_RISCV_COPY";
+                case R_RISCV_JUMP_SLOT: return "R_RISCV_JUMP_SLOT";
+                case R_RISCV_BRANCH: return "R_RISCV_BRANCH";
+                case R_RISCV_JAL: return "R_RISCV_JAL";
+                case R_RISCV_CALL: return "R_RISCV_CALL";
+                case R_RISCV_CALL_PLT: return "R_RISCV_CALL_PLT";
+                case R_RISCV_GOT_HI20: return "R_RISCV_GOT_HI20";
+                case R_RISCV_PCREL_HI20: return "R_RISCV_PCREL_HI20";
+                case R_RISCV_PCREL_LO12_I: return "R_RISCV_PCREL_LO12_I";
+                case R_RISCV_PCREL_LO12_S: return "R_RISCV_PCREL_LO12_S";
+                case R_RISCV_HI20: return "R_RISCV_HI20";
+                case R_RISCV_LO12_I: return "R_RISCV_LO12_I";
+                case R_RISCV_LO12_S: return "R_RISCV_LO12_S";
+                case R_RISCV_RVC_BRANCH: return "R_RISCV_RVC_BRANCH";
+                case R_RISCV_RVC_JUMP: return "R_RISCV_RVC_JUMP";
+                case R_RISCV_RELAX: return "R_RISCV_RELAX";
+                case R_RISCV_32_PCREL: return "R_RISCV_32_PCREL";
+                case R_RISCV_IRELATIVE: return "R_RISCV_IRELATIVE";
+                case R_RISCV_TLS_DTPMOD32: return "R_RISCV_TLS_DTPMOD32";
+                case R_RISCV_TLS_DTPMOD64: return "R_RISCV_TLS_DTPMOD64";
+                case R_RISCV_TLS_DTPREL32: return "R_RISCV_TLS_DTPREL32";
+                case R_RISCV_TLS_DTPREL64: return "R_RISCV_TLS_DTPREL64";
+                case R_RISCV_TLS_TPREL32: return "R_RISCV_TLS_TPREL32";
+                case R_RISCV_TLS_TPREL64: return "R_RISCV_TLS_TPREL64";
+                case R_RISCV_TLS_GOT_HI20: return "R_RISCV_TLS_GOT_HI20";
+                case R_RISCV_TLS_GD_HI20: return "R_RISCV_TLS_GD_HI20";
+                case R_RISCV_TPREL_HI20: return "R_RISCV_TPREL_HI20";
+                case R_RISCV_TPREL_LO12_I: return "R_RISCV_TPREL_LO12_I";
+                case R_RISCV_TPREL_LO12_S: return "R_RISCV_TPREL_LO12_S";
+                case R_RISCV_TPREL_ADD: return "R_RISCV_TPREL_ADD";
                 default: break;
             }
             break;

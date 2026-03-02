@@ -810,20 +810,20 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Vendor: `R_RISCV_VENDOR` (reserved range).
 
 ### 18c. RISC-V Relocation Backend
-- [ ] `riscv_reloc_size()` for all RISC-V relocation types.
-- [ ] `riscv_is_pc_relative()`: BRANCH, JAL, CALL, CALL_PLT, PCREL_HI20, PCREL_LO12_I/S, RVC_BRANCH, RVC_JUMP, 32_PCREL.
-- [ ] `riscv_is_tls()`: all TLS_* and TPREL_* types.
-- [ ] `riscv_apply()`: U-type immediate insertion (HI20: bits[31:12]).
-- [ ] `riscv_apply()`: I-type immediate insertion (LO12_I: bits[31:20]).
-- [ ] `riscv_apply()`: S-type immediate insertion (LO12_S: bits[31:25]+bits[11:7]).
-- [ ] `riscv_apply()`: B-type branch encoding (BRANCH: imm[12|10:5|4:1|11]).
-- [ ] `riscv_apply()`: J-type jump encoding (JAL: imm[20|10:1|11|19:12]).
-- [ ] `riscv_apply()`: CALL/CALL_PLT (AUIPC+JALR pair).
-- [ ] `riscv_apply()`: RVC compressed branch/jump encoding.
-- [ ] `riscv_apply()`: ADD/SUB content relocations for DWARF.
-- [ ] `riscv_apply()`: RELAX marker handling (no-op, but must not error).
-- [ ] Register under `EM_RISCV`.
-- [ ] Relocation name strings for all RISC-V types.
+- [x] `riscv_reloc_size()` for all RISC-V relocation types.
+- [x] `riscv_is_pc_relative()`: BRANCH, JAL, CALL, CALL_PLT, PCREL_HI20, PCREL_LO12_I/S, RVC_BRANCH, RVC_JUMP, 32_PCREL.
+- [x] `riscv_is_tls()`: all TLS_* and TPREL_* types.
+- [x] `riscv_apply()`: U-type immediate insertion (HI20: bits[31:12]).
+- [x] `riscv_apply()`: I-type immediate insertion (LO12_I: bits[31:20]).
+- [x] `riscv_apply()`: S-type immediate insertion (LO12_S: bits[31:25]+bits[11:7]).
+- [x] `riscv_apply()`: B-type branch encoding (BRANCH: imm[12|10:5|4:1|11]).
+- [x] `riscv_apply()`: J-type jump encoding (JAL: imm[20|10:1|11|19:12]).
+- [x] `riscv_apply()`: CALL/CALL_PLT (AUIPC+JALR pair).
+- [x] `riscv_apply()`: RVC compressed branch/jump encoding.
+- [x] `riscv_apply()`: ADD/SUB content relocations for DWARF.
+- [x] `riscv_apply()`: RELAX marker handling (no-op, but must not error).
+- [x] Register under `EM_RISCV`.
+- [x] Relocation name strings for all RISC-V types.
 
 ### 18d. RISC-V Attributes Parser
 - [ ] Parse `.riscv.attributes` (`SHT_RISCV_ATTRIBUTES`).
