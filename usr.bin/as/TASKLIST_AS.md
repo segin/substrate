@@ -286,14 +286,14 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `PLD`, `PLDW`, `PLI` (preload)
 
 ### 6f. Coprocessor and System
-- [ ] `SVC`/`SWI`, `BKPT`, `HLT`
-- [ ] `MRS`, `MSR` (CPSR/SPSR/APSR fields)
-- [ ] `CPS{IE,ID}` (interrupt enable/disable), `SETEND`
-- [ ] `DMB`, `DSB`, `ISB` (barriers)
-- [ ] `WFI`, `WFE`, `SEV`, `YIELD`, `NOP`, `DBG`
-- [ ] `CDP`, `CDP2`, `MCR`, `MCR2`, `MRC`, `MRC2`, `MCRR`, `MCRR2`, `MRRC`, `MRRC2`
-- [ ] `LDC`, `LDC2`, `STC`, `STC2`
-- [ ] `CLREX`
+- [x] `SVC`/`SWI`, `BKPT`, `HLT`
+- [x] `MRS`, `MSR` (CPSR/SPSR/APSR fields)
+- [x] `CPS{IE,ID}` (interrupt enable/disable), `SETEND`
+- [x] `DMB`, `DSB`, `ISB` (barriers)
+- [x] `WFI`, `WFE`, `SEV`, `YIELD`, `NOP`, `DBG`
+- [x] `CDP`, `CDP2`, `MCR`, `MCR2`, `MRC`, `MRC2`, `MCRR`, `MCRR2`, `MRRC`, `MRRC2`
+- [x] `LDC`, `LDC2`, `STC`, `STC2`
+- [x] `CLREX`
 
 ### 6g. VFPv3/v4 (Floating Point)
 - [ ] `VADD.F32/F64`, `VSUB`, `VMUL`, `VDIV`, `VNMUL`, `VMLA`, `VMLS`, `VNMLA`, `VNMLS`
