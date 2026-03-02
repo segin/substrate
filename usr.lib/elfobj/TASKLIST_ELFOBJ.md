@@ -930,14 +930,14 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] M68K has no mandatory `e_flags`; validate flags is 0 or recognized.
 
 ### 20b. M68K Relocation Type Constants
-- [ ] `R_68K_NONE` (0), `R_68K_32` (1), `R_68K_16` (2), `R_68K_8` (3)
-- [ ] `R_68K_PC32` (4), `R_68K_PC16` (5), `R_68K_PC8` (6)
-- [ ] `R_68K_GOT32` (7), `R_68K_GOT16` (8), `R_68K_GOT8` (9)
-- [ ] `R_68K_GOT32O` (10), `R_68K_GOT16O` (11), `R_68K_GOT8O` (12)
-- [ ] `R_68K_PLT32` (13), `R_68K_PLT16` (14), `R_68K_PLT8` (15)
-- [ ] `R_68K_PLT32O` (16), `R_68K_PLT16O` (17), `R_68K_PLT8O` (18)
-- [ ] `R_68K_COPY` (19), `R_68K_GLOB_DAT` (20), `R_68K_JMP_SLOT` (21), `R_68K_RELATIVE` (22)
-- [ ] TLS: `R_68K_TLS_GD32` (25), `R_68K_TLS_GD16` (26), `R_68K_TLS_GD8` (27), `R_68K_TLS_LDM32` (28), `R_68K_TLS_LDM16` (29), `R_68K_TLS_LDM8` (30), `R_68K_TLS_LDO32` (31), `R_68K_TLS_LDO16` (32), `R_68K_TLS_LDO8` (33), `R_68K_TLS_IE32` (34), `R_68K_TLS_IE16` (35), `R_68K_TLS_IE8` (36), `R_68K_TLS_LE32` (37), `R_68K_TLS_LE16` (38), `R_68K_TLS_LE8` (39), `R_68K_TLS_DTPMOD32` (40), `R_68K_TLS_DTPREL32` (41), `R_68K_TLS_TPREL32` (42)
+- [x] `R_68K_NONE` (0), `R_68K_32` (1), `R_68K_16` (2), `R_68K_8` (3)
+- [x] `R_68K_PC32` (4), `R_68K_PC16` (5), `R_68K_PC8` (6)
+- [x] `R_68K_GOT32` (7), `R_68K_GOT16` (8), `R_68K_GOT8` (9)
+- [x] `R_68K_GOT32O` (10), `R_68K_GOT16O` (11), `R_68K_GOT8O` (12)
+- [x] `R_68K_PLT32` (13), `R_68K_PLT16` (14), `R_68K_PLT8` (15)
+- [x] `R_68K_PLT32O` (16), `R_68K_PLT16O` (17), `R_68K_PLT8O` (18)
+- [x] `R_68K_COPY` (19), `R_68K_GLOB_DAT` (20), `R_68K_JMP_SLOT` (21), `R_68K_RELATIVE` (22)
+- [x] TLS: `R_68K_TLS_GD32` (25), `R_68K_TLS_GD16` (26), `R_68K_TLS_GD8` (27), `R_68K_TLS_LDM32` (28), `R_68K_TLS_LDM16` (29), `R_68K_TLS_LDM8` (30), `R_68K_TLS_LDO32` (31), `R_68K_TLS_LDO16` (32), `R_68K_TLS_LDO8` (33), `R_68K_TLS_IE32` (34), `R_68K_TLS_IE16` (35), `R_68K_TLS_IE8` (36), `R_68K_TLS_LE32` (37), `R_68K_TLS_LE16` (38), `R_68K_TLS_LE8` (39), `R_68K_TLS_DTPMOD32` (40), `R_68K_TLS_DTPREL32` (41), `R_68K_TLS_TPREL32` (42)
 
 ### 20c. M68K Relocation Backend
 - [ ] `m68k_reloc_size()` for all M68K relocation types.
