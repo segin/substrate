@@ -458,9 +458,9 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] Compatibility: Substrate `as` output linkable by GNU `ld`, and vice versa.
 
 ### 8c. Fuzz Testing
-- [ ] Grammar-aware fuzzer for instruction parser.
-- [ ] Byte-level fuzzer for ELF output validation.
-- [ ] Crash-free guarantee on arbitrary input.
+- [x] Grammar-aware fuzzer for instruction parser.
+- [x] Byte-level fuzzer for ELF output validation.
+- [x] Crash-free guarantee on arbitrary input.
 
 ## 9. Documentation
 - [ ] `as.1` man page: all options, directives, per-arch syntax.
