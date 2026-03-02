@@ -1157,8 +1157,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 24. IA-64 (Itanium) Support
 
 ### 24a. Machine Types and Constants
-- [ ] Define `EM_IA_64` (50).
-- [ ] Define IA-64 `e_flags`: `EF_IA_64_ABI64` (0x10), `EF_IA_64_ARCH` (0xFF000000).
+- [x] Define `EM_IA_64` (50).
+- [x] Define IA-64 `e_flags`: `EF_IA_64_ABI64` (0x10), `EF_IA_64_ARCH` (0xFF000000).
 
 ### 24b. IA-64 Relocation Type Constants
 - [ ] `R_IA64_NONE` (0)
