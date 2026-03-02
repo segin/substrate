@@ -1195,9 +1195,9 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Relocation name strings for all IA-64 types.
 
 ### 24d. IA-64 Validation
-- [ ] Accept `EM_IA_64` with `ELFCLASS64` only.
-- [ ] Accept both `ELFDATA2LSB` and `ELFDATA2MSB`.
-- [ ] Validate `e_flags` `EF_IA_64_ABI64` and `EF_IA_64_ARCH`.
+- [x] Accept `EM_IA_64` with `ELFCLASS64` only.
+- [x] Accept both `ELFDATA2LSB` and `ELFDATA2MSB`.
+- [x] Validate `e_flags` `EF_IA_64_ABI64` and `EF_IA_64_ARCH`.
 
 ### 24e. IA-64 ELF Read/Write/Create
 - [ ] Recognize `EM_IA_64` as valid machine type.
