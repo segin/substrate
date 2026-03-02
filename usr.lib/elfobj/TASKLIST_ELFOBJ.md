@@ -1045,20 +1045,20 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] TLS: `R_PPC64_TLS`, `R_PPC64_DTPMOD64`, `R_PPC64_TPREL64`, `R_PPC64_DTPREL64`, `R_PPC64_TPREL16_DS`, `R_PPC64_TPREL16_LO_DS`, `R_PPC64_TPREL16_HIGHER`, `R_PPC64_TPREL16_HIGHERA`, `R_PPC64_TPREL16_HIGHEST`, `R_PPC64_TPREL16_HIGHESTA`, `R_PPC64_DTPREL16_DS`, `R_PPC64_DTPREL16_LO_DS`, `R_PPC64_DTPREL16_HIGHER`, `R_PPC64_DTPREL16_HIGHERA`, `R_PPC64_DTPREL16_HIGHEST`, `R_PPC64_DTPREL16_HIGHESTA`, `R_PPC64_GOT_TLSGD16{_LO/_HI/_HA}`, `R_PPC64_GOT_TLSLD16{_LO/_HI/_HA}`, `R_PPC64_GOT_TPREL16_DS`, `R_PPC64_GOT_TPREL16_LO_DS`, `R_PPC64_GOT_TPREL16_HI`, `R_PPC64_GOT_TPREL16_HA`
 
 ### 22d. PowerPC Relocation Backend
-- [ ] `ppc_reloc_size()` for all PPC32 relocation types.
-- [ ] `ppc64_reloc_size()` for all PPC64 relocation types.
-- [ ] `ppc_is_pc_relative()`: REL24, REL14, REL32, LOCAL24PC, PLTREL24, PLTREL32.
-- [ ] `ppc64_is_pc_relative()`: above + REL64, PCREL34, GOT_PCREL34, PLT_PCREL34.
-- [ ] `ppc_is_tls()` / `ppc64_is_tls()`: all TLS types.
-- [ ] `ppc_apply()`: ADDR16_HI/HA with carry adjustment (`((S + A + 0x8000) >> 16) & 0xFFFF` for _HA).
-- [ ] `ppc_apply()`: REL24 branch (26-bit signed offset in bits[25:2]).
-- [ ] `ppc_apply()`: REL14 conditional branch (16-bit signed offset in bits[15:2]).
-- [ ] `ppc64_apply()`: TOC16/TOC16_LO/HI/HA with TOC pointer base.
-- [ ] `ppc64_apply()`: ADDR16_DS/LO_DS with 4-byte alignment check (low 2 bits must be 0).
-- [ ] `ppc64_apply()`: PCREL34 (34-bit signed PC-relative, PCRel ABI).
-- [ ] `ppc64_apply()`: ENTRY (local entry point offset).
-- [ ] Register under `EM_PPC` and `EM_PPC64`.
-- [ ] Relocation name strings for all PPC32 and PPC64 types.
+- [x] `ppc_reloc_size()` for all PPC32 relocation types.
+- [x] `ppc64_reloc_size()` for all PPC64 relocation types.
+- [x] `ppc_is_pc_relative()`: REL24, REL14, REL32, LOCAL24PC, PLTREL24, PLTREL32.
+- [x] `ppc64_is_pc_relative()`: above + REL64, PCREL34, GOT_PCREL34, PLT_PCREL34.
+- [x] `ppc_is_tls()` / `ppc64_is_tls()`: all TLS types.
+- [x] `ppc_apply()`: ADDR16_HI/HA with carry adjustment (`((S + A + 0x8000) >> 16) & 0xFFFF` for _HA).
+- [x] `ppc_apply()`: REL24 branch (26-bit signed offset in bits[25:2]).
+- [x] `ppc_apply()`: REL14 conditional branch (16-bit signed offset in bits[15:2]).
+- [x] `ppc64_apply()`: TOC16/TOC16_LO/HI/HA with TOC pointer base.
+- [x] `ppc64_apply()`: ADDR16_DS/LO_DS with 4-byte alignment check (low 2 bits must be 0).
+- [x] `ppc64_apply()`: PCREL34 (34-bit signed PC-relative, PCRel ABI).
+- [x] `ppc64_apply()`: ENTRY (local entry point offset).
+- [x] Register under `EM_PPC` and `EM_PPC64`.
+- [x] Relocation name strings for all PPC32 and PPC64 types.
 
 ### 22e. PowerPC64 OPD and TOC Handling
 - [ ] Parse `.opd` section for ELFv1 function descriptors (3-word entries: address, TOC, environment).

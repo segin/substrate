@@ -1255,6 +1255,330 @@ static int vax_apply(const elfobj_reloc_ctx_t *ctx,
     }
 }
 
+static int ppc_reloc_size(uint32_t type) {
+    switch (type) {
+        case R_PPC_NONE:
+            return 0;
+        case R_PPC_ADDR16:
+        case R_PPC_ADDR16_LO:
+        case R_PPC_ADDR16_HI:
+        case R_PPC_ADDR16_HA:
+        case R_PPC_ADDR14:
+        case R_PPC_ADDR14_BRTAKEN:
+        case R_PPC_ADDR14_BRNTAKEN:
+        case R_PPC_REL14:
+        case R_PPC_REL14_BRTAKEN:
+        case R_PPC_REL14_BRNTAKEN:
+        case R_PPC_GOT16:
+        case R_PPC_GOT16_LO:
+        case R_PPC_GOT16_HI:
+        case R_PPC_GOT16_HA:
+        case R_PPC_PLT16_LO:
+        case R_PPC_PLT16_HI:
+        case R_PPC_PLT16_HA:
+        case R_PPC_UADDR16:
+        case R_PPC_SDAREL16:
+        case R_PPC_SECTOFF_LO:
+        case R_PPC_SECTOFF_HI:
+        case R_PPC_SECTOFF_HA:
+        case R_PPC_TPREL16:
+        case R_PPC_TPREL16_LO:
+        case R_PPC_TPREL16_HI:
+        case R_PPC_TPREL16_HA:
+        case R_PPC_DTPREL16:
+        case R_PPC_DTPREL16_LO:
+        case R_PPC_DTPREL16_HI:
+        case R_PPC_DTPREL16_HA:
+        case R_PPC_GOT_TLSGD16:
+        case R_PPC_GOT_TLSGD16_LO:
+        case R_PPC_GOT_TLSGD16_HI:
+        case R_PPC_GOT_TLSGD16_HA:
+        case R_PPC_GOT_TLSLD16:
+        case R_PPC_GOT_TLSLD16_LO:
+        case R_PPC_GOT_TLSLD16_HI:
+        case R_PPC_GOT_TLSLD16_HA:
+        case R_PPC_GOT_TPREL16:
+        case R_PPC_GOT_TPREL16_LO:
+        case R_PPC_GOT_TPREL16_HI:
+        case R_PPC_GOT_TPREL16_HA:
+            return 2;
+        default:
+            return 4;
+    }
+}
+
+static int ppc64_reloc_size(uint32_t type) {
+    switch (type) {
+        case R_PPC64_NONE:
+            return 0;
+        case R_PPC64_ADDR64:
+        case R_PPC64_UADDR64:
+        case R_PPC64_REL64:
+        case R_PPC64_PLT64:
+        case R_PPC64_PLTREL64:
+        case R_PPC64_TOC:
+        case R_PPC64_DTPMOD64:
+        case R_PPC64_TPREL64:
+        case R_PPC64_DTPREL64:
+            return 8;
+        case R_PPC64_ADDR16_HIGHER:
+        case R_PPC64_ADDR16_HIGHERA:
+        case R_PPC64_ADDR16_HIGHEST:
+        case R_PPC64_ADDR16_HIGHESTA:
+        case R_PPC64_TOC16:
+        case R_PPC64_TOC16_LO:
+        case R_PPC64_TOC16_HI:
+        case R_PPC64_TOC16_HA:
+        case R_PPC64_ADDR16_DS:
+        case R_PPC64_ADDR16_LO_DS:
+        case R_PPC64_GOT16_DS:
+        case R_PPC64_GOT16_LO_DS:
+        case R_PPC64_PLT16_LO_DS:
+        case R_PPC64_SECTOFF_DS:
+        case R_PPC64_SECTOFF_LO_DS:
+        case R_PPC64_TOC16_DS:
+        case R_PPC64_TOC16_LO_DS:
+        case R_PPC64_GOT_TLSGD16:
+        case R_PPC64_GOT_TLSGD16_LO:
+        case R_PPC64_GOT_TLSGD16_HI:
+        case R_PPC64_GOT_TLSGD16_HA:
+        case R_PPC64_GOT_TLSLD16:
+        case R_PPC64_GOT_TLSLD16_LO:
+        case R_PPC64_GOT_TLSLD16_HI:
+        case R_PPC64_GOT_TLSLD16_HA:
+        case R_PPC64_GOT_TPREL16_DS:
+        case R_PPC64_GOT_TPREL16_LO_DS:
+        case R_PPC64_GOT_TPREL16_HI:
+        case R_PPC64_GOT_TPREL16_HA:
+        case R_PPC64_TPREL16_DS:
+        case R_PPC64_TPREL16_LO_DS:
+        case R_PPC64_TPREL16_HIGHER:
+        case R_PPC64_TPREL16_HIGHERA:
+        case R_PPC64_TPREL16_HIGHEST:
+        case R_PPC64_TPREL16_HIGHESTA:
+        case R_PPC64_DTPREL16_DS:
+        case R_PPC64_DTPREL16_LO_DS:
+        case R_PPC64_DTPREL16_HIGHER:
+        case R_PPC64_DTPREL16_HIGHERA:
+        case R_PPC64_DTPREL16_HIGHEST:
+        case R_PPC64_DTPREL16_HIGHESTA:
+            return 2;
+        default:
+            return 4;
+    }
+}
+
+static int ppc_is_pc_relative(uint32_t type) {
+    switch (type) {
+        case R_PPC_REL24:
+        case R_PPC_REL14:
+        case R_PPC_REL14_BRTAKEN:
+        case R_PPC_REL14_BRNTAKEN:
+        case R_PPC_REL32:
+        case R_PPC_LOCAL24PC:
+        case R_PPC_PLTREL24:
+        case R_PPC_PLTREL32:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int ppc64_is_pc_relative(uint32_t type) {
+    if (ppc_is_pc_relative(type)) {
+        return 1;
+    }
+    switch (type) {
+        case R_PPC64_REL64:
+        case R_PPC64_PCREL34:
+        case R_PPC64_GOT_PCREL34:
+        case R_PPC64_PLT_PCREL34:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+static int ppc_is_tls(uint32_t type) {
+    return type >= R_PPC_TLS && type <= R_PPC_GOT_TPREL16_HA;
+}
+
+static int ppc64_is_tls(uint32_t type) {
+    return (type >= R_PPC64_TLS && type <= R_PPC64_DTPREL64) ||
+           (type >= R_PPC64_GOT_TLSGD16 && type <= R_PPC64_TPREL16_HIGHESTA) ||
+           (type >= R_PPC64_DTPREL16_DS && type <= R_PPC64_DTPREL16_HIGHESTA);
+}
+
+static int ppc_apply(const elfobj_reloc_ctx_t *ctx,
+                     uint32_t type,
+                     uint64_t place,
+                     uint64_t sym_value,
+                     int64_t addend,
+                     uint64_t *out_value) {
+    elf_swide_t v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+    elf_swide_t rel = v - (elf_swide_t)place;
+    (void)ctx;
+    switch (type) {
+        case R_PPC_NONE:
+            *out_value = 0;
+            return 0;
+        case R_PPC_ADDR16_HI:
+        case R_PPC_GOT16_HI:
+        case R_PPC_PLT16_HI:
+        case R_PPC_SECTOFF_HI:
+        case R_PPC_TPREL16_HI:
+        case R_PPC_DTPREL16_HI:
+        case R_PPC_GOT_TLSGD16_HI:
+        case R_PPC_GOT_TLSLD16_HI:
+        case R_PPC_GOT_TPREL16_HI:
+            *out_value = (uint64_t)(((uint64_t)v >> 16) & 0xffffu);
+            return 0;
+        case R_PPC_ADDR16_HA:
+        case R_PPC_GOT16_HA:
+        case R_PPC_PLT16_HA:
+        case R_PPC_SECTOFF_HA:
+        case R_PPC_TPREL16_HA:
+        case R_PPC_DTPREL16_HA:
+        case R_PPC_GOT_TLSGD16_HA:
+        case R_PPC_GOT_TLSLD16_HA:
+        case R_PPC_GOT_TPREL16_HA:
+            *out_value = (uint64_t)((((uint64_t)v + 0x8000u) >> 16) & 0xffffu);
+            return 0;
+        case R_PPC_REL24:
+        case R_PPC_PLTREL24:
+        case R_PPC_LOCAL24PC:
+            if ((rel & 3) != 0 || !swide_in_signed_bits(rel, 26)) {
+                return -2;
+            }
+            *out_value = (uint64_t)((uint64_t)(rel >> 2) & 0x00ffffffu);
+            return 0;
+        case R_PPC_REL14:
+        case R_PPC_REL14_BRTAKEN:
+        case R_PPC_REL14_BRNTAKEN:
+            if ((rel & 3) != 0 || !swide_in_signed_bits(rel, 16)) {
+                return -2;
+            }
+            *out_value = (uint64_t)((uint64_t)(rel >> 2) & 0x00003fffu);
+            return 0;
+        case R_PPC_REL32:
+        case R_PPC_PLTREL32:
+            if (!swide_in_signed_bits(rel, 32)) {
+                return -2;
+            }
+            *out_value = swide_to_width(rel, 32);
+            return 0;
+        default:
+            if (ppc_reloc_size(type) == 2) {
+                *out_value = swide_to_width(v, 16);
+                return 0;
+            }
+            *out_value = swide_to_width(v, 32);
+            return 0;
+    }
+}
+
+static int ppc64_apply(const elfobj_reloc_ctx_t *ctx,
+                       uint32_t type,
+                       uint64_t place,
+                       uint64_t sym_value,
+                       int64_t addend,
+                       uint64_t *out_value) {
+    elf_swide_t v = (elf_swide_t)sym_value + (elf_swide_t)addend;
+    elf_swide_t rel = v - (elf_swide_t)place;
+    elf_swide_t toc_rel = v;
+    (void)ctx;
+    switch (type) {
+        case R_PPC64_NONE:
+            *out_value = 0;
+            return 0;
+        case R_PPC64_ADDR16_HIGHER:
+        case R_PPC64_TPREL16_HIGHER:
+        case R_PPC64_DTPREL16_HIGHER:
+            *out_value = (uint64_t)(((uint64_t)v >> 32) & 0xffffu);
+            return 0;
+        case R_PPC64_ADDR16_HIGHERA:
+        case R_PPC64_TPREL16_HIGHERA:
+        case R_PPC64_DTPREL16_HIGHERA:
+            *out_value = (uint64_t)((((uint64_t)v + 0x80000000ull) >> 32) & 0xffffu);
+            return 0;
+        case R_PPC64_ADDR16_HIGHEST:
+        case R_PPC64_TPREL16_HIGHEST:
+        case R_PPC64_DTPREL16_HIGHEST:
+            *out_value = (uint64_t)(((uint64_t)v >> 48) & 0xffffu);
+            return 0;
+        case R_PPC64_ADDR16_HIGHESTA:
+        case R_PPC64_TPREL16_HIGHESTA:
+        case R_PPC64_DTPREL16_HIGHESTA:
+            *out_value = (uint64_t)((((uint64_t)v + 0x800000000000ull) >> 48) & 0xffffu);
+            return 0;
+        case R_PPC64_TOC16:
+        case R_PPC64_TOC16_LO:
+        case R_PPC64_TOC16_HI:
+        case R_PPC64_TOC16_HA:
+        case R_PPC64_TOC16_DS:
+        case R_PPC64_TOC16_LO_DS:
+            if (type == R_PPC64_TOC16_HI) {
+                *out_value = (uint64_t)(((uint64_t)toc_rel >> 16) & 0xffffu);
+                return 0;
+            }
+            if (type == R_PPC64_TOC16_HA) {
+                *out_value = (uint64_t)((((uint64_t)toc_rel + 0x8000u) >> 16) & 0xffffu);
+                return 0;
+            }
+            if (type == R_PPC64_TOC16_DS || type == R_PPC64_TOC16_LO_DS) {
+                if (((uint64_t)toc_rel & 3u) != 0) {
+                    return -2;
+                }
+                *out_value = (uint64_t)((uint64_t)toc_rel & 0xfffcu);
+                return 0;
+            }
+            *out_value = (uint64_t)((uint64_t)toc_rel & 0xffffu);
+            return 0;
+        case R_PPC64_ADDR16_DS:
+        case R_PPC64_ADDR16_LO_DS:
+        case R_PPC64_GOT16_DS:
+        case R_PPC64_GOT16_LO_DS:
+        case R_PPC64_PLT16_LO_DS:
+        case R_PPC64_SECTOFF_DS:
+        case R_PPC64_SECTOFF_LO_DS:
+        case R_PPC64_GOT_TPREL16_DS:
+        case R_PPC64_GOT_TPREL16_LO_DS:
+        case R_PPC64_TPREL16_DS:
+        case R_PPC64_TPREL16_LO_DS:
+        case R_PPC64_DTPREL16_DS:
+        case R_PPC64_DTPREL16_LO_DS:
+            if (((uint64_t)v & 3u) != 0) {
+                return -2;
+            }
+            *out_value = (uint64_t)((uint64_t)v & 0xfffcu);
+            return 0;
+        case R_PPC64_REL64:
+        case R_PPC64_PLTREL64:
+            *out_value = swide_to_width(rel, 64);
+            return 0;
+        case R_PPC64_PCREL34:
+        case R_PPC64_GOT_PCREL34:
+        case R_PPC64_PLT_PCREL34:
+            if (!swide_in_signed_bits(rel, 34)) {
+                return -2;
+            }
+            *out_value = swide_to_width(rel, 34);
+            return 0;
+        case R_PPC64_ENTRY:
+            *out_value = swide_to_width(v, 32);
+            return 0;
+        default:
+            if (ppc64_reloc_size(type) == 2) {
+                *out_value = swide_to_width(v, 16);
+            } else if (ppc64_reloc_size(type) == 8) {
+                *out_value = swide_to_width(v, 64);
+            } else {
+                *out_value = swide_to_width(v, 32);
+            }
+            return 0;
+    }
+}
+
 static int arm_reloc_size(uint32_t type) {
     switch (type) {
         case R_ARM_NONE:
@@ -2004,6 +2328,20 @@ static void register_builtin_backends_locked(void) {
     b.is_pc_relative = vax_is_pc_relative;
     g_backends[g_backend_count++] = b;
 
+    memset(&b, 0, sizeof(b));
+    b.machine = EM_PPC;
+    b.apply_reloc = ppc_apply;
+    b.reloc_size = ppc_reloc_size;
+    b.is_pc_relative = ppc_is_pc_relative;
+    g_backends[g_backend_count++] = b;
+
+    memset(&b, 0, sizeof(b));
+    b.machine = EM_PPC64;
+    b.apply_reloc = ppc64_apply;
+    b.reloc_size = ppc64_reloc_size;
+    b.is_pc_relative = ppc64_is_pc_relative;
+    g_backends[g_backend_count++] = b;
+
     g_builtin_backends_ready = 1;
 }
 
@@ -2237,6 +2575,12 @@ int elf_reloc_is_tls_for_machine(uint16_t machine, uint32_t type) {
     }
     if (machine == EM_68K) {
         return m68k_is_tls(type);
+    }
+    if (machine == EM_PPC) {
+        return ppc_is_tls(type);
+    }
+    if (machine == EM_PPC64) {
+        return ppc64_is_tls(type);
     }
     return 0;
 }
@@ -2520,6 +2864,134 @@ const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type) {
                 case R_VAX_GLOB_DAT: return "R_VAX_GLOB_DAT";
                 case R_VAX_JMP_SLOT: return "R_VAX_JMP_SLOT";
                 case R_VAX_RELATIVE: return "R_VAX_RELATIVE";
+                default: break;
+            }
+            break;
+        case EM_PPC:
+            switch (type) {
+                case R_PPC_NONE: return "R_PPC_NONE";
+                case R_PPC_ADDR32: return "R_PPC_ADDR32";
+                case R_PPC_ADDR24: return "R_PPC_ADDR24";
+                case R_PPC_ADDR16: return "R_PPC_ADDR16";
+                case R_PPC_ADDR16_LO: return "R_PPC_ADDR16_LO";
+                case R_PPC_ADDR16_HI: return "R_PPC_ADDR16_HI";
+                case R_PPC_ADDR16_HA: return "R_PPC_ADDR16_HA";
+                case R_PPC_ADDR14: return "R_PPC_ADDR14";
+                case R_PPC_ADDR14_BRTAKEN: return "R_PPC_ADDR14_BRTAKEN";
+                case R_PPC_ADDR14_BRNTAKEN: return "R_PPC_ADDR14_BRNTAKEN";
+                case R_PPC_REL24: return "R_PPC_REL24";
+                case R_PPC_REL14: return "R_PPC_REL14";
+                case R_PPC_REL14_BRTAKEN: return "R_PPC_REL14_BRTAKEN";
+                case R_PPC_REL14_BRNTAKEN: return "R_PPC_REL14_BRNTAKEN";
+                case R_PPC_GOT16: return "R_PPC_GOT16";
+                case R_PPC_GOT16_LO: return "R_PPC_GOT16_LO";
+                case R_PPC_GOT16_HI: return "R_PPC_GOT16_HI";
+                case R_PPC_GOT16_HA: return "R_PPC_GOT16_HA";
+                case R_PPC_PLTREL24: return "R_PPC_PLTREL24";
+                case R_PPC_COPY: return "R_PPC_COPY";
+                case R_PPC_GLOB_DAT: return "R_PPC_GLOB_DAT";
+                case R_PPC_JMP_SLOT: return "R_PPC_JMP_SLOT";
+                case R_PPC_RELATIVE: return "R_PPC_RELATIVE";
+                case R_PPC_LOCAL24PC: return "R_PPC_LOCAL24PC";
+                case R_PPC_UADDR32: return "R_PPC_UADDR32";
+                case R_PPC_UADDR16: return "R_PPC_UADDR16";
+                case R_PPC_REL32: return "R_PPC_REL32";
+                case R_PPC_PLT32: return "R_PPC_PLT32";
+                case R_PPC_PLTREL32: return "R_PPC_PLTREL32";
+                case R_PPC_PLT16_LO: return "R_PPC_PLT16_LO";
+                case R_PPC_PLT16_HI: return "R_PPC_PLT16_HI";
+                case R_PPC_PLT16_HA: return "R_PPC_PLT16_HA";
+                case R_PPC_SDAREL16: return "R_PPC_SDAREL16";
+                case R_PPC_SECTOFF: return "R_PPC_SECTOFF";
+                case R_PPC_SECTOFF_LO: return "R_PPC_SECTOFF_LO";
+                case R_PPC_SECTOFF_HI: return "R_PPC_SECTOFF_HI";
+                case R_PPC_SECTOFF_HA: return "R_PPC_SECTOFF_HA";
+                case R_PPC_TLS: return "R_PPC_TLS";
+                case R_PPC_DTPMOD32: return "R_PPC_DTPMOD32";
+                case R_PPC_TPREL16: return "R_PPC_TPREL16";
+                case R_PPC_TPREL16_LO: return "R_PPC_TPREL16_LO";
+                case R_PPC_TPREL16_HI: return "R_PPC_TPREL16_HI";
+                case R_PPC_TPREL16_HA: return "R_PPC_TPREL16_HA";
+                case R_PPC_TPREL32: return "R_PPC_TPREL32";
+                case R_PPC_DTPREL16: return "R_PPC_DTPREL16";
+                case R_PPC_DTPREL16_LO: return "R_PPC_DTPREL16_LO";
+                case R_PPC_DTPREL16_HI: return "R_PPC_DTPREL16_HI";
+                case R_PPC_DTPREL16_HA: return "R_PPC_DTPREL16_HA";
+                case R_PPC_DTPREL32: return "R_PPC_DTPREL32";
+                case R_PPC_GOT_TLSGD16: return "R_PPC_GOT_TLSGD16";
+                case R_PPC_GOT_TLSGD16_LO: return "R_PPC_GOT_TLSGD16_LO";
+                case R_PPC_GOT_TLSGD16_HI: return "R_PPC_GOT_TLSGD16_HI";
+                case R_PPC_GOT_TLSGD16_HA: return "R_PPC_GOT_TLSGD16_HA";
+                case R_PPC_GOT_TLSLD16: return "R_PPC_GOT_TLSLD16";
+                case R_PPC_GOT_TLSLD16_LO: return "R_PPC_GOT_TLSLD16_LO";
+                case R_PPC_GOT_TLSLD16_HI: return "R_PPC_GOT_TLSLD16_HI";
+                case R_PPC_GOT_TLSLD16_HA: return "R_PPC_GOT_TLSLD16_HA";
+                case R_PPC_GOT_TPREL16: return "R_PPC_GOT_TPREL16";
+                case R_PPC_GOT_TPREL16_LO: return "R_PPC_GOT_TPREL16_LO";
+                case R_PPC_GOT_TPREL16_HI: return "R_PPC_GOT_TPREL16_HI";
+                case R_PPC_GOT_TPREL16_HA: return "R_PPC_GOT_TPREL16_HA";
+                case R_PPC_IRELATIVE: return "R_PPC_IRELATIVE";
+                default: break;
+            }
+            break;
+        case EM_PPC64:
+            switch (type) {
+                case R_PPC64_ADDR64: return "R_PPC64_ADDR64";
+                case R_PPC64_ADDR16_HIGHER: return "R_PPC64_ADDR16_HIGHER";
+                case R_PPC64_ADDR16_HIGHERA: return "R_PPC64_ADDR16_HIGHERA";
+                case R_PPC64_ADDR16_HIGHEST: return "R_PPC64_ADDR16_HIGHEST";
+                case R_PPC64_ADDR16_HIGHESTA: return "R_PPC64_ADDR16_HIGHESTA";
+                case R_PPC64_UADDR64: return "R_PPC64_UADDR64";
+                case R_PPC64_REL64: return "R_PPC64_REL64";
+                case R_PPC64_PLT64: return "R_PPC64_PLT64";
+                case R_PPC64_PLTREL64: return "R_PPC64_PLTREL64";
+                case R_PPC64_TOC16: return "R_PPC64_TOC16";
+                case R_PPC64_TOC16_LO: return "R_PPC64_TOC16_LO";
+                case R_PPC64_TOC16_HI: return "R_PPC64_TOC16_HI";
+                case R_PPC64_TOC16_HA: return "R_PPC64_TOC16_HA";
+                case R_PPC64_TOC: return "R_PPC64_TOC";
+                case R_PPC64_ADDR16_DS: return "R_PPC64_ADDR16_DS";
+                case R_PPC64_ADDR16_LO_DS: return "R_PPC64_ADDR16_LO_DS";
+                case R_PPC64_GOT16_DS: return "R_PPC64_GOT16_DS";
+                case R_PPC64_GOT16_LO_DS: return "R_PPC64_GOT16_LO_DS";
+                case R_PPC64_PLT16_LO_DS: return "R_PPC64_PLT16_LO_DS";
+                case R_PPC64_SECTOFF_DS: return "R_PPC64_SECTOFF_DS";
+                case R_PPC64_SECTOFF_LO_DS: return "R_PPC64_SECTOFF_LO_DS";
+                case R_PPC64_TOC16_DS: return "R_PPC64_TOC16_DS";
+                case R_PPC64_TOC16_LO_DS: return "R_PPC64_TOC16_LO_DS";
+                case R_PPC64_ENTRY: return "R_PPC64_ENTRY";
+                case R_PPC64_PCREL34: return "R_PPC64_PCREL34";
+                case R_PPC64_GOT_PCREL34: return "R_PPC64_GOT_PCREL34";
+                case R_PPC64_PLT_PCREL34: return "R_PPC64_PLT_PCREL34";
+                case R_PPC64_TLS: return "R_PPC64_TLS";
+                case R_PPC64_DTPMOD64: return "R_PPC64_DTPMOD64";
+                case R_PPC64_TPREL64: return "R_PPC64_TPREL64";
+                case R_PPC64_DTPREL64: return "R_PPC64_DTPREL64";
+                case R_PPC64_TPREL16_DS: return "R_PPC64_TPREL16_DS";
+                case R_PPC64_TPREL16_LO_DS: return "R_PPC64_TPREL16_LO_DS";
+                case R_PPC64_TPREL16_HIGHER: return "R_PPC64_TPREL16_HIGHER";
+                case R_PPC64_TPREL16_HIGHERA: return "R_PPC64_TPREL16_HIGHERA";
+                case R_PPC64_TPREL16_HIGHEST: return "R_PPC64_TPREL16_HIGHEST";
+                case R_PPC64_TPREL16_HIGHESTA: return "R_PPC64_TPREL16_HIGHESTA";
+                case R_PPC64_DTPREL16_DS: return "R_PPC64_DTPREL16_DS";
+                case R_PPC64_DTPREL16_LO_DS: return "R_PPC64_DTPREL16_LO_DS";
+                case R_PPC64_DTPREL16_HIGHER: return "R_PPC64_DTPREL16_HIGHER";
+                case R_PPC64_DTPREL16_HIGHERA: return "R_PPC64_DTPREL16_HIGHERA";
+                case R_PPC64_DTPREL16_HIGHEST: return "R_PPC64_DTPREL16_HIGHEST";
+                case R_PPC64_DTPREL16_HIGHESTA: return "R_PPC64_DTPREL16_HIGHESTA";
+                case R_PPC64_GOT_TLSGD16: return "R_PPC64_GOT_TLSGD16";
+                case R_PPC64_GOT_TLSGD16_LO: return "R_PPC64_GOT_TLSGD16_LO";
+                case R_PPC64_GOT_TLSGD16_HI: return "R_PPC64_GOT_TLSGD16_HI";
+                case R_PPC64_GOT_TLSGD16_HA: return "R_PPC64_GOT_TLSGD16_HA";
+                case R_PPC64_GOT_TLSLD16: return "R_PPC64_GOT_TLSLD16";
+                case R_PPC64_GOT_TLSLD16_LO: return "R_PPC64_GOT_TLSLD16_LO";
+                case R_PPC64_GOT_TLSLD16_HI: return "R_PPC64_GOT_TLSLD16_HI";
+                case R_PPC64_GOT_TLSLD16_HA: return "R_PPC64_GOT_TLSLD16_HA";
+                case R_PPC64_GOT_TPREL16_DS: return "R_PPC64_GOT_TPREL16_DS";
+                case R_PPC64_GOT_TPREL16_LO_DS: return "R_PPC64_GOT_TPREL16_LO_DS";
+                case R_PPC64_GOT_TPREL16_HI: return "R_PPC64_GOT_TPREL16_HI";
+                case R_PPC64_GOT_TPREL16_HA: return "R_PPC64_GOT_TPREL16_HA";
+                case R_PPC64_IRELATIVE: return "R_PPC64_IRELATIVE";
                 default: break;
             }
             break;
