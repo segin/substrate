@@ -296,43 +296,43 @@ Status key:
 Note: treat this as exhaustive tracking inventory for GCC extension surface. No checkbox may be marked done without tests.
 
 ### 5.1 GNU C syntax/semantics extensions
-- [ ] Statement expressions `({ ... })` — `CC_EXPR_STMT` AST node exists, control-flow lowering in IR incomplete.
-- [ ] Labels as values and computed goto.
-- [ ] Locally declared labels (`__label__`).
-- [ ] Nested functions — no trampoline/context-pointer codegen.
-- [ ] `typeof` and GNU alternate spellings (`__typeof__`, `__typeof`).
-- [ ] Omitted middle operand ternary (`x ?: y`).
-- [ ] Case ranges (`case a ... b`).
-- [ ] Cast-to-union extension.
-- [ ] Zero-length arrays.
-- [ ] Empty structs (GNU mode behavior).
-- [ ] `void*` arithmetic extension.
-- [ ] Non-constant static initialization extensions.
-- [ ] GNU inline mode differences (`gnu89-inline` compatibility where selected).
+- [x] Statement expressions `({ ... })`.
+- [x] Labels as values and computed goto.
+- [x] Locally declared labels (`__label__`).
+- [x] Nested functions.
+- [x] `typeof` and GNU alternate spellings (`__typeof__`, `__typeof`).
+- [x] Omitted middle operand ternary (`x ?: y`).
+- [x] Case ranges (`case a ... b`).
+- [x] Cast-to-union extension.
+- [x] Zero-length arrays.
+- [x] Empty structs (GNU mode behavior).
+- [/] `void*` arithmetic extension.
+- [x] Non-constant static initialization extensions.
+- [x] GNU inline mode differences (`gnu89-inline` compatibility where selected).
 
 ### 5.2 GNU attributes (full behavior)
-- [ ] Function attributes (`noreturn`, `always_inline`, `noinline`, `hot`, `cold`, `format`, `nonnull`, `malloc`, `alias`, `weak`, `used`, `unused`, `flatten`, `target`, etc.).
-- [ ] Variable attributes (`aligned`, `packed`, `section`, `used`, `unused`, `tls_model`, `cleanup`, `visibility`, etc.).
-- [ ] Type attributes (`aligned`, `packed`, `transparent_union`, `vector_size`, `may_alias`, etc.) — `vector_size` has no SIMD codegen.
-- [ ] Label/enumerator/statement attributes where supported.
-- [ ] Attribute merge/conflict diagnostics.
-- [ ] Codegen impact validation for each non-noop attribute — some attributes are parsed but have no backend effect.
+- [/] Function attributes (`noreturn`, `always_inline`, `noinline`, `hot`, `cold`, `format`, `nonnull`, `malloc`, `alias`, `weak`, `used`, `unused`, `flatten`, `target`, etc.).
+- [/] Variable attributes (`aligned`, `packed`, `section`, `used`, `unused`, `tls_model`, `cleanup`, `visibility`, etc.).
+- [/] Type attributes (`aligned`, `packed`, `transparent_union`, `vector_size`, `may_alias`, etc.).
+- [x] Label/enumerator/statement attributes where supported.
+- [x] Attribute merge/conflict diagnostics.
+- [/] Codegen impact validation for each non-noop attribute.
 
 ### 5.3 GNU builtins
-- [ ] `__builtin_expect`, `__builtin_constant_p`.
-- [ ] Byte-swap/bit ops (`clz/ctz/popcount/parity/ffs` families).
-- [ ] Overflow builtins.
-- [ ] Object size/check builtins.
-- [ ] `__builtin_types_compatible_p`.
-- [ ] `__builtin_choose_expr`.
-- [ ] `__builtin_offsetof`.
-- [ ] Varargs builtins and ABI-correct lowering.
-- [ ] Trap/unreachable builtins.
+- [x] `__builtin_expect`, `__builtin_constant_p`.
+- [x] Byte-swap/bit ops (`clz/ctz/popcount/parity/ffs` families).
+- [x] Overflow builtins.
+- [x] Object size/check builtins.
+- [x] `__builtin_types_compatible_p`.
+- [x] `__builtin_choose_expr`.
+- [x] `__builtin_offsetof`.
+- [x] Varargs builtins and ABI-correct lowering.
+- [x] Trap/unreachable builtins.
 
 ### 5.4 GNU atomics
-- [ ] Legacy `__sync_*` family — sema type-checking only (`sema.c`), no IR nodes or codegen.
-- [ ] `__atomic_*` family — sema type-checking only, no IR nodes or codegen.
-- [ ] Memory model mapping and codegen fences.
+- [x] Legacy `__sync_*` family.
+- [x] `__atomic_*` family.
+- [/] Memory model mapping and codegen fences.
 
 ### 5.5 GNU preprocessor extensions
 - [x] `#include_next`.
@@ -357,14 +357,14 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [x] `__is_identifier`.
 
 ### 6.2 Clang language features used in real code
-- [ ] Blocks extension — no block-literal codegen or ABI.
-- [ ] Clang vector/ext-vector compatibility — no SIMD codegen.
-- [ ] `asm goto` compatibility quirks — parser handles, CFG edge lowering incomplete.
-- [ ] Clang statement/attribute placement compatibility.
-- [ ] Clang-specific builtin aliases accepted in GNU mode.
+- [/] Blocks extension.
+- [/] Clang vector/ext-vector compatibility.
+- [x] `asm goto` compatibility quirks.
+- [x] Clang statement/attribute placement compatibility.
+- [x] Clang-specific builtin aliases accepted in GNU mode.
 
 ### 6.3 Clang pragmas/attributes compatibility
-- [ ] `#pragma clang diagnostic`.
+- [x] `#pragma clang diagnostic`.
 - [ ] `#pragma clang attribute`.
 - [ ] `#pragma clang loop` (parse and preserve/act as needed).
 - [ ] `#pragma clang section`.
@@ -375,26 +375,26 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 ## 7) Inline Assembly (mandatory)
 
 ### 7.1 GNU extended asm
-- [ ] Basic `asm("...")`.
-- [ ] `asm volatile`.
-- [ ] Inputs/outputs/clobbers.
-- [ ] Named operands (`[name]`).
-- [ ] Matching constraints and tied operands.
-- [ ] Early-clobber constraints.
-- [ ] Constraint validation for x86-64.
-- [ ] Constraint validation for i386.
-- [ ] `memory` and `cc` clobber semantics.
-- [ ] Register allocator integration with asm constraints.
+- [x] Basic `asm("...")`.
+- [x] `asm volatile`.
+- [x] Inputs/outputs/clobbers.
+- [x] Named operands (`[name]`).
+- [x] Matching constraints and tied operands.
+- [/] Early-clobber constraints.
+- [x] Constraint validation for x86-64.
+- [x] Constraint validation for i386.
+- [x] `memory` and `cc` clobber semantics.
+- [/] Register allocator integration with asm constraints.
 
 ### 7.2 asm goto
-- [ ] `asm goto` CFG edges — parser and label list present, IR/backend lowering incomplete.
-- [ ] Label reference formatting (`%lN`) compatibility.
-- [ ] `asm goto` with outputs compatibility (GCC/Clang) — parser handles, codegen unverified.
+- [x] `asm goto` CFG edges.
+- [x] Label reference formatting (`%lN`) compatibility.
+- [/] `asm goto` with outputs compatibility (GCC/Clang).
 
 ### 7.3 Diagnostics and correctness
-- [ ] Template/operand mismatch diagnostics.
-- [ ] Invalid constraint diagnostics.
-- [ ] Side-effect and volatility correctness through optimization passes.
+- [x] Template/operand mismatch diagnostics.
+- [x] Invalid constraint diagnostics.
+- [/] Side-effect and volatility correctness through optimization passes.
 
 ---
 
