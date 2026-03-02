@@ -1206,8 +1206,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Endian-correct output for big-endian IA-64 (HP-UX).
 
 ### 24f. IA-64 DWARF
-- [ ] IA-64 DWARF register mapping: GR0–GR127 → 0–127, FR0–FR127 → 128–255, BR0–BR7 → 320–327, PR0–PR63 → 256–319.
-- [ ] IA-64 CFA: frame pointer GR12 (SP), return address BR0 (RP).
+- [x] IA-64 DWARF register mapping: GR0–GR127 → 0–127, FR0–FR127 → 128–255, BR0–BR7 → 320–327, PR0–PR63 → 256–319.
+- [x] IA-64 CFA: frame pointer GR12 (SP), return address BR0 (RP).
 
 ### 24g. IA-64 Testing
 - [ ] Unit tests for all IA-64 relocation types.
