@@ -107,6 +107,8 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
         use_rela_default = 1;
     } else if (obj->machine == EM_ALPHA) {
         use_rela_default = 1;
+    } else if (obj->machine == EM_IA_64) {
+        use_rela_default = 1;
     }
 
     for (i = 0; i < target->reloc_count; ++i) {
@@ -120,7 +122,7 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
             obj->machine != EM_RISCV && obj->machine != EM_LOONGARCH &&
             obj->machine != EM_68K && obj->machine != EM_VAX &&
             obj->machine != EM_PPC && obj->machine != EM_PPC64 &&
-            obj->machine != EM_ALPHA) {
+            obj->machine != EM_ALPHA && obj->machine != EM_IA_64) {
             reloc_has_addend = r->has_addend != 0;
         }
         if ((reloc_has_addend != 0) == (with_addend != 0)) {
@@ -159,7 +161,7 @@ static uint8_t *build_relocs_for_section(const elfobj_t *obj, const struct elf_s
             obj->machine != EM_RISCV && obj->machine != EM_LOONGARCH &&
             obj->machine != EM_68K && obj->machine != EM_VAX &&
             obj->machine != EM_PPC && obj->machine != EM_PPC64 &&
-            obj->machine != EM_ALPHA) {
+            obj->machine != EM_ALPHA && obj->machine != EM_IA_64) {
             reloc_has_addend = r->has_addend != 0;
         }
         if ((reloc_has_addend != 0) != (with_addend != 0)) {

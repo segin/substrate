@@ -1318,6 +1318,7 @@ elfobj_t *elf_init_vax(void);
 elfobj_t *elf_init_ppc32(void);
 elfobj_t *elf_init_ppc64(void);
 elfobj_t *elf_init_alpha(void);
+elfobj_t *elf_init_ia64(void);
 elf_err_t elf_finalize(elfobj_t *obj);
 elf_err_t elf_set_type(elfobj_t *obj, uint16_t type);
 elf_err_t elf_set_machine(elfobj_t *obj, uint16_t machine);

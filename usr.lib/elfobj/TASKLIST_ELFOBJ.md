@@ -1200,10 +1200,10 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Validate `e_flags` `EF_IA_64_ABI64` and `EF_IA_64_ARCH`.
 
 ### 24e. IA-64 ELF Read/Write/Create
-- [ ] Recognize `EM_IA_64` as valid machine type.
-- [ ] Parse/write RELA relocations (IA-64 uses RELA).
-- [ ] `elf_init_ia64()`: ELF64/EM_IA_64/ELFDATA2LSB.
-- [ ] Endian-correct output for big-endian IA-64 (HP-UX).
+- [x] Recognize `EM_IA_64` as valid machine type.
+- [x] Parse/write RELA relocations (IA-64 uses RELA).
+- [x] `elf_init_ia64()`: ELF64/EM_IA_64/ELFDATA2LSB.
+- [x] Endian-correct output for big-endian IA-64 (HP-UX).
 
 ### 24f. IA-64 DWARF
 - [ ] IA-64 DWARF register mapping: GR0–GR127 → 0–127, FR0–FR127 → 128–255, BR0–BR7 → 320–327, PR0–PR63 → 256–319.

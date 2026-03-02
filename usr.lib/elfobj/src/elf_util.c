@@ -542,6 +542,16 @@ elfobj_t *elf_init_alpha(void) {
     return obj;
 }
 
+elfobj_t *elf_init_ia64(void) {
+    elfobj_t *obj = elf_create(ET_REL, EM_IA_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+    if (obj == NULL) {
+        return NULL;
+    }
+    obj->flags = EF_IA_64_ABI64;
+    init_default_sections(obj, 16, 8);
+    return obj;
+}
+
 elf_section_t *elf_add_arm_exidx(elfobj_t *obj) {
     elf_section_t *exidx;
     elf_section_t *extab;
