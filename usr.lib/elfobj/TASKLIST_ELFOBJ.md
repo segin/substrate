@@ -14,229 +14,229 @@ Goal: extend `libelfobj` with complete multi-architecture support for i386, x86-
 ## 1. ELF Constants and Header Definitions
 
 ### 1a. Machine Types (`elf_private.h` or upstream `elf.h`)
-- [ ] Define `EM_ARM` (40).
-- [ ] Define `EM_AARCH64` (183).
+- [x] Define `EM_ARM` (40).
+- [x] Define `EM_AARCH64` (183).
 
 ### 1b. ARM-Specific ELF Header Flags (`e_flags`)
-- [ ] `EF_ARM_ABI_VER5` (0x05000000) — EABI version 5.
-- [ ] `EF_ARM_ABI_FLOAT_HARD` (0x00000400) — hard-float ABI.
-- [ ] `EF_ARM_ABI_FLOAT_SOFT` (0x00000200) — soft-float ABI.
-- [ ] `EF_ARM_BE8` (0x00800000) — BE8 data format.
-- [ ] `EF_ARM_INTERWORK` (0x00000004) — ARM/Thumb interwork support.
-- [ ] `EF_ARM_APCS_26` (0x00000008).
-- [ ] `EF_ARM_APCS_FLOAT` (0x00000010).
-- [ ] `EF_ARM_VFP_FLOAT` (0x00000400).
-- [ ] `EF_ARM_MAVERICK_FLOAT` (0x00000800).
-- [ ] Parse and expose `e_flags` for ARM objects via `elf_flags()` accessor.
-- [ ] Validate `e_flags` ABI version field on read.
+- [x] `EF_ARM_ABI_VER5` (0x05000000) — EABI version 5.
+- [x] `EF_ARM_ABI_FLOAT_HARD` (0x00000400) — hard-float ABI.
+- [x] `EF_ARM_ABI_FLOAT_SOFT` (0x00000200) — soft-float ABI.
+- [x] `EF_ARM_BE8` (0x00800000) — BE8 data format.
+- [x] `EF_ARM_INTERWORK` (0x00000004) — ARM/Thumb interwork support.
+- [x] `EF_ARM_APCS_26` (0x00000008).
+- [x] `EF_ARM_APCS_FLOAT` (0x00000010).
+- [x] `EF_ARM_VFP_FLOAT` (0x00000400).
+- [x] `EF_ARM_MAVERICK_FLOAT` (0x00000800).
+- [x] Parse and expose `e_flags` for ARM objects via `elf_flags()` accessor.
+- [x] Validate `e_flags` ABI version field on read.
 
 ### 1c. AArch64-Specific ELF Header Flags
-- [ ] `EF_AARCH64_CHERI_PURECAP` (reserved).
-- [ ] AArch64 has no mandatory `e_flags` bits; validate that flags is 0 or recognized optional.
+- [x] `EF_AARCH64_CHERI_PURECAP` (reserved).
+- [x] AArch64 has no mandatory `e_flags` bits; validate that flags is 0 or recognized optional.
 
 ### 1d. ARM Relocation Type Constants
 Every relocation type used by GCC/LLVM for ARM targets must be defined:
 
-- [ ] `R_ARM_NONE` (0)
-- [ ] `R_ARM_PC24` (1)
-- [ ] `R_ARM_ABS32` (2)
-- [ ] `R_ARM_REL32` (3)
-- [ ] `R_ARM_LDR_PC_G0` (4)
-- [ ] `R_ARM_ABS16` (5)
-- [ ] `R_ARM_ABS12` (6)
-- [ ] `R_ARM_THM_ABS5` (7)
-- [ ] `R_ARM_ABS8` (8)
-- [ ] `R_ARM_SBREL32` (9)
-- [ ] `R_ARM_THM_CALL` (10)
-- [ ] `R_ARM_THM_PC8` (11)
-- [ ] `R_ARM_BREL_ADJ` (12)
-- [ ] `R_ARM_TLS_DESC` (13)
-- [ ] `R_ARM_THM_SWI8` (14)
-- [ ] `R_ARM_XPC25` (15)
-- [ ] `R_ARM_THM_XPC22` (16)
-- [ ] `R_ARM_TLS_DTPMOD32` (17)
-- [ ] `R_ARM_TLS_DTPOFF32` (18)
-- [ ] `R_ARM_TLS_TPOFF32` (19)
-- [ ] `R_ARM_COPY` (20)
-- [ ] `R_ARM_GLOB_DAT` (21)
-- [ ] `R_ARM_JUMP_SLOT` (22)
-- [ ] `R_ARM_RELATIVE` (23)
-- [ ] `R_ARM_GOTOFF32` (24)
-- [ ] `R_ARM_BASE_PREL` (25) / `R_ARM_GOTPC`
-- [ ] `R_ARM_GOT_BREL` (26) / `R_ARM_GOT32`
-- [ ] `R_ARM_PLT32` (27)
-- [ ] `R_ARM_CALL` (28)
-- [ ] `R_ARM_JUMP24` (29)
-- [ ] `R_ARM_THM_JUMP24` (30)
-- [ ] `R_ARM_BASE_ABS` (31)
-- [ ] `R_ARM_ALU_PCREL_7_0` (32)
-- [ ] `R_ARM_ALU_PCREL_15_8` (33)
-- [ ] `R_ARM_ALU_PCREL_23_16` (34)
-- [ ] `R_ARM_LDR_SBREL_11_0_NC` (35)
-- [ ] `R_ARM_ALU_SBREL_19_12_NC` (36)
-- [ ] `R_ARM_ALU_SBREL_27_20_CK` (37)
-- [ ] `R_ARM_TARGET1` (38)
-- [ ] `R_ARM_SBREL31` (39)
-- [ ] `R_ARM_V4BX` (40)
-- [ ] `R_ARM_TARGET2` (41)
-- [ ] `R_ARM_PREL31` (42)
-- [ ] `R_ARM_MOVW_ABS_NC` (43)
-- [ ] `R_ARM_MOVT_ABS` (44)
-- [ ] `R_ARM_MOVW_PREL_NC` (45)
-- [ ] `R_ARM_MOVT_PREL` (46)
-- [ ] `R_ARM_THM_MOVW_ABS_NC` (47)
-- [ ] `R_ARM_THM_MOVT_ABS` (48)
-- [ ] `R_ARM_THM_MOVW_PREL_NC` (49)
-- [ ] `R_ARM_THM_MOVT_PREL` (50)
-- [ ] `R_ARM_THM_JUMP19` (51)
-- [ ] `R_ARM_THM_JUMP6` (52)
-- [ ] `R_ARM_THM_ALU_PREL_11_0` (53)
-- [ ] `R_ARM_THM_PC12` (54)
-- [ ] `R_ARM_ABS32_NOI` (55)
-- [ ] `R_ARM_REL32_NOI` (56)
-- [ ] `R_ARM_ALU_PC_G0_NC` (57)
-- [ ] `R_ARM_ALU_PC_G0` (58)
-- [ ] `R_ARM_ALU_PC_G1_NC` (59)
-- [ ] `R_ARM_ALU_PC_G1` (60)
-- [ ] `R_ARM_ALU_PC_G2` (61)
-- [ ] `R_ARM_LDR_PC_G1` (62)
-- [ ] `R_ARM_LDR_PC_G2` (63)
-- [ ] `R_ARM_LDRS_PC_G0` (64)
-- [ ] `R_ARM_LDRS_PC_G1` (65)
-- [ ] `R_ARM_LDRS_PC_G2` (66)
-- [ ] `R_ARM_LDC_PC_G0` (67)
-- [ ] `R_ARM_LDC_PC_G1` (68)
-- [ ] `R_ARM_LDC_PC_G2` (69)
-- [ ] `R_ARM_ALU_SB_G0_NC` (70)
-- [ ] `R_ARM_ALU_SB_G0` (71)
-- [ ] `R_ARM_ALU_SB_G1_NC` (72)
-- [ ] `R_ARM_ALU_SB_G1` (73)
-- [ ] `R_ARM_ALU_SB_G2` (74)
-- [ ] `R_ARM_LDR_SB_G0` (75)
-- [ ] `R_ARM_LDR_SB_G1` (76)
-- [ ] `R_ARM_LDR_SB_G2` (77)
-- [ ] `R_ARM_LDRS_SB_G0` (78)
-- [ ] `R_ARM_LDRS_SB_G1` (79)
-- [ ] `R_ARM_LDRS_SB_G2` (80)
-- [ ] `R_ARM_LDC_SB_G0` (81)
-- [ ] `R_ARM_LDC_SB_G1` (82)
-- [ ] `R_ARM_LDC_SB_G2` (83)
-- [ ] `R_ARM_MOVW_BREL_NC` (84)
-- [ ] `R_ARM_MOVT_BREL` (85)
-- [ ] `R_ARM_MOVW_BREL` (86)
-- [ ] `R_ARM_THM_MOVW_BREL_NC` (87)
-- [ ] `R_ARM_THM_MOVT_BREL` (88)
-- [ ] `R_ARM_THM_MOVW_BREL` (89)
-- [ ] `R_ARM_TLS_GOTDESC` (90)
-- [ ] `R_ARM_TLS_CALL` (91)
-- [ ] `R_ARM_TLS_DESCSEQ` (92)
-- [ ] `R_ARM_THM_TLS_CALL` (93)
-- [ ] `R_ARM_PLT32_ABS` (94)
-- [ ] `R_ARM_GOT_ABS` (95)
-- [ ] `R_ARM_GOT_PREL` (96)
-- [ ] `R_ARM_GOT_BREL12` (97)
-- [ ] `R_ARM_GOTOFF12` (98)
-- [ ] `R_ARM_GOTRELAX` (99)
-- [ ] `R_ARM_GNU_VTENTRY` (100)
-- [ ] `R_ARM_GNU_VTINHERIT` (101)
-- [ ] `R_ARM_THM_JUMP11` (102)
-- [ ] `R_ARM_THM_JUMP8` (103)
-- [ ] `R_ARM_TLS_GD32` (104)
-- [ ] `R_ARM_TLS_LDM32` (105)
-- [ ] `R_ARM_TLS_LDO32` (106)
-- [ ] `R_ARM_TLS_IE32` (107)
-- [ ] `R_ARM_TLS_LE32` (108)
-- [ ] `R_ARM_TLS_LDO12` (109)
-- [ ] `R_ARM_TLS_LE12` (110)
-- [ ] `R_ARM_TLS_IE12GP` (111)
-- [ ] `R_ARM_IRELATIVE` (160)
-- [ ] `R_ARM_RXPC25` (249)
-- [ ] `R_ARM_RSBREL32` (250)
-- [ ] `R_ARM_THM_RPC22` (251)
-- [ ] `R_ARM_RREL32` (252)
-- [ ] `R_ARM_RABS32` (253)
-- [ ] `R_ARM_RPC24` (254)
-- [ ] `R_ARM_RBASE` (255)
+- [x] `R_ARM_NONE` (0)
+- [x] `R_ARM_PC24` (1)
+- [x] `R_ARM_ABS32` (2)
+- [x] `R_ARM_REL32` (3)
+- [x] `R_ARM_LDR_PC_G0` (4)
+- [x] `R_ARM_ABS16` (5)
+- [x] `R_ARM_ABS12` (6)
+- [x] `R_ARM_THM_ABS5` (7)
+- [x] `R_ARM_ABS8` (8)
+- [x] `R_ARM_SBREL32` (9)
+- [x] `R_ARM_THM_CALL` (10)
+- [x] `R_ARM_THM_PC8` (11)
+- [x] `R_ARM_BREL_ADJ` (12)
+- [x] `R_ARM_TLS_DESC` (13)
+- [x] `R_ARM_THM_SWI8` (14)
+- [x] `R_ARM_XPC25` (15)
+- [x] `R_ARM_THM_XPC22` (16)
+- [x] `R_ARM_TLS_DTPMOD32` (17)
+- [x] `R_ARM_TLS_DTPOFF32` (18)
+- [x] `R_ARM_TLS_TPOFF32` (19)
+- [x] `R_ARM_COPY` (20)
+- [x] `R_ARM_GLOB_DAT` (21)
+- [x] `R_ARM_JUMP_SLOT` (22)
+- [x] `R_ARM_RELATIVE` (23)
+- [x] `R_ARM_GOTOFF32` (24)
+- [x] `R_ARM_BASE_PREL` (25) / `R_ARM_GOTPC`
+- [x] `R_ARM_GOT_BREL` (26) / `R_ARM_GOT32`
+- [x] `R_ARM_PLT32` (27)
+- [x] `R_ARM_CALL` (28)
+- [x] `R_ARM_JUMP24` (29)
+- [x] `R_ARM_THM_JUMP24` (30)
+- [x] `R_ARM_BASE_ABS` (31)
+- [x] `R_ARM_ALU_PCREL_7_0` (32)
+- [x] `R_ARM_ALU_PCREL_15_8` (33)
+- [x] `R_ARM_ALU_PCREL_23_16` (34)
+- [x] `R_ARM_LDR_SBREL_11_0_NC` (35)
+- [x] `R_ARM_ALU_SBREL_19_12_NC` (36)
+- [x] `R_ARM_ALU_SBREL_27_20_CK` (37)
+- [x] `R_ARM_TARGET1` (38)
+- [x] `R_ARM_SBREL31` (39)
+- [x] `R_ARM_V4BX` (40)
+- [x] `R_ARM_TARGET2` (41)
+- [x] `R_ARM_PREL31` (42)
+- [x] `R_ARM_MOVW_ABS_NC` (43)
+- [x] `R_ARM_MOVT_ABS` (44)
+- [x] `R_ARM_MOVW_PREL_NC` (45)
+- [x] `R_ARM_MOVT_PREL` (46)
+- [x] `R_ARM_THM_MOVW_ABS_NC` (47)
+- [x] `R_ARM_THM_MOVT_ABS` (48)
+- [x] `R_ARM_THM_MOVW_PREL_NC` (49)
+- [x] `R_ARM_THM_MOVT_PREL` (50)
+- [x] `R_ARM_THM_JUMP19` (51)
+- [x] `R_ARM_THM_JUMP6` (52)
+- [x] `R_ARM_THM_ALU_PREL_11_0` (53)
+- [x] `R_ARM_THM_PC12` (54)
+- [x] `R_ARM_ABS32_NOI` (55)
+- [x] `R_ARM_REL32_NOI` (56)
+- [x] `R_ARM_ALU_PC_G0_NC` (57)
+- [x] `R_ARM_ALU_PC_G0` (58)
+- [x] `R_ARM_ALU_PC_G1_NC` (59)
+- [x] `R_ARM_ALU_PC_G1` (60)
+- [x] `R_ARM_ALU_PC_G2` (61)
+- [x] `R_ARM_LDR_PC_G1` (62)
+- [x] `R_ARM_LDR_PC_G2` (63)
+- [x] `R_ARM_LDRS_PC_G0` (64)
+- [x] `R_ARM_LDRS_PC_G1` (65)
+- [x] `R_ARM_LDRS_PC_G2` (66)
+- [x] `R_ARM_LDC_PC_G0` (67)
+- [x] `R_ARM_LDC_PC_G1` (68)
+- [x] `R_ARM_LDC_PC_G2` (69)
+- [x] `R_ARM_ALU_SB_G0_NC` (70)
+- [x] `R_ARM_ALU_SB_G0` (71)
+- [x] `R_ARM_ALU_SB_G1_NC` (72)
+- [x] `R_ARM_ALU_SB_G1` (73)
+- [x] `R_ARM_ALU_SB_G2` (74)
+- [x] `R_ARM_LDR_SB_G0` (75)
+- [x] `R_ARM_LDR_SB_G1` (76)
+- [x] `R_ARM_LDR_SB_G2` (77)
+- [x] `R_ARM_LDRS_SB_G0` (78)
+- [x] `R_ARM_LDRS_SB_G1` (79)
+- [x] `R_ARM_LDRS_SB_G2` (80)
+- [x] `R_ARM_LDC_SB_G0` (81)
+- [x] `R_ARM_LDC_SB_G1` (82)
+- [x] `R_ARM_LDC_SB_G2` (83)
+- [x] `R_ARM_MOVW_BREL_NC` (84)
+- [x] `R_ARM_MOVT_BREL` (85)
+- [x] `R_ARM_MOVW_BREL` (86)
+- [x] `R_ARM_THM_MOVW_BREL_NC` (87)
+- [x] `R_ARM_THM_MOVT_BREL` (88)
+- [x] `R_ARM_THM_MOVW_BREL` (89)
+- [x] `R_ARM_TLS_GOTDESC` (90)
+- [x] `R_ARM_TLS_CALL` (91)
+- [x] `R_ARM_TLS_DESCSEQ` (92)
+- [x] `R_ARM_THM_TLS_CALL` (93)
+- [x] `R_ARM_PLT32_ABS` (94)
+- [x] `R_ARM_GOT_ABS` (95)
+- [x] `R_ARM_GOT_PREL` (96)
+- [x] `R_ARM_GOT_BREL12` (97)
+- [x] `R_ARM_GOTOFF12` (98)
+- [x] `R_ARM_GOTRELAX` (99)
+- [x] `R_ARM_GNU_VTENTRY` (100)
+- [x] `R_ARM_GNU_VTINHERIT` (101)
+- [x] `R_ARM_THM_JUMP11` (102)
+- [x] `R_ARM_THM_JUMP8` (103)
+- [x] `R_ARM_TLS_GD32` (104)
+- [x] `R_ARM_TLS_LDM32` (105)
+- [x] `R_ARM_TLS_LDO32` (106)
+- [x] `R_ARM_TLS_IE32` (107)
+- [x] `R_ARM_TLS_LE32` (108)
+- [x] `R_ARM_TLS_LDO12` (109)
+- [x] `R_ARM_TLS_LE12` (110)
+- [x] `R_ARM_TLS_IE12GP` (111)
+- [x] `R_ARM_IRELATIVE` (160)
+- [x] `R_ARM_RXPC25` (249)
+- [x] `R_ARM_RSBREL32` (250)
+- [x] `R_ARM_THM_RPC22` (251)
+- [x] `R_ARM_RREL32` (252)
+- [x] `R_ARM_RABS32` (253)
+- [x] `R_ARM_RPC24` (254)
+- [x] `R_ARM_RBASE` (255)
 
 ### 1e. AArch64 Relocation Type Constants
-- [ ] `R_AARCH64_NONE` (0)
-- [ ] `R_AARCH64_ABS64` (257), `R_AARCH64_ABS32` (258), `R_AARCH64_ABS16` (259)
-- [ ] `R_AARCH64_PREL64` (260), `R_AARCH64_PREL32` (261), `R_AARCH64_PREL16` (262)
-- [ ] `R_AARCH64_MOVW_UABS_G0` (263), `_G0_NC` (264), `_G1` (265), `_G1_NC` (266), `_G2` (267), `_G2_NC` (268), `_G3` (269)
-- [ ] `R_AARCH64_MOVW_SABS_G0` (270), `_G1` (271), `_G2` (272)
-- [ ] `R_AARCH64_LD_PREL_LO19` (273), `R_AARCH64_ADR_PREL_LO21` (274)
-- [ ] `R_AARCH64_ADR_PREL_PG_HI21` (275), `_NC` (276)
-- [ ] `R_AARCH64_ADD_ABS_LO12_NC` (277)
-- [ ] `R_AARCH64_LDST8_ABS_LO12_NC` (278)
-- [ ] `R_AARCH64_TSTBR14` (279), `R_AARCH64_CONDBR19` (280)
-- [ ] `R_AARCH64_JUMP26` (282), `R_AARCH64_CALL26` (283)
-- [ ] `R_AARCH64_LDST16_ABS_LO12_NC` (284), `R_AARCH64_LDST32_ABS_LO12_NC` (285), `R_AARCH64_LDST64_ABS_LO12_NC` (286), `R_AARCH64_LDST128_ABS_LO12_NC` (299)
-- [ ] `R_AARCH64_MOVW_PREL_G0` (287), `_G0_NC` (288), `_G1` (289), `_G1_NC` (290), `_G2` (291), `_G2_NC` (292), `_G3` (293)
-- [ ] `R_AARCH64_GOT_LD_PREL19` (309), `R_AARCH64_ADR_GOT_PAGE` (311), `R_AARCH64_LD64_GOT_LO12_NC` (312)
-- [ ] `R_AARCH64_LD64_GOTPAGE_LO15` (313)
-- [ ] `R_AARCH64_TLSGD_ADR_PREL21` (512), `R_AARCH64_TLSGD_ADR_PAGE21` (513), `R_AARCH64_TLSGD_ADD_LO12_NC` (514), `R_AARCH64_TLSGD_MOVW_G1` (515), `R_AARCH64_TLSGD_MOVW_G0_NC` (516)
-- [ ] `R_AARCH64_TLSLD_ADR_PREL21` (517), `R_AARCH64_TLSLD_ADR_PAGE21` (518), `R_AARCH64_TLSLD_ADD_LO12_NC` (519), `R_AARCH64_TLSLD_ADD_DTPREL_HI12` (528), `R_AARCH64_TLSLD_ADD_DTPREL_LO12` (529), `_NC` (530)
-- [ ] `R_AARCH64_TLSLD_LDST8_DTPREL_LO12` (531), `_NC` (532)
-- [ ] `R_AARCH64_TLSLD_LDST16/32/64/128_DTPREL_LO12{_NC}` (533–540)
-- [ ] `R_AARCH64_TLSLD_MOVW_DTPREL_G0{_NC}` (520,521), `_G1{_NC}` (522,523), `_G2` (524)
-- [ ] `R_AARCH64_TLSIE_MOVW_GOTTPREL_G1` (539), `_G0_NC` (540)
-- [ ] `R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21` (541), `R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC` (542), `R_AARCH64_TLSIE_LD_GOTTPREL_PREL19` (543)
-- [ ] `R_AARCH64_TLSLE_MOVW_TPREL_G2` (544), `_G1{_NC}` (545,546), `_G0{_NC}` (547,548)
-- [ ] `R_AARCH64_TLSLE_ADD_TPREL_HI12` (549), `R_AARCH64_TLSLE_ADD_TPREL_LO12` (550), `_NC` (551)
-- [ ] `R_AARCH64_TLSLE_LDST8/16/32/64/128_TPREL_LO12{_NC}` (552–561)
-- [ ] `R_AARCH64_TLSDESC_LD_PREL19` (560), `R_AARCH64_TLSDESC_ADR_PREL21` (561), `R_AARCH64_TLSDESC_ADR_PAGE21` (562), `R_AARCH64_TLSDESC_LD64_LO12` (563), `R_AARCH64_TLSDESC_ADD_LO12` (564), `R_AARCH64_TLSDESC_OFF_G1` (565), `R_AARCH64_TLSDESC_OFF_G0_NC` (566), `R_AARCH64_TLSDESC_LDR` (567), `R_AARCH64_TLSDESC_ADD` (568), `R_AARCH64_TLSDESC_CALL` (569), `R_AARCH64_TLSDESC` (1031)
-- [ ] Dynamic relocations: `R_AARCH64_COPY` (1024), `R_AARCH64_GLOB_DAT` (1025), `R_AARCH64_JUMP_SLOT` (1026), `R_AARCH64_RELATIVE` (1027), `R_AARCH64_TLS_DTPMOD64` (1028), `R_AARCH64_TLS_DTPREL64` (1029), `R_AARCH64_TLS_TPREL64` (1030), `R_AARCH64_IRELATIVE` (1032)
+- [x] `R_AARCH64_NONE` (0)
+- [x] `R_AARCH64_ABS64` (257), `R_AARCH64_ABS32` (258), `R_AARCH64_ABS16` (259)
+- [x] `R_AARCH64_PREL64` (260), `R_AARCH64_PREL32` (261), `R_AARCH64_PREL16` (262)
+- [x] `R_AARCH64_MOVW_UABS_G0` (263), `_G0_NC` (264), `_G1` (265), `_G1_NC` (266), `_G2` (267), `_G2_NC` (268), `_G3` (269)
+- [x] `R_AARCH64_MOVW_SABS_G0` (270), `_G1` (271), `_G2` (272)
+- [x] `R_AARCH64_LD_PREL_LO19` (273), `R_AARCH64_ADR_PREL_LO21` (274)
+- [x] `R_AARCH64_ADR_PREL_PG_HI21` (275), `_NC` (276)
+- [x] `R_AARCH64_ADD_ABS_LO12_NC` (277)
+- [x] `R_AARCH64_LDST8_ABS_LO12_NC` (278)
+- [x] `R_AARCH64_TSTBR14` (279), `R_AARCH64_CONDBR19` (280)
+- [x] `R_AARCH64_JUMP26` (282), `R_AARCH64_CALL26` (283)
+- [x] `R_AARCH64_LDST16_ABS_LO12_NC` (284), `R_AARCH64_LDST32_ABS_LO12_NC` (285), `R_AARCH64_LDST64_ABS_LO12_NC` (286), `R_AARCH64_LDST128_ABS_LO12_NC` (299)
+- [x] `R_AARCH64_MOVW_PREL_G0` (287), `_G0_NC` (288), `_G1` (289), `_G1_NC` (290), `_G2` (291), `_G2_NC` (292), `_G3` (293)
+- [x] `R_AARCH64_GOT_LD_PREL19` (309), `R_AARCH64_ADR_GOT_PAGE` (311), `R_AARCH64_LD64_GOT_LO12_NC` (312)
+- [x] `R_AARCH64_LD64_GOTPAGE_LO15` (313)
+- [x] `R_AARCH64_TLSGD_ADR_PREL21` (512), `R_AARCH64_TLSGD_ADR_PAGE21` (513), `R_AARCH64_TLSGD_ADD_LO12_NC` (514), `R_AARCH64_TLSGD_MOVW_G1` (515), `R_AARCH64_TLSGD_MOVW_G0_NC` (516)
+- [x] `R_AARCH64_TLSLD_ADR_PREL21` (517), `R_AARCH64_TLSLD_ADR_PAGE21` (518), `R_AARCH64_TLSLD_ADD_LO12_NC` (519), `R_AARCH64_TLSLD_ADD_DTPREL_HI12` (528), `R_AARCH64_TLSLD_ADD_DTPREL_LO12` (529), `_NC` (530)
+- [x] `R_AARCH64_TLSLD_LDST8_DTPREL_LO12` (531), `_NC` (532)
+- [x] `R_AARCH64_TLSLD_LDST16/32/64/128_DTPREL_LO12{_NC}` (533–540)
+- [x] `R_AARCH64_TLSLD_MOVW_DTPREL_G0{_NC}` (520,521), `_G1{_NC}` (522,523), `_G2` (524)
+- [x] `R_AARCH64_TLSIE_MOVW_GOTTPREL_G1` (539), `_G0_NC` (540)
+- [x] `R_AARCH64_TLSIE_ADR_GOTTPREL_PAGE21` (541), `R_AARCH64_TLSIE_LD64_GOTTPREL_LO12_NC` (542), `R_AARCH64_TLSIE_LD_GOTTPREL_PREL19` (543)
+- [x] `R_AARCH64_TLSLE_MOVW_TPREL_G2` (544), `_G1{_NC}` (545,546), `_G0{_NC}` (547,548)
+- [x] `R_AARCH64_TLSLE_ADD_TPREL_HI12` (549), `R_AARCH64_TLSLE_ADD_TPREL_LO12` (550), `_NC` (551)
+- [x] `R_AARCH64_TLSLE_LDST8/16/32/64/128_TPREL_LO12{_NC}` (552–561)
+- [x] `R_AARCH64_TLSDESC_LD_PREL19` (560), `R_AARCH64_TLSDESC_ADR_PREL21` (561), `R_AARCH64_TLSDESC_ADR_PAGE21` (562), `R_AARCH64_TLSDESC_LD64_LO12` (563), `R_AARCH64_TLSDESC_ADD_LO12` (564), `R_AARCH64_TLSDESC_OFF_G1` (565), `R_AARCH64_TLSDESC_OFF_G0_NC` (566), `R_AARCH64_TLSDESC_LDR` (567), `R_AARCH64_TLSDESC_ADD` (568), `R_AARCH64_TLSDESC_CALL` (569), `R_AARCH64_TLSDESC` (1031)
+- [x] Dynamic relocations: `R_AARCH64_COPY` (1024), `R_AARCH64_GLOB_DAT` (1025), `R_AARCH64_JUMP_SLOT` (1026), `R_AARCH64_RELATIVE` (1027), `R_AARCH64_TLS_DTPMOD64` (1028), `R_AARCH64_TLS_DTPREL64` (1029), `R_AARCH64_TLS_TPREL64` (1030), `R_AARCH64_IRELATIVE` (1032)
 
 ### 1f. ARM Section Types and Flags
-- [ ] `SHT_ARM_EXIDX` (0x70000001) — exception index table.
-- [ ] `SHT_ARM_PREEMPTMAP` (0x70000002).
-- [ ] `SHT_ARM_ATTRIBUTES` (0x70000003) — build attributes.
-- [ ] `SHF_ARM_PURECODE` (0x20000000) — execute-only section.
-- [ ] `PT_ARM_EXIDX` (0x70000001) — exception unwind segment.
+- [x] `SHT_ARM_EXIDX` (0x70000001) — exception index table.
+- [x] `SHT_ARM_PREEMPTMAP` (0x70000002).
+- [x] `SHT_ARM_ATTRIBUTES` (0x70000003) — build attributes.
+- [x] `SHF_ARM_PURECODE` (0x20000000) — execute-only section.
+- [x] `PT_ARM_EXIDX` (0x70000001) — exception unwind segment.
 
 ### 1g. AArch64 Section Types
-- [ ] `SHT_AARCH64_ATTRIBUTES` (0x70000003).
-- [ ] `PT_AARCH64_MEMTAG_MTE` (0x70000002).
+- [x] `SHT_AARCH64_ATTRIBUTES` (0x70000003).
+- [x] `PT_AARCH64_MEMTAG_MTE` (0x70000002).
 
 ### 1h. ARM Special Section Names
-- [ ] `.ARM.exidx` — exception index table.
-- [ ] `.ARM.extab` — exception table data.
-- [ ] `.ARM.attributes` — build attributes.
-- [ ] `.note.gnu.property` — BTI/PAC properties (AArch64).
+- [x] `.ARM.exidx` — exception index table.
+- [x] `.ARM.extab` — exception table data.
+- [x] `.ARM.attributes` — build attributes.
+- [x] `.note.gnu.property` — BTI/PAC properties (AArch64).
 
 ### 1i. Expanded x86 Relocation Type Constants
 
 Beyond the currently-implemented core set, add the full x86 relocation roster:
 
 #### i386 Missing Relocations
-- [ ] `R_386_NONE` (0)
-- [ ] `R_386_COPY` (5), `R_386_GLOB_DAT` (6), `R_386_JMP_SLOT` (7), `R_386_RELATIVE` (8)
-- [ ] `R_386_16` (20), `R_386_PC16` (21), `R_386_8` (22), `R_386_PC8` (23)
-- [ ] `R_386_TLS_DTPMOD32` (35), `R_386_TLS_DTPOFF32` (36)
-- [ ] `R_386_TLS_LE_32` (33), `R_386_TLS_TPOFF32` (37)
-- [ ] `R_386_SIZE32` (38)
-- [ ] `R_386_GOT32X` (43)
-- [ ] `R_386_IRELATIVE` (42)
+- [x] `R_386_NONE` (0)
+- [x] `R_386_COPY` (5), `R_386_GLOB_DAT` (6), `R_386_JMP_SLOT` (7), `R_386_RELATIVE` (8)
+- [x] `R_386_16` (20), `R_386_PC16` (21), `R_386_8` (22), `R_386_PC8` (23)
+- [x] `R_386_TLS_DTPMOD32` (35), `R_386_TLS_DTPOFF32` (36)
+- [x] `R_386_TLS_LE_32` (33), `R_386_TLS_TPOFF32` (37)
+- [x] `R_386_SIZE32` (38)
+- [x] `R_386_GOT32X` (43)
+- [x] `R_386_IRELATIVE` (42)
 
 #### x86-64 Missing Relocations
-- [ ] `R_X86_64_COPY` (5), `R_X86_64_GLOB_DAT` (6), `R_X86_64_JUMP_SLOT` (7), `R_X86_64_RELATIVE` (8)
-- [ ] `R_X86_64_16` (12), `R_X86_64_PC16` (13), `R_X86_64_8` (14), `R_X86_64_PC8` (15)
-- [ ] `R_X86_64_DTPMOD64` (16), `R_X86_64_DTPOFF64` (17), `R_X86_64_TPOFF64` (18)
-- [ ] `R_X86_64_TLSLD` (20), `R_X86_64_DTPOFF32` (21)
-- [ ] `R_X86_64_PC64` (24), `R_X86_64_GOTOFF64` (25), `R_X86_64_GOTPC32` (26)
-- [ ] `R_X86_64_SIZE32` (32), `R_X86_64_SIZE64` (33)
-- [ ] `R_X86_64_GOTPCRELX` (41), `R_X86_64_REX_GOTPCRELX` (42)
-- [ ] `R_X86_64_IRELATIVE` (37)
-- [ ] `R_X86_64_GOTPC32_TLSDESC` (34), `R_X86_64_TLSDESC_CALL` (35), `R_X86_64_TLSDESC` (36)
+- [x] `R_X86_64_COPY` (5), `R_X86_64_GLOB_DAT` (6), `R_X86_64_JUMP_SLOT` (7), `R_X86_64_RELATIVE` (8)
+- [x] `R_X86_64_16` (12), `R_X86_64_PC16` (13), `R_X86_64_8` (14), `R_X86_64_PC8` (15)
+- [x] `R_X86_64_DTPMOD64` (16), `R_X86_64_DTPOFF64` (17), `R_X86_64_TPOFF64` (18)
+- [x] `R_X86_64_TLSLD` (20), `R_X86_64_DTPOFF32` (21)
+- [x] `R_X86_64_PC64` (24), `R_X86_64_GOTOFF64` (25), `R_X86_64_GOTPC32` (26)
+- [x] `R_X86_64_SIZE32` (32), `R_X86_64_SIZE64` (33)
+- [x] `R_X86_64_GOTPCRELX` (41), `R_X86_64_REX_GOTPCRELX` (42)
+- [x] `R_X86_64_IRELATIVE` (37)
+- [x] `R_X86_64_GOTPC32_TLSDESC` (34), `R_X86_64_TLSDESC_CALL` (35), `R_X86_64_TLSDESC` (36)
 
 ### 1j. x86 GNU Property Constants
-- [ ] `GNU_PROPERTY_X86_ISA_1_NEEDED` (0xc0008002)
-- [ ] `GNU_PROPERTY_X86_ISA_1_USED` (0xc0010002)
-- [ ] ISA level bits: `GNU_PROPERTY_X86_ISA_1_BASELINE` (1), `_V2` (2), `_V3` (4), `_V4` (8)
-- [ ] `GNU_PROPERTY_X86_FEATURE_1_AND` (0xc0000002)
-- [ ] Feature bits: `GNU_PROPERTY_X86_FEATURE_1_IBT` (1), `_SHSTK` (2)
-- [ ] `GNU_PROPERTY_AARCH64_FEATURE_1_AND` (0xc0000000)
-- [ ] AArch64 feature bits: `_BTI` (1), `_PAC` (2)
+- [x] `GNU_PROPERTY_X86_ISA_1_NEEDED` (0xc0008002)
+- [x] `GNU_PROPERTY_X86_ISA_1_USED` (0xc0010002)
+- [x] ISA level bits: `GNU_PROPERTY_X86_ISA_1_BASELINE` (1), `_V2` (2), `_V3` (4), `_V4` (8)
+- [x] `GNU_PROPERTY_X86_FEATURE_1_AND` (0xc0000002)
+- [x] Feature bits: `GNU_PROPERTY_X86_FEATURE_1_IBT` (1), `_SHSTK` (2)
+- [x] `GNU_PROPERTY_AARCH64_FEATURE_1_AND` (0xc0000000)
+- [x] AArch64 feature bits: `_BTI` (1), `_PAC` (2)
 
 ---
 
