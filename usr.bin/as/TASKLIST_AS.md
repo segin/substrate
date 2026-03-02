@@ -305,16 +305,16 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] `VCVTA/M/N/P` (ARMv8 rounding modes)
 
 ### 6h. NEON (Advanced SIMD)
-- [ ] **Data types:** `.I8/.I16/.I32/.I64`, `.U8/.U16/.U32/.U64`, `.S8/.S16/.S32/.S64`, `.F16/.F32`, `.P8/.P16`
-- [ ] **Arithmetic:** `VADD`, `VSUB`, `VMUL`, `VMLA`, `VMLS`, `VABA`, `VABD`, `VPADD`, `VPMIN/MAX`, `VMAX/MIN`, `VHADD`, `VHSUB`, `VRHADD`, `VQADD`, `VQSUB`, `VMULL`, `VMLAL`, `VMLSL`, `VQDMULL`, `VQDMLAL`, `VQDMLSL`, `VQDMULH`, `VQRDMULH`, `VRSHL`, `VQRSHL`, `VSHL`, `VQSHL`, `VSHR`, `VRSHR`, `VSRA`, `VRSRA`, `VSLI`, `VSRI`, `VQSHLU`, `VSHLL`, `VSHRN`, `VQSHRN`, `VQRSHRN`, `VQSHRUN`, `VQRSHRUN`, `VMOVN`, `VQMOVN`, `VQMOVUN`, `VMOVL`
-- [ ] **Logical:** `VAND`, `VORR`, `VEOR`, `VBIC`, `VORN`, `VBIT`, `VBIF`, `VBSL`, `VMOV`, `VMVN`
-- [ ] **Compare:** `VCEQ`, `VCGE`, `VCGT`, `VCLE`, `VCLT`, `VACGE`, `VACGT`, `VTST`
-- [ ] **Table lookup:** `VTBL`, `VTBX`
-- [ ] **Transpose/Interleave:** `VTRN`, `VUZP`, `VZIP`, `VSWP`, `VEXT`, `VREV16/32/64`
-- [ ] **Load/Store:** `VLD1/2/3/4`, `VST1/2/3/4` (single/multi-element, all lane, one lane)
-- [ ] **Duplicate:** `VDUP` (scalar→vector, ARM reg→vector)
-- [ ] **Convert:** `VCVT` (integer↔float within NEON), `VRECPE`, `VRECPS`, `VRSQRTE`, `VRSQRTS`
-- [ ] **Accumulate:** `VPADAL`, `VPADDL`, `VCNT`, `VCLZ`, `VCLS`
+- [x] **Data types:** `.I8/.I16/.I32/.I64`, `.U8/.U16/.U32/.U64`, `.S8/.S16/.S32/.S64`, `.F16/.F32`, `.P8/.P16`
+- [x] **Arithmetic:** `VADD`, `VSUB`, `VMUL`, `VMLA`, `VMLS`, `VABA`, `VABD`, `VPADD`, `VPMIN/MAX`, `VMAX/MIN`, `VHADD`, `VHSUB`, `VRHADD`, `VQADD`, `VQSUB`, `VMULL`, `VMLAL`, `VMLSL`, `VQDMULL`, `VQDMLAL`, `VQDMLSL`, `VQDMULH`, `VQRDMULH`, `VRSHL`, `VQRSHL`, `VSHL`, `VQSHL`, `VSHR`, `VRSHR`, `VSRA`, `VRSRA`, `VSLI`, `VSRI`, `VQSHLU`, `VSHLL`, `VSHRN`, `VQSHRN`, `VQRSHRN`, `VQSHRUN`, `VQRSHRUN`, `VMOVN`, `VQMOVN`, `VQMOVUN`, `VMOVL`
+- [x] **Logical:** `VAND`, `VORR`, `VEOR`, `VBIC`, `VORN`, `VBIT`, `VBIF`, `VBSL`, `VMOV`, `VMVN`
+- [x] **Compare:** `VCEQ`, `VCGE`, `VCGT`, `VCLE`, `VCLT`, `VACGE`, `VACGT`, `VTST`
+- [x] **Table lookup:** `VTBL`, `VTBX`
+- [x] **Transpose/Interleave:** `VTRN`, `VUZP`, `VZIP`, `VSWP`, `VEXT`, `VREV16/32/64`
+- [x] **Load/Store:** `VLD1/2/3/4`, `VST1/2/3/4` (single/multi-element, all lane, one lane)
+- [x] **Duplicate:** `VDUP` (scalar→vector, ARM reg→vector)
+- [x] **Convert:** `VCVT` (integer↔float within NEON), `VRECPE`, `VRECPS`, `VRSQRTE`, `VRSQRTS`
+- [x] **Accumulate:** `VPADAL`, `VPADDL`, `VCNT`, `VCLZ`, `VCLS`
 
 ### 6i. ARMv7 Relocations
 - [ ] `R_ARM_ABS32`, `R_ARM_REL32`, `R_ARM_PC24`, `R_ARM_CALL`, `R_ARM_JUMP24`
