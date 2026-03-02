@@ -243,72 +243,72 @@ Beyond the currently-implemented core set, add the full x86 relocation roster:
 ## 2. ARMv7 Relocation Backend (`elf_reloc.c`)
 
 ### 2a. `arm_reloc_size()` — Size of Each Relocation Result
-- [ ] `R_ARM_NONE` → 0
-- [ ] `R_ARM_ABS32`, `R_ARM_REL32`, `R_ARM_GOTOFF32`, `R_ARM_GOTPC`, `R_ARM_GOT_BREL`, `R_ARM_PLT32`, `R_ARM_CALL`, `R_ARM_JUMP24`, `R_ARM_TARGET1`, `R_ARM_TARGET2`, `R_ARM_PREL31`, `R_ARM_MOVW_ABS_NC`, `R_ARM_MOVT_ABS`, `R_ARM_MOVW_PREL_NC`, `R_ARM_MOVT_PREL`, `R_ARM_ABS32_NOI`, `R_ARM_REL32_NOI` → 4
-- [ ] `R_ARM_PC24` → 4 (24-bit field in 32-bit instruction)
-- [ ] `R_ARM_ABS16` → 2
-- [ ] `R_ARM_ABS12` → 4 (12-bit field in 32-bit instruction)
-- [ ] `R_ARM_ABS8` → 1
-- [ ] `R_ARM_THM_CALL`, `R_ARM_THM_JUMP24` → 4 (two 16-bit Thumb instructions)
-- [ ] `R_ARM_THM_JUMP11` → 2, `R_ARM_THM_JUMP8` → 2
-- [ ] `R_ARM_THM_MOVW_ABS_NC`, `R_ARM_THM_MOVT_ABS`, `R_ARM_THM_MOVW_PREL_NC`, `R_ARM_THM_MOVT_PREL` → 4
-- [ ] `R_ARM_THM_JUMP19` → 4, `R_ARM_THM_JUMP6` → 2
-- [ ] All TLS relocations (`R_ARM_TLS_GD32` through `R_ARM_TLS_LE12`) → 4
-- [ ] `R_ARM_COPY`, `R_ARM_GLOB_DAT`, `R_ARM_JUMP_SLOT`, `R_ARM_RELATIVE` → 4
-- [ ] `R_ARM_IRELATIVE` → 4
-- [ ] `R_ARM_V4BX` → 4 (instruction rewrite)
-- [ ] All group relocations (`R_ARM_ALU_PC_G*`, `R_ARM_LDR_PC_G*`, `R_ARM_LDRS_PC_G*`, `R_ARM_LDC_PC_G*`, SB variants) → 4
+- [x] `R_ARM_NONE` → 0
+- [x] `R_ARM_ABS32`, `R_ARM_REL32`, `R_ARM_GOTOFF32`, `R_ARM_GOTPC`, `R_ARM_GOT_BREL`, `R_ARM_PLT32`, `R_ARM_CALL`, `R_ARM_JUMP24`, `R_ARM_TARGET1`, `R_ARM_TARGET2`, `R_ARM_PREL31`, `R_ARM_MOVW_ABS_NC`, `R_ARM_MOVT_ABS`, `R_ARM_MOVW_PREL_NC`, `R_ARM_MOVT_PREL`, `R_ARM_ABS32_NOI`, `R_ARM_REL32_NOI` → 4
+- [x] `R_ARM_PC24` → 4 (24-bit field in 32-bit instruction)
+- [x] `R_ARM_ABS16` → 2
+- [x] `R_ARM_ABS12` → 4 (12-bit field in 32-bit instruction)
+- [x] `R_ARM_ABS8` → 1
+- [x] `R_ARM_THM_CALL`, `R_ARM_THM_JUMP24` → 4 (two 16-bit Thumb instructions)
+- [x] `R_ARM_THM_JUMP11` → 2, `R_ARM_THM_JUMP8` → 2
+- [x] `R_ARM_THM_MOVW_ABS_NC`, `R_ARM_THM_MOVT_ABS`, `R_ARM_THM_MOVW_PREL_NC`, `R_ARM_THM_MOVT_PREL` → 4
+- [x] `R_ARM_THM_JUMP19` → 4, `R_ARM_THM_JUMP6` → 2
+- [x] All TLS relocations (`R_ARM_TLS_GD32` through `R_ARM_TLS_LE12`) → 4
+- [x] `R_ARM_COPY`, `R_ARM_GLOB_DAT`, `R_ARM_JUMP_SLOT`, `R_ARM_RELATIVE` → 4
+- [x] `R_ARM_IRELATIVE` → 4
+- [x] `R_ARM_V4BX` → 4 (instruction rewrite)
+- [x] All group relocations (`R_ARM_ALU_PC_G*`, `R_ARM_LDR_PC_G*`, `R_ARM_LDRS_PC_G*`, `R_ARM_LDC_PC_G*`, SB variants) → 4
 
 ### 2b. `arm_is_pc_relative()` — Identify PC-Relative Relocations
-- [ ] PC-relative: `R_ARM_PC24`, `R_ARM_REL32`, `R_ARM_PLT32`, `R_ARM_CALL`, `R_ARM_JUMP24`, `R_ARM_THM_CALL`, `R_ARM_THM_JUMP24`, `R_ARM_THM_JUMP19`, `R_ARM_THM_JUMP11`, `R_ARM_THM_JUMP8`, `R_ARM_PREL31`, `R_ARM_MOVW_PREL_NC`, `R_ARM_MOVT_PREL`, `R_ARM_THM_MOVW_PREL_NC`, `R_ARM_THM_MOVT_PREL`, `R_ARM_GOTPC`, `R_ARM_BASE_PREL`, `R_ARM_GOT_PREL`, `R_ARM_REL32_NOI`, all `ALU_PC_G*`/`LDR_PC_G*`/`LDRS_PC_G*`/`LDC_PC_G*`
-- [ ] Absolute: `R_ARM_ABS32`, `R_ARM_ABS16`, `R_ARM_ABS12`, `R_ARM_ABS8`, `R_ARM_MOVW_ABS_NC`, `R_ARM_MOVT_ABS`, `R_ARM_THM_MOVW_ABS_NC`, `R_ARM_THM_MOVT_ABS`, `R_ARM_ABS32_NOI`, `R_ARM_GOTOFF32`, `R_ARM_GOT_BREL`
+- [x] PC-relative: `R_ARM_PC24`, `R_ARM_REL32`, `R_ARM_PLT32`, `R_ARM_CALL`, `R_ARM_JUMP24`, `R_ARM_THM_CALL`, `R_ARM_THM_JUMP24`, `R_ARM_THM_JUMP19`, `R_ARM_THM_JUMP11`, `R_ARM_THM_JUMP8`, `R_ARM_PREL31`, `R_ARM_MOVW_PREL_NC`, `R_ARM_MOVT_PREL`, `R_ARM_THM_MOVW_PREL_NC`, `R_ARM_THM_MOVT_PREL`, `R_ARM_GOTPC`, `R_ARM_BASE_PREL`, `R_ARM_GOT_PREL`, `R_ARM_REL32_NOI`, all `ALU_PC_G*`/`LDR_PC_G*`/`LDRS_PC_G*`/`LDC_PC_G*`
+- [x] Absolute: `R_ARM_ABS32`, `R_ARM_ABS16`, `R_ARM_ABS12`, `R_ARM_ABS8`, `R_ARM_MOVW_ABS_NC`, `R_ARM_MOVT_ABS`, `R_ARM_THM_MOVW_ABS_NC`, `R_ARM_THM_MOVT_ABS`, `R_ARM_ABS32_NOI`, `R_ARM_GOTOFF32`, `R_ARM_GOT_BREL`
 
 ### 2c. `arm_is_tls()` — Identify TLS Relocations
-- [ ] TLS: `R_ARM_TLS_DTPMOD32`, `R_ARM_TLS_DTPOFF32`, `R_ARM_TLS_TPOFF32`, `R_ARM_TLS_GD32`, `R_ARM_TLS_LDM32`, `R_ARM_TLS_LDO32`, `R_ARM_TLS_IE32`, `R_ARM_TLS_LE32`, `R_ARM_TLS_LDO12`, `R_ARM_TLS_LE12`, `R_ARM_TLS_IE12GP`, `R_ARM_TLS_DESC`, `R_ARM_TLS_GOTDESC`, `R_ARM_TLS_CALL`, `R_ARM_TLS_DESCSEQ`, `R_ARM_THM_TLS_CALL`
+- [x] TLS: `R_ARM_TLS_DTPMOD32`, `R_ARM_TLS_DTPOFF32`, `R_ARM_TLS_TPOFF32`, `R_ARM_TLS_GD32`, `R_ARM_TLS_LDM32`, `R_ARM_TLS_LDO32`, `R_ARM_TLS_IE32`, `R_ARM_TLS_LE32`, `R_ARM_TLS_LDO12`, `R_ARM_TLS_LE12`, `R_ARM_TLS_IE12GP`, `R_ARM_TLS_DESC`, `R_ARM_TLS_GOTDESC`, `R_ARM_TLS_CALL`, `R_ARM_TLS_DESCSEQ`, `R_ARM_THM_TLS_CALL`
 
 ### 2d. `arm_apply()` — Relocation Application
-- [ ] `R_ARM_NONE` → no-op
-- [ ] `R_ARM_ABS32` → S + A
-- [ ] `R_ARM_REL32` → S + A − P (signed 32-bit)
-- [ ] `R_ARM_PC24` → extract bits[23:0], compute ((S + A) | T) − P, check ±32MB range, reinsert with instruction mask
-- [ ] `R_ARM_CALL` → ((S + A) | T) − P, range ±32MB, encode in bits[23:0]
-- [ ] `R_ARM_JUMP24` → ((S + A) | T) − P, range ±32MB, encode in bits[23:0]
-- [ ] `R_ARM_PLT32` → ((S + A) | T) − P
-- [ ] `R_ARM_GOTOFF32` → ((S + A) | T) − GOT_ORG
-- [ ] `R_ARM_GOTPC` / `R_ARM_BASE_PREL` → GOT_ORG + A − P
-- [ ] `R_ARM_GOT_BREL` → GOT(S) + A − GOT_ORG
-- [ ] `R_ARM_PREL31` → (S + A − P) masked to 31 bits, preserve bit[31]
-- [ ] `R_ARM_MOVW_ABS_NC` → extract imm16 from instruction (bits[19:16]+bits[11:0]), compute (S + A) & 0xFFFF, reinsert; no overflow check
-- [ ] `R_ARM_MOVT_ABS` → ((S + A) >> 16) & 0xFFFF into imm16 field
-- [ ] `R_ARM_MOVW_PREL_NC` → ((S + A) | T) − P, low 16 bits
-- [ ] `R_ARM_MOVT_PREL` → (((S + A) | T) − P) >> 16, high 16 bits
-- [ ] `R_ARM_THM_CALL` → decode Thumb BL/BLX pair, compute ((S + A) | T) − P, range ±16MB (BL) / ±16MB even (BLX), re-encode J1/J2/imm10/imm11
-- [ ] `R_ARM_THM_JUMP24` → like THM_CALL but unconditional
-- [ ] `R_ARM_THM_JUMP19` → Thumb B.cond, 20-bit signed offset
-- [ ] `R_ARM_THM_JUMP11` → Thumb B, 11-bit unsigned offset
-- [ ] `R_ARM_THM_JUMP8` → Thumb B.cond, 8-bit signed offset
-- [ ] `R_ARM_THM_MOVW_ABS_NC` → extract Thumb MOVW imm16 (imm4:i:imm3:imm8), compute, reinsert
-- [ ] `R_ARM_THM_MOVT_ABS` → extract Thumb MOVT imm16, compute, reinsert
-- [ ] `R_ARM_THM_MOVW_PREL_NC` → PC-relative low 16 bits into Thumb MOVW
-- [ ] `R_ARM_THM_MOVT_PREL` → PC-relative high 16 bits into Thumb MOVT
-- [ ] `R_ARM_V4BX` → rewrite `BX Rm` to `MOV PC, Rm` for ARMv4 compat
-- [ ] `R_ARM_TARGET1` → platform-defined, typically `R_ARM_ABS32` or `R_ARM_REL32`
-- [ ] `R_ARM_TARGET2` → platform-defined, typically `R_ARM_GOT_PREL`
-- [ ] `R_ARM_ABS16` → S + A, check ±32K range or 0–64K unsigned
-- [ ] `R_ARM_ABS12` → (S + A) encoded in LDR immediate field, 12-bit unsigned
-- [ ] `R_ARM_ABS8` → S + A, check 0–255
-- [ ] `R_ARM_SBREL32` → S + A − B(S) (static base relative)
-- [ ] Group relocations (`ALU_PC/SB`, `LDR_PC/SB`, `LDRS_PC/SB`, `LDC_PC/SB` with G0/G1/G2): extract instruction-format-specific field width, apply group masking per ARM EABI §4.6.1.4
-- [ ] All TLS relocations: S + A (raw value passthrough for linker to fixup GOT/TP offsets)
-- [ ] Dynamic: `R_ARM_COPY`, `R_ARM_GLOB_DAT`, `R_ARM_JUMP_SLOT`, `R_ARM_RELATIVE`, `R_ARM_IRELATIVE` — produce raw S + A or B(S) + A
+- [x] `R_ARM_NONE` → no-op
+- [x] `R_ARM_ABS32` → S + A
+- [x] `R_ARM_REL32` → S + A − P (signed 32-bit)
+- [x] `R_ARM_PC24` → extract bits[23:0], compute ((S + A) | T) − P, check ±32MB range, reinsert with instruction mask
+- [x] `R_ARM_CALL` → ((S + A) | T) − P, range ±32MB, encode in bits[23:0]
+- [x] `R_ARM_JUMP24` → ((S + A) | T) − P, range ±32MB, encode in bits[23:0]
+- [x] `R_ARM_PLT32` → ((S + A) | T) − P
+- [x] `R_ARM_GOTOFF32` → ((S + A) | T) − GOT_ORG
+- [x] `R_ARM_GOTPC` / `R_ARM_BASE_PREL` → GOT_ORG + A − P
+- [x] `R_ARM_GOT_BREL` → GOT(S) + A − GOT_ORG
+- [x] `R_ARM_PREL31` → (S + A − P) masked to 31 bits, preserve bit[31]
+- [x] `R_ARM_MOVW_ABS_NC` → extract imm16 from instruction (bits[19:16]+bits[11:0]), compute (S + A) & 0xFFFF, reinsert; no overflow check
+- [x] `R_ARM_MOVT_ABS` → ((S + A) >> 16) & 0xFFFF into imm16 field
+- [x] `R_ARM_MOVW_PREL_NC` → ((S + A) | T) − P, low 16 bits
+- [x] `R_ARM_MOVT_PREL` → (((S + A) | T) − P) >> 16, high 16 bits
+- [x] `R_ARM_THM_CALL` → decode Thumb BL/BLX pair, compute ((S + A) | T) − P, range ±16MB (BL) / ±16MB even (BLX), re-encode J1/J2/imm10/imm11
+- [x] `R_ARM_THM_JUMP24` → like THM_CALL but unconditional
+- [x] `R_ARM_THM_JUMP19` → Thumb B.cond, 20-bit signed offset
+- [x] `R_ARM_THM_JUMP11` → Thumb B, 11-bit unsigned offset
+- [x] `R_ARM_THM_JUMP8` → Thumb B.cond, 8-bit signed offset
+- [x] `R_ARM_THM_MOVW_ABS_NC` → extract Thumb MOVW imm16 (imm4:i:imm3:imm8), compute, reinsert
+- [x] `R_ARM_THM_MOVT_ABS` → extract Thumb MOVT imm16, compute, reinsert
+- [x] `R_ARM_THM_MOVW_PREL_NC` → PC-relative low 16 bits into Thumb MOVW
+- [x] `R_ARM_THM_MOVT_PREL` → PC-relative high 16 bits into Thumb MOVT
+- [x] `R_ARM_V4BX` → rewrite `BX Rm` to `MOV PC, Rm` for ARMv4 compat
+- [x] `R_ARM_TARGET1` → platform-defined, typically `R_ARM_ABS32` or `R_ARM_REL32`
+- [x] `R_ARM_TARGET2` → platform-defined, typically `R_ARM_GOT_PREL`
+- [x] `R_ARM_ABS16` → S + A, check ±32K range or 0–64K unsigned
+- [x] `R_ARM_ABS12` → (S + A) encoded in LDR immediate field, 12-bit unsigned
+- [x] `R_ARM_ABS8` → S + A, check 0–255
+- [x] `R_ARM_SBREL32` → S + A − B(S) (static base relative)
+- [x] Group relocations (`ALU_PC/SB`, `LDR_PC/SB`, `LDRS_PC/SB`, `LDC_PC/SB` with G0/G1/G2): extract instruction-format-specific field width, apply group masking per ARM EABI §4.6.1.4
+- [x] All TLS relocations: S + A (raw value passthrough for linker to fixup GOT/TP offsets)
+- [x] Dynamic: `R_ARM_COPY`, `R_ARM_GLOB_DAT`, `R_ARM_JUMP_SLOT`, `R_ARM_RELATIVE`, `R_ARM_IRELATIVE` — produce raw S + A or B(S) + A
 
 ### 2e. ARM Thumb Interwork Bit (T)
-- [ ] Detect if target symbol is Thumb (`STT_FUNC` with `st_value` bit 0 set or `$t` mapping symbol).
-- [ ] Set T=1 for Thumb targets in branch relocations.
+- [x] Detect if target symbol is Thumb (`STT_FUNC` with `st_value` bit 0 set or `$t` mapping symbol).
+- [x] Set T=1 for Thumb targets in branch relocations.
 
 ### 2f. ARM Relocation Backend Registration
-- [ ] Register `arm_apply`, `arm_reloc_size`, `arm_is_pc_relative` under `EM_ARM` in `register_builtin_backends_locked()`.
-- [ ] Add `arm_is_tls` to `elf_reloc_is_tls_for_machine()`.
+- [x] Register `arm_apply`, `arm_reloc_size`, `arm_is_pc_relative` under `EM_ARM` in `register_builtin_backends_locked()`.
+- [x] Add `arm_is_tls` to `elf_reloc_is_tls_for_machine()`.
 
 ---
 
