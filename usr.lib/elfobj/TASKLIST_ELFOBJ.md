@@ -997,9 +997,9 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Accept `ELFDATA2LSB` only (VAX is little-endian).
 
 ### 21e. VAX ELF Read/Write/Create
-- [ ] Recognize `EM_VAX` as valid machine type.
-- [ ] Parse/write RELA relocations (VAX uses RELA).
-- [ ] `elf_init_vax()`: ELF32/EM_VAX/ELFDATA2LSB.
+- [x] Recognize `EM_VAX` as valid machine type.
+- [x] Parse/write RELA relocations (VAX uses RELA).
+- [x] `elf_init_vax()`: ELF32/EM_VAX/ELFDATA2LSB.
 
 ### 21f. VAX DWARF
 - [ ] VAX DWARF register mapping: R0–R15 → 0–15, AP → 12, FP → 13, SP → 14, PC → 15.

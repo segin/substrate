@@ -429,6 +429,9 @@ static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t m
         if (obj->machine == EM_68K && sec->type != SHT_RELA) {
             return ELF_ERR_FORMAT;
         }
+        if (obj->machine == EM_VAX && sec->type != SHT_RELA) {
+            return ELF_ERR_FORMAT;
+        }
         if (obj->machine == EM_MIPS) {
             if (obj->cls == ELFOBJ_CLASS_32 && sec->type != SHT_REL) {
                 return ELF_ERR_FORMAT;
@@ -611,7 +614,8 @@ static elf_err_t parse_object(elfobj_t *obj) {
     if (obj->machine != EM_386 && obj->machine != EM_X86_64 &&
         obj->machine != EM_ARM && obj->machine != EM_AARCH64 &&
         obj->machine != EM_MIPS && obj->machine != EM_RISCV &&
-        obj->machine != EM_LOONGARCH && obj->machine != EM_68K) {
+        obj->machine != EM_LOONGARCH && obj->machine != EM_68K &&
+        obj->machine != EM_VAX) {
         return ELF_ERR_UNSUPPORTED;
     }
 
