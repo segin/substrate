@@ -773,8 +773,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Endian-correct output for big-endian MIPS.
 
 ### 17g. MIPS DWARF
-- [ ] MIPS DWARF register mapping: $zero–$ra → 0–31, $f0–$f31 → 32–63, HI → 64, LO → 65.
-- [ ] MIPS CFA: frame pointer $fp ($30) or $sp ($29).
+- [x] MIPS DWARF register mapping: $zero–$ra → 0–31, $f0–$f31 → 32–63, HI → 64, LO → 65.
+- [x] MIPS CFA: frame pointer $fp ($30) or $sp ($29).
 
 ### 17h. MIPS Testing
 - [ ] Unit tests for all MIPS relocation types.
