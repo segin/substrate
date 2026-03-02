@@ -403,28 +403,28 @@ Goal: replace the current GCC/GAS wrapper with a native multi-architecture assem
 - [x] **CRC32 (optional):** `CRC32B/H/W/X/CB/CH/CW/CX`
 
 ### 7h. ARMv8.1 Extensions
-- [ ] **LSE (Large System Extensions) — Atomics:**
-    - [ ] `LDADD{A,L,AL}{B,H,}` — atomic add
-    - [ ] `LDCLR{A,L,AL}{B,H,}` — atomic bit clear
-    - [ ] `LDEOR{A,L,AL}{B,H,}` — atomic exclusive OR
-    - [ ] `LDSET{A,L,AL}{B,H,}` — atomic bit set
-    - [ ] `LDSMAX/LDSMIN/LDUMAX/LDUMIN{A,L,AL}{B,H,}` — atomic signed/unsigned max/min
-    - [ ] `SWP{A,L,AL}{B,H,}` — atomic swap
-    - [ ] `CAS{A,L,AL}{B,H,}` — compare and swap (single)
-    - [ ] `CASP{A,L,AL}` — compare and swap pair
-    - [ ] `STADD{L}{B,H,}`, `STCLR{L}`, `STEOR{L}`, `STSET{L}`, `STSMAX{L}`, `STSMIN{L}`, `STUMAX{L}`, `STUMIN{L}` — store-only atomics (aliases with XZR destination)
-- [ ] **RDMA (Rounding Double Multiply Accumulate):**
-    - [ ] `SQRDMLAH` (vector/element) — signed saturating rounding doubling multiply accumulate high
-    - [ ] `SQRDMLSH` (vector/element) — signed saturating rounding doubling multiply subtract high
-- [ ] **LOR (Limited Ordering Regions):**
-    - [ ] `LDLAR{B,H}` — load LOAcquire
-    - [ ] `STLLR{B,H}` — store LORelease
-- [ ] **VHE (Virtualization Host Extensions):**
-    - [ ] New system register access patterns (EL2 registers)
-- [ ] **PAN (Privileged Access Never):**
-    - [ ] `LDTR/STTR` unprivileged load/store (existing, but PAN makes them significant)
-- [ ] **HPD/HPDS (Hierarchical Permission Disables):**
-    - [ ] System register configuration (TCR_EL1.HPD bits)
+- [x] **LSE (Large System Extensions) — Atomics:**
+    - [x] `LDADD{A,L,AL}{B,H,}` — atomic add
+    - [x] `LDCLR{A,L,AL}{B,H,}` — atomic bit clear
+    - [x] `LDEOR{A,L,AL}{B,H,}` — atomic exclusive OR
+    - [x] `LDSET{A,L,AL}{B,H,}` — atomic bit set
+    - [x] `LDSMAX/LDSMIN/LDUMAX/LDUMIN{A,L,AL}{B,H,}` — atomic signed/unsigned max/min
+    - [x] `SWP{A,L,AL}{B,H,}` — atomic swap
+    - [x] `CAS{A,L,AL}{B,H,}` — compare and swap (single)
+    - [x] `CASP{A,L,AL}` — compare and swap pair
+    - [x] `STADD{L}{B,H,}`, `STCLR{L}`, `STEOR{L}`, `STSET{L}`, `STSMAX{L}`, `STSMIN{L}`, `STUMAX{L}`, `STUMIN{L}` — store-only atomics (aliases with XZR destination)
+- [x] **RDMA (Rounding Double Multiply Accumulate):**
+    - [x] `SQRDMLAH` (vector/element) — signed saturating rounding doubling multiply accumulate high
+    - [x] `SQRDMLSH` (vector/element) — signed saturating rounding doubling multiply subtract high
+- [x] **LOR (Limited Ordering Regions):**
+    - [x] `LDLAR{B,H}` — load LOAcquire
+    - [x] `STLLR{B,H}` — store LORelease
+- [x] **VHE (Virtualization Host Extensions):**
+    - [x] New system register access patterns (EL2 registers)
+- [x] **PAN (Privileged Access Never):**
+    - [x] `LDTR/STTR` unprivileged load/store (existing, but PAN makes them significant)
+- [x] **HPD/HPDS (Hierarchical Permission Disables):**
+    - [x] System register configuration (TCR_EL1.HPD bits)
 
 ### 7i. AArch64 Relocations
 - [ ] `R_AARCH64_ABS64`, `R_AARCH64_ABS32`, `R_AARCH64_ABS16`
