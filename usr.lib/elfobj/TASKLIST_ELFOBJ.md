@@ -572,52 +572,52 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 ## 12. Expanded x86 Relocation Backend
 
 ### 12a. i386 Backend Expansion
-- [ ] `R_386_COPY` → no value (dynamic linker copies data)
-- [ ] `R_386_GLOB_DAT` → S (GOT slot fill)
-- [ ] `R_386_JMP_SLOT` → S (PLT GOT slot fill)
-- [ ] `R_386_RELATIVE` → B(S) + A (base-relative)
-- [ ] `R_386_16` → S + A, check unsigned 16-bit
-- [ ] `R_386_PC16` → S + A − P, check signed 16-bit
-- [ ] `R_386_8` → S + A, check unsigned 8-bit
-- [ ] `R_386_PC8` → S + A − P, check signed 8-bit
-- [ ] `R_386_SIZE32` → Z + A (symbol size)
-- [ ] `R_386_GOT32X` → GOT(S) + A − GOT_ORG (relaxable GOT reference)
-- [ ] `R_386_IRELATIVE` → indirect function resolution
-- [ ] `R_386_TLS_DTPMOD32` → module ID for TLS
-- [ ] `R_386_TLS_DTPOFF32` → offset within TLS block
-- [ ] `R_386_TLS_LE_32` → negative TP-relative offset
-- [ ] `R_386_TLS_TPOFF32` → negative TP-relative offset (variant)
-- [ ] Add `i386_is_tls()` for complete TLS classification: all `R_386_TLS_*` types
+- [x] `R_386_COPY` → no value (dynamic linker copies data)
+- [x] `R_386_GLOB_DAT` → S (GOT slot fill)
+- [x] `R_386_JMP_SLOT` → S (PLT GOT slot fill)
+- [x] `R_386_RELATIVE` → B(S) + A (base-relative)
+- [x] `R_386_16` → S + A, check unsigned 16-bit
+- [x] `R_386_PC16` → S + A − P, check signed 16-bit
+- [x] `R_386_8` → S + A, check unsigned 8-bit
+- [x] `R_386_PC8` → S + A − P, check signed 8-bit
+- [x] `R_386_SIZE32` → Z + A (symbol size)
+- [x] `R_386_GOT32X` → GOT(S) + A − GOT_ORG (relaxable GOT reference)
+- [x] `R_386_IRELATIVE` → indirect function resolution
+- [x] `R_386_TLS_DTPMOD32` → module ID for TLS
+- [x] `R_386_TLS_DTPOFF32` → offset within TLS block
+- [x] `R_386_TLS_LE_32` → negative TP-relative offset
+- [x] `R_386_TLS_TPOFF32` → negative TP-relative offset (variant)
+- [x] Add `i386_is_tls()` for complete TLS classification: all `R_386_TLS_*` types
 
 ### 12b. x86-64 Backend Expansion
-- [ ] `R_X86_64_COPY` → no value
-- [ ] `R_X86_64_GLOB_DAT` → S
-- [ ] `R_X86_64_JUMP_SLOT` → S
-- [ ] `R_X86_64_RELATIVE` → B + A
-- [ ] `R_X86_64_16` → S + A, check unsigned 16-bit
-- [ ] `R_X86_64_PC16` → S + A − P, check signed 16-bit
-- [ ] `R_X86_64_8` → S + A, check unsigned 8-bit
-- [ ] `R_X86_64_PC8` → S + A − P, check signed 8-bit
-- [ ] `R_X86_64_PC64` → S + A − P (64-bit PC-relative)
-- [ ] `R_X86_64_GOTOFF64` → S + A − GOT_ORG
-- [ ] `R_X86_64_GOTPC32` → GOT_ORG + A − P
-- [ ] `R_X86_64_SIZE32` → Z + A (check 32-bit), `R_X86_64_SIZE64` → Z + A
-- [ ] `R_X86_64_GOTPCRELX` → GOT(S) + A − P (relaxable to LEA for non-preemptible)
-- [ ] `R_X86_64_REX_GOTPCRELX` → same with REX prefix
-- [ ] `R_X86_64_IRELATIVE` → indirect function resolution
-- [ ] `R_X86_64_DTPMOD64`, `R_X86_64_DTPOFF64`, `R_X86_64_TPOFF64` → TLS module/offset dynamic
-- [ ] `R_X86_64_TLSLD` → Local Dynamic TLS
-- [ ] `R_X86_64_DTPOFF32` → 32-bit DTP offset
-- [ ] `R_X86_64_GOTPC32_TLSDESC` → TLSDESC GOT-relative
-- [ ] `R_X86_64_TLSDESC_CALL` → TLSDESC call relocation
-- [ ] `R_X86_64_TLSDESC` → TLSDESC pair
-- [ ] Add `x64_is_tls()` for complete TLS classification: all `R_X86_64_TLS*`, `GOTTPOFF`, `TPOFF32`, `DTPMOD64`, `DTPOFF64`, `TPOFF64`, `DTPOFF32`, `GOTPC32_TLSDESC`, `TLSDESC_CALL`, `TLSDESC`
+- [x] `R_X86_64_COPY` → no value
+- [x] `R_X86_64_GLOB_DAT` → S
+- [x] `R_X86_64_JUMP_SLOT` → S
+- [x] `R_X86_64_RELATIVE` → B + A
+- [x] `R_X86_64_16` → S + A, check unsigned 16-bit
+- [x] `R_X86_64_PC16` → S + A − P, check signed 16-bit
+- [x] `R_X86_64_8` → S + A, check unsigned 8-bit
+- [x] `R_X86_64_PC8` → S + A − P, check signed 8-bit
+- [x] `R_X86_64_PC64` → S + A − P (64-bit PC-relative)
+- [x] `R_X86_64_GOTOFF64` → S + A − GOT_ORG
+- [x] `R_X86_64_GOTPC32` → GOT_ORG + A − P
+- [x] `R_X86_64_SIZE32` → Z + A (check 32-bit), `R_X86_64_SIZE64` → Z + A
+- [x] `R_X86_64_GOTPCRELX` → GOT(S) + A − P (relaxable to LEA for non-preemptible)
+- [x] `R_X86_64_REX_GOTPCRELX` → same with REX prefix
+- [x] `R_X86_64_IRELATIVE` → indirect function resolution
+- [x] `R_X86_64_DTPMOD64`, `R_X86_64_DTPOFF64`, `R_X86_64_TPOFF64` → TLS module/offset dynamic
+- [x] `R_X86_64_TLSLD` → Local Dynamic TLS
+- [x] `R_X86_64_DTPOFF32` → 32-bit DTP offset
+- [x] `R_X86_64_GOTPC32_TLSDESC` → TLSDESC GOT-relative
+- [x] `R_X86_64_TLSDESC_CALL` → TLSDESC call relocation
+- [x] `R_X86_64_TLSDESC` → TLSDESC pair
+- [x] Add `x64_is_tls()` for complete TLS classification: all `R_X86_64_TLS*`, `GOTTPOFF`, `TPOFF32`, `DTPMOD64`, `DTPOFF64`, `TPOFF64`, `DTPOFF32`, `GOTPC32_TLSDESC`, `TLSDESC_CALL`, `TLSDESC`
 
 ### 12c. x86 Relocation Name Strings
-- [ ] `elf_reloc_name_for_machine(machine, type)` → human-readable string (e.g., `"R_X86_64_PC32"`)
-- [ ] Complete name tables for all i386 and x86-64 relocation types.
-- [ ] Complete name tables for all ARM and AArch64 relocation types.
-- [ ] Complete name tables for all MIPS, RISC-V, LoongArch, M68K, VAX, Alpha, PPC, PPC64, and IA-64 relocation types.
+- [x] `elf_reloc_name_for_machine(machine, type)` → human-readable string (e.g., `"R_X86_64_PC32"`)
+- [x] Complete name tables for all i386 and x86-64 relocation types.
+- [x] Complete name tables for all ARM and AArch64 relocation types.
+- [x] Complete name tables for all MIPS, RISC-V, LoongArch, M68K, VAX, Alpha, PPC, PPC64, and IA-64 relocation types.
 
 ---
 
