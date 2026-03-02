@@ -915,6 +915,20 @@ typedef struct {
     size_t data_size;
 } elf_gnu_property_info_t;
 
+typedef struct {
+    uint16_t version;
+    uint8_t isa_level;
+    uint8_t isa_rev;
+    uint8_t gpr_size;
+    uint8_t cpr1_size;
+    uint8_t cpr2_size;
+    uint8_t fp_abi;
+    uint32_t isa_ext;
+    uint32_t ases;
+    uint32_t flags1;
+    uint32_t flags2;
+} elf_mips_abiflags_t;
+
 size_t elf_note_count(const elfobj_t *obj);
 int elf_note_at(const elfobj_t *obj, size_t index, elf_note_info_t *out);
 size_t elf_gnu_property_count(const elfobj_t *obj);
@@ -925,6 +939,7 @@ uint32_t elf_aarch64_feature_flags(const elfobj_t *obj);
 elf_err_t elf_add_gnu_property_x86(elfobj_t *obj, uint32_t isa_needed, uint32_t isa_used,
                                    uint32_t feature_1);
 int elf_build_id(const elfobj_t *obj, const uint8_t **out_data, size_t *out_size);
+int elf_mips_abiflags(const elfobj_t *obj, elf_mips_abiflags_t *out);
 
 const char *elf_reloc_name_for_machine(uint16_t machine, uint32_t type);
 

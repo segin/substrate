@@ -83,6 +83,17 @@ static elf_err_t merge_arch_metadata(elfobj_t *out, const elfobj_t *in) {
             return ELF_ERR_OOM;
         }
     }
+    if (out->machine == EM_MIPS) {
+        elf_mips_abiflags_t a;
+        elf_mips_abiflags_t b;
+        int ha = elf_mips_abiflags(out, &a);
+        int hb = elf_mips_abiflags(in, &b);
+        if (ha && hb && (a.isa_level != b.isa_level || a.fp_abi != b.fp_abi ||
+                         a.gpr_size != b.gpr_size || a.cpr1_size != b.cpr1_size)) {
+            elf__set_err(out, ELF_ERR_FORMAT, "MIPS ABIFLAGS conflict across link inputs");
+            return ELF_ERR_FORMAT;
+        }
+    }
     return ELF_OK;
 }
 

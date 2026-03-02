@@ -291,6 +291,43 @@ int elf_build_id(const elfobj_t *obj, const uint8_t **out_data, size_t *out_size
     return 0;
 }
 
+int elf_mips_abiflags(const elfobj_t *obj, elf_mips_abiflags_t *out) {
+    size_t i;
+    const elf_section_t *sec = NULL;
+    const uint8_t *p;
+    if (obj == NULL || out == NULL) {
+        return 0;
+    }
+    for (i = 0; i < obj->section_count; ++i) {
+        const elf_section_t *s = obj->sections[i];
+        if (s == NULL) {
+            continue;
+        }
+        if (s->type == SHT_MIPS_ABIFLAGS ||
+            (s->name != NULL && strcmp(s->name, ".MIPS.abiflags") == 0)) {
+            sec = s;
+            break;
+        }
+    }
+    if (sec == NULL || sec->data == NULL || sec->data_size < 24) {
+        return 0;
+    }
+    p = sec->data;
+    memset(out, 0, sizeof(*out));
+    out->version = elf__rd16(p + 0, obj->endian);
+    out->isa_level = p[2];
+    out->isa_rev = p[3];
+    out->gpr_size = p[4];
+    out->cpr1_size = p[5];
+    out->cpr2_size = p[6];
+    out->fp_abi = p[7];
+    out->isa_ext = elf__rd32(p + 8, obj->endian);
+    out->ases = elf__rd32(p + 12, obj->endian);
+    out->flags1 = elf__rd32(p + 16, obj->endian);
+    out->flags2 = elf__rd32(p + 20, obj->endian);
+    return 1;
+}
+
 static size_t parse_arm_attrs(const elfobj_t *obj, arm_attr_item_t *items, size_t max_items) {
     const elf_section_t *s;
     const uint8_t *p;

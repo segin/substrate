@@ -484,6 +484,33 @@ static int validate_machine_basics(validate_ctx_t *ctx, const elfobj_t *obj) {
                                    "EM_AARCH64 has unknown e_flags bits");
             }
             break;
+        case EM_MIPS: {
+            elf_mips_abiflags_t af;
+            uint32_t arch = obj->flags & 0xf0000000u;
+            if (obj->cls != ELFOBJ_CLASS_32 && obj->cls != ELFOBJ_CLASS_64) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_MIPS requires ELFCLASS32/ELFCLASS64");
+            }
+            if (obj->endian != ELFOBJ_ENDIAN_LE && obj->endian != ELFOBJ_ENDIAN_BE) {
+                return report_diag(ctx, ELF_DIAG_ERROR, ELF_ERR_FORMAT, UINT64_MAX,
+                                   "EM_MIPS requires valid endian encoding");
+            }
+            if (elf_mips_abiflags(obj, &af)) {
+                if (af.isa_level == 0) {
+                    if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                    "MIPS ABIFLAGS missing ISA level")) {
+                        return 1;
+                    }
+                }
+                if (arch == EF_MIPS_ARCH_64R6 && af.isa_level < 64) {
+                    if (report_diag(ctx, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
+                                    "MIPS ABIFLAGS ISA level conflicts with e_flags")) {
+                        return 1;
+                    }
+                }
+            }
+            break;
+        }
         default:
             break;
     }

@@ -752,10 +752,10 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] Relocation name strings for all MIPS types.
 
 ### 17d. MIPS ABIFLAGS Parser
-- [ ] Parse `.MIPS.abiflags` structure: `isa_level`, `isa_rev`, `gpr_size`, `cpr1_size`, `cpr2_size`, `fp_abi`, `isa_ext`, `ases`, `flags1`, `flags2`.
-- [ ] API: `elf_mips_abiflags()` returning parsed structure.
-- [ ] Validate ABIFLAGS consistency with `e_flags` ISA level.
-- [ ] ABIFLAGS merge rules across link inputs.
+- [x] Parse `.MIPS.abiflags` structure: `isa_level`, `isa_rev`, `gpr_size`, `cpr1_size`, `cpr2_size`, `fp_abi`, `isa_ext`, `ases`, `flags1`, `flags2`.
+- [x] API: `elf_mips_abiflags()` returning parsed structure.
+- [x] Validate ABIFLAGS consistency with `e_flags` ISA level.
+- [x] ABIFLAGS merge rules across link inputs.
 
 ### 17e. MIPS Validation
 - [ ] Accept `EM_MIPS` with `ELFCLASS32` (O32/N32) or `ELFCLASS64` (N64).
