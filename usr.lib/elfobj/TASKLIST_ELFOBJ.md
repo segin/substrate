@@ -315,68 +315,68 @@ Beyond the currently-implemented core set, add the full x86 relocation roster:
 ## 3. AArch64 Relocation Backend (`elf_reloc.c`)
 
 ### 3a. `aarch64_reloc_size()`
-- [ ] `R_AARCH64_NONE` → 0
-- [ ] `R_AARCH64_ABS64`, `R_AARCH64_PREL64` → 8
-- [ ] `R_AARCH64_ABS32`, `R_AARCH64_PREL32` → 4
-- [ ] `R_AARCH64_ABS16`, `R_AARCH64_PREL16` → 2
-- [ ] All instruction-embedded relocations (`ADR_PREL_*`, `ADD_ABS_*`, `LDST*`, `MOVW_*`, `JUMP26`, `CALL26`, `CONDBR19`, `TSTBR14`) → 4 (instruction width)
-- [ ] All GOT/TLS instruction-embedded → 4
-- [ ] Dynamic (`COPY`, `GLOB_DAT`, `JUMP_SLOT`, `RELATIVE`, `IRELATIVE`, `TLS_DTPMOD64`, `TLS_DTPREL64`, `TLS_TPREL64`, `TLSDESC`) → 8
+- [x] `R_AARCH64_NONE` → 0
+- [x] `R_AARCH64_ABS64`, `R_AARCH64_PREL64` → 8
+- [x] `R_AARCH64_ABS32`, `R_AARCH64_PREL32` → 4
+- [x] `R_AARCH64_ABS16`, `R_AARCH64_PREL16` → 2
+- [x] All instruction-embedded relocations (`ADR_PREL_*`, `ADD_ABS_*`, `LDST*`, `MOVW_*`, `JUMP26`, `CALL26`, `CONDBR19`, `TSTBR14`) → 4 (instruction width)
+- [x] All GOT/TLS instruction-embedded → 4
+- [x] Dynamic (`COPY`, `GLOB_DAT`, `JUMP_SLOT`, `RELATIVE`, `IRELATIVE`, `TLS_DTPMOD64`, `TLS_DTPREL64`, `TLS_TPREL64`, `TLSDESC`) → 8
 
 ### 3b. `aarch64_is_pc_relative()`
-- [ ] PC-relative: `R_AARCH64_PREL64`, `R_AARCH64_PREL32`, `R_AARCH64_PREL16`, `R_AARCH64_ADR_PREL_LO21`, `R_AARCH64_ADR_PREL_PG_HI21{_NC}`, `R_AARCH64_JUMP26`, `R_AARCH64_CALL26`, `R_AARCH64_CONDBR19`, `R_AARCH64_TSTBR14`, `R_AARCH64_LD_PREL_LO19`, `R_AARCH64_GOT_LD_PREL19`, `R_AARCH64_ADR_GOT_PAGE`, `R_AARCH64_MOVW_PREL_G*`, all `TLSGD_ADR_PREL21`, `TLSLD_ADR_PREL21`, `TLSIE_LD_GOTTPREL_PREL19`, `TLSDESC_LD_PREL19`, `TLSDESC_ADR_PREL21`
-- [ ] Absolute: `R_AARCH64_ABS64/32/16`, `R_AARCH64_ADD_ABS_LO12_NC`, `R_AARCH64_LDST*_ABS_LO12_NC`, `R_AARCH64_MOVW_UABS_G*`, `R_AARCH64_MOVW_SABS_G*`
+- [x] PC-relative: `R_AARCH64_PREL64`, `R_AARCH64_PREL32`, `R_AARCH64_PREL16`, `R_AARCH64_ADR_PREL_LO21`, `R_AARCH64_ADR_PREL_PG_HI21{_NC}`, `R_AARCH64_JUMP26`, `R_AARCH64_CALL26`, `R_AARCH64_CONDBR19`, `R_AARCH64_TSTBR14`, `R_AARCH64_LD_PREL_LO19`, `R_AARCH64_GOT_LD_PREL19`, `R_AARCH64_ADR_GOT_PAGE`, `R_AARCH64_MOVW_PREL_G*`, all `TLSGD_ADR_PREL21`, `TLSLD_ADR_PREL21`, `TLSIE_LD_GOTTPREL_PREL19`, `TLSDESC_LD_PREL19`, `TLSDESC_ADR_PREL21`
+- [x] Absolute: `R_AARCH64_ABS64/32/16`, `R_AARCH64_ADD_ABS_LO12_NC`, `R_AARCH64_LDST*_ABS_LO12_NC`, `R_AARCH64_MOVW_UABS_G*`, `R_AARCH64_MOVW_SABS_G*`
 
 ### 3c. `aarch64_is_tls()`
-- [ ] All `TLSGD_*`, `TLSLD_*`, `TLSIE_*`, `TLSLE_*`, `TLSDESC_*`, `TLS_DTPMOD64`, `TLS_DTPREL64`, `TLS_TPREL64`
+- [x] All `TLSGD_*`, `TLSLD_*`, `TLSIE_*`, `TLSLE_*`, `TLSDESC_*`, `TLS_DTPMOD64`, `TLS_DTPREL64`, `TLS_TPREL64`
 
 ### 3d. `aarch64_apply()` — Relocation Application
-- [ ] `R_AARCH64_ABS64` → S + A (64-bit)
-- [ ] `R_AARCH64_ABS32` → S + A, check unsigned 32-bit or signed 32-bit
-- [ ] `R_AARCH64_ABS16` → S + A, check ±32K
-- [ ] `R_AARCH64_PREL64` → S + A − P
-- [ ] `R_AARCH64_PREL32` → S + A − P, check signed 32-bit
-- [ ] `R_AARCH64_PREL16` → S + A − P, check signed 16-bit
-- [ ] `R_AARCH64_ADR_PREL_LO21` → extract ADR immediate (imm:immlo), compute S + A − P, check ±1MB, re-encode bits[23:5]+bits[30:29]
-- [ ] `R_AARCH64_ADR_PREL_PG_HI21` → Page(S + A) − Page(P), check ±4GB, encode as ADRP immediate (immhi:immlo)
-- [ ] `R_AARCH64_ADR_PREL_PG_HI21_NC` → same without overflow check
-- [ ] `R_AARCH64_ADD_ABS_LO12_NC` → (S + A) & 0xFFF, encode in ADD imm12 field (bits[21:10])
-- [ ] `R_AARCH64_LDST8_ABS_LO12_NC` → (S + A) & 0xFFF, encode in LDR/STR imm12 (no shift)
-- [ ] `R_AARCH64_LDST16_ABS_LO12_NC` → ((S + A) & 0xFFF) >> 1, check alignment
-- [ ] `R_AARCH64_LDST32_ABS_LO12_NC` → ((S + A) & 0xFFF) >> 2, check alignment
-- [ ] `R_AARCH64_LDST64_ABS_LO12_NC` → ((S + A) & 0xFFF) >> 3, check alignment
-- [ ] `R_AARCH64_LDST128_ABS_LO12_NC` → ((S + A) & 0xFFF) >> 4, check alignment
-- [ ] `R_AARCH64_MOVW_UABS_G0` → (S + A) & 0xFFFF, encode in MOVZ/MOVK imm16 (bits[20:5])
-- [ ] `R_AARCH64_MOVW_UABS_G0_NC` → same, no overflow check
-- [ ] `R_AARCH64_MOVW_UABS_G1` → ((S + A) >> 16) & 0xFFFF; G2 → >>32; G3 → >>48
-- [ ] `R_AARCH64_MOVW_SABS_G0` → signed version, may flip MOVZ↔MOVN
-- [ ] `R_AARCH64_JUMP26` → (S + A − P) >> 2, check ±128MB, encode in bits[25:0]
-- [ ] `R_AARCH64_CALL26` → same as JUMP26
-- [ ] `R_AARCH64_CONDBR19` → (S + A − P) >> 2, check ±1MB, encode in bits[23:5]
-- [ ] `R_AARCH64_TSTBR14` → (S + A − P) >> 2, check ±32KB, encode in bits[18:5]
-- [ ] `R_AARCH64_LD_PREL_LO19` → (S + A − P) >> 2, check ±1MB, encode in bits[23:5]
-- [ ] GOT relocations: compute GOT slot address, output GOT(S) + A or Page(GOT(S)) − Page(P)
-- [ ] TLS relocations: S + A passthrough (linker resolves GOT/TP offsets)
-- [ ] Dynamic: `R_AARCH64_COPY/GLOB_DAT/JUMP_SLOT/RELATIVE/IRELATIVE` → S + A or B(S) + A
+- [x] `R_AARCH64_ABS64` → S + A (64-bit)
+- [x] `R_AARCH64_ABS32` → S + A, check unsigned 32-bit or signed 32-bit
+- [x] `R_AARCH64_ABS16` → S + A, check ±32K
+- [x] `R_AARCH64_PREL64` → S + A − P
+- [x] `R_AARCH64_PREL32` → S + A − P, check signed 32-bit
+- [x] `R_AARCH64_PREL16` → S + A − P, check signed 16-bit
+- [x] `R_AARCH64_ADR_PREL_LO21` → extract ADR immediate (imm:immlo), compute S + A − P, check ±1MB, re-encode bits[23:5]+bits[30:29]
+- [x] `R_AARCH64_ADR_PREL_PG_HI21` → Page(S + A) − Page(P), check ±4GB, encode as ADRP immediate (immhi:immlo)
+- [x] `R_AARCH64_ADR_PREL_PG_HI21_NC` → same without overflow check
+- [x] `R_AARCH64_ADD_ABS_LO12_NC` → (S + A) & 0xFFF, encode in ADD imm12 field (bits[21:10])
+- [x] `R_AARCH64_LDST8_ABS_LO12_NC` → (S + A) & 0xFFF, encode in LDR/STR imm12 (no shift)
+- [x] `R_AARCH64_LDST16_ABS_LO12_NC` → ((S + A) & 0xFFF) >> 1, check alignment
+- [x] `R_AARCH64_LDST32_ABS_LO12_NC` → ((S + A) & 0xFFF) >> 2, check alignment
+- [x] `R_AARCH64_LDST64_ABS_LO12_NC` → ((S + A) & 0xFFF) >> 3, check alignment
+- [x] `R_AARCH64_LDST128_ABS_LO12_NC` → ((S + A) & 0xFFF) >> 4, check alignment
+- [x] `R_AARCH64_MOVW_UABS_G0` → (S + A) & 0xFFFF, encode in MOVZ/MOVK imm16 (bits[20:5])
+- [x] `R_AARCH64_MOVW_UABS_G0_NC` → same, no overflow check
+- [x] `R_AARCH64_MOVW_UABS_G1` → ((S + A) >> 16) & 0xFFFF; G2 → >>32; G3 → >>48
+- [x] `R_AARCH64_MOVW_SABS_G0` → signed version, may flip MOVZ↔MOVN
+- [x] `R_AARCH64_JUMP26` → (S + A − P) >> 2, check ±128MB, encode in bits[25:0]
+- [x] `R_AARCH64_CALL26` → same as JUMP26
+- [x] `R_AARCH64_CONDBR19` → (S + A − P) >> 2, check ±1MB, encode in bits[23:5]
+- [x] `R_AARCH64_TSTBR14` → (S + A − P) >> 2, check ±32KB, encode in bits[18:5]
+- [x] `R_AARCH64_LD_PREL_LO19` → (S + A − P) >> 2, check ±1MB, encode in bits[23:5]
+- [x] GOT relocations: compute GOT slot address, output GOT(S) + A or Page(GOT(S)) − Page(P)
+- [x] TLS relocations: S + A passthrough (linker resolves GOT/TP offsets)
+- [x] Dynamic: `R_AARCH64_COPY/GLOB_DAT/JUMP_SLOT/RELATIVE/IRELATIVE` → S + A or B(S) + A
 
 ### 3e. AArch64 Instruction Field Helpers
-- [ ] `aarch64_extract_imm26(uint32_t insn)` — bits[25:0] for B/BL
-- [ ] `aarch64_insert_imm26(uint32_t insn, int32_t value)` — encode into bits[25:0]
-- [ ] `aarch64_extract_imm19(uint32_t insn)` — bits[23:5] for B.cond/CBZ/LDR literal
-- [ ] `aarch64_insert_imm19(uint32_t insn, int32_t value)`
-- [ ] `aarch64_extract_imm14(uint32_t insn)` — bits[18:5] for TBZ
-- [ ] `aarch64_insert_imm14(uint32_t insn, int32_t value)`
-- [ ] `aarch64_extract_adr_imm(uint32_t insn)` — immhi(bits[23:5]):immlo(bits[30:29]) for ADR/ADRP
-- [ ] `aarch64_insert_adr_imm(uint32_t insn, int32_t value)`
-- [ ] `aarch64_extract_imm12(uint32_t insn)` — bits[21:10] for ADD/LDR
-- [ ] `aarch64_insert_imm12(uint32_t insn, uint32_t value)`
-- [ ] `aarch64_extract_movw_imm16(uint32_t insn)` — bits[20:5]
-- [ ] `aarch64_insert_movw_imm16(uint32_t insn, uint16_t value)`
-- [ ] `aarch64_page(uint64_t addr)` → addr & ~0xFFF
+- [x] `aarch64_extract_imm26(uint32_t insn)` — bits[25:0] for B/BL
+- [x] `aarch64_insert_imm26(uint32_t insn, int32_t value)` — encode into bits[25:0]
+- [x] `aarch64_extract_imm19(uint32_t insn)` — bits[23:5] for B.cond/CBZ/LDR literal
+- [x] `aarch64_insert_imm19(uint32_t insn, int32_t value)`
+- [x] `aarch64_extract_imm14(uint32_t insn)` — bits[18:5] for TBZ
+- [x] `aarch64_insert_imm14(uint32_t insn, int32_t value)`
+- [x] `aarch64_extract_adr_imm(uint32_t insn)` — immhi(bits[23:5]):immlo(bits[30:29]) for ADR/ADRP
+- [x] `aarch64_insert_adr_imm(uint32_t insn, int32_t value)`
+- [x] `aarch64_extract_imm12(uint32_t insn)` — bits[21:10] for ADD/LDR
+- [x] `aarch64_insert_imm12(uint32_t insn, uint32_t value)`
+- [x] `aarch64_extract_movw_imm16(uint32_t insn)` — bits[20:5]
+- [x] `aarch64_insert_movw_imm16(uint32_t insn, uint16_t value)`
+- [x] `aarch64_page(uint64_t addr)` → addr & ~0xFFF
 
 ### 3f. AArch64 Relocation Backend Registration
-- [ ] Register `aarch64_apply`, `aarch64_reloc_size`, `aarch64_is_pc_relative` under `EM_AARCH64`.
-- [ ] Add `aarch64_is_tls` to `elf_reloc_is_tls_for_machine()`.
+- [x] Register `aarch64_apply`, `aarch64_reloc_size`, `aarch64_is_pc_relative` under `EM_AARCH64`.
+- [x] Add `aarch64_is_tls` to `elf_reloc_is_tls_for_machine()`.
 
 ---
 
