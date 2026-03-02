@@ -849,8 +849,8 @@ Per ARM EABI §2.2.3, `.ARM.attributes` contains vendor-specific attribute tags:
 - [x] `elf_init_riscv64()`: ELF64/EM_RISCV/ELFDATA2LSB.
 
 ### 18g. RISC-V DWARF
-- [ ] RISC-V DWARF register mapping: x0–x31 → 0–31, f0–f31 → 32–63.
-- [ ] RISC-V CFA: frame pointer x8 (s0/fp) or x2 (sp), return address x1 (ra).
+- [x] RISC-V DWARF register mapping: x0–x31 → 0–31, f0–f31 → 32–63.
+- [x] RISC-V CFA: frame pointer x8 (s0/fp) or x2 (sp), return address x1 (ra).
 
 ### 18h. RISC-V Testing
 - [ ] Unit tests for all RISC-V relocation types.

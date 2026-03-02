@@ -316,6 +316,9 @@ static int dwarf_frame_pointer_reg(uint16_t machine) {
     if (machine == EM_MIPS) {
         return 30;
     }
+    if (machine == EM_RISCV) {
+        return 8;
+    }
     if (machine == EM_386) {
         return 5;
     }
@@ -334,6 +337,9 @@ static int dwarf_link_register_reg(uint16_t machine) {
     }
     if (machine == EM_MIPS) {
         return 31;
+    }
+    if (machine == EM_RISCV) {
+        return 1;
     }
     return -1;
 }
@@ -421,7 +427,8 @@ elf_err_t elf_debug_validate(elfobj_t *obj, char **diagnostics) {
         (void)elf__diag_append(obj, ELF_DIAG_WARNING, ELF_ERR_FORMAT, UINT64_MAX,
                                "no CFI section found for target architecture");
     }
-    if (obj->machine == EM_ARM || obj->machine == EM_AARCH64 || obj->machine == EM_MIPS) {
+    if (obj->machine == EM_ARM || obj->machine == EM_AARCH64 || obj->machine == EM_MIPS ||
+        obj->machine == EM_RISCV) {
         int fp = dwarf_frame_pointer_reg(obj->machine);
         int lr = dwarf_link_register_reg(obj->machine);
         char msg[160];
@@ -429,6 +436,10 @@ elf_err_t elf_debug_validate(elfobj_t *obj, char **diagnostics) {
             (void)snprintf(msg, sizeof(msg),
                            "DWARF frame model fp=%d lr=%d regs gpr=0-31 fpr=32-63 hi=64 lo=65",
                            fp, lr);
+        } else if (obj->machine == EM_RISCV) {
+            (void)snprintf(msg, sizeof(msg),
+                           "DWARF frame model fp=%d lr=%d regs x0-31=0-31 f0-31=32-63", fp,
+                           lr);
         } else {
             (void)snprintf(msg, sizeof(msg), "DWARF frame model fp=%d lr=%d", fp, lr);
         }
