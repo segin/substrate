@@ -113,7 +113,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-E-006, LD-U-010.
 
 ### 4.2 x86-64
-- [ ] Complete ABS/PC/GOT/PLT/TLS/IFUNC reloc family support used by GCC/Clang outputs.  
+- [x] Complete ABS/PC/GOT/PLT/TLS/IFUNC reloc family support used by GCC/Clang outputs.  
   Reqs: LD-U-006. Stories: US-001, US-201.
 - [x] Implement `R_X86_64_GOTPCRELX` and relaxation-aware behavior.  
   Reqs: LD-U-006.
