@@ -163,9 +163,6 @@ static int i386_apply(const elfobj_reloc_ctx_t *ctx,
         case R_386_TLS_LE_32:
         case R_386_TLS_TPOFF32:
             v = (elf_swide_t)sym_value + (elf_swide_t)addend;
-            if (!swide_in_unsigned_bits(v, 32)) {
-                return -2;
-            }
             *out_value = swide_to_width(v, 32);
             return 0;
         case R_386_PC32:

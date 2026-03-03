@@ -123,7 +123,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 4.3 i386
 - [ ] Complete ABS/PC/GOT/PLT/TLS reloc family support used by GCC/Clang outputs.  
   Reqs: LD-U-006. Stories: US-001.
-- [ ] Implement 8/16/32-bit overflow diagnostics and range checks.  
+- [x] Implement 8/16/32-bit overflow diagnostics and range checks.  
   Reqs: LD-E-006.
 - [ ] Add i386 relocation suite (direct + archive + shared).  
   Reqs: LD-U-007.
