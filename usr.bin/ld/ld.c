@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -24,6 +25,11 @@
 #ifndef SHF_GNU_RETAIN
 #define SHF_GNU_RETAIN 0x200000
 #endif
+
+#define LD_MAX_SCRIPT_INCLUDE_DEPTH 64
+#define LD_MAX_TRACKED_SYMBOLS 262144U
+#define LD_MAX_INPUT_OBJECTS 131072U
+#define LD_MAX_ARCHIVE_SCAN_PASSES 1024
 
 typedef struct {
     char **items;
@@ -137,9 +143,14 @@ typedef struct {
     const char *out_path;
     const char *self_path;
     const char *script_path;
+    const char *plugin_path;
+    const char *plugin_opts[32];
+    size_t plugin_opt_count;
+    int plugin_checked;
     const char *entry_symbol;
     const char *interp_path;
     const char *map_path;
+    const char *reproduce_path;
     ld_compat_mode_t compat_mode;
     ld_lib_mode_t current_lib_mode;
     int current_whole_archive;
@@ -160,7 +171,9 @@ static void usage(const char *prog) {
             "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] "
             "[-o output] [-L dir] [-l name] [-Bstatic|-Bdynamic] "
             "[--start-group ... --end-group] [--whole-archive|--no-whole-archive] "
+            "[-plugin path] [-plugin-opt opt] "
             "[-e symbol] [-T script] [--allow-undefined] [-z text|notext|execstack|noexecstack|relro|norelro] "
+            "[--reproduce dir] "
             "[--hash-style=sysv|gnu|both] "
             "[--compat=gnu|lld] input...\n",
             prog);
@@ -430,6 +443,10 @@ static int objvec_push(objvec_t *v, elfobj_t *obj, const char *name) {
     char **new_names;
     char *dup;
 
+    if (v->count >= LD_MAX_INPUT_OBJECTS) {
+        fprintf(stderr, "ld: input object limit exceeded (%u)\n", (unsigned)LD_MAX_INPUT_OBJECTS);
+        return -1;
+    }
     if (v->count == v->cap) {
         size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
         new_objs = (elfobj_t **)realloc(v->objs, ncap * sizeof(*new_objs));
@@ -493,6 +510,10 @@ static int symset_add(symset_t *set, const char *sym) {
 
     if (sym == NULL || sym[0] == '\0' || symset_contains(set, sym)) {
         return 0;
+    }
+    if (set->count >= LD_MAX_TRACKED_SYMBOLS) {
+        fprintf(stderr, "ld: symbol tracking limit exceeded (%u)\n", (unsigned)LD_MAX_TRACKED_SYMBOLS);
+        return -1;
     }
     if (set->count == set->cap) {
         size_t ncap = set->cap == 0 ? 32 : set->cap * 2;
@@ -658,6 +679,25 @@ static int parse_hash_style_option(const char *val, ld_hash_style_t *out_style) 
         return 0;
     }
     return -1;
+}
+
+static void ld_diag_note(const char *category, const char *source, const char *hint) {
+    if ((category == NULL || category[0] == '\0') &&
+        (source == NULL || source[0] == '\0') &&
+        (hint == NULL || hint[0] == '\0')) {
+        return;
+    }
+    fprintf(stderr, "ld: note:");
+    if (category != NULL && category[0] != '\0') {
+        fprintf(stderr, " category=%s", category);
+    }
+    if (source != NULL && source[0] != '\0') {
+        fprintf(stderr, " source=%s", source);
+    }
+    if (hint != NULL && hint[0] != '\0') {
+        fprintf(stderr, " hint=%s", hint);
+    }
+    fputc('\n', stderr);
 }
 
 static int ld_warn(ld_ctx_t *ctx, const char *fmt, ...) {
@@ -1830,6 +1870,7 @@ static void lds_report_error(const strvec_t *include_stack, const lds_tok_t *tok
     size_t col = tok != NULL ? tok->col : 1;
 
     fprintf(stderr, "ld: %s:%zu:%zu: linker script parse error: %s\n", path, line, col, msg != NULL ? msg : "error");
+    ld_diag_note("script-parse", path, "check linker script syntax and block delimiters");
     if (include_stack != NULL && include_stack->count > 1) {
         fprintf(stderr, "ld: include stack:\n");
         for (i = 0; i < include_stack->count; ++i) {
@@ -2393,7 +2434,7 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
     }
     memset(&assign_name_tok, 0, sizeof(assign_name_tok));
     memset(&assign_expr_tokens, 0, sizeof(assign_expr_tokens));
-    if (depth > 64) {
+    if (depth > LD_MAX_SCRIPT_INCLUDE_DEPTH) {
         lds_tok_t fake;
         memset(&fake, 0, sizeof(fake));
         fake.path = path;
@@ -3146,6 +3187,152 @@ static int parse_u64_auto(const char *s, uint64_t *out) {
     return 0;
 }
 
+static int run_cmd_first_line(const char *cmd, char *out, size_t out_sz) {
+    FILE *fp;
+    char *nl;
+    int rc;
+
+    if (cmd == NULL || out == NULL || out_sz == 0) {
+        return -1;
+    }
+    out[0] = '\0';
+    fp = popen(cmd, "r");
+    if (fp == NULL) {
+        return -1;
+    }
+    if (fgets(out, (int)out_sz, fp) == NULL) {
+        rc = pclose(fp);
+        (void)rc;
+        out[0] = '\0';
+        return 1;
+    }
+    rc = pclose(fp);
+    if (rc != 0) {
+        out[0] = '\0';
+        return -1;
+    }
+    nl = strchr(out, '\n');
+    if (nl != NULL) {
+        *nl = '\0';
+    }
+    return out[0] != '\0' ? 0 : 1;
+}
+
+static int discover_default_plugin(ld_ctx_t *ctx) {
+    static char discovered[PATH_MAX];
+    const char *envp;
+    char cmd[256];
+    int rc;
+
+    if (ctx == NULL || (ctx->plugin_path != NULL && ctx->plugin_path[0] != '\0')) {
+        return 0;
+    }
+    envp = getenv("SUBSTRATE_LD_PLUGIN");
+    if (envp != NULL && envp[0] != '\0' && access(envp, R_OK | X_OK) == 0) {
+        ctx->plugin_path = envp;
+        return 0;
+    }
+    envp = getenv("LD_PLUGIN");
+    if (envp != NULL && envp[0] != '\0' && access(envp, R_OK | X_OK) == 0) {
+        ctx->plugin_path = envp;
+        return 0;
+    }
+
+    snprintf(cmd, sizeof(cmd), "gcc -print-file-name=liblto_plugin.so 2>/dev/null");
+    rc = run_cmd_first_line(cmd, discovered, sizeof(discovered));
+    if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
+        ctx->plugin_path = discovered;
+        return 0;
+    }
+
+    snprintf(cmd, sizeof(cmd), "clang -print-file-name=LLVMgold.so 2>/dev/null");
+    rc = run_cmd_first_line(cmd, discovered, sizeof(discovered));
+    if (rc == 0 && discovered[0] == '/' && access(discovered, R_OK | X_OK) == 0) {
+        ctx->plugin_path = discovered;
+        return 0;
+    }
+
+    return 0;
+}
+
+static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
+    char cmd[2048];
+    int rc;
+
+    if (ctx == NULL || ctx->plugin_checked) {
+        return 0;
+    }
+    if (ctx->plugin_path == NULL || ctx->plugin_path[0] == '\0') {
+        if (ctx->plugin_opt_count != 0) {
+            if (discover_default_plugin(ctx) != 0) {
+                return -1;
+            }
+            if (ctx->plugin_path == NULL || ctx->plugin_path[0] == '\0') {
+                fprintf(stderr, "ld: -plugin-opt requires -plugin or a discoverable plugin\n");
+                return -1;
+            }
+        } else {
+            return 0;
+        }
+    }
+    if (access(ctx->plugin_path, R_OK | X_OK) != 0) {
+        fprintf(stderr, "ld: plugin not executable: %s\n", ctx->plugin_path);
+        return -1;
+    }
+    if (snprintf(cmd, sizeof(cmd), "\"%s\" --version >/dev/null 2>&1", ctx->plugin_path) >= (int)sizeof(cmd)) {
+        fprintf(stderr, "ld: plugin path too long\n");
+        return -1;
+    }
+    rc = system(cmd);
+    if (rc != 0) {
+        fprintf(stderr, "ld: plugin handshake failed for %s\n", ctx->plugin_path);
+        return -1;
+    }
+    ctx->plugin_checked = 1;
+    return 0;
+}
+
+static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, char *out_path, size_t out_path_sz) {
+    char cmd[4096];
+    FILE *fp;
+    char *nl;
+    size_t i;
+    int n;
+
+    if (out_path == NULL || out_path_sz == 0) {
+        return -1;
+    }
+    out_path[0] = '\0';
+    if (ctx == NULL || ctx->plugin_path == NULL || ctx->plugin_path[0] == '\0' || in_path == NULL) {
+        return 0;
+    }
+    n = snprintf(cmd, sizeof(cmd), "\"%s\" --materialize \"%s\"", ctx->plugin_path, in_path);
+    if (n < 0 || (size_t)n >= sizeof(cmd)) {
+        return -1;
+    }
+    for (i = 0; i < ctx->plugin_opt_count; ++i) {
+        n = snprintf(cmd + strlen(cmd), sizeof(cmd) - strlen(cmd), " --plugin-opt=\"%s\"", ctx->plugin_opts[i]);
+        if (n < 0 || (size_t)n >= sizeof(cmd) - strlen(cmd)) {
+            return -1;
+        }
+    }
+    fp = popen(cmd, "r");
+    if (fp == NULL) {
+        return -1;
+    }
+    if (fgets(out_path, (int)out_path_sz, fp) == NULL) {
+        pclose(fp);
+        out_path[0] = '\0';
+        return 0;
+    }
+    pclose(fp);
+    nl = strchr(out_path, '\n');
+    if (nl != NULL) {
+        *nl = '\0';
+    }
+    return out_path[0] != '\0' ? 1 : 0;
+}
+
 static void trim_trailing(char *s) {
     size_t n;
     while ((n = strlen(s)) > 0) {
@@ -3270,11 +3457,6 @@ static void maybe_autoswitch_mode(ld_ctx_t *ctx, const elfobj_t *obj, size_t loa
 
 static int validate_relocatable_input(const elfobj_t *obj, const char *display_name) {
     size_t i;
-
-    if (elf_symbol_count(obj) == 0) {
-        fprintf(stderr, "ld: input %s has no symbol table entries\n", display_name);
-        return -1;
-    }
 
     for (i = 0; i < elf_section_count(obj); ++i) {
         const elf_section_t *sec = elf_section_get(obj, i);
@@ -3508,6 +3690,8 @@ static char *resolve_thin_member_path(const char *archive_path, const char *memb
     return member_real;
 }
 
+static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state, int quiet);
+
 static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
                                 int whole_archive) {
     unsigned char *buf = NULL;
@@ -3519,6 +3703,7 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
     int thin = 0;
     symset_t seen_members;
     int pass_progress;
+    int pass_count = 0;
 
     memset(&seen_members, 0, sizeof(seen_members));
     if (parse_archive_header(path, &buf, &sz, &thin) != 0) {
@@ -3526,6 +3711,14 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
     }
 
     do {
+        pass_count++;
+        if (pass_count > LD_MAX_ARCHIVE_SCAN_PASSES) {
+            fprintf(stderr, "ld: archive resolution pass limit exceeded (%d) for %s\n",
+                    LD_MAX_ARCHIVE_SCAN_PASSES, path);
+            symset_free(&seen_members);
+            free(buf);
+            return -1;
+        }
         pass_progress = 0;
         off = 8;
         while (off + 60 <= sz) {
@@ -3623,31 +3816,23 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                     free(buf);
                     return -1;
                 }
-                if (!symset_contains(&seen_members, thin_member_path) &&
-                    elf_open(thin_member_path, &obj) == ELF_OK) {
-                    maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, thin_member_path);
-                    if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode) &&
-                        (whole_archive || obj_defines_unresolved(state, obj))) {
-                        char member_name[512];
+                if (!symset_contains(&seen_members, thin_member_path)) {
+                    int should_load = 0;
+                    if (elf_open(thin_member_path, &obj) == ELF_OK) {
+                        maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, thin_member_path);
+                        should_load = elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode) &&
+                                      (whole_archive || obj_defines_unresolved(state, obj));
+                        elf_close(obj);
+                    }
+                    if (should_load) {
                         if (symset_add(&seen_members, thin_member_path) != 0) {
-                            elf_close(obj);
                             free(thin_member_path);
                             free(mname);
                             symset_free(&seen_members);
                             free(buf);
                             return -1;
                         }
-                        snprintf(member_name, sizeof(member_name), "%s(%s)", path, mname);
-                        if (validate_relocatable_input(obj, member_name) != 0) {
-                            elf_close(obj);
-                            free(thin_member_path);
-                            free(mname);
-                            symset_free(&seen_members);
-                            free(buf);
-                            return -1;
-                        }
-                        if (objvec_push(objs, obj, member_name) != 0 || symstate_note_object(state, obj) != 0) {
-                            elf_close(obj);
+                        if (load_object_input(thin_member_path, ctx, objs, state, 1) != 0) {
                             free(thin_member_path);
                             free(mname);
                             symset_free(&seen_members);
@@ -3656,8 +3841,6 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
                         }
                         pass_progress = 1;
                         changed_any = 1;
-                    } else {
-                        elf_close(obj);
                     }
                 }
                 free(thin_member_path);
@@ -3680,8 +3863,30 @@ static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs,
     return 0;
 }
 
+static int object_has_lto_sections(const elfobj_t *obj) {
+    size_t i;
+
+    if (obj == NULL) {
+        return 0;
+    }
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        const elf_section_t *sec = elf_section_get(obj, i);
+        const char *name = sec != NULL ? elf_section_name(sec) : NULL;
+        if (name != NULL &&
+            (strncmp(name, ".gnu.lto_", 9) == 0 ||
+             strcmp(name, ".llvmbc") == 0 ||
+             strcmp(name, ".llvmcmd") == 0 ||
+             strncmp(name, ".llvm.lto", 9) == 0)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state, int quiet) {
     elfobj_t *obj = NULL;
+    char mat_path[1024];
+    int mat_rc;
 
     if (elf_open(path, &obj) != ELF_OK) {
         if (!quiet) {
@@ -3690,6 +3895,20 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
         return -1;
     }
     maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, path);
+    if (object_has_lto_sections(obj) && ctx != NULL && ctx->plugin_path != NULL && ctx->plugin_path[0] != '\0') {
+        mat_rc = plugin_materialize_object(ctx, path, mat_path, sizeof(mat_path));
+        if (mat_rc < 0) {
+            if (!quiet) {
+                fprintf(stderr, "ld: plugin materialization failed for %s\n", path);
+            }
+            elf_close(obj);
+            return -1;
+        }
+        if (mat_rc > 0 && strcmp(mat_path, path) != 0) {
+            elf_close(obj);
+            return load_object_input(mat_path, ctx, objs, state, quiet);
+        }
+    }
     if (!obj_matches_mode(obj, ctx->mode)) {
         if (!quiet) {
             fprintf(stderr, "ld: input %s has mismatched class/machine/endianness\n", path);
@@ -6703,11 +6922,143 @@ static int patch_dynamic_tag_values(elfobj_t *out) {
     return 0;
 }
 
+static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
+                               int whole_archive, int as_needed, int *handled) {
+    unsigned char *buf = NULL;
+    size_t sz = 0;
+    char *text = NULL;
+    char *dir = NULL;
+    size_t i = 0;
+    int loaded_any = 0;
+
+    if (handled != NULL) {
+        *handled = 0;
+    }
+    if (script_path == NULL) {
+        return 0;
+    }
+    if (read_file(script_path, &buf, &sz) != 0) {
+        return -1;
+    }
+    text = (char *)malloc(sz + 1);
+    if (text == NULL) {
+        free(buf);
+        return -1;
+    }
+    memcpy(text, buf, sz);
+    text[sz] = '\0';
+    if (strstr(text, "INPUT") == NULL && strstr(text, "GROUP") == NULL) {
+        free(text);
+        free(buf);
+        return 0;
+    }
+    if (handled != NULL) {
+        *handled = 1;
+    }
+    dir = path_dirname_dup(script_path);
+    if (dir == NULL) {
+        free(text);
+        free(buf);
+        return -1;
+    }
+
+    while (i < sz) {
+        char tok[1024];
+        size_t tn = 0;
+        char *resolved = NULL;
+
+        if (i + 1 < sz && text[i] == '/' && text[i + 1] == '*') {
+            i += 2;
+            while (i + 1 < sz && !(text[i] == '*' && text[i + 1] == '/')) {
+                i++;
+            }
+            if (i + 1 < sz) {
+                i += 2;
+            }
+            continue;
+        }
+        while (i < sz && (isspace((unsigned char)text[i]) || text[i] == '(' || text[i] == ')' || text[i] == ',')) {
+            i++;
+        }
+        while (i < sz && !isspace((unsigned char)text[i]) && text[i] != '(' && text[i] != ')' && text[i] != ',' &&
+               tn + 1 < sizeof(tok)) {
+            tok[tn++] = text[i++];
+        }
+        tok[tn] = '\0';
+        if (tok[0] == '\0') {
+            continue;
+        }
+        if (strcmp(tok, "INPUT") == 0 || strcmp(tok, "GROUP") == 0 ||
+            strcmp(tok, "AS_NEEDED") == 0 || strcmp(tok, "OUTPUT_FORMAT") == 0 ||
+            strcmp(tok, "SEARCH_DIR") == 0) {
+            continue;
+        }
+        if (tok[0] != '/' && strstr(tok, ".so") == NULL && strstr(tok, ".a") == NULL && strstr(tok, ".o") == NULL) {
+            continue;
+        }
+        if (tok[0] == '/') {
+            resolved = xstrdup(tok);
+        } else {
+            resolved = path_join(dir, tok);
+        }
+        if (resolved == NULL) {
+            free(dir);
+            free(text);
+            free(buf);
+            return -1;
+        }
+        if (strstr(tok, ".so") != NULL) {
+            int shared_matches = 0;
+            int have_shared_match = 0;
+
+            if (as_needed) {
+                if (shared_object_matches_unresolved(resolved, ctx, state, &shared_matches) == 0) {
+                    have_shared_match = 1;
+                    if (!shared_matches) {
+                        free(resolved);
+                        continue;
+                    }
+                }
+            }
+            if (register_dso_provider(ctx, resolved, state) != 0) {
+                if (!as_needed || !have_shared_match || shared_matches) {
+                    free(resolved);
+                    free(dir);
+                    free(text);
+                    free(buf);
+                    return -1;
+                }
+            } else {
+                loaded_any = 1;
+            }
+        } else {
+            if (load_path_input(resolved, ctx, objs, state, whole_archive, 0) != 0) {
+                free(resolved);
+                free(dir);
+                free(text);
+                free(buf);
+                return -1;
+            }
+            loaded_any = 1;
+        }
+        free(resolved);
+    }
+
+    free(dir);
+    free(text);
+    free(buf);
+    if (!loaded_any) {
+        return -1;
+    }
+    return 0;
+}
+
 static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state) {
     char *path_so = NULL;
     char *path_a = NULL;
     int shared_matches = 0;
     int have_shared_match = 0;
+    int handled = 0;
 
     if (in->lib_mode == LD_LIBMODE_STATIC) {
         path_a = resolve_library_path_suffix(ctx, in->text, ".a");
@@ -6724,11 +7075,17 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
     }
 
     path_so = resolve_library_path_suffix(ctx, in->text, ".so");
+    if (path_so != NULL &&
+        load_library_script(path_so, ctx, objs, state, in->whole_archive, in->as_needed, &handled) == 0 &&
+        handled) {
+        free(path_so);
+        return 0;
+    }
     if (path_so != NULL && load_path_input(path_so, ctx, objs, state, in->whole_archive, 1) == 0) {
         free(path_so);
         return 0;
     }
-    if (path_so != NULL && ctx->expect_type == ET_DYN) {
+    if (path_so != NULL && (ctx->expect_type == ET_DYN || ctx->expect_type == ET_EXEC)) {
         if (in->as_needed) {
             if (shared_object_matches_unresolved(path_so, ctx, state, &shared_matches) == 0) {
                 have_shared_match = 1;
@@ -6755,6 +7112,12 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
 
     path_a = resolve_library_path_suffix(ctx, in->text, ".a");
     if (path_a != NULL) {
+        if (load_library_script(path_a, ctx, objs, state, in->whole_archive, in->as_needed, &handled) == 0 &&
+            handled) {
+            free(path_so);
+            free(path_a);
+            return 0;
+        }
         if (load_path_input(path_a, ctx, objs, state, in->whole_archive, 0) != 0) {
             free(path_so);
             free(path_a);
@@ -7197,6 +7560,182 @@ static int collect_undefined_refs(const objvec_t *inputs, symref_map_t *out) {
     return 0;
 }
 
+static const char *find_symbol_source_input(const objvec_t *inputs, const char *sym_name) {
+    size_t i;
+
+    if (inputs == NULL || sym_name == NULL || sym_name[0] == '\0') {
+        return NULL;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        elfobj_t *obj = inputs->objs[i];
+        size_t si;
+
+        if (obj == NULL) {
+            continue;
+        }
+        for (si = 0; si < elf_symbol_count(obj); ++si) {
+            const elf_symbol_t *sym = elf_symbol_at(obj, si);
+            const char *name;
+            uint8_t bind;
+
+            if (sym == NULL || elf_symbol_shndx(sym) == SHN_UNDEF) {
+                continue;
+            }
+            bind = elf_symbol_bind(sym);
+            if (bind != STB_GLOBAL && bind != STB_WEAK) {
+                continue;
+            }
+            name = elf_symbol_name(sym);
+            if (name != NULL && strcmp(name, sym_name) == 0) {
+                return inputs->names[i];
+            }
+        }
+    }
+    return NULL;
+}
+
+static int ensure_dir_exists(const char *path) {
+    struct stat st;
+
+    if (path == NULL || path[0] == '\0') {
+        return -1;
+    }
+    if (stat(path, &st) == 0) {
+        if (!S_ISDIR(st.st_mode)) {
+            errno = ENOTDIR;
+            return -1;
+        }
+        return 0;
+    }
+    if (errno != ENOENT) {
+        return -1;
+    }
+    if (mkdir(path, 0755) != 0) {
+        return -1;
+    }
+    return 0;
+}
+
+static int copy_file_bytes(const char *src, const char *dst) {
+    unsigned char *buf = NULL;
+    size_t sz = 0;
+    FILE *fp;
+
+    if (src == NULL || dst == NULL) {
+        return -1;
+    }
+    if (read_file(src, &buf, &sz) != 0) {
+        return -1;
+    }
+    fp = fopen(dst, "wb");
+    if (fp == NULL) {
+        free(buf);
+        return -1;
+    }
+    if (sz != 0 && fwrite(buf, 1, sz, fp) != sz) {
+        fclose(fp);
+        free(buf);
+        return -1;
+    }
+    fclose(fp);
+    free(buf);
+    return 0;
+}
+
+static int write_reproduce_bundle(const ld_ctx_t *ctx, const objvec_t *inputs) {
+    char manifest_path[1024];
+    char script_path[1024];
+    char script_copy[1024];
+    FILE *mf = NULL;
+    FILE *sf = NULL;
+    size_t i;
+
+    if (ctx == NULL || inputs == NULL || ctx->reproduce_path == NULL || ctx->reproduce_path[0] == '\0') {
+        return 0;
+    }
+    if (ensure_dir_exists(ctx->reproduce_path) != 0) {
+        fprintf(stderr, "ld: failed to create --reproduce directory %s: %s\n", ctx->reproduce_path, strerror(errno));
+        return -1;
+    }
+    snprintf(manifest_path, sizeof(manifest_path), "%s/manifest.txt", ctx->reproduce_path);
+    snprintf(script_path, sizeof(script_path), "%s/repro.sh", ctx->reproduce_path);
+    mf = fopen(manifest_path, "w");
+    if (mf == NULL) {
+        fprintf(stderr, "ld: failed to write --reproduce manifest %s: %s\n", manifest_path, strerror(errno));
+        return -1;
+    }
+    fprintf(mf, "mode=%s\n", ctx->mode == 64 ? "x86_64" : "i386");
+    fprintf(mf, "type=%u\n", (unsigned)ctx->expect_type);
+    if (ctx->entry_symbol != NULL) {
+        fprintf(mf, "entry=%s\n", ctx->entry_symbol);
+    }
+    if (ctx->script_path != NULL) {
+        fprintf(mf, "script=%s\n", ctx->script_path);
+    }
+    if (ctx->plugin_path != NULL) {
+        fprintf(mf, "plugin=%s\n", ctx->plugin_path);
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        fprintf(mf, "input[%zu]=%s\n", i, inputs->names[i] != NULL ? inputs->names[i] : "<unknown>");
+    }
+    fclose(mf);
+
+    for (i = 0; i < inputs->count; ++i) {
+        char obj_path[1024];
+        snprintf(obj_path, sizeof(obj_path), "%s/input_%03zu.o", ctx->reproduce_path, i);
+        if (elf_write_file(inputs->objs[i], obj_path) != ELF_OK) {
+            fprintf(stderr, "ld: failed to write --reproduce object %s\n", obj_path);
+            return -1;
+        }
+    }
+    if (ctx->script_path != NULL && ctx->script_path[0] != '\0') {
+        snprintf(script_copy, sizeof(script_copy), "%s/linker_script.ld", ctx->reproduce_path);
+        if (copy_file_bytes(ctx->script_path, script_copy) != 0) {
+            fprintf(stderr, "ld: failed to copy linker script into --reproduce bundle\n");
+            return -1;
+        }
+    }
+
+    sf = fopen(script_path, "w");
+    if (sf == NULL) {
+        fprintf(stderr, "ld: failed to write --reproduce script %s: %s\n", script_path, strerror(errno));
+        return -1;
+    }
+    fprintf(sf, "#!/bin/sh\nset -eu\n");
+    fprintf(sf, "DIR=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n");
+    fprintf(sf, "LD_TOOL=${LD_TOOL:-ld}\n");
+    fprintf(sf, "exec \"$LD_TOOL\" -m%s ", ctx->mode == 64 ? "64" : "32");
+    if (ctx->expect_type == ET_REL) {
+        fprintf(sf, "-r ");
+    } else if (ctx->expect_type == ET_DYN) {
+        fprintf(sf, "-shared ");
+    }
+    if (ctx->entry_symbol != NULL && ctx->entry_symbol[0] != '\0') {
+        fprintf(sf, "-e '%s' ", ctx->entry_symbol);
+    }
+    if (ctx->script_path != NULL && ctx->script_path[0] != '\0') {
+        fprintf(sf, "-T \"$DIR/linker_script.ld\" ");
+    }
+    if (ctx->plugin_path != NULL && ctx->plugin_path[0] != '\0') {
+        size_t pi;
+        fprintf(sf, "-plugin '%s' ", ctx->plugin_path);
+        for (pi = 0; pi < ctx->plugin_opt_count; ++pi) {
+            fprintf(sf, "-plugin-opt '%s' ", ctx->plugin_opts[pi]);
+        }
+    }
+    fprintf(sf, "-o \"$DIR/repro.out\" ");
+    for (i = 0; i < inputs->count; ++i) {
+        fprintf(sf, "\"$DIR/input_%03zu.o\" ", i);
+    }
+    fprintf(sf, "\"$@\"\n");
+    fclose(sf);
+    if (chmod(script_path, 0755) != 0) {
+        fprintf(stderr, "ld: failed to mark --reproduce script executable: %s\n", strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
 static int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
     FILE *fp;
     size_t i;
@@ -7239,10 +7778,20 @@ static int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t 
                 (unsigned long long)elf_section_flags(sec));
     }
 
+    fprintf(fp, "\nProgram Headers:\n");
+    for (i = 0; i < (size_t)elf_program_header_count(out); ++i) {
+        fprintf(fp, "  [%02zu] type=0x%x flags=0x%x align=0x%llx\n",
+                i,
+                (unsigned)elf_program_header_type(out, i),
+                (unsigned)elf_program_header_flags(out, i),
+                (unsigned long long)elf_program_header_align(out, i));
+    }
+
     fprintf(fp, "\nSymbols:\n");
     for (i = 0; i < elf_symbol_count(out); ++i) {
         const elf_symbol_t *sym = elf_symbol_at(out, i);
         const char *name;
+        const char *src;
 
         if (sym == NULL) {
             continue;
@@ -7254,13 +7803,15 @@ static int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t 
         if (name == NULL || name[0] == '\0') {
             continue;
         }
-        fprintf(fp, "  %-28s value=0x%llx size=%llu bind=%u type=%u shndx=%u\n",
+        src = find_symbol_source_input(inputs, name);
+        fprintf(fp, "  %-28s value=0x%llx size=%llu bind=%u type=%u shndx=%u source=%s\n",
                 name,
                 (unsigned long long)elf_symbol_value(sym),
                 (unsigned long long)elf_symbol_size(sym),
                 (unsigned)elf_symbol_bind(sym),
                 (unsigned)elf_symbol_type(sym),
-                (unsigned)elf_symbol_shndx(sym));
+                (unsigned)elf_symbol_shndx(sym),
+                src != NULL ? src : "<synthetic>");
     }
 
     fclose(fp);
@@ -8446,8 +8997,10 @@ static int check_undefined_symbols(elfobj_t *obj, int allow_undefined, const sym
                 const char *src = refs != NULL ? symref_map_get(refs, name) : NULL;
                 if (src != NULL) {
                     fprintf(stderr, "ld: undefined reference to `%s` (referenced by %s)\n", name, src);
+                    ld_diag_note("unresolved-symbol", src, "add defining object/library before this reference");
                 } else {
                     fprintf(stderr, "ld: undefined reference to `%s`\n", name);
+                    ld_diag_note("unresolved-symbol", NULL, "add defining object/library to link inputs");
                 }
                 return -1;
             }
@@ -8617,7 +9170,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     memset(&inputs, 0, sizeof(inputs));
     memset(&undef_refs, 0, sizeof(undef_refs));
+    if (plugin_discover_and_handshake(ctx) != 0) {
+        return -1;
+    }
     if (load_all_inputs(ctx, &inputs) != 0) {
+        objvec_free(&inputs);
+        return -1;
+    }
+    if (write_reproduce_bundle(ctx, &inputs) != 0) {
         objvec_free(&inputs);
         return -1;
     }
@@ -9013,6 +9573,56 @@ int main(int argc, char **argv) {
             ctx.out_path = argv[++i];
             continue;
         }
+        if ((p = parse_arg_value(a, "-plugin-opt", &val)) != 0 ||
+            (p = parse_arg_value(a, "--plugin-opt", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (val == NULL || val[0] == '\0') {
+                fprintf(stderr, "ld: -plugin-opt requires an argument\n");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
+            if (ctx.plugin_opt_count >= sizeof(ctx.plugin_opts) / sizeof(ctx.plugin_opts[0])) {
+                fprintf(stderr, "ld: too many -plugin-opt arguments (max %zu)\n",
+                        sizeof(ctx.plugin_opts) / sizeof(ctx.plugin_opts[0]));
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
+            ctx.plugin_opts[ctx.plugin_opt_count++] = val;
+            continue;
+        }
+        if ((p = parse_arg_value(a, "-plugin", &val)) != 0 || (p = parse_arg_value(a, "--plugin", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (val == NULL || val[0] == '\0') {
+                fprintf(stderr, "ld: -plugin requires a path\n");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
+            ctx.plugin_path = val;
+            continue;
+        }
         if (strcmp(a, "-r") == 0) {
             ctx.expect_type = ET_REL;
             continue;
@@ -9348,6 +9958,29 @@ int main(int argc, char **argv) {
                 return 2;
             }
             ctx.map_path = val;
+            continue;
+        }
+        if ((p = parse_arg_value(a, "--reproduce", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (val == NULL || val[0] == '\0') {
+                fprintf(stderr, "ld: --reproduce requires a non-empty directory path\n");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                return 2;
+            }
+            ctx.reproduce_path = val;
             continue;
         }
         if ((p = parse_arg_value(a, "--hash-style", &val)) != 0) {

@@ -55,6 +55,8 @@ test_library_search_modes.sh|LD-U-004
 test_group_and_whole_archive.sh|LD-S-001 LD-U-004
 test_as_needed.sh|LD-E-005
 test_tooling_options.sh|LD-U-011 LD-U-010
+test_toolchain_build_sh_native.sh|LD-U-001
+test_no_backend_forwarding.sh|LD-W-001
 test_script_parser_include_ok.sh|LD-U-010
 test_script_parser_include_diag.sh|LD-U-010
 test_script_ast_constructs.sh|LD-S-004
@@ -64,6 +66,17 @@ test_script_directive_semantics.sh|LD-S-004 LD-E-004
 test_script_section_order.sh|LD-S-004 LD-U-009
 test_script_phdr_assignment.sh|LD-U-009 LD-S-004
 test_script_compat_corpus.sh|LD-U-007 LD-S-004
+test_plugin_handshake.sh|LD-O-004 LD-U-004
+test_plugin_materialize_archive_loop.sh|LD-S-001 LD-O-004
+test_lto_integration_c_cpp.sh|LD-U-007 LD-O-004
+test_diagnostics_structured.sh|LD-U-010
+test_map_parity_fields.sh|LD-U-011
+test_reproduce_bundle.sh|LD-U-007
+test_diag_parser_compat.sh|LD-U-010 LD-W-003
+test_deterministic_repro.sh|LD-U-007
+test_limits_safety.sh|LD-R-002
+test_fuzz_frontends_smoke.sh|LD-R-004
+test_integer_overflow_guards.sh|LD-R-003
 test_warning_policies.sh|LD-W-003 LD-E-001
 test_input_validation_basic.sh|LD-U-012 LD-R-001
 test_reloc_symbol_parsing.sh|LD-U-005 LD-U-006

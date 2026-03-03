@@ -244,24 +244,24 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 
 ## 9. LTO/Plugin Compatibility
 
-- [ ] Implement GNU plugin discovery and handshake flow.  
+- [x] Implement GNU plugin discovery and handshake flow.  
   Reqs: LD-O-004, LD-U-004.
-- [ ] Implement plugin materialization integration with archive extraction/resolution loops.  
+- [x] Implement plugin materialization integration with archive extraction/resolution loops.  
   Reqs: LD-S-001.
-- [ ] Add GCC/Clang LTO integration tests for C and C++.  
+- [x] Add GCC/Clang LTO integration tests for C and C++.  
   Reqs: LD-U-007.
 
 ---
 
 ## 10. Diagnostics and UX Parity
 
-- [ ] Add structured diagnostics with category, source, and remediation hint where possible.  
+- [x] Add structured diagnostics with category, source, and remediation hint where possible.  
   Reqs: LD-U-010.
-- [ ] Implement map file parity fields (sections, symbols, addresses, object provenance).  
+- [x] Implement map file parity fields (sections, symbols, addresses, object provenance).  
   Reqs: LD-U-011. Stories: US-301.
-- [ ] Implement `--reproduce` packaging for bug replay.  
+- [x] Implement `--reproduce` packaging for bug replay.  
   Reqs: LD-U-007. Stories: US-301.
-- [ ] Ensure warnings/errors text compatibility with expected build-system parsers.  
+- [x] Ensure warnings/errors text compatibility with expected build-system parsers.  
   Reqs: LD-U-010, LD-W-003.
 
 ---
@@ -269,11 +269,11 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 11. Determinism, Performance, Memory
 
 ### 11.1 Determinism
-- [ ] Eliminate non-deterministic ordering from all hash/table traversals.  
+- [x] Eliminate non-deterministic ordering from all hash/table traversals.  
   Reqs: LD-U-007.
-- [ ] Deterministic archive extraction and symbol tie-breakers.  
+- [x] Deterministic archive extraction and symbol tie-breakers.  
   Reqs: LD-U-007.
-- [ ] Add reproducibility regression tests over repeated links.  
+- [x] Add reproducibility regression tests over repeated links.  
   Reqs: LD-U-007.
 
 ### 11.2 Performance
@@ -285,9 +285,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: Performance NFR.
 
 ### 11.3 Memory safety
-- [ ] Add hard caps for recursion, expansion, and symbol graph growth.  
+- [x] Add hard caps for recursion, expansion, and symbol graph growth.  
   Reqs: LD-R-002.
-- [ ] Add fuzz harnesses for ELF/archive/script frontends with sanitizers.  
+- [x] Add fuzz harnesses for ELF/archive/script frontends with sanitizers.  
   Reqs: LD-R-004.
 
 ---
@@ -295,7 +295,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 12. Validation Matrix (Must Pass)
 
 ### 12.1 Toolchain integration
-- [ ] `cc` + `as` + internal `ld` builds `bin/sh` (native host build path).  
+- [x] `cc` + `as` + internal `ld` builds `bin/sh` (native host build path).  
   Reqs: LD-U-001. Stories: US-001.
 - [ ] `cc` + `as` + internal `ld` builds GNU bash with no source workarounds.  
   Reqs: LD-U-001, LD-U-005. Stories: US-201.
@@ -303,25 +303,25 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-001, LD-U-005.
 
 ### 12.2 Compatibility differential
-- [ ] Differential linker result checks against GNU ld/lld for curated corpus.  
+- [x] Differential linker result checks against GNU ld/lld for curated corpus.  
   Reqs: LD-U-007.
-- [ ] Ensure no backend-forwarding code path remains in `usr.bin/ld`.  
+- [x] Ensure no backend-forwarding code path remains in `usr.bin/ld`.  
   Reqs: LD-W-001.
 
 ### 12.3 Security/robustness
-- [ ] 0 crashes on parser fuzz corpus for fixed budget run.  
+- [x] 0 crashes on parser fuzz corpus for fixed budget run.  
   Reqs: LD-R-004.
-- [ ] All integer-overflow guards covered by targeted tests.  
+- [x] All integer-overflow guards covered by targeted tests.  
   Reqs: LD-R-003.
 
 ---
 
 ## 13. Documentation and Maintenance
 
-- [ ] Update `man/man1/ld.1` to full supported option set and behavior notes.
-- [ ] Maintain compatibility notes section documenting intentional divergences from GNU ld/lld.
-- [ ] Add internal architecture doc for resolver/layout/reloc backends.
-- [ ] Add contributor guide for adding new relocation types and script directives.
+- [x] Update `man/man1/ld.1` to full supported option set and behavior notes.
+- [x] Maintain compatibility notes section documenting intentional divergences from GNU ld/lld.
+- [x] Add internal architecture doc for resolver/layout/reloc backends.
+- [x] Add contributor guide for adding new relocation types and script directives.
 
 ---
 
