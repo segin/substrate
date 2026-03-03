@@ -1827,8 +1827,41 @@ static int apply_script_discard_pattern(elfobj_t *obj, const char *pattern) {
     return 0;
 }
 
+static int apply_script_output_section_order(elfobj_t *obj, const char *section_name, size_t *target_index) {
+    elf_section_t *sec;
+    size_t target;
+    size_t count;
+    size_t cur_idx;
+
+    if (obj == NULL || section_name == NULL || target_index == NULL || section_name[0] == '\0') {
+        return 0;
+    }
+    sec = elf_find_section(obj, section_name);
+    if (sec == NULL) {
+        return 0;
+    }
+    count = elf_section_count(obj);
+    if (*target_index >= count) {
+        return 0;
+    }
+    cur_idx = count;
+    for (target = 0; target < count; ++target) {
+        if (elf_section_get(obj, target) == sec) {
+            cur_idx = target;
+            break;
+        }
+    }
+    target = *target_index;
+    if (cur_idx != target && elf_reorder_section(obj, sec, target) != ELF_OK) {
+        return -1;
+    }
+    (*target_index)++;
+    return 0;
+}
+
 static int parse_linker_script_file_rec(const char *path, strvec_t *include_stack, lds_ast_t *ast, ld_ctx_t *ctx,
-                                        const elfobj_t *obj, int apply_semantics, int depth);
+                                        const elfobj_t *obj, int apply_semantics, size_t *section_reorder_target,
+                                        int depth);
 
 static int apply_script_assignment(const strvec_t *include_stack, const lds_tok_t *name_tok, const char *name,
                                    const lds_tokvec_t *expr_tokens, ld_ctx_t *ctx, const elfobj_t *obj,
@@ -2192,7 +2225,8 @@ static int parse_script_insert_directive(lds_lexer_t *lx, const strvec_t *includ
 }
 
 static int handle_script_include(const char *current_path, strvec_t *include_stack, lds_ast_t *ast, ld_ctx_t *ctx,
-                                 const elfobj_t *obj, int apply_semantics, int depth, const lds_tok_t *tok) {
+                                 const elfobj_t *obj, int apply_semantics, size_t *section_reorder_target, int depth,
+                                 const lds_tok_t *tok) {
     char *resolved;
     int rc;
 
@@ -2204,13 +2238,15 @@ static int handle_script_include(const char *current_path, strvec_t *include_sta
         lds_report_error(include_stack, tok, "failed to resolve INCLUDE path");
         return -1;
     }
-    rc = parse_linker_script_file_rec(resolved, include_stack, ast, ctx, obj, apply_semantics, depth + 1);
+    rc = parse_linker_script_file_rec(resolved, include_stack, ast, ctx, obj, apply_semantics, section_reorder_target,
+                                      depth + 1);
     free(resolved);
     return rc;
 }
 
 static int parse_linker_script_file_rec(const char *path, strvec_t *include_stack, lds_ast_t *ast, ld_ctx_t *ctx,
-                                        const elfobj_t *obj, int apply_semantics, int depth) {
+                                        const elfobj_t *obj, int apply_semantics, size_t *section_reorder_target,
+                                        int depth) {
     unsigned char *buf = NULL;
     size_t sz = 0;
     lds_lexer_t lx;
@@ -2221,7 +2257,10 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
     int paren_depth = 0;
     int pending_block_expect_lbrace = 0;
     int pending_block_depth = 0;
+    int pending_sections_block = 0;
+    int sections_block_depth = 0;
     char *pending_assign_name = NULL;
+    char *pending_output_section_name = NULL;
     int pending_assign_wait_eq = 0;
     int pending_assign_active = 0;
 
@@ -2294,7 +2333,8 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                 strvec_pop(include_stack);
                 return -1;
             }
-            if (handle_script_include(path, include_stack, ast, ctx, obj, apply_semantics, depth, &include_tok) != 0) {
+            if (handle_script_include(path, include_stack, ast, ctx, obj, apply_semantics, section_reorder_target,
+                                      depth, &include_tok) != 0) {
                 lds_tok_free(&include_tok);
                 lds_tok_free(&tok);
                 free(buf);
@@ -2325,6 +2365,37 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
             lds_tok_free(&tok);
             continue;
         }
+        if (sections_block_depth == 1 && pending_output_section_name != NULL && tok.kind == LDS_TOK_COLON) {
+            if (apply_semantics && obj != NULL && section_reorder_target != NULL &&
+                apply_script_output_section_order((elfobj_t *)obj, pending_output_section_name,
+                                                  section_reorder_target) != 0) {
+                lds_report_error(include_stack, &tok, "failed to apply SECTIONS output order");
+                lds_tok_free(&tok);
+                free(buf);
+                free(pending_assign_name);
+                free(pending_output_section_name);
+                strvec_pop(include_stack);
+                return -1;
+            }
+            free(pending_output_section_name);
+            pending_output_section_name = NULL;
+        } else if (sections_block_depth == 1 && tok.kind == LDS_TOK_IDENT && tok.text != NULL && tok.text[0] == '.' &&
+                   strcmp(tok.text, ".") != 0) {
+            free(pending_output_section_name);
+            pending_output_section_name = xstrdup(tok.text);
+            if (pending_output_section_name == NULL) {
+                lds_tok_free(&tok);
+                free(buf);
+                free(pending_assign_name);
+                free(pending_output_section_name);
+                strvec_pop(include_stack);
+                return -1;
+            }
+        } else if (pending_output_section_name != NULL &&
+                   (tok.kind == LDS_TOK_SEMI || tok.kind == LDS_TOK_LBRACE || tok.kind == LDS_TOK_RBRACE)) {
+            free(pending_output_section_name);
+            pending_output_section_name = NULL;
+        }
         if (!pending_assign_active && !pending_assign_wait_eq &&
             brace_depth == 0 && paren_depth == 0 && tok.kind == LDS_TOK_IDENT && tok.text != NULL) {
             if (strcmp(tok.text, "SECTIONS") == 0) {
@@ -2332,9 +2403,11 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                     lds_tok_free(&tok);
                     free(buf);
                     strvec_pop(include_stack);
+                    free(pending_output_section_name);
                     return -1;
                 }
                 pending_block_expect_lbrace = 1;
+                pending_sections_block = 1;
                 lds_tok_free(&tok);
                 continue;
             }
@@ -2343,6 +2416,7 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                     lds_tok_free(&tok);
                     free(buf);
                     strvec_pop(include_stack);
+                    free(pending_output_section_name);
                     return -1;
                 }
                 pending_block_expect_lbrace = 1;
@@ -2354,6 +2428,7 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                     lds_tok_free(&tok);
                     free(buf);
                     strvec_pop(include_stack);
+                    free(pending_output_section_name);
                     return -1;
                 }
                 pending_block_expect_lbrace = 1;
@@ -2365,6 +2440,7 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                     lds_tok_free(&tok);
                     free(buf);
                     strvec_pop(include_stack);
+                    free(pending_output_section_name);
                     return -1;
                 }
                 if (parse_script_assert_directive(&lx, include_stack, ctx, obj, apply_semantics, &tok) != 0) {
@@ -2405,27 +2481,41 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                 lds_tok_free(&tok);
                 free(buf);
                 strvec_pop(include_stack);
+                free(pending_output_section_name);
                 return -1;
             }
         }
         if (tok.kind == LDS_TOK_LBRACE) {
+            int started_sections_block = 0;
             brace_depth++;
             if (pending_block_expect_lbrace) {
                 pending_block_expect_lbrace = 0;
                 pending_block_depth = 1;
+                if (pending_sections_block) {
+                    sections_block_depth = 1;
+                    pending_sections_block = 0;
+                    started_sections_block = 1;
+                }
             } else if (pending_block_depth > 0) {
                 pending_block_depth++;
+            }
+            if (sections_block_depth > 0 && !started_sections_block) {
+                sections_block_depth++;
             }
         } else if (tok.kind == LDS_TOK_RBRACE) {
             if (brace_depth == 0) {
                 lds_report_error(include_stack, &tok, "unexpected '}'");
-                lds_tok_free(&tok);
-                free(buf);
-                strvec_pop(include_stack);
-                return -1;
-            }
+                    lds_tok_free(&tok);
+                    free(buf);
+                    strvec_pop(include_stack);
+                    free(pending_output_section_name);
+                    return -1;
+                }
             if (pending_block_depth > 0) {
                 pending_block_depth--;
+            }
+            if (sections_block_depth > 0) {
+                sections_block_depth--;
             }
             brace_depth--;
         } else if (tok.kind == LDS_TOK_LPAREN) {
@@ -2436,6 +2526,7 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                 lds_tok_free(&tok);
                 free(buf);
                 strvec_pop(include_stack);
+                free(pending_output_section_name);
                 return -1;
             }
             paren_depth--;
@@ -2474,6 +2565,7 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                 lds_tok_free(&tok);
                 free(buf);
                 free(pending_assign_name);
+                free(pending_output_section_name);
                 lds_tok_free(&assign_name_tok);
                 lds_tokvec_free(&assign_expr_tokens);
                 strvec_pop(include_stack);
@@ -2485,6 +2577,7 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
             lds_tok_free(&tok);
             free(buf);
             free(pending_assign_name);
+            free(pending_output_section_name);
             lds_tok_free(&assign_name_tok);
             lds_tokvec_free(&assign_expr_tokens);
             strvec_pop(include_stack);
@@ -2495,6 +2588,7 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
 
     free(buf);
     free(pending_assign_name);
+    free(pending_output_section_name);
     lds_tok_free(&assign_name_tok);
     lds_tokvec_free(&assign_expr_tokens);
     if (brace_depth != 0 || paren_depth != 0) {
@@ -2516,11 +2610,13 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
 static int parse_linker_script_file(const char *path, ld_ctx_t *ctx, const elfobj_t *obj, int apply_semantics) {
     strvec_t include_stack;
     lds_ast_t ast;
+    size_t section_reorder_target = 0;
     int rc;
 
     memset(&include_stack, 0, sizeof(include_stack));
     memset(&ast, 0, sizeof(ast));
-    rc = parse_linker_script_file_rec(path, &include_stack, &ast, ctx, obj, apply_semantics, 0);
+    rc = parse_linker_script_file_rec(path, &include_stack, &ast, ctx, obj, apply_semantics,
+                                      apply_semantics ? &section_reorder_target : NULL, 0);
     lds_ast_free(&ast);
     strvec_free(&include_stack);
     return rc;
@@ -8085,6 +8181,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
         objvec_free(&inputs);
         elf_close(out);
         return -1;
+    }
+    if (ctx->script_path != NULL) {
+        if (parse_linker_script_file(ctx->script_path, ctx, out, 1) != 0) {
+            symref_map_free(&undef_refs);
+            objvec_free(&inputs);
+            elf_close(out);
+            return -1;
+        }
     }
     if (ctx->gc_sections && gc_sections_by_reachability(out, ctx) != 0) {
         fprintf(stderr, "ld: --gc-sections failed during reachability sweep\n");
