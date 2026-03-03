@@ -149,11 +149,11 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-007.
 
 ### 5.3 ICF
-- [ ] Implement `--icf=safe` function/data folding.  
+- [x] Implement `--icf=safe` function/data folding.  
   Reqs: LD-O-004, LD-U-007.
-- [ ] Implement `--icf=all` extended fold mode.  
+- [x] Implement `--icf=all` extended fold mode.  
   Reqs: LD-O-004.
-- [ ] Add guardrails to prevent unsafe merges under reloc/metadata constraints.  
+- [x] Add guardrails to prevent unsafe merges under reloc/metadata constraints.  
   Reqs: LD-R-003.
 
 ---

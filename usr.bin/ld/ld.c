@@ -101,6 +101,7 @@ typedef struct {
     int export_dynamic;
     int gc_sections;
     int gc_print_sections;
+    int icf_mode; /* 0=off, 1=safe, 2=all */
     const char *out_path;
     const char *self_path;
     const char *entry_symbol;
@@ -2685,6 +2686,169 @@ static int gc_sections_by_reachability(elfobj_t *obj, const ld_ctx_t *ctx) {
     return 0;
 }
 
+static int is_icf_special_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    return strcmp(name, ".init_array") == 0 || strcmp(name, ".fini_array") == 0 ||
+           strcmp(name, ".preinit_array") == 0 || strcmp(name, ".dynamic") == 0 ||
+           strcmp(name, ".dynsym") == 0 || strcmp(name, ".dynstr") == 0;
+}
+
+static int is_icf_candidate_section(const elf_section_t *sec, int icf_mode) {
+    uint64_t flags;
+    uint32_t type;
+    const char *name;
+
+    if (sec == NULL || icf_mode == 0) {
+        return 0;
+    }
+    type = elf_section_type(sec);
+    flags = elf_section_flags(sec);
+    name = elf_section_name(sec);
+    if (type != SHT_PROGBITS || (flags & SHF_ALLOC) == 0) {
+        return 0;
+    }
+    if ((flags & SHF_GROUP) != 0) {
+        return 0;
+    }
+    if (is_icf_special_name(name)) {
+        return 0;
+    }
+    if (icf_mode == 1 && (flags & SHF_WRITE) != 0) {
+        return 0;
+    }
+    return 1;
+}
+
+static int sections_reloc_signature_equal(const elf_section_t *a, const elf_section_t *b) {
+    size_t ra_n;
+    size_t rb_n;
+    size_t i;
+
+    if (a == NULL || b == NULL) {
+        return 0;
+    }
+    ra_n = elf_section_reloc_count(a);
+    rb_n = elf_section_reloc_count(b);
+    if (ra_n != rb_n) {
+        return 0;
+    }
+    for (i = 0; i < ra_n; ++i) {
+        const elf_reloc_t *ra = elf_section_reloc_at((elf_section_t *)a, i);
+        const elf_reloc_t *rb = elf_section_reloc_at((elf_section_t *)b, i);
+        const elf_symbol_t *sa;
+        const elf_symbol_t *sb;
+        const char *na = NULL;
+        const char *nb = NULL;
+
+        if (ra == NULL || rb == NULL) {
+            return 0;
+        }
+        if (elf_reloc_offset(ra) != elf_reloc_offset(rb) || elf_reloc_type(ra) != elf_reloc_type(rb) ||
+            elf_reloc_addend(ra) != elf_reloc_addend(rb) || elf_reloc_has_addend(ra) != elf_reloc_has_addend(rb)) {
+            return 0;
+        }
+        sa = elf_reloc_symbol(ra);
+        sb = elf_reloc_symbol(rb);
+        na = sa != NULL ? elf_symbol_name(sa) : NULL;
+        nb = sb != NULL ? elf_symbol_name(sb) : NULL;
+        if ((na == NULL) != (nb == NULL)) {
+            return 0;
+        }
+        if (na != NULL && strcmp(na, nb) != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int sections_icf_equal(const elf_section_t *a, const elf_section_t *b) {
+    size_t asz = 0;
+    size_t bsz = 0;
+    const void *ad;
+    const void *bd;
+
+    if (a == NULL || b == NULL) {
+        return 0;
+    }
+    if (elf_section_type(a) != elf_section_type(b) || elf_section_flags(a) != elf_section_flags(b) ||
+        elf_section_align(a) != elf_section_align(b) || elf_section_size(a) != elf_section_size(b)) {
+        return 0;
+    }
+    ad = elf_section_data(a, &asz);
+    bd = elf_section_data(b, &bsz);
+    if (asz != bsz) {
+        return 0;
+    }
+    if (asz != 0 && (ad == NULL || bd == NULL || memcmp(ad, bd, asz) != 0)) {
+        return 0;
+    }
+    if (!sections_reloc_signature_equal(a, b)) {
+        return 0;
+    }
+    return 1;
+}
+
+static int icf_fold_section(elfobj_t *obj, size_t leader_idx, size_t dupe_idx) {
+    size_t i;
+    elf_section_t *dupe;
+    uint16_t dupe_shndx;
+    uint16_t leader_shndx;
+
+    if (obj == NULL || leader_idx >= elf_section_count(obj) || dupe_idx >= elf_section_count(obj)) {
+        return -1;
+    }
+    dupe = elf_section_get(obj, dupe_idx);
+    if (dupe == NULL) {
+        return -1;
+    }
+    dupe_shndx = (uint16_t)(dupe_idx + 1);
+    leader_shndx = (uint16_t)(leader_idx + 1);
+    for (i = 0; i < elf_symbol_count(obj); ++i) {
+        elf_symbol_t *sym = elf_symbol_at(obj, i);
+        if (sym == NULL) {
+            continue;
+        }
+        if (elf_symbol_shndx(sym) == dupe_shndx) {
+            if (elf_symbol_set_shndx(sym, leader_shndx) != ELF_OK) {
+                return -1;
+            }
+        }
+    }
+    if (elf_remove_section(obj, dupe) != ELF_OK) {
+        return -1;
+    }
+    return 0;
+}
+
+static int apply_identical_code_folding(elfobj_t *obj, const ld_ctx_t *ctx) {
+    size_t i;
+
+    if (obj == NULL || ctx == NULL || ctx->icf_mode == 0) {
+        return 0;
+    }
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        elf_section_t *leader = elf_section_get(obj, i);
+        size_t j;
+
+        if (!is_icf_candidate_section(leader, ctx->icf_mode)) {
+            continue;
+        }
+        for (j = i + 1; j < elf_section_count(obj);) {
+            elf_section_t *dupe = elf_section_get(obj, j);
+            if (!is_icf_candidate_section(dupe, ctx->icf_mode) || !sections_icf_equal(leader, dupe)) {
+                j++;
+                continue;
+            }
+            if (icf_fold_section(obj, i, j) != 0) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static int add_default_segments(elfobj_t *obj, const char *interp_path) {
     elf_segment_t *load_seg;
     uint32_t load_flags = 0x4;
@@ -3129,6 +3293,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
+    if (ctx->icf_mode != 0 && apply_identical_code_folding(out, ctx) != 0) {
+        fprintf(stderr, "ld: --icf fold pass failed\n");
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
 
     if (out_type == ET_REL) {
         if (write_map_file(ctx, &inputs, out) != 0) {
@@ -3413,6 +3584,36 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "--print-gc-sections") == 0) {
             ctx.gc_print_sections = 1;
+            continue;
+        }
+        if ((p = parse_arg_value(a, "--icf", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (strcmp(val, "safe") == 0) {
+                ctx.icf_mode = 1;
+            } else if (strcmp(val, "all") == 0) {
+                ctx.icf_mode = 2;
+            } else if (strcmp(val, "none") == 0) {
+                ctx.icf_mode = 0;
+            } else {
+                fprintf(stderr,
+                        "ld: unsupported --icf mode '%s' (supported: safe, all, none)\n",
+                        val);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                return 2;
+            }
             continue;
         }
         if (strcmp(a, "--start-group") == 0) {

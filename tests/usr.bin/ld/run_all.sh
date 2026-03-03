@@ -67,6 +67,8 @@ test_orphan_placement.sh|LD-S-004
 test_gc_sections_reachability.sh|LD-E-004
 test_gc_comdat_print.sh|LD-E-004 LD-U-010
 test_gc_sections_matrix.sh|LD-U-007 LD-E-004
+test_icf_safe.sh|LD-O-004 LD-U-007
+test_icf_all_data.sh|LD-O-004 LD-R-003
 test_defsym_undefined.sh|LD-U-005
 test_unresolved_provenance.sh|LD-U-010 LD-E-001
 test_symbol_resolution_diff.sh|LD-U-007 LD-E-003
