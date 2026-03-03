@@ -1276,6 +1276,27 @@ int main(int argc, char **argv) {
             ctx.entry_symbol = argv[++i];
             continue;
         }
+        if ((p = parse_arg_value(a, "--entry", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (val == NULL || val[0] == '\0') {
+                fprintf(stderr, "ld: --entry requires a non-empty symbol name\n");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
+            ctx.entry_symbol = val;
+            continue;
+        }
         if (strcmp(a, "-dynamic-linker") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);

@@ -44,6 +44,7 @@ done <<'EOF'
 test_link_32_64.sh|LD-U-002 LD-U-003
 test_mode_parser.sh|LD-U-010 LD-E-007
 test_unsupported_option_policy.sh|LD-U-010 LD-W-003
+test_entry_option.sh|LD-U-001 LD-U-009
 EOF
 
 echo
