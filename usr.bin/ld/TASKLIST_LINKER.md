@@ -33,7 +33,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-004. Stories: US-002.
 - [x] Implement `--start-group/--end-group` and `--whole-archive/--no-whole-archive`.  
   Reqs: LD-S-001, LD-U-004. Stories: US-002.
-- [ ] Implement `--as-needed/--no-as-needed`.  
+- [x] Implement `--as-needed/--no-as-needed`.  
   Reqs: LD-E-005. Stories: US-201.
 
 ### 1.3 Tooling options

@@ -34,6 +34,7 @@ typedef struct {
     ld_input_kind_t kind;
     ld_lib_mode_t lib_mode;
     int whole_archive;
+    int as_needed;
     char *text;
 } ld_input_t;
 
@@ -74,6 +75,7 @@ typedef struct {
     ld_compat_mode_t compat_mode;
     ld_lib_mode_t current_lib_mode;
     int current_whole_archive;
+    int current_as_needed;
     strvec_t lib_paths;
     inputvec_t inputs;
 } ld_ctx_t;
@@ -137,7 +139,7 @@ static void strvec_free(strvec_t *v) {
 }
 
 static int inputvec_push(inputvec_t *v, ld_input_kind_t kind, ld_lib_mode_t lib_mode, int whole_archive,
-                         const char *text) {
+                         int as_needed, const char *text) {
     ld_input_t *next;
 
     if (v->count == v->cap) {
@@ -153,6 +155,7 @@ static int inputvec_push(inputvec_t *v, ld_input_kind_t kind, ld_lib_mode_t lib_
     v->items[v->count].kind = kind;
     v->items[v->count].lib_mode = lib_mode;
     v->items[v->count].whole_archive = whole_archive ? 1 : 0;
+    v->items[v->count].as_needed = as_needed ? 1 : 0;
     if (text != NULL) {
         v->items[v->count].text = xstrdup(text);
         if (v->items[v->count].text == NULL) {
@@ -800,9 +803,54 @@ static int load_path_input(const char *path, const ld_ctx_t *ctx, objvec_t *objs
     return load_object_input(path, ctx, objs, state, quiet);
 }
 
+static int shared_object_matches_unresolved(const char *path, const ld_ctx_t *ctx, const symstate_t *state,
+                                            int *out_match) {
+    elfobj_t *obj = NULL;
+    size_t i;
+
+    *out_match = 0;
+    if (state == NULL || state->unresolved.count == 0) {
+        return 0;
+    }
+    if (elf_open(path, &obj) != ELF_OK) {
+        return -1;
+    }
+    if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
+        elf_close(obj);
+        return 0;
+    }
+    for (i = 0; i < elf_symbol_count(obj); ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(obj, i);
+        const char *name;
+        uint16_t shndx;
+        uint8_t bind;
+
+        if (sym == NULL) {
+            continue;
+        }
+        name = elf_symbol_name(sym);
+        if (name == NULL || name[0] == '\0') {
+            continue;
+        }
+        bind = elf_symbol_bind(sym);
+        if (bind != STB_GLOBAL && bind != STB_WEAK) {
+            continue;
+        }
+        shndx = elf_symbol_shndx(sym);
+        if (shndx != SHN_UNDEF && symset_contains(&state->unresolved, name)) {
+            *out_match = 1;
+            break;
+        }
+    }
+    elf_close(obj);
+    return 0;
+}
+
 static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state) {
     char *path_so = NULL;
     char *path_a = NULL;
+    int shared_matches = 0;
+    int have_shared_match = 0;
 
     if (in->lib_mode == LD_LIBMODE_STATIC) {
         path_a = resolve_library_path_suffix(ctx, in->text, ".a");
@@ -823,6 +871,15 @@ static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_
         free(path_so);
         return 0;
     }
+    if (path_so != NULL && in->as_needed) {
+        if (shared_object_matches_unresolved(path_so, ctx, state, &shared_matches) == 0) {
+            have_shared_match = 1;
+            if (!shared_matches) {
+                free(path_so);
+                return 0;
+            }
+        }
+    }
 
     path_a = resolve_library_path_suffix(ctx, in->text, ".a");
     if (path_a != NULL) {
@@ -837,6 +894,10 @@ static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_
     }
 
     if (path_so != NULL) {
+        if (in->as_needed && have_shared_match && !shared_matches) {
+            free(path_so);
+            return 0;
+        }
         fprintf(stderr,
                 "ld: cannot use shared library %s for this link (shared-object linking not implemented)\n",
                 path_so);
@@ -1481,6 +1542,7 @@ int main(int argc, char **argv) {
     ctx.compat_mode = LD_COMPAT_GNU;
     ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
     ctx.current_whole_archive = 0;
+    ctx.current_as_needed = 0;
 
     for (i = 1; i < argc; ++i) {
         const char *a = argv[i];
@@ -1601,9 +1663,17 @@ int main(int argc, char **argv) {
             ctx.current_whole_archive = 0;
             continue;
         }
+        if (strcmp(a, "--as-needed") == 0) {
+            ctx.current_as_needed = 1;
+            continue;
+        }
+        if (strcmp(a, "--no-as-needed") == 0) {
+            ctx.current_as_needed = 0;
+            continue;
+        }
         if (strcmp(a, "--start-group") == 0) {
             if (inputvec_push(&ctx.inputs, LD_INPUT_GROUP_START, ctx.current_lib_mode,
-                              ctx.current_whole_archive, NULL) != 0) {
+                              ctx.current_whole_archive, ctx.current_as_needed, NULL) != 0) {
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
                 return 1;
@@ -1612,7 +1682,7 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "--end-group") == 0) {
             if (inputvec_push(&ctx.inputs, LD_INPUT_GROUP_END, ctx.current_lib_mode,
-                              ctx.current_whole_archive, NULL) != 0) {
+                              ctx.current_whole_archive, ctx.current_as_needed, NULL) != 0) {
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
                 return 1;
@@ -1692,7 +1762,7 @@ int main(int argc, char **argv) {
                 val = argv[++i];
             }
             if (inputvec_push(&ctx.inputs, LD_INPUT_LIB, ctx.current_lib_mode,
-                              ctx.current_whole_archive, val) != 0) {
+                              ctx.current_whole_archive, ctx.current_as_needed, val) != 0) {
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
                 return 1;
@@ -1711,7 +1781,6 @@ int main(int argc, char **argv) {
             continue;
         }
         if (strcmp(a, "--gc-sections") == 0 || strcmp(a, "--strip-all") == 0 ||
-            strcmp(a, "--as-needed") == 0 || strcmp(a, "--no-as-needed") == 0 ||
             strcmp(a, "--build-id") == 0 || strcmp(a, "-s") == 0) {
             continue;
         }
@@ -1727,7 +1796,7 @@ int main(int argc, char **argv) {
             continue;
         }
         if (inputvec_push(&ctx.inputs, LD_INPUT_FILE, ctx.current_lib_mode,
-                          ctx.current_whole_archive, a) != 0) {
+                          ctx.current_whole_archive, ctx.current_as_needed, a) != 0) {
             inputvec_free(&ctx.inputs);
             strvec_free(&ctx.lib_paths);
             return 1;
