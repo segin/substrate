@@ -348,6 +348,25 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                     memcmp(src->data, dst->data, src->data_size) != 0)) {
             elf__set_err(out, ELF_ERR_FORMAT, ".ARM.attributes mismatch across inputs");
             return ELF_ERR_FORMAT;
+        } else if (action == ELF_LINK_MERGE_APPEND) {
+            if (dst->type != src->type) {
+                elf__set_err(out, ELF_ERR_FORMAT, "section type mismatch during merge");
+                (void)elf__append_diag(out, src->name);
+                return ELF_ERR_FORMAT;
+            }
+            if (src->addralign > dst->addralign) {
+                dst->addralign = src->addralign;
+            }
+            dst->flags |= src->flags;
+            if (src->entsize != 0) {
+                if (dst->entsize == 0) {
+                    dst->entsize = src->entsize;
+                } else if (dst->entsize != src->entsize) {
+                    elf__set_err(out, ELF_ERR_FORMAT, "section entsize mismatch during merge");
+                    (void)elf__append_diag(out, src->name);
+                    return ELF_ERR_FORMAT;
+                }
+            }
         }
 
         if (action == ELF_LINK_MERGE_REPLACE) {

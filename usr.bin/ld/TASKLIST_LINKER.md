@@ -133,7 +133,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 5. Section Merge, COMDAT, GC, ICF
 
 ### 5.1 Section merge core
-- [ ] Merge sections by output policy with alignment/max-flag handling.  
+- [x] Merge sections by output policy with alignment/max-flag handling.  
   Reqs: LD-U-008, LD-S-004.
 - [ ] Implement COMDAT/group leader selection and duplicate discard.  
   Reqs: LD-U-004, LD-S-004.
