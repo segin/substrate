@@ -222,8 +222,35 @@ void run_memcmp_tests(void) {
     ASSERT_TRUE(libc_memcmp(large1, large2, 1024) < 0, "Large buffers differ at end");
 }
 
+void run_strstr_tests(void) {
+    printf("Running strstr tests...\n");
+
+    // Basic tests
+    ASSERT_STREQ(libc_strstr("hello world", "world"), "world", "Basic substring at end");
+    ASSERT_STREQ(libc_strstr("hello world", "hello"), "hello world", "Basic substring at start");
+    ASSERT_STREQ(libc_strstr("hello world", "lo w"), "lo world", "Basic substring in middle");
+
+    // Empty strings
+    ASSERT_STREQ(libc_strstr("hello", ""), "hello", "Empty needle");
+    ASSERT_EQ((uintptr_t)libc_strstr("", "world"), 0, "Empty haystack");
+    ASSERT_STREQ(libc_strstr("", ""), "", "Both empty");
+
+    // Substring not found
+    ASSERT_EQ((uintptr_t)libc_strstr("hello", "world"), 0, "Substring not found");
+    ASSERT_EQ((uintptr_t)libc_strstr("he", "hello"), 0, "Needle longer than haystack");
+
+    // Overlapping / repeated substrings
+    ASSERT_STREQ(libc_strstr("aaaa", "aa"), "aaaa", "Overlapping substrings");
+    ASSERT_STREQ(libc_strstr("mississippi", "issip"), "issippi", "Complex overlap");
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
+    return true;
+}
+
+bool test_libc_strstr(void) {
+    run_strstr_tests();
     return true;
 }
 
@@ -254,6 +281,7 @@ int main(void) {
     run_strcat_tests();
     run_strtok_tests();
     run_memcmp_tests();
+    run_strstr_tests();
     return 0;
 }
 #endif
