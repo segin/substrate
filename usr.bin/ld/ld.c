@@ -132,6 +132,7 @@ typedef struct {
     ld_hash_style_t hash_style;
     const char *out_path;
     const char *self_path;
+    const char *script_path;
     const char *entry_symbol;
     const char *interp_path;
     const char *map_path;
@@ -155,7 +156,7 @@ static void usage(const char *prog) {
             "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] "
             "[-o output] [-L dir] [-l name] [-Bstatic|-Bdynamic] "
             "[--start-group ... --end-group] [--whole-archive|--no-whole-archive] "
-            "[-e symbol] [--allow-undefined] [-z text|notext|execstack|noexecstack|relro|norelro] "
+            "[-e symbol] [-T script] [--allow-undefined] [-z text|notext|execstack|noexecstack|relro|norelro] "
             "[--hash-style=sysv|gnu|both] "
             "[--compat=gnu|lld] input...\n",
             prog);
@@ -207,6 +208,15 @@ static void strvec_free(strvec_t *v) {
     v->items = NULL;
     v->count = 0;
     v->cap = 0;
+}
+
+static void strvec_pop(strvec_t *v) {
+    if (v == NULL || v->count == 0) {
+        return;
+    }
+    v->count--;
+    free(v->items[v->count]);
+    v->items[v->count] = NULL;
 }
 
 static int defsymvec_push(defsymvec_t *v, const char *name, uint64_t value) {
@@ -728,6 +738,420 @@ static int read_file(const char *path, unsigned char **out, size_t *out_sz) {
     *out = buf;
     *out_sz = (size_t)end;
     return 0;
+}
+
+typedef enum {
+    LDS_TOK_EOF = 0,
+    LDS_TOK_IDENT,
+    LDS_TOK_NUMBER,
+    LDS_TOK_STRING,
+    LDS_TOK_LBRACE,
+    LDS_TOK_RBRACE,
+    LDS_TOK_LPAREN,
+    LDS_TOK_RPAREN,
+    LDS_TOK_SEMI,
+    LDS_TOK_COLON,
+    LDS_TOK_COMMA,
+    LDS_TOK_EQUAL,
+    LDS_TOK_OTHER
+} lds_tok_kind_t;
+
+typedef struct {
+    lds_tok_kind_t kind;
+    char *text;
+    const char *path;
+    size_t line;
+    size_t col;
+} lds_tok_t;
+
+typedef struct {
+    const unsigned char *buf;
+    size_t len;
+    size_t pos;
+    const char *path;
+    size_t line;
+    size_t col;
+} lds_lexer_t;
+
+static void lds_tok_free(lds_tok_t *tok) {
+    if (tok == NULL) {
+        return;
+    }
+    free(tok->text);
+    tok->text = NULL;
+}
+
+static int lds_lex_push_text(lds_tok_t *tok, const unsigned char *start, size_t n) {
+    tok->text = (char *)malloc(n + 1);
+    if (tok->text == NULL) {
+        return -1;
+    }
+    memcpy(tok->text, start, n);
+    tok->text[n] = '\0';
+    return 0;
+}
+
+static int lds_is_ident_start(int c) {
+    return isalpha(c) || c == '_' || c == '.' || c == '/' || c == '$';
+}
+
+static int lds_is_ident_char(int c) {
+    return isalnum(c) || c == '_' || c == '.' || c == '/' || c == '$' || c == '-' || c == '+';
+}
+
+static void lds_advance(lds_lexer_t *lx) {
+    if (lx->pos >= lx->len) {
+        return;
+    }
+    if (lx->buf[lx->pos] == '\n') {
+        lx->line++;
+        lx->col = 1;
+    } else {
+        lx->col++;
+    }
+    lx->pos++;
+}
+
+static int lds_peek(const lds_lexer_t *lx, size_t off) {
+    if (lx->pos + off >= lx->len) {
+        return -1;
+    }
+    return lx->buf[lx->pos + off];
+}
+
+static int lds_skip_ws_comments(lds_lexer_t *lx) {
+    for (;;) {
+        int c = lds_peek(lx, 0);
+        if (c < 0) {
+            return 0;
+        }
+        if (isspace(c)) {
+            lds_advance(lx);
+            continue;
+        }
+        if (c == '/' && lds_peek(lx, 1) == '/') {
+            while ((c = lds_peek(lx, 0)) >= 0 && c != '\n') {
+                lds_advance(lx);
+            }
+            continue;
+        }
+        if (c == '/' && lds_peek(lx, 1) == '*') {
+            lds_advance(lx);
+            lds_advance(lx);
+            while ((c = lds_peek(lx, 0)) >= 0) {
+                if (c == '*' && lds_peek(lx, 1) == '/') {
+                    lds_advance(lx);
+                    lds_advance(lx);
+                    break;
+                }
+                lds_advance(lx);
+            }
+            if (c < 0) {
+                return -1;
+            }
+            continue;
+        }
+        return 0;
+    }
+}
+
+static int lds_lex_next(lds_lexer_t *lx, lds_tok_t *out) {
+    size_t start;
+    int c;
+
+    memset(out, 0, sizeof(*out));
+    out->path = lx->path;
+    out->line = lx->line;
+    out->col = lx->col;
+    if (lds_skip_ws_comments(lx) != 0) {
+        out->kind = LDS_TOK_OTHER;
+        out->text = xstrdup("<unterminated-comment>");
+        out->line = lx->line;
+        out->col = lx->col;
+        return out->text == NULL ? -1 : 0;
+    }
+    out->path = lx->path;
+    out->line = lx->line;
+    out->col = lx->col;
+    c = lds_peek(lx, 0);
+    if (c < 0) {
+        out->kind = LDS_TOK_EOF;
+        return 0;
+    }
+    if (lds_is_ident_start(c)) {
+        start = lx->pos;
+        while ((c = lds_peek(lx, 0)) >= 0 && lds_is_ident_char(c)) {
+            lds_advance(lx);
+        }
+        out->kind = LDS_TOK_IDENT;
+        return lds_lex_push_text(out, lx->buf + start, lx->pos - start);
+    }
+    if (isdigit(c)) {
+        start = lx->pos;
+        while ((c = lds_peek(lx, 0)) >= 0 && (isalnum(c) || c == 'x' || c == 'X')) {
+            lds_advance(lx);
+        }
+        out->kind = LDS_TOK_NUMBER;
+        return lds_lex_push_text(out, lx->buf + start, lx->pos - start);
+    }
+    if (c == '"') {
+        start = ++lx->pos;
+        lx->col++;
+        while ((c = lds_peek(lx, 0)) >= 0) {
+            if (c == '"') {
+                size_t end = lx->pos;
+                lds_advance(lx);
+                out->kind = LDS_TOK_STRING;
+                return lds_lex_push_text(out, lx->buf + start, end - start);
+            }
+            if (c == '\\' && lds_peek(lx, 1) >= 0) {
+                lds_advance(lx);
+            }
+            lds_advance(lx);
+        }
+        out->kind = LDS_TOK_OTHER;
+        out->text = xstrdup("<unterminated-string>");
+        return out->text == NULL ? -1 : 0;
+    }
+
+    lds_advance(lx);
+    switch (c) {
+    case '{': out->kind = LDS_TOK_LBRACE; break;
+    case '}': out->kind = LDS_TOK_RBRACE; break;
+    case '(': out->kind = LDS_TOK_LPAREN; break;
+    case ')': out->kind = LDS_TOK_RPAREN; break;
+    case ';': out->kind = LDS_TOK_SEMI; break;
+    case ':': out->kind = LDS_TOK_COLON; break;
+    case ',': out->kind = LDS_TOK_COMMA; break;
+    case '=': out->kind = LDS_TOK_EQUAL; break;
+    default:
+        out->kind = LDS_TOK_OTHER;
+        out->text = (char *)malloc(2);
+        if (out->text == NULL) {
+            return -1;
+        }
+        out->text[0] = (char)c;
+        out->text[1] = '\0';
+        break;
+    }
+    return 0;
+}
+
+static void lds_report_error(const strvec_t *include_stack, const lds_tok_t *tok, const char *msg) {
+    size_t i;
+    const char *path = tok != NULL && tok->path != NULL ? tok->path : "<script>";
+    size_t line = tok != NULL ? tok->line : 1;
+    size_t col = tok != NULL ? tok->col : 1;
+
+    fprintf(stderr, "ld: %s:%zu:%zu: linker script parse error: %s\n", path, line, col, msg != NULL ? msg : "error");
+    if (include_stack != NULL && include_stack->count > 1) {
+        fprintf(stderr, "ld: include stack:\n");
+        for (i = 0; i < include_stack->count; ++i) {
+            fprintf(stderr, "ld:   %s\n", include_stack->items[i]);
+        }
+    }
+}
+
+static char *dirname_copy(const char *path) {
+    const char *slash;
+    size_t n;
+    char *out;
+
+    if (path == NULL || path[0] == '\0') {
+        return xstrdup(".");
+    }
+    slash = strrchr(path, '/');
+    if (slash == NULL) {
+        return xstrdup(".");
+    }
+    n = (size_t)(slash - path);
+    if (n == 0) {
+        return xstrdup("/");
+    }
+    out = (char *)malloc(n + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, path, n);
+    out[n] = '\0';
+    return out;
+}
+
+static char *resolve_script_include_path(const char *parent_path, const char *name) {
+    char *dir;
+    char *joined;
+
+    if (name == NULL || name[0] == '\0') {
+        return NULL;
+    }
+    if (name[0] == '/') {
+        return xstrdup(name);
+    }
+    dir = dirname_copy(parent_path);
+    if (dir == NULL) {
+        return NULL;
+    }
+    joined = path_join(dir, name);
+    free(dir);
+    return joined;
+}
+
+static int parse_linker_script_file_rec(const char *path, strvec_t *include_stack, int depth);
+
+static int handle_script_include(const char *current_path, strvec_t *include_stack, int depth, const lds_tok_t *tok) {
+    char *resolved;
+    int rc;
+
+    if (tok == NULL || tok->text == NULL) {
+        return -1;
+    }
+    resolved = resolve_script_include_path(current_path, tok->text);
+    if (resolved == NULL) {
+        lds_report_error(include_stack, tok, "failed to resolve INCLUDE path");
+        return -1;
+    }
+    rc = parse_linker_script_file_rec(resolved, include_stack, depth + 1);
+    free(resolved);
+    return rc;
+}
+
+static int parse_linker_script_file_rec(const char *path, strvec_t *include_stack, int depth) {
+    unsigned char *buf = NULL;
+    size_t sz = 0;
+    lds_lexer_t lx;
+    lds_tok_t tok;
+    int brace_depth = 0;
+    int paren_depth = 0;
+
+    if (path == NULL || include_stack == NULL) {
+        return -1;
+    }
+    if (depth > 64) {
+        lds_tok_t fake;
+        memset(&fake, 0, sizeof(fake));
+        fake.path = path;
+        fake.line = 1;
+        fake.col = 1;
+        lds_report_error(include_stack, &fake, "INCLUDE depth exceeds limit (64)");
+        return -1;
+    }
+    if (strvec_push(include_stack, path) != 0) {
+        return -1;
+    }
+    if (read_file(path, &buf, &sz) != 0) {
+        lds_tok_t fake;
+        memset(&fake, 0, sizeof(fake));
+        fake.path = path;
+        fake.line = 1;
+        fake.col = 1;
+        lds_report_error(include_stack, &fake, "unable to read linker script");
+        strvec_pop(include_stack);
+        return -1;
+    }
+    memset(&lx, 0, sizeof(lx));
+    lx.buf = buf;
+    lx.len = sz;
+    lx.path = path;
+    lx.line = 1;
+    lx.col = 1;
+
+    for (;;) {
+        int rc = lds_lex_next(&lx, &tok);
+        if (rc != 0) {
+            free(buf);
+            strvec_pop(include_stack);
+            return -1;
+        }
+        if (tok.kind == LDS_TOK_EOF) {
+            lds_tok_free(&tok);
+            break;
+        }
+        if (tok.kind == LDS_TOK_OTHER && tok.text != NULL &&
+            (strcmp(tok.text, "<unterminated-comment>") == 0 || strcmp(tok.text, "<unterminated-string>") == 0)) {
+            lds_report_error(include_stack, &tok, tok.text);
+            lds_tok_free(&tok);
+            free(buf);
+            strvec_pop(include_stack);
+            return -1;
+        }
+        if (tok.kind == LDS_TOK_IDENT && tok.text != NULL && strcmp(tok.text, "INCLUDE") == 0) {
+            lds_tok_t include_tok;
+            if (lds_lex_next(&lx, &include_tok) != 0) {
+                lds_tok_free(&tok);
+                free(buf);
+                strvec_pop(include_stack);
+                return -1;
+            }
+            if (include_tok.kind != LDS_TOK_IDENT && include_tok.kind != LDS_TOK_STRING) {
+                lds_report_error(include_stack, &include_tok, "expected include file name after INCLUDE");
+                lds_tok_free(&include_tok);
+                lds_tok_free(&tok);
+                free(buf);
+                strvec_pop(include_stack);
+                return -1;
+            }
+            if (handle_script_include(path, include_stack, depth, &include_tok) != 0) {
+                lds_tok_free(&include_tok);
+                lds_tok_free(&tok);
+                free(buf);
+                strvec_pop(include_stack);
+                return -1;
+            }
+            lds_tok_free(&include_tok);
+            lds_tok_free(&tok);
+            continue;
+        }
+        if (tok.kind == LDS_TOK_LBRACE) {
+            brace_depth++;
+        } else if (tok.kind == LDS_TOK_RBRACE) {
+            if (brace_depth == 0) {
+                lds_report_error(include_stack, &tok, "unexpected '}'");
+                lds_tok_free(&tok);
+                free(buf);
+                strvec_pop(include_stack);
+                return -1;
+            }
+            brace_depth--;
+        } else if (tok.kind == LDS_TOK_LPAREN) {
+            paren_depth++;
+        } else if (tok.kind == LDS_TOK_RPAREN) {
+            if (paren_depth == 0) {
+                lds_report_error(include_stack, &tok, "unexpected ')'");
+                lds_tok_free(&tok);
+                free(buf);
+                strvec_pop(include_stack);
+                return -1;
+            }
+            paren_depth--;
+        }
+        lds_tok_free(&tok);
+    }
+
+    free(buf);
+    if (brace_depth != 0 || paren_depth != 0) {
+        lds_tok_t fake;
+        memset(&fake, 0, sizeof(fake));
+        fake.path = path;
+        fake.line = lx.line;
+        fake.col = lx.col;
+        lds_report_error(include_stack, &fake,
+                         brace_depth != 0 ? "unexpected end-of-file: missing '}'"
+                                          : "unexpected end-of-file: missing ')'");
+        strvec_pop(include_stack);
+        return -1;
+    }
+    strvec_pop(include_stack);
+    return 0;
+}
+
+static int parse_linker_script_file(const char *path) {
+    strvec_t include_stack;
+    int rc;
+
+    memset(&include_stack, 0, sizeof(include_stack));
+    rc = parse_linker_script_file_rec(path, &include_stack, 0);
+    strvec_free(&include_stack);
+    return rc;
 }
 
 static int parse_u64_dec(const char *s, size_t n, uint64_t *out) {
@@ -6985,15 +7409,27 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        if (strcmp(a, "-T") == 0) {
-            if (i + 1 >= argc) {
-                usage(argv[0]);
+        if ((p = parse_arg_value(a, "-T", &val)) != 0 || (p = parse_arg_value(a, "--script", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (val == NULL || val[0] == '\0') {
+                fprintf(stderr, "ld: -T/--script requires a path\n");
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
                 strvec_free(&ctx.trace_symbols);
                 return 2;
             }
-            ++i;
+            ctx.script_path = val;
             continue;
         }
         if (strcmp(a, "-z") == 0 || strncmp(a, "-z", 2) == 0) {
@@ -7062,6 +7498,18 @@ int main(int argc, char **argv) {
         strvec_free(&ctx.dso_inputs);
         dyn_import_vec_free(&ctx.dyn_imports);
         return 0;
+    }
+    if (ctx.script_path != NULL) {
+        if (parse_linker_script_file(ctx.script_path) != 0) {
+            inputvec_free(&ctx.inputs);
+            strvec_free(&ctx.lib_paths);
+            strvec_free(&ctx.trace_symbols);
+            strvec_free(&ctx.force_undefined);
+            defsymvec_free(&ctx.defsyms);
+            strvec_free(&ctx.dso_inputs);
+            dyn_import_vec_free(&ctx.dyn_imports);
+            return 2;
+        }
     }
     if (ctx.inputs.count == 0) {
         usage(argv[0]);

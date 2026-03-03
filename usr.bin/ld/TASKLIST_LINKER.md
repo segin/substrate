@@ -221,7 +221,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 8. Linker Script Engine
 
 ### 8.1 Parser and AST
-- [ ] Implement lexer/parser with source location and include stack context.  
+- [x] Implement lexer/parser with source location and include stack context.  
   Reqs: LD-E-007, LD-U-010.
 - [ ] Implement AST for `SECTIONS`, `PHDRS`, `MEMORY`, assignments, assertions.  
   Reqs: LD-S-004.
