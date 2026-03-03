@@ -2259,6 +2259,9 @@ static int check_undefined_symbols(elfobj_t *obj, int allow_undefined, const sym
         if (elf_symbol_bind(sym) == STB_GLOBAL) {
             const char *name = elf_symbol_name(sym);
             if (name != NULL && name[0] != '\0') {
+                if (strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0) {
+                    continue;
+                }
                 const char *src = refs != NULL ? symref_map_get(refs, name) : NULL;
                 if (src != NULL) {
                     fprintf(stderr, "ld: undefined reference to `%s` (referenced by %s)\n", name, src);
@@ -2374,6 +2377,12 @@ static int apply_all_relocations(elfobj_t *obj, int allow_undefined) {
                         "ld: relocation error: section=%s offset=0x%llx type=%u symbol=%s: %s\n",
                         sec_name, (unsigned long long)off, type, sym_name, elf_errstr(err));
                 return -1;
+            }
+            if (machine == EM_X86_64 &&
+                (type == R_X86_64_GOTPCRELX || type == R_X86_64_REX_GOTPCRELX) &&
+                off >= 2 && buf[off - 2] == 0x8b) {
+                /* Relax MOV r64, [rip+disp32] GOT load into LEA r64, [rip+disp32]. */
+                buf[off - 2] = 0x8d;
             }
             write_uint_bytes(buf + off, width, endian, outv);
         }
