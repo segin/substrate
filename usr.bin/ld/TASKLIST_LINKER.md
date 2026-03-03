@@ -143,9 +143,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 5.2 Garbage collection (`--gc-sections`)
 - [x] Build reachability graph from entry roots + explicit roots + KEEP roots.  
   Reqs: LD-E-004.
-- [ ] Implement COMDAT-aware mark/sweep and diagnostics (`--print-gc-sections`).  
+- [x] Implement COMDAT-aware mark/sweep and diagnostics (`--print-gc-sections`).  
   Reqs: LD-E-004, LD-U-010.
-- [ ] Add exhaustive GC correctness tests (function/data, ctors/dtors, COMDAT, weak refs).  
+- [x] Add exhaustive GC correctness tests (function/data, ctors/dtors, COMDAT, weak refs).  
   Reqs: LD-U-007.
 
 ### 5.3 ICF

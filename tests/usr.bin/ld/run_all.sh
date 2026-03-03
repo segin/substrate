@@ -65,6 +65,8 @@ test_section_merge_policy.sh|LD-U-008 LD-S-004
 test_comdat_discard.sh|LD-U-004 LD-S-004
 test_orphan_placement.sh|LD-S-004
 test_gc_sections_reachability.sh|LD-E-004
+test_gc_comdat_print.sh|LD-E-004 LD-U-010
+test_gc_sections_matrix.sh|LD-U-007 LD-E-004
 test_defsym_undefined.sh|LD-U-005
 test_unresolved_provenance.sh|LD-U-010 LD-E-001
 test_symbol_resolution_diff.sh|LD-U-007 LD-E-003

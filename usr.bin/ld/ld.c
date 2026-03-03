@@ -100,6 +100,7 @@ typedef struct {
     int trace_inputs;
     int export_dynamic;
     int gc_sections;
+    int gc_print_sections;
     const char *out_path;
     const char *self_path;
     const char *entry_symbol;
@@ -2560,6 +2561,33 @@ static int mark_live_section(uint8_t *live, size_t count, uint16_t shndx, int *c
     return 0;
 }
 
+static void mark_group_peers_live(elfobj_t *obj, uint8_t *live, size_t count, int *changed) {
+    size_t i;
+
+    for (i = 0; i < count; ++i) {
+        const elf_section_t *sec = elf_section_get(obj, i);
+        if (sec == NULL || !live[i]) {
+            continue;
+        }
+        if ((elf_section_flags(sec) & SHF_GROUP) == 0) {
+            continue;
+        }
+        {
+            size_t j;
+            for (j = 0; j < count; ++j) {
+                const elf_section_t *peer = elf_section_get(obj, j);
+                if (peer == NULL || live[j] || !is_gc_candidate_section(peer)) {
+                    continue;
+                }
+                if ((elf_section_flags(peer) & SHF_GROUP) != 0) {
+                    live[j] = 1;
+                    *changed = 1;
+                }
+            }
+        }
+    }
+}
+
 static int gc_sections_by_reachability(elfobj_t *obj, const ld_ctx_t *ctx) {
     uint8_t *live;
     size_t count;
@@ -2635,6 +2663,7 @@ static int gc_sections_by_reachability(elfobj_t *obj, const ld_ctx_t *ctx) {
                 }
             }
         }
+        mark_group_peers_live(obj, live, count, &changed);
     } while (changed);
 
     for (i = count; i > 0; --i) {
@@ -2642,6 +2671,10 @@ static int gc_sections_by_reachability(elfobj_t *obj, const ld_ctx_t *ctx) {
         elf_section_t *sec = elf_section_get(obj, idx);
         if (sec == NULL || !is_gc_candidate_section(sec) || live[idx]) {
             continue;
+        }
+        if (ctx->gc_print_sections) {
+            const char *name = elf_section_name(sec);
+            fprintf(stderr, "ld: gc-sections: removing %s\n", name != NULL ? name : "<unnamed>");
         }
         if (elf_remove_section(obj, sec) != ELF_OK) {
             free(live);
@@ -3376,6 +3409,10 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "--no-gc-sections") == 0) {
             ctx.gc_sections = 0;
+            continue;
+        }
+        if (strcmp(a, "--print-gc-sections") == 0) {
+            ctx.gc_print_sections = 1;
             continue;
         }
         if (strcmp(a, "--start-group") == 0) {
