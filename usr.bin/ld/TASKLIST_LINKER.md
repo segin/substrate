@@ -107,7 +107,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 4.1 Generic relocation framework
 - [ ] Formalize backend API (`size`, `is_pc_rel`, `apply`, overflow checks).  
   Reqs: LD-U-006, LD-R-003.
-- [ ] Ensure addend extraction rules for REL vs RELA are architecture-correct.  
+- [x] Ensure addend extraction rules for REL vs RELA are architecture-correct.  
   Reqs: LD-U-006.
 - [x] Add precise relocation error context (section+offset+symbol+type).  
   Reqs: LD-E-006, LD-U-010.

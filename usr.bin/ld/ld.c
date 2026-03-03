@@ -1888,6 +1888,43 @@ static int64_t sign_extend_u64(uint64_t v, int bits) {
     return (int64_t)((v ^ m) - m);
 }
 
+static int reloc_addend_is_signed(uint16_t machine, uint32_t type) {
+    if (elf_reloc_is_pc_relative_for_machine(machine, type)) {
+        return 1;
+    }
+    switch (machine) {
+    case EM_386:
+        switch (type) {
+        case R_386_GOT32:
+        case R_386_GOTOFF:
+        case R_386_TLS_TPOFF:
+        case R_386_TLS_IE:
+        case R_386_TLS_GOTIE:
+        case R_386_TLS_LE:
+        case R_386_TLS_GD:
+        case R_386_TLS_LDM:
+        case R_386_TLS_LDO_32:
+            return 1;
+        default:
+            return 0;
+        }
+    case EM_X86_64:
+        switch (type) {
+        case R_X86_64_32S:
+        case R_X86_64_TLSGD:
+        case R_X86_64_GOTTPOFF:
+        case R_X86_64_TPOFF32:
+        case R_X86_64_TLSLD:
+        case R_X86_64_DTPOFF32:
+            return 1;
+        default:
+            return 0;
+        }
+    default:
+        return 1;
+    }
+}
+
 static uint64_t read_uint_bytes(const uint8_t *p, int sz, elfobj_endian_t e) {
     uint64_t v = 0;
     int i;
@@ -2182,6 +2219,7 @@ static int check_undefined_symbols(elfobj_t *obj, int allow_undefined, const sym
 static int apply_all_relocations(elfobj_t *obj, int allow_undefined) {
     size_t i;
     elfobj_endian_t endian = elf_endian(obj);
+    uint16_t machine = elf_machine(obj);
 
     for (i = 0; i < elf_section_count(obj); ++i) {
         elf_section_t *sec = elf_section_get(obj, i);
@@ -2254,7 +2292,11 @@ static int apply_all_relocations(elfobj_t *obj, int allow_undefined) {
                 addend = elf_reloc_addend(rel);
             } else {
                 uint64_t raw = read_uint_bytes(buf + off, width, endian);
-                addend = sign_extend_u64(raw, width * 8);
+                if (reloc_addend_is_signed(machine, type)) {
+                    addend = sign_extend_u64(raw, width * 8);
+                } else {
+                    addend = (int64_t)raw;
+                }
             }
 
             sym = elf_reloc_symbol(rel);
