@@ -145,6 +145,18 @@ elf_err_t elf_section_set_align(elf_section_t *section, uint64_t align) {
     return ELF_OK;
 }
 
+elf_err_t elf_section_set_addr(elf_section_t *section, uint64_t addr) {
+    if (section == NULL || section->obj == NULL) {
+        return ELF_ERR_STATE;
+    }
+    if (!is_mutable_obj(section->obj)) {
+        return ELF_ERR_STATE;
+    }
+    section->addr = addr;
+    section->obj->dirty = 1;
+    return ELF_OK;
+}
+
 elf_err_t elf_section_set_type(elf_section_t *section, uint32_t type) {
     if (section == NULL || section->obj == NULL) {
         return ELF_ERR_STATE;

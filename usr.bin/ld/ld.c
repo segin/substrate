@@ -1,15 +1,11 @@
 #include "elfobj.h"
+#include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <unistd.h>
-
-#ifndef EM_X86_64
-#define EM_X86_64 62
-#endif
 
 typedef struct {
     char **items;
@@ -17,21 +13,47 @@ typedef struct {
     size_t cap;
 } strvec_t;
 
+typedef enum {
+    LD_INPUT_FILE = 0,
+    LD_INPUT_LIB = 1
+} ld_input_kind_t;
+
+typedef struct {
+    ld_input_kind_t kind;
+    char *text;
+} ld_input_t;
+
+typedef struct {
+    ld_input_t *items;
+    size_t count;
+    size_t cap;
+} inputvec_t;
+
+typedef struct {
+    elfobj_t **objs;
+    char **names;
+    size_t count;
+    size_t cap;
+} objvec_t;
+
 typedef struct {
     int mode; /* 32 or 64 */
     int explicit_mode;
     uint16_t expect_type;
+    int allow_undefined;
+    int query_version;
     const char *out_path;
     const char *self_path;
-    strvec_t pass;
-    strvec_t inputs;
+    const char *entry_symbol;
+    const char *interp_path;
+    strvec_t lib_paths;
+    inputvec_t inputs;
 } ld_ctx_t;
 
 static void usage(const char *prog) {
     fprintf(stderr,
-            "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] [-o output] "
-            "[-L dir] [-l name] [-T script] [--gc-sections] [--strip-all] "
-            "[--allow-undefined] input...\n",
+            "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] "
+            "[-o output] [-L dir] [-l name] [-e symbol] [--allow-undefined] input...\n",
             prog);
 }
 
@@ -54,7 +76,7 @@ static int strvec_push(strvec_t *v, const char *s) {
     char **next;
 
     if (v->count == v->cap) {
-        size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
+        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
         next = (char **)realloc(v->items, ncap * sizeof(*next));
         if (next == NULL) {
             return -1;
@@ -83,17 +105,86 @@ static void strvec_free(strvec_t *v) {
     v->cap = 0;
 }
 
-static int same_file(const char *a, const char *b) {
-    struct stat sa;
-    struct stat sb;
+static int inputvec_push(inputvec_t *v, ld_input_kind_t kind, const char *text) {
+    ld_input_t *next;
 
-    if (a == NULL || b == NULL) {
-        return 0;
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
+        next = (ld_input_t *)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        v->items = next;
+        v->cap = ncap;
     }
-    if (stat(a, &sa) != 0 || stat(b, &sb) != 0) {
-        return 0;
+
+    v->items[v->count].kind = kind;
+    v->items[v->count].text = xstrdup(text);
+    if (v->items[v->count].text == NULL) {
+        return -1;
     }
-    return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+    v->count++;
+    return 0;
+}
+
+static void inputvec_free(inputvec_t *v) {
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        free(v->items[i].text);
+    }
+    free(v->items);
+    v->items = NULL;
+    v->count = 0;
+    v->cap = 0;
+}
+
+static int objvec_push(objvec_t *v, elfobj_t *obj, const char *name) {
+    elfobj_t **new_objs;
+    char **new_names;
+    char *dup;
+
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
+        new_objs = (elfobj_t **)realloc(v->objs, ncap * sizeof(*new_objs));
+        if (new_objs == NULL) {
+            return -1;
+        }
+        new_names = (char **)realloc(v->names, ncap * sizeof(*new_names));
+        if (new_names == NULL) {
+            v->objs = new_objs;
+            return -1;
+        }
+        v->objs = new_objs;
+        v->names = new_names;
+        v->cap = ncap;
+    }
+
+    dup = xstrdup(name != NULL ? name : "<input>");
+    if (dup == NULL) {
+        return -1;
+    }
+    v->objs[v->count] = obj;
+    v->names[v->count] = dup;
+    v->count++;
+    return 0;
+}
+
+static void objvec_free(objvec_t *v) {
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        if (v->objs[i] != NULL) {
+            elf_close(v->objs[i]);
+        }
+        free(v->names[i]);
+    }
+    free(v->objs);
+    free(v->names);
+    v->objs = NULL;
+    v->names = NULL;
+    v->count = 0;
+    v->cap = 0;
 }
 
 static char *path_join(const char *dir, const char *leaf) {
@@ -121,108 +212,6 @@ static char *path_join(const char *dir, const char *leaf) {
     return out;
 }
 
-static char *find_backend_ld(const ld_ctx_t *ctx) {
-    const char *override = getenv("LD_BACKEND");
-    const char *path_env;
-    char *dup;
-    char *tok;
-    char *saveptr;
-
-    if (override != NULL && override[0] != '\0') {
-        if (strchr(override, '/') != NULL && same_file(override, ctx->self_path)) {
-            fprintf(stderr, "ld: LD_BACKEND resolves to this linker binary (%s)\n", override);
-            return NULL;
-        }
-        return xstrdup(override);
-    }
-
-    path_env = getenv("PATH");
-    if (path_env != NULL && path_env[0] != '\0') {
-        dup = xstrdup(path_env);
-        if (dup == NULL) {
-            return NULL;
-        }
-        for (tok = strtok_r(dup, ":", &saveptr); tok != NULL; tok = strtok_r(NULL, ":", &saveptr)) {
-            char *cand;
-
-            if (tok[0] == '\0') {
-                continue;
-            }
-            cand = path_join(tok, "ld");
-            if (cand == NULL) {
-                free(dup);
-                return NULL;
-            }
-            if (access(cand, X_OK) == 0) {
-                if (!same_file(cand, ctx->self_path)) {
-                    free(dup);
-                    return cand;
-                }
-            }
-            free(cand);
-        }
-        free(dup);
-    }
-
-    if (access("/usr/bin/ld", X_OK) == 0 && !same_file("/usr/bin/ld", ctx->self_path)) {
-        return xstrdup("/usr/bin/ld");
-    }
-    if (access("/bin/ld", X_OK) == 0 && !same_file("/bin/ld", ctx->self_path)) {
-        return xstrdup("/bin/ld");
-    }
-
-    fprintf(stderr, "ld: no backend linker found (set LD_BACKEND or adjust PATH)\n");
-    return NULL;
-}
-
-static int infer_mode_from_inputs(ld_ctx_t *ctx) {
-    size_t i;
-
-    for (i = 0; i < ctx->inputs.count; ++i) {
-        elfobj_t *obj = NULL;
-        if (elf_open(ctx->inputs.items[i], &obj) != ELF_OK) {
-            continue;
-        }
-        if (elf_class(obj) == ELFOBJ_CLASS_64 || elf_machine(obj) == EM_X86_64) {
-            ctx->mode = 64;
-            elf_close(obj);
-            return 0;
-        }
-        if (elf_class(obj) == ELFOBJ_CLASS_32 || elf_machine(obj) == EM_386) {
-            ctx->mode = 32;
-            elf_close(obj);
-            return 0;
-        }
-        elf_close(obj);
-    }
-
-    ctx->mode = 64;
-    return 0;
-}
-
-static int infer_mode_from_program_name(ld_ctx_t *ctx) {
-    const char *base;
-
-    if (ctx == NULL || ctx->self_path == NULL) {
-        return 0;
-    }
-    base = strrchr(ctx->self_path, '/');
-    if (base != NULL) {
-        base++;
-    } else {
-        base = ctx->self_path;
-    }
-    if (strstr(base, "x86_64") != NULL || strstr(base, "amd64") != NULL || strstr(base, "x64") != NULL) {
-        ctx->mode = 64;
-        return 1;
-    }
-    if (strstr(base, "i386") != NULL || strstr(base, "x86") != NULL || strstr(base, "32") != NULL) {
-        ctx->mode = 32;
-        return 1;
-    }
-    return 0;
-}
-
 static int default_mode(void) {
 #if defined(__x86_64__) || defined(__amd64__)
     return 64;
@@ -246,92 +235,726 @@ static int parse_mode_token(const char *tok) {
     return 0;
 }
 
-static int run_internal_rel_link(const ld_ctx_t *ctx) {
-    elfobj_t **objs = NULL;
-    size_t obj_count = 0;
-    elfobj_t *out = NULL;
-    elf_err_t err;
+static uint64_t align_up_u64(uint64_t v, uint64_t a) {
+    if (a <= 1) {
+        return v;
+    }
+    return (v + (a - 1)) & ~(a - 1);
+}
 
-    err = elf_link_load_objects((const char **)ctx->inputs.items, ctx->inputs.count, &objs, &obj_count);
-    if (err != ELF_OK) {
-        fprintf(stderr, "ld: failed to load input objects: %s\n", elf_errstr(err));
+static int has_suffix(const char *s, const char *suffix) {
+    size_t n;
+    size_t m;
+
+    if (s == NULL || suffix == NULL) {
+        return 0;
+    }
+    n = strlen(s);
+    m = strlen(suffix);
+    if (n < m) {
+        return 0;
+    }
+    return strcmp(s + (n - m), suffix) == 0;
+}
+
+static int read_file(const char *path, unsigned char **out, size_t *out_sz) {
+    FILE *fp;
+    long end;
+    size_t got;
+    unsigned char *buf;
+
+    *out = NULL;
+    *out_sz = 0;
+    fp = fopen(path, "rb");
+    if (fp == NULL) {
         return -1;
     }
-    err = elf_link(objs, obj_count, &out);
-    if (err != ELF_OK || out == NULL) {
-        fprintf(stderr, "ld: internal relocatable link failed: %s\n", out ? elf_last_diagnostics(out) : elf_errstr(err));
-        elf_link_unload_objects(objs, obj_count);
-        if (out != NULL) {
-            elf_close(out);
-        }
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
         return -1;
     }
-    err = elf_write_file(out, ctx->out_path);
-    if (err != ELF_OK) {
-        fprintf(stderr, "ld: failed to write output %s: %s\n", ctx->out_path, elf_errstr(err));
-        elf_link_unload_objects(objs, obj_count);
-        elf_close(out);
+    end = ftell(fp);
+    if (end < 0) {
+        fclose(fp);
+        return -1;
+    }
+    if (fseek(fp, 0, SEEK_SET) != 0) {
+        fclose(fp);
         return -1;
     }
 
-    elf_link_unload_objects(objs, obj_count);
-    elf_close(out);
+    buf = (unsigned char *)malloc((size_t)end);
+    if (buf == NULL && end != 0) {
+        fclose(fp);
+        return -1;
+    }
+    got = fread(buf, 1, (size_t)end, fp);
+    fclose(fp);
+    if (got != (size_t)end) {
+        free(buf);
+        return -1;
+    }
+
+    *out = buf;
+    *out_sz = (size_t)end;
     return 0;
 }
 
-static int run_ld_backend(const ld_ctx_t *ctx) {
-    const char *emu = ctx->mode == 64 ? "elf_x86_64" : "elf_i386";
-    size_t argc = 4 + ctx->pass.count;
-    char **argv = (char **)calloc(argc + 1, sizeof(*argv));
-    char *backend;
-    pid_t pid;
-    int status;
+static int parse_u64_dec(const char *s, size_t n, uint64_t *out) {
+    size_t i = 0;
+    uint64_t v = 0;
+    int saw = 0;
+
+    while (i < n && isspace((unsigned char)s[i])) {
+        i++;
+    }
+    for (; i < n; ++i) {
+        char c = s[i];
+        if (isspace((unsigned char)c)) {
+            break;
+        }
+        if (c < '0' || c > '9') {
+            return -1;
+        }
+        saw = 1;
+        v = v * 10 + (uint64_t)(c - '0');
+    }
+    if (!saw) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static void trim_trailing(char *s) {
+    size_t n;
+    while ((n = strlen(s)) > 0) {
+        char c = s[n - 1];
+        if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+            s[n - 1] = '\0';
+            continue;
+        }
+        break;
+    }
+}
+
+static char *decode_ar_name(const char *raw_name16, const unsigned char *member_data, uint64_t member_size,
+                            const char *strtab, size_t strtab_sz, size_t *name_extra) {
+    char raw[17];
+    char *out;
+    uint64_t ext_len = 0;
+
+    memcpy(raw, raw_name16, 16);
+    raw[16] = '\0';
+    trim_trailing(raw);
+    if (strcmp(raw, "/") == 0 || strcmp(raw, "__.SYMDEF") == 0 || strcmp(raw, "__.SYMDEF SORTED") == 0) {
+        *name_extra = 0;
+        return xstrdup(raw);
+    }
+    if (strcmp(raw, "//") == 0) {
+        *name_extra = 0;
+        return xstrdup(raw);
+    }
+    if (strncmp(raw, "#1/", 3) == 0) {
+        if (parse_u64_dec(raw + 3, strlen(raw + 3), &ext_len) != 0 || ext_len > member_size) {
+            return NULL;
+        }
+        out = (char *)malloc((size_t)ext_len + 1);
+        if (out == NULL) {
+            return NULL;
+        }
+        memcpy(out, member_data, (size_t)ext_len);
+        out[ext_len] = '\0';
+        *name_extra = (size_t)ext_len;
+        return out;
+    }
+    if (raw[0] == '/' && isdigit((unsigned char)raw[1]) && strtab != NULL) {
+        uint64_t off = 0;
+        size_t i;
+        size_t n = 0;
+        if (parse_u64_dec(raw + 1, strlen(raw + 1), &off) != 0 || off >= strtab_sz) {
+            return NULL;
+        }
+        for (i = (size_t)off; i < strtab_sz; ++i) {
+            char c = strtab[i];
+            if (c == '\0' || c == '\n' || c == '/') {
+                break;
+            }
+            n++;
+        }
+        out = (char *)malloc(n + 1);
+        if (out == NULL) {
+            return NULL;
+        }
+        memcpy(out, strtab + off, n);
+        out[n] = '\0';
+        *name_extra = 0;
+        return out;
+    }
+    if (raw[0] != '\0') {
+        size_t n = strlen(raw);
+        if (n > 0 && raw[n - 1] == '/') {
+            raw[n - 1] = '\0';
+        }
+    }
+    *name_extra = 0;
+    return xstrdup(raw);
+}
+
+static int obj_matches_mode(const elfobj_t *obj, int mode) {
+    if (mode == 64) {
+        return elf_class(obj) == ELFOBJ_CLASS_64 && elf_machine(obj) == EM_X86_64;
+    }
+    return elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386;
+}
+
+static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t *objs) {
+    unsigned char *buf = NULL;
+    size_t sz = 0;
+    size_t off = 8;
+    const char *strtab = NULL;
+    size_t strtab_sz = 0;
+
+    if (read_file(path, &buf, &sz) != 0) {
+        fprintf(stderr, "ld: cannot read archive %s\n", path);
+        return -1;
+    }
+    if (sz < 8 || memcmp(buf, "!<arch>\n", 8) != 0) {
+        free(buf);
+        fprintf(stderr, "ld: unsupported archive format: %s\n", path);
+        return -1;
+    }
+
+    while (off + 60 <= sz) {
+        const unsigned char *hdr = buf + off;
+        uint64_t msize = 0;
+        const unsigned char *mdata;
+        char *mname;
+        size_t name_extra = 0;
+        size_t body_sz;
+
+        if (hdr[58] != '`' || hdr[59] != '\n') {
+            break;
+        }
+        if (parse_u64_dec((const char *)hdr + 48, 10, &msize) != 0) {
+            break;
+        }
+        off += 60;
+        if (off + (size_t)msize > sz) {
+            break;
+        }
+        mdata = buf + off;
+        mname = decode_ar_name((const char *)hdr, mdata, msize, strtab, strtab_sz, &name_extra);
+        if (mname == NULL) {
+            break;
+        }
+        if (name_extra > (size_t)msize) {
+            free(mname);
+            break;
+        }
+        body_sz = (size_t)msize - name_extra;
+        mdata += name_extra;
+
+        if (strcmp(mname, "//") == 0) {
+            strtab = (const char *)mdata;
+            strtab_sz = body_sz;
+        } else if (strcmp(mname, "/") != 0 && body_sz >= 4 &&
+                   mdata[0] == 0x7f && mdata[1] == 'E' && mdata[2] == 'L' && mdata[3] == 'F') {
+            elfobj_t *obj = NULL;
+            if (elf_open_memory(mdata, body_sz, &obj) == ELF_OK) {
+                if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode)) {
+                    char member_name[512];
+                    snprintf(member_name, sizeof(member_name), "%s(%s)", path, mname);
+                    if (objvec_push(objs, obj, member_name) != 0) {
+                        elf_close(obj);
+                        free(mname);
+                        free(buf);
+                        return -1;
+                    }
+                } else {
+                    elf_close(obj);
+                }
+            }
+        }
+        free(mname);
+        off += (size_t)msize;
+        if ((off & 1u) != 0) {
+            off++;
+        }
+    }
+
+    free(buf);
+    return 0;
+}
+
+static char *resolve_library_path(const ld_ctx_t *ctx, const char *name) {
+    static const char *default_dirs[] = {
+        "/usr/lib",
+        "/usr/local/lib"
+    };
+    char leaf[512];
     size_t i;
 
-    backend = find_backend_ld(ctx);
-    if (backend == NULL) {
-        return -1;
-    }
-
-    if (argv == NULL) {
-        free(backend);
-        return -1;
-    }
-
-    argv[0] = backend;
-    argv[1] = "-m";
-    argv[2] = (char *)emu;
-
-    for (i = 0; i < ctx->pass.count; ++i) {
-        argv[3 + i] = ctx->pass.items[i];
-    }
-    argv[3 + ctx->pass.count] = NULL;
-
-    pid = fork();
-    if (pid < 0) {
-        free(backend);
-        free(argv);
-        return -1;
-    }
-    if (pid == 0) {
-        if (strchr(argv[0], '/') != NULL) {
-            execv(argv[0], argv);
-        } else {
-            execvp(argv[0], argv);
+    snprintf(leaf, sizeof(leaf), "lib%s.a", name);
+    for (i = 0; i < ctx->lib_paths.count; ++i) {
+        char *cand = path_join(ctx->lib_paths.items[i], leaf);
+        if (cand != NULL && access(cand, R_OK) == 0) {
+            return cand;
         }
-        _exit(127);
+        free(cand);
     }
+    for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
+        char *cand = path_join(default_dirs[i], leaf);
+        if (cand != NULL && access(cand, R_OK) == 0) {
+            return cand;
+        }
+        free(cand);
+    }
+    return NULL;
+}
 
-    if (waitpid(pid, &status, 0) < 0) {
-        free(backend);
-        free(argv);
+static int load_input_file(const char *path, const ld_ctx_t *ctx, objvec_t *objs) {
+    elfobj_t *obj = NULL;
+
+    if (has_suffix(path, ".a")) {
+        return load_archive_members(path, ctx, objs);
+    }
+    if (elf_open(path, &obj) != ELF_OK) {
+        fprintf(stderr, "ld: failed to open input %s\n", path);
         return -1;
     }
-
-    free(backend);
-    free(argv);
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    if (!obj_matches_mode(obj, ctx->mode)) {
+        fprintf(stderr, "ld: input %s has mismatched class/machine\n", path);
+        elf_close(obj);
         return -1;
+    }
+    if (elf_type(obj) != ET_REL) {
+        fprintf(stderr, "ld: input %s is not relocatable (only ET_REL supported)\n", path);
+        elf_close(obj);
+        return -1;
+    }
+    if (objvec_push(objs, obj, path) != 0) {
+        elf_close(obj);
+        return -1;
+    }
+    return 0;
+}
+
+static int load_all_inputs(const ld_ctx_t *ctx, objvec_t *objs) {
+    size_t i;
+
+    for (i = 0; i < ctx->inputs.count; ++i) {
+        const ld_input_t *in = &ctx->inputs.items[i];
+        if (in->kind == LD_INPUT_FILE) {
+            if (load_input_file(in->text, ctx, objs) != 0) {
+                return -1;
+            }
+        } else {
+            char *lib_path = resolve_library_path(ctx, in->text);
+            if (lib_path == NULL) {
+                fprintf(stderr, "ld: cannot find -l%s\n", in->text);
+                return -1;
+            }
+            if (load_input_file(lib_path, ctx, objs) != 0) {
+                free(lib_path);
+                return -1;
+            }
+            free(lib_path);
+        }
+    }
+    return 0;
+}
+
+static int64_t sign_extend_u64(uint64_t v, int bits) {
+    uint64_t m;
+    if (bits <= 0 || bits >= 64) {
+        return (int64_t)v;
+    }
+    m = 1ULL << (bits - 1);
+    return (int64_t)((v ^ m) - m);
+}
+
+static uint64_t read_uint_bytes(const uint8_t *p, int sz, elfobj_endian_t e) {
+    uint64_t v = 0;
+    int i;
+    if (e == ELFOBJ_ENDIAN_BE) {
+        for (i = 0; i < sz; ++i) {
+            v = (v << 8) | (uint64_t)p[i];
+        }
+    } else {
+        for (i = sz - 1; i >= 0; --i) {
+            v = (v << 8) | (uint64_t)p[i];
+        }
+    }
+    return v;
+}
+
+static void write_uint_bytes(uint8_t *p, int sz, elfobj_endian_t e, uint64_t v) {
+    int i;
+    if (e == ELFOBJ_ENDIAN_BE) {
+        for (i = sz - 1; i >= 0; --i) {
+            p[i] = (uint8_t)(v & 0xffu);
+            v >>= 8;
+        }
+    } else {
+        for (i = 0; i < sz; ++i) {
+            p[i] = (uint8_t)(v & 0xffu);
+            v >>= 8;
+        }
+    }
+}
+
+static int resolve_symbol_addr(elfobj_t *obj, const elf_symbol_t *sym, int allow_undef,
+                               uint64_t *out_addr, const char **undef_name) {
+    uint16_t shndx;
+    uint8_t bind;
+    uint64_t value;
+
+    if (sym == NULL) {
+        *out_addr = 0;
+        return 0;
+    }
+
+    shndx = elf_symbol_shndx(sym);
+    bind = elf_symbol_bind(sym);
+    value = elf_symbol_value(sym);
+    if (shndx == SHN_UNDEF) {
+        if (allow_undef || bind == STB_WEAK) {
+            *out_addr = 0;
+            return 0;
+        }
+        if (undef_name != NULL) {
+            *undef_name = elf_symbol_name(sym);
+        }
+        return -1;
+    }
+    if (shndx == SHN_ABS || shndx == SHN_COMMON || shndx >= 0xff00) {
+        *out_addr = value;
+        return 0;
+    }
+    if (shndx == 0 || (size_t)(shndx - 1) >= elf_section_count(obj)) {
+        return -1;
+    }
+    *out_addr = elf_section_addr(elf_section_get(obj, (size_t)(shndx - 1))) + value;
+    return 0;
+}
+
+static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
+    uint64_t off;
+    uint64_t mem_end;
+    uint64_t ehsize;
+    uint64_t phentsz;
+    uint64_t phnum;
+    size_t i;
+
+    ehsize = elf_class(obj) == ELFOBJ_CLASS_64 ? 64u : 52u;
+    phentsz = elf_class(obj) == ELFOBJ_CLASS_64 ? 56u : 32u;
+    phnum = (uint64_t)elf_segment_count(obj);
+    if (phnum == 0) {
+        phnum = (uint64_t)elf_program_header_count(obj);
+    }
+    if (phnum == 0 && (elf_type(obj) == ET_EXEC || elf_type(obj) == ET_DYN)) {
+        int has_dynamic = 0;
+        int has_tls = 0;
+        int has_interp = 0;
+        phnum = 1;
+        for (i = 0; i < elf_section_count(obj); ++i) {
+            const elf_section_t *sec = elf_section_get(obj, i);
+            const char *nm = elf_section_name(sec);
+            if (sec == NULL) {
+                continue;
+            }
+            if (elf_section_type(sec) == SHT_DYNAMIC) {
+                has_dynamic = 1;
+            }
+            if ((elf_section_flags(sec) & SHF_TLS) != 0) {
+                has_tls = 1;
+            }
+            if (nm != NULL && strcmp(nm, ".interp") == 0) {
+                has_interp = 1;
+            }
+        }
+        if (has_dynamic) {
+            phnum++;
+        }
+        if (has_interp) {
+            phnum++;
+        }
+        if (has_tls) {
+            phnum++;
+        }
+    }
+
+    off = ehsize + phnum * phentsz;
+    mem_end = base_vaddr + off;
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        elf_section_t *sec = elf_section_get(obj, i);
+        uint64_t align;
+        uint64_t size;
+        uint64_t flags;
+        uint64_t file_off = 0;
+        uint64_t addr = 0;
+
+        if (sec == NULL) {
+            continue;
+        }
+        align = elf_section_align(sec);
+        if (align == 0) {
+            align = 1;
+        }
+        size = elf_section_size(sec);
+        flags = elf_section_flags(sec);
+
+        if (elf_section_type(sec) != SHT_NOBITS) {
+            off = align_up_u64(off, align);
+            file_off = off;
+            off += size;
+        }
+
+        if ((flags & SHF_ALLOC) != 0) {
+            if (elf_section_type(sec) == SHT_NOBITS) {
+                addr = align_up_u64(mem_end, align);
+            } else {
+                addr = base_vaddr + file_off;
+            }
+            if (addr + size > mem_end) {
+                mem_end = addr + size;
+            }
+            if (elf_section_set_addr(sec, addr) != ELF_OK) {
+                return -1;
+            }
+        } else if (elf_section_set_addr(sec, 0) != ELF_OK) {
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+static int add_default_segments(elfobj_t *obj, const char *interp_path) {
+    elf_segment_t *load_seg;
+    uint32_t load_flags = 0x4;
+    size_t i;
+
+    if (interp_path != NULL && interp_path[0] != '\0') {
+        if (elf_add_interp_segment(obj, interp_path) == NULL) {
+            return -1;
+        }
+    }
+
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        const elf_section_t *sec = elf_section_get(obj, i);
+        uint64_t flags;
+        if (sec == NULL) {
+            continue;
+        }
+        flags = elf_section_flags(sec);
+        if ((flags & SHF_ALLOC) == 0) {
+            continue;
+        }
+        if ((flags & SHF_EXECINSTR) != 0) {
+            load_flags |= 0x1;
+        }
+        if ((flags & SHF_WRITE) != 0) {
+            load_flags |= 0x2;
+        }
+    }
+
+    load_seg = elf_add_load_segment(obj, load_flags, 0x1000);
+    if (load_seg == NULL) {
+        return -1;
+    }
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        elf_section_t *sec = elf_section_get(obj, i);
+        if (sec == NULL) {
+            continue;
+        }
+        if ((elf_section_flags(sec) & SHF_ALLOC) == 0) {
+            continue;
+        }
+        if (elf_segment_add_section(load_seg, sec) != ELF_OK) {
+            return -1;
+        }
+    }
+
+    {
+        elf_section_t *dyn = elf_find_section(obj, ".dynamic");
+        if (dyn != NULL) {
+            elf_segment_t *dyn_seg = elf_add_dynamic_segment(obj, 8);
+            if (dyn_seg == NULL || elf_segment_add_section(dyn_seg, dyn) != ELF_OK) {
+                return -1;
+            }
+        }
+    }
+    {
+        elf_segment_t *tls_seg = NULL;
+        for (i = 0; i < elf_section_count(obj); ++i) {
+            elf_section_t *sec = elf_section_get(obj, i);
+            if (sec == NULL || (elf_section_flags(sec) & SHF_TLS) == 0) {
+                continue;
+            }
+            if (tls_seg == NULL) {
+                tls_seg = elf_add_tls_segment(obj, 8);
+                if (tls_seg == NULL) {
+                    return -1;
+                }
+            }
+            if (elf_segment_add_section(tls_seg, sec) != ELF_OK) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int set_entry_symbol(elfobj_t *obj, const char *entry_symbol, int require_entry) {
+    const elf_symbol_t *sym;
+    uint64_t addr = 0;
+
+    if (entry_symbol == NULL || entry_symbol[0] == '\0') {
+        return 0;
+    }
+    sym = elf_find_symbol(obj, entry_symbol);
+    if (sym == NULL || elf_symbol_shndx(sym) == SHN_UNDEF) {
+        if (require_entry) {
+            fprintf(stderr, "ld: entry symbol '%s' not found\n", entry_symbol);
+            return -1;
+        }
+        return 0;
+    }
+    if (resolve_symbol_addr(obj, sym, 0, &addr, NULL) != 0) {
+        fprintf(stderr, "ld: failed to resolve entry symbol '%s'\n", entry_symbol);
+        return -1;
+    }
+    if (elf_set_entry(obj, addr) != ELF_OK) {
+        fprintf(stderr, "ld: failed to set entry address\n");
+        return -1;
+    }
+    return 0;
+}
+
+static int check_undefined_symbols(elfobj_t *obj, int allow_undefined) {
+    size_t i;
+    if (allow_undefined) {
+        return 0;
+    }
+    for (i = 0; i < elf_symbol_count(obj); ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(obj, i);
+        if (sym == NULL) {
+            continue;
+        }
+        if (elf_symbol_shndx(sym) != SHN_UNDEF) {
+            continue;
+        }
+        if (elf_symbol_bind(sym) == STB_WEAK) {
+            continue;
+        }
+        if (elf_symbol_bind(sym) == STB_GLOBAL) {
+            const char *name = elf_symbol_name(sym);
+            if (name != NULL && name[0] != '\0') {
+                fprintf(stderr, "ld: undefined reference to `%s`\n", name);
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int apply_all_relocations(elfobj_t *obj, int allow_undefined) {
+    size_t i;
+    elfobj_endian_t endian = elf_endian(obj);
+
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        elf_section_t *sec = elf_section_get(obj, i);
+        uint8_t *buf;
+        const void *src;
+        size_t sec_sz;
+        size_t rc;
+        size_t ri;
+
+        if (sec == NULL) {
+            continue;
+        }
+        rc = elf_section_reloc_count(sec);
+        if (rc == 0) {
+            continue;
+        }
+        if (elf_section_type(sec) == SHT_NOBITS) {
+            fprintf(stderr, "ld: relocations against NOBITS section '%s' unsupported\n",
+                    elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+            return -1;
+        }
+        src = elf_section_data(sec, &sec_sz);
+        if (src == NULL || sec_sz == 0) {
+            fprintf(stderr, "ld: relocation target section '%s' has no data\n",
+                    elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+            return -1;
+        }
+        buf = (uint8_t *)malloc(sec_sz);
+        if (buf == NULL) {
+            return -1;
+        }
+        memcpy(buf, src, sec_sz);
+
+        for (ri = 0; ri < rc; ++ri) {
+            const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+            uint64_t off;
+            uint32_t type;
+            int64_t addend;
+            int width;
+            const elf_symbol_t *sym;
+            uint64_t S = 0;
+            uint64_t P;
+            uint64_t outv = 0;
+            const char *undef_name = NULL;
+            elf_err_t err;
+
+            if (rel == NULL) {
+                continue;
+            }
+            off = elf_reloc_offset(rel);
+            type = elf_reloc_type(rel);
+            width = elf_reloc_size_for_machine(elf_machine(obj), type);
+            if (width <= 0 || width > 8) {
+                free(buf);
+                fprintf(stderr, "ld: unsupported relocation width for type %u\n", type);
+                return -1;
+            }
+            if (off + (uint64_t)width > sec_sz) {
+                free(buf);
+                fprintf(stderr, "ld: relocation out of range in section '%s'\n",
+                        elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+                return -1;
+            }
+            if (elf_reloc_has_addend(rel)) {
+                addend = elf_reloc_addend(rel);
+            } else {
+                uint64_t raw = read_uint_bytes(buf + off, width, endian);
+                addend = sign_extend_u64(raw, width * 8);
+            }
+
+            sym = elf_reloc_symbol(rel);
+            if (resolve_symbol_addr(obj, sym, allow_undefined, &S, &undef_name) != 0) {
+                free(buf);
+                fprintf(stderr, "ld: unresolved relocation symbol `%s`\n",
+                        undef_name != NULL ? undef_name : "<unknown>");
+                return -1;
+            }
+            P = elf_section_addr(sec) + off;
+            err = elf_apply_relocation_value(obj, type, P, S, addend, &outv);
+            if (err != ELF_OK) {
+                free(buf);
+                fprintf(stderr, "ld: relocation apply failed (type=%u): %s\n", type, elf_errstr(err));
+                return -1;
+            }
+            write_uint_bytes(buf + off, width, endian, outv);
+        }
+
+        if (elf_section_set_data(sec, buf, sec_sz) != ELF_OK) {
+            free(buf);
+            return -1;
+        }
+        free(buf);
     }
     return 0;
 }
@@ -343,13 +966,11 @@ static int validate_output(const ld_ctx_t *ctx) {
         fprintf(stderr, "ld: failed to open output %s\n", ctx->out_path);
         return -1;
     }
-
     if (ctx->expect_type != 0 && elf_type(obj) != ctx->expect_type) {
         fprintf(stderr, "ld: wrong output ELF type\n");
         elf_close(obj);
         return -1;
     }
-
     if (ctx->mode == 64) {
         if (elf_class(obj) != ELFOBJ_CLASS_64 || elf_machine(obj) != EM_X86_64) {
             fprintf(stderr, "ld: expected x86_64 ELF64 output\n");
@@ -363,144 +984,321 @@ static int validate_output(const ld_ctx_t *ctx) {
             return -1;
         }
     }
-
     elf_close(obj);
     return 0;
+}
+
+static int run_internal_link(const ld_ctx_t *ctx) {
+    objvec_t inputs;
+    elfobj_t *out = NULL;
+    elf_err_t err;
+    uint16_t out_type;
+    uint64_t base_vaddr;
+
+    memset(&inputs, 0, sizeof(inputs));
+    if (load_all_inputs(ctx, &inputs) != 0) {
+        objvec_free(&inputs);
+        return -1;
+    }
+    if (inputs.count == 0) {
+        fprintf(stderr, "ld: no compatible relocatable input objects found\n");
+        objvec_free(&inputs);
+        return -1;
+    }
+
+    err = elf_link(inputs.objs, inputs.count, &out);
+    if (err != ELF_OK || out == NULL) {
+        fprintf(stderr, "ld: link merge failed: %s\n", out != NULL ? elf_last_diagnostics(out) : elf_errstr(err));
+        objvec_free(&inputs);
+        if (out != NULL) {
+            elf_close(out);
+        }
+        return -1;
+    }
+
+    out_type = ctx->expect_type == 0 ? ET_EXEC : ctx->expect_type;
+    if (elf_set_type(out, out_type) != ELF_OK) {
+        fprintf(stderr, "ld: failed to set output type\n");
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+
+    if (out_type == ET_REL) {
+        if (elf_write_file(out, ctx->out_path) != ELF_OK) {
+            fprintf(stderr, "ld: failed to write output %s\n", ctx->out_path);
+            objvec_free(&inputs);
+            elf_close(out);
+            return -1;
+        }
+        if (chmod(ctx->out_path, 0644) != 0) {
+            fprintf(stderr, "ld: warning: failed to set output mode on %s: %s\n",
+                    ctx->out_path, strerror(errno));
+        }
+        objvec_free(&inputs);
+        elf_close(out);
+        return 0;
+    }
+
+    if (add_default_segments(out, ctx->interp_path) != 0) {
+        fprintf(stderr, "ld: failed to add output program segments\n");
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+
+    if (ctx->mode == 64) {
+        base_vaddr = (out_type == ET_DYN) ? 0x0ULL : 0x400000ULL;
+    } else {
+        base_vaddr = (out_type == ET_DYN) ? 0x0ULL : 0x08048000ULL;
+    }
+
+    if (assign_section_addresses(out, base_vaddr) != 0) {
+        fprintf(stderr, "ld: failed to assign section virtual addresses\n");
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+
+    if (check_undefined_symbols(out, ctx->allow_undefined || out_type == ET_DYN) != 0) {
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+
+    if (apply_all_relocations(out, ctx->allow_undefined || out_type == ET_DYN) != 0) {
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+
+    if (set_entry_symbol(out, ctx->entry_symbol != NULL ? ctx->entry_symbol : "_start",
+                         out_type == ET_EXEC) != 0) {
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+
+    if (elf_write_file(out, ctx->out_path) != ELF_OK) {
+        fprintf(stderr, "ld: failed to write output %s\n", ctx->out_path);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+    if (chmod(ctx->out_path, out_type == ET_EXEC ? 0755 : 0644) != 0) {
+        fprintf(stderr, "ld: warning: failed to set output mode on %s: %s\n",
+                ctx->out_path, strerror(errno));
+    }
+
+    objvec_free(&inputs);
+    elf_close(out);
+    return 0;
+}
+
+static int parse_arg_value(const char *arg, const char *opt, const char **out_val) {
+    size_t n = strlen(opt);
+    if (strncmp(arg, opt, n) != 0) {
+        return 0;
+    }
+    if (arg[n] == '\0') {
+        return 1;
+    }
+    *out_val = arg + n;
+    return 2;
 }
 
 int main(int argc, char **argv) {
     ld_ctx_t ctx;
     int i;
-    int query_version = 0;
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.out_path = "a.out";
     ctx.self_path = argv[0];
 
     for (i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--version") == 0 || strcmp(argv[i], "-v") == 0) {
-            query_version = 1;
+        const char *a = argv[i];
+        const char *val = NULL;
+        int p;
+
+        if (strcmp(a, "--help") == 0 || strcmp(a, "-h") == 0) {
+            usage(argv[0]);
+            inputvec_free(&ctx.inputs);
+            strvec_free(&ctx.lib_paths);
+            return 0;
+        }
+        if (strcmp(a, "--version") == 0 || strcmp(a, "-v") == 0) {
+            ctx.query_version = 1;
             continue;
         }
-        if (strcmp(argv[i], "-m32") == 0) {
+        if (strcmp(a, "-m32") == 0) {
             ctx.mode = 32;
             ctx.explicit_mode = 1;
             continue;
         }
-        if (strcmp(argv[i], "-m64") == 0) {
+        if (strcmp(a, "-m64") == 0) {
             ctx.mode = 64;
             ctx.explicit_mode = 1;
             continue;
         }
-        if (strcmp(argv[i], "-m") == 0) {
+        if (strcmp(a, "-m") == 0) {
             int m;
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.pass);
-                strvec_free(&ctx.inputs);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
                 return 2;
             }
-            m = parse_mode_token(argv[i + 1]);
+            m = parse_mode_token(argv[++i]);
             if (m == 0) {
-                fprintf(stderr, "ld: unsupported emulation '%s'\n", argv[i + 1]);
-                strvec_free(&ctx.pass);
-                strvec_free(&ctx.inputs);
+                fprintf(stderr, "ld: unsupported emulation '%s'\n", argv[i]);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
                 return 2;
             }
             ctx.mode = m;
             ctx.explicit_mode = 1;
-            if (strvec_push(&ctx.pass, argv[i]) != 0 || strvec_push(&ctx.pass, argv[i + 1]) != 0) {
-                strvec_free(&ctx.pass);
-                strvec_free(&ctx.inputs);
-                return 1;
-            }
-            ++i;
             continue;
         }
-
-        if (strcmp(argv[i], "-o") == 0) {
+        if (strcmp(a, "-o") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
-                strvec_free(&ctx.pass);
-                strvec_free(&ctx.inputs);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
                 return 2;
             }
-            ctx.out_path = argv[i + 1];
-            if (strvec_push(&ctx.pass, argv[i]) != 0 || strvec_push(&ctx.pass, argv[i + 1]) != 0) {
-                strvec_free(&ctx.pass);
-                strvec_free(&ctx.inputs);
+            ctx.out_path = argv[++i];
+            continue;
+        }
+        if (strcmp(a, "-r") == 0) {
+            ctx.expect_type = ET_REL;
+            continue;
+        }
+        if (strcmp(a, "-shared") == 0 || strcmp(a, "-pie") == 0) {
+            ctx.expect_type = ET_DYN;
+            continue;
+        }
+        if (strcmp(a, "-static") == 0) {
+            ctx.expect_type = ET_EXEC;
+            continue;
+        }
+        if (strcmp(a, "--allow-undefined") == 0) {
+            ctx.allow_undefined = 1;
+            continue;
+        }
+        if (strcmp(a, "-e") == 0) {
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
+            ctx.entry_symbol = argv[++i];
+            continue;
+        }
+        if (strcmp(a, "-dynamic-linker") == 0) {
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
+            ctx.interp_path = argv[++i];
+            continue;
+        }
+        if ((p = parse_arg_value(a, "-L", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    return 2;
+                }
+                val = argv[++i];
+            }
+            if (strvec_push(&ctx.lib_paths, val) != 0) {
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
                 return 1;
+            }
+            continue;
+        }
+        if ((p = parse_arg_value(a, "-l", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    return 2;
+                }
+                val = argv[++i];
+            }
+            if (inputvec_push(&ctx.inputs, LD_INPUT_LIB, val) != 0) {
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 1;
+            }
+            continue;
+        }
+
+        if (strcmp(a, "-z") == 0 || strcmp(a, "-T") == 0 || strcmp(a, "-Map") == 0) {
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
             }
             ++i;
             continue;
         }
-
-        if (strcmp(argv[i], "-r") == 0) {
-            ctx.expect_type = ET_REL;
-        } else if (strcmp(argv[i], "-shared") == 0 || strcmp(argv[i], "-pie") == 0) {
-            ctx.expect_type = ET_DYN;
-        } else if (strcmp(argv[i], "-static") == 0) {
-            ctx.expect_type = ET_EXEC;
+        if (strcmp(a, "--gc-sections") == 0 || strcmp(a, "--strip-all") == 0 ||
+            strcmp(a, "--as-needed") == 0 || strcmp(a, "--no-as-needed") == 0 ||
+            strcmp(a, "--build-id") == 0 || strcmp(a, "-s") == 0) {
+            continue;
         }
 
-        if (argv[i][0] != '-') {
-            if (strvec_push(&ctx.inputs, argv[i]) != 0) {
-                strvec_free(&ctx.pass);
-                strvec_free(&ctx.inputs);
-                return 1;
-            }
+        if (a[0] == '-') {
+            fprintf(stderr, "ld: warning: unsupported option ignored: %s\n", a);
+            continue;
         }
-
-        if (strvec_push(&ctx.pass, argv[i]) != 0) {
-            strvec_free(&ctx.pass);
-            strvec_free(&ctx.inputs);
+        if (inputvec_push(&ctx.inputs, LD_INPUT_FILE, a) != 0) {
+            inputvec_free(&ctx.inputs);
+            strvec_free(&ctx.lib_paths);
             return 1;
         }
     }
 
-    if (query_version && ctx.inputs.count == 0) {
-        printf("GNU ld (GNU Binutils) 2.40\n");
-        strvec_free(&ctx.pass);
-        strvec_free(&ctx.inputs);
+    if (ctx.query_version && ctx.inputs.count == 0) {
+        printf("Substrate ld (internal) 0.1\n");
+        inputvec_free(&ctx.inputs);
+        strvec_free(&ctx.lib_paths);
         return 0;
     }
-
     if (ctx.inputs.count == 0) {
         usage(argv[0]);
-        strvec_free(&ctx.pass);
-        strvec_free(&ctx.inputs);
+        inputvec_free(&ctx.inputs);
+        strvec_free(&ctx.lib_paths);
         return 2;
     }
 
     if (ctx.mode == 0) {
-        if (!infer_mode_from_program_name(&ctx)) {
-            infer_mode_from_inputs(&ctx);
-        }
-    }
-    if (ctx.mode == 0) {
         ctx.mode = default_mode();
     }
-
-    if (ctx.expect_type == ET_REL) {
-        if (run_internal_rel_link(&ctx) != 0) {
-            strvec_free(&ctx.pass);
-            strvec_free(&ctx.inputs);
-            return 1;
-        }
-    } else if (run_ld_backend(&ctx) != 0) {
-        fprintf(stderr, "ld: backend link failed\n");
-        strvec_free(&ctx.pass);
-        strvec_free(&ctx.inputs);
-        return 1;
+    if (ctx.expect_type == 0) {
+        ctx.expect_type = ET_EXEC;
     }
 
+    if (run_internal_link(&ctx) != 0) {
+        inputvec_free(&ctx.inputs);
+        strvec_free(&ctx.lib_paths);
+        return 1;
+    }
     if (validate_output(&ctx) != 0) {
-        strvec_free(&ctx.pass);
-        strvec_free(&ctx.inputs);
+        inputvec_free(&ctx.inputs);
+        strvec_free(&ctx.lib_paths);
         return 1;
     }
 
-    strvec_free(&ctx.pass);
-    strvec_free(&ctx.inputs);
+    inputvec_free(&ctx.inputs);
+    strvec_free(&ctx.lib_paths);
     return 0;
 }

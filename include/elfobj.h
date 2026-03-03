@@ -1212,6 +1212,7 @@ int elf_is_lazy_parse_enabled(const elfobj_t *obj);
 elf_section_t *elf_add_section(elfobj_t *obj, const char *name, uint32_t type, uint64_t flags);
 elf_err_t elf_section_set_data(elf_section_t *section, const void *data, size_t size);
 elf_err_t elf_section_set_align(elf_section_t *section, uint64_t align);
+elf_err_t elf_section_set_addr(elf_section_t *section, uint64_t addr);
 elf_err_t elf_section_set_type(elf_section_t *section, uint32_t type);
 elf_err_t elf_section_set_flags(elf_section_t *section, uint64_t flags);
 elf_err_t elf_section_set_name(elf_section_t *section, const char *name);
@@ -1355,6 +1356,7 @@ const char *elf_section_name(const elf_section_t *section);
 uint32_t elf_section_type(const elf_section_t *section);
 uint64_t elf_section_flags(const elf_section_t *section);
 uint64_t elf_section_addr(const elf_section_t *section);
+uint64_t elf_section_align(const elf_section_t *section);
 uint64_t elf_section_size(const elf_section_t *section);
 const void *elf_section_data(const elf_section_t *section, size_t *size_out);
 

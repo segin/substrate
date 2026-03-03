@@ -472,6 +472,16 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
             continue;
         }
 
+        if (existing->shndx == SHN_UNDEF && shndx != SHN_UNDEF) {
+            existing->bind = sym->bind;
+            existing->type = sym->type;
+            existing->value = value;
+            existing->size = sym->size;
+            existing->shndx = shndx;
+            existing->ver_index = sym->ver_index;
+            continue;
+        }
+
         if (existing->bind == STB_WEAK && sym->bind == STB_GLOBAL) {
             existing->bind = sym->bind;
             existing->type = sym->type;
