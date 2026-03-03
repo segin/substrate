@@ -1140,6 +1140,12 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
             symset_remove(&state->unresolved, name);
         }
     }
+    for (i = 0; i < ctx->dso_inputs.count; ++i) {
+        if (strcmp(ctx->dso_inputs.items[i], path) == 0) {
+            elf_close(obj);
+            return 0;
+        }
+    }
     if (strvec_push(&ctx->dso_inputs, path) != 0) {
         elf_close(obj);
         return -1;
@@ -1148,6 +1154,58 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
         fprintf(stderr, "ld: trace: dso %s\n", path);
     }
     elf_close(obj);
+    return 0;
+}
+
+static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
+    elf_section_t *dynstr;
+    size_t i;
+    size_t total = 1;
+    uint8_t *buf;
+    size_t off = 1;
+
+    if (ctx->dso_inputs.count == 0) {
+        return 0;
+    }
+    dynstr = elf_find_section(out, ".dynstr");
+    if (dynstr == NULL) {
+        dynstr = elf_add_section(out, ".dynstr", SHT_STRTAB, SHF_ALLOC);
+        if (dynstr == NULL) {
+            return -1;
+        }
+        if (elf_section_set_align(dynstr, 1) != ELF_OK) {
+            return -1;
+        }
+    }
+    for (i = 0; i < ctx->dso_inputs.count; ++i) {
+        const char *p = strrchr(ctx->dso_inputs.items[i], '/');
+        const char *name = p != NULL ? p + 1 : ctx->dso_inputs.items[i];
+        total += strlen(name) + 1;
+    }
+    buf = (uint8_t *)calloc(1, total);
+    if (buf == NULL) {
+        return -1;
+    }
+    for (i = 0; i < ctx->dso_inputs.count; ++i) {
+        const char *p = strrchr(ctx->dso_inputs.items[i], '/');
+        const char *name = p != NULL ? p + 1 : ctx->dso_inputs.items[i];
+        size_t n = strlen(name) + 1;
+        memcpy(buf + off, name, n);
+        if (elf_link_add_dynamic_entry(out, DT_NEEDED, off) != ELF_OK) {
+            free(buf);
+            return -1;
+        }
+        off += n;
+    }
+    if (elf_link_add_dynamic_entry(out, DT_NULL, 0) != ELF_OK) {
+        free(buf);
+        return -1;
+    }
+    if (elf_section_set_data(dynstr, buf, total) != ELF_OK) {
+        free(buf);
+        return -1;
+    }
+    free(buf);
     return 0;
 }
 
@@ -1960,6 +2018,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         objvec_free(&inputs);
         elf_close(out);
         return 0;
+    }
+
+    if (plan_dynamic_needed(ctx, out) != 0) {
+        fprintf(stderr, "ld: failed to plan dynamic DT_NEEDED entries\n");
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
     }
 
     if (add_default_segments(out, ctx->interp_path) != 0) {

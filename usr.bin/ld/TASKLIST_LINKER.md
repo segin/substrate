@@ -71,7 +71,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-004, LD-U-005.
 - [x] Integrate DSO symbol candidates into resolver with visibility/version awareness.  
   Reqs: LD-U-005, LD-S-003.
-- [ ] Implement DT_NEEDED planning with `--as-needed` gate.  
+- [x] Implement DT_NEEDED planning with `--as-needed` gate.  
   Reqs: LD-E-005. Stories: US-201.
 
 ---

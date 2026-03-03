@@ -56,6 +56,7 @@ test_malformed_object_hardening.sh|LD-R-001 LD-R-003 LD-R-004
 test_archive_formats.sh|LD-U-004 LD-R-002
 test_archive_parser_sanitization.sh|LD-R-004
 test_dso_import_only.sh|LD-U-004 LD-U-005
+test_dynamic_needed_as_needed.sh|LD-E-005 LD-S-003
 EOF
 
 echo
