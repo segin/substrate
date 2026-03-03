@@ -67,9 +67,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-R-004.
 
 ### 2.3 Shared object input support
-- [ ] Parse ET_DYN inputs as import-only providers (`.dynsym/.dynstr`).  
+- [x] Parse ET_DYN inputs as import-only providers (`.dynsym/.dynstr`).  
   Reqs: LD-U-004, LD-U-005.
-- [ ] Integrate DSO symbol candidates into resolver with visibility/version awareness.  
+- [x] Integrate DSO symbol candidates into resolver with visibility/version awareness.  
   Reqs: LD-U-005, LD-S-003.
 - [ ] Implement DT_NEEDED planning with `--as-needed` gate.  
   Reqs: LD-E-005. Stories: US-201.

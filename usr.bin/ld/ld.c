@@ -84,6 +84,7 @@ typedef struct {
     int current_as_needed;
     strvec_t lib_paths;
     strvec_t trace_symbols;
+    strvec_t dso_inputs;
     inputvec_t inputs;
 } ld_ctx_t;
 
@@ -1105,7 +1106,52 @@ static int shared_object_matches_unresolved(const char *path, const ld_ctx_t *ct
     return 0;
 }
 
-static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state) {
+static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
+    elfobj_t *obj = NULL;
+    size_t i;
+
+    if (elf_open(path, &obj) != ELF_OK) {
+        return -1;
+    }
+    if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
+        elf_close(obj);
+        return -1;
+    }
+    for (i = 0; i < elf_symbol_count(obj); ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(obj, i);
+        const char *name;
+        uint8_t bind;
+        uint16_t shndx;
+
+        if (sym == NULL) {
+            continue;
+        }
+        name = elf_symbol_name(sym);
+        if (name == NULL || name[0] == '\0') {
+            continue;
+        }
+        bind = elf_symbol_bind(sym);
+        shndx = elf_symbol_shndx(sym);
+        if ((bind == STB_GLOBAL || bind == STB_WEAK) && shndx != SHN_UNDEF) {
+            if (symset_add(&state->defined, name) != 0) {
+                elf_close(obj);
+                return -1;
+            }
+            symset_remove(&state->unresolved, name);
+        }
+    }
+    if (strvec_push(&ctx->dso_inputs, path) != 0) {
+        elf_close(obj);
+        return -1;
+    }
+    if (ctx->trace_inputs) {
+        fprintf(stderr, "ld: trace: dso %s\n", path);
+    }
+    elf_close(obj);
+    return 0;
+}
+
+static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state) {
     char *path_so = NULL;
     char *path_a = NULL;
     int shared_matches = 0;
@@ -1129,6 +1175,21 @@ static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_
     if (path_so != NULL && load_path_input(path_so, ctx, objs, state, in->whole_archive, 1) == 0) {
         free(path_so);
         return 0;
+    }
+    if (path_so != NULL && ctx->expect_type == ET_DYN) {
+        if (in->as_needed) {
+            if (shared_object_matches_unresolved(path_so, ctx, state, &shared_matches) == 0) {
+                have_shared_match = 1;
+                if (!shared_matches) {
+                    free(path_so);
+                    return 0;
+                }
+            }
+        }
+        if (register_dso_provider(ctx, path_so, state) == 0) {
+            free(path_so);
+            return 0;
+        }
     }
     if (path_so != NULL && in->as_needed) {
         if (shared_object_matches_unresolved(path_so, ctx, state, &shared_matches) == 0) {
@@ -1168,7 +1229,7 @@ static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_
     return -1;
 }
 
-static int process_input_once(const ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state) {
+static int process_input_once(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state) {
     if (in->kind == LD_INPUT_FILE) {
         return load_path_input(in->text, ctx, objs, state, in->whole_archive, 0);
     }
@@ -1178,7 +1239,7 @@ static int process_input_once(const ld_ctx_t *ctx, const ld_input_t *in, objvec_
     return 0;
 }
 
-static int load_group_inputs(const ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
+static int load_group_inputs(ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
                              size_t begin, size_t end) {
     int progress;
 
@@ -1201,7 +1262,7 @@ static int load_group_inputs(const ld_ctx_t *ctx, objvec_t *objs, symstate_t *st
     return 0;
 }
 
-static int load_all_inputs(const ld_ctx_t *ctx, objvec_t *objs) {
+static int load_all_inputs(ld_ctx_t *ctx, objvec_t *objs) {
     symstate_t state;
     size_t i;
 
@@ -1360,6 +1421,12 @@ static int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t 
     fprintf(fp, "\nInputs:\n");
     for (i = 0; i < inputs->count; ++i) {
         fprintf(fp, "  %s\n", inputs->names[i]);
+    }
+    if (ctx->dso_inputs.count > 0) {
+        fprintf(fp, "\nDSO Inputs:\n");
+        for (i = 0; i < ctx->dso_inputs.count; ++i) {
+            fprintf(fp, "  %s\n", ctx->dso_inputs.items[i]);
+        }
     }
 
     fprintf(fp, "\nSections:\n");
@@ -1993,6 +2060,7 @@ int main(int argc, char **argv) {
             inputvec_free(&ctx.inputs);
             strvec_free(&ctx.lib_paths);
             strvec_free(&ctx.trace_symbols);
+            strvec_free(&ctx.dso_inputs);
             return 0;
         }
         if ((p = parse_arg_value(a, "--compat=", &val)) != 0) {
@@ -2349,6 +2417,7 @@ int main(int argc, char **argv) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);
+        strvec_free(&ctx.dso_inputs);
         return 0;
     }
     if (ctx.inputs.count == 0) {
@@ -2356,6 +2425,7 @@ int main(int argc, char **argv) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);
+        strvec_free(&ctx.dso_inputs);
         return 2;
     }
 
@@ -2370,17 +2440,20 @@ int main(int argc, char **argv) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);
+        strvec_free(&ctx.dso_inputs);
         return 1;
     }
     if (validate_output(&ctx) != 0) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);
+        strvec_free(&ctx.dso_inputs);
         return 1;
     }
 
     inputvec_free(&ctx.inputs);
     strvec_free(&ctx.lib_paths);
     strvec_free(&ctx.trace_symbols);
+    strvec_free(&ctx.dso_inputs);
     return 0;
 }
