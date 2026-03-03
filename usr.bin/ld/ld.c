@@ -3032,11 +3032,13 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
 static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     elf_section_t *dynstr;
     elf_section_t *dynsym;
+    elf_section_t *versym_sec;
     elf_section_t *dynamic;
     elf_section_t *hash_sec = NULL;
     elf_section_t *gnu_hash_sec = NULL;
     uint8_t *dynstr_buf = NULL;
     uint8_t *dynsym_buf = NULL;
+    uint8_t *versym_buf = NULL;
     uint8_t *dynamic_buf = NULL;
     uint8_t *hash_buf = NULL;
     uint8_t *gnu_hash_buf = NULL;
@@ -3044,6 +3046,8 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     size_t dynstr_cap = 0;
     size_t dynsym_len = 0;
     size_t dynsym_cap = 0;
+    size_t versym_len = 0;
+    size_t versym_cap = 0;
     size_t dynamic_len = 0;
     size_t dynamic_cap = 0;
     size_t hash_sz = 0;
@@ -3083,6 +3087,16 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         }
     }
     if (elf_section_set_align(dynsym, elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4) != ELF_OK) {
+        return -1;
+    }
+    versym_sec = elf_find_section(out, ".gnu.version");
+    if (versym_sec == NULL) {
+        versym_sec = elf_add_section(out, ".gnu.version", SHT_GNU_versym, SHF_ALLOC);
+        if (versym_sec == NULL) {
+            return -1;
+        }
+    }
+    if (elf_section_set_align(versym_sec, 2) != ELF_OK) {
         return -1;
     }
     if (ctx->hash_style == LD_HASH_SYSV || ctx->hash_style == LD_HASH_BOTH) {
@@ -3154,12 +3168,26 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     if (dynsym_buf == NULL) {
         free(dynstr_buf);
         free(dynamic_buf);
+        free(versym_buf);
         free(hash_buf);
         free(gnu_hash_buf);
         return -1;
     }
     dynsym_len = entsz;
     dynsym_cap = entsz;
+    {
+        uint8_t v0[2];
+        write_u16_endian(v0, elf_endian(out), VER_NDX_LOCAL);
+        if (dynbuf_append(&versym_buf, &versym_len, &versym_cap, v0, sizeof(v0)) != 0) {
+            free(dynstr_buf);
+            free(dynsym_buf);
+            free(dynamic_buf);
+            free(versym_buf);
+            free(hash_buf);
+            free(gnu_hash_buf);
+            return -1;
+        }
+    }
 
     for (i = 0; i < elf_symbol_count(out); ++i) {
         const elf_symbol_t *sym = elf_symbol_at(out, i);
@@ -3168,6 +3196,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         uint8_t other;
         uint32_t name_off = 0;
         uint16_t shndx;
+        uint16_t version;
         uint64_t value;
         uint64_t size;
 
@@ -3178,6 +3207,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(versym_buf);
             free(hash_buf);
             free(gnu_hash_buf);
             return -1;
@@ -3208,9 +3238,27 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(versym_buf);
             free(hash_buf);
             free(gnu_hash_buf);
             return -1;
+        }
+        version = elf_symbol_version(sym);
+        if (version == 0) {
+            version = VER_NDX_GLOBAL;
+        }
+        {
+            uint8_t vraw[2];
+            write_u16_endian(vraw, elf_endian(out), version);
+            if (dynbuf_append(&versym_buf, &versym_len, &versym_cap, vraw, sizeof(vraw)) != 0) {
+                free(dynstr_buf);
+                free(dynsym_buf);
+                free(dynamic_buf);
+                free(versym_buf);
+                free(hash_buf);
+                free(gnu_hash_buf);
+                return -1;
+            }
         }
     }
 
@@ -3221,6 +3269,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(versym_buf);
             free(gnu_hash_buf);
             return -1;
         }
@@ -3232,6 +3281,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(versym_buf);
             free(hash_buf);
             return -1;
         }
@@ -3248,6 +3298,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(dynstr_buf);
         free(dynsym_buf);
         free(dynamic_buf);
+        free(versym_buf);
         free(hash_buf);
         free(gnu_hash_buf);
         return -1;
@@ -3259,6 +3310,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(versym_buf);
             free(hash_buf);
             free(gnu_hash_buf);
             return -1;
@@ -3276,6 +3328,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(versym_buf);
             free(hash_buf);
             free(gnu_hash_buf);
             return -1;
@@ -3292,6 +3345,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(versym_buf);
             free(hash_buf);
             free(gnu_hash_buf);
             return -1;
@@ -3307,6 +3361,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(versym_buf);
             free(hash_buf);
             free(gnu_hash_buf);
             return -1;
@@ -3318,6 +3373,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(dynstr_buf);
         free(dynsym_buf);
         free(dynamic_buf);
+        free(versym_buf);
         free(hash_buf);
         free(gnu_hash_buf);
         return -1;
@@ -3325,12 +3381,14 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
 
     if (elf_section_set_data(dynstr, dynstr_buf, dynstr_len) != ELF_OK ||
         elf_section_set_data(dynsym, dynsym_buf, dynsym_len) != ELF_OK ||
+        elf_section_set_data(versym_sec, versym_buf, versym_len) != ELF_OK ||
         elf_section_set_data(dynamic, dynamic_buf, dynamic_len) != ELF_OK ||
         (hash_sec != NULL && elf_section_set_data(hash_sec, hash_buf, hash_sz) != ELF_OK) ||
         (gnu_hash_sec != NULL && elf_section_set_data(gnu_hash_sec, gnu_hash_buf, gnu_hash_sz) != ELF_OK)) {
         free(dynstr_buf);
         free(dynsym_buf);
         free(dynamic_buf);
+        free(versym_buf);
         free(hash_buf);
         free(gnu_hash_buf);
         return -1;
@@ -3338,6 +3396,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     free(dynstr_buf);
     free(dynsym_buf);
     free(dynamic_buf);
+    free(versym_buf);
     free(hash_buf);
     free(gnu_hash_buf);
     return 0;
