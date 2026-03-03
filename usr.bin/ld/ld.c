@@ -1563,6 +1563,17 @@ typedef struct {
     size_t cap;
 } symrule_vec_t;
 
+typedef struct {
+    char *name;
+    const char *source;
+} symref_entry_t;
+
+typedef struct {
+    symref_entry_t *items;
+    size_t count;
+    size_t cap;
+} symref_map_t;
+
 static void symrule_free(symrule_vec_t *v) {
     size_t i;
 
@@ -1673,6 +1684,105 @@ static int check_symbol_precedence(ld_ctx_t *ctx, const objvec_t *inputs) {
         }
     }
     symrule_free(&table);
+    return 0;
+}
+
+static void symref_map_free(symref_map_t *m) {
+    size_t i;
+    size_t n;
+
+    if (m == NULL) {
+        return;
+    }
+    if (m->items == NULL || m->cap == 0) {
+        m->items = NULL;
+        m->count = 0;
+        m->cap = 0;
+        return;
+    }
+    n = m->count;
+    if (n > m->cap) {
+        n = m->cap;
+    }
+    for (i = 0; i < n; ++i) {
+        free(m->items[i].name);
+    }
+    free(m->items);
+    m->items = NULL;
+    m->count = 0;
+    m->cap = 0;
+}
+
+static const char *symref_map_get(const symref_map_t *m, const char *name) {
+    size_t i;
+    size_t n;
+
+    if (m == NULL || name == NULL || m->items == NULL || m->count == 0) {
+        return NULL;
+    }
+    n = m->count;
+    if (n > m->cap) {
+        n = m->cap;
+    }
+    for (i = 0; i < n; ++i) {
+        if (strcmp(m->items[i].name, name) == 0) {
+            return m->items[i].source;
+        }
+    }
+    return NULL;
+}
+
+static int symref_map_add(symref_map_t *m, const char *name, const char *source) {
+    symref_entry_t *next;
+
+    if (name == NULL || name[0] == '\0' || symref_map_get(m, name) != NULL) {
+        return 0;
+    }
+    if (m->count == m->cap) {
+        size_t ncap = m->cap == 0 ? 64 : m->cap * 2;
+        next = (symref_entry_t *)realloc(m->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        m->items = next;
+        m->cap = ncap;
+    }
+    m->items[m->count].name = xstrdup(name);
+    if (m->items[m->count].name == NULL) {
+        return -1;
+    }
+    m->items[m->count].source = source;
+    m->count++;
+    return 0;
+}
+
+static int collect_undefined_refs(const objvec_t *inputs, symref_map_t *out) {
+    size_t i;
+
+    memset(out, 0, sizeof(*out));
+    for (i = 0; i < inputs->count; ++i) {
+        elfobj_t *obj = inputs->objs[i];
+        size_t si;
+
+        for (si = 0; si < elf_symbol_count(obj); ++si) {
+            const elf_symbol_t *sym = elf_symbol_at(obj, si);
+            const char *name;
+            uint8_t bind;
+
+            if (sym == NULL || elf_symbol_shndx(sym) != SHN_UNDEF) {
+                continue;
+            }
+            bind = elf_symbol_bind(sym);
+            if (bind != STB_GLOBAL && bind != STB_WEAK) {
+                continue;
+            }
+            name = elf_symbol_name(sym);
+            if (symref_map_add(out, name, inputs->names[i]) != 0) {
+                symref_map_free(out);
+                return -1;
+            }
+        }
+    }
     return 0;
 }
 
@@ -2037,7 +2147,7 @@ static int set_entry_symbol(elfobj_t *obj, const char *entry_symbol, int require
     return 0;
 }
 
-static int check_undefined_symbols(elfobj_t *obj, int allow_undefined) {
+static int check_undefined_symbols(elfobj_t *obj, int allow_undefined, const symref_map_t *refs) {
     size_t i;
     if (allow_undefined) {
         return 0;
@@ -2056,7 +2166,12 @@ static int check_undefined_symbols(elfobj_t *obj, int allow_undefined) {
         if (elf_symbol_bind(sym) == STB_GLOBAL) {
             const char *name = elf_symbol_name(sym);
             if (name != NULL && name[0] != '\0') {
-                fprintf(stderr, "ld: undefined reference to `%s`\n", name);
+                const char *src = refs != NULL ? symref_map_get(refs, name) : NULL;
+                if (src != NULL) {
+                    fprintf(stderr, "ld: undefined reference to `%s` (referenced by %s)\n", name, src);
+                } else {
+                    fprintf(stderr, "ld: undefined reference to `%s`\n", name);
+                }
                 return -1;
             }
         }
@@ -2194,6 +2309,7 @@ static int validate_output(const ld_ctx_t *ctx) {
 
 static int run_internal_link(ld_ctx_t *ctx) {
     objvec_t inputs;
+    symref_map_t undef_refs;
     elfobj_t *out = NULL;
     elf_err_t err;
     uint16_t out_type;
@@ -2201,6 +2317,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     uint64_t base_vaddr;
 
     memset(&inputs, 0, sizeof(inputs));
+    memset(&undef_refs, 0, sizeof(undef_refs));
     if (load_all_inputs(ctx, &inputs) != 0) {
         objvec_free(&inputs);
         return -1;
@@ -2215,8 +2332,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         objvec_free(&inputs);
         return -1;
     }
+    if (collect_undefined_refs(&inputs, &undef_refs) != 0) {
+        objvec_free(&inputs);
+        return -1;
+    }
     if (inputs.count == 0) {
         fprintf(stderr, "ld: no compatible relocatable input objects found\n");
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         return -1;
     }
@@ -2224,6 +2346,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     err = elf_link(inputs.objs, inputs.count, &out);
     if (err != ELF_OK || out == NULL) {
         fprintf(stderr, "ld: link merge failed: %s\n", out != NULL ? elf_last_diagnostics(out) : elf_errstr(err));
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         if (out != NULL) {
             elf_close(out);
@@ -2238,11 +2361,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
     }
     if (elf_set_type(out, out_type) != ELF_OK) {
         fprintf(stderr, "ld: failed to set output type\n");
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (apply_defsyms(ctx, out) != 0) {
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -2250,12 +2375,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (out_type == ET_REL) {
         if (write_map_file(ctx, &inputs, out) != 0) {
+            symref_map_free(&undef_refs);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
         }
         if (elf_write_file(out, ctx->out_path) != ELF_OK) {
             fprintf(stderr, "ld: failed to write output %s\n", ctx->out_path);
+            symref_map_free(&undef_refs);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
@@ -2263,11 +2390,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         if (chmod(ctx->out_path, 0644) != 0) {
             if (ld_warn(ctx, "failed to set output mode on %s: %s",
                         ctx->out_path, strerror(errno)) != 0) {
+                symref_map_free(&undef_refs);
                 objvec_free(&inputs);
                 elf_close(out);
                 return -1;
             }
         }
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return 0;
@@ -2275,6 +2404,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (plan_dynamic_needed(ctx, out) != 0) {
         fprintf(stderr, "ld: failed to plan dynamic DT_NEEDED entries\n");
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -2282,6 +2412,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (add_default_segments(out, ctx->interp_path) != 0) {
         fprintf(stderr, "ld: failed to add output program segments\n");
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -2295,18 +2426,21 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (assign_section_addresses(out, base_vaddr) != 0) {
         fprintf(stderr, "ld: failed to assign section virtual addresses\n");
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
 
-    if (check_undefined_symbols(out, allow_undef_runtime) != 0) {
+    if (check_undefined_symbols(out, allow_undef_runtime, &undef_refs) != 0) {
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
 
     if (apply_all_relocations(out, allow_undef_runtime) != 0) {
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -2314,11 +2448,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (set_entry_symbol(out, ctx->entry_symbol != NULL ? ctx->entry_symbol : "_start",
                          out_type == ET_EXEC) != 0) {
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
     if (write_map_file(ctx, &inputs, out) != 0) {
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -2326,6 +2462,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (elf_write_file(out, ctx->out_path) != ELF_OK) {
         fprintf(stderr, "ld: failed to write output %s\n", ctx->out_path);
+        symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -2333,12 +2470,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
     if (chmod(ctx->out_path, out_type == ET_EXEC ? 0755 : 0644) != 0) {
         if (ld_warn(ctx, "failed to set output mode on %s: %s",
                     ctx->out_path, strerror(errno)) != 0) {
+            symref_map_free(&undef_refs);
             objvec_free(&inputs);
             elf_close(out);
             return -1;
         }
     }
 
+    symref_map_free(&undef_refs);
     objvec_free(&inputs);
     elf_close(out);
     return 0;

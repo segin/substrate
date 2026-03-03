@@ -61,6 +61,7 @@ test_symbol_precedence.sh|LD-U-005 LD-E-003
 test_unresolved_matrix.sh|LD-E-001 LD-E-002
 test_visibility_resolution.sh|LD-U-005 LD-S-003
 test_defsym_undefined.sh|LD-U-005
+test_unresolved_provenance.sh|LD-U-010 LD-E-001
 EOF
 
 echo
