@@ -97,7 +97,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 3.3 Diagnostics quality
 - [x] Emit unresolved and duplicate diagnostics with defining/reference provenance.  
   Reqs: LD-U-010, LD-E-001, LD-E-003. Stories: US-102.
-- [ ] Add symbol-resolution differential tests vs GNU ld and lld for mixed weak/common cases.  
+- [x] Add symbol-resolution differential tests vs GNU ld and lld for mixed weak/common cases.  
   Reqs: LD-U-007.
 
 ---
