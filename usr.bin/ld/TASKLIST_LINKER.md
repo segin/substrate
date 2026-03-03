@@ -223,7 +223,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 8.1 Parser and AST
 - [x] Implement lexer/parser with source location and include stack context.  
   Reqs: LD-E-007, LD-U-010.
-- [ ] Implement AST for `SECTIONS`, `PHDRS`, `MEMORY`, assignments, assertions.  
+- [x] Implement AST for `SECTIONS`, `PHDRS`, `MEMORY`, assignments, assertions.  
   Reqs: LD-S-004.
 
 ### 8.2 Evaluator

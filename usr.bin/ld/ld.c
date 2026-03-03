@@ -773,12 +773,76 @@ typedef struct {
     size_t col;
 } lds_lexer_t;
 
+typedef enum {
+    LDS_AST_SECTIONS = 0,
+    LDS_AST_PHDRS,
+    LDS_AST_MEMORY,
+    LDS_AST_ASSIGN,
+    LDS_AST_ASSERT
+} lds_ast_kind_t;
+
+typedef struct {
+    lds_ast_kind_t kind;
+    char *name;
+    const char *path;
+    size_t line;
+    size_t col;
+} lds_ast_node_t;
+
+typedef struct {
+    lds_ast_node_t *nodes;
+    size_t count;
+    size_t cap;
+} lds_ast_t;
+
 static void lds_tok_free(lds_tok_t *tok) {
     if (tok == NULL) {
         return;
     }
     free(tok->text);
     tok->text = NULL;
+}
+
+static void lds_ast_free(lds_ast_t *ast) {
+    size_t i;
+
+    if (ast == NULL) {
+        return;
+    }
+    for (i = 0; i < ast->count; ++i) {
+        free(ast->nodes[i].name);
+    }
+    free(ast->nodes);
+    ast->nodes = NULL;
+    ast->count = 0;
+    ast->cap = 0;
+}
+
+static int lds_ast_push(lds_ast_t *ast, lds_ast_kind_t kind, const char *name, const lds_tok_t *tok) {
+    lds_ast_node_t *next;
+
+    if (ast == NULL || tok == NULL) {
+        return -1;
+    }
+    if (ast->count == ast->cap) {
+        size_t ncap = ast->cap == 0 ? 16 : ast->cap * 2;
+        next = (lds_ast_node_t *)realloc(ast->nodes, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        ast->nodes = next;
+        ast->cap = ncap;
+    }
+    ast->nodes[ast->count].kind = kind;
+    ast->nodes[ast->count].name = name != NULL ? xstrdup(name) : NULL;
+    ast->nodes[ast->count].path = tok->path;
+    ast->nodes[ast->count].line = tok->line;
+    ast->nodes[ast->count].col = tok->col;
+    if (name != NULL && ast->nodes[ast->count].name == NULL) {
+        return -1;
+    }
+    ast->count++;
+    return 0;
 }
 
 static int lds_lex_push_text(lds_tok_t *tok, const unsigned char *start, size_t n) {
@@ -996,9 +1060,10 @@ static char *resolve_script_include_path(const char *parent_path, const char *na
     return joined;
 }
 
-static int parse_linker_script_file_rec(const char *path, strvec_t *include_stack, int depth);
+static int parse_linker_script_file_rec(const char *path, strvec_t *include_stack, lds_ast_t *ast, int depth);
 
-static int handle_script_include(const char *current_path, strvec_t *include_stack, int depth, const lds_tok_t *tok) {
+static int handle_script_include(const char *current_path, strvec_t *include_stack, lds_ast_t *ast, int depth,
+                                 const lds_tok_t *tok) {
     char *resolved;
     int rc;
 
@@ -1010,20 +1075,28 @@ static int handle_script_include(const char *current_path, strvec_t *include_sta
         lds_report_error(include_stack, tok, "failed to resolve INCLUDE path");
         return -1;
     }
-    rc = parse_linker_script_file_rec(resolved, include_stack, depth + 1);
+    rc = parse_linker_script_file_rec(resolved, include_stack, ast, depth + 1);
     free(resolved);
     return rc;
 }
 
-static int parse_linker_script_file_rec(const char *path, strvec_t *include_stack, int depth) {
+static int parse_linker_script_file_rec(const char *path, strvec_t *include_stack, lds_ast_t *ast, int depth) {
     unsigned char *buf = NULL;
     size_t sz = 0;
     lds_lexer_t lx;
     lds_tok_t tok;
     int brace_depth = 0;
     int paren_depth = 0;
+    int pending_block_expect_lbrace = 0;
+    int pending_block_depth = 0;
+    int pending_assert = 0;
+    int pending_assert_need_lparen = 0;
+    int pending_assert_depth = 0;
+    char *pending_assign_name = NULL;
+    int pending_assign_wait_eq = 0;
+    int pending_assign_active = 0;
 
-    if (path == NULL || include_stack == NULL) {
+    if (path == NULL || include_stack == NULL || ast == NULL) {
         return -1;
     }
     if (depth > 64) {
@@ -1090,7 +1163,7 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                 strvec_pop(include_stack);
                 return -1;
             }
-            if (handle_script_include(path, include_stack, depth, &include_tok) != 0) {
+            if (handle_script_include(path, include_stack, ast, depth, &include_tok) != 0) {
                 lds_tok_free(&include_tok);
                 lds_tok_free(&tok);
                 free(buf);
@@ -1101,8 +1174,65 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
             lds_tok_free(&tok);
             continue;
         }
+        if (brace_depth == 0 && paren_depth == 0 && tok.kind == LDS_TOK_IDENT && tok.text != NULL) {
+            if (strcmp(tok.text, "SECTIONS") == 0) {
+                if (lds_ast_push(ast, LDS_AST_SECTIONS, NULL, &tok) != 0) {
+                    lds_tok_free(&tok);
+                    free(buf);
+                    strvec_pop(include_stack);
+                    return -1;
+                }
+                pending_block_expect_lbrace = 1;
+                lds_tok_free(&tok);
+                continue;
+            }
+            if (strcmp(tok.text, "PHDRS") == 0) {
+                if (lds_ast_push(ast, LDS_AST_PHDRS, NULL, &tok) != 0) {
+                    lds_tok_free(&tok);
+                    free(buf);
+                    strvec_pop(include_stack);
+                    return -1;
+                }
+                pending_block_expect_lbrace = 1;
+                lds_tok_free(&tok);
+                continue;
+            }
+            if (strcmp(tok.text, "MEMORY") == 0) {
+                if (lds_ast_push(ast, LDS_AST_MEMORY, NULL, &tok) != 0) {
+                    lds_tok_free(&tok);
+                    free(buf);
+                    strvec_pop(include_stack);
+                    return -1;
+                }
+                pending_block_expect_lbrace = 1;
+                lds_tok_free(&tok);
+                continue;
+            }
+            if (strcmp(tok.text, "ASSERT") == 0) {
+                if (lds_ast_push(ast, LDS_AST_ASSERT, NULL, &tok) != 0) {
+                    lds_tok_free(&tok);
+                    free(buf);
+                    strvec_pop(include_stack);
+                    return -1;
+                }
+                pending_assert = 1;
+                pending_assert_need_lparen = 1;
+                lds_tok_free(&tok);
+                continue;
+            }
+            free(pending_assign_name);
+            pending_assign_name = xstrdup(tok.text);
+            pending_assign_wait_eq = pending_assign_name != NULL;
+            pending_assign_active = 0;
+        }
         if (tok.kind == LDS_TOK_LBRACE) {
             brace_depth++;
+            if (pending_block_expect_lbrace) {
+                pending_block_expect_lbrace = 0;
+                pending_block_depth = 1;
+            } else if (pending_block_depth > 0) {
+                pending_block_depth++;
+            }
         } else if (tok.kind == LDS_TOK_RBRACE) {
             if (brace_depth == 0) {
                 lds_report_error(include_stack, &tok, "unexpected '}'");
@@ -1111,9 +1241,18 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                 strvec_pop(include_stack);
                 return -1;
             }
+            if (pending_block_depth > 0) {
+                pending_block_depth--;
+            }
             brace_depth--;
         } else if (tok.kind == LDS_TOK_LPAREN) {
             paren_depth++;
+            if (pending_assert_need_lparen) {
+                pending_assert_need_lparen = 0;
+                pending_assert_depth = 1;
+            } else if (pending_assert_depth > 0) {
+                pending_assert_depth++;
+            }
         } else if (tok.kind == LDS_TOK_RPAREN) {
             if (paren_depth == 0) {
                 lds_report_error(include_stack, &tok, "unexpected ')'");
@@ -1122,12 +1261,57 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
                 strvec_pop(include_stack);
                 return -1;
             }
+            if (pending_assert_depth > 0) {
+                pending_assert_depth--;
+                if (pending_assert_depth == 0) {
+                    pending_assert = 0;
+                }
+            }
             paren_depth--;
+        }
+        if (pending_block_expect_lbrace && tok.kind != LDS_TOK_SEMI && tok.kind != LDS_TOK_COMMA) {
+            lds_report_error(include_stack, &tok, "expected '{' after block keyword");
+            lds_tok_free(&tok);
+            free(pending_assign_name);
+            free(buf);
+            strvec_pop(include_stack);
+            return -1;
+        }
+        if (pending_assert && pending_assert_need_lparen && tok.kind != LDS_TOK_SEMI && tok.kind != LDS_TOK_COMMA) {
+            lds_report_error(include_stack, &tok, "expected '(' after ASSERT");
+            lds_tok_free(&tok);
+            free(pending_assign_name);
+            free(buf);
+            strvec_pop(include_stack);
+            return -1;
+        }
+        if (pending_assign_wait_eq) {
+            if (tok.kind == LDS_TOK_EQUAL) {
+                lds_tok_t fake = tok;
+                if (lds_ast_push(ast, LDS_AST_ASSIGN, pending_assign_name, &fake) != 0) {
+                    lds_tok_free(&tok);
+                    free(pending_assign_name);
+                    free(buf);
+                    strvec_pop(include_stack);
+                    return -1;
+                }
+                pending_assign_wait_eq = 0;
+                pending_assign_active = 1;
+                free(pending_assign_name);
+                pending_assign_name = NULL;
+            } else if (tok.kind != LDS_TOK_IDENT && tok.kind != LDS_TOK_NUMBER && tok.kind != LDS_TOK_STRING) {
+                pending_assign_wait_eq = 0;
+                free(pending_assign_name);
+                pending_assign_name = NULL;
+            }
+        } else if (pending_assign_active && brace_depth == 0 && paren_depth == 0 && tok.kind == LDS_TOK_SEMI) {
+            pending_assign_active = 0;
         }
         lds_tok_free(&tok);
     }
 
     free(buf);
+    free(pending_assign_name);
     if (brace_depth != 0 || paren_depth != 0) {
         lds_tok_t fake;
         memset(&fake, 0, sizeof(fake));
@@ -1146,10 +1330,13 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
 
 static int parse_linker_script_file(const char *path) {
     strvec_t include_stack;
+    lds_ast_t ast;
     int rc;
 
     memset(&include_stack, 0, sizeof(include_stack));
-    rc = parse_linker_script_file_rec(path, &include_stack, 0);
+    memset(&ast, 0, sizeof(ast));
+    rc = parse_linker_script_file_rec(path, &include_stack, &ast, 0);
+    lds_ast_free(&ast);
     strvec_free(&include_stack);
     return rc;
 }
