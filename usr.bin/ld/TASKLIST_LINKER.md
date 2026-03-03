@@ -7,7 +7,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 
 ## 0. Program Controls and Definition of Done
 
-- [ ] Create `tests/usr.bin/ld/README.md` with test taxonomy and required naming conventions.  
+- [x] Create `tests/usr.bin/ld/README.md` with test taxonomy and required naming conventions.  
   Reqs: LD-U-007, LD-R-004. Stories: US-301.
 - [ ] Add requirement/story tag format to commit template for linker work.  
   Reqs: Traceability section. Stories: US-301.
