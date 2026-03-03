@@ -128,6 +128,10 @@ typedef struct {
     // Hints for Next Fit allocation
     uint32_t last_alloc_group;
     uint32_t last_alloc_bit;
+
+    // Active block group bitmap cache
+    uint32_t active_bg_group;
+    uint8_t *active_bg_bitmap;
 } ext2_fs_t;
 
 // EXT2 file/directory node context

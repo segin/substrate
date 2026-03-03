@@ -776,6 +776,12 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_fs.last_alloc_group = 0;
     ext2_fs.last_alloc_bit = 0;
 
+    // Initialize active block bitmap cache
+    ext2_fs.active_bg_group = (uint32_t)-1;
+    if (!ext2_fs.active_bg_bitmap) {
+        ext2_fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    }
+
     // Setup root node
     ext2_root_ctx.fs = &ext2_fs;
     ext2_root_ctx.inode_num = EXT2_ROOT_INO;
@@ -809,9 +815,6 @@ void ext2_init(void) {
 uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     if (!fs) return 0;
     
-    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
-    if (!bitmap_buf) return 0;
-    
     // Search each block group for a free block, starting from last allocation
     uint32_t start_group = fs->last_alloc_group;
     uint32_t group = start_group;
@@ -822,12 +825,17 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             continue;
         }
         
-        // Read the block bitmap
-        if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf) != fs->block_size) {
-            group = (group + 1) % fs->group_count;
-            continue;
+        // Read the block bitmap if it's not cached
+        if (fs->active_bg_group != group) {
+            fs->active_bg_group = (uint32_t)-1;
+            if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, fs->active_bg_bitmap) != fs->block_size) {
+                group = (group + 1) % fs->group_count;
+                continue;
+            }
+            fs->active_bg_group = group;
         }
         
+        uint8_t *bitmap_buf = fs->active_bg_bitmap;
         uint32_t bits_in_group = fs->blocks_per_group;
         uint32_t start_bit = (group == fs->last_alloc_group) ? fs->last_alloc_bit : 0;
         uint32_t found_idx = 0;
@@ -865,14 +873,12 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             fs->last_alloc_group = group;
             fs->last_alloc_bit = (found_idx + 1) % bits_in_group;
 
-            uma_zfree(ext2_block_cache, bitmap_buf);
             return block_num;
         }
 
         group = (group + 1) % fs->group_count;
     } while (group != start_group);
     
-    uma_zfree(ext2_block_cache, bitmap_buf);
     return 0; // No free blocks
 }
 
@@ -886,15 +892,17 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     
     if (group >= fs->group_count) return;
     
-    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
-    if (!bitmap_buf) return;
-    
-    // Read the block bitmap
-    if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf) != fs->block_size) {
-        uma_zfree(ext2_block_cache, bitmap_buf);
-        return;
+    // Read the block bitmap if it's not cached
+    if (fs->active_bg_group != group) {
+        fs->active_bg_group = (uint32_t)-1;
+        if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, fs->active_bg_bitmap) != fs->block_size) {
+            return;
+        }
+        fs->active_bg_group = group;
     }
     
+    uint8_t *bitmap_buf = fs->active_bg_bitmap;
+
     uint32_t byte_idx = index / 8;
     uint32_t bit_idx = index % 8;
     
@@ -909,8 +917,6 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     
     // Update superblock
     fs->sb.s_free_blocks_count++;
-
-    uma_zfree(ext2_block_cache, bitmap_buf);
 }
 
 // Allocate an inode
