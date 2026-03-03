@@ -50,6 +50,7 @@ test_group_and_whole_archive.sh|LD-S-001 LD-U-004
 test_as_needed.sh|LD-E-005
 test_tooling_options.sh|LD-U-011 LD-U-010
 test_warning_policies.sh|LD-W-003 LD-E-001
+test_input_validation_basic.sh|LD-U-012 LD-R-001
 EOF
 
 echo

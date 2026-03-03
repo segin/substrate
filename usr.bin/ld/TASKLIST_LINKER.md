@@ -49,7 +49,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 2. Input Format Support
 
 ### 2.1 ET_REL input loader
-- [ ] Validate ELF class/machine/endianness and reject incompatible inputs.  
+- [x] Validate ELF class/machine/endianness and reject incompatible inputs.  
   Reqs: LD-U-012, LD-R-001.
 - [ ] Parse symbols, relocations, groups, and section metadata needed for linking.  
   Reqs: LD-U-005, LD-U-006.

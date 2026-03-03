@@ -572,9 +572,13 @@ static char *decode_ar_name(const char *raw_name16, const unsigned char *member_
 
 static int obj_matches_mode(const elfobj_t *obj, int mode) {
     if (mode == 64) {
-        return elf_class(obj) == ELFOBJ_CLASS_64 && elf_machine(obj) == EM_X86_64;
+        return elf_class(obj) == ELFOBJ_CLASS_64 &&
+               elf_machine(obj) == EM_X86_64 &&
+               elf_endian(obj) == ELFOBJ_ENDIAN_LE;
     }
-    return elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386;
+    return elf_class(obj) == ELFOBJ_CLASS_32 &&
+           elf_machine(obj) == EM_386 &&
+           elf_endian(obj) == ELFOBJ_ENDIAN_LE;
 }
 
 static int symstate_note_object(symstate_t *state, elfobj_t *obj) {
@@ -773,7 +777,7 @@ static int load_object_input(const char *path, const ld_ctx_t *ctx, objvec_t *ob
     }
     if (!obj_matches_mode(obj, ctx->mode)) {
         if (!quiet) {
-            fprintf(stderr, "ld: input %s has mismatched class/machine\n", path);
+            fprintf(stderr, "ld: input %s has mismatched class/machine/endianness\n", path);
         }
         elf_close(obj);
         return -1;
