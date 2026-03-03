@@ -9,6 +9,170 @@ static int is_internal_section_name(const char *name) {
            strncmp(name, ".rela", 5) == 0;
 }
 
+typedef struct {
+    char **items;
+    size_t count;
+    size_t cap;
+} comdat_set_t;
+
+static int safe_str_has_nul(const uint8_t *data, size_t size, uint32_t off, const char **out_name) {
+    size_t i;
+
+    if (data == NULL || out_name == NULL || off >= size) {
+        return 0;
+    }
+    for (i = off; i < size; ++i) {
+        if (data[i] == '\0') {
+            *out_name = (const char *)(data + off);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void comdat_set_free(comdat_set_t *set) {
+    size_t i;
+
+    if (set == NULL) {
+        return;
+    }
+    for (i = 0; i < set->count; ++i) {
+        free(set->items[i]);
+    }
+    free(set->items);
+    set->items = NULL;
+    set->count = 0;
+    set->cap = 0;
+}
+
+static int comdat_set_contains(const comdat_set_t *set, const char *name) {
+    size_t i;
+
+    if (set == NULL || name == NULL) {
+        return 0;
+    }
+    for (i = 0; i < set->count; ++i) {
+        if (strcmp(set->items[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static elf_err_t comdat_set_add(comdat_set_t *set, const char *name) {
+    char **next;
+
+    if (set == NULL || name == NULL || name[0] == '\0' || comdat_set_contains(set, name)) {
+        return ELF_OK;
+    }
+    if (set->count == set->cap) {
+        size_t ncap = set->cap == 0 ? 16 : set->cap * 2;
+        next = (char **)realloc(set->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return ELF_ERR_OOM;
+        }
+        set->items = next;
+        set->cap = ncap;
+    }
+    set->items[set->count] = elf__strdup(name);
+    if (set->items[set->count] == NULL) {
+        return ELF_ERR_OOM;
+    }
+    set->count++;
+    return ELF_OK;
+}
+
+static char *group_signature_name(const elfobj_t *obj, const struct elf_section *group_sec) {
+    const struct elf_section *symtab;
+    const struct elf_section *strtab;
+    const uint8_t *symp;
+    uint32_t st_name = 0;
+    const char *sig_name = NULL;
+    size_t entsz;
+    size_t nsyms;
+
+    if (obj == NULL || group_sec == NULL || group_sec->type != SHT_GROUP) {
+        return NULL;
+    }
+    if (group_sec->link >= obj->section_count) {
+        return NULL;
+    }
+    symtab = obj->sections[group_sec->link];
+    if (symtab == NULL || (symtab->type != SHT_SYMTAB && symtab->type != SHT_DYNSYM) || symtab->data == NULL) {
+        return NULL;
+    }
+    entsz = (size_t)(symtab->entsize ? symtab->entsize : (obj->cls == ELFOBJ_CLASS_32 ? 16 : 24));
+    if (entsz == 0 || symtab->data_size % entsz != 0) {
+        return NULL;
+    }
+    nsyms = symtab->data_size / entsz;
+    if (group_sec->info >= nsyms) {
+        return NULL;
+    }
+    if (symtab->link >= obj->section_count) {
+        return NULL;
+    }
+    strtab = obj->sections[symtab->link];
+    if (strtab == NULL || strtab->type != SHT_STRTAB || strtab->data == NULL) {
+        return NULL;
+    }
+    symp = symtab->data + (group_sec->info * entsz);
+    st_name = elf__rd32(symp + 0, obj->endian);
+    if (!safe_str_has_nul(strtab->data, strtab->data_size, st_name, &sig_name) ||
+        sig_name == NULL || sig_name[0] == '\0') {
+        return NULL;
+    }
+    return elf__strdup(sig_name);
+}
+
+static elf_err_t mark_discarded_comdat_members(const struct elf_link_input *input, comdat_set_t *seen,
+                                                uint8_t *sec_discard) {
+    size_t i;
+
+    for (i = 0; i < input->obj->section_count; ++i) {
+        struct elf_section *sec = input->obj->sections[i];
+        const uint8_t *data;
+        size_t words;
+        uint32_t flags;
+        char *sig = NULL;
+        elf_err_t err;
+        size_t w;
+
+        if (sec == NULL || sec->type != SHT_GROUP || sec->data == NULL || sec->data_size < 4 ||
+            (sec->data_size % 4) != 0) {
+            continue;
+        }
+        data = sec->data;
+        words = sec->data_size / 4;
+        flags = elf__rd32(data, input->obj->endian);
+        if ((flags & 0x1u) == 0) {
+            continue;
+        }
+        sig = group_signature_name(input->obj, sec);
+        if (sig == NULL || sig[0] == '\0') {
+            free(sig);
+            continue;
+        }
+        if (comdat_set_contains(seen, sig)) {
+            sec_discard[i] = 1;
+            for (w = 1; w < words; ++w) {
+                uint32_t member = elf__rd32(data + (w * 4), input->obj->endian);
+                if (member < input->obj->section_count) {
+                    sec_discard[member] = 1;
+                }
+            }
+            free(sig);
+            continue;
+        }
+        err = comdat_set_add(seen, sig);
+        free(sig);
+        if (err != ELF_OK) {
+            return err;
+        }
+    }
+    return ELF_OK;
+}
+
 static int arm_float_conflict(uint32_t a, uint32_t b) {
     uint32_t ah = a & EF_ARM_ABI_FLOAT_HARD;
     uint32_t as = a & EF_ARM_ABI_FLOAT_SOFT;
@@ -309,8 +473,21 @@ static elf_err_t plan_push_map_entry(elf_link_plan_t *plan, const char *symbol_n
 
 static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                                 const struct elf_link_input *input,
-                                uint64_t *sec_bases, uint8_t *sec_included) {
+                                uint64_t *sec_bases, uint8_t *sec_included,
+                                comdat_set_t *comdat_seen) {
     size_t j;
+    uint8_t *sec_discard = NULL;
+    elf_err_t pre_err;
+
+    sec_discard = (uint8_t *)elf__calloc(input->obj->section_count, sizeof(sec_discard[0]));
+    if (sec_discard == NULL && input->obj->section_count != 0) {
+        return ELF_ERR_OOM;
+    }
+    pre_err = mark_discarded_comdat_members(input, comdat_seen, sec_discard);
+    if (pre_err != ELF_OK) {
+        free(sec_discard);
+        return pre_err;
+    }
 
     for (j = 0; j < input->obj->section_count; ++j) {
         struct elf_section *src = input->obj->sections[j];
@@ -319,6 +496,9 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         elf_err_t err;
 
         if (src == NULL || src->name == NULL || src->name[0] == '\0') {
+            continue;
+        }
+        if (src->type == SHT_GROUP || sec_discard[j]) {
             continue;
         }
         if (is_internal_section_name(src->name)) {
@@ -339,6 +519,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         if (dst == NULL) {
             dst = elf_add_section(out, src->name, src->type, src->flags);
             if (dst == NULL) {
+                free(sec_discard);
                 return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
             }
             dst->addralign = src->addralign;
@@ -347,11 +528,13 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                    (src->data_size != dst->data_size ||
                     memcmp(src->data, dst->data, src->data_size) != 0)) {
             elf__set_err(out, ELF_ERR_FORMAT, ".ARM.attributes mismatch across inputs");
+            free(sec_discard);
             return ELF_ERR_FORMAT;
         } else if (action == ELF_LINK_MERGE_APPEND) {
             if (dst->type != src->type) {
                 elf__set_err(out, ELF_ERR_FORMAT, "section type mismatch during merge");
                 (void)elf__append_diag(out, src->name);
+                free(sec_discard);
                 return ELF_ERR_FORMAT;
             }
             if (src->addralign > dst->addralign) {
@@ -364,6 +547,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
                 } else if (dst->entsize != src->entsize) {
                     elf__set_err(out, ELF_ERR_FORMAT, "section entsize mismatch during merge");
                     (void)elf__append_diag(out, src->name);
+                    free(sec_discard);
                     return ELF_ERR_FORMAT;
                 }
             }
@@ -372,12 +556,14 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         if (action == ELF_LINK_MERGE_REPLACE) {
             err = replace_section_data(dst, src);
             if (err != ELF_OK) {
+                free(sec_discard);
                 return err;
             }
             sec_bases[j] = 0;
         } else {
             err = append_section_data(dst, src->data, src->data_size, &sec_bases[j]);
             if (err != ELF_OK) {
+                free(sec_discard);
                 return err;
             }
             if (src->type == SHT_NOBITS && src->size > 0) {
@@ -389,6 +575,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
         sec_included[j] = 1;
     }
 
+    free(sec_discard);
     return ELF_OK;
 }
 
@@ -666,6 +853,7 @@ elf_err_t elf_link_plan_note_incremental(elf_link_plan_t *plan, const char *key,
 
 elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
     elfobj_t *out;
+    comdat_set_t comdat_seen;
     size_t i;
 
     if (plan == NULL || output == NULL || plan->input_count == 0) {
@@ -677,6 +865,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
     if (out == NULL) {
         return ELF_ERR_OOM;
     }
+    memset(&comdat_seen, 0, sizeof(comdat_seen));
 
     free_map_entries(plan);
     out->flags = plan->inputs[0].obj->flags;
@@ -711,7 +900,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
             return ELF_ERR_OOM;
         }
 
-        err = merge_sections(plan, out, in, sec_bases, sec_included);
+        err = merge_sections(plan, out, in, sec_bases, sec_included, &comdat_seen);
         if (err == ELF_OK) {
             err = merge_symbols(plan, out, in, sec_bases, sec_included, i);
         }
@@ -721,6 +910,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
         free(sec_bases);
         free(sec_included);
         if (err != ELF_OK) {
+            comdat_set_free(&comdat_seen);
             elf_close(out);
             return err;
         }
@@ -728,6 +918,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
                                              in->name != NULL ? in->name : "");
     }
 
+    comdat_set_free(&comdat_seen);
     *output = out;
     return ELF_OK;
 }

@@ -135,7 +135,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 5.1 Section merge core
 - [x] Merge sections by output policy with alignment/max-flag handling.  
   Reqs: LD-U-008, LD-S-004.
-- [ ] Implement COMDAT/group leader selection and duplicate discard.  
+- [x] Implement COMDAT/group leader selection and duplicate discard.  
   Reqs: LD-U-004, LD-S-004.
 - [ ] Implement orphan placement heuristics consistent with GNU defaults.  
   Reqs: LD-S-004.
