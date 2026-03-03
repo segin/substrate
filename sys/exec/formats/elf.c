@@ -217,27 +217,8 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
             
             // Now copy file data to the mapped segment via kernel space
             // We need to translate user VA to kernel VA via the physical address
-            // Simple approach: read directly into kernel buffer then copy page-by-page
+            // Simple approach: read directly from the file into the mapped kernel pages
             if (phdr.p_filesz > 0) {
-                // Allocate temporary buffer in kernel space for segment data
-                if (phdr.p_filesz > 1024*1024) {
-                    kprint("ELF: Segment too large\n");
-                    return 0;
-                }
-                uint8_t *segment_buffer = kmalloc(phdr.p_filesz);
-                if (!segment_buffer) {
-                    kprint("ELF: Failed to allocate memory for segment data\n");
-                    return 0;
-                }
-                
-                // Read entire segment into kernel buffer
-                if (file->read(file, phdr.p_offset, phdr.p_filesz, segment_buffer) != phdr.p_filesz) {
-                    kprint("ELF: Failed to read segment data\n");
-                    kfree(segment_buffer, phdr.p_filesz);
-                    return 0;
-                }
-                
-                // Copy from kernel buffer to mapped user pages (via kernel addresses)
                 uint32_t bytes_copied = 0;
                 for (int pi = 0; pi < num_pages && bytes_copied < phdr.p_filesz; pi++) {
                     uint32_t page_va = page_maps[pi].va;
@@ -259,13 +240,15 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
                         // Offset into segment data
                         uint32_t offset_in_segment = copy_start_va - segment_va;
                         
-                        // Copy to kernel-mapped page (pa is already virtual)
+                        // Read directly to kernel-mapped page (pa is already virtual)
                         uint8_t *dest = (uint8_t *)page_maps[pi].pa + offset_in_page;
-                        memcpy(dest, segment_buffer + offset_in_segment, copy_size);
+                        if (file->read(file, phdr.p_offset + offset_in_segment, copy_size, dest) != copy_size) {
+                            kprint("ELF: Failed to read segment data directly\n");
+                            return 0;
+                        }
                         bytes_copied += copy_size;
                     }
                 }
-                kfree(segment_buffer, phdr.p_filesz);
             }
             
             // BSS is already zeroed since we memset each page
@@ -575,8 +558,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     
     // Set up kernel stack for this process in TSS
     extern void set_kernel_stack(uint32_t stack);
-    static uint8_t kernel_stack[8192] __attribute__((aligned(16)));
-    set_kernel_stack((uint32_t)(uintptr_t)(kernel_stack + 8192));
+    set_kernel_stack((uint32_t)current_thread->kstack_top);
     
     // Allocate and map user stack pages
     extern void *pmm_alloc_block(void);

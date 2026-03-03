@@ -108,13 +108,13 @@ int vm_map_remove(vm_map_t *map, uintptr_t start, uintptr_t end) {
 }
 
 // Mocks for linking
-int pmap_is_referenced(pmap_t pmap, uintptr_t pa) {
-    (void)pmap; (void)pa;
+int pmap_is_referenced(struct vm_page *m) {
+    (void)m;
     return 0;
 }
 
-void pmap_clear_reference(pmap_t pmap, uintptr_t pa) {
-    (void)pmap; (void)pa;
+void pmap_clear_reference(struct vm_page *m) {
+    (void)m;
 }
 
 int syscall_trace_enabled = 0;
