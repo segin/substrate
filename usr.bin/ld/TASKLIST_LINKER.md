@@ -125,7 +125,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-006. Stories: US-001.
 - [x] Implement 8/16/32-bit overflow diagnostics and range checks.  
   Reqs: LD-E-006.
-- [ ] Add i386 relocation suite (direct + archive + shared).  
+- [x] Add i386 relocation suite (direct + archive + shared).  
   Reqs: LD-U-007.
 
 ---
