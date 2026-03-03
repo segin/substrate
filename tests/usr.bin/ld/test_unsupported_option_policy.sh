@@ -1,6 +1,8 @@
 #!/bin/sh
 set -eu
 
+# Reqs: LD-U-010, LD-W-003
+
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 LDX="$ROOT/usr.bin/ld/ld"
 TMP=${TMPDIR:-/tmp}/ldx86-compat-$$

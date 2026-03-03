@@ -11,7 +11,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-007, LD-R-004. Stories: US-301.
 - [x] Add requirement/story tag format to commit template for linker work.  
   Reqs: Traceability section. Stories: US-301.
-- [ ] Establish pass/fail dashboard script (`tests/usr.bin/ld/run_all.sh`) with summary by requirement ID.  
+- [x] Establish pass/fail dashboard script (`tests/usr.bin/ld/run_all.sh`) with summary by requirement ID.  
   Reqs: LD-U-010. Stories: US-301.
 
 ---
