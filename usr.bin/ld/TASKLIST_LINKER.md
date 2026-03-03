@@ -19,7 +19,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 1. Driver and Option Compatibility
 
 ### 1.1 Core invocation and mode selection
-- [ ] Normalize default mode policy (x86-64 default, i386 explicit).  
+- [x] Normalize default mode policy (x86-64 default, i386 explicit).  
   Reqs: LD-U-002, LD-U-003.
 - [ ] Implement strict parser for `-m`, `-m32`, `-m64`, including canonical aliases and diagnostics.  
   Reqs: LD-U-010, LD-E-007.
@@ -342,4 +342,3 @@ Mark this tasklist complete only when all are true:
 - [ ] No backend forwarding remains.
 - [ ] Reproducibility and fuzz gates pass.
 - [ ] Temporary linker tasklist removed after migration to steady-state maintenance tickets.
-

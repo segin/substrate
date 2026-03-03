@@ -213,11 +213,7 @@ static char *path_join(const char *dir, const char *leaf) {
 }
 
 static int default_mode(void) {
-#if defined(__x86_64__) || defined(__amd64__)
     return 64;
-#else
-    return 32;
-#endif
 }
 
 static int parse_mode_token(const char *tok) {
