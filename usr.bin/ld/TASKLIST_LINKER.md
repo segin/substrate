@@ -137,7 +137,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-008, LD-S-004.
 - [x] Implement COMDAT/group leader selection and duplicate discard.  
   Reqs: LD-U-004, LD-S-004.
-- [ ] Implement orphan placement heuristics consistent with GNU defaults.  
+- [x] Implement orphan placement heuristics consistent with GNU defaults.  
   Reqs: LD-S-004.
 
 ### 5.2 Garbage collection (`--gc-sections`)

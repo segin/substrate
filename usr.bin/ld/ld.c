@@ -2444,6 +2444,70 @@ static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
     return 0;
 }
 
+static int section_order_rank(const elf_section_t *sec) {
+    const char *name;
+    uint64_t flags;
+    uint32_t type;
+
+    if (sec == NULL) {
+        return 999;
+    }
+    name = elf_section_name(sec);
+    type = elf_section_type(sec);
+    flags = elf_section_flags(sec);
+
+    if (name != NULL &&
+        (strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 || strcmp(name, ".shstrtab") == 0)) {
+        return 200;
+    }
+    if (type == SHT_REL || type == SHT_RELA) {
+        return 190;
+    }
+    if ((flags & SHF_ALLOC) != 0) {
+        if ((flags & SHF_EXECINSTR) != 0) {
+            return 10;
+        }
+        if ((flags & SHF_WRITE) == 0) {
+            return 20;
+        }
+        if (type == SHT_NOBITS) {
+            return 40;
+        }
+        return 30;
+    }
+    return 100;
+}
+
+static int reorder_sections_default_policy(elfobj_t *obj) {
+    size_t count;
+    size_t target;
+
+    if (obj == NULL) {
+        return -1;
+    }
+    count = elf_section_count(obj);
+    for (target = 0; target < count; ++target) {
+        size_t i;
+        size_t best = target;
+        int best_rank = section_order_rank(elf_section_get(obj, target));
+
+        for (i = target + 1; i < count; ++i) {
+            int rank = section_order_rank(elf_section_get(obj, i));
+            if (rank < best_rank) {
+                best = i;
+                best_rank = rank;
+            }
+        }
+        if (best != target) {
+            elf_section_t *best_sec = elf_section_get(obj, best);
+            if (best_sec == NULL || elf_reorder_section(obj, best_sec, target) != ELF_OK) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static int add_default_segments(elfobj_t *obj, const char *interp_path) {
     elf_segment_t *load_seg;
     uint32_t load_flags = 0x4;
@@ -2869,6 +2933,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
     if (apply_defsyms(ctx, out) != 0) {
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+    if (reorder_sections_default_policy(out) != 0) {
+        fprintf(stderr, "ld: failed to apply default section placement policy\n");
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
