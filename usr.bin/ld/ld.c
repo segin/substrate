@@ -472,11 +472,40 @@ static int set_explicit_mode(ld_ctx_t *ctx, int mode, const char *opt_text) {
     return 0;
 }
 
-static uint64_t align_up_u64(uint64_t v, uint64_t a) {
-    if (a <= 1) {
-        return v;
+static int align_up_u64_checked(uint64_t v, uint64_t a, uint64_t *out) {
+    uint64_t add;
+
+    if (out == NULL) {
+        return 0;
     }
-    return (v + (a - 1)) & ~(a - 1);
+    if (a <= 1) {
+        *out = v;
+        return 1;
+    }
+    if ((a & (a - 1)) == 0) {
+        if (v > UINT64_MAX - (a - 1)) {
+            return 0;
+        }
+        *out = (v + (a - 1)) & ~(a - 1);
+        return 1;
+    }
+    add = a - (v % a);
+    if (add == a) {
+        add = 0;
+    }
+    if (v > UINT64_MAX - add) {
+        return 0;
+    }
+    *out = v + add;
+    return 1;
+}
+
+static int add_u64_checked(uint64_t a, uint64_t b, uint64_t *out) {
+    if (out == NULL || a > UINT64_MAX - b) {
+        return 0;
+    }
+    *out = a + b;
+    return 1;
 }
 
 static int has_suffix(const char *s, const char *suffix) {
@@ -2407,8 +2436,9 @@ static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         }
     }
 
-    off = ehsize + phnum * phentsz;
-    mem_end = base_vaddr + off;
+    if (!add_u64_checked(ehsize, phnum * phentsz, &off) || !add_u64_checked(base_vaddr, off, &mem_end)) {
+        return -1;
+    }
     for (i = 0; i < elf_section_count(obj); ++i) {
         elf_section_t *sec = elf_section_get(obj, i);
         uint64_t align;
@@ -2428,19 +2458,36 @@ static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         flags = elf_section_flags(sec);
 
         if (elf_section_type(sec) != SHT_NOBITS) {
-            off = align_up_u64(off, align);
+            if (!align_up_u64_checked(off, align, &off)) {
+                return -1;
+            }
             file_off = off;
-            off += size;
+            if (!add_u64_checked(off, size, &off)) {
+                return -1;
+            }
         }
 
         if ((flags & SHF_ALLOC) != 0) {
             if (elf_section_type(sec) == SHT_NOBITS) {
-                addr = align_up_u64(mem_end, align);
+                if (!align_up_u64_checked(mem_end, align, &addr)) {
+                    return -1;
+                }
             } else {
-                addr = base_vaddr + file_off;
+                if (!add_u64_checked(base_vaddr, file_off, &addr)) {
+                    return -1;
+                }
+                if ((addr & 0xfffu) != (file_off & 0xfffu)) {
+                    return -1;
+                }
             }
-            if (addr + size > mem_end) {
-                mem_end = addr + size;
+            {
+                uint64_t addr_end;
+                if (!add_u64_checked(addr, size, &addr_end)) {
+                    return -1;
+                }
+                if (addr_end > mem_end) {
+                    mem_end = addr_end;
+                }
             }
             if (elf_section_set_addr(sec, addr) != ELF_OK) {
                 return -1;

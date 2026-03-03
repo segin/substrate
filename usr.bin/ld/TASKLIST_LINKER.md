@@ -161,11 +161,11 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 6. Layout and Segment Construction
 
 ### 6.1 Address assignment
-- [ ] Implement page-aware file/vaddr assignment preserving `offset % page == vaddr % page`.  
+- [x] Implement page-aware file/vaddr assignment preserving `offset % page == vaddr % page`.  
   Reqs: LD-U-009, LD-S-004.
-- [ ] Implement target defaults for text/data base addresses and PIE behavior.  
+- [x] Implement target defaults for text/data base addresses and PIE behavior.  
   Reqs: LD-U-001, LD-U-009.
-- [ ] Add overflow checks for all arithmetic and address-space bounds.  
+- [x] Add overflow checks for all arithmetic and address-space bounds.  
   Reqs: LD-R-003.
 
 ### 6.2 PHDR generation
