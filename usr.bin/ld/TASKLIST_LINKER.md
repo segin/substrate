@@ -231,7 +231,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-S-004.
 - [x] Implement builtin operators/functions (`ADDR`, `SIZEOF`, `ALIGN`, `LOADADDR`, etc.).  
   Reqs: LD-S-004.
-- [ ] Implement `PROVIDE`, `KEEP`, `/DISCARD/`, `SORT_*`, `INSERT` semantics.  
+- [x] Implement `PROVIDE`, `KEEP`, `/DISCARD/`, `SORT_*`, `INSERT` semantics.  
   Reqs: LD-S-004, LD-E-004.
 
 ### 8.3 Integration

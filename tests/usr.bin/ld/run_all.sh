@@ -60,6 +60,7 @@ test_script_parser_include_diag.sh|LD-U-010
 test_script_ast_constructs.sh|LD-S-004
 test_script_expr_eval.sh|LD-S-004
 test_script_builtin_sections.sh|LD-S-004
+test_script_directive_semantics.sh|LD-S-004 LD-E-004
 test_warning_policies.sh|LD-W-003 LD-E-001
 test_input_validation_basic.sh|LD-U-012 LD-R-001
 test_reloc_symbol_parsing.sh|LD-U-005 LD-U-006

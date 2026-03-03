@@ -21,6 +21,10 @@
 #define SHT_PREINIT_ARRAY 16
 #endif
 
+#ifndef SHF_GNU_RETAIN
+#define SHF_GNU_RETAIN 0x200000
+#endif
+
 typedef struct {
     char **items;
     size_t count;
@@ -1754,6 +1758,75 @@ static char *resolve_script_include_path(const char *parent_path, const char *na
     return joined;
 }
 
+static int script_section_pattern_match(const char *pattern, const char *name) {
+    size_t pn;
+
+    if (pattern == NULL || name == NULL) {
+        return 0;
+    }
+    if (strcmp(pattern, "*") == 0) {
+        return 1;
+    }
+    pn = strlen(pattern);
+    if (pn > 0 && pattern[pn - 1] == '*') {
+        return strncmp(name, pattern, pn - 1) == 0;
+    }
+    return strcmp(pattern, name) == 0;
+}
+
+static int apply_script_keep_pattern(elfobj_t *obj, const char *pattern) {
+    size_t i;
+    size_t count;
+
+    if (obj == NULL || pattern == NULL || pattern[0] == '\0') {
+        return 0;
+    }
+    count = elf_section_count(obj);
+    for (i = 0; i < count; ++i) {
+        elf_section_t *sec = elf_section_get(obj, i);
+        const char *name = sec != NULL ? elf_section_name(sec) : NULL;
+        uint64_t flags;
+        if (name == NULL || !script_section_pattern_match(pattern, name)) {
+            continue;
+        }
+        flags = elf_section_flags(sec);
+        if ((flags & SHF_GNU_RETAIN) == 0 && elf_section_set_flags(sec, flags | SHF_GNU_RETAIN) != ELF_OK) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int is_protected_output_section_name(const char *name) {
+    if (name == NULL) {
+        return 1;
+    }
+    return strcmp(name, ".shstrtab") == 0 || strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0;
+}
+
+static int apply_script_discard_pattern(elfobj_t *obj, const char *pattern) {
+    size_t i;
+
+    if (obj == NULL || pattern == NULL || pattern[0] == '\0') {
+        return 0;
+    }
+    for (i = elf_section_count(obj); i > 0; --i) {
+        size_t idx = i - 1;
+        elf_section_t *sec = elf_section_get(obj, idx);
+        const char *name = sec != NULL ? elf_section_name(sec) : NULL;
+        if (sec == NULL || name == NULL || is_protected_output_section_name(name)) {
+            continue;
+        }
+        if (!script_section_pattern_match(pattern, name)) {
+            continue;
+        }
+        if (elf_remove_section(obj, sec) != ELF_OK) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int parse_linker_script_file_rec(const char *path, strvec_t *include_stack, lds_ast_t *ast, ld_ctx_t *ctx,
                                         const elfobj_t *obj, int apply_semantics, int depth);
 
@@ -1990,6 +2063,134 @@ static int parse_script_provide_directive(lds_lexer_t *lx, const strvec_t *inclu
     return rc;
 }
 
+static int parse_script_keep_directive(lds_lexer_t *lx, const strvec_t *include_stack, ld_ctx_t *ctx,
+                                       const elfobj_t *obj, int apply_semantics, const lds_tok_t *keep_tok) {
+    lds_tok_t tok;
+    int depth = 1;
+
+    if (lds_lex_next(lx, &tok) != 0) {
+        return -1;
+    }
+    if (tok.kind != LDS_TOK_LPAREN) {
+        lds_report_error(include_stack, &tok, "expected '(' after KEEP");
+        lds_tok_free(&tok);
+        return -1;
+    }
+    lds_tok_free(&tok);
+
+    while (depth > 0) {
+        if (lds_lex_next(lx, &tok) != 0) {
+            return -1;
+        }
+        if (tok.kind == LDS_TOK_EOF) {
+            lds_report_error(include_stack, keep_tok, "unexpected end-of-file in KEEP");
+            lds_tok_free(&tok);
+            return -1;
+        }
+        if (tok.kind == LDS_TOK_LPAREN) {
+            depth++;
+        } else if (tok.kind == LDS_TOK_RPAREN) {
+            depth--;
+        } else if (apply_semantics && ctx != NULL && obj != NULL &&
+                   (tok.kind == LDS_TOK_IDENT || tok.kind == LDS_TOK_STRING) &&
+                   tok.text != NULL && tok.text[0] == '.') {
+            if (apply_script_keep_pattern((elfobj_t *)obj, tok.text) != 0) {
+                lds_report_error(include_stack, &tok, "failed to apply KEEP section pattern");
+                lds_tok_free(&tok);
+                return -1;
+            }
+        }
+        lds_tok_free(&tok);
+    }
+    return 0;
+}
+
+static int parse_script_discard_directive(lds_lexer_t *lx, const strvec_t *include_stack, ld_ctx_t *ctx,
+                                          const elfobj_t *obj, int apply_semantics, const lds_tok_t *discard_tok) {
+    lds_tok_t tok;
+    int depth = 1;
+
+    if (lds_lex_next(lx, &tok) != 0) {
+        return -1;
+    }
+    if (tok.kind != LDS_TOK_COLON) {
+        lds_report_error(include_stack, &tok, "expected ':' after /DISCARD/");
+        lds_tok_free(&tok);
+        return -1;
+    }
+    lds_tok_free(&tok);
+    if (lds_lex_next(lx, &tok) != 0) {
+        return -1;
+    }
+    if (tok.kind != LDS_TOK_LBRACE) {
+        lds_report_error(include_stack, &tok, "expected '{' after /DISCARD/:");
+        lds_tok_free(&tok);
+        return -1;
+    }
+    lds_tok_free(&tok);
+
+    while (depth > 0) {
+        if (lds_lex_next(lx, &tok) != 0) {
+            return -1;
+        }
+        if (tok.kind == LDS_TOK_EOF) {
+            lds_report_error(include_stack, discard_tok, "unexpected end-of-file in /DISCARD/ block");
+            lds_tok_free(&tok);
+            return -1;
+        }
+        if (tok.kind == LDS_TOK_LBRACE) {
+            depth++;
+        } else if (tok.kind == LDS_TOK_RBRACE) {
+            depth--;
+        } else if (apply_semantics && ctx != NULL && obj != NULL &&
+                   (tok.kind == LDS_TOK_IDENT || tok.kind == LDS_TOK_STRING) &&
+                   tok.text != NULL && tok.text[0] == '.') {
+            if (apply_script_discard_pattern((elfobj_t *)obj, tok.text) != 0) {
+                lds_report_error(include_stack, &tok, "failed to apply /DISCARD/ section pattern");
+                lds_tok_free(&tok);
+                return -1;
+            }
+        }
+        lds_tok_free(&tok);
+    }
+    return 0;
+}
+
+static int parse_script_insert_directive(lds_lexer_t *lx, const strvec_t *include_stack, const lds_tok_t *insert_tok) {
+    lds_tok_t tok;
+
+    if (lds_lex_next(lx, &tok) != 0) {
+        return -1;
+    }
+    if (tok.kind != LDS_TOK_IDENT || tok.text == NULL ||
+        (strcmp(tok.text, "AFTER") != 0 && strcmp(tok.text, "BEFORE") != 0)) {
+        lds_report_error(include_stack, &tok, "expected BEFORE or AFTER after INSERT");
+        lds_tok_free(&tok);
+        return -1;
+    }
+    lds_tok_free(&tok);
+    if (lds_lex_next(lx, &tok) != 0) {
+        return -1;
+    }
+    if ((tok.kind != LDS_TOK_IDENT && tok.kind != LDS_TOK_STRING) || tok.text == NULL) {
+        lds_report_error(include_stack, &tok, "expected section name after INSERT BEFORE/AFTER");
+        lds_tok_free(&tok);
+        return -1;
+    }
+    lds_tok_free(&tok);
+    if (lds_lex_next(lx, &tok) != 0) {
+        return -1;
+    }
+    if (tok.kind != LDS_TOK_SEMI) {
+        lds_report_error(include_stack, &tok, "expected ';' after INSERT directive");
+        lds_tok_free(&tok);
+        return -1;
+    }
+    lds_tok_free(&tok);
+    (void)insert_tok;
+    return 0;
+}
+
 static int handle_script_include(const char *current_path, strvec_t *include_stack, lds_ast_t *ast, ld_ctx_t *ctx,
                                  const elfobj_t *obj, int apply_semantics, int depth, const lds_tok_t *tok) {
     char *resolved;
@@ -2104,6 +2305,26 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
             lds_tok_free(&tok);
             continue;
         }
+        if (tok.kind == LDS_TOK_IDENT && tok.text != NULL && strcmp(tok.text, "KEEP") == 0) {
+            if (parse_script_keep_directive(&lx, include_stack, ctx, obj, apply_semantics, &tok) != 0) {
+                lds_tok_free(&tok);
+                free(buf);
+                strvec_pop(include_stack);
+                return -1;
+            }
+            lds_tok_free(&tok);
+            continue;
+        }
+        if (tok.kind == LDS_TOK_IDENT && tok.text != NULL && strcmp(tok.text, "/DISCARD/") == 0) {
+            if (parse_script_discard_directive(&lx, include_stack, ctx, obj, apply_semantics, &tok) != 0) {
+                lds_tok_free(&tok);
+                free(buf);
+                strvec_pop(include_stack);
+                return -1;
+            }
+            lds_tok_free(&tok);
+            continue;
+        }
         if (!pending_assign_active && !pending_assign_wait_eq &&
             brace_depth == 0 && paren_depth == 0 && tok.kind == LDS_TOK_IDENT && tok.text != NULL) {
             if (strcmp(tok.text, "SECTIONS") == 0) {
@@ -2157,6 +2378,16 @@ static int parse_linker_script_file_rec(const char *path, strvec_t *include_stac
             }
             if (strcmp(tok.text, "PROVIDE") == 0) {
                 if (parse_script_provide_directive(&lx, include_stack, ctx, obj, apply_semantics, &tok) != 0) {
+                    lds_tok_free(&tok);
+                    free(buf);
+                    strvec_pop(include_stack);
+                    return -1;
+                }
+                lds_tok_free(&tok);
+                continue;
+            }
+            if (strcmp(tok.text, "INSERT") == 0) {
+                if (parse_script_insert_directive(&lx, include_stack, &tok) != 0) {
                     lds_tok_free(&tok);
                     free(buf);
                     strvec_pop(include_stack);
@@ -7009,6 +7240,11 @@ static int gc_sections_by_reachability(elfobj_t *obj, const ld_ctx_t *ctx) {
         const elf_section_t *sec = elf_section_get(obj, i);
         uint32_t type = sec != NULL ? elf_section_type(sec) : SHT_NULL;
         if (type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY || type == SHT_PREINIT_ARRAY) {
+            live[i] = 1;
+            changed = 1;
+            continue;
+        }
+        if (sec != NULL && (elf_section_flags(sec) & SHF_GNU_RETAIN) != 0) {
             live[i] = 1;
             changed = 1;
         }
