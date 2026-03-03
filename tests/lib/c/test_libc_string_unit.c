@@ -222,8 +222,41 @@ void run_memcmp_tests(void) {
     ASSERT_TRUE(libc_memcmp(large1, large2, 1024) < 0, "Large buffers differ at end");
 }
 
+void run_strspn_tests(void) {
+    printf("Running strspn tests...\n");
+
+    // Empty strings
+    ASSERT_EQ(libc_strspn("", ""), 0, "Empty s and empty accept");
+    ASSERT_EQ(libc_strspn("", "abc"), 0, "Empty s and non-empty accept");
+    ASSERT_EQ(libc_strspn("abc", ""), 0, "Non-empty s and empty accept");
+
+    // Basic functionality
+    ASSERT_EQ(libc_strspn("abcde", "abc"), 3, "s starts with accept characters");
+    ASSERT_EQ(libc_strspn("abcde", "cba"), 3, "s starts with accept characters, different order");
+    ASSERT_EQ(libc_strspn("abcde", "xyz"), 0, "s starts with no accept characters");
+    ASSERT_EQ(libc_strspn("abcde", "abcde"), 5, "s consists entirely of accept characters");
+    ASSERT_EQ(libc_strspn("abcde", "edcba"), 5, "s consists entirely of accept characters, different order");
+
+    // Multiple occurrences and overlapping characters
+    ASSERT_EQ(libc_strspn("abacaba", "ab"), 3, "Multiple occurrences of accept characters");
+    ASSERT_EQ(libc_strspn("abacaba", "abc"), 7, "All characters match");
+
+    // Missing matching character early on
+    ASSERT_EQ(libc_strspn("abxyz", "ab"), 2, "Mismatch after valid characters");
+    ASSERT_EQ(libc_strspn("xyzab", "ab"), 0, "No initial match");
+
+    // Duplicates in accept string
+    ASSERT_EQ(libc_strspn("hello", "hlleo"), 5, "Accept has duplicates");
+    ASSERT_EQ(libc_strspn("hello", "he"), 2, "Accept has subset");
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
+    return true;
+}
+
+bool test_libc_strspn(void) {
+    run_strspn_tests();
     return true;
 }
 
@@ -250,6 +283,7 @@ bool test_libc_memcmp(void) {
 #ifndef NO_MAIN
 int main(void) {
     run_strlen_tests();
+    run_strspn_tests();
     run_memmove_tests();
     run_strcat_tests();
     run_strtok_tests();
