@@ -141,7 +141,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-S-004.
 
 ### 5.2 Garbage collection (`--gc-sections`)
-- [ ] Build reachability graph from entry roots + explicit roots + KEEP roots.  
+- [x] Build reachability graph from entry roots + explicit roots + KEEP roots.  
   Reqs: LD-E-004.
 - [ ] Implement COMDAT-aware mark/sweep and diagnostics (`--print-gc-sections`).  
   Reqs: LD-E-004, LD-U-010.

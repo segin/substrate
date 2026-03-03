@@ -582,6 +582,7 @@ static elf_err_t merge_sections(elf_link_plan_t *plan, elfobj_t *out,
 static int resolve_src_sec_index(const elfobj_t *obj, uint16_t shndx, size_t *out_idx) {
     size_t idx;
     struct elf_section *sec;
+    int parsed_with_null0;
 
     if (obj == NULL || out_idx == NULL) {
         return 0;
@@ -589,7 +590,27 @@ static int resolve_src_sec_index(const elfobj_t *obj, uint16_t shndx, size_t *ou
     if (shndx == SHN_UNDEF || shndx == SHN_ABS || shndx == SHN_COMMON) {
         return 0;
     }
-    if (shndx == 0 || shndx > obj->section_count) {
+    if (shndx == 0) {
+        return 0;
+    }
+    parsed_with_null0 = obj->section_count > 0 && obj->sections[0] != NULL && obj->sections[0]->type == SHT_NULL;
+
+    if (parsed_with_null0) {
+        if ((size_t)shndx < obj->section_count) {
+            sec = obj->sections[shndx];
+            if (sec != NULL && sec->name != NULL && sec->name[0] != '\0') {
+                *out_idx = (size_t)shndx;
+                return 1;
+            }
+        }
+        idx = (size_t)(shndx - 1);
+        if (idx < obj->section_count) {
+            sec = obj->sections[idx];
+            if (sec != NULL && sec->name != NULL && sec->name[0] != '\0') {
+                *out_idx = idx;
+                return 1;
+            }
+        }
         return 0;
     }
 

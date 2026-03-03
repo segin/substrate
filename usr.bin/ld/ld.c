@@ -15,6 +15,12 @@
 #define STV_PROTECTED 3
 #endif
 
+#ifndef SHT_INIT_ARRAY
+#define SHT_INIT_ARRAY 14
+#define SHT_FINI_ARRAY 15
+#define SHT_PREINIT_ARRAY 16
+#endif
+
 typedef struct {
     char **items;
     size_t count;
@@ -93,6 +99,7 @@ typedef struct {
     int query_version;
     int trace_inputs;
     int export_dynamic;
+    int gc_sections;
     const char *out_path;
     const char *self_path;
     const char *entry_symbol;
@@ -2508,6 +2515,143 @@ static int reorder_sections_default_policy(elfobj_t *obj) {
     return 0;
 }
 
+static int is_gc_candidate_section(const elf_section_t *sec) {
+    const char *name;
+    uint64_t flags;
+    uint32_t type;
+
+    if (sec == NULL) {
+        return 0;
+    }
+    name = elf_section_name(sec);
+    type = elf_section_type(sec);
+    flags = elf_section_flags(sec);
+    if ((flags & SHF_ALLOC) == 0) {
+        return 0;
+    }
+    if (type == SHT_NULL || type == SHT_SYMTAB || type == SHT_STRTAB || type == SHT_REL || type == SHT_RELA) {
+        return 0;
+    }
+    if (name != NULL &&
+        (strcmp(name, ".shstrtab") == 0 || strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 ||
+         strcmp(name, ".group") == 0)) {
+        return 0;
+    }
+    return 1;
+}
+
+static int mark_live_section(uint8_t *live, size_t count, uint16_t shndx, int *changed) {
+    size_t idx;
+
+    if (live == NULL || changed == NULL) {
+        return -1;
+    }
+    if (shndx == SHN_UNDEF || shndx == SHN_ABS || shndx == SHN_COMMON || shndx >= 0xff00) {
+        return 0;
+    }
+    if (shndx == 0 || (size_t)(shndx - 1) >= count) {
+        return -1;
+    }
+    idx = (size_t)(shndx - 1);
+    if (!live[idx]) {
+        live[idx] = 1;
+        *changed = 1;
+    }
+    return 0;
+}
+
+static int gc_sections_by_reachability(elfobj_t *obj, const ld_ctx_t *ctx) {
+    uint8_t *live;
+    size_t count;
+    int changed;
+    size_t i;
+
+    if (obj == NULL || ctx == NULL) {
+        return -1;
+    }
+    count = elf_section_count(obj);
+    live = (uint8_t *)calloc(count, sizeof(*live));
+    if (live == NULL && count != 0) {
+        return -1;
+    }
+
+    changed = 0;
+    if (ctx->entry_symbol != NULL && ctx->entry_symbol[0] != '\0') {
+        const elf_symbol_t *entry = elf_find_symbol(obj, ctx->entry_symbol);
+        if (entry != NULL && mark_live_section(live, count, elf_symbol_shndx(entry), &changed) != 0) {
+            free(live);
+            return -1;
+        }
+    } else {
+        const elf_symbol_t *entry = elf_find_symbol(obj, "_start");
+        if (entry != NULL && mark_live_section(live, count, elf_symbol_shndx(entry), &changed) != 0) {
+            free(live);
+            return -1;
+        }
+    }
+    for (i = 0; i < ctx->force_undefined.count; ++i) {
+        const elf_symbol_t *root = elf_find_symbol(obj, ctx->force_undefined.items[i]);
+        if (root != NULL && mark_live_section(live, count, elf_symbol_shndx(root), &changed) != 0) {
+            free(live);
+            return -1;
+        }
+    }
+    for (i = 0; i < count; ++i) {
+        const elf_section_t *sec = elf_section_get(obj, i);
+        uint32_t type = sec != NULL ? elf_section_type(sec) : SHT_NULL;
+        if (type == SHT_INIT_ARRAY || type == SHT_FINI_ARRAY || type == SHT_PREINIT_ARRAY) {
+            live[i] = 1;
+            changed = 1;
+        }
+    }
+
+    do {
+        changed = 0;
+        for (i = 0; i < count; ++i) {
+            elf_section_t *sec;
+            size_t rc;
+            size_t ri;
+            if (!live[i]) {
+                continue;
+            }
+            sec = elf_section_get(obj, i);
+            if (sec == NULL) {
+                continue;
+            }
+            rc = elf_section_reloc_count(sec);
+            for (ri = 0; ri < rc; ++ri) {
+                const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+                const elf_symbol_t *sym;
+                if (rel == NULL) {
+                    continue;
+                }
+                sym = elf_reloc_symbol(rel);
+                if (sym == NULL) {
+                    continue;
+                }
+                if (mark_live_section(live, count, elf_symbol_shndx(sym), &changed) != 0) {
+                    free(live);
+                    return -1;
+                }
+            }
+        }
+    } while (changed);
+
+    for (i = count; i > 0; --i) {
+        size_t idx = i - 1;
+        elf_section_t *sec = elf_section_get(obj, idx);
+        if (sec == NULL || !is_gc_candidate_section(sec) || live[idx]) {
+            continue;
+        }
+        if (elf_remove_section(obj, sec) != ELF_OK) {
+            free(live);
+            return -1;
+        }
+    }
+    free(live);
+    return 0;
+}
+
 static int add_default_segments(elfobj_t *obj, const char *interp_path) {
     elf_segment_t *load_seg;
     uint32_t load_flags = 0x4;
@@ -2945,6 +3089,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
+    if (ctx->gc_sections && gc_sections_by_reachability(out, ctx) != 0) {
+        fprintf(stderr, "ld: --gc-sections failed during reachability sweep\n");
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
 
     if (out_type == ET_REL) {
         if (write_map_file(ctx, &inputs, out) != 0) {
@@ -3217,6 +3368,14 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "--no-as-needed") == 0) {
             ctx.current_as_needed = 0;
+            continue;
+        }
+        if (strcmp(a, "--gc-sections") == 0) {
+            ctx.gc_sections = 1;
+            continue;
+        }
+        if (strcmp(a, "--no-gc-sections") == 0) {
+            ctx.gc_sections = 0;
             continue;
         }
         if (strcmp(a, "--start-group") == 0) {
@@ -3515,8 +3674,7 @@ int main(int argc, char **argv) {
             ++i;
             continue;
         }
-        if (strcmp(a, "--gc-sections") == 0 || strcmp(a, "--strip-all") == 0 ||
-            strcmp(a, "--build-id") == 0 || strcmp(a, "-s") == 0) {
+        if (strcmp(a, "--strip-all") == 0 || strcmp(a, "--build-id") == 0 || strcmp(a, "-s") == 0) {
             continue;
         }
 
