@@ -9978,8 +9978,9 @@ void cc_parser_set_std_mode(const char *std_mode) {
     } else {
         g_parser_enable_trigraphs = 1;
     }
-    if (strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 || strcmp(std_mode, "c95") == 0 ||
-        strcmp(std_mode, "gnu89") == 0 || strcmp(std_mode, "gnu90") == 0 || strcmp(std_mode, "gnu95") == 0) {
+    if (g_parser_std_gnu || strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 ||
+        strcmp(std_mode, "c95") == 0 || strcmp(std_mode, "c99") == 0 || strcmp(std_mode, "c11") == 0 ||
+        strcmp(std_mode, "c17") == 0 || strcmp(std_mode, "c18") == 0) {
         g_parser_allow_oldstyle_funcdecl = 1;
     } else {
         g_parser_allow_oldstyle_funcdecl = 0;
