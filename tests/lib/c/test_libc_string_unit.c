@@ -242,8 +242,42 @@ bool test_libc_strtok(void) {
     return true;
 }
 
+void run_strcmp_tests(void) {
+    printf("Running strcmp tests...\n");
+
+    // Equal strings
+    ASSERT_EQ(libc_strcmp("abc", "abc"), 0, "Equal strings");
+    ASSERT_EQ(libc_strcmp("", ""), 0, "Empty strings");
+    ASSERT_EQ(libc_strcmp("a", "a"), 0, "Single character equal");
+
+    // Differing strings
+    ASSERT_TRUE(libc_strcmp("abc", "abd") < 0, "abc < abd");
+    ASSERT_TRUE(libc_strcmp("abd", "abc") > 0, "abd > abc");
+
+    // Different lengths
+    ASSERT_TRUE(libc_strcmp("abc", "ab") > 0, "abc > ab");
+    ASSERT_TRUE(libc_strcmp("ab", "abc") < 0, "ab < abc");
+    ASSERT_TRUE(libc_strcmp("a", "") > 0, "a > empty");
+    ASSERT_TRUE(libc_strcmp("", "a") < 0, "empty < a");
+
+    // Test at different positions
+    ASSERT_TRUE(libc_strcmp("xbc", "abc") > 0, "Different at first byte");
+    ASSERT_TRUE(libc_strcmp("axc", "abc") > 0, "Different at middle byte");
+    ASSERT_TRUE(libc_strcmp("abx", "abc") > 0, "Different at last byte");
+
+    // Sign verification (ensure unsigned char comparison)
+    char s1[] = {(char)0xff, '\0'};
+    char s2[] = {(char)0x7f, '\0'};
+    ASSERT_TRUE(libc_strcmp(s1, s2) > 0, "0xff > 0x7f (unsigned)");
+}
+
 bool test_libc_memcmp(void) {
     run_memcmp_tests();
+    return true;
+}
+
+bool test_libc_strcmp(void) {
+    run_strcmp_tests();
     return true;
 }
 
@@ -254,6 +288,7 @@ int main(void) {
     run_strcat_tests();
     run_strtok_tests();
     run_memcmp_tests();
+    run_strcmp_tests();
     return 0;
 }
 #endif

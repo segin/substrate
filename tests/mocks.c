@@ -292,6 +292,9 @@ vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
 // vm_phys stubs
 void vm_phys_get_free(uint64_t *free) { *free = 0; }
 void vm_phys_get_used(uint64_t *used) { *used = 0; }
+uintptr_t vm_phys_alloc_page(int flags) { (void)flags; return 0x1000; }
+void vm_phys_free_page(uintptr_t pa) { (void)pa; }
+void swapper_request_work(void) {}
 void sched_get_system_load(uint32_t *loads) { loads[0]=0; loads[1]=0; loads[2]=0; }
 
 // Fix cast:

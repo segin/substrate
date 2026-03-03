@@ -132,6 +132,7 @@ extern bool test_libc_memmove(void);
 extern bool test_libc_strcat(void);
 extern bool test_libc_strtok(void);
 extern bool test_libc_memcmp(void);
+extern bool test_libc_strcmp(void);
 
 // Div64 Tests
 extern bool run_div64_tests(void);
@@ -233,6 +234,7 @@ test_case_t tests[] = {
     {"libc_strcat", test_libc_strcat},
     {"libc_strtok", test_libc_strtok},
     {"libc_memcmp", test_libc_memcmp},
+    {"libc_strcmp", test_libc_strcmp},
     {"div64", run_div64_tests},
     {"pipe_race", run_pipe_race},
     {"mmap_batch", test_mmap_batch_run},
