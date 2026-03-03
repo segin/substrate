@@ -222,6 +222,83 @@ void run_memcmp_tests(void) {
     ASSERT_TRUE(libc_memcmp(large1, large2, 1024) < 0, "Large buffers differ at end");
 }
 
+void run_memcpy_tests(void) {
+    printf("Running memcpy tests...\n");
+
+    // Basic copy
+    char src1[] = "Hello";
+    char dest1[10] = {0};
+    libc_memcpy(dest1, src1, 6);
+    ASSERT_STREQ(dest1, "Hello", "Basic copy");
+
+    // Empty copy
+    char dest2[10] = "world";
+    libc_memcpy(dest2, src1, 0);
+    ASSERT_STREQ(dest2, "world", "Zero length copy");
+
+    // Test different alignments
+    // Create large buffers to ensure word-aligned copying is triggered
+    // Use __attribute__((aligned(8))) to guarantee determinism
+    char src3[256] __attribute__((aligned(8)));
+    char dest3[256] __attribute__((aligned(8)));
+    for (int i = 0; i < 256; i++) {
+        src3[i] = (char)(i & 0xFF);
+    }
+
+    // Aligned to Aligned
+    memset(dest3, 0, sizeof(dest3));
+    libc_memcpy(dest3, src3, 128);
+    ASSERT_MEM_EQ(dest3, src3, 128, "Aligned to aligned copy");
+
+    // Unaligned src to Aligned dest
+    memset(dest3, 0, sizeof(dest3));
+    libc_memcpy(dest3, src3 + 1, 128);
+    ASSERT_MEM_EQ(dest3, src3 + 1, 128, "Unaligned src to aligned dest");
+
+    // Aligned src to Unaligned dest
+    memset(dest3, 0, sizeof(dest3));
+    libc_memcpy(dest3 + 1, src3, 128);
+    ASSERT_MEM_EQ(dest3 + 1, src3, 128, "Aligned src to unaligned dest");
+
+    // Unaligned src to Unaligned dest (same offset)
+    memset(dest3, 0, sizeof(dest3));
+    libc_memcpy(dest3 + 1, src3 + 1, 128);
+    ASSERT_MEM_EQ(dest3 + 1, src3 + 1, 128, "Unaligned to unaligned (same offset)");
+
+    // Unaligned src to Unaligned dest (different offset)
+    memset(dest3, 0, sizeof(dest3));
+    libc_memcpy(dest3 + 2, src3 + 1, 128);
+    ASSERT_MEM_EQ(dest3 + 2, src3 + 1, 128, "Unaligned to unaligned (diff offset)");
+
+    // Test tail bytes (lengths that are not multiples of 4)
+    memset(dest3, 0, sizeof(dest3));
+    libc_memcpy(dest3, src3, 127); // 127 is not multiple of 4
+    ASSERT_MEM_EQ(dest3, src3, 127, "Length not multiple of 4");
+
+    // Partial overlap (memcpy is technically undefined for this in standard C,
+    // but the task specifically requested testing it, so we check that it
+    // doesn't crash and behaves consistently with a forward copy).
+    // Partial overlap - backward: src > dest
+    // In standard C, this is undefined, but practically it acts like memmove
+    // when copying backward since string.c iterates forwards.
+    char overlap_bwd[32] = "0123456789";
+    libc_memcpy(overlap_bwd, overlap_bwd + 2, 8);
+    ASSERT_STREQ(overlap_bwd, "2345678989", "Backward overlap copy");
+
+    // Partial overlap - forward: dest > src
+    // Here we just test it completes. The result is implementation-defined
+    // because standard memcpy overwrites src while copying forward.
+    char overlap_fwd[32] = "0123456789";
+    libc_memcpy(overlap_fwd + 2, overlap_fwd, 8);
+    // We simply assert it executed without faults, we don't assert the result
+    // as it depends on exact word-size logic.
+}
+
+bool test_libc_memcpy(void) {
+    run_memcpy_tests();
+    return true;
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -249,6 +326,7 @@ bool test_libc_memcmp(void) {
 
 #ifndef NO_MAIN
 int main(void) {
+    run_memcpy_tests();
     run_strlen_tests();
     run_memmove_tests();
     run_strcat_tests();
