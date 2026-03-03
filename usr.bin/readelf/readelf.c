@@ -20,24 +20,62 @@
 
 #ifndef EF_ARM_RELEXEC
 #define EF_ARM_RELEXEC 0x01u
+#endif
+#ifndef EF_ARM_HASENTRY
 #define EF_ARM_HASENTRY 0x02u
+#endif
+#ifndef EF_ARM_INTERWORK
 #define EF_ARM_INTERWORK 0x04u
+#endif
+#ifndef EF_ARM_APCS_26
 #define EF_ARM_APCS_26 0x08u
+#endif
+#ifndef EF_ARM_APCS_FLOAT
 #define EF_ARM_APCS_FLOAT 0x10u
+#endif
+#ifndef EF_ARM_PIC
 #define EF_ARM_PIC 0x20u
+#endif
+#ifndef EF_ARM_ALIGN8
 #define EF_ARM_ALIGN8 0x40u
+#endif
+#ifndef EF_ARM_NEW_ABI
 #define EF_ARM_NEW_ABI 0x80u
+#endif
+#ifndef EF_ARM_OLD_ABI
 #define EF_ARM_OLD_ABI 0x100u
+#endif
+#ifndef EF_ARM_SOFT_FLOAT
 #define EF_ARM_SOFT_FLOAT 0x200u
+#endif
+#ifndef EF_ARM_VFP_FLOAT
 #define EF_ARM_VFP_FLOAT 0x400u
+#endif
+#ifndef EF_ARM_MAVERICK_FLOAT
 #define EF_ARM_MAVERICK_FLOAT 0x800u
+#endif
+#ifndef EF_ARM_BE8
 #define EF_ARM_BE8 0x00800000u
+#endif
+#ifndef EF_ARM_LE8
 #define EF_ARM_LE8 0x00400000u
+#endif
+#ifndef EF_ARM_EABIMASK
 #define EF_ARM_EABIMASK 0xFF000000u
+#endif
+#ifndef EF_ARM_EABI_VER1
 #define EF_ARM_EABI_VER1 0x01000000u
+#endif
+#ifndef EF_ARM_EABI_VER2
 #define EF_ARM_EABI_VER2 0x02000000u
+#endif
+#ifndef EF_ARM_EABI_VER3
 #define EF_ARM_EABI_VER3 0x03000000u
+#endif
+#ifndef EF_ARM_EABI_VER4
 #define EF_ARM_EABI_VER4 0x04000000u
+#endif
+#ifndef EF_ARM_EABI_VER5
 #define EF_ARM_EABI_VER5 0x05000000u
 #endif
 
