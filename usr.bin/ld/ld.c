@@ -19,6 +19,7 @@ typedef struct {
 
 typedef struct {
     int mode; /* 32 or 64 */
+    int explicit_mode;
     uint16_t expect_type;
     const char *out_path;
     const char *self_path;
@@ -28,7 +29,7 @@ typedef struct {
 
 static void usage(const char *prog) {
     fprintf(stderr,
-            "usage: %s [-m32|-m64] [-r|-shared|-pie|-static] [-o output] "
+            "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] [-o output] "
             "[-L dir] [-l name] [-T script] [--gc-sections] [--strip-all] "
             "[--allow-undefined] input...\n",
             prog);
@@ -129,7 +130,7 @@ static char *find_backend_ld(const ld_ctx_t *ctx) {
 
     if (override != NULL && override[0] != '\0') {
         if (strchr(override, '/') != NULL && same_file(override, ctx->self_path)) {
-            fprintf(stderr, "ld.x86: LD_BACKEND resolves to this wrapper (%s)\n", override);
+            fprintf(stderr, "ld: LD_BACKEND resolves to this linker binary (%s)\n", override);
             return NULL;
         }
         return xstrdup(override);
@@ -170,8 +171,7 @@ static char *find_backend_ld(const ld_ctx_t *ctx) {
         return xstrdup("/bin/ld");
     }
 
-    fprintf(stderr,
-            "ld.x86: no backend linker found (set LD_BACKEND or adjust PATH)\n");
+    fprintf(stderr, "ld: no backend linker found (set LD_BACKEND or adjust PATH)\n");
     return NULL;
 }
 
@@ -196,7 +196,86 @@ static int infer_mode_from_inputs(ld_ctx_t *ctx) {
         elf_close(obj);
     }
 
-    ctx->mode = 32;
+    ctx->mode = 64;
+    return 0;
+}
+
+static int infer_mode_from_program_name(ld_ctx_t *ctx) {
+    const char *base;
+
+    if (ctx == NULL || ctx->self_path == NULL) {
+        return 0;
+    }
+    base = strrchr(ctx->self_path, '/');
+    if (base != NULL) {
+        base++;
+    } else {
+        base = ctx->self_path;
+    }
+    if (strstr(base, "x86_64") != NULL || strstr(base, "amd64") != NULL || strstr(base, "x64") != NULL) {
+        ctx->mode = 64;
+        return 1;
+    }
+    if (strstr(base, "i386") != NULL || strstr(base, "x86") != NULL || strstr(base, "32") != NULL) {
+        ctx->mode = 32;
+        return 1;
+    }
+    return 0;
+}
+
+static int default_mode(void) {
+#if defined(__x86_64__) || defined(__amd64__)
+    return 64;
+#else
+    return 32;
+#endif
+}
+
+static int parse_mode_token(const char *tok) {
+    if (tok == NULL) {
+        return 0;
+    }
+    if (strcmp(tok, "elf_x86_64") == 0 || strcmp(tok, "elf64-x86-64") == 0 ||
+        strcmp(tok, "x86_64") == 0 || strcmp(tok, "amd64") == 0 || strcmp(tok, "64") == 0) {
+        return 64;
+    }
+    if (strcmp(tok, "elf_i386") == 0 || strcmp(tok, "elf32-i386") == 0 ||
+        strcmp(tok, "i386") == 0 || strcmp(tok, "x86") == 0 || strcmp(tok, "32") == 0) {
+        return 32;
+    }
+    return 0;
+}
+
+static int run_internal_rel_link(const ld_ctx_t *ctx) {
+    elfobj_t **objs = NULL;
+    size_t obj_count = 0;
+    elfobj_t *out = NULL;
+    elf_err_t err;
+
+    err = elf_link_load_objects((const char **)ctx->inputs.items, ctx->inputs.count, &objs, &obj_count);
+    if (err != ELF_OK) {
+        fprintf(stderr, "ld: failed to load input objects: %s\n", elf_errstr(err));
+        return -1;
+    }
+    err = elf_link(objs, obj_count, &out);
+    if (err != ELF_OK || out == NULL) {
+        fprintf(stderr, "ld: internal relocatable link failed: %s\n", out ? elf_last_diagnostics(out) : elf_errstr(err));
+        elf_link_unload_objects(objs, obj_count);
+        if (out != NULL) {
+            elf_close(out);
+        }
+        return -1;
+    }
+    err = elf_write_file(out, ctx->out_path);
+    if (err != ELF_OK) {
+        fprintf(stderr, "ld: failed to write output %s: %s\n", ctx->out_path, elf_errstr(err));
+        elf_link_unload_objects(objs, obj_count);
+        elf_close(out);
+        return -1;
+    }
+
+    elf_link_unload_objects(objs, obj_count);
+    elf_close(out);
     return 0;
 }
 
@@ -261,25 +340,25 @@ static int validate_output(const ld_ctx_t *ctx) {
     elfobj_t *obj = NULL;
 
     if (elf_open(ctx->out_path, &obj) != ELF_OK) {
-        fprintf(stderr, "ld.x86: failed to open output %s\n", ctx->out_path);
+        fprintf(stderr, "ld: failed to open output %s\n", ctx->out_path);
         return -1;
     }
 
     if (ctx->expect_type != 0 && elf_type(obj) != ctx->expect_type) {
-        fprintf(stderr, "ld.x86: wrong output ELF type\n");
+        fprintf(stderr, "ld: wrong output ELF type\n");
         elf_close(obj);
         return -1;
     }
 
     if (ctx->mode == 64) {
         if (elf_class(obj) != ELFOBJ_CLASS_64 || elf_machine(obj) != EM_X86_64) {
-            fprintf(stderr, "ld.x86: expected x86_64 ELF64 output\n");
+            fprintf(stderr, "ld: expected x86_64 ELF64 output\n");
             elf_close(obj);
             return -1;
         }
     } else {
         if (elf_class(obj) != ELFOBJ_CLASS_32 || elf_machine(obj) != EM_386) {
-            fprintf(stderr, "ld.x86: expected i386 ELF32 output\n");
+            fprintf(stderr, "ld: expected i386 ELF32 output\n");
             elf_close(obj);
             return -1;
         }
@@ -305,10 +384,37 @@ int main(int argc, char **argv) {
         }
         if (strcmp(argv[i], "-m32") == 0) {
             ctx.mode = 32;
+            ctx.explicit_mode = 1;
             continue;
         }
         if (strcmp(argv[i], "-m64") == 0) {
             ctx.mode = 64;
+            ctx.explicit_mode = 1;
+            continue;
+        }
+        if (strcmp(argv[i], "-m") == 0) {
+            int m;
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                strvec_free(&ctx.pass);
+                strvec_free(&ctx.inputs);
+                return 2;
+            }
+            m = parse_mode_token(argv[i + 1]);
+            if (m == 0) {
+                fprintf(stderr, "ld: unsupported emulation '%s'\n", argv[i + 1]);
+                strvec_free(&ctx.pass);
+                strvec_free(&ctx.inputs);
+                return 2;
+            }
+            ctx.mode = m;
+            ctx.explicit_mode = 1;
+            if (strvec_push(&ctx.pass, argv[i]) != 0 || strvec_push(&ctx.pass, argv[i + 1]) != 0) {
+                strvec_free(&ctx.pass);
+                strvec_free(&ctx.inputs);
+                return 1;
+            }
+            ++i;
             continue;
         }
 
@@ -367,11 +473,22 @@ int main(int argc, char **argv) {
     }
 
     if (ctx.mode == 0) {
-        infer_mode_from_inputs(&ctx);
+        if (!infer_mode_from_program_name(&ctx)) {
+            infer_mode_from_inputs(&ctx);
+        }
+    }
+    if (ctx.mode == 0) {
+        ctx.mode = default_mode();
     }
 
-    if (run_ld_backend(&ctx) != 0) {
-        fprintf(stderr, "ld.x86: backend link failed\n");
+    if (ctx.expect_type == ET_REL) {
+        if (run_internal_rel_link(&ctx) != 0) {
+            strvec_free(&ctx.pass);
+            strvec_free(&ctx.inputs);
+            return 1;
+        }
+    } else if (run_ld_backend(&ctx) != 0) {
+        fprintf(stderr, "ld: backend link failed\n");
         strvec_free(&ctx.pass);
         strvec_free(&ctx.inputs);
         return 1;
