@@ -63,7 +63,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-004, LD-R-002.
 - [x] Implement lazy extraction engine driven by unresolved symbol set.  
   Reqs: LD-S-001, LD-E-001. Stories: US-002.
-- [ ] Add archive fuzz corpus and parser sanitization tests.  
+- [x] Add archive fuzz corpus and parser sanitization tests.  
   Reqs: LD-R-004.
 
 ### 2.3 Shared object input support
