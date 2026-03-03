@@ -119,6 +119,7 @@ typedef enum {
 #endif
 
 #ifndef SHT_GNU_verdef
+#define SHT_GNU_HASH 0x6ffffff6
 #define SHT_GNU_verdef 0x6ffffffd
 #define SHT_GNU_verneed 0x6ffffffe
 #define SHT_GNU_versym 0x6fffffff

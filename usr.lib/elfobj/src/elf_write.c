@@ -474,6 +474,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         size_t dynsym_index = (size_t)-1;
         size_t dynstr_index = (size_t)-1;
         size_t dynamic_index = (size_t)-1;
+        size_t hash_index = (size_t)-1;
+        size_t gnu_hash_index = (size_t)-1;
         for (i = 1; i < sec_count; ++i) {
             const char *nm = secs[i].name != NULL ? secs[i].name : "";
             if (strcmp(nm, ".dynsym") == 0) {
@@ -482,6 +484,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 dynstr_index = i;
             } else if (strcmp(nm, ".dynamic") == 0) {
                 dynamic_index = i;
+            } else if (strcmp(nm, ".hash") == 0) {
+                hash_index = i;
+            } else if (strcmp(nm, ".gnu.hash") == 0) {
+                gnu_hash_index = i;
             }
         }
         if (dynsym_index != (size_t)-1) {
@@ -501,6 +507,17 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             }
             if (dynstr_index != (size_t)-1) {
                 secs[dynamic_index].link = (uint32_t)dynstr_index;
+            }
+        }
+        if (dynsym_index != (size_t)-1) {
+            if (hash_index != (size_t)-1) {
+                if (secs[hash_index].entsize == 0) {
+                    secs[hash_index].entsize = 4;
+                }
+                secs[hash_index].link = (uint32_t)dynsym_index;
+            }
+            if (gnu_hash_index != (size_t)-1) {
+                secs[gnu_hash_index].link = (uint32_t)dynsym_index;
             }
         }
     }

@@ -191,7 +191,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-S-003.
 - [x] Build `.dynamic` tags and ensure consistency invariants.  
   Reqs: LD-S-003.
-- [ ] Implement `--hash-style` (`sysv|gnu|both`) generators.  
+- [x] Implement `--hash-style` (`sysv|gnu|both`) generators.  
   Reqs: LD-U-001, LD-S-003.
 
 ### 7.2 GOT/PLT

@@ -44,6 +44,12 @@ typedef enum {
     LD_COMPAT_LLD = 1
 } ld_compat_mode_t;
 
+typedef enum {
+    LD_HASH_BOTH = 0,
+    LD_HASH_SYSV = 1,
+    LD_HASH_GNU = 2
+} ld_hash_style_t;
+
 typedef struct {
     ld_input_kind_t kind;
     ld_lib_mode_t lib_mode;
@@ -105,6 +111,7 @@ typedef struct {
     int z_text_mode; /* 0=default, 1=text, 2=notext */
     int z_execstack; /* -1=auto, 0=noexecstack, 1=execstack */
     int z_relro; /* 0=norelro, 1=relro */
+    ld_hash_style_t hash_style;
     const char *out_path;
     const char *self_path;
     const char *entry_symbol;
@@ -128,6 +135,7 @@ static void usage(const char *prog) {
             "[-o output] [-L dir] [-l name] [-Bstatic|-Bdynamic] "
             "[--start-group ... --end-group] [--whole-archive|--no-whole-archive] "
             "[-e symbol] [--allow-undefined] [-z text|notext|execstack|noexecstack|relro|norelro] "
+            "[--hash-style=sysv|gnu|both] "
             "[--compat=gnu|lld] input...\n",
             prog);
 }
@@ -469,6 +477,25 @@ static int parse_z_option(ld_ctx_t *ctx, const char *val) {
     }
     if (strcmp(val, "norelro") == 0) {
         ctx->z_relro = 0;
+        return 0;
+    }
+    return -1;
+}
+
+static int parse_hash_style_option(const char *val, ld_hash_style_t *out_style) {
+    if (val == NULL || out_style == NULL || val[0] == '\0') {
+        return -1;
+    }
+    if (strcmp(val, "sysv") == 0) {
+        *out_style = LD_HASH_SYSV;
+        return 0;
+    }
+    if (strcmp(val, "gnu") == 0) {
+        *out_style = LD_HASH_GNU;
+        return 0;
+    }
+    if (strcmp(val, "both") == 0) {
+        *out_style = LD_HASH_BOTH;
         return 0;
     }
     return -1;
@@ -1866,19 +1893,178 @@ static int dynamic_append_entry(uint8_t **buf, size_t *len, size_t *cap, elfobj_
     return dynbuf_append(buf, len, cap, entry, entsz);
 }
 
+static uint32_t dynsym_name_off_at(const uint8_t *dynsym, size_t dynsym_len, size_t entsz,
+                                   elfobj_endian_t endian, size_t index) {
+    size_t off = index * entsz;
+    if (dynsym == NULL || entsz == 0 || off > dynsym_len || dynsym_len - off < entsz) {
+        return 0;
+    }
+    return read_u32_endian(dynsym + off, endian);
+}
+
+static uint8_t *build_sysv_hash_section(const uint8_t *dynsym, size_t dynsym_len,
+                                        const uint8_t *dynstr, size_t dynstr_len,
+                                        size_t entsz, elfobj_endian_t endian, size_t *out_sz) {
+    size_t nsyms;
+    size_t nbucket;
+    size_t nchain;
+    uint32_t *buckets = NULL;
+    uint32_t *chains = NULL;
+    uint8_t *buf = NULL;
+    size_t i;
+    size_t j;
+
+    if (out_sz == NULL || entsz == 0 || (dynsym_len % entsz) != 0) {
+        return NULL;
+    }
+    nsyms = dynsym_len / entsz;
+    nbucket = nsyms > 1 ? nsyms - 1 : 1;
+    nchain = nsyms;
+    buckets = (uint32_t *)calloc(nbucket, sizeof(*buckets));
+    chains = (uint32_t *)calloc(nchain, sizeof(*chains));
+    if (buckets == NULL || chains == NULL) {
+        free(buckets);
+        free(chains);
+        return NULL;
+    }
+
+    for (i = 1; i < nsyms; ++i) {
+        uint32_t noff = dynsym_name_off_at(dynsym, dynsym_len, entsz, endian, i);
+        const char *name = (noff < dynstr_len) ? (const char *)(dynstr + noff) : "";
+        uint32_t h = elf_hash_sysv(name);
+        size_t b = (size_t)(h % (uint32_t)nbucket);
+
+        if (buckets[b] == 0) {
+            buckets[b] = (uint32_t)i;
+        } else {
+            j = buckets[b];
+            while (j < nchain && chains[j] != 0) {
+                j = chains[j];
+            }
+            if (j < nchain) {
+                chains[j] = (uint32_t)i;
+            }
+        }
+    }
+
+    *out_sz = (2 + nbucket + nchain) * 4;
+    buf = (uint8_t *)malloc(*out_sz);
+    if (buf == NULL) {
+        free(buckets);
+        free(chains);
+        return NULL;
+    }
+    write_u32_endian(buf + 0, endian, (uint32_t)nbucket);
+    write_u32_endian(buf + 4, endian, (uint32_t)nchain);
+    for (i = 0; i < nbucket; ++i) {
+        write_u32_endian(buf + 8 + (i * 4), endian, buckets[i]);
+    }
+    for (i = 0; i < nchain; ++i) {
+        write_u32_endian(buf + 8 + (nbucket * 4) + (i * 4), endian, chains[i]);
+    }
+    free(buckets);
+    free(chains);
+    return buf;
+}
+
+static uint8_t *build_gnu_hash_section(const uint8_t *dynsym, size_t dynsym_len,
+                                       const uint8_t *dynstr, size_t dynstr_len,
+                                       size_t entsz, elfobj_class_t cls,
+                                       elfobj_endian_t endian, size_t *out_sz) {
+    size_t nsyms;
+    uint32_t nbuckets;
+    uint32_t symoffset = 1;
+    uint32_t bloom_size = 1;
+    uint32_t bloom_shift = 5;
+    size_t chain_count;
+    size_t word_sz;
+    size_t i;
+    uint8_t *buf = NULL;
+    size_t off;
+
+    if (out_sz == NULL || entsz == 0 || (dynsym_len % entsz) != 0) {
+        return NULL;
+    }
+    nsyms = dynsym_len / entsz;
+    nbuckets = (nsyms > 1) ? 1u : 1u;
+    chain_count = (nsyms > symoffset) ? (nsyms - symoffset) : 0;
+    word_sz = cls == ELFOBJ_CLASS_64 ? 8 : 4;
+    *out_sz = 16 + (bloom_size * word_sz) + ((size_t)nbuckets * 4) + (chain_count * 4);
+    buf = (uint8_t *)calloc(1, *out_sz);
+    if (buf == NULL) {
+        return NULL;
+    }
+
+    write_u32_endian(buf + 0, endian, nbuckets);
+    write_u32_endian(buf + 4, endian, symoffset);
+    write_u32_endian(buf + 8, endian, bloom_size);
+    write_u32_endian(buf + 12, endian, bloom_shift);
+
+    off = 16;
+    if (chain_count > 0) {
+        uint64_t bloom = 0;
+        if (cls == ELFOBJ_CLASS_64) {
+            write_u64_endian(buf + off, endian, 0);
+        } else {
+            write_u32_endian(buf + off, endian, 0);
+        }
+        off += word_sz;
+        write_u32_endian(buf + off, endian, symoffset);
+        off += 4;
+        for (i = 0; i < chain_count; ++i) {
+            size_t sym_index = symoffset + i;
+            uint32_t noff = dynsym_name_off_at(dynsym, dynsym_len, entsz, endian, sym_index);
+            const char *name = (noff < dynstr_len) ? (const char *)(dynstr + noff) : "";
+            uint32_t h = elf_hash_gnu(name);
+            uint32_t chain = h & ~1u;
+            if (i + 1 == chain_count) {
+                chain |= 1u;
+            }
+            if (cls == ELFOBJ_CLASS_64) {
+                bloom |= (1ull << (h % 64));
+                bloom |= (1ull << ((h >> bloom_shift) % 64));
+            } else {
+                bloom |= (1u << (h % 32));
+                bloom |= (1u << ((h >> bloom_shift) % 32));
+            }
+            write_u32_endian(buf + off + (i * 4), endian, chain);
+        }
+        if (cls == ELFOBJ_CLASS_64) {
+            write_u64_endian(buf + 16, endian, bloom);
+        } else {
+            write_u32_endian(buf + 16, endian, (uint32_t)bloom);
+        }
+    } else {
+        if (cls == ELFOBJ_CLASS_64) {
+            write_u64_endian(buf + off, endian, 0);
+        } else {
+            write_u32_endian(buf + off, endian, 0);
+        }
+        off += word_sz;
+        write_u32_endian(buf + off, endian, 0);
+    }
+    return buf;
+}
+
 static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     elf_section_t *dynstr;
     elf_section_t *dynsym;
     elf_section_t *dynamic;
+    elf_section_t *hash_sec = NULL;
+    elf_section_t *gnu_hash_sec = NULL;
     uint8_t *dynstr_buf = NULL;
     uint8_t *dynsym_buf = NULL;
     uint8_t *dynamic_buf = NULL;
+    uint8_t *hash_buf = NULL;
+    uint8_t *gnu_hash_buf = NULL;
     size_t dynstr_len = 0;
     size_t dynstr_cap = 0;
     size_t dynsym_len = 0;
     size_t dynsym_cap = 0;
     size_t dynamic_len = 0;
     size_t dynamic_cap = 0;
+    size_t hash_sz = 0;
+    size_t gnu_hash_sz = 0;
     size_t i;
     size_t entsz;
     int need_dyn;
@@ -1911,6 +2097,30 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     if (elf_section_set_align(dynsym, elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4) != ELF_OK) {
         return -1;
     }
+    if (ctx->hash_style == LD_HASH_SYSV || ctx->hash_style == LD_HASH_BOTH) {
+        hash_sec = elf_find_section(out, ".hash");
+        if (hash_sec == NULL) {
+            hash_sec = elf_add_section(out, ".hash", SHT_HASH, SHF_ALLOC);
+            if (hash_sec == NULL) {
+                return -1;
+            }
+        }
+        if (elf_section_set_align(hash_sec, 4) != ELF_OK) {
+            return -1;
+        }
+    }
+    if (ctx->hash_style == LD_HASH_GNU || ctx->hash_style == LD_HASH_BOTH) {
+        gnu_hash_sec = elf_find_section(out, ".gnu.hash");
+        if (gnu_hash_sec == NULL) {
+            gnu_hash_sec = elf_add_section(out, ".gnu.hash", SHT_GNU_HASH, SHF_ALLOC);
+            if (gnu_hash_sec == NULL) {
+                return -1;
+            }
+        }
+        if (elf_section_set_align(gnu_hash_sec, elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4) != ELF_OK) {
+            return -1;
+        }
+    }
     dynamic = elf_find_section(out, ".dynamic");
     if (dynamic == NULL) {
         dynamic = elf_add_section(out, ".dynamic", SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE);
@@ -1933,11 +2143,15 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         uint32_t off = 0;
         if (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, name, &off) != 0) {
             free(dynstr_buf);
+            free(hash_buf);
+            free(gnu_hash_buf);
             return -1;
         }
         if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
                                  elf_class(out), elf_endian(out), DT_NEEDED, off) != 0) {
             free(dynstr_buf);
+            free(hash_buf);
+            free(gnu_hash_buf);
             return -1;
         }
     }
@@ -1947,6 +2161,8 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     if (dynsym_buf == NULL) {
         free(dynstr_buf);
         free(dynamic_buf);
+        free(hash_buf);
+        free(gnu_hash_buf);
         return -1;
     }
     dynsym_len = entsz;
@@ -1969,6 +2185,8 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(hash_buf);
+            free(gnu_hash_buf);
             return -1;
         }
 
@@ -1997,6 +2215,31 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
+            free(hash_buf);
+            free(gnu_hash_buf);
+            return -1;
+        }
+    }
+
+    if (hash_sec != NULL) {
+        hash_buf = build_sysv_hash_section(dynsym_buf, dynsym_len, dynstr_buf, dynstr_len,
+                                           entsz, elf_endian(out), &hash_sz);
+        if (hash_buf == NULL) {
+            free(dynstr_buf);
+            free(dynsym_buf);
+            free(dynamic_buf);
+            free(gnu_hash_buf);
+            return -1;
+        }
+    }
+    if (gnu_hash_sec != NULL) {
+        gnu_hash_buf = build_gnu_hash_section(dynsym_buf, dynsym_len, dynstr_buf, dynstr_len,
+                                              entsz, elf_class(out), elf_endian(out), &gnu_hash_sz);
+        if (gnu_hash_buf == NULL) {
+            free(dynstr_buf);
+            free(dynsym_buf);
+            free(dynamic_buf);
+            free(hash_buf);
             return -1;
         }
     }
@@ -2014,20 +2257,28 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(dynstr_buf);
         free(dynsym_buf);
         free(dynamic_buf);
+        free(hash_buf);
+        free(gnu_hash_buf);
         return -1;
     }
 
     if (elf_section_set_data(dynstr, dynstr_buf, dynstr_len) != ELF_OK ||
         elf_section_set_data(dynsym, dynsym_buf, dynsym_len) != ELF_OK ||
-        elf_section_set_data(dynamic, dynamic_buf, dynamic_len) != ELF_OK) {
+        elf_section_set_data(dynamic, dynamic_buf, dynamic_len) != ELF_OK ||
+        (hash_sec != NULL && elf_section_set_data(hash_sec, hash_buf, hash_sz) != ELF_OK) ||
+        (gnu_hash_sec != NULL && elf_section_set_data(gnu_hash_sec, gnu_hash_buf, gnu_hash_sz) != ELF_OK)) {
         free(dynstr_buf);
         free(dynsym_buf);
         free(dynamic_buf);
+        free(hash_buf);
+        free(gnu_hash_buf);
         return -1;
     }
     free(dynstr_buf);
     free(dynsym_buf);
     free(dynamic_buf);
+    free(hash_buf);
+    free(gnu_hash_buf);
     return 0;
 }
 
@@ -4128,6 +4379,7 @@ int main(int argc, char **argv) {
     ctx.z_text_mode = 0;
     ctx.z_execstack = -1;
     ctx.z_relro = 1;
+    ctx.hash_style = LD_HASH_BOTH;
 
     for (i = 1; i < argc; ++i) {
         const char *a = argv[i];
@@ -4558,6 +4810,31 @@ int main(int argc, char **argv) {
                 return 2;
             }
             ctx.map_path = val;
+            continue;
+        }
+        if ((p = parse_arg_value(a, "--hash-style", &val)) != 0) {
+            ld_hash_style_t style;
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (parse_hash_style_option(val, &style) != 0) {
+                fprintf(stderr, "ld: unsupported --hash-style value '%s' (expected sysv|gnu|both)\n",
+                        val != NULL ? val : "");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                return 2;
+            }
+            ctx.hash_style = style;
             continue;
         }
         if (strcmp(a, "--trace") == 0) {
