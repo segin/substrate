@@ -48,26 +48,26 @@ typedef struct variable {
 
 variable_t *vars = NULL;
 
-bc_num *get_var(const char *name) {
-    for (variable_t *v = vars; v; v = v->next) {
-        if (strcmp(v->name, name) == 0) return v->val;
-    }
-    // Create new (init to 0)
-    variable_t *v = malloc(sizeof(variable_t));
-    v->name = strdup(name);
-    v->val = bc_from_long(0);
-    v->next = vars;
-    vars = v;
-    return v->val;
-}
-
-
-
 variable_t *find_var(const char *name) {
     for (variable_t *v = vars; v; v = v->next) {
         if (strcmp(v->name, name) == 0) return v;
     }
-    variable_t *v = malloc(sizeof(variable_t));
+    return NULL;
+}
+
+bc_num *get_var(const char *name) {
+    variable_t *v = find_var(name);
+    if (!v) {
+        fprintf(stderr, "Error: undefined variable '%s'\n", name);
+        return NULL;
+    }
+    return v->val;
+}
+
+variable_t *get_or_create_var(const char *name) {
+    variable_t *v = find_var(name);
+    if (v) return v;
+    v = malloc(sizeof(variable_t));
     v->name = strdup(name);
     v->val = bc_from_long(0);
     v->next = vars;
@@ -196,14 +196,15 @@ bc_num *factor(void) {
         if (token == TOK_ASSIGN) {
             next_token(); // eat =
             bc_num *v = expr();
-            variable_t *var = find_var(id);
+            variable_t *var = get_or_create_var(id);
             bc_free(var->val);
             var->val = bc_dup(v); // Store copy
             return v; // Return value for chain
         }
         // Load
-        variable_t *var = find_var(id);
-        return bc_dup(var->val);
+        bc_num *v = get_var(id);
+        if (!v) return bc_from_long(0);
+        return bc_dup(v);
     }
     if (token == '(') {
         next_token();
