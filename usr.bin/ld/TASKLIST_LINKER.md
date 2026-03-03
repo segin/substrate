@@ -37,7 +37,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-E-005. Stories: US-201.
 
 ### 1.3 Tooling options
-- [ ] Implement `-Map`, `--trace`, `--trace-symbol`, `--version`, `--help`.  
+- [x] Implement `-Map`, `--trace`, `--trace-symbol`, `--version`, `--help`.  
   Reqs: LD-U-011, LD-U-010. Stories: US-301.
 - [ ] Implement warning policy options (`--fatal-warnings`, `--warn-common`, unresolved policies).  
   Reqs: LD-W-003, LD-E-001.

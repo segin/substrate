@@ -68,15 +68,18 @@ typedef struct {
     uint16_t expect_type;
     int allow_undefined;
     int query_version;
+    int trace_inputs;
     const char *out_path;
     const char *self_path;
     const char *entry_symbol;
     const char *interp_path;
+    const char *map_path;
     ld_compat_mode_t compat_mode;
     ld_lib_mode_t current_lib_mode;
     int current_whole_archive;
     int current_as_needed;
     strvec_t lib_paths;
+    strvec_t trace_symbols;
     inputvec_t inputs;
 } ld_ctx_t;
 
@@ -990,6 +993,125 @@ static int load_all_inputs(const ld_ctx_t *ctx, objvec_t *objs) {
     return 0;
 }
 
+static int trace_symbol_requested(const ld_ctx_t *ctx, const char *name) {
+    size_t i;
+
+    if (ctx->trace_symbols.count == 0 || name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    for (i = 0; i < ctx->trace_symbols.count; ++i) {
+        if (strcmp(ctx->trace_symbols.items[i], name) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void emit_trace_inputs(const ld_ctx_t *ctx, const objvec_t *inputs) {
+    size_t i;
+
+    if (!ctx->trace_inputs) {
+        return;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        fprintf(stderr, "ld: trace: input %s\n", inputs->names[i]);
+    }
+}
+
+static void emit_trace_symbols(const ld_ctx_t *ctx, const objvec_t *inputs) {
+    size_t i;
+
+    if (ctx->trace_symbols.count == 0) {
+        return;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        elfobj_t *obj = inputs->objs[i];
+        size_t si;
+
+        for (si = 0; si < elf_symbol_count(obj); ++si) {
+            const elf_symbol_t *sym = elf_symbol_at(obj, si);
+            const char *name;
+
+            if (sym == NULL) {
+                continue;
+            }
+            name = elf_symbol_name(sym);
+            if (!trace_symbol_requested(ctx, name)) {
+                continue;
+            }
+            if (elf_symbol_shndx(sym) != SHN_UNDEF) {
+                fprintf(stderr, "ld: trace-symbol: %s defined in %s\n", name, inputs->names[i]);
+            } else {
+                fprintf(stderr, "ld: trace-symbol: %s referenced by %s\n", name, inputs->names[i]);
+            }
+        }
+    }
+}
+
+static int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
+    FILE *fp;
+    size_t i;
+
+    if (ctx->map_path == NULL || ctx->map_path[0] == '\0') {
+        return 0;
+    }
+    fp = fopen(ctx->map_path, "w");
+    if (fp == NULL) {
+        fprintf(stderr, "ld: failed to open map file %s: %s\n", ctx->map_path, strerror(errno));
+        return -1;
+    }
+
+    fprintf(fp, "Output: %s\n", ctx->out_path);
+    fprintf(fp, "Type: %u\n", (unsigned)elf_type(out));
+    fprintf(fp, "Class: %s\n", elf_class(out) == ELFOBJ_CLASS_64 ? "ELF64" : "ELF32");
+    fprintf(fp, "\nInputs:\n");
+    for (i = 0; i < inputs->count; ++i) {
+        fprintf(fp, "  %s\n", inputs->names[i]);
+    }
+
+    fprintf(fp, "\nSections:\n");
+    for (i = 0; i < elf_section_count(out); ++i) {
+        const elf_section_t *sec = elf_section_get(out, i);
+        const char *name = sec != NULL ? elf_section_name(sec) : NULL;
+
+        if (sec == NULL) {
+            continue;
+        }
+        fprintf(fp, "  %-20s addr=0x%llx size=0x%llx flags=0x%llx\n",
+                name != NULL ? name : "<unnamed>",
+                (unsigned long long)elf_section_addr(sec),
+                (unsigned long long)elf_section_size(sec),
+                (unsigned long long)elf_section_flags(sec));
+    }
+
+    fprintf(fp, "\nSymbols:\n");
+    for (i = 0; i < elf_symbol_count(out); ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(out, i);
+        const char *name;
+
+        if (sym == NULL) {
+            continue;
+        }
+        if (elf_symbol_bind(sym) == STB_LOCAL || elf_symbol_shndx(sym) == SHN_UNDEF) {
+            continue;
+        }
+        name = elf_symbol_name(sym);
+        if (name == NULL || name[0] == '\0') {
+            continue;
+        }
+        fprintf(fp, "  %-28s value=0x%llx size=%llu bind=%u type=%u shndx=%u\n",
+                name,
+                (unsigned long long)elf_symbol_value(sym),
+                (unsigned long long)elf_symbol_size(sym),
+                (unsigned)elf_symbol_bind(sym),
+                (unsigned)elf_symbol_type(sym),
+                (unsigned)elf_symbol_shndx(sym));
+    }
+
+    fclose(fp);
+    return 0;
+}
+
 static int64_t sign_extend_u64(uint64_t v, int bits) {
     uint64_t m;
     if (bits <= 0 || bits >= 64) {
@@ -1425,6 +1547,8 @@ static int run_internal_link(const ld_ctx_t *ctx) {
         objvec_free(&inputs);
         return -1;
     }
+    emit_trace_inputs(ctx, &inputs);
+    emit_trace_symbols(ctx, &inputs);
     if (inputs.count == 0) {
         fprintf(stderr, "ld: no compatible relocatable input objects found\n");
         objvec_free(&inputs);
@@ -1450,6 +1574,11 @@ static int run_internal_link(const ld_ctx_t *ctx) {
     }
 
     if (out_type == ET_REL) {
+        if (write_map_file(ctx, &inputs, out) != 0) {
+            objvec_free(&inputs);
+            elf_close(out);
+            return -1;
+        }
         if (elf_write_file(out, ctx->out_path) != ELF_OK) {
             fprintf(stderr, "ld: failed to write output %s\n", ctx->out_path);
             objvec_free(&inputs);
@@ -1499,6 +1628,11 @@ static int run_internal_link(const ld_ctx_t *ctx) {
 
     if (set_entry_symbol(out, ctx->entry_symbol != NULL ? ctx->entry_symbol : "_start",
                          out_type == ET_EXEC) != 0) {
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+    if (write_map_file(ctx, &inputs, out) != 0) {
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -1553,6 +1687,7 @@ int main(int argc, char **argv) {
             usage(argv[0]);
             inputvec_free(&ctx.inputs);
             strvec_free(&ctx.lib_paths);
+            strvec_free(&ctx.trace_symbols);
             return 0;
         }
         if ((p = parse_arg_value(a, "--compat=", &val)) != 0) {
@@ -1769,12 +1904,62 @@ int main(int argc, char **argv) {
             }
             continue;
         }
+        if ((p = parse_arg_value(a, "-Map", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (val == NULL || val[0] == '\0') {
+                fprintf(stderr, "ld: -Map requires a non-empty path\n");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                return 2;
+            }
+            ctx.map_path = val;
+            continue;
+        }
+        if (strcmp(a, "--trace") == 0) {
+            ctx.trace_inputs = 1;
+            continue;
+        }
+        if ((p = parse_arg_value(a, "--trace-symbol", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (val == NULL || val[0] == '\0' || strvec_push(&ctx.trace_symbols, val) != 0) {
+                fprintf(stderr, "ld: --trace-symbol requires a symbol name\n");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                return 2;
+            }
+            continue;
+        }
 
-        if (strcmp(a, "-z") == 0 || strcmp(a, "-T") == 0 || strcmp(a, "-Map") == 0) {
+        if (strcmp(a, "-z") == 0 || strcmp(a, "-T") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
                 return 2;
             }
             ++i;
@@ -1807,12 +1992,14 @@ int main(int argc, char **argv) {
         printf("Substrate ld (internal) 0.1\n");
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
+        strvec_free(&ctx.trace_symbols);
         return 0;
     }
     if (ctx.inputs.count == 0) {
         usage(argv[0]);
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
+        strvec_free(&ctx.trace_symbols);
         return 2;
     }
 
@@ -1826,15 +2013,18 @@ int main(int argc, char **argv) {
     if (run_internal_link(&ctx) != 0) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
+        strvec_free(&ctx.trace_symbols);
         return 1;
     }
     if (validate_output(&ctx) != 0) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
+        strvec_free(&ctx.trace_symbols);
         return 1;
     }
 
     inputvec_free(&ctx.inputs);
     strvec_free(&ctx.lib_paths);
+    strvec_free(&ctx.trace_symbols);
     return 0;
 }

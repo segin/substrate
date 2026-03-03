@@ -48,6 +48,7 @@ test_entry_option.sh|LD-U-001 LD-U-009
 test_library_search_modes.sh|LD-U-004
 test_group_and_whole_archive.sh|LD-S-001 LD-U-004
 test_as_needed.sh|LD-E-005
+test_tooling_options.sh|LD-U-011 LD-U-010
 EOF
 
 echo
