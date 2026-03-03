@@ -66,6 +66,7 @@ typedef struct {
 typedef struct {
     int mode; /* 32 or 64 */
     int explicit_mode;
+    int explicit_unresolved_policy;
     uint16_t expect_type;
     int allow_undefined;
     int warn_common;
@@ -2085,6 +2086,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     elfobj_t *out = NULL;
     elf_err_t err;
     uint16_t out_type;
+    int allow_undef_runtime;
     uint64_t base_vaddr;
 
     memset(&inputs, 0, sizeof(inputs));
@@ -2119,6 +2121,10 @@ static int run_internal_link(ld_ctx_t *ctx) {
     }
 
     out_type = ctx->expect_type == 0 ? ET_EXEC : ctx->expect_type;
+    allow_undef_runtime = ctx->allow_undefined;
+    if (out_type == ET_DYN && !ctx->explicit_unresolved_policy) {
+        allow_undef_runtime = 1;
+    }
     if (elf_set_type(out, out_type) != ELF_OK) {
         fprintf(stderr, "ld: failed to set output type\n");
         objvec_free(&inputs);
@@ -2178,13 +2184,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
 
-    if (check_undefined_symbols(out, ctx->allow_undefined || out_type == ET_DYN) != 0) {
+    if (check_undefined_symbols(out, allow_undef_runtime) != 0) {
         objvec_free(&inputs);
         elf_close(out);
         return -1;
     }
 
-    if (apply_all_relocations(out, ctx->allow_undefined || out_type == ET_DYN) != 0) {
+    if (apply_all_relocations(out, allow_undef_runtime) != 0) {
         objvec_free(&inputs);
         elf_close(out);
         return -1;
@@ -2395,10 +2401,12 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "--allow-undefined") == 0) {
             ctx.allow_undefined = 1;
+            ctx.explicit_unresolved_policy = 1;
             continue;
         }
         if (strcmp(a, "--no-undefined") == 0) {
             ctx.allow_undefined = 0;
+            ctx.explicit_unresolved_policy = 1;
             continue;
         }
         if (strcmp(a, "--warn-common") == 0) {
@@ -2428,8 +2436,10 @@ int main(int argc, char **argv) {
             }
             if (strcmp(val, "ignore-all") == 0) {
                 ctx.allow_undefined = 1;
+                ctx.explicit_unresolved_policy = 1;
             } else if (strcmp(val, "report-all") == 0) {
                 ctx.allow_undefined = 0;
+                ctx.explicit_unresolved_policy = 1;
             } else {
                 fprintf(stderr,
                         "ld: unsupported --unresolved-symbols policy '%s' "

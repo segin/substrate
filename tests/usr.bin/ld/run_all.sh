@@ -58,6 +58,7 @@ test_archive_parser_sanitization.sh|LD-R-004
 test_dso_import_only.sh|LD-U-004 LD-U-005
 test_dynamic_needed_as_needed.sh|LD-E-005 LD-S-003
 test_symbol_precedence.sh|LD-U-005 LD-E-003
+test_unresolved_matrix.sh|LD-E-001 LD-E-002
 EOF
 
 echo

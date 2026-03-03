@@ -83,7 +83,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-005, LD-E-003.
 - [x] Implement `SHN_COMMON` placement policy and conflict handling.  
   Reqs: LD-U-005.
-- [ ] Implement unresolved handling matrix by output type and policy flags.  
+- [x] Implement unresolved handling matrix by output type and policy flags.  
   Reqs: LD-E-001, LD-E-002.
 
 ### 3.2 Visibility and versioning
