@@ -600,7 +600,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
         // Map with user access and WRITE permission for stack operations
         // pmap_enter expects physical address, convert virtual to physical
         uint32_t pa_phys = (uint32_t)(uintptr_t)pa - 0xC0000000;
-        if (pmap_enter(pmap, va, pa_phys, VM_PROT_WRITE, 0) < 0) {
+        if (pmap_enter(pmap, va, pa_phys, VM_PROT_ALL & ~VM_PROT_EXEC, 0) < 0) {
             kprint("execve: Failed to map user stack\n");
             goto cleanup;
         }
