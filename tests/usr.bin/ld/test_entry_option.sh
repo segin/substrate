@@ -15,19 +15,18 @@ SRC
 
 gcc -m64 -c -o "$TMP/entry64.o" "$TMP/entry.c"
 
-if "$LDX" -m64 -static -o "$TMP/default.out" "$TMP/entry64.o" >"$TMP/default.err" 2>&1; then
-	echo "FAIL: default entry unexpectedly succeeded without _start" >&2
-	exit 1
-fi
-if ! grep -q "entry symbol '_start' not found" "$TMP/default.err"; then
-	echo "FAIL: missing default entry diagnostic" >&2
-	cat "$TMP/default.err" >&2
-	exit 1
-fi
+"$LDX" -m64 -static -o "$TMP/default.out" "$TMP/entry64.o"
 
 "$LDX" -m64 -static -e alt -o "$TMP/e_alt.out" "$TMP/entry64.o"
 "$LDX" -m64 -static --entry alt -o "$TMP/entry_alt_sep.out" "$TMP/entry64.o"
 "$LDX" -m64 -static --entry=alt -o "$TMP/entry_alt_eq.out" "$TMP/entry64.o"
+
+default_entry=$(readelf -h "$TMP/default.out" | awk '/Entry point address:/{print $4}')
+alt_entry=$(readelf -h "$TMP/e_alt.out" | awk '/Entry point address:/{print $4}')
+if [ "$default_entry" != "$alt_entry" ]; then
+	echo "FAIL: default entry fallback does not match explicit -e alt entry" >&2
+	exit 1
+fi
 
 if "$LDX" -m64 -static --entry= -o "$TMP/entry_empty.out" "$TMP/entry64.o" >"$TMP/entry_empty.err" 2>&1; then
 	echo "FAIL: empty --entry value unexpectedly succeeded" >&2

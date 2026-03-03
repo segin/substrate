@@ -177,9 +177,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-009, LD-W-003.
 
 ### 6.3 Entry point logic
-- [ ] Implement `-e`, `_start`, fallback entry resolution order.  
+- [x] Implement `-e`, `_start`, fallback entry resolution order.  
   Reqs: LD-U-001, LD-E-001.
-- [ ] Add tests for entry handling in ET_EXEC/ET_DYN/ET_REL contexts.  
+- [x] Add tests for entry handling in ET_EXEC/ET_DYN/ET_REL contexts.  
   Reqs: LD-U-007.
 
 ---

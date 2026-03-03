@@ -68,6 +68,7 @@ test_rel_addend_rules.sh|LD-U-006
 test_x64_reloc_overflow_signext.sh|LD-E-006 LD-U-006
 test_i386_reloc_overflow_ranges.sh|LD-E-006 LD-U-006
 test_i386_reloc_suite.sh|LD-U-007 LD-U-006
+test_entry_fallback_matrix.sh|LD-U-001 LD-E-001 LD-U-007
 EOF
 
 echo

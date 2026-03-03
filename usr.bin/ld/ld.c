@@ -2158,7 +2158,38 @@ static int add_default_segments(elfobj_t *obj, const char *interp_path) {
     return 0;
 }
 
-static int set_entry_symbol(elfobj_t *obj, const char *entry_symbol, int require_entry) {
+static int symbol_is_defined(const elf_symbol_t *sym) {
+    return sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF;
+}
+
+static const elf_symbol_t *find_fallback_entry_symbol(elfobj_t *obj) {
+    const elf_symbol_t *sym;
+    size_t i;
+
+    sym = elf_find_symbol(obj, "start");
+    if (symbol_is_defined(sym)) {
+        return sym;
+    }
+    for (i = 0; i < elf_symbol_count(obj); ++i) {
+        sym = elf_symbol_at(obj, i);
+        if (!symbol_is_defined(sym)) {
+            continue;
+        }
+        if (elf_symbol_type(sym) != STT_FUNC && elf_symbol_type(sym) != STT_NOTYPE) {
+            continue;
+        }
+        if (elf_symbol_bind(sym) != STB_GLOBAL && elf_symbol_bind(sym) != STB_WEAK) {
+            continue;
+        }
+        if (elf_symbol_name(sym) == NULL || elf_symbol_name(sym)[0] == '\0') {
+            continue;
+        }
+        return sym;
+    }
+    return NULL;
+}
+
+static int set_entry_symbol(elfobj_t *obj, const char *entry_symbol, int require_entry, int entry_explicit) {
     const elf_symbol_t *sym;
     uint64_t addr = 0;
 
@@ -2166,10 +2197,35 @@ static int set_entry_symbol(elfobj_t *obj, const char *entry_symbol, int require
         return 0;
     }
     sym = elf_find_symbol(obj, entry_symbol);
-    if (sym == NULL || elf_symbol_shndx(sym) == SHN_UNDEF) {
+    if (!symbol_is_defined(sym)) {
         if (require_entry) {
-            fprintf(stderr, "ld: entry symbol '%s' not found\n", entry_symbol);
-            return -1;
+            if (entry_explicit) {
+                fprintf(stderr, "ld: entry symbol '%s' not found\n", entry_symbol);
+                return -1;
+            }
+            sym = find_fallback_entry_symbol(obj);
+            if (!symbol_is_defined(sym)) {
+                elf_section_t *text = elf_find_section(obj, ".text");
+                if (text != NULL && (elf_section_flags(text) & SHF_ALLOC) != 0) {
+                    addr = elf_section_addr(text);
+                    if (elf_set_entry(obj, addr) != ELF_OK) {
+                        fprintf(stderr, "ld: failed to set fallback .text entry address\n");
+                        return -1;
+                    }
+                    return 0;
+                }
+                fprintf(stderr, "ld: entry symbol '%s' not found (no fallback entry)\n", entry_symbol);
+                return -1;
+            }
+            if (resolve_symbol_addr(obj, sym, 0, &addr, NULL) != 0) {
+                fprintf(stderr, "ld: failed to resolve fallback entry symbol\n");
+                return -1;
+            }
+            if (elf_set_entry(obj, addr) != ELF_OK) {
+                fprintf(stderr, "ld: failed to set fallback entry address\n");
+                return -1;
+            }
+            return 0;
         }
         return 0;
     }
@@ -2500,7 +2556,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
     }
 
     if (set_entry_symbol(out, ctx->entry_symbol != NULL ? ctx->entry_symbol : "_start",
-                         out_type == ET_EXEC) != 0) {
+                         out_type == ET_EXEC, ctx->entry_symbol != NULL) != 0) {
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
