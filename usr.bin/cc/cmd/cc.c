@@ -14,6 +14,11 @@
 #define PATH_MAX 4096
 #endif
 
+#define SUBSTRATE_TC_DEPTH_ENV "SUBSTRATE_TC_DEPTH"
+#define SUBSTRATE_TC_TRACE_ENV "SUBSTRATE_TC_TRACE"
+#define SUBSTRATE_TC_MAX_ENV "SUBSTRATE_TC_MAX_DEPTH"
+#define SUBSTRATE_TC_DEFAULT_MAX 64
+
 typedef struct {
     char **items;
     size_t count;
@@ -323,6 +328,72 @@ static const char *prog_basename(const char *path) {
         return path;
     }
     return slash + 1;
+}
+
+static long parse_env_long(const char *s, long fallback) {
+    char *end;
+    long v;
+
+    if (s == NULL || s[0] == '\0') {
+        return fallback;
+    }
+    errno = 0;
+    v = strtol(s, &end, 10);
+    if (errno != 0 || end == s || *end != '\0') {
+        return fallback;
+    }
+    return v;
+}
+
+static int toolchain_guard_enter(const char *tool) {
+    long depth;
+    long max_depth;
+    char depth_buf[32];
+    char trace_buf[256];
+    const char *trace;
+    int n;
+
+    depth = parse_env_long(getenv(SUBSTRATE_TC_DEPTH_ENV), 0);
+    if (depth < 0) {
+        depth = 0;
+    }
+
+    max_depth = parse_env_long(getenv(SUBSTRATE_TC_MAX_ENV), SUBSTRATE_TC_DEFAULT_MAX);
+    if (max_depth < 4) {
+        max_depth = 4;
+    }
+    if (depth >= max_depth) {
+        trace = getenv(SUBSTRATE_TC_TRACE_ENV);
+        fprintf(stderr,
+                "cc: fatal: toolchain recursion guard hit at depth %ld (max %ld)%s%s\n",
+                depth,
+                max_depth,
+                trace != NULL && trace[0] != '\0' ? ", trace: " : "",
+                trace != NULL && trace[0] != '\0' ? trace : "");
+        return -1;
+    }
+
+    snprintf(depth_buf, sizeof(depth_buf), "%ld", depth + 1);
+    if (setenv(SUBSTRATE_TC_DEPTH_ENV, depth_buf, 1) != 0) {
+        return -1;
+    }
+
+    trace = getenv(SUBSTRATE_TC_TRACE_ENV);
+    if (trace == NULL || trace[0] == '\0') {
+        n = snprintf(trace_buf, sizeof(trace_buf), "%s", tool);
+    } else {
+        n = snprintf(trace_buf, sizeof(trace_buf), "%s->%s", trace, tool);
+    }
+    if (n < 0) {
+        return -1;
+    }
+    if ((size_t)n >= sizeof(trace_buf)) {
+        trace_buf[sizeof(trace_buf) - 1] = '\0';
+    }
+    if (setenv(SUBSTRATE_TC_TRACE_ENV, trace_buf, 1) != 0) {
+        return -1;
+    }
+    return 0;
 }
 
 static int strvec_has_flag(const strvec_t *v, const char *flag) {
@@ -1346,6 +1417,11 @@ int cc_main(int argc, char **argv) {
     strvec_t obj_files;
     size_t i;
     int rc = 1;
+
+    if (toolchain_guard_enter("cc") != 0) {
+        return 1;
+    }
+    setenv("SUBSTRATE_CC_ACTIVE", "1", 1);
 
     memset(&o, 0, sizeof(o));
     memset(&obj_files, 0, sizeof(obj_files));

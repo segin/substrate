@@ -16,6 +16,11 @@
 #define EM_X86_64 62
 #endif
 
+#define SUBSTRATE_TC_DEPTH_ENV "SUBSTRATE_TC_DEPTH"
+#define SUBSTRATE_TC_TRACE_ENV "SUBSTRATE_TC_TRACE"
+#define SUBSTRATE_TC_MAX_ENV "SUBSTRATE_TC_MAX_DEPTH"
+#define SUBSTRATE_TC_DEFAULT_MAX 64
+
 #define AS_MODE_AUTO (-1)
 #define AS_MODE_32 0
 #define AS_MODE_64 1
@@ -57,6 +62,74 @@ typedef enum {
 } as_error_code_t;
 
 static int g_emit_error_codes = 0;
+static void as_diag(as_error_code_t code, const char *fmt, ...);
+
+static long parse_env_long(const char *s, long fallback) {
+    char *end;
+    long v;
+
+    if (s == NULL || s[0] == '\0') {
+        return fallback;
+    }
+    errno = 0;
+    v = strtol(s, &end, 10);
+    if (errno != 0 || end == s || *end != '\0') {
+        return fallback;
+    }
+    return v;
+}
+
+static int toolchain_guard_enter(const char *tool) {
+    long depth;
+    long max_depth;
+    char depth_buf[32];
+    char trace_buf[256];
+    const char *trace;
+    int n;
+
+    depth = parse_env_long(getenv(SUBSTRATE_TC_DEPTH_ENV), 0);
+    if (depth < 0) {
+        depth = 0;
+    }
+    max_depth = parse_env_long(getenv(SUBSTRATE_TC_MAX_ENV), SUBSTRATE_TC_DEFAULT_MAX);
+    if (max_depth < 4) {
+        max_depth = 4;
+    }
+    if (depth >= max_depth) {
+        trace = getenv(SUBSTRATE_TC_TRACE_ENV);
+        as_diag(AS_E_INTERNAL,
+                "toolchain recursion guard hit at depth %ld (max %ld)%s%s",
+                depth,
+                max_depth,
+                trace != NULL && trace[0] != '\0' ? ", trace: " : "",
+                trace != NULL && trace[0] != '\0' ? trace : "");
+        return -1;
+    }
+
+    snprintf(depth_buf, sizeof(depth_buf), "%ld", depth + 1);
+    if (setenv(SUBSTRATE_TC_DEPTH_ENV, depth_buf, 1) != 0) {
+        as_diag(AS_E_INTERNAL, "failed to set recursion depth env");
+        return -1;
+    }
+    trace = getenv(SUBSTRATE_TC_TRACE_ENV);
+    if (trace == NULL || trace[0] == '\0') {
+        n = snprintf(trace_buf, sizeof(trace_buf), "%s", tool);
+    } else {
+        n = snprintf(trace_buf, sizeof(trace_buf), "%s->%s", trace, tool);
+    }
+    if (n < 0) {
+        as_diag(AS_E_INTERNAL, "failed to format recursion trace");
+        return -1;
+    }
+    if ((size_t)n >= sizeof(trace_buf)) {
+        trace_buf[sizeof(trace_buf) - 1] = '\0';
+    }
+    if (setenv(SUBSTRATE_TC_TRACE_ENV, trace_buf, 1) != 0) {
+        as_diag(AS_E_INTERNAL, "failed to set recursion trace env");
+        return -1;
+    }
+    return 0;
+}
 
 static const char *as_error_code_name(as_error_code_t code) {
     switch (code) {
@@ -465,9 +538,17 @@ static const char *march_to_gas(int mode, const char *march) {
 static const char *backend_compiler(void) {
     const char *override = getenv("AS_BACKEND");
     const char *cc = getenv("CC");
+    const char *from_cc = getenv("SUBSTRATE_CC_ACTIVE");
 
     if (override != NULL && override[0] != '\0') {
         return override;
+    }
+    if (from_cc != NULL && from_cc[0] != '\0') {
+        /*
+         * Avoid cc->as->cc recursion when builds export CC=cc and PATH points
+         * at this toolchain.
+         */
+        return "gcc";
     }
     if (cc != NULL && cc[0] != '\0') {
         return cc;
@@ -485,7 +566,7 @@ static int run_backend(const as_ctx_t *ctx) {
     int status;
 
     cc_prog = backend_compiler();
-    argc = 8 + ctx->gcc_opts.count + (ctx->as_opts.count * 2);
+    argc = 9 + ctx->gcc_opts.count + (ctx->as_opts.count * 2);
     argv = (char **)calloc(argc + 1, sizeof(*argv));
     if (argv == NULL) {
         return -1;
@@ -496,6 +577,7 @@ static int run_backend(const as_ctx_t *ctx) {
     argv[at++] = "-x";
     argv[at++] = "assembler-with-cpp";
     argv[at++] = ctx->mode == AS_MODE_64 ? "-m64" : "-m32";
+    argv[at++] = "-B/usr/bin";
 
     for (i = 0; i < ctx->gcc_opts.count; ++i) {
         argv[at++] = ctx->gcc_opts.items[i];
@@ -696,6 +778,10 @@ int main(int argc, char **argv) {
     ctx.max_include_depth = limit_from_env("AS_MAX_INCLUDE_DEPTH");
     g_emit_error_codes = getenv("AS_ERROR_CODES") != NULL ? 1 : 0;
     t_start_us = wallclock_us();
+    if (toolchain_guard_enter("as") != 0) {
+        return 1;
+    }
+    setenv("SUBSTRATE_AS_ACTIVE", "1", 1);
 
     for (i = 1; i < argc; ++i) {
         const char *arg = argv[i];
