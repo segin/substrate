@@ -68,8 +68,12 @@ typedef struct {
     char *name;
     int need_plt;
     int need_got;
+    int need_tls_gd;
+    int need_tls_ie;
     size_t plt_slot;
     size_t got_slot;
+    size_t tls_gd_slot;
+    size_t tls_ie_slot;
 } dyn_import_t;
 
 typedef struct {
@@ -318,8 +322,12 @@ static int dyn_import_push(dyn_import_vec_t *v, const char *name, size_t *out_id
     v->items[v->count].name = dup;
     v->items[v->count].need_plt = 0;
     v->items[v->count].need_got = 0;
+    v->items[v->count].need_tls_gd = 0;
+    v->items[v->count].need_tls_ie = 0;
     v->items[v->count].plt_slot = 0;
     v->items[v->count].got_slot = 0;
+    v->items[v->count].tls_gd_slot = 0;
+    v->items[v->count].tls_ie_slot = 0;
     if (out_idx != NULL) {
         *out_idx = v->count;
     }
@@ -2177,6 +2185,14 @@ static int reloc_is_x64_got_ref(uint32_t type) {
     }
 }
 
+static int reloc_is_x64_tls_gd_ref(uint32_t type) {
+    return type == R_X86_64_TLSGD;
+}
+
+static int reloc_is_x64_tls_ie_ref(uint32_t type) {
+    return type == R_X86_64_GOTTPOFF;
+}
+
 static int reloc_is_i386_plt_ref(uint32_t type) {
     return type == R_386_PLT32;
 }
@@ -2189,6 +2205,14 @@ static int reloc_is_i386_got_ref(uint32_t type) {
     default:
         return 0;
     }
+}
+
+static int reloc_is_i386_tls_gd_ref(uint32_t type) {
+    return type == R_386_TLS_GD;
+}
+
+static int reloc_is_i386_tls_ie_ref(uint32_t type) {
+    return type == R_386_TLS_IE || type == R_386_TLS_GOTIE;
 }
 
 static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports) {
@@ -2220,7 +2244,8 @@ static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports)
                 continue;
             }
             type = elf_reloc_type(rel);
-            if (!reloc_is_x64_plt_ref(type) && !reloc_is_x64_got_ref(type)) {
+            if (!reloc_is_x64_plt_ref(type) && !reloc_is_x64_got_ref(type) &&
+                !reloc_is_x64_tls_gd_ref(type) && !reloc_is_x64_tls_ie_ref(type)) {
                 continue;
             }
             imp = dyn_import_get_or_add(imports, elf_symbol_name(sym));
@@ -2232,6 +2257,12 @@ static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports)
             }
             if (reloc_is_x64_got_ref(type)) {
                 imp->need_got = 1;
+            }
+            if (reloc_is_x64_tls_gd_ref(type)) {
+                imp->need_tls_gd = 1;
+            }
+            if (reloc_is_x64_tls_ie_ref(type)) {
+                imp->need_tls_ie = 1;
             }
         }
     }
@@ -2267,7 +2298,8 @@ static int collect_dynamic_imports_i386(elfobj_t *out, dyn_import_vec_t *imports
                 continue;
             }
             type = elf_reloc_type(rel);
-            if (!reloc_is_i386_plt_ref(type) && !reloc_is_i386_got_ref(type)) {
+            if (!reloc_is_i386_plt_ref(type) && !reloc_is_i386_got_ref(type) &&
+                !reloc_is_i386_tls_gd_ref(type) && !reloc_is_i386_tls_ie_ref(type)) {
                 continue;
             }
             imp = dyn_import_get_or_add(imports, elf_symbol_name(sym));
@@ -2279,6 +2311,12 @@ static int collect_dynamic_imports_i386(elfobj_t *out, dyn_import_vec_t *imports
             }
             if (reloc_is_i386_got_ref(type)) {
                 imp->need_got = 1;
+            }
+            if (reloc_is_i386_tls_gd_ref(type)) {
+                imp->need_tls_gd = 1;
+            }
+            if (reloc_is_i386_tls_ie_ref(type)) {
+                imp->need_tls_ie = 1;
             }
         }
     }
@@ -2320,6 +2358,12 @@ static int ensure_dynamic_import_sections_x64(elfobj_t *out, const dyn_import_ve
         }
         if (imports->items[i].need_got) {
             got_count++;
+        }
+        if (imports->items[i].need_tls_ie) {
+            got_count++;
+        }
+        if (imports->items[i].need_tls_gd) {
+            got_count += 2;
         }
     }
 
@@ -2399,6 +2443,12 @@ static int ensure_dynamic_import_sections_i386(elfobj_t *out, const dyn_import_v
         }
         if (imports->items[i].need_got) {
             got_count++;
+        }
+        if (imports->items[i].need_tls_ie) {
+            got_count++;
+        }
+        if (imports->items[i].need_tls_gd) {
+            got_count += 2;
         }
     }
 
@@ -2490,6 +2540,13 @@ static int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
         }
         if (ctx->dyn_imports.items[i].need_got) {
             ctx->dyn_imports.items[i].got_slot = got_slot++;
+        }
+        if (ctx->dyn_imports.items[i].need_tls_ie) {
+            ctx->dyn_imports.items[i].tls_ie_slot = got_slot++;
+        }
+        if (ctx->dyn_imports.items[i].need_tls_gd) {
+            ctx->dyn_imports.items[i].tls_gd_slot = got_slot;
+            got_slot += 2;
         }
     }
     if (ctx->mode == 64) {
@@ -2700,6 +2757,35 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
                 write_u64_endian(rela_dyn_buf + roff + 16, e, 0);
             }
         }
+        if (imp->need_tls_ie && got != NULL) {
+            size_t ent = imp->tls_ie_slot;
+            size_t roff = ent * 24;
+            uint64_t slot_addr = got_addr + (ent * 8);
+
+            if (rela_dyn_buf != NULL && roff + 24 <= rela_dyn_sz) {
+                write_u64_endian(rela_dyn_buf + roff + 0, e, slot_addr);
+                write_u64_endian(rela_dyn_buf + roff + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_TPOFF64);
+                write_u64_endian(rela_dyn_buf + roff + 16, e, 0);
+            }
+        }
+        if (imp->need_tls_gd && got != NULL) {
+            size_t ent = imp->tls_gd_slot;
+            size_t roff0 = ent * 24;
+            size_t roff1 = (ent + 1) * 24;
+            uint64_t slot0 = got_addr + (ent * 8);
+            uint64_t slot1 = got_addr + ((ent + 1) * 8);
+
+            if (rela_dyn_buf != NULL && roff0 + 24 <= rela_dyn_sz) {
+                write_u64_endian(rela_dyn_buf + roff0 + 0, e, slot0);
+                write_u64_endian(rela_dyn_buf + roff0 + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_DTPMOD64);
+                write_u64_endian(rela_dyn_buf + roff0 + 16, e, 0);
+            }
+            if (rela_dyn_buf != NULL && roff1 + 24 <= rela_dyn_sz) {
+                write_u64_endian(rela_dyn_buf + roff1 + 0, e, slot1);
+                write_u64_endian(rela_dyn_buf + roff1 + 8, e, (((uint64_t)dynidx) << 32) | R_X86_64_DTPOFF64);
+                write_u64_endian(rela_dyn_buf + roff1 + 16, e, 0);
+            }
+        }
     }
 
     if (elf_section_set_data(plt, plt_buf, plt_sz) != ELF_OK ||
@@ -2892,6 +2978,32 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
             if (rel_dyn_buf != NULL && roff + 8 <= rel_dyn_sz) {
                 write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)slot_addr);
                 write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_GLOB_DAT);
+            }
+        }
+        if (imp->need_tls_ie && got != NULL) {
+            size_t ent = imp->tls_ie_slot;
+            size_t roff = ent * 8;
+            uint64_t slot_addr = got_addr + (ent * 4);
+
+            if (rel_dyn_buf != NULL && roff + 8 <= rel_dyn_sz) {
+                write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)slot_addr);
+                write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_TLS_TPOFF32);
+            }
+        }
+        if (imp->need_tls_gd && got != NULL) {
+            size_t ent = imp->tls_gd_slot;
+            size_t roff0 = ent * 8;
+            size_t roff1 = (ent + 1) * 8;
+            uint64_t slot0 = got_addr + (ent * 4);
+            uint64_t slot1 = got_addr + ((ent + 1) * 4);
+
+            if (rel_dyn_buf != NULL && roff0 + 8 <= rel_dyn_sz) {
+                write_u32_endian(rel_dyn_buf + roff0 + 0, e, (uint32_t)slot0);
+                write_u32_endian(rel_dyn_buf + roff0 + 4, e, (dynidx << 8) | R_386_TLS_DTPMOD32);
+            }
+            if (rel_dyn_buf != NULL && roff1 + 8 <= rel_dyn_sz) {
+                write_u32_endian(rel_dyn_buf + roff1 + 0, e, (uint32_t)slot1);
+                write_u32_endian(rel_dyn_buf + roff1 + 4, e, (dynidx << 8) | R_386_TLS_DTPOFF32);
             }
         }
     }
@@ -4165,6 +4277,22 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
                 return 0;
             }
         }
+        if (reloc_is_x64_tls_gd_ref(type) && imp->need_tls_gd) {
+            sec = elf_find_section(obj, ".got");
+            if (sec == NULL) {
+                return -1;
+            }
+            *out_addr = elf_section_addr(sec) + (imp->tls_gd_slot * 8);
+            return 0;
+        }
+        if (reloc_is_x64_tls_ie_ref(type) && imp->need_tls_ie) {
+            sec = elf_find_section(obj, ".got");
+            if (sec == NULL) {
+                return -1;
+            }
+            *out_addr = elf_section_addr(sec) + (imp->tls_ie_slot * 8);
+            return 0;
+        }
     } else if (ctx != NULL && ctx->mode == 32) {
         if (reloc_is_i386_plt_ref(type) && imp->need_plt) {
             sec = elf_find_section(obj, ".plt");
@@ -4191,6 +4319,22 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
                 *out_addr = elf_section_addr(sec) + 12 + (imp->plt_slot * 4);
                 return 0;
             }
+        }
+        if (reloc_is_i386_tls_gd_ref(type) && imp->need_tls_gd) {
+            sec = elf_find_section(obj, ".got");
+            if (sec == NULL) {
+                return -1;
+            }
+            *out_addr = elf_section_addr(sec) + (imp->tls_gd_slot * 4);
+            return 0;
+        }
+        if (reloc_is_i386_tls_ie_ref(type) && imp->need_tls_ie) {
+            sec = elf_find_section(obj, ".got");
+            if (sec == NULL) {
+                return -1;
+            }
+            *out_addr = elf_section_addr(sec) + (imp->tls_ie_slot * 4);
+            return 0;
         }
     }
     if (name != NULL && strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0) {

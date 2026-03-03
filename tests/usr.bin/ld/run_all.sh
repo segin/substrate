@@ -89,9 +89,11 @@ test_i386_reloc_suite.sh|LD-U-007 LD-U-006
 test_entry_fallback_matrix.sh|LD-U-001 LD-E-001 LD-U-007
 test_x64_gotpcrelx_relax.sh|LD-U-006
 test_x64_tls_reloc_basic.sh|LD-U-006 LD-S-003
+test_x64_tls_external_models.sh|LD-U-006 LD-S-003
 test_x64_ifunc_basic.sh|LD-U-006
 test_x64_got_plt_runtime_sections.sh|LD-U-006 LD-S-003
 test_i386_tls_reloc_basic.sh|LD-U-006 LD-S-003
+test_i386_tls_external_models.sh|LD-U-006 LD-S-003
 test_i386_got_plt_runtime_sections.sh|LD-U-006 LD-S-003
 EOF
 

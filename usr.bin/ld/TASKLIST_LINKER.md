@@ -203,11 +203,11 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-006.
 
 ### 7.3 TLS
-- [ ] Implement TLS model handling (GD/LD/IE/LE) for x86-64 and i386.  
+- [x] Implement TLS model handling (GD/LD/IE/LE) for x86-64 and i386.  
   Reqs: LD-U-006, LD-S-003.
 - [ ] Generate PT_TLS and TLS dynamic tags correctly.  
   Reqs: LD-U-009.
-- [ ] Add TLS integration tests with compiler-emitted sequences.  
+- [x] Add TLS integration tests with compiler-emitted sequences.  
   Reqs: LD-U-007.
 
 ### 7.4 Symbol versioning
