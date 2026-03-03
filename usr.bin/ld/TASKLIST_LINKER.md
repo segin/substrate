@@ -41,7 +41,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-011, LD-U-010. Stories: US-301.
 - [x] Implement warning policy options (`--fatal-warnings`, `--warn-common`, unresolved policies).  
   Reqs: LD-W-003, LD-E-001.
-- [ ] Add regression tests for every option in this section.  
+- [x] Add regression tests for every option in this section.  
   Reqs: LD-U-007.
 
 ---
