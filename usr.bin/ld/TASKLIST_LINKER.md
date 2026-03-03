@@ -9,7 +9,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 
 - [x] Create `tests/usr.bin/ld/README.md` with test taxonomy and required naming conventions.  
   Reqs: LD-U-007, LD-R-004. Stories: US-301.
-- [ ] Add requirement/story tag format to commit template for linker work.  
+- [x] Add requirement/story tag format to commit template for linker work.  
   Reqs: Traceability section. Stories: US-301.
 - [ ] Establish pass/fail dashboard script (`tests/usr.bin/ld/run_all.sh`) with summary by requirement ID.  
   Reqs: LD-U-010. Stories: US-301.
