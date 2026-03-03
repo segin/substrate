@@ -77,6 +77,31 @@ static void test_crc32_ones(void) {
     }
 }
 
+static void test_crc32_unaligned(void) {
+    uint8_t data[33];
+    memset(data, 0, sizeof(data));
+    data[1] = '1';
+    data[2] = '2';
+    data[3] = '3';
+    data[4] = '4';
+    data[5] = '5';
+    data[6] = '6';
+    data[7] = '7';
+    data[8] = '8';
+    data[9] = '9';
+
+    // We pass data+1 which is unaligned
+    uint32_t expected = 0xCBF43926;
+    uint32_t actual = crc32(data + 1, 9);
+
+    if (actual != expected) {
+        char msg[128];
+        snprintf(msg, sizeof(msg), "FAIL: crc32(unaligned) expected 0xCBF43926, got 0x%x\n", actual);
+        kprint(msg);
+        failed_tests++;
+    }
+}
+
 void run_crc32_tests(void) {
     kprint("\n=== CRC32 TESTS ===\n");
     failed_tests = 0;
@@ -89,6 +114,7 @@ void run_crc32_tests(void) {
     test_crc32_fox();
     test_crc32_zeros();
     test_crc32_ones();
+    test_crc32_unaligned();
 
     if (failed_tests == 0) {
         kprint("CRC32 Tests: PASS\n");
