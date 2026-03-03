@@ -247,6 +247,35 @@ bool test_libc_memcmp(void) {
     return true;
 }
 
+void run_strcasecmp_tests(void) {
+    printf("Running strcasecmp tests...\n");
+
+    // Equal strings
+    ASSERT_EQ(libc_strcasecmp("hello", "hello"), 0, "Equal exact case");
+    ASSERT_EQ(libc_strcasecmp("hello", "HELLO"), 0, "Equal opposite case");
+    ASSERT_EQ(libc_strcasecmp("HeLlO", "hElLo"), 0, "Equal mixed case");
+    ASSERT_EQ(libc_strcasecmp("", ""), 0, "Empty strings");
+
+    // Different strings
+    ASSERT_TRUE(libc_strcasecmp("hello", "hella") > 0, "'o' > 'a'");
+    ASSERT_TRUE(libc_strcasecmp("hella", "hello") < 0, "'a' < 'o'");
+    ASSERT_TRUE(libc_strcasecmp("HELLA", "hello") < 0, "'a' < 'o' cross case");
+    ASSERT_TRUE(libc_strcasecmp("hello", "HELLA") > 0, "'o' > 'a' cross case");
+
+    // Prefix scenarios
+    ASSERT_TRUE(libc_strcasecmp("hell", "hello") < 0, "Prefix shorter");
+    ASSERT_TRUE(libc_strcasecmp("hello", "hell") > 0, "Prefix longer");
+
+    // Non-alphabetic characters
+    ASSERT_EQ(libc_strcasecmp("1234!", "1234!"), 0, "Non-alphabetic equal");
+    ASSERT_TRUE(libc_strcasecmp("1234!", "1234@") < 0, "'!' < '@'");
+}
+
+bool test_libc_strcasecmp(void) {
+    run_strcasecmp_tests();
+    return true;
+}
+
 #ifndef NO_MAIN
 int main(void) {
     run_strlen_tests();
@@ -254,6 +283,7 @@ int main(void) {
     run_strcat_tests();
     run_strtok_tests();
     run_memcmp_tests();
+    run_strcasecmp_tests();
     return 0;
 }
 #endif
