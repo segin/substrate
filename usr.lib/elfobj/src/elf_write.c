@@ -28,6 +28,25 @@ static int u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
     return elf__u64_add(a, b, out);
 }
 
+static int find_alloc_file_bias(const out_sec_t *secs, size_t sec_count, uint64_t *out_bias) {
+    size_t i;
+
+    if (secs == NULL || out_bias == NULL) {
+        return 0;
+    }
+    for (i = 1; i < sec_count; ++i) {
+        if ((secs[i].flags & SHF_ALLOC) == 0 || secs[i].type == SHT_NOBITS || secs[i].size == 0) {
+            continue;
+        }
+        if (secs[i].addr < secs[i].offset) {
+            continue;
+        }
+        *out_bias = secs[i].addr - secs[i].offset;
+        return 1;
+    }
+    return 0;
+}
+
 static elf_err_t out_push(out_sec_t **secs, size_t *count, size_t *cap, const out_sec_t *in) {
     void *next;
     if (*count == *cap) {
@@ -581,6 +600,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     if (phnum != 0) {
         if (obj->segment_count != 0) {
             size_t phidx;
+            uint64_t file_bias = 0;
+            int have_file_bias = find_alloc_file_bias(secs, sec_count, &file_bias);
             for (phidx = 0; phidx < phnum; ++phidx) {
                 struct elf_segment *seg = obj->segments[phidx];
                 uint8_t *p = img + phoff + (phidx * phentsz);
@@ -588,6 +609,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 uint64_t hi_off = 0;
                 uint64_t lo_addr = UINT64_MAX;
                 uint64_t hi_addr = 0;
+                uint64_t out_filesz;
+                uint64_t out_memsz;
+                uint64_t out_off;
+                uint64_t out_vaddr;
                 size_t j;
 
                 for (j = 0; j < seg->section_count; ++j) {
@@ -623,29 +648,68 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                         hi_addr = end_addr;
                     }
                 }
+
+                if (seg->type == PT_PHDR) {
+                    uint64_t ph_bytes = (uint64_t)phnum * (uint64_t)phentsz;
+                    lo_off = phoff;
+                    if (!u64_add_checked(phoff, ph_bytes, &hi_off)) {
+                        err = ELF_ERR_BOUNDS;
+                        goto done;
+                    }
+                    if (have_file_bias) {
+                        if (!u64_add_checked(file_bias, phoff, &lo_addr) ||
+                            !u64_add_checked(lo_addr, ph_bytes, &hi_addr)) {
+                            err = ELF_ERR_BOUNDS;
+                            goto done;
+                        }
+                    } else {
+                        lo_addr = 0;
+                        hi_addr = ph_bytes;
+                    }
+                }
+
                 if (lo_off == UINT64_MAX) {
                     lo_off = 0;
                 }
                 if (lo_addr == UINT64_MAX) {
                     lo_addr = 0;
                 }
+                out_off = lo_off;
+                out_vaddr = lo_addr;
+                out_filesz = hi_off >= lo_off ? (hi_off - lo_off) : 0;
+                out_memsz = hi_addr >= lo_addr ? (hi_addr - lo_addr) : 0;
+                if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && phoff < out_off) {
+                    uint64_t delta = out_off - phoff;
+                    if (out_vaddr < delta) {
+                        err = ELF_ERR_BOUNDS;
+                        goto done;
+                    }
+                    out_off = phoff;
+                    out_vaddr -= delta;
+                    if (!u64_add_checked(out_filesz, delta, &out_filesz) ||
+                        !u64_add_checked(out_memsz, delta, &out_memsz)) {
+                        err = ELF_ERR_BOUNDS;
+                        goto done;
+                    }
+                }
+
                 if (obj->cls == ELFOBJ_CLASS_32) {
                     elf__wr32(p + 0, obj->endian, seg->type);
-                    elf__wr32(p + 4, obj->endian, (uint32_t)lo_off);
-                    elf__wr32(p + 8, obj->endian, (uint32_t)lo_addr);
-                    elf__wr32(p + 12, obj->endian, (uint32_t)lo_addr);
-                    elf__wr32(p + 16, obj->endian, (uint32_t)(hi_off - lo_off));
-                    elf__wr32(p + 20, obj->endian, (uint32_t)(hi_addr - lo_addr));
+                    elf__wr32(p + 4, obj->endian, (uint32_t)out_off);
+                    elf__wr32(p + 8, obj->endian, (uint32_t)out_vaddr);
+                    elf__wr32(p + 12, obj->endian, (uint32_t)out_vaddr);
+                    elf__wr32(p + 16, obj->endian, (uint32_t)out_filesz);
+                    elf__wr32(p + 20, obj->endian, (uint32_t)out_memsz);
                     elf__wr32(p + 24, obj->endian, seg->flags);
                     elf__wr32(p + 28, obj->endian, (uint32_t)(seg->align ? seg->align : 1));
                 } else {
                     elf__wr32(p + 0, obj->endian, seg->type);
                     elf__wr32(p + 4, obj->endian, seg->flags);
-                    elf__wr64(p + 8, obj->endian, lo_off);
-                    elf__wr64(p + 16, obj->endian, lo_addr);
-                    elf__wr64(p + 24, obj->endian, lo_addr);
-                    elf__wr64(p + 32, obj->endian, hi_off - lo_off);
-                    elf__wr64(p + 40, obj->endian, hi_addr - lo_addr);
+                    elf__wr64(p + 8, obj->endian, out_off);
+                    elf__wr64(p + 16, obj->endian, out_vaddr);
+                    elf__wr64(p + 24, obj->endian, out_vaddr);
+                    elf__wr64(p + 32, obj->endian, out_filesz);
+                    elf__wr64(p + 40, obj->endian, out_memsz);
                     elf__wr64(p + 48, obj->endian, seg->align ? seg->align : 1);
                 }
             }

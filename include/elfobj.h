@@ -156,6 +156,18 @@ typedef enum {
 #define PT_PHDR 6
 #define PT_TLS 7
 #endif
+#ifndef PT_GNU_EH_FRAME
+#define PT_GNU_EH_FRAME 0x6474e550
+#endif
+#ifndef PT_GNU_STACK
+#define PT_GNU_STACK 0x6474e551
+#endif
+#ifndef PT_GNU_RELRO
+#define PT_GNU_RELRO 0x6474e552
+#endif
+#ifndef PT_GNU_PROPERTY
+#define PT_GNU_PROPERTY 0x6474e553
+#endif
 
 #ifndef DT_NULL
 #define DT_NULL 0

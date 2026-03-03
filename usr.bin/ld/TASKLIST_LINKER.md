@@ -169,11 +169,11 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-R-003.
 
 ### 6.2 PHDR generation
-- [ ] Generate PT_LOAD and standard PHDR set (`PHDR`, `INTERP`, `DYNAMIC`, `TLS`, `NOTE`).  
+- [x] Generate PT_LOAD and standard PHDR set (`PHDR`, `INTERP`, `DYNAMIC`, `TLS`, `NOTE`).  
   Reqs: LD-U-009.
-- [ ] Generate PT_GNU_STACK, PT_GNU_RELRO, PT_GNU_EH_FRAME, PT_GNU_PROPERTY where applicable.  
+- [x] Generate PT_GNU_STACK, PT_GNU_RELRO, PT_GNU_EH_FRAME, PT_GNU_PROPERTY where applicable.  
   Reqs: LD-U-009, LD-U-010. Stories: US-401.
-- [ ] Ensure W^X-safe mapping policy and `-z text/notext` diagnostics.  
+- [x] Ensure W^X-safe mapping policy and `-z text/notext` diagnostics.  
   Reqs: LD-U-009, LD-W-003.
 
 ### 6.3 Entry point logic

@@ -102,6 +102,9 @@ typedef struct {
     int gc_sections;
     int gc_print_sections;
     int icf_mode; /* 0=off, 1=safe, 2=all */
+    int z_text_mode; /* 0=default, 1=text, 2=notext */
+    int z_execstack; /* -1=auto, 0=noexecstack, 1=execstack */
+    int z_relro; /* 0=norelro, 1=relro */
     const char *out_path;
     const char *self_path;
     const char *entry_symbol;
@@ -124,7 +127,7 @@ static void usage(const char *prog) {
             "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] "
             "[-o output] [-L dir] [-l name] [-Bstatic|-Bdynamic] "
             "[--start-group ... --end-group] [--whole-archive|--no-whole-archive] "
-            "[-e symbol] [--allow-undefined] "
+            "[-e symbol] [--allow-undefined] [-z text|notext|execstack|noexecstack|relro|norelro] "
             "[--compat=gnu|lld] input...\n",
             prog);
 }
@@ -438,6 +441,37 @@ static const char *canonical_mode_name(int mode) {
         return "i386";
     }
     return "unknown";
+}
+
+static int parse_z_option(ld_ctx_t *ctx, const char *val) {
+    if (ctx == NULL || val == NULL || val[0] == '\0') {
+        return -1;
+    }
+    if (strcmp(val, "text") == 0) {
+        ctx->z_text_mode = 1;
+        return 0;
+    }
+    if (strcmp(val, "notext") == 0) {
+        ctx->z_text_mode = 2;
+        return 0;
+    }
+    if (strcmp(val, "execstack") == 0) {
+        ctx->z_execstack = 1;
+        return 0;
+    }
+    if (strcmp(val, "noexecstack") == 0) {
+        ctx->z_execstack = 0;
+        return 0;
+    }
+    if (strcmp(val, "relro") == 0) {
+        ctx->z_relro = 1;
+        return 0;
+    }
+    if (strcmp(val, "norelro") == 0) {
+        ctx->z_relro = 0;
+        return 0;
+    }
+    return -1;
 }
 
 static int ld_warn(ld_ctx_t *ctx, const char *fmt, ...) {
@@ -2896,68 +2930,172 @@ static int apply_identical_code_folding(elfobj_t *obj, const ld_ctx_t *ctx) {
     return 0;
 }
 
-static int add_default_segments(elfobj_t *obj, const char *interp_path) {
-    elf_segment_t *load_seg;
-    uint32_t load_flags = 0x4;
+static int is_relro_candidate_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (strncmp(name, ".got", 4) == 0 ||
+        strncmp(name, ".data.rel.ro", 12) == 0 ||
+        strcmp(name, ".dynamic") == 0 ||
+        strncmp(name, ".init_array", 11) == 0 ||
+        strncmp(name, ".fini_array", 11) == 0 ||
+        strncmp(name, ".preinit_array", 14) == 0 ||
+        strncmp(name, ".ctors", 6) == 0 ||
+        strncmp(name, ".dtors", 6) == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int has_execstack_note(const elfobj_t *obj) {
     size_t i;
 
-    if (interp_path != NULL && interp_path[0] != '\0') {
-        if (elf_add_interp_segment(obj, interp_path) == NULL) {
-            return -1;
-        }
+    if (obj == NULL) {
+        return 0;
     }
-
     for (i = 0; i < elf_section_count(obj); ++i) {
         const elf_section_t *sec = elf_section_get(obj, i);
-        uint64_t flags;
+        const char *name;
         if (sec == NULL) {
             continue;
         }
-        flags = elf_section_flags(sec);
-        if ((flags & SHF_ALLOC) == 0) {
+        name = elf_section_name(sec);
+        if (name == NULL || strcmp(name, ".note.GNU-stack") != 0) {
             continue;
         }
-        if ((flags & SHF_EXECINSTR) != 0) {
-            load_flags |= 0x1;
-        }
-        if ((flags & SHF_WRITE) != 0) {
-            load_flags |= 0x2;
+        if ((elf_section_flags(sec) & SHF_EXECINSTR) != 0) {
+            return 1;
         }
     }
+    return 0;
+}
 
-    load_seg = elf_add_load_segment(obj, load_flags, 0x1000);
-    if (load_seg == NULL) {
+static int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
+    enum {
+        LD_PF_X = 0x1u,
+        LD_PF_W = 0x2u,
+        LD_PF_R = 0x4u
+    };
+    elf_segment_t *load_rx = NULL;
+    elf_segment_t *load_ro = NULL;
+    elf_segment_t *load_rw = NULL;
+    elf_segment_t *note_seg = NULL;
+    elf_segment_t *tls_seg = NULL;
+    elf_segment_t *relro_seg = NULL;
+    elf_segment_t *eh_frame_seg = NULL;
+    elf_segment_t *gnu_property_seg = NULL;
+    elf_section_t *dyn;
+    size_t i;
+    int execstack_mode;
+
+    if (obj == NULL || ctx == NULL) {
         return -1;
     }
-    for (i = 0; i < elf_section_count(obj); ++i) {
-        elf_section_t *sec = elf_section_get(obj, i);
-        if (sec == NULL) {
-            continue;
-        }
-        if ((elf_section_flags(sec) & SHF_ALLOC) == 0) {
-            continue;
-        }
-        if (elf_segment_add_section(load_seg, sec) != ELF_OK) {
+
+    if (elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
+        return -1;
+    }
+    if (ctx->interp_path != NULL && ctx->interp_path[0] != '\0') {
+        if (elf_add_interp_segment(obj, ctx->interp_path) == NULL) {
             return -1;
         }
     }
 
-    {
-        elf_section_t *dyn = elf_find_section(obj, ".dynamic");
-        if (dyn != NULL) {
-            elf_segment_t *dyn_seg = elf_add_dynamic_segment(obj, 8);
-            if (dyn_seg == NULL || elf_segment_add_section(dyn_seg, dyn) != ELF_OK) {
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        elf_section_t *sec = elf_section_get(obj, i);
+        const char *name;
+        uint64_t flags;
+        uint32_t type;
+        int is_alloc;
+
+        if (sec == NULL) {
+            continue;
+        }
+        name = elf_section_name(sec);
+        flags = elf_section_flags(sec);
+        type = elf_section_type(sec);
+        is_alloc = (flags & SHF_ALLOC) != 0;
+
+        if (is_alloc) {
+            if ((flags & SHF_EXECINSTR) != 0) {
+                if (load_rx == NULL) {
+                    load_rx = elf_add_load_segment(obj, LD_PF_R | LD_PF_X, 0x1000);
+                    if (load_rx == NULL) {
+                        return -1;
+                    }
+                }
+                if (elf_segment_add_section(load_rx, sec) != ELF_OK) {
+                    return -1;
+                }
+            } else if ((flags & SHF_WRITE) != 0) {
+                if (load_rw == NULL) {
+                    load_rw = elf_add_load_segment(obj, LD_PF_R | LD_PF_W, 0x1000);
+                    if (load_rw == NULL) {
+                        return -1;
+                    }
+                }
+                if (elf_segment_add_section(load_rw, sec) != ELF_OK) {
+                    return -1;
+                }
+            } else {
+                if (load_ro == NULL) {
+                    load_ro = elf_add_load_segment(obj, LD_PF_R, 0x1000);
+                    if (load_ro == NULL) {
+                        return -1;
+                    }
+                }
+                if (elf_segment_add_section(load_ro, sec) != ELF_OK) {
+                    return -1;
+                }
+            }
+        }
+
+        if (is_alloc && type == SHT_NOTE) {
+            if (note_seg == NULL) {
+                note_seg = elf_add_segment(obj, PT_NOTE, LD_PF_R, 4);
+                if (note_seg == NULL) {
+                    return -1;
+                }
+            }
+            if (elf_segment_add_section(note_seg, sec) != ELF_OK) {
                 return -1;
             }
         }
-    }
-    {
-        elf_segment_t *tls_seg = NULL;
-        for (i = 0; i < elf_section_count(obj); ++i) {
-            elf_section_t *sec = elf_section_get(obj, i);
-            if (sec == NULL || (elf_section_flags(sec) & SHF_TLS) == 0) {
-                continue;
+        if (is_alloc && name != NULL && strcmp(name, ".eh_frame_hdr") == 0) {
+            if (eh_frame_seg == NULL) {
+                eh_frame_seg = elf_add_segment(obj, PT_GNU_EH_FRAME, LD_PF_R, 4);
+                if (eh_frame_seg == NULL) {
+                    return -1;
+                }
             }
+            if (elf_segment_add_section(eh_frame_seg, sec) != ELF_OK) {
+                return -1;
+            }
+        }
+        if (is_alloc && name != NULL && strcmp(name, ".note.gnu.property") == 0) {
+            if (gnu_property_seg == NULL) {
+                gnu_property_seg = elf_add_segment(obj, PT_GNU_PROPERTY, LD_PF_R, 8);
+                if (gnu_property_seg == NULL) {
+                    return -1;
+                }
+            }
+            if (elf_segment_add_section(gnu_property_seg, sec) != ELF_OK) {
+                return -1;
+            }
+        }
+        if (ctx->z_relro && is_alloc && (flags & SHF_WRITE) != 0 &&
+            is_relro_candidate_name(name)) {
+            if (relro_seg == NULL) {
+                relro_seg = elf_add_segment(obj, PT_GNU_RELRO, LD_PF_R, 1);
+                if (relro_seg == NULL) {
+                    return -1;
+                }
+            }
+            if (elf_segment_add_section(relro_seg, sec) != ELF_OK) {
+                return -1;
+            }
+        }
+        if (is_alloc && (flags & SHF_TLS) != 0) {
             if (tls_seg == NULL) {
                 tls_seg = elf_add_tls_segment(obj, 8);
                 if (tls_seg == NULL) {
@@ -2968,6 +3106,23 @@ static int add_default_segments(elfobj_t *obj, const char *interp_path) {
                 return -1;
             }
         }
+    }
+
+    dyn = elf_find_section(obj, ".dynamic");
+    if (dyn != NULL) {
+        elf_segment_t *dyn_seg = elf_add_dynamic_segment(obj, 8);
+        if (dyn_seg == NULL || elf_segment_add_section(dyn_seg, dyn) != ELF_OK) {
+            return -1;
+        }
+    }
+
+    execstack_mode = ctx->z_execstack;
+    if (execstack_mode < 0) {
+        execstack_mode = has_execstack_note(obj) ? 1 : 0;
+    }
+    if (elf_add_segment(obj, PT_GNU_STACK,
+                        LD_PF_R | LD_PF_W | (execstack_mode ? LD_PF_X : 0), 16) == NULL) {
+        return -1;
     }
     return 0;
 }
@@ -2988,6 +3143,61 @@ static int strip_group_sections_for_final(elfobj_t *obj) {
             continue;
         }
         if (elf_remove_section(obj, sec) != ELF_OK) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int has_text_relocation(const elfobj_t *obj, const char **out_sec_name) {
+    size_t i;
+
+    if (obj == NULL) {
+        return 0;
+    }
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        const elf_section_t *sec = elf_section_get(obj, i);
+        const char *name;
+        if (sec == NULL) {
+            continue;
+        }
+        if ((elf_section_flags(sec) & (SHF_ALLOC | SHF_EXECINSTR)) != (SHF_ALLOC | SHF_EXECINSTR)) {
+            continue;
+        }
+        if (elf_section_reloc_count(sec) == 0) {
+            continue;
+        }
+        name = elf_section_name(sec);
+        if (out_sec_name != NULL) {
+            *out_sec_name = name;
+        }
+        return 1;
+    }
+    return 0;
+}
+
+static int enforce_wx_policy(const elfobj_t *obj) {
+    size_t i;
+
+    if (obj == NULL) {
+        return -1;
+    }
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        const elf_section_t *sec = elf_section_get(obj, i);
+        uint64_t flags;
+        const char *name;
+        if (sec == NULL) {
+            continue;
+        }
+        flags = elf_section_flags(sec);
+        if ((flags & SHF_ALLOC) == 0) {
+            continue;
+        }
+        if ((flags & SHF_WRITE) != 0 && (flags & SHF_EXECINSTR) != 0) {
+            name = elf_section_name(sec);
+            fprintf(stderr,
+                    "ld: W^X policy violation: section %s is both writable and executable\n",
+                    name != NULL ? name : "<unnamed>");
             return -1;
         }
     }
@@ -3393,7 +3603,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return -1;
     }
 
-    if (add_default_segments(out, ctx->interp_path) != 0) {
+    if (add_default_segments(out, ctx) != 0) {
         fprintf(stderr, "ld: failed to add output program segments\n");
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
@@ -3413,6 +3623,31 @@ static int run_internal_link(ld_ctx_t *ctx) {
         objvec_free(&inputs);
         elf_close(out);
         return -1;
+    }
+    if (enforce_wx_policy(out) != 0) {
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+    {
+        const char *textrel_sec = NULL;
+        if (has_text_relocation(out, &textrel_sec)) {
+            if (ctx->z_text_mode == 1) {
+                fprintf(stderr,
+                        "ld: -z text rejects text relocations (section %s has pending relocations)\n",
+                        textrel_sec != NULL ? textrel_sec : "<unknown>");
+                symref_map_free(&undef_refs);
+                objvec_free(&inputs);
+                elf_close(out);
+                return -1;
+            }
+            if (ctx->z_text_mode == 2) {
+                fprintf(stderr,
+                        "ld: -z notext: allowing text relocations in section %s\n",
+                        textrel_sec != NULL ? textrel_sec : "<unknown>");
+            }
+        }
     }
 
     if (check_undefined_symbols(out, allow_undef_runtime, &undef_refs) != 0) {
@@ -3489,6 +3724,9 @@ int main(int argc, char **argv) {
     ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
     ctx.current_whole_archive = 0;
     ctx.current_as_needed = 0;
+    ctx.z_text_mode = 0;
+    ctx.z_execstack = -1;
+    ctx.z_relro = 1;
 
     for (i = 1; i < argc; ++i) {
         const char *a = argv[i];
@@ -3948,7 +4186,7 @@ int main(int argc, char **argv) {
             continue;
         }
 
-        if (strcmp(a, "-z") == 0 || strcmp(a, "-T") == 0) {
+        if (strcmp(a, "-T") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
                 inputvec_free(&ctx.inputs);
@@ -3957,6 +4195,34 @@ int main(int argc, char **argv) {
                 return 2;
             }
             ++i;
+            continue;
+        }
+        if (strcmp(a, "-z") == 0 || strncmp(a, "-z", 2) == 0) {
+            const char *zval = NULL;
+            if (strcmp(a, "-z") == 0) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    return 2;
+                }
+                zval = argv[++i];
+            } else {
+                zval = a + 2;
+                if (zval[0] == '=') {
+                    zval++;
+                }
+            }
+            if (parse_z_option(&ctx, zval) != 0) {
+                fprintf(stderr,
+                        "ld: unsupported -z option '%s' (supported: text, notext, execstack, noexecstack, relro, norelro)\n",
+                        zval != NULL ? zval : "");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                return 2;
+            }
             continue;
         }
         if (strcmp(a, "--strip-all") == 0 || strcmp(a, "--build-id") == 0 || strcmp(a, "-s") == 0) {
