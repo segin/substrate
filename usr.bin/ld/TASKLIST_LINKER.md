@@ -189,7 +189,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 7.1 Core dynamic sections
 - [x] Build `.dynsym/.dynstr` from export policy and resolved dyn symbols.  
   Reqs: LD-S-003.
-- [ ] Build `.dynamic` tags and ensure consistency invariants.  
+- [x] Build `.dynamic` tags and ensure consistency invariants.  
   Reqs: LD-S-003.
 - [ ] Implement `--hash-style` (`sysv|gnu|both`) generators.  
   Reqs: LD-U-001, LD-S-003.

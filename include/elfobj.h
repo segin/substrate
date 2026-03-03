@@ -174,6 +174,8 @@ typedef enum {
 #define DT_NEEDED 1
 #define DT_STRTAB 5
 #define DT_SYMTAB 6
+#define DT_STRSZ 10
+#define DT_SYMENT 11
 #endif
 
 #ifndef STB_LOCAL

@@ -473,12 +473,15 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     {
         size_t dynsym_index = (size_t)-1;
         size_t dynstr_index = (size_t)-1;
+        size_t dynamic_index = (size_t)-1;
         for (i = 1; i < sec_count; ++i) {
             const char *nm = secs[i].name != NULL ? secs[i].name : "";
             if (strcmp(nm, ".dynsym") == 0) {
                 dynsym_index = i;
             } else if (strcmp(nm, ".dynstr") == 0) {
                 dynstr_index = i;
+            } else if (strcmp(nm, ".dynamic") == 0) {
+                dynamic_index = i;
             }
         }
         if (dynsym_index != (size_t)-1) {
@@ -490,6 +493,14 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             }
             if (dynstr_index != (size_t)-1) {
                 secs[dynsym_index].link = (uint32_t)dynstr_index;
+            }
+        }
+        if (dynamic_index != (size_t)-1) {
+            if (secs[dynamic_index].entsize == 0) {
+                secs[dynamic_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
+            }
+            if (dynstr_index != (size_t)-1) {
+                secs[dynamic_index].link = (uint32_t)dynstr_index;
             }
         }
     }

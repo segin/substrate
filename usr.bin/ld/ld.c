@@ -1270,6 +1270,15 @@ static uint32_t read_u32_endian(const uint8_t *p, elfobj_endian_t endian) {
     return ((uint32_t)p[3] << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | (uint32_t)p[0];
 }
 
+static uint64_t read_u64_endian(const uint8_t *p, elfobj_endian_t endian) {
+    if (endian == ELFOBJ_ENDIAN_BE) {
+        return ((uint64_t)p[0] << 56) | ((uint64_t)p[1] << 48) | ((uint64_t)p[2] << 40) | ((uint64_t)p[3] << 32) |
+               ((uint64_t)p[4] << 24) | ((uint64_t)p[5] << 16) | ((uint64_t)p[6] << 8) | (uint64_t)p[7];
+    }
+    return ((uint64_t)p[7] << 56) | ((uint64_t)p[6] << 48) | ((uint64_t)p[5] << 40) | ((uint64_t)p[4] << 32) |
+           ((uint64_t)p[3] << 24) | ((uint64_t)p[2] << 16) | ((uint64_t)p[1] << 8) | (uint64_t)p[0];
+}
+
 static void write_u16_endian(uint8_t *p, elfobj_endian_t endian, uint16_t v) {
     if (endian == ELFOBJ_ENDIAN_BE) {
         p[0] = (uint8_t)((v >> 8) & 0xffu);
@@ -1840,15 +1849,36 @@ static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const 
     return ctx->export_dynamic ? 1 : 0;
 }
 
+static int dynamic_append_entry(uint8_t **buf, size_t *len, size_t *cap, elfobj_class_t cls,
+                                elfobj_endian_t endian, int64_t tag, uint64_t value) {
+    uint8_t entry[16];
+    size_t entsz;
+
+    if (cls == ELFOBJ_CLASS_64) {
+        entsz = 16;
+        write_u64_endian(entry + 0, endian, (uint64_t)tag);
+        write_u64_endian(entry + 8, endian, value);
+    } else {
+        entsz = 8;
+        write_u32_endian(entry + 0, endian, (uint32_t)tag);
+        write_u32_endian(entry + 4, endian, (uint32_t)value);
+    }
+    return dynbuf_append(buf, len, cap, entry, entsz);
+}
+
 static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     elf_section_t *dynstr;
     elf_section_t *dynsym;
+    elf_section_t *dynamic;
     uint8_t *dynstr_buf = NULL;
     uint8_t *dynsym_buf = NULL;
+    uint8_t *dynamic_buf = NULL;
     size_t dynstr_len = 0;
     size_t dynstr_cap = 0;
     size_t dynsym_len = 0;
     size_t dynsym_cap = 0;
+    size_t dynamic_len = 0;
+    size_t dynamic_cap = 0;
     size_t i;
     size_t entsz;
     int need_dyn;
@@ -1881,6 +1911,16 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     if (elf_section_set_align(dynsym, elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4) != ELF_OK) {
         return -1;
     }
+    dynamic = elf_find_section(out, ".dynamic");
+    if (dynamic == NULL) {
+        dynamic = elf_add_section(out, ".dynamic", SHT_DYNAMIC, SHF_ALLOC | SHF_WRITE);
+        if (dynamic == NULL) {
+            return -1;
+        }
+    }
+    if (elf_section_set_align(dynamic, elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4) != ELF_OK) {
+        return -1;
+    }
 
     if (dynbuf_append(&dynstr_buf, &dynstr_len, &dynstr_cap, "\0", 1) != 0) {
         free(dynstr_buf);
@@ -1895,13 +1935,8 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(dynstr_buf);
             return -1;
         }
-        if (elf_link_add_dynamic_entry(out, DT_NEEDED, off) != ELF_OK) {
-            free(dynstr_buf);
-            return -1;
-        }
-    }
-    if (ctx->dso_inputs.count != 0) {
-        if (elf_link_add_dynamic_entry(out, DT_NULL, 0) != ELF_OK) {
+        if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                                 elf_class(out), elf_endian(out), DT_NEEDED, off) != 0) {
             free(dynstr_buf);
             return -1;
         }
@@ -1911,6 +1946,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     dynsym_buf = (uint8_t *)calloc(1, entsz);
     if (dynsym_buf == NULL) {
         free(dynstr_buf);
+        free(dynamic_buf);
         return -1;
     }
     dynsym_len = entsz;
@@ -1932,6 +1968,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         if (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, elf_symbol_name(sym), &name_off) != 0) {
             free(dynstr_buf);
             free(dynsym_buf);
+            free(dynamic_buf);
             return -1;
         }
 
@@ -1959,18 +1996,127 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         if (dynbuf_append(&dynsym_buf, &dynsym_len, &dynsym_cap, entry, entsz) != 0) {
             free(dynstr_buf);
             free(dynsym_buf);
+            free(dynamic_buf);
             return -1;
         }
     }
 
-    if (elf_section_set_data(dynstr, dynstr_buf, dynstr_len) != ELF_OK ||
-        elf_section_set_data(dynsym, dynsym_buf, dynsym_len) != ELF_OK) {
+    if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                             elf_class(out), elf_endian(out), DT_STRTAB, 0) != 0 ||
+        dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                             elf_class(out), elf_endian(out), DT_SYMTAB, 0) != 0 ||
+        dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                             elf_class(out), elf_endian(out), DT_STRSZ, dynstr_len) != 0 ||
+        dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                             elf_class(out), elf_endian(out), DT_SYMENT, entsz) != 0 ||
+        dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                             elf_class(out), elf_endian(out), DT_NULL, 0) != 0) {
         free(dynstr_buf);
         free(dynsym_buf);
+        free(dynamic_buf);
+        return -1;
+    }
+
+    if (elf_section_set_data(dynstr, dynstr_buf, dynstr_len) != ELF_OK ||
+        elf_section_set_data(dynsym, dynsym_buf, dynsym_len) != ELF_OK ||
+        elf_section_set_data(dynamic, dynamic_buf, dynamic_len) != ELF_OK) {
+        free(dynstr_buf);
+        free(dynsym_buf);
+        free(dynamic_buf);
         return -1;
     }
     free(dynstr_buf);
     free(dynsym_buf);
+    free(dynamic_buf);
+    return 0;
+}
+
+static int patch_dynamic_tag_values(elfobj_t *out) {
+    elf_section_t *dynamic;
+    elf_section_t *dynstr;
+    elf_section_t *dynsym;
+    size_t dyn_sz = 0;
+    const uint8_t *dyn_data;
+    uint8_t *buf;
+    size_t i;
+    size_t entsz;
+    uint64_t dynstr_addr = 0;
+    uint64_t dynsym_addr = 0;
+    uint64_t dynstr_size = 0;
+    uint64_t dynsym_entsz;
+
+    if (out == NULL) {
+        return -1;
+    }
+    dynamic = elf_find_section(out, ".dynamic");
+    if (dynamic == NULL) {
+        return 0;
+    }
+    dynstr = elf_find_section(out, ".dynstr");
+    dynsym = elf_find_section(out, ".dynsym");
+    if (dynstr == NULL || dynsym == NULL) {
+        return -1;
+    }
+    dynstr_addr = elf_section_addr(dynstr);
+    dynsym_addr = elf_section_addr(dynsym);
+    dynstr_size = elf_section_size(dynstr);
+    dynsym_entsz = elf_class(out) == ELFOBJ_CLASS_64 ? 24u : 16u;
+
+    dyn_data = (const uint8_t *)elf_section_data(dynamic, &dyn_sz);
+    if (dyn_sz == 0 || dyn_data == NULL) {
+        return -1;
+    }
+    entsz = elf_class(out) == ELFOBJ_CLASS_64 ? 16 : 8;
+    if ((dyn_sz % entsz) != 0) {
+        return -1;
+    }
+    buf = (uint8_t *)malloc(dyn_sz);
+    if (buf == NULL) {
+        return -1;
+    }
+    memcpy(buf, dyn_data, dyn_sz);
+
+    for (i = 0; i < dyn_sz; i += entsz) {
+        int64_t tag;
+        uint8_t *p = buf + i;
+
+        if (elf_class(out) == ELFOBJ_CLASS_64) {
+            tag = (int64_t)read_u64_endian(p + 0, elf_endian(out));
+        } else {
+            tag = (int64_t)(int32_t)read_u32_endian(p + 0, elf_endian(out));
+        }
+        if (tag == DT_STRTAB) {
+            if (elf_class(out) == ELFOBJ_CLASS_64) {
+                write_u64_endian(p + 8, elf_endian(out), dynstr_addr);
+            } else {
+                write_u32_endian(p + 4, elf_endian(out), (uint32_t)dynstr_addr);
+            }
+        } else if (tag == DT_SYMTAB) {
+            if (elf_class(out) == ELFOBJ_CLASS_64) {
+                write_u64_endian(p + 8, elf_endian(out), dynsym_addr);
+            } else {
+                write_u32_endian(p + 4, elf_endian(out), (uint32_t)dynsym_addr);
+            }
+        } else if (tag == DT_STRSZ) {
+            if (elf_class(out) == ELFOBJ_CLASS_64) {
+                write_u64_endian(p + 8, elf_endian(out), dynstr_size);
+            } else {
+                write_u32_endian(p + 4, elf_endian(out), (uint32_t)dynstr_size);
+            }
+        } else if (tag == DT_SYMENT) {
+            if (elf_class(out) == ELFOBJ_CLASS_64) {
+                write_u64_endian(p + 8, elf_endian(out), dynsym_entsz);
+            } else {
+                write_u32_endian(p + 4, elf_endian(out), (uint32_t)dynsym_entsz);
+            }
+        }
+    }
+
+    if (elf_section_set_data(dynamic, buf, dyn_sz) != ELF_OK) {
+        free(buf);
+        return -1;
+    }
+    free(buf);
     return 0;
 }
 
@@ -3867,6 +4013,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (assign_section_addresses(out, base_vaddr) != 0) {
         fprintf(stderr, "ld: failed to assign section virtual addresses\n");
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+    if (patch_dynamic_tag_values(out) != 0) {
+        fprintf(stderr, "ld: failed to finalize .dynamic tag values\n");
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
