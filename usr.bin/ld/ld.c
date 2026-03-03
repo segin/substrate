@@ -1,6 +1,7 @@
 #include "elfobj.h"
 #include <ctype.h>
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -67,6 +68,9 @@ typedef struct {
     int explicit_mode;
     uint16_t expect_type;
     int allow_undefined;
+    int warn_common;
+    int fatal_warnings;
+    int warning_count;
     int query_version;
     int trace_inputs;
     const char *out_path;
@@ -366,6 +370,22 @@ static const char *canonical_mode_name(int mode) {
         return "i386";
     }
     return "unknown";
+}
+
+static int ld_warn(ld_ctx_t *ctx, const char *fmt, ...) {
+    va_list ap;
+
+    fprintf(stderr, "ld: warning: ");
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fputc('\n', stderr);
+    ctx->warning_count++;
+    if (ctx->fatal_warnings) {
+        fprintf(stderr, "ld: error: warnings treated as errors (--fatal-warnings)\n");
+        return -1;
+    }
+    return 0;
 }
 
 static int set_explicit_mode(ld_ctx_t *ctx, int mode, const char *opt_text) {
@@ -1048,6 +1068,43 @@ static void emit_trace_symbols(const ld_ctx_t *ctx, const objvec_t *inputs) {
     }
 }
 
+static int emit_common_symbol_warnings(ld_ctx_t *ctx, const objvec_t *inputs) {
+    size_t i;
+
+    if (!ctx->warn_common) {
+        return 0;
+    }
+    for (i = 0; i < inputs->count; ++i) {
+        elfobj_t *obj = inputs->objs[i];
+        size_t si;
+
+        for (si = 0; si < elf_symbol_count(obj); ++si) {
+            const elf_symbol_t *sym = elf_symbol_at(obj, si);
+            const char *name;
+            uint8_t bind;
+
+            if (sym == NULL) {
+                continue;
+            }
+            if (elf_symbol_shndx(sym) != SHN_COMMON) {
+                continue;
+            }
+            bind = elf_symbol_bind(sym);
+            if (bind != STB_GLOBAL && bind != STB_WEAK) {
+                continue;
+            }
+            name = elf_symbol_name(sym);
+            if (name == NULL || name[0] == '\0') {
+                continue;
+            }
+            if (ld_warn(ctx, "common symbol `%s` in %s", name, inputs->names[i]) != 0) {
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
 static int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
     FILE *fp;
     size_t i;
@@ -1535,7 +1592,7 @@ static int validate_output(const ld_ctx_t *ctx) {
     return 0;
 }
 
-static int run_internal_link(const ld_ctx_t *ctx) {
+static int run_internal_link(ld_ctx_t *ctx) {
     objvec_t inputs;
     elfobj_t *out = NULL;
     elf_err_t err;
@@ -1549,6 +1606,10 @@ static int run_internal_link(const ld_ctx_t *ctx) {
     }
     emit_trace_inputs(ctx, &inputs);
     emit_trace_symbols(ctx, &inputs);
+    if (emit_common_symbol_warnings(ctx, &inputs) != 0) {
+        objvec_free(&inputs);
+        return -1;
+    }
     if (inputs.count == 0) {
         fprintf(stderr, "ld: no compatible relocatable input objects found\n");
         objvec_free(&inputs);
@@ -1586,8 +1647,12 @@ static int run_internal_link(const ld_ctx_t *ctx) {
             return -1;
         }
         if (chmod(ctx->out_path, 0644) != 0) {
-            fprintf(stderr, "ld: warning: failed to set output mode on %s: %s\n",
-                    ctx->out_path, strerror(errno));
+            if (ld_warn(ctx, "failed to set output mode on %s: %s",
+                        ctx->out_path, strerror(errno)) != 0) {
+                objvec_free(&inputs);
+                elf_close(out);
+                return -1;
+            }
         }
         objvec_free(&inputs);
         elf_close(out);
@@ -1645,8 +1710,12 @@ static int run_internal_link(const ld_ctx_t *ctx) {
         return -1;
     }
     if (chmod(ctx->out_path, out_type == ET_EXEC ? 0755 : 0644) != 0) {
-        fprintf(stderr, "ld: warning: failed to set output mode on %s: %s\n",
-                ctx->out_path, strerror(errno));
+        if (ld_warn(ctx, "failed to set output mode on %s: %s",
+                    ctx->out_path, strerror(errno)) != 0) {
+            objvec_free(&inputs);
+            elf_close(out);
+            return -1;
+        }
     }
 
     objvec_free(&inputs);
@@ -1828,6 +1897,51 @@ int main(int argc, char **argv) {
             ctx.allow_undefined = 1;
             continue;
         }
+        if (strcmp(a, "--no-undefined") == 0) {
+            ctx.allow_undefined = 0;
+            continue;
+        }
+        if (strcmp(a, "--warn-common") == 0) {
+            ctx.warn_common = 1;
+            continue;
+        }
+        if (strcmp(a, "--no-warn-common") == 0) {
+            ctx.warn_common = 0;
+            continue;
+        }
+        if (strcmp(a, "--fatal-warnings") == 0) {
+            ctx.fatal_warnings = 1;
+            continue;
+        }
+        if ((p = parse_arg_value(a, "--unresolved-symbols", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (strcmp(val, "ignore-all") == 0) {
+                ctx.allow_undefined = 1;
+            } else if (strcmp(val, "report-all") == 0) {
+                ctx.allow_undefined = 0;
+            } else {
+                fprintf(stderr,
+                        "ld: unsupported --unresolved-symbols policy '%s' "
+                        "(supported: ignore-all, report-all)\n",
+                        val);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                return 2;
+            }
+            continue;
+        }
         if (strcmp(a, "-e") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
@@ -1975,9 +2089,15 @@ int main(int argc, char **argv) {
                 fprintf(stderr, "ld: error: unsupported option in lld mode: %s\n", a);
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
                 return 2;
             }
-            fprintf(stderr, "ld: warning: unsupported option ignored (gnu mode): %s\n", a);
+            if (ld_warn(&ctx, "unsupported option ignored (gnu mode): %s", a) != 0) {
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                return 2;
+            }
             continue;
         }
         if (inputvec_push(&ctx.inputs, LD_INPUT_FILE, ctx.current_lib_mode,
