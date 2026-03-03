@@ -400,7 +400,7 @@ static char *path_join(const char *dir, const char *leaf) {
 }
 
 static int default_mode(void) {
-    return 64;
+    return (int)(sizeof(void *) == 8 ? 64 : 32);
 }
 
 static int parse_mode_token(const char *tok) {
@@ -721,14 +721,47 @@ static char *decode_ar_name(const char *raw_name16, const unsigned char *member_
 }
 
 static int obj_matches_mode(const elfobj_t *obj, int mode) {
-    if (mode == 64) {
-        return elf_class(obj) == ELFOBJ_CLASS_64 &&
-               elf_machine(obj) == EM_X86_64 &&
-               elf_endian(obj) == ELFOBJ_ENDIAN_LE;
+    if (obj == NULL || elf_endian(obj) != ELFOBJ_ENDIAN_LE) {
+        return 0;
     }
-    return elf_class(obj) == ELFOBJ_CLASS_32 &&
-           elf_machine(obj) == EM_386 &&
-           elf_endian(obj) == ELFOBJ_ENDIAN_LE;
+    if (mode == 64) {
+        return elf_class(obj) == ELFOBJ_CLASS_64 && elf_machine(obj) == EM_X86_64;
+    }
+    if (mode == 32) {
+        return elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386;
+    }
+    return (elf_class(obj) == ELFOBJ_CLASS_64 && elf_machine(obj) == EM_X86_64) ||
+           (elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386);
+}
+
+static int detect_object_mode(const elfobj_t *obj) {
+    if (obj == NULL || elf_endian(obj) != ELFOBJ_ENDIAN_LE) {
+        return 0;
+    }
+    if (elf_class(obj) == ELFOBJ_CLASS_64 && elf_machine(obj) == EM_X86_64) {
+        return 64;
+    }
+    if (elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386) {
+        return 32;
+    }
+    return 0;
+}
+
+static void maybe_autoswitch_mode(ld_ctx_t *ctx, const elfobj_t *obj, size_t loaded_count, const char *path) {
+    int detected;
+
+    if (ctx == NULL || ctx->explicit_mode || loaded_count != 0) {
+        return;
+    }
+    detected = detect_object_mode(obj);
+    if (detected == 0 || detected == ctx->mode) {
+        return;
+    }
+    ctx->mode = detected;
+    if (ctx->trace_inputs) {
+        fprintf(stderr, "ld: trace: auto-selected mode %s from %s\n",
+                canonical_mode_name(ctx->mode), path != NULL ? path : "<input>");
+    }
 }
 
 static int validate_relocatable_input(const elfobj_t *obj, const char *display_name) {
@@ -971,7 +1004,7 @@ static char *resolve_thin_member_path(const char *archive_path, const char *memb
     return member_real;
 }
 
-static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
+static int load_archive_members(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
                                 int whole_archive) {
     unsigned char *buf = NULL;
     size_t sz = 0;
@@ -1044,6 +1077,7 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
                 elfobj_t *obj = NULL;
                 snprintf(member_key, sizeof(member_key), "%s@%zu", path, off);
                 if (!symset_contains(&seen_members, member_key) && elf_open_memory(body, body_sz, &obj) == ELF_OK) {
+                    maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, path);
                     if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode) &&
                         (whole_archive || obj_defines_unresolved(state, obj))) {
                         char member_name[512];
@@ -1087,6 +1121,7 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
                 }
                 if (!symset_contains(&seen_members, thin_member_path) &&
                     elf_open(thin_member_path, &obj) == ELF_OK) {
+                    maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, thin_member_path);
                     if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode) &&
                         (whole_archive || obj_defines_unresolved(state, obj))) {
                         char member_name[512];
@@ -1141,7 +1176,7 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
     return 0;
 }
 
-static int load_object_input(const char *path, const ld_ctx_t *ctx, objvec_t *objs, symstate_t *state, int quiet) {
+static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state, int quiet) {
     elfobj_t *obj = NULL;
 
     if (elf_open(path, &obj) != ELF_OK) {
@@ -1150,6 +1185,7 @@ static int load_object_input(const char *path, const ld_ctx_t *ctx, objvec_t *ob
         }
         return -1;
     }
+    maybe_autoswitch_mode(ctx, obj, objs != NULL ? objs->count : 0, path);
     if (!obj_matches_mode(obj, ctx->mode)) {
         if (!quiet) {
             fprintf(stderr, "ld: input %s has mismatched class/machine/endianness\n", path);
@@ -1201,7 +1237,7 @@ static char *resolve_library_path_suffix(const ld_ctx_t *ctx, const char *name, 
     return NULL;
 }
 
-static int load_path_input(const char *path, const ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
+static int load_path_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
                            int whole_archive, int quiet) {
     if (has_suffix(path, ".a")) {
         return load_archive_members(path, ctx, objs, state, whole_archive);
@@ -1555,7 +1591,7 @@ static int symstate_note_dso_symbol(symstate_t *state, const char *sym_name, uin
     return 0;
 }
 
-static int shared_object_matches_unresolved(const char *path, const ld_ctx_t *ctx, const symstate_t *state,
+static int shared_object_matches_unresolved(const char *path, ld_ctx_t *ctx, const symstate_t *state,
                                             int *out_match) {
     elfobj_t *obj = NULL;
     verdef_table_t defs;
@@ -1568,6 +1604,7 @@ static int shared_object_matches_unresolved(const char *path, const ld_ctx_t *ct
     if (elf_open(path, &obj) != ELF_OK) {
         return -1;
     }
+    maybe_autoswitch_mode(ctx, obj, 0, path);
     if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
         elf_close(obj);
         return 0;
@@ -1619,6 +1656,7 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
     if (elf_open(path, &obj) != ELF_OK) {
         return -1;
     }
+    maybe_autoswitch_mode(ctx, obj, 0, path);
     if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
         elf_close(obj);
         return -1;
