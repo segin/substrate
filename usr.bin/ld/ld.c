@@ -231,6 +231,32 @@ static int parse_mode_token(const char *tok) {
     return 0;
 }
 
+static const char *canonical_mode_name(int mode) {
+    if (mode == 64) {
+        return "x86-64";
+    }
+    if (mode == 32) {
+        return "i386";
+    }
+    return "unknown";
+}
+
+static int set_explicit_mode(ld_ctx_t *ctx, int mode, const char *opt_text) {
+    if (mode != 32 && mode != 64) {
+        return -1;
+    }
+    if (ctx->explicit_mode && ctx->mode != mode) {
+        fprintf(stderr,
+                "ld: conflicting target mode options: already %s, new %s from %s\n",
+                canonical_mode_name(ctx->mode), canonical_mode_name(mode),
+                opt_text != NULL ? opt_text : "<option>");
+        return -1;
+    }
+    ctx->mode = mode;
+    ctx->explicit_mode = 1;
+    return 0;
+}
+
 static uint64_t align_up_u64(uint64_t v, uint64_t a) {
     if (a <= 1) {
         return v;
@@ -1127,32 +1153,48 @@ int main(int argc, char **argv) {
             continue;
         }
         if (strcmp(a, "-m32") == 0) {
-            ctx.mode = 32;
-            ctx.explicit_mode = 1;
+            if (set_explicit_mode(&ctx, 32, "-m32") != 0) {
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
             continue;
         }
         if (strcmp(a, "-m64") == 0) {
-            ctx.mode = 64;
-            ctx.explicit_mode = 1;
+            if (set_explicit_mode(&ctx, 64, "-m64") != 0) {
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
             continue;
         }
-        if (strcmp(a, "-m") == 0) {
+        if ((p = parse_arg_value(a, "-m", &val)) != 0) {
             int m;
-            if (i + 1 >= argc) {
-                usage(argv[0]);
-                inputvec_free(&ctx.inputs);
-                strvec_free(&ctx.lib_paths);
-                return 2;
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    return 2;
+                }
+                val = argv[++i];
             }
-            m = parse_mode_token(argv[++i]);
+            m = parse_mode_token(val);
             if (m == 0) {
-                fprintf(stderr, "ld: unsupported emulation '%s'\n", argv[i]);
+                fprintf(stderr,
+                        "ld: unsupported emulation '%s' for -m "
+                        "(supported: elf_x86_64, elf64-x86-64, x86_64, amd64, "
+                        "elf_i386, elf32-i386, i386)\n",
+                        val);
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
                 return 2;
             }
-            ctx.mode = m;
-            ctx.explicit_mode = 1;
+            if (set_explicit_mode(&ctx, m, a) != 0) {
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
             continue;
         }
         if (strcmp(a, "-o") == 0) {
