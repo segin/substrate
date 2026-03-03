@@ -187,7 +187,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 7. Dynamic Linking Artifacts
 
 ### 7.1 Core dynamic sections
-- [ ] Build `.dynsym/.dynstr` from export policy and resolved dyn symbols.  
+- [x] Build `.dynsym/.dynstr` from export policy and resolved dyn symbols.  
   Reqs: LD-S-003.
 - [ ] Build `.dynamic` tags and ensure consistency invariants.  
   Reqs: LD-S-003.

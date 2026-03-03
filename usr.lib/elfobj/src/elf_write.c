@@ -248,6 +248,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     uint8_t *symtab_data = NULL;
     uint8_t *dynstr_data = NULL;
     size_t dynstr_size = 0;
+    int has_dynstr_section = 0;
     size_t symtab_size = 0;
     size_t symtab_entsz = 0;
     uint64_t shoff;
@@ -302,6 +303,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         out.entsize = s->entsize;
         out.data = s->data;
         out.size = s->type == SHT_NOBITS ? s->size : s->data_size;
+        if (strcmp(name, ".dynstr") == 0) {
+            has_dynstr_section = 1;
+        }
         if (out_push(&secs, &sec_count, &sec_cap, &out) != ELF_OK) {
             err = ELF_ERR_OOM;
             goto done;
@@ -408,7 +412,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         }
     }
 
-    if (obj->type == ET_EXEC || obj->type == ET_DYN) {
+    if ((obj->type == ET_EXEC || obj->type == ET_DYN) && !has_dynstr_section) {
         out_sec_t dynst;
         dynstr_data = build_dynstr(obj, &dynstr_size);
         if (dynstr_data == NULL && dynstr_size != 0) {
@@ -464,6 +468,29 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     for (i = 1; i < sec_count; ++i) {
         if (secs[i].type == SHT_RELA || secs[i].type == SHT_REL) {
             secs[i].link = (uint32_t)symtab_index;
+        }
+    }
+    {
+        size_t dynsym_index = (size_t)-1;
+        size_t dynstr_index = (size_t)-1;
+        for (i = 1; i < sec_count; ++i) {
+            const char *nm = secs[i].name != NULL ? secs[i].name : "";
+            if (strcmp(nm, ".dynsym") == 0) {
+                dynsym_index = i;
+            } else if (strcmp(nm, ".dynstr") == 0) {
+                dynstr_index = i;
+            }
+        }
+        if (dynsym_index != (size_t)-1) {
+            if (secs[dynsym_index].entsize == 0) {
+                secs[dynsym_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 16;
+            }
+            if (secs[dynsym_index].info == 0) {
+                secs[dynsym_index].info = 1;
+            }
+            if (dynstr_index != (size_t)-1) {
+                secs[dynsym_index].link = (uint32_t)dynstr_index;
+            }
         }
     }
 

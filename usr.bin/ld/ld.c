@@ -1270,6 +1270,52 @@ static uint32_t read_u32_endian(const uint8_t *p, elfobj_endian_t endian) {
     return ((uint32_t)p[3] << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | (uint32_t)p[0];
 }
 
+static void write_u16_endian(uint8_t *p, elfobj_endian_t endian, uint16_t v) {
+    if (endian == ELFOBJ_ENDIAN_BE) {
+        p[0] = (uint8_t)((v >> 8) & 0xffu);
+        p[1] = (uint8_t)(v & 0xffu);
+        return;
+    }
+    p[0] = (uint8_t)(v & 0xffu);
+    p[1] = (uint8_t)((v >> 8) & 0xffu);
+}
+
+static void write_u32_endian(uint8_t *p, elfobj_endian_t endian, uint32_t v) {
+    if (endian == ELFOBJ_ENDIAN_BE) {
+        p[0] = (uint8_t)((v >> 24) & 0xffu);
+        p[1] = (uint8_t)((v >> 16) & 0xffu);
+        p[2] = (uint8_t)((v >> 8) & 0xffu);
+        p[3] = (uint8_t)(v & 0xffu);
+        return;
+    }
+    p[0] = (uint8_t)(v & 0xffu);
+    p[1] = (uint8_t)((v >> 8) & 0xffu);
+    p[2] = (uint8_t)((v >> 16) & 0xffu);
+    p[3] = (uint8_t)((v >> 24) & 0xffu);
+}
+
+static void write_u64_endian(uint8_t *p, elfobj_endian_t endian, uint64_t v) {
+    if (endian == ELFOBJ_ENDIAN_BE) {
+        p[0] = (uint8_t)((v >> 56) & 0xffu);
+        p[1] = (uint8_t)((v >> 48) & 0xffu);
+        p[2] = (uint8_t)((v >> 40) & 0xffu);
+        p[3] = (uint8_t)((v >> 32) & 0xffu);
+        p[4] = (uint8_t)((v >> 24) & 0xffu);
+        p[5] = (uint8_t)((v >> 16) & 0xffu);
+        p[6] = (uint8_t)((v >> 8) & 0xffu);
+        p[7] = (uint8_t)(v & 0xffu);
+        return;
+    }
+    p[0] = (uint8_t)(v & 0xffu);
+    p[1] = (uint8_t)((v >> 8) & 0xffu);
+    p[2] = (uint8_t)((v >> 16) & 0xffu);
+    p[3] = (uint8_t)((v >> 24) & 0xffu);
+    p[4] = (uint8_t)((v >> 32) & 0xffu);
+    p[5] = (uint8_t)((v >> 40) & 0xffu);
+    p[6] = (uint8_t)((v >> 48) & 0xffu);
+    p[7] = (uint8_t)((v >> 56) & 0xffu);
+}
+
 static const char *safe_strtab_name(const uint8_t *strtab, size_t strtab_sz, uint32_t off) {
     size_t i;
 
@@ -1712,55 +1758,219 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
     return 0;
 }
 
-static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
-    elf_section_t *dynstr;
-    size_t i;
-    size_t total = 1;
-    uint8_t *buf;
-    size_t off = 1;
+static int dynbuf_append(uint8_t **buf, size_t *len, size_t *cap, const void *src, size_t n) {
+    uint8_t *next;
+    size_t ncap;
 
-    if (ctx->dso_inputs.count == 0) {
+    if (buf == NULL || len == NULL || cap == NULL) {
+        return -1;
+    }
+    if (n == 0) {
         return 0;
     }
+    if (*len > SIZE_MAX - n) {
+        return -1;
+    }
+    if (*len + n > *cap) {
+        ncap = *cap == 0 ? 64 : *cap;
+        while (ncap < *len + n) {
+            if (ncap > SIZE_MAX / 2) {
+                ncap = *len + n;
+                break;
+            }
+            ncap *= 2;
+        }
+        next = (uint8_t *)realloc(*buf, ncap);
+        if (next == NULL) {
+            return -1;
+        }
+        *buf = next;
+        *cap = ncap;
+    }
+    memcpy(*buf + *len, src, n);
+    *len += n;
+    return 0;
+}
+
+static int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const char *name, uint32_t *out_off) {
+    size_t n;
+    size_t off;
+
+    if (buf == NULL || len == NULL || cap == NULL || out_off == NULL || name == NULL) {
+        return -1;
+    }
+    off = *len;
+    if (off > UINT32_MAX) {
+        return -1;
+    }
+    n = strlen(name) + 1;
+    if (dynbuf_append(buf, len, cap, name, n) != 0) {
+        return -1;
+    }
+    *out_off = (uint32_t)off;
+    return 0;
+}
+
+static int dynsym_should_export(const ld_ctx_t *ctx, const elfobj_t *out, const elf_symbol_t *sym) {
+    uint8_t bind;
+    uint8_t vis;
+    uint16_t shndx;
+
+    if (ctx == NULL || out == NULL || sym == NULL) {
+        return 0;
+    }
+    if (elf_symbol_name(sym) == NULL || elf_symbol_name(sym)[0] == '\0') {
+        return 0;
+    }
+    bind = elf_symbol_bind(sym);
+    if (bind != STB_GLOBAL && bind != STB_WEAK) {
+        return 0;
+    }
+    vis = elf_symbol_visibility(sym);
+    if (vis != STV_DEFAULT && vis != STV_PROTECTED) {
+        return 0;
+    }
+    shndx = elf_symbol_shndx(sym);
+    if (elf_type(out) == ET_DYN) {
+        return 1;
+    }
+    if (shndx == SHN_UNDEF) {
+        return 1;
+    }
+    return ctx->export_dynamic ? 1 : 0;
+}
+
+static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
+    elf_section_t *dynstr;
+    elf_section_t *dynsym;
+    uint8_t *dynstr_buf = NULL;
+    uint8_t *dynsym_buf = NULL;
+    size_t dynstr_len = 0;
+    size_t dynstr_cap = 0;
+    size_t dynsym_len = 0;
+    size_t dynsym_cap = 0;
+    size_t i;
+    size_t entsz;
+    int need_dyn;
+
+    if (ctx == NULL || out == NULL) {
+        return -1;
+    }
+    need_dyn = (elf_type(out) == ET_DYN) || (ctx->dso_inputs.count != 0) || ctx->export_dynamic;
+    if (!need_dyn) {
+        return 0;
+    }
+
     dynstr = elf_find_section(out, ".dynstr");
     if (dynstr == NULL) {
         dynstr = elf_add_section(out, ".dynstr", SHT_STRTAB, SHF_ALLOC);
         if (dynstr == NULL) {
             return -1;
         }
-        if (elf_section_set_align(dynstr, 1) != ELF_OK) {
+    }
+    if (elf_section_set_align(dynstr, 1) != ELF_OK) {
+        return -1;
+    }
+    dynsym = elf_find_section(out, ".dynsym");
+    if (dynsym == NULL) {
+        dynsym = elf_add_section(out, ".dynsym", SHT_DYNSYM, SHF_ALLOC);
+        if (dynsym == NULL) {
             return -1;
         }
     }
-    for (i = 0; i < ctx->dso_inputs.count; ++i) {
-        const char *p = strrchr(ctx->dso_inputs.items[i], '/');
-        const char *name = p != NULL ? p + 1 : ctx->dso_inputs.items[i];
-        total += strlen(name) + 1;
-    }
-    buf = (uint8_t *)calloc(1, total);
-    if (buf == NULL) {
+    if (elf_section_set_align(dynsym, elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4) != ELF_OK) {
         return -1;
     }
+
+    if (dynbuf_append(&dynstr_buf, &dynstr_len, &dynstr_cap, "\0", 1) != 0) {
+        free(dynstr_buf);
+        return -1;
+    }
+
     for (i = 0; i < ctx->dso_inputs.count; ++i) {
         const char *p = strrchr(ctx->dso_inputs.items[i], '/');
         const char *name = p != NULL ? p + 1 : ctx->dso_inputs.items[i];
-        size_t n = strlen(name) + 1;
-        memcpy(buf + off, name, n);
+        uint32_t off = 0;
+        if (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, name, &off) != 0) {
+            free(dynstr_buf);
+            return -1;
+        }
         if (elf_link_add_dynamic_entry(out, DT_NEEDED, off) != ELF_OK) {
-            free(buf);
+            free(dynstr_buf);
             return -1;
         }
-        off += n;
     }
-    if (elf_link_add_dynamic_entry(out, DT_NULL, 0) != ELF_OK) {
-        free(buf);
+    if (ctx->dso_inputs.count != 0) {
+        if (elf_link_add_dynamic_entry(out, DT_NULL, 0) != ELF_OK) {
+            free(dynstr_buf);
+            return -1;
+        }
+    }
+
+    entsz = elf_class(out) == ELFOBJ_CLASS_64 ? 24 : 16;
+    dynsym_buf = (uint8_t *)calloc(1, entsz);
+    if (dynsym_buf == NULL) {
+        free(dynstr_buf);
         return -1;
     }
-    if (elf_section_set_data(dynstr, buf, total) != ELF_OK) {
-        free(buf);
+    dynsym_len = entsz;
+    dynsym_cap = entsz;
+
+    for (i = 0; i < elf_symbol_count(out); ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(out, i);
+        uint8_t entry[24];
+        uint8_t info;
+        uint8_t other;
+        uint32_t name_off = 0;
+        uint16_t shndx;
+        uint64_t value;
+        uint64_t size;
+
+        if (!dynsym_should_export(ctx, out, sym)) {
+            continue;
+        }
+        if (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, elf_symbol_name(sym), &name_off) != 0) {
+            free(dynstr_buf);
+            free(dynsym_buf);
+            return -1;
+        }
+
+        info = (uint8_t)(((elf_symbol_bind(sym) & 0x0f) << 4) | (elf_symbol_type(sym) & 0x0f));
+        other = (uint8_t)(elf_symbol_visibility(sym) & 0x03);
+        shndx = elf_symbol_shndx(sym);
+        value = elf_symbol_value(sym);
+        size = elf_symbol_size(sym);
+        memset(entry, 0, sizeof(entry));
+        if (elf_class(out) == ELFOBJ_CLASS_64) {
+            write_u32_endian(entry + 0, elf_endian(out), name_off);
+            entry[4] = info;
+            entry[5] = other;
+            write_u16_endian(entry + 6, elf_endian(out), shndx);
+            write_u64_endian(entry + 8, elf_endian(out), value);
+            write_u64_endian(entry + 16, elf_endian(out), size);
+        } else {
+            write_u32_endian(entry + 0, elf_endian(out), name_off);
+            write_u32_endian(entry + 4, elf_endian(out), (uint32_t)value);
+            write_u32_endian(entry + 8, elf_endian(out), (uint32_t)size);
+            entry[12] = info;
+            entry[13] = other;
+            write_u16_endian(entry + 14, elf_endian(out), shndx);
+        }
+        if (dynbuf_append(&dynsym_buf, &dynsym_len, &dynsym_cap, entry, entsz) != 0) {
+            free(dynstr_buf);
+            free(dynsym_buf);
+            return -1;
+        }
+    }
+
+    if (elf_section_set_data(dynstr, dynstr_buf, dynstr_len) != ELF_OK ||
+        elf_section_set_data(dynsym, dynsym_buf, dynsym_len) != ELF_OK) {
+        free(dynstr_buf);
+        free(dynsym_buf);
         return -1;
     }
-    free(buf);
+    free(dynstr_buf);
+    free(dynsym_buf);
     return 0;
 }
 
