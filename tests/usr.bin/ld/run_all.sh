@@ -51,6 +51,8 @@ test_as_needed.sh|LD-E-005
 test_tooling_options.sh|LD-U-011 LD-U-010
 test_warning_policies.sh|LD-W-003 LD-E-001
 test_input_validation_basic.sh|LD-U-012 LD-R-001
+test_reloc_symbol_parsing.sh|LD-U-005 LD-U-006
+test_malformed_object_hardening.sh|LD-R-001 LD-R-003 LD-R-004
 EOF
 
 echo

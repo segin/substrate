@@ -581,6 +581,75 @@ static int obj_matches_mode(const elfobj_t *obj, int mode) {
            elf_endian(obj) == ELFOBJ_ENDIAN_LE;
 }
 
+static int validate_relocatable_input(const elfobj_t *obj, const char *display_name) {
+    size_t i;
+
+    if (elf_symbol_count(obj) == 0) {
+        fprintf(stderr, "ld: input %s has no symbol table entries\n", display_name);
+        return -1;
+    }
+
+    for (i = 0; i < elf_section_count(obj); ++i) {
+        const elf_section_t *sec = elf_section_get(obj, i);
+        size_t rc;
+        size_t sec_sz = 0;
+        const void *sec_data;
+        size_t ri;
+
+        if (sec == NULL) {
+            continue;
+        }
+        sec_data = elf_section_data(sec, &sec_sz);
+        if (elf_section_type(sec) != SHT_NOBITS && elf_section_size(sec) > 0 && sec_data == NULL) {
+            fprintf(stderr, "ld: input %s section %s has invalid data payload\n",
+                    display_name, elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+            return -1;
+        }
+        if (elf_section_align(sec) == 0) {
+            fprintf(stderr, "ld: input %s section %s has invalid zero alignment\n",
+                    display_name, elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+            return -1;
+        }
+        rc = elf_section_reloc_count(sec);
+        for (ri = 0; ri < rc; ++ri) {
+            const elf_reloc_t *rel = elf_section_reloc_at((elf_section_t *)sec, ri);
+            const elf_symbol_t *sym;
+            int width;
+
+            if (rel == NULL) {
+                fprintf(stderr, "ld: input %s section %s has null relocation entry\n",
+                        display_name, elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+                return -1;
+            }
+            if (elf_reloc_offset(rel) > elf_section_size(sec)) {
+                fprintf(stderr, "ld: input %s section %s has out-of-range relocation offset\n",
+                        display_name, elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+                return -1;
+            }
+            width = elf_reloc_size_for_machine(elf_machine(obj), elf_reloc_type(rel));
+            if (width <= 0 || width > 8) {
+                fprintf(stderr, "ld: input %s section %s has unsupported relocation type %u\n",
+                        display_name, elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>",
+                        (unsigned)elf_reloc_type(rel));
+                return -1;
+            }
+            if (elf_reloc_offset(rel) + (uint64_t)width > elf_section_size(sec)) {
+                fprintf(stderr, "ld: input %s section %s has relocation exceeding section bounds\n",
+                        display_name, elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+                return -1;
+            }
+            sym = elf_reloc_symbol(rel);
+            if (sym == NULL) {
+                fprintf(stderr, "ld: input %s section %s has relocation with missing symbol\n",
+                        display_name, elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+                return -1;
+            }
+        }
+    }
+
+    return 0;
+}
+
 static int symstate_note_object(symstate_t *state, elfobj_t *obj) {
     size_t i;
 
@@ -736,6 +805,13 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
                             return -1;
                         }
                         snprintf(member_name, sizeof(member_name), "%s(%s)", path, mname);
+                        if (validate_relocatable_input(obj, member_name) != 0) {
+                            elf_close(obj);
+                            free(mname);
+                            symset_free(&seen_members);
+                            free(buf);
+                            return -1;
+                        }
                         if (objvec_push(objs, obj, member_name) != 0 || symstate_note_object(state, obj) != 0) {
                             elf_close(obj);
                             free(mname);
@@ -786,6 +862,10 @@ static int load_object_input(const char *path, const ld_ctx_t *ctx, objvec_t *ob
         if (!quiet) {
             fprintf(stderr, "ld: input %s is not relocatable (only ET_REL supported)\n", path);
         }
+        elf_close(obj);
+        return -1;
+    }
+    if (validate_relocatable_input(obj, path) != 0) {
         elf_close(obj);
         return -1;
     }

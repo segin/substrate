@@ -51,9 +51,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 2.1 ET_REL input loader
 - [x] Validate ELF class/machine/endianness and reject incompatible inputs.  
   Reqs: LD-U-012, LD-R-001.
-- [ ] Parse symbols, relocations, groups, and section metadata needed for linking.  
+- [x] Parse symbols, relocations, groups, and section metadata needed for linking.  
   Reqs: LD-U-005, LD-U-006.
-- [ ] Add malformed-object hardening tests.  
+- [x] Add malformed-object hardening tests.  
   Reqs: LD-R-001, LD-R-003, LD-R-004.
 
 ### 2.2 Archive loader
