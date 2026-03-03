@@ -37,9 +37,6 @@ static bucket *make_dummy(void);
 
 /* ... */
 
-/* Track current rule's RHS length for $N translation */
-static int action_rule_len;
-
 static bucket *make_dummy(void) {
     char name[32];
     snprintf(name, sizeof(name), "$@%d", ++gen_sym_count);
@@ -840,7 +837,6 @@ static void fixup_grammar(void) {
 }
 
 void reader(void) {
-    int c;
     create_symbol_table();
     get_line(); /* Prime the pump */
     parse_declarations();
