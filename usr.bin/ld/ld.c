@@ -19,12 +19,18 @@ typedef enum {
 } ld_input_kind_t;
 
 typedef enum {
+    LD_LIBMODE_DYNAMIC = 0,
+    LD_LIBMODE_STATIC = 1
+} ld_lib_mode_t;
+
+typedef enum {
     LD_COMPAT_GNU = 0,
     LD_COMPAT_LLD = 1
 } ld_compat_mode_t;
 
 typedef struct {
     ld_input_kind_t kind;
+    ld_lib_mode_t lib_mode;
     char *text;
 } ld_input_t;
 
@@ -52,6 +58,7 @@ typedef struct {
     const char *entry_symbol;
     const char *interp_path;
     ld_compat_mode_t compat_mode;
+    ld_lib_mode_t current_lib_mode;
     strvec_t lib_paths;
     inputvec_t inputs;
 } ld_ctx_t;
@@ -59,7 +66,7 @@ typedef struct {
 static void usage(const char *prog) {
     fprintf(stderr,
             "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] "
-            "[-o output] [-L dir] [-l name] [-e symbol] [--allow-undefined] "
+            "[-o output] [-L dir] [-l name] [-Bstatic|-Bdynamic] [-e symbol] [--allow-undefined] "
             "[--compat=gnu|lld] input...\n",
             prog);
 }
@@ -112,7 +119,7 @@ static void strvec_free(strvec_t *v) {
     v->cap = 0;
 }
 
-static int inputvec_push(inputvec_t *v, ld_input_kind_t kind, const char *text) {
+static int inputvec_push(inputvec_t *v, ld_input_kind_t kind, ld_lib_mode_t lib_mode, const char *text) {
     ld_input_t *next;
 
     if (v->count == v->cap) {
@@ -126,6 +133,7 @@ static int inputvec_push(inputvec_t *v, ld_input_kind_t kind, const char *text) 
     }
 
     v->items[v->count].kind = kind;
+    v->items[v->count].lib_mode = lib_mode;
     v->items[v->count].text = xstrdup(text);
     if (v->items[v->count].text == NULL) {
         return -1;
@@ -531,7 +539,7 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
     return 0;
 }
 
-static char *resolve_library_path(const ld_ctx_t *ctx, const char *name) {
+static char *resolve_library_path_suffix(const ld_ctx_t *ctx, const char *name, const char *suffix) {
     static const char *default_dirs[] = {
         "/usr/lib",
         "/usr/local/lib"
@@ -539,7 +547,7 @@ static char *resolve_library_path(const ld_ctx_t *ctx, const char *name) {
     char leaf[512];
     size_t i;
 
-    snprintf(leaf, sizeof(leaf), "lib%s.a", name);
+    snprintf(leaf, sizeof(leaf), "lib%s%s", name, suffix != NULL ? suffix : "");
     for (i = 0; i < ctx->lib_paths.count; ++i) {
         char *cand = path_join(ctx->lib_paths.items[i], leaf);
         if (cand != NULL && access(cand, R_OK) == 0) {
@@ -557,23 +565,29 @@ static char *resolve_library_path(const ld_ctx_t *ctx, const char *name) {
     return NULL;
 }
 
-static int load_input_file(const char *path, const ld_ctx_t *ctx, objvec_t *objs) {
+static int load_input_file(const char *path, const ld_ctx_t *ctx, objvec_t *objs, int quiet) {
     elfobj_t *obj = NULL;
 
     if (has_suffix(path, ".a")) {
         return load_archive_members(path, ctx, objs);
     }
     if (elf_open(path, &obj) != ELF_OK) {
-        fprintf(stderr, "ld: failed to open input %s\n", path);
+        if (!quiet) {
+            fprintf(stderr, "ld: failed to open input %s\n", path);
+        }
         return -1;
     }
     if (!obj_matches_mode(obj, ctx->mode)) {
-        fprintf(stderr, "ld: input %s has mismatched class/machine\n", path);
+        if (!quiet) {
+            fprintf(stderr, "ld: input %s has mismatched class/machine\n", path);
+        }
         elf_close(obj);
         return -1;
     }
     if (elf_type(obj) != ET_REL) {
-        fprintf(stderr, "ld: input %s is not relocatable (only ET_REL supported)\n", path);
+        if (!quiet) {
+            fprintf(stderr, "ld: input %s is not relocatable (only ET_REL supported)\n", path);
+        }
         elf_close(obj);
         return -1;
     }
@@ -584,26 +598,67 @@ static int load_input_file(const char *path, const ld_ctx_t *ctx, objvec_t *objs
     return 0;
 }
 
+static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs) {
+    char *path_so = NULL;
+    char *path_a = NULL;
+
+    if (in->lib_mode == LD_LIBMODE_STATIC) {
+        path_a = resolve_library_path_suffix(ctx, in->text, ".a");
+        if (path_a == NULL) {
+            fprintf(stderr, "ld: cannot find -l%s\n", in->text);
+            return -1;
+        }
+        if (load_input_file(path_a, ctx, objs, 0) != 0) {
+            free(path_a);
+            return -1;
+        }
+        free(path_a);
+        return 0;
+    }
+
+    path_so = resolve_library_path_suffix(ctx, in->text, ".so");
+    if (path_so != NULL && load_input_file(path_so, ctx, objs, 1) == 0) {
+        free(path_so);
+        return 0;
+    }
+
+    path_a = resolve_library_path_suffix(ctx, in->text, ".a");
+    if (path_a != NULL) {
+        if (load_input_file(path_a, ctx, objs, 0) != 0) {
+            free(path_so);
+            free(path_a);
+            return -1;
+        }
+        free(path_so);
+        free(path_a);
+        return 0;
+    }
+
+    if (path_so != NULL) {
+        fprintf(stderr,
+                "ld: cannot use shared library %s for this link (shared-object linking not implemented)\n",
+                path_so);
+        free(path_so);
+        return -1;
+    }
+
+    fprintf(stderr, "ld: cannot find -l%s\n", in->text);
+    return -1;
+}
+
 static int load_all_inputs(const ld_ctx_t *ctx, objvec_t *objs) {
     size_t i;
 
     for (i = 0; i < ctx->inputs.count; ++i) {
         const ld_input_t *in = &ctx->inputs.items[i];
         if (in->kind == LD_INPUT_FILE) {
-            if (load_input_file(in->text, ctx, objs) != 0) {
+            if (load_input_file(in->text, ctx, objs, 0) != 0) {
                 return -1;
             }
         } else {
-            char *lib_path = resolve_library_path(ctx, in->text);
-            if (lib_path == NULL) {
-                fprintf(stderr, "ld: cannot find -l%s\n", in->text);
+            if (load_library_input(ctx, in, objs) != 0) {
                 return -1;
             }
-            if (load_input_file(lib_path, ctx, objs) != 0) {
-                free(lib_path);
-                return -1;
-            }
-            free(lib_path);
         }
     }
     return 0;
@@ -1159,6 +1214,7 @@ int main(int argc, char **argv) {
     ctx.out_path = "a.out";
     ctx.self_path = argv[0];
     ctx.compat_mode = LD_COMPAT_GNU;
+    ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
 
     for (i = 1; i < argc; ++i) {
         const char *a = argv[i];
@@ -1260,6 +1316,15 @@ int main(int argc, char **argv) {
         }
         if (strcmp(a, "-static") == 0) {
             ctx.expect_type = ET_EXEC;
+            ctx.current_lib_mode = LD_LIBMODE_STATIC;
+            continue;
+        }
+        if (strcmp(a, "-Bstatic") == 0) {
+            ctx.current_lib_mode = LD_LIBMODE_STATIC;
+            continue;
+        }
+        if (strcmp(a, "-Bdynamic") == 0) {
+            ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
             continue;
         }
         if (strcmp(a, "--allow-undefined") == 0) {
@@ -1334,7 +1399,7 @@ int main(int argc, char **argv) {
                 }
                 val = argv[++i];
             }
-            if (inputvec_push(&ctx.inputs, LD_INPUT_LIB, val) != 0) {
+            if (inputvec_push(&ctx.inputs, LD_INPUT_LIB, ctx.current_lib_mode, val) != 0) {
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
                 return 1;
@@ -1368,7 +1433,7 @@ int main(int argc, char **argv) {
             fprintf(stderr, "ld: warning: unsupported option ignored (gnu mode): %s\n", a);
             continue;
         }
-        if (inputvec_push(&ctx.inputs, LD_INPUT_FILE, a) != 0) {
+        if (inputvec_push(&ctx.inputs, LD_INPUT_FILE, ctx.current_lib_mode, a) != 0) {
             inputvec_free(&ctx.inputs);
             strvec_free(&ctx.lib_paths);
             return 1;

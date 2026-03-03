@@ -29,7 +29,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 1.2 Essential GNU-compatible options
 - [x] Implement `-o`, `-e`, `--entry`, `-r`, `-shared`, `-pie`, `-static`.  
   Reqs: LD-U-001, LD-U-009. Stories: US-001, US-101.
-- [ ] Implement `-L`, `-l`, `-Bstatic`, `-Bdynamic` with ordered search semantics.  
+- [x] Implement `-L`, `-l`, `-Bstatic`, `-Bdynamic` with ordered search semantics.  
   Reqs: LD-U-004. Stories: US-002.
 - [ ] Implement `--start-group/--end-group` and `--whole-archive/--no-whole-archive`.  
   Reqs: LD-S-001, LD-U-004. Stories: US-002.
