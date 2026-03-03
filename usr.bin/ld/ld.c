@@ -1460,6 +1460,133 @@ static int emit_common_symbol_warnings(ld_ctx_t *ctx, const objvec_t *inputs) {
     return 0;
 }
 
+typedef struct {
+    char *name;
+    const char *strong_src;
+    const char *weak_src;
+    const char *common_src;
+    uint64_t common_size;
+} symrule_entry_t;
+
+typedef struct {
+    symrule_entry_t *items;
+    size_t count;
+    size_t cap;
+} symrule_vec_t;
+
+static void symrule_free(symrule_vec_t *v) {
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        free(v->items[i].name);
+    }
+    free(v->items);
+    v->items = NULL;
+    v->count = 0;
+    v->cap = 0;
+}
+
+static symrule_entry_t *symrule_get(symrule_vec_t *v, const char *name) {
+    size_t i;
+    symrule_entry_t *next;
+
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->items[i].name, name) == 0) {
+            return &v->items[i];
+        }
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 128 : v->cap * 2;
+        next = (symrule_entry_t *)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return NULL;
+        }
+        v->items = next;
+        v->cap = ncap;
+    }
+    memset(&v->items[v->count], 0, sizeof(v->items[v->count]));
+    v->items[v->count].name = xstrdup(name);
+    if (v->items[v->count].name == NULL) {
+        return NULL;
+    }
+    v->count++;
+    return &v->items[v->count - 1];
+}
+
+static int check_symbol_precedence(ld_ctx_t *ctx, const objvec_t *inputs) {
+    symrule_vec_t table;
+    size_t i;
+
+    memset(&table, 0, sizeof(table));
+    for (i = 0; i < inputs->count; ++i) {
+        elfobj_t *obj = inputs->objs[i];
+        size_t si;
+
+        for (si = 0; si < elf_symbol_count(obj); ++si) {
+            const elf_symbol_t *sym = elf_symbol_at(obj, si);
+            const char *name;
+            uint8_t bind;
+            uint16_t shndx;
+            symrule_entry_t *entry;
+
+            if (sym == NULL) {
+                continue;
+            }
+            name = elf_symbol_name(sym);
+            if (name == NULL || name[0] == '\0') {
+                continue;
+            }
+            bind = elf_symbol_bind(sym);
+            if (bind != STB_GLOBAL && bind != STB_WEAK) {
+                continue;
+            }
+            shndx = elf_symbol_shndx(sym);
+            if (shndx == SHN_UNDEF) {
+                continue;
+            }
+            entry = symrule_get(&table, name);
+            if (entry == NULL) {
+                symrule_free(&table);
+                return -1;
+            }
+            if (shndx == SHN_COMMON) {
+                uint64_t sz = elf_symbol_size(sym);
+                if (entry->strong_src != NULL) {
+                    continue;
+                }
+                if (entry->common_src == NULL || sz > entry->common_size) {
+                    entry->common_src = inputs->names[i];
+                    entry->common_size = sz;
+                }
+                continue;
+            }
+            if (bind == STB_WEAK) {
+                if (entry->strong_src == NULL && entry->weak_src == NULL) {
+                    entry->weak_src = inputs->names[i];
+                }
+                continue;
+            }
+            if (entry->strong_src != NULL && strcmp(entry->strong_src, inputs->names[i]) != 0) {
+                fprintf(stderr,
+                        "ld: duplicate strong definition of `%s`: %s and %s\n",
+                        name, entry->strong_src, inputs->names[i]);
+                symrule_free(&table);
+                return -1;
+            }
+            if (entry->common_src != NULL && ctx->warn_common) {
+                if (ld_warn(ctx, "common symbol `%s` overridden by strong definition in %s (common from %s)",
+                            name, inputs->names[i], entry->common_src) != 0) {
+                    symrule_free(&table);
+                    return -1;
+                }
+            }
+            entry->strong_src = inputs->names[i];
+        }
+    }
+    symrule_free(&table);
+    return 0;
+}
+
 static int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t *out) {
     FILE *fp;
     size_t i;
@@ -1968,6 +2095,10 @@ static int run_internal_link(ld_ctx_t *ctx) {
     emit_trace_inputs(ctx, &inputs);
     emit_trace_symbols(ctx, &inputs);
     if (emit_common_symbol_warnings(ctx, &inputs) != 0) {
+        objvec_free(&inputs);
+        return -1;
+    }
+    if (check_symbol_precedence(ctx, &inputs) != 0) {
         objvec_free(&inputs);
         return -1;
     }

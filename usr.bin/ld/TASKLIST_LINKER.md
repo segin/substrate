@@ -79,9 +79,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 3. Symbol Resolution Engine
 
 ### 3.1 Global resolution rules
-- [ ] Implement complete binding precedence (strong/weak/common/undef).  
+- [x] Implement complete binding precedence (strong/weak/common/undef).  
   Reqs: LD-U-005, LD-E-003.
-- [ ] Implement `SHN_COMMON` placement policy and conflict handling.  
+- [x] Implement `SHN_COMMON` placement policy and conflict handling.  
   Reqs: LD-U-005.
 - [ ] Implement unresolved handling matrix by output type and policy flags.  
   Reqs: LD-E-001, LD-E-002.
