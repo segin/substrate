@@ -60,6 +60,17 @@ typedef struct {
 } objvec_t;
 
 typedef struct {
+    char *name;
+    uint64_t value;
+} defsym_t;
+
+typedef struct {
+    defsym_t *items;
+    size_t count;
+    size_t cap;
+} defsymvec_t;
+
+typedef struct {
     char **items;
     size_t count;
     size_t cap;
@@ -81,6 +92,7 @@ typedef struct {
     int warning_count;
     int query_version;
     int trace_inputs;
+    int export_dynamic;
     const char *out_path;
     const char *self_path;
     const char *entry_symbol;
@@ -92,6 +104,8 @@ typedef struct {
     int current_as_needed;
     strvec_t lib_paths;
     strvec_t trace_symbols;
+    strvec_t force_undefined;
+    defsymvec_t defsyms;
     strvec_t dso_inputs;
     inputvec_t inputs;
 } ld_ctx_t;
@@ -147,6 +161,42 @@ static void strvec_free(strvec_t *v) {
 
     for (i = 0; i < v->count; ++i) {
         free(v->items[i]);
+    }
+    free(v->items);
+    v->items = NULL;
+    v->count = 0;
+    v->cap = 0;
+}
+
+static int defsymvec_push(defsymvec_t *v, const char *name, uint64_t value) {
+    defsym_t *next;
+
+    if (name == NULL || name[0] == '\0') {
+        return -1;
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
+        next = (defsym_t *)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        v->items = next;
+        v->cap = ncap;
+    }
+    v->items[v->count].name = xstrdup(name);
+    if (v->items[v->count].name == NULL) {
+        return -1;
+    }
+    v->items[v->count].value = value;
+    v->count++;
+    return 0;
+}
+
+static void defsymvec_free(defsymvec_t *v) {
+    size_t i;
+
+    for (i = 0; i < v->count; ++i) {
+        free(v->items[i].name);
     }
     free(v->items);
     v->items = NULL;
@@ -501,6 +551,22 @@ static int parse_u64_dec(const char *s, size_t n, uint64_t *out) {
         return -1;
     }
     *out = v;
+    return 0;
+}
+
+static int parse_u64_auto(const char *s, uint64_t *out) {
+    char *end = NULL;
+    unsigned long long v;
+
+    if (s == NULL || s[0] == '\0') {
+        return -1;
+    }
+    errno = 0;
+    v = strtoull(s, &end, 0);
+    if (errno != 0 || end == s || *end != '\0') {
+        return -1;
+    }
+    *out = (uint64_t)v;
     return 0;
 }
 
@@ -1342,6 +1408,12 @@ static int load_all_inputs(ld_ctx_t *ctx, objvec_t *objs) {
     size_t i;
 
     memset(&state, 0, sizeof(state));
+    for (i = 0; i < ctx->force_undefined.count; ++i) {
+        if (symset_add(&state.unresolved, ctx->force_undefined.items[i]) != 0) {
+            symstate_free(&state);
+            return -1;
+        }
+    }
     for (i = 0; i < ctx->inputs.count; ++i) {
         const ld_input_t *in = &ctx->inputs.items[i];
         if (in->kind == LD_INPUT_GROUP_START) {
@@ -1671,6 +1743,29 @@ static int write_map_file(const ld_ctx_t *ctx, const objvec_t *inputs, elfobj_t 
     }
 
     fclose(fp);
+    return 0;
+}
+
+static int apply_defsyms(ld_ctx_t *ctx, elfobj_t *out) {
+    size_t i;
+
+    for (i = 0; i < ctx->defsyms.count; ++i) {
+        const char *name = ctx->defsyms.items[i].name;
+        uint64_t value = ctx->defsyms.items[i].value;
+        elf_symbol_t *sym = elf_find_symbol(out, name);
+
+        if (sym == NULL) {
+            sym = elf_add_symbol(out, name, value, 0, STB_GLOBAL, STT_NOTYPE);
+            if (sym == NULL) {
+                fprintf(stderr, "ld: failed to create --defsym symbol `%s`\n", name);
+                return -1;
+            }
+        }
+        if (elf_symbol_set_value(sym, value) != ELF_OK || elf_symbol_set_shndx(sym, SHN_ABS) != ELF_OK) {
+            fprintf(stderr, "ld: failed to apply --defsym `%s`\n", name);
+            return -1;
+        }
+    }
     return 0;
 }
 
@@ -2147,6 +2242,11 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
+    if (apply_defsyms(ctx, out) != 0) {
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
 
     if (out_type == ET_REL) {
         if (write_map_file(ctx, &inputs, out) != 0) {
@@ -2278,6 +2378,8 @@ int main(int argc, char **argv) {
             inputvec_free(&ctx.inputs);
             strvec_free(&ctx.lib_paths);
             strvec_free(&ctx.trace_symbols);
+            strvec_free(&ctx.force_undefined);
+            defsymvec_free(&ctx.defsyms);
             strvec_free(&ctx.dso_inputs);
             return 0;
         }
@@ -2468,6 +2570,94 @@ int main(int argc, char **argv) {
             }
             continue;
         }
+        if ((p = parse_arg_value(a, "-u", &val)) != 0 || (p = parse_arg_value(a, "--undefined", &val)) != 0) {
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    strvec_free(&ctx.dso_inputs);
+                    defsymvec_free(&ctx.defsyms);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            if (val == NULL || val[0] == '\0' || strvec_push(&ctx.force_undefined, val) != 0) {
+                fprintf(stderr, "ld: --undefined requires a symbol name\n");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                strvec_free(&ctx.dso_inputs);
+                defsymvec_free(&ctx.defsyms);
+                return 2;
+            }
+            continue;
+        }
+        if ((p = parse_arg_value(a, "--defsym", &val)) != 0) {
+            char *eq;
+            char *name_dup;
+            uint64_t value;
+
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    strvec_free(&ctx.trace_symbols);
+                    strvec_free(&ctx.dso_inputs);
+                    defsymvec_free(&ctx.defsyms);
+                    return 2;
+                }
+                val = argv[++i];
+            } else if (val[0] == '=') {
+                val++;
+            }
+            name_dup = xstrdup(val != NULL ? val : "");
+            if (name_dup == NULL) {
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                strvec_free(&ctx.dso_inputs);
+                defsymvec_free(&ctx.defsyms);
+                return 1;
+            }
+            eq = strchr(name_dup, '=');
+            if (eq == NULL) {
+                free(name_dup);
+                fprintf(stderr, "ld: --defsym requires NAME=VALUE\n");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                strvec_free(&ctx.dso_inputs);
+                defsymvec_free(&ctx.defsyms);
+                return 2;
+            }
+            *eq++ = '\0';
+            if (name_dup[0] == '\0' || parse_u64_auto(eq, &value) != 0 ||
+                defsymvec_push(&ctx.defsyms, name_dup, value) != 0) {
+                free(name_dup);
+                fprintf(stderr, "ld: invalid --defsym `%s`\n", val != NULL ? val : "");
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                strvec_free(&ctx.trace_symbols);
+                strvec_free(&ctx.dso_inputs);
+                defsymvec_free(&ctx.defsyms);
+                return 2;
+            }
+            free(name_dup);
+            continue;
+        }
+        if (strcmp(a, "--export-dynamic") == 0) {
+            ctx.export_dynamic = 1;
+            continue;
+        }
+        if (strcmp(a, "--no-export-dynamic") == 0) {
+            ctx.export_dynamic = 0;
+            continue;
+        }
         if (strcmp(a, "-e") == 0) {
             if (i + 1 >= argc) {
                 usage(argv[0]);
@@ -2639,6 +2829,8 @@ int main(int argc, char **argv) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);
+        strvec_free(&ctx.force_undefined);
+        defsymvec_free(&ctx.defsyms);
         strvec_free(&ctx.dso_inputs);
         return 0;
     }
@@ -2647,6 +2839,8 @@ int main(int argc, char **argv) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);
+        strvec_free(&ctx.force_undefined);
+        defsymvec_free(&ctx.defsyms);
         strvec_free(&ctx.dso_inputs);
         return 2;
     }
@@ -2662,6 +2856,8 @@ int main(int argc, char **argv) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);
+        strvec_free(&ctx.force_undefined);
+        defsymvec_free(&ctx.defsyms);
         strvec_free(&ctx.dso_inputs);
         return 1;
     }
@@ -2669,6 +2865,8 @@ int main(int argc, char **argv) {
         inputvec_free(&ctx.inputs);
         strvec_free(&ctx.lib_paths);
         strvec_free(&ctx.trace_symbols);
+        strvec_free(&ctx.force_undefined);
+        defsymvec_free(&ctx.defsyms);
         strvec_free(&ctx.dso_inputs);
         return 1;
     }
@@ -2676,6 +2874,8 @@ int main(int argc, char **argv) {
     inputvec_free(&ctx.inputs);
     strvec_free(&ctx.lib_paths);
     strvec_free(&ctx.trace_symbols);
+    strvec_free(&ctx.force_undefined);
+    defsymvec_free(&ctx.defsyms);
     strvec_free(&ctx.dso_inputs);
     return 0;
 }

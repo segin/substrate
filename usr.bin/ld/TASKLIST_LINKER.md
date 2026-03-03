@@ -91,7 +91,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-005.
 - [ ] Implement symbol version definitions and references (`.gnu.version*`).  
   Reqs: LD-S-003. Stories: US-201.
-- [ ] Implement `--defsym`, `--undefined`, export-dynamic controls.  
+- [x] Implement `--defsym`, `--undefined`, export-dynamic controls.  
   Reqs: LD-U-005, LD-E-001.
 
 ### 3.3 Diagnostics quality
