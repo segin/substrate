@@ -15,7 +15,9 @@ typedef struct {
 
 typedef enum {
     LD_INPUT_FILE = 0,
-    LD_INPUT_LIB = 1
+    LD_INPUT_LIB = 1,
+    LD_INPUT_GROUP_START = 2,
+    LD_INPUT_GROUP_END = 3
 } ld_input_kind_t;
 
 typedef enum {
@@ -31,6 +33,7 @@ typedef enum {
 typedef struct {
     ld_input_kind_t kind;
     ld_lib_mode_t lib_mode;
+    int whole_archive;
     char *text;
 } ld_input_t;
 
@@ -48,6 +51,17 @@ typedef struct {
 } objvec_t;
 
 typedef struct {
+    char **items;
+    size_t count;
+    size_t cap;
+} symset_t;
+
+typedef struct {
+    symset_t defined;
+    symset_t unresolved;
+} symstate_t;
+
+typedef struct {
     int mode; /* 32 or 64 */
     int explicit_mode;
     uint16_t expect_type;
@@ -59,6 +73,7 @@ typedef struct {
     const char *interp_path;
     ld_compat_mode_t compat_mode;
     ld_lib_mode_t current_lib_mode;
+    int current_whole_archive;
     strvec_t lib_paths;
     inputvec_t inputs;
 } ld_ctx_t;
@@ -66,7 +81,9 @@ typedef struct {
 static void usage(const char *prog) {
     fprintf(stderr,
             "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] "
-            "[-o output] [-L dir] [-l name] [-Bstatic|-Bdynamic] [-e symbol] [--allow-undefined] "
+            "[-o output] [-L dir] [-l name] [-Bstatic|-Bdynamic] "
+            "[--start-group ... --end-group] [--whole-archive|--no-whole-archive] "
+            "[-e symbol] [--allow-undefined] "
             "[--compat=gnu|lld] input...\n",
             prog);
 }
@@ -119,7 +136,8 @@ static void strvec_free(strvec_t *v) {
     v->cap = 0;
 }
 
-static int inputvec_push(inputvec_t *v, ld_input_kind_t kind, ld_lib_mode_t lib_mode, const char *text) {
+static int inputvec_push(inputvec_t *v, ld_input_kind_t kind, ld_lib_mode_t lib_mode, int whole_archive,
+                         const char *text) {
     ld_input_t *next;
 
     if (v->count == v->cap) {
@@ -134,9 +152,14 @@ static int inputvec_push(inputvec_t *v, ld_input_kind_t kind, ld_lib_mode_t lib_
 
     v->items[v->count].kind = kind;
     v->items[v->count].lib_mode = lib_mode;
-    v->items[v->count].text = xstrdup(text);
-    if (v->items[v->count].text == NULL) {
-        return -1;
+    v->items[v->count].whole_archive = whole_archive ? 1 : 0;
+    if (text != NULL) {
+        v->items[v->count].text = xstrdup(text);
+        if (v->items[v->count].text == NULL) {
+            return -1;
+        }
+    } else {
+        v->items[v->count].text = NULL;
     }
     v->count++;
     return 0;
@@ -200,6 +223,74 @@ static void objvec_free(objvec_t *v) {
     v->names = NULL;
     v->count = 0;
     v->cap = 0;
+}
+
+static int symset_index_of(const symset_t *set, const char *sym) {
+    size_t i;
+
+    for (i = 0; i < set->count; ++i) {
+        if (strcmp(set->items[i], sym) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static int symset_contains(const symset_t *set, const char *sym) {
+    return symset_index_of(set, sym) >= 0;
+}
+
+static int symset_add(symset_t *set, const char *sym) {
+    char **next;
+
+    if (sym == NULL || sym[0] == '\0' || symset_contains(set, sym)) {
+        return 0;
+    }
+    if (set->count == set->cap) {
+        size_t ncap = set->cap == 0 ? 32 : set->cap * 2;
+        next = (char **)realloc(set->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        set->items = next;
+        set->cap = ncap;
+    }
+    set->items[set->count] = xstrdup(sym);
+    if (set->items[set->count] == NULL) {
+        return -1;
+    }
+    set->count++;
+    return 0;
+}
+
+static void symset_remove(symset_t *set, const char *sym) {
+    int idx = symset_index_of(set, sym);
+
+    if (idx < 0) {
+        return;
+    }
+    free(set->items[idx]);
+    set->count--;
+    if ((size_t)idx != set->count) {
+        set->items[idx] = set->items[set->count];
+    }
+}
+
+static void symset_free(symset_t *set) {
+    size_t i;
+
+    for (i = 0; i < set->count; ++i) {
+        free(set->items[i]);
+    }
+    free(set->items);
+    set->items = NULL;
+    set->count = 0;
+    set->cap = 0;
+}
+
+static void symstate_free(symstate_t *state) {
+    symset_free(&state->defined);
+    symset_free(&state->unresolved);
 }
 
 static char *path_join(const char *dir, const char *leaf) {
@@ -460,82 +551,218 @@ static int obj_matches_mode(const elfobj_t *obj, int mode) {
     return elf_class(obj) == ELFOBJ_CLASS_32 && elf_machine(obj) == EM_386;
 }
 
-static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t *objs) {
+static int symstate_note_object(symstate_t *state, elfobj_t *obj) {
+    size_t i;
+
+    if (state == NULL || obj == NULL) {
+        return 0;
+    }
+    for (i = 0; i < elf_symbol_count(obj); ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(obj, i);
+        const char *name;
+        uint8_t bind;
+        uint16_t shndx;
+
+        if (sym == NULL) {
+            continue;
+        }
+        name = elf_symbol_name(sym);
+        if (name == NULL || name[0] == '\0') {
+            continue;
+        }
+        bind = elf_symbol_bind(sym);
+        if (bind != STB_GLOBAL && bind != STB_WEAK) {
+            continue;
+        }
+        shndx = elf_symbol_shndx(sym);
+        if (shndx == SHN_UNDEF) {
+            if (bind != STB_WEAK && !symset_contains(&state->defined, name)) {
+                if (symset_add(&state->unresolved, name) != 0) {
+                    return -1;
+                }
+            }
+            continue;
+        }
+        if (symset_add(&state->defined, name) != 0) {
+            return -1;
+        }
+        symset_remove(&state->unresolved, name);
+    }
+    return 0;
+}
+
+static int obj_defines_unresolved(const symstate_t *state, elfobj_t *obj) {
+    size_t i;
+
+    if (state == NULL || obj == NULL) {
+        return 1;
+    }
+    for (i = 0; i < elf_symbol_count(obj); ++i) {
+        const elf_symbol_t *sym = elf_symbol_at(obj, i);
+        const char *name;
+        uint8_t bind;
+        uint16_t shndx;
+
+        if (sym == NULL) {
+            continue;
+        }
+        name = elf_symbol_name(sym);
+        if (name == NULL || name[0] == '\0') {
+            continue;
+        }
+        bind = elf_symbol_bind(sym);
+        if (bind != STB_GLOBAL && bind != STB_WEAK) {
+            continue;
+        }
+        shndx = elf_symbol_shndx(sym);
+        if (shndx != SHN_UNDEF && symset_contains(&state->unresolved, name)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int parse_archive_header(const char *path, unsigned char **out_buf, size_t *out_sz) {
+    if (read_file(path, out_buf, out_sz) != 0) {
+        fprintf(stderr, "ld: cannot read archive %s\n", path);
+        return -1;
+    }
+    if (*out_sz < 8 || memcmp(*out_buf, "!<arch>\n", 8) != 0) {
+        free(*out_buf);
+        *out_buf = NULL;
+        *out_sz = 0;
+        fprintf(stderr, "ld: unsupported archive format: %s\n", path);
+        return -1;
+    }
+    return 0;
+}
+
+static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
+                                int whole_archive) {
     unsigned char *buf = NULL;
     size_t sz = 0;
     size_t off = 8;
     const char *strtab = NULL;
     size_t strtab_sz = 0;
+    int changed_any = 0;
+    symset_t seen_members;
+    int pass_progress;
 
-    if (read_file(path, &buf, &sz) != 0) {
-        fprintf(stderr, "ld: cannot read archive %s\n", path);
+    memset(&seen_members, 0, sizeof(seen_members));
+    if (parse_archive_header(path, &buf, &sz) != 0) {
         return -1;
     }
-    if (sz < 8 || memcmp(buf, "!<arch>\n", 8) != 0) {
-        free(buf);
-        fprintf(stderr, "ld: unsupported archive format: %s\n", path);
-        return -1;
-    }
 
-    while (off + 60 <= sz) {
-        const unsigned char *hdr = buf + off;
-        uint64_t msize = 0;
-        const unsigned char *mdata;
-        char *mname;
-        size_t name_extra = 0;
-        size_t body_sz;
+    do {
+        pass_progress = 0;
+        off = 8;
+        while (off + 60 <= sz) {
+            const unsigned char *hdr = buf + off;
+            uint64_t msize = 0;
+            const unsigned char *mdata;
+            char *mname;
+            size_t name_extra = 0;
+            size_t body_sz;
+            char member_key[96];
 
-        if (hdr[58] != '`' || hdr[59] != '\n') {
-            break;
-        }
-        if (parse_u64_dec((const char *)hdr + 48, 10, &msize) != 0) {
-            break;
-        }
-        off += 60;
-        if (off + (size_t)msize > sz) {
-            break;
-        }
-        mdata = buf + off;
-        mname = decode_ar_name((const char *)hdr, mdata, msize, strtab, strtab_sz, &name_extra);
-        if (mname == NULL) {
-            break;
-        }
-        if (name_extra > (size_t)msize) {
-            free(mname);
-            break;
-        }
-        body_sz = (size_t)msize - name_extra;
-        mdata += name_extra;
+            if (hdr[58] != '`' || hdr[59] != '\n') {
+                break;
+            }
+            if (parse_u64_dec((const char *)hdr + 48, 10, &msize) != 0) {
+                break;
+            }
+            off += 60;
+            if (off + (size_t)msize > sz) {
+                break;
+            }
+            mdata = buf + off;
+            mname = decode_ar_name((const char *)hdr, mdata, msize, strtab, strtab_sz, &name_extra);
+            if (mname == NULL) {
+                break;
+            }
+            if (name_extra > (size_t)msize) {
+                free(mname);
+                break;
+            }
+            body_sz = (size_t)msize - name_extra;
+            mdata += name_extra;
 
-        if (strcmp(mname, "//") == 0) {
-            strtab = (const char *)mdata;
-            strtab_sz = body_sz;
-        } else if (strcmp(mname, "/") != 0 && body_sz >= 4 &&
-                   mdata[0] == 0x7f && mdata[1] == 'E' && mdata[2] == 'L' && mdata[3] == 'F') {
-            elfobj_t *obj = NULL;
-            if (elf_open_memory(mdata, body_sz, &obj) == ELF_OK) {
-                if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode)) {
-                    char member_name[512];
-                    snprintf(member_name, sizeof(member_name), "%s(%s)", path, mname);
-                    if (objvec_push(objs, obj, member_name) != 0) {
+            if (strcmp(mname, "//") == 0) {
+                strtab = (const char *)mdata;
+                strtab_sz = body_sz;
+            } else if (strcmp(mname, "/") != 0 && body_sz >= 4 &&
+                       mdata[0] == 0x7f && mdata[1] == 'E' && mdata[2] == 'L' && mdata[3] == 'F') {
+                elfobj_t *obj = NULL;
+                snprintf(member_key, sizeof(member_key), "%s@%zu", path, off);
+                if (!symset_contains(&seen_members, member_key) && elf_open_memory(mdata, body_sz, &obj) == ELF_OK) {
+                    if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode) &&
+                        (whole_archive || obj_defines_unresolved(state, obj))) {
+                        char member_name[512];
+                        if (symset_add(&seen_members, member_key) != 0) {
+                            elf_close(obj);
+                            free(mname);
+                            symset_free(&seen_members);
+                            free(buf);
+                            return -1;
+                        }
+                        snprintf(member_name, sizeof(member_name), "%s(%s)", path, mname);
+                        if (objvec_push(objs, obj, member_name) != 0 || symstate_note_object(state, obj) != 0) {
+                            elf_close(obj);
+                            free(mname);
+                            symset_free(&seen_members);
+                            free(buf);
+                            return -1;
+                        }
+                        pass_progress = 1;
+                        changed_any = 1;
+                    } else {
                         elf_close(obj);
-                        free(mname);
-                        free(buf);
-                        return -1;
                     }
-                } else {
-                    elf_close(obj);
                 }
             }
+            free(mname);
+            off += (size_t)msize;
+            if ((off & 1u) != 0) {
+                off++;
+            }
         }
-        free(mname);
-        off += (size_t)msize;
-        if ((off & 1u) != 0) {
-            off++;
-        }
-    }
+    } while (!whole_archive && pass_progress);
 
+    symset_free(&seen_members);
     free(buf);
+    if (!whole_archive && !changed_any && state != NULL) {
+        return 0;
+    }
+    return 0;
+}
+
+static int load_object_input(const char *path, const ld_ctx_t *ctx, objvec_t *objs, symstate_t *state, int quiet) {
+    elfobj_t *obj = NULL;
+
+    if (elf_open(path, &obj) != ELF_OK) {
+        if (!quiet) {
+            fprintf(stderr, "ld: failed to open input %s\n", path);
+        }
+        return -1;
+    }
+    if (!obj_matches_mode(obj, ctx->mode)) {
+        if (!quiet) {
+            fprintf(stderr, "ld: input %s has mismatched class/machine\n", path);
+        }
+        elf_close(obj);
+        return -1;
+    }
+    if (elf_type(obj) != ET_REL) {
+        if (!quiet) {
+            fprintf(stderr, "ld: input %s is not relocatable (only ET_REL supported)\n", path);
+        }
+        elf_close(obj);
+        return -1;
+    }
+    if (objvec_push(objs, obj, path) != 0 || symstate_note_object(state, obj) != 0) {
+        elf_close(obj);
+        return -1;
+    }
     return 0;
 }
 
@@ -565,40 +792,15 @@ static char *resolve_library_path_suffix(const ld_ctx_t *ctx, const char *name, 
     return NULL;
 }
 
-static int load_input_file(const char *path, const ld_ctx_t *ctx, objvec_t *objs, int quiet) {
-    elfobj_t *obj = NULL;
-
+static int load_path_input(const char *path, const ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
+                           int whole_archive, int quiet) {
     if (has_suffix(path, ".a")) {
-        return load_archive_members(path, ctx, objs);
+        return load_archive_members(path, ctx, objs, state, whole_archive);
     }
-    if (elf_open(path, &obj) != ELF_OK) {
-        if (!quiet) {
-            fprintf(stderr, "ld: failed to open input %s\n", path);
-        }
-        return -1;
-    }
-    if (!obj_matches_mode(obj, ctx->mode)) {
-        if (!quiet) {
-            fprintf(stderr, "ld: input %s has mismatched class/machine\n", path);
-        }
-        elf_close(obj);
-        return -1;
-    }
-    if (elf_type(obj) != ET_REL) {
-        if (!quiet) {
-            fprintf(stderr, "ld: input %s is not relocatable (only ET_REL supported)\n", path);
-        }
-        elf_close(obj);
-        return -1;
-    }
-    if (objvec_push(objs, obj, path) != 0) {
-        elf_close(obj);
-        return -1;
-    }
-    return 0;
+    return load_object_input(path, ctx, objs, state, quiet);
 }
 
-static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs) {
+static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state) {
     char *path_so = NULL;
     char *path_a = NULL;
 
@@ -608,7 +810,7 @@ static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_
             fprintf(stderr, "ld: cannot find -l%s\n", in->text);
             return -1;
         }
-        if (load_input_file(path_a, ctx, objs, 0) != 0) {
+        if (load_path_input(path_a, ctx, objs, state, in->whole_archive, 0) != 0) {
             free(path_a);
             return -1;
         }
@@ -617,14 +819,14 @@ static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_
     }
 
     path_so = resolve_library_path_suffix(ctx, in->text, ".so");
-    if (path_so != NULL && load_input_file(path_so, ctx, objs, 1) == 0) {
+    if (path_so != NULL && load_path_input(path_so, ctx, objs, state, in->whole_archive, 1) == 0) {
         free(path_so);
         return 0;
     }
 
     path_a = resolve_library_path_suffix(ctx, in->text, ".a");
     if (path_a != NULL) {
-        if (load_input_file(path_a, ctx, objs, 0) != 0) {
+        if (load_path_input(path_a, ctx, objs, state, in->whole_archive, 0) != 0) {
             free(path_so);
             free(path_a);
             return -1;
@@ -646,21 +848,84 @@ static int load_library_input(const ld_ctx_t *ctx, const ld_input_t *in, objvec_
     return -1;
 }
 
-static int load_all_inputs(const ld_ctx_t *ctx, objvec_t *objs) {
-    size_t i;
+static int process_input_once(const ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state) {
+    if (in->kind == LD_INPUT_FILE) {
+        return load_path_input(in->text, ctx, objs, state, in->whole_archive, 0);
+    }
+    if (in->kind == LD_INPUT_LIB) {
+        return load_library_input(ctx, in, objs, state);
+    }
+    return 0;
+}
 
-    for (i = 0; i < ctx->inputs.count; ++i) {
-        const ld_input_t *in = &ctx->inputs.items[i];
-        if (in->kind == LD_INPUT_FILE) {
-            if (load_input_file(in->text, ctx, objs, 0) != 0) {
-                return -1;
+static int load_group_inputs(const ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
+                             size_t begin, size_t end) {
+    int progress;
+
+    do {
+        size_t before = objs->count;
+        size_t i;
+
+        for (i = begin; i < end; ++i) {
+            const ld_input_t *in = &ctx->inputs.items[i];
+            if (in->kind == LD_INPUT_GROUP_START || in->kind == LD_INPUT_GROUP_END) {
+                continue;
             }
-        } else {
-            if (load_library_input(ctx, in, objs) != 0) {
+            if (process_input_once(ctx, in, objs, state) != 0) {
                 return -1;
             }
         }
+        progress = objs->count > before;
+    } while (progress);
+
+    return 0;
+}
+
+static int load_all_inputs(const ld_ctx_t *ctx, objvec_t *objs) {
+    symstate_t state;
+    size_t i;
+
+    memset(&state, 0, sizeof(state));
+    for (i = 0; i < ctx->inputs.count; ++i) {
+        const ld_input_t *in = &ctx->inputs.items[i];
+        if (in->kind == LD_INPUT_GROUP_START) {
+            size_t j;
+            int depth = 1;
+
+            for (j = i + 1; j < ctx->inputs.count; ++j) {
+                if (ctx->inputs.items[j].kind == LD_INPUT_GROUP_START) {
+                    depth++;
+                } else if (ctx->inputs.items[j].kind == LD_INPUT_GROUP_END) {
+                    depth--;
+                    if (depth == 0) {
+                        break;
+                    }
+                }
+            }
+            if (depth != 0) {
+                fprintf(stderr, "ld: --start-group without matching --end-group\n");
+                symstate_free(&state);
+                return -1;
+            }
+            if (load_group_inputs(ctx, objs, &state, i + 1, j) != 0) {
+                symstate_free(&state);
+                return -1;
+            }
+            i = j;
+            continue;
+        }
+        if (in->kind == LD_INPUT_GROUP_END) {
+            fprintf(stderr, "ld: --end-group without matching --start-group\n");
+            symstate_free(&state);
+            return -1;
+        }
+        if (process_input_once(ctx, in, objs, &state) != 0) {
+            symstate_free(&state);
+            return -1;
+        }
     }
+
+    symstate_free(&state);
     return 0;
 }
 
@@ -1215,6 +1480,7 @@ int main(int argc, char **argv) {
     ctx.self_path = argv[0];
     ctx.compat_mode = LD_COMPAT_GNU;
     ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
+    ctx.current_whole_archive = 0;
 
     for (i = 1; i < argc; ++i) {
         const char *a = argv[i];
@@ -1327,6 +1593,32 @@ int main(int argc, char **argv) {
             ctx.current_lib_mode = LD_LIBMODE_DYNAMIC;
             continue;
         }
+        if (strcmp(a, "--whole-archive") == 0) {
+            ctx.current_whole_archive = 1;
+            continue;
+        }
+        if (strcmp(a, "--no-whole-archive") == 0) {
+            ctx.current_whole_archive = 0;
+            continue;
+        }
+        if (strcmp(a, "--start-group") == 0) {
+            if (inputvec_push(&ctx.inputs, LD_INPUT_GROUP_START, ctx.current_lib_mode,
+                              ctx.current_whole_archive, NULL) != 0) {
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 1;
+            }
+            continue;
+        }
+        if (strcmp(a, "--end-group") == 0) {
+            if (inputvec_push(&ctx.inputs, LD_INPUT_GROUP_END, ctx.current_lib_mode,
+                              ctx.current_whole_archive, NULL) != 0) {
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 1;
+            }
+            continue;
+        }
         if (strcmp(a, "--allow-undefined") == 0) {
             ctx.allow_undefined = 1;
             continue;
@@ -1399,7 +1691,8 @@ int main(int argc, char **argv) {
                 }
                 val = argv[++i];
             }
-            if (inputvec_push(&ctx.inputs, LD_INPUT_LIB, ctx.current_lib_mode, val) != 0) {
+            if (inputvec_push(&ctx.inputs, LD_INPUT_LIB, ctx.current_lib_mode,
+                              ctx.current_whole_archive, val) != 0) {
                 inputvec_free(&ctx.inputs);
                 strvec_free(&ctx.lib_paths);
                 return 1;
@@ -1433,7 +1726,8 @@ int main(int argc, char **argv) {
             fprintf(stderr, "ld: warning: unsupported option ignored (gnu mode): %s\n", a);
             continue;
         }
-        if (inputvec_push(&ctx.inputs, LD_INPUT_FILE, ctx.current_lib_mode, a) != 0) {
+        if (inputvec_push(&ctx.inputs, LD_INPUT_FILE, ctx.current_lib_mode,
+                          ctx.current_whole_archive, a) != 0) {
             inputvec_free(&ctx.inputs);
             strvec_free(&ctx.lib_paths);
             return 1;

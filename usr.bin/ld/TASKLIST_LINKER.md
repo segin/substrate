@@ -31,7 +31,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-001, LD-U-009. Stories: US-001, US-101.
 - [x] Implement `-L`, `-l`, `-Bstatic`, `-Bdynamic` with ordered search semantics.  
   Reqs: LD-U-004. Stories: US-002.
-- [ ] Implement `--start-group/--end-group` and `--whole-archive/--no-whole-archive`.  
+- [x] Implement `--start-group/--end-group` and `--whole-archive/--no-whole-archive`.  
   Reqs: LD-S-001, LD-U-004. Stories: US-002.
 - [ ] Implement `--as-needed/--no-as-needed`.  
   Reqs: LD-E-005. Stories: US-201.
