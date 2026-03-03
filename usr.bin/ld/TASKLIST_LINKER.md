@@ -195,7 +195,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-001, LD-S-003.
 
 ### 7.2 GOT/PLT
-- [ ] Implement x86-64 GOT/PLT synthesis for lazy and non-lazy paths.  
+- [x] Implement x86-64 GOT/PLT synthesis for lazy and non-lazy paths.  
   Reqs: LD-U-006, LD-S-003.
 - [ ] Implement i386 GOT/PLT synthesis for lazy and non-lazy paths.  
   Reqs: LD-U-006, LD-S-003.

@@ -289,7 +289,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         if (strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 ||
             strcmp(name, ".shstrtab") == 0 ||
             ((s->type == SHT_REL || s->type == SHT_RELA) &&
-             (strncmp(name, ".rel", 4) == 0 || strncmp(name, ".rela", 5) == 0))) {
+             (strncmp(name, ".rel", 4) == 0 || strncmp(name, ".rela", 5) == 0) &&
+             (s->flags & SHF_ALLOC) == 0)) {
             continue;
         }
         memset(&out, 0, sizeof(out));
@@ -476,6 +477,13 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         size_t dynamic_index = (size_t)-1;
         size_t hash_index = (size_t)-1;
         size_t gnu_hash_index = (size_t)-1;
+        size_t rela_plt_index = (size_t)-1;
+        size_t rel_plt_index = (size_t)-1;
+        size_t rela_dyn_index = (size_t)-1;
+        size_t rel_dyn_index = (size_t)-1;
+        size_t plt_index = (size_t)-1;
+        size_t gotplt_index = (size_t)-1;
+        size_t got_index = (size_t)-1;
         for (i = 1; i < sec_count; ++i) {
             const char *nm = secs[i].name != NULL ? secs[i].name : "";
             if (strcmp(nm, ".dynsym") == 0) {
@@ -488,6 +496,20 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 hash_index = i;
             } else if (strcmp(nm, ".gnu.hash") == 0) {
                 gnu_hash_index = i;
+            } else if (strcmp(nm, ".rela.plt") == 0) {
+                rela_plt_index = i;
+            } else if (strcmp(nm, ".rel.plt") == 0) {
+                rel_plt_index = i;
+            } else if (strcmp(nm, ".rela.dyn") == 0) {
+                rela_dyn_index = i;
+            } else if (strcmp(nm, ".rel.dyn") == 0) {
+                rel_dyn_index = i;
+            } else if (strcmp(nm, ".plt") == 0) {
+                plt_index = i;
+            } else if (strcmp(nm, ".got.plt") == 0) {
+                gotplt_index = i;
+            } else if (strcmp(nm, ".got") == 0) {
+                got_index = i;
             }
         }
         if (dynsym_index != (size_t)-1) {
@@ -518,6 +540,46 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             }
             if (gnu_hash_index != (size_t)-1) {
                 secs[gnu_hash_index].link = (uint32_t)dynsym_index;
+            }
+            if (rela_plt_index != (size_t)-1) {
+                if (secs[rela_plt_index].entsize == 0) {
+                    secs[rela_plt_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 12;
+                }
+                secs[rela_plt_index].link = (uint32_t)dynsym_index;
+                if (plt_index != (size_t)-1 && secs[rela_plt_index].info == 0) {
+                    secs[rela_plt_index].info = (uint32_t)plt_index;
+                } else if (gotplt_index != (size_t)-1 && secs[rela_plt_index].info == 0) {
+                    secs[rela_plt_index].info = (uint32_t)gotplt_index;
+                }
+            }
+            if (rel_plt_index != (size_t)-1) {
+                if (secs[rel_plt_index].entsize == 0) {
+                    secs[rel_plt_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
+                }
+                secs[rel_plt_index].link = (uint32_t)dynsym_index;
+                if (plt_index != (size_t)-1 && secs[rel_plt_index].info == 0) {
+                    secs[rel_plt_index].info = (uint32_t)plt_index;
+                } else if (gotplt_index != (size_t)-1 && secs[rel_plt_index].info == 0) {
+                    secs[rel_plt_index].info = (uint32_t)gotplt_index;
+                }
+            }
+            if (rela_dyn_index != (size_t)-1) {
+                if (secs[rela_dyn_index].entsize == 0) {
+                    secs[rela_dyn_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 12;
+                }
+                secs[rela_dyn_index].link = (uint32_t)dynsym_index;
+                if (got_index != (size_t)-1 && secs[rela_dyn_index].info == 0) {
+                    secs[rela_dyn_index].info = (uint32_t)got_index;
+                }
+            }
+            if (rel_dyn_index != (size_t)-1) {
+                if (secs[rel_dyn_index].entsize == 0) {
+                    secs[rel_dyn_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
+                }
+                secs[rel_dyn_index].link = (uint32_t)dynsym_index;
+                if (got_index != (size_t)-1 && secs[rel_dyn_index].info == 0) {
+                    secs[rel_dyn_index].info = (uint32_t)got_index;
+                }
             }
         }
     }
