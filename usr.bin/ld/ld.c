@@ -546,7 +546,10 @@ static char *decode_ar_name(const char *raw_name16, const unsigned char *member_
         }
         for (i = (size_t)off; i < strtab_sz; ++i) {
             char c = strtab[i];
-            if (c == '\0' || c == '\n' || c == '/') {
+            if (c == '\0' || c == '\n') {
+                break;
+            }
+            if (c == '/' && (i + 1 >= strtab_sz || strtab[i + 1] == '\n')) {
                 break;
             }
             n++;
@@ -721,19 +724,104 @@ static int obj_defines_unresolved(const symstate_t *state, elfobj_t *obj) {
     return 0;
 }
 
-static int parse_archive_header(const char *path, unsigned char **out_buf, size_t *out_sz) {
+static int parse_archive_header(const char *path, unsigned char **out_buf, size_t *out_sz, int *out_thin) {
     if (read_file(path, out_buf, out_sz) != 0) {
         fprintf(stderr, "ld: cannot read archive %s\n", path);
         return -1;
     }
-    if (*out_sz < 8 || memcmp(*out_buf, "!<arch>\n", 8) != 0) {
+    if (*out_sz < 8) {
         free(*out_buf);
         *out_buf = NULL;
         *out_sz = 0;
         fprintf(stderr, "ld: unsupported archive format: %s\n", path);
         return -1;
     }
+    if (memcmp(*out_buf, "!<arch>\n", 8) == 0) {
+        *out_thin = 0;
+        return 0;
+    }
+    if (memcmp(*out_buf, "!<thin>\n", 8) == 0) {
+        *out_thin = 1;
+        return 0;
+    }
+    free(*out_buf);
+    *out_buf = NULL;
+    *out_sz = 0;
+    fprintf(stderr, "ld: unsupported archive format: %s\n", path);
+    return -1;
+}
+
+static char *path_dirname_dup(const char *path) {
+    char *dup = xstrdup(path);
+    char *slash;
+
+    if (dup == NULL) {
+        return NULL;
+    }
+    slash = strrchr(dup, '/');
+    if (slash == NULL) {
+        dup[0] = '.';
+        dup[1] = '\0';
+    } else if (slash == dup) {
+        slash[1] = '\0';
+    } else {
+        *slash = '\0';
+    }
+    return dup;
+}
+
+static int path_is_within_dir(const char *dir, const char *path) {
+    size_t dlen = strlen(dir);
+
+    if (strncmp(dir, path, dlen) != 0) {
+        return 0;
+    }
+    if (path[dlen] == '\0' || path[dlen] == '/') {
+        return 1;
+    }
     return 0;
+}
+
+static char *resolve_thin_member_path(const char *archive_path, const char *member_name) {
+    char *archive_dir = NULL;
+    char *archive_real = NULL;
+    char *candidate = NULL;
+    char *member_real = NULL;
+
+    if (member_name == NULL || member_name[0] == '\0') {
+        return NULL;
+    }
+    archive_dir = path_dirname_dup(archive_path);
+    if (archive_dir == NULL) {
+        return NULL;
+    }
+    archive_real = realpath(archive_dir, NULL);
+    if (archive_real == NULL) {
+        free(archive_dir);
+        return NULL;
+    }
+    if (member_name[0] == '/') {
+        candidate = xstrdup(member_name);
+    } else {
+        candidate = path_join(archive_real, member_name);
+    }
+    if (candidate == NULL) {
+        free(archive_real);
+        free(archive_dir);
+        return NULL;
+    }
+    member_real = realpath(candidate, NULL);
+    if (member_real == NULL || !path_is_within_dir(archive_real, member_real)) {
+        free(member_real);
+        free(candidate);
+        free(archive_real);
+        free(archive_dir);
+        return NULL;
+    }
+    free(candidate);
+    free(archive_real);
+    free(archive_dir);
+    return member_real;
 }
 
 static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
@@ -744,11 +832,12 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
     const char *strtab = NULL;
     size_t strtab_sz = 0;
     int changed_any = 0;
+    int thin = 0;
     symset_t seen_members;
     int pass_progress;
 
     memset(&seen_members, 0, sizeof(seen_members));
-    if (parse_archive_header(path, &buf, &sz) != 0) {
+    if (parse_archive_header(path, &buf, &sz, &thin) != 0) {
         return -1;
     }
 
@@ -758,11 +847,14 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
         while (off + 60 <= sz) {
             const unsigned char *hdr = buf + off;
             uint64_t msize = 0;
-            const unsigned char *mdata;
+            const unsigned char *mdata = NULL;
+            const unsigned char *body = NULL;
             char *mname;
             size_t name_extra = 0;
-            size_t body_sz;
+            size_t body_sz = 0;
             char member_key[96];
+            int is_special = 0;
+            int has_member_payload = 0;
 
             if (hdr[58] != '`' || hdr[59] != '\n') {
                 break;
@@ -771,7 +863,7 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
                 break;
             }
             off += 60;
-            if (off + (size_t)msize > sz) {
+            if (off > sz) {
                 break;
             }
             mdata = buf + off;
@@ -779,21 +871,32 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
             if (mname == NULL) {
                 break;
             }
-            if (name_extra > (size_t)msize) {
+            is_special = strcmp(mname, "/") == 0 ||
+                         strcmp(mname, "//") == 0 ||
+                         strcmp(mname, "__.SYMDEF") == 0 ||
+                         strcmp(mname, "__.SYMDEF SORTED") == 0;
+            has_member_payload = !thin || is_special;
+            if (has_member_payload && off + (size_t)msize > sz) {
                 free(mname);
                 break;
             }
-            body_sz = (size_t)msize - name_extra;
-            mdata += name_extra;
+            if (has_member_payload && name_extra > (size_t)msize) {
+                free(mname);
+                break;
+            }
+            if (has_member_payload) {
+                body_sz = (size_t)msize - name_extra;
+                body = mdata + name_extra;
+            }
 
             if (strcmp(mname, "//") == 0) {
-                strtab = (const char *)mdata;
+                strtab = (const char *)body;
                 strtab_sz = body_sz;
-            } else if (strcmp(mname, "/") != 0 && body_sz >= 4 &&
-                       mdata[0] == 0x7f && mdata[1] == 'E' && mdata[2] == 'L' && mdata[3] == 'F') {
+            } else if (!is_special && has_member_payload &&
+                       body_sz >= 4 && body[0] == 0x7f && body[1] == 'E' && body[2] == 'L' && body[3] == 'F') {
                 elfobj_t *obj = NULL;
                 snprintf(member_key, sizeof(member_key), "%s@%zu", path, off);
-                if (!symset_contains(&seen_members, member_key) && elf_open_memory(mdata, body_sz, &obj) == ELF_OK) {
+                if (!symset_contains(&seen_members, member_key) && elf_open_memory(body, body_sz, &obj) == ELF_OK) {
                     if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode) &&
                         (whole_archive || obj_defines_unresolved(state, obj))) {
                         char member_name[512];
@@ -825,11 +928,60 @@ static int load_archive_members(const char *path, const ld_ctx_t *ctx, objvec_t 
                         elf_close(obj);
                     }
                 }
+            } else if (!is_special && thin) {
+                char *thin_member_path = resolve_thin_member_path(path, mname);
+                elfobj_t *obj = NULL;
+                if (thin_member_path == NULL) {
+                    fprintf(stderr, "ld: invalid thin archive member path '%s' in %s\n", mname, path);
+                    free(mname);
+                    symset_free(&seen_members);
+                    free(buf);
+                    return -1;
+                }
+                if (!symset_contains(&seen_members, thin_member_path) &&
+                    elf_open(thin_member_path, &obj) == ELF_OK) {
+                    if (elf_type(obj) == ET_REL && obj_matches_mode(obj, ctx->mode) &&
+                        (whole_archive || obj_defines_unresolved(state, obj))) {
+                        char member_name[512];
+                        if (symset_add(&seen_members, thin_member_path) != 0) {
+                            elf_close(obj);
+                            free(thin_member_path);
+                            free(mname);
+                            symset_free(&seen_members);
+                            free(buf);
+                            return -1;
+                        }
+                        snprintf(member_name, sizeof(member_name), "%s(%s)", path, mname);
+                        if (validate_relocatable_input(obj, member_name) != 0) {
+                            elf_close(obj);
+                            free(thin_member_path);
+                            free(mname);
+                            symset_free(&seen_members);
+                            free(buf);
+                            return -1;
+                        }
+                        if (objvec_push(objs, obj, member_name) != 0 || symstate_note_object(state, obj) != 0) {
+                            elf_close(obj);
+                            free(thin_member_path);
+                            free(mname);
+                            symset_free(&seen_members);
+                            free(buf);
+                            return -1;
+                        }
+                        pass_progress = 1;
+                        changed_any = 1;
+                    } else {
+                        elf_close(obj);
+                    }
+                }
+                free(thin_member_path);
             }
             free(mname);
-            off += (size_t)msize;
-            if ((off & 1u) != 0) {
-                off++;
+            if (has_member_payload) {
+                off += (size_t)msize;
+                if ((off & 1u) != 0) {
+                    off++;
+                }
             }
         }
     } while (!whole_archive && pass_progress);

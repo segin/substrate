@@ -57,11 +57,11 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-R-001, LD-R-003, LD-R-004.
 
 ### 2.2 Archive loader
-- [ ] Implement robust parser for GNU/BSD archives, including symbol tables.  
+- [x] Implement robust parser for GNU/BSD archives, including symbol tables.  
   Reqs: LD-U-004, LD-R-001.
-- [ ] Implement thin archive resolution with path canonicalization and safety checks.  
+- [x] Implement thin archive resolution with path canonicalization and safety checks.  
   Reqs: LD-U-004, LD-R-002.
-- [ ] Implement lazy extraction engine driven by unresolved symbol set.  
+- [x] Implement lazy extraction engine driven by unresolved symbol set.  
   Reqs: LD-S-001, LD-E-001. Stories: US-002.
 - [ ] Add archive fuzz corpus and parser sanitization tests.  
   Reqs: LD-R-004.
