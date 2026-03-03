@@ -6930,6 +6930,9 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
     char *dir = NULL;
     size_t i = 0;
     int loaded_any = 0;
+    int paren_depth = 0;
+    int as_needed_depth = 0;
+    int pending_as_needed = 0;
 
     if (handled != NULL) {
         *handled = 0;
@@ -6966,6 +6969,8 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
         char tok[1024];
         size_t tn = 0;
         char *resolved = NULL;
+        int effective_as_needed;
+        int c;
 
         if (i + 1 < sz && text[i] == '/' && text[i + 1] == '*') {
             i += 2;
@@ -6977,25 +6982,55 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
             }
             continue;
         }
-        while (i < sz && (isspace((unsigned char)text[i]) || text[i] == '(' || text[i] == ')' || text[i] == ',')) {
+        c = (unsigned char)text[i];
+        if (isspace(c) || c == ',') {
             i++;
+            continue;
+        }
+        if (c == '(') {
+            paren_depth++;
+            if (pending_as_needed) {
+                as_needed_depth = paren_depth;
+                pending_as_needed = 0;
+            }
+            i++;
+            continue;
+        }
+        if (c == ')') {
+            if (as_needed_depth == paren_depth) {
+                as_needed_depth = 0;
+            }
+            if (paren_depth > 0) {
+                paren_depth--;
+            }
+            i++;
+            continue;
         }
         while (i < sz && !isspace((unsigned char)text[i]) && text[i] != '(' && text[i] != ')' && text[i] != ',' &&
                tn + 1 < sizeof(tok)) {
             tok[tn++] = text[i++];
         }
+        while (i < sz && !isspace((unsigned char)text[i]) && text[i] != '(' && text[i] != ')' && text[i] != ',') {
+            i++;
+        }
         tok[tn] = '\0';
         if (tok[0] == '\0') {
+            i++;
             continue;
         }
         if (strcmp(tok, "INPUT") == 0 || strcmp(tok, "GROUP") == 0 ||
-            strcmp(tok, "AS_NEEDED") == 0 || strcmp(tok, "OUTPUT_FORMAT") == 0 ||
+            strcmp(tok, "OUTPUT_FORMAT") == 0 ||
             strcmp(tok, "SEARCH_DIR") == 0) {
+            continue;
+        }
+        if (strcmp(tok, "AS_NEEDED") == 0) {
+            pending_as_needed = 1;
             continue;
         }
         if (tok[0] != '/' && strstr(tok, ".so") == NULL && strstr(tok, ".a") == NULL && strstr(tok, ".o") == NULL) {
             continue;
         }
+        effective_as_needed = as_needed || as_needed_depth != 0;
         if (tok[0] == '/') {
             resolved = xstrdup(tok);
         } else {
@@ -7011,7 +7046,7 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
             int shared_matches = 0;
             int have_shared_match = 0;
 
-            if (as_needed) {
+            if (effective_as_needed) {
                 if (shared_object_matches_unresolved(resolved, ctx, state, &shared_matches) == 0) {
                     have_shared_match = 1;
                     if (!shared_matches) {
@@ -7021,7 +7056,7 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
                 }
             }
             if (register_dso_provider(ctx, resolved, state) != 0) {
-                if (!as_needed || !have_shared_match || shared_matches) {
+                if (!effective_as_needed || !have_shared_match || shared_matches) {
                     free(resolved);
                     free(dir);
                     free(text);
