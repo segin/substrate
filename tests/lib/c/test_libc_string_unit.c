@@ -184,6 +184,56 @@ void run_strcat_tests(void) {
     ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Basic strcat");
 }
 
+void run_memset_tests(void) {
+    printf("Running memset tests...\n");
+    char buf[256];
+
+    // Basic functionality
+    libc_memset(buf, 'A', 10);
+    for (int i = 0; i < 10; i++) {
+        ASSERT_EQ(buf[i], 'A', "Basic memset");
+    }
+
+    // Zero length
+    buf[0] = 'B';
+    libc_memset(buf, 'A', 0);
+    ASSERT_EQ(buf[0], 'B', "Zero length memset");
+
+    // Unaligned start, short length
+    libc_memset(buf, 0, sizeof(buf));
+    libc_memset(buf + 1, 'C', 2);
+    ASSERT_EQ(buf[0], 0, "Unaligned start before");
+    ASSERT_EQ(buf[1], 'C', "Unaligned start pos 1");
+    ASSERT_EQ(buf[2], 'C', "Unaligned start pos 2");
+    ASSERT_EQ(buf[3], 0, "Unaligned start after");
+
+    // Unaligned start, crossing word boundary
+    libc_memset(buf, 0, sizeof(buf));
+    libc_memset(buf + 3, 'D', 6);
+    ASSERT_EQ(buf[2], 0, "Cross word before");
+    for (int i = 3; i < 9; i++) {
+        ASSERT_EQ(buf[i], 'D', "Cross word pos");
+    }
+    ASSERT_EQ(buf[9], 0, "Cross word after");
+
+    // Large fill (word-aligned)
+    libc_memset(buf, 0, sizeof(buf));
+    libc_memset(buf, 0xAA, 128);
+    for (int i = 0; i < 128; i++) {
+        ASSERT_EQ((unsigned char)buf[i], 0xAA, "Large word-aligned fill");
+    }
+    ASSERT_EQ(buf[128], 0, "Large word-aligned fill after");
+
+    // Large fill (unaligned start)
+    libc_memset(buf, 0, sizeof(buf));
+    libc_memset(buf + 1, 0x55, 128);
+    ASSERT_EQ(buf[0], 0, "Large unaligned start before");
+    for (int i = 1; i < 129; i++) {
+        ASSERT_EQ((unsigned char)buf[i], 0x55, "Large unaligned start fill");
+    }
+    ASSERT_EQ(buf[129], 0, "Large unaligned start after");
+}
+
 void run_memcmp_tests(void) {
     printf("Running memcmp tests...\n");
 
@@ -242,6 +292,11 @@ bool test_libc_strtok(void) {
     return true;
 }
 
+bool test_libc_memset(void) {
+    run_memset_tests();
+    return true;
+}
+
 bool test_libc_memcmp(void) {
     run_memcmp_tests();
     return true;
@@ -253,6 +308,7 @@ int main(void) {
     run_memmove_tests();
     run_strcat_tests();
     run_strtok_tests();
+    run_memset_tests();
     run_memcmp_tests();
     return 0;
 }
