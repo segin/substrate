@@ -89,7 +89,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 3.2 Visibility and versioning
 - [x] Enforce visibility semantics (`DEFAULT/HIDDEN/PROTECTED/INTERNAL`) in resolver.  
   Reqs: LD-U-005.
-- [ ] Implement symbol version definitions and references (`.gnu.version*`).  
+- [x] Implement symbol version definitions and references (`.gnu.version*`).  
   Reqs: LD-S-003. Stories: US-201.
 - [x] Implement `--defsym`, `--undefined`, export-dynamic controls.  
   Reqs: LD-U-005, LD-E-001.

@@ -1137,9 +1137,356 @@ static int load_path_input(const char *path, const ld_ctx_t *ctx, objvec_t *objs
     return load_object_input(path, ctx, objs, state, quiet);
 }
 
+typedef struct {
+    uint16_t index;
+    char *name;
+} verdef_name_t;
+
+typedef struct {
+    verdef_name_t *items;
+    size_t count;
+    size_t cap;
+} verdef_table_t;
+
+static uint16_t read_u16_endian(const uint8_t *p, elfobj_endian_t endian) {
+    if (endian == ELFOBJ_ENDIAN_BE) {
+        return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
+    }
+    return (uint16_t)(((uint16_t)p[1] << 8) | (uint16_t)p[0]);
+}
+
+static uint32_t read_u32_endian(const uint8_t *p, elfobj_endian_t endian) {
+    if (endian == ELFOBJ_ENDIAN_BE) {
+        return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+    }
+    return ((uint32_t)p[3] << 24) | ((uint32_t)p[2] << 16) | ((uint32_t)p[1] << 8) | (uint32_t)p[0];
+}
+
+static const char *safe_strtab_name(const uint8_t *strtab, size_t strtab_sz, uint32_t off) {
+    size_t i;
+
+    if (strtab == NULL || off >= strtab_sz) {
+        return NULL;
+    }
+    for (i = off; i < strtab_sz; ++i) {
+        if (strtab[i] == '\0') {
+            return (const char *)(strtab + off);
+        }
+    }
+    return NULL;
+}
+
+static void verdef_table_free(verdef_table_t *tab) {
+    size_t i;
+
+    if (tab == NULL) {
+        return;
+    }
+    for (i = 0; i < tab->count; ++i) {
+        free(tab->items[i].name);
+    }
+    free(tab->items);
+    tab->items = NULL;
+    tab->count = 0;
+    tab->cap = 0;
+}
+
+static int verdef_table_add(verdef_table_t *tab, uint16_t index, const char *name) {
+    verdef_name_t *next;
+    size_t i;
+
+    if (tab == NULL || name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    for (i = 0; i < tab->count; ++i) {
+        if (tab->items[i].index == index) {
+            return 0;
+        }
+    }
+    if (tab->count == tab->cap) {
+        size_t ncap = tab->cap == 0 ? 8 : tab->cap * 2;
+        next = (verdef_name_t *)realloc(tab->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        tab->items = next;
+        tab->cap = ncap;
+    }
+    tab->items[tab->count].index = index;
+    tab->items[tab->count].name = xstrdup(name);
+    if (tab->items[tab->count].name == NULL) {
+        return -1;
+    }
+    tab->count++;
+    return 0;
+}
+
+static const char *verdef_lookup(const verdef_table_t *tab, uint16_t index) {
+    size_t i;
+
+    if (tab == NULL || index <= VER_NDX_GLOBAL) {
+        return NULL;
+    }
+    for (i = 0; i < tab->count; ++i) {
+        if (tab->items[i].index == index) {
+            return tab->items[i].name;
+        }
+    }
+    return NULL;
+}
+
+static int load_dso_verdef_table(const elfobj_t *obj, verdef_table_t *out) {
+    const elf_section_t *verdef_sec;
+    const elf_section_t *dynstr_sec;
+    const uint8_t *verdef_data;
+    const uint8_t *dynstr_data;
+    size_t verdef_sz;
+    size_t dynstr_sz;
+    size_t off;
+    elfobj_endian_t endian;
+
+    if (obj == NULL || out == NULL) {
+        return -1;
+    }
+    memset(out, 0, sizeof(*out));
+
+    verdef_sec = elf_find_section((elfobj_t *)obj, ".gnu.version_d");
+    if (verdef_sec == NULL) {
+        return 0;
+    }
+    dynstr_sec = elf_find_section((elfobj_t *)obj, ".dynstr");
+    if (dynstr_sec == NULL) {
+        return -1;
+    }
+    verdef_data = (const uint8_t *)elf_section_data(verdef_sec, &verdef_sz);
+    dynstr_data = (const uint8_t *)elf_section_data(dynstr_sec, &dynstr_sz);
+    if (verdef_data == NULL || dynstr_data == NULL || verdef_sz == 0 || dynstr_sz == 0) {
+        return -1;
+    }
+    endian = elf_endian(obj);
+    off = 0;
+    while (off + 20 <= verdef_sz) {
+        uint16_t vd_ndx = read_u16_endian(verdef_data + off + 4, endian);
+        uint32_t vd_aux = read_u32_endian(verdef_data + off + 12, endian);
+        uint32_t vd_next = read_u32_endian(verdef_data + off + 16, endian);
+        size_t aux_off;
+        uint32_t name_off;
+        const char *name;
+
+        if (vd_aux == 0 || vd_aux > verdef_sz - off || off + vd_aux + 8 > verdef_sz) {
+            verdef_table_free(out);
+            return -1;
+        }
+        aux_off = off + vd_aux;
+        name_off = read_u32_endian(verdef_data + aux_off + 0, endian);
+        name = safe_strtab_name(dynstr_data, dynstr_sz, name_off);
+        if (verdef_table_add(out, (uint16_t)(vd_ndx & (uint16_t)~VER_NDX_HIDDEN), name) != 0) {
+            verdef_table_free(out);
+            return -1;
+        }
+        if (vd_next == 0) {
+            break;
+        }
+        if (vd_next < 20 || vd_next > verdef_sz - off) {
+            verdef_table_free(out);
+            return -1;
+        }
+        off += vd_next;
+    }
+    return 0;
+}
+
+static void split_symbol_version(const char *name, const char **base, size_t *base_len, const char **ver_name,
+                                 int *is_default) {
+    const char *at2;
+    const char *at1;
+
+    if (base != NULL) {
+        *base = name;
+    }
+    if (base_len != NULL) {
+        *base_len = name != NULL ? strlen(name) : 0;
+    }
+    if (ver_name != NULL) {
+        *ver_name = NULL;
+    }
+    if (is_default != NULL) {
+        *is_default = 0;
+    }
+    if (name == NULL || name[0] == '\0') {
+        return;
+    }
+    at2 = strstr(name, "@@");
+    if (at2 != NULL) {
+        if (base_len != NULL) {
+            *base_len = (size_t)(at2 - name);
+        }
+        if (ver_name != NULL && at2[2] != '\0') {
+            *ver_name = at2 + 2;
+        }
+        if (is_default != NULL) {
+            *is_default = 1;
+        }
+        return;
+    }
+    at1 = strchr(name, '@');
+    if (at1 != NULL) {
+        if (base_len != NULL) {
+            *base_len = (size_t)(at1 - name);
+        }
+        if (ver_name != NULL && at1[1] != '\0') {
+            *ver_name = at1 + 1;
+        }
+    }
+}
+
+static char *make_versioned_symbol(const char *base, size_t base_len, const char *sep, const char *ver_name) {
+    size_t sep_len;
+    size_t ver_len;
+    char *out;
+
+    if (base == NULL || sep == NULL || ver_name == NULL) {
+        return NULL;
+    }
+    sep_len = strlen(sep);
+    ver_len = strlen(ver_name);
+    out = (char *)malloc(base_len + sep_len + ver_len + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, base, base_len);
+    memcpy(out + base_len, sep, sep_len);
+    memcpy(out + base_len + sep_len, ver_name, ver_len);
+    out[base_len + sep_len + ver_len] = '\0';
+    return out;
+}
+
+static int symstate_define_name(symstate_t *state, const char *name) {
+    if (name == NULL || name[0] == '\0') {
+        return 0;
+    }
+    if (symset_add(&state->defined, name) != 0) {
+        return -1;
+    }
+    symset_remove(&state->unresolved, name);
+    return 0;
+}
+
+static int dso_symbol_match_unresolved(const symstate_t *state, const char *sym_name, uint16_t sym_ver,
+                                       const verdef_table_t *defs) {
+    const char *base;
+    size_t base_len;
+    const char *ver_name;
+    int is_default_name;
+    int hidden;
+
+    split_symbol_version(sym_name, &base, &base_len, &ver_name, &is_default_name);
+    hidden = (sym_ver & VER_NDX_HIDDEN) != 0;
+    sym_ver = (uint16_t)(sym_ver & (uint16_t)~VER_NDX_HIDDEN);
+    if (ver_name == NULL && sym_ver > VER_NDX_GLOBAL) {
+        ver_name = verdef_lookup(defs, sym_ver);
+    }
+    if (ver_name != NULL) {
+        char *at_name = make_versioned_symbol(base, base_len, "@", ver_name);
+        if (at_name != NULL) {
+            if (symset_contains(&state->unresolved, at_name)) {
+                free(at_name);
+                return 1;
+            }
+            free(at_name);
+        }
+        if (!hidden || is_default_name) {
+            char *at_at_name = make_versioned_symbol(base, base_len, "@@", ver_name);
+            char *plain = NULL;
+            int matched = 0;
+            if (at_at_name != NULL && symset_contains(&state->unresolved, at_at_name)) {
+                matched = 1;
+            }
+            plain = (char *)malloc(base_len + 1);
+            if (plain != NULL) {
+                memcpy(plain, base, base_len);
+                plain[base_len] = '\0';
+                if (symset_contains(&state->unresolved, plain)) {
+                    matched = 1;
+                }
+            }
+            free(at_at_name);
+            free(plain);
+            if (matched) {
+                return 1;
+            }
+        }
+    }
+    return symset_contains(&state->unresolved, sym_name);
+}
+
+static int symstate_note_dso_symbol(symstate_t *state, const char *sym_name, uint16_t sym_ver,
+                                    const verdef_table_t *defs) {
+    const char *base;
+    size_t base_len;
+    const char *ver_name;
+    int is_default_name;
+    int hidden;
+
+    if (symstate_define_name(state, sym_name) != 0) {
+        return -1;
+    }
+    split_symbol_version(sym_name, &base, &base_len, &ver_name, &is_default_name);
+    if (base == NULL || base_len == 0) {
+        return 0;
+    }
+    hidden = (sym_ver & VER_NDX_HIDDEN) != 0;
+    sym_ver = (uint16_t)(sym_ver & (uint16_t)~VER_NDX_HIDDEN);
+    if (ver_name == NULL && sym_ver > VER_NDX_GLOBAL) {
+        ver_name = verdef_lookup(defs, sym_ver);
+    }
+    if (ver_name != NULL) {
+        char *at_name = make_versioned_symbol(base, base_len, "@", ver_name);
+        if (at_name == NULL || symstate_define_name(state, at_name) != 0) {
+            free(at_name);
+            return -1;
+        }
+        free(at_name);
+        if (!hidden || is_default_name) {
+            char *at_at_name = make_versioned_symbol(base, base_len, "@@", ver_name);
+            char *plain = (char *)malloc(base_len + 1);
+            if (at_at_name == NULL || plain == NULL) {
+                free(at_at_name);
+                free(plain);
+                return -1;
+            }
+            memcpy(plain, base, base_len);
+            plain[base_len] = '\0';
+            if (symstate_define_name(state, at_at_name) != 0 || symstate_define_name(state, plain) != 0) {
+                free(at_at_name);
+                free(plain);
+                return -1;
+            }
+            free(at_at_name);
+            free(plain);
+        }
+        return 0;
+    }
+    if (base_len != strlen(sym_name)) {
+        char *plain = (char *)malloc(base_len + 1);
+        if (plain == NULL) {
+            return -1;
+        }
+        memcpy(plain, base, base_len);
+        plain[base_len] = '\0';
+        if (symstate_define_name(state, plain) != 0) {
+            free(plain);
+            return -1;
+        }
+        free(plain);
+    }
+    return 0;
+}
+
 static int shared_object_matches_unresolved(const char *path, const ld_ctx_t *ctx, const symstate_t *state,
                                             int *out_match) {
     elfobj_t *obj = NULL;
+    verdef_table_t defs;
     size_t i;
 
     *out_match = 0;
@@ -1153,10 +1500,15 @@ static int shared_object_matches_unresolved(const char *path, const ld_ctx_t *ct
         elf_close(obj);
         return 0;
     }
+    if (load_dso_verdef_table(obj, &defs) != 0) {
+        elf_close(obj);
+        return -1;
+    }
     for (i = 0; i < elf_symbol_count(obj); ++i) {
         const elf_symbol_t *sym = elf_symbol_at(obj, i);
         const char *name;
         uint16_t shndx;
+        uint16_t ver;
         uint8_t bind;
         uint8_t vis;
 
@@ -1176,17 +1528,20 @@ static int shared_object_matches_unresolved(const char *path, const ld_ctx_t *ct
             continue;
         }
         shndx = elf_symbol_shndx(sym);
-        if (shndx != SHN_UNDEF && symset_contains(&state->unresolved, name)) {
+        ver = elf_symbol_version(sym);
+        if (shndx != SHN_UNDEF && dso_symbol_match_unresolved(state, name, ver, &defs)) {
             *out_match = 1;
             break;
         }
     }
+    verdef_table_free(&defs);
     elf_close(obj);
     return 0;
 }
 
 static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *state) {
     elfobj_t *obj = NULL;
+    verdef_table_t defs;
     size_t i;
 
     if (elf_open(path, &obj) != ELF_OK) {
@@ -1196,12 +1551,17 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
         elf_close(obj);
         return -1;
     }
+    if (load_dso_verdef_table(obj, &defs) != 0) {
+        elf_close(obj);
+        return -1;
+    }
     for (i = 0; i < elf_symbol_count(obj); ++i) {
         const elf_symbol_t *sym = elf_symbol_at(obj, i);
         const char *name;
         uint8_t bind;
         uint8_t vis;
         uint16_t shndx;
+        uint16_t ver;
 
         if (sym == NULL) {
             continue;
@@ -1216,13 +1576,15 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
         if ((bind == STB_GLOBAL || bind == STB_WEAK) &&
             (vis == STV_DEFAULT || vis == STV_PROTECTED) &&
             shndx != SHN_UNDEF) {
-            if (symset_add(&state->defined, name) != 0) {
+            ver = elf_symbol_version(sym);
+            if (symstate_note_dso_symbol(state, name, ver, &defs) != 0) {
+                verdef_table_free(&defs);
                 elf_close(obj);
                 return -1;
             }
-            symset_remove(&state->unresolved, name);
         }
     }
+    verdef_table_free(&defs);
     for (i = 0; i < ctx->dso_inputs.count; ++i) {
         if (strcmp(ctx->dso_inputs.items[i], path) == 0) {
             elf_close(obj);

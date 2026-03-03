@@ -118,6 +118,18 @@ typedef enum {
 #define SHT_DYNSYM 11
 #endif
 
+#ifndef SHT_GNU_verdef
+#define SHT_GNU_verdef 0x6ffffffd
+#define SHT_GNU_verneed 0x6ffffffe
+#define SHT_GNU_versym 0x6fffffff
+#endif
+
+#ifndef VER_NDX_LOCAL
+#define VER_NDX_LOCAL 0
+#define VER_NDX_GLOBAL 1
+#define VER_NDX_HIDDEN 0x8000
+#endif
+
 #ifndef SHF_WRITE
 #define SHF_WRITE 0x1
 #define SHF_ALLOC 0x2

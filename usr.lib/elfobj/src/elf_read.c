@@ -400,6 +400,44 @@ static elf_err_t parse_symbols(elfobj_t *obj, symtab_index_t **out_maps, size_t 
     return ELF_OK;
 }
 
+static elf_err_t parse_symbol_versions(elfobj_t *obj, symtab_index_t *maps, size_t map_count) {
+    size_t i;
+
+    for (i = 0; i < obj->section_count; ++i) {
+        struct elf_section *sec = obj->sections[i];
+        symtab_index_t *map;
+        size_t entsz;
+        size_t nvers;
+        size_t limit;
+        size_t j;
+
+        if (sec->type != SHT_GNU_versym) {
+            continue;
+        }
+        if (sec->data == NULL) {
+            continue;
+        }
+        map = find_symtab(maps, map_count, sec->link);
+        if (map == NULL) {
+            return ELF_ERR_FORMAT;
+        }
+        entsz = sec->entsize != 0 ? (size_t)sec->entsize : 2u;
+        if (entsz < 2u || sec->data_size % entsz != 0) {
+            return ELF_ERR_FORMAT;
+        }
+        nvers = sec->data_size / entsz;
+        if (nvers < map->count) {
+            return ELF_ERR_FORMAT;
+        }
+        limit = map->count;
+        for (j = 0; j < limit; ++j) {
+            map->symbols[j]->ver_index = elf__rd16(sec->data + (j * entsz), obj->endian);
+        }
+        obj->has_versioning = 1;
+    }
+    return ELF_OK;
+}
+
 static elf_err_t parse_relocations(elfobj_t *obj, symtab_index_t *maps, size_t map_count) {
     size_t i;
 
@@ -545,6 +583,14 @@ static elf_err_t materialize_symbols_relocs(elfobj_t *obj) {
 
     err = parse_symbols(obj, &maps, &map_count);
     if (err != ELF_OK) {
+        return err;
+    }
+    err = parse_symbol_versions(obj, maps, map_count);
+    if (err != ELF_OK) {
+        for (i = 0; i < map_count; ++i) {
+            free(maps[i].symbols);
+        }
+        free(maps);
         return err;
     }
     err = parse_relocations(obj, maps, map_count);
