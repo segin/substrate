@@ -1363,6 +1363,7 @@ const void *elf_section_data(const elf_section_t *section, size_t *size_out);
 const char *elf_symbol_name(const elf_symbol_t *symbol);
 uint8_t elf_symbol_bind(const elf_symbol_t *symbol);
 uint8_t elf_symbol_type(const elf_symbol_t *symbol);
+uint8_t elf_symbol_visibility(const elf_symbol_t *symbol);
 uint16_t elf_symbol_shndx(const elf_symbol_t *symbol);
 uint64_t elf_symbol_value(const elf_symbol_t *symbol);
 uint64_t elf_symbol_size(const elf_symbol_t *symbol);

@@ -8,6 +8,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifndef STV_DEFAULT
+#define STV_DEFAULT 0
+#define STV_INTERNAL 1
+#define STV_HIDDEN 2
+#define STV_PROTECTED 3
+#endif
+
 typedef struct {
     char **items;
     size_t count;
@@ -1085,6 +1092,7 @@ static int shared_object_matches_unresolved(const char *path, const ld_ctx_t *ct
         const char *name;
         uint16_t shndx;
         uint8_t bind;
+        uint8_t vis;
 
         if (sym == NULL) {
             continue;
@@ -1094,7 +1102,11 @@ static int shared_object_matches_unresolved(const char *path, const ld_ctx_t *ct
             continue;
         }
         bind = elf_symbol_bind(sym);
+        vis = elf_symbol_visibility(sym);
         if (bind != STB_GLOBAL && bind != STB_WEAK) {
+            continue;
+        }
+        if (vis != STV_DEFAULT && vis != STV_PROTECTED) {
             continue;
         }
         shndx = elf_symbol_shndx(sym);
@@ -1122,6 +1134,7 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
         const elf_symbol_t *sym = elf_symbol_at(obj, i);
         const char *name;
         uint8_t bind;
+        uint8_t vis;
         uint16_t shndx;
 
         if (sym == NULL) {
@@ -1132,8 +1145,11 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
             continue;
         }
         bind = elf_symbol_bind(sym);
+        vis = elf_symbol_visibility(sym);
         shndx = elf_symbol_shndx(sym);
-        if ((bind == STB_GLOBAL || bind == STB_WEAK) && shndx != SHN_UNDEF) {
+        if ((bind == STB_GLOBAL || bind == STB_WEAK) &&
+            (vis == STV_DEFAULT || vis == STV_PROTECTED) &&
+            shndx != SHN_UNDEF) {
             if (symset_add(&state->defined, name) != 0) {
                 elf_close(obj);
                 return -1;

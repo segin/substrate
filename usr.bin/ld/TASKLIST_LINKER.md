@@ -87,7 +87,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-E-001, LD-E-002.
 
 ### 3.2 Visibility and versioning
-- [ ] Enforce visibility semantics (`DEFAULT/HIDDEN/PROTECTED/INTERNAL`) in resolver.  
+- [x] Enforce visibility semantics (`DEFAULT/HIDDEN/PROTECTED/INTERNAL`) in resolver.  
   Reqs: LD-U-005.
 - [ ] Implement symbol version definitions and references (`.gnu.version*`).  
   Reqs: LD-S-003. Stories: US-201.

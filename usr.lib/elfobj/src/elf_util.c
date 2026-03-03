@@ -917,6 +917,10 @@ uint8_t elf_symbol_type(const elf_symbol_t *symbol) {
     return symbol == NULL ? STT_NOTYPE : symbol->type;
 }
 
+uint8_t elf_symbol_visibility(const elf_symbol_t *symbol) {
+    return symbol == NULL ? 0 : (uint8_t)(symbol->other & 0x3u);
+}
+
 uint16_t elf_symbol_shndx(const elf_symbol_t *symbol) {
     return symbol == NULL ? SHN_UNDEF : symbol->shndx;
 }
