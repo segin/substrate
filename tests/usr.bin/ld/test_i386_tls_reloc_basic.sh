@@ -23,6 +23,13 @@ fi
 
 "$LDX" -m32 -shared -e f -o "$TMP/tls.so" "$TMP/tls.o"
 
+readelf -S "$TMP/tls.so" >"$TMP/sections.out" 2>"$TMP/sections.err" || true
+if grep -Eq "invalid sh_entsize|Link field .*symtab" "$TMP/sections.err"; then
+	echo "FAIL: i386 shared output has malformed section metadata" >&2
+	cat "$TMP/sections.err" >&2
+	exit 1
+fi
+
 if ! readelf -l "$TMP/tls.so" 2>/dev/null | grep -q " TLS "; then
 	echo "FAIL: i386 shared output missing PT_TLS segment" >&2
 	readelf -l "$TMP/tls.so" >&2 || true

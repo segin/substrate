@@ -2158,6 +2158,28 @@ static int add_default_segments(elfobj_t *obj, const char *interp_path) {
     return 0;
 }
 
+static int strip_group_sections_for_final(elfobj_t *obj) {
+    size_t i = 0;
+
+    while (i < elf_section_count(obj)) {
+        elf_section_t *sec = elf_section_get(obj, i);
+        const char *name;
+        if (sec == NULL) {
+            i++;
+            continue;
+        }
+        name = elf_section_name(sec);
+        if (name == NULL || strcmp(name, ".group") != 0) {
+            i++;
+            continue;
+        }
+        if (elf_remove_section(obj, sec) != ELF_OK) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int symbol_is_defined(const elf_symbol_t *sym) {
     return sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF;
 }
@@ -2518,6 +2540,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
         objvec_free(&inputs);
         elf_close(out);
         return 0;
+    }
+
+    if (strip_group_sections_for_final(out) != 0) {
+        fprintf(stderr, "ld: failed to strip SHT_GROUP sections for final output\n");
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
     }
 
     if (plan_dynamic_needed(ctx, out) != 0) {
