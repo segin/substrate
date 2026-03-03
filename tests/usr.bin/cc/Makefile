@@ -238,6 +238,10 @@ test:
 	/tmp/cc_native_c99_struct_pass_value
 	$(TOP)/usr.bin/cc/cc native_c99_struct_return_value.c -o /tmp/cc_native_c99_struct_return_value
 	/tmp/cc_native_c99_struct_return_value
+	$(TOP)/usr.bin/cc/cc native_c99_anonymous_struct_union.c -o /tmp/cc_native_c99_anonymous_struct_union
+	/tmp/cc_native_c99_anonymous_struct_union
+	$(TOP)/usr.bin/cc/cc native_c99_bitfield_basic.c -o /tmp/cc_native_c99_bitfield_basic
+	/tmp/cc_native_c99_bitfield_basic
 	$(TOP)/usr.bin/cc/cc native_c99_void_pointer.c -o /tmp/cc_native_c99_void_pointer
 	/tmp/cc_native_c99_void_pointer
 	$(TOP)/usr.bin/cc/cc native_c99_pointer_cmp.c -o /tmp/cc_native_c99_pointer_cmp
@@ -348,6 +352,10 @@ test:
 	/tmp/cc_native_gnu_zerolen_array
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_empty_struct.c -o /tmp/cc_native_gnu_empty_struct
 	/tmp/cc_native_gnu_empty_struct
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_void_ptr_arith.c -o /tmp/cc_native_gnu_void_ptr_arith
+	/tmp/cc_native_gnu_void_ptr_arith
+	$(TOP)/usr.bin/cc/cc -std=c99 -pedantic -c native_gnu_void_ptr_arith.c -o /tmp/cc_native_gnu_void_ptr_arith_pedantic.o 2>/tmp/cc_native_gnu_void_ptr_arith_pedantic.log
+	grep -q "warning: arithmetic on 'void \\*' is a GNU extension" /tmp/cc_native_gnu_void_ptr_arith_pedantic.log
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_static_nonconst_init.c -o /tmp/cc_native_gnu_static_nonconst_init
 	/tmp/cc_native_gnu_static_nonconst_init
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -fgnu89-inline native_gnu89_inline.c -o /tmp/cc_native_gnu89_inline
@@ -371,11 +379,18 @@ test:
 	grep -q "add" /tmp/cc_native_gnu_asm_ext_32.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_asm_goto.c -o /tmp/cc_native_gnu_asm_goto
 	/tmp/cc_native_gnu_asm_goto
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_asm_goto_outputs.c -o /tmp/cc_native_gnu_asm_goto_outputs
+	/tmp/cc_native_gnu_asm_goto_outputs
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_asm_goto.c -o /tmp/cc_native_gnu_asm_goto.s
 	grep -Eq "jz \\.L[a-zA-Z0-9_]+_[0-9]+" /tmp/cc_native_gnu_asm_goto.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -m32 -S native_gnu_asm_goto.c -o /tmp/cc_native_gnu_asm_goto_32.s
 	grep -q "\\.code32" /tmp/cc_native_gnu_asm_goto_32.s
 	grep -Eq "jz \\.L[a-zA-Z0-9_]+_[0-9]+" /tmp/cc_native_gnu_asm_goto_32.s
+	$(TOP)/usr.bin/cc/cc -std=gnu11 native_gnu_asm_early_clobber.c -o /tmp/cc_native_gnu_asm_early_clobber
+	/tmp/cc_native_gnu_asm_early_clobber
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -S native_gnu_asm_volatile_barrier.c -O2 -o /tmp/cc_native_gnu_asm_volatile_barrier.s
+	grep -q "# volatile asm" /tmp/cc_native_gnu_asm_volatile_barrier.s
+	grep -q "# asm clobber memory" /tmp/cc_native_gnu_asm_volatile_barrier.s
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -O2 native_gnu_asm_side_effect.c -o /tmp/cc_native_gnu_asm_side_effect
 	/tmp/cc_native_gnu_asm_side_effect
 	$(TOP)/usr.bin/cc/cc -std=gnu11 -O2 -S native_gnu_asm_side_effect.c -o /tmp/cc_native_gnu_asm_side_effect.s
@@ -576,6 +591,9 @@ test:
 	grep -q "call sum_pair" /tmp/cc_native_c99_struct_pass_value_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_struct_return_value.c -o /tmp/cc_native_c99_struct_return_value_32.s
 	grep -q "call mk_pair" /tmp/cc_native_c99_struct_return_value_32.s
+	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_bitfield_basic.c -o /tmp/cc_native_c99_bitfield_basic_32.s
+	grep -q "andl" /tmp/cc_native_c99_bitfield_basic_32.s
+	grep -q "shll" /tmp/cc_native_c99_bitfield_basic_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_deref_postfix_update.c -o /tmp/cc_native_c99_deref_postfix_update_32.s
 	grep -q "addl" /tmp/cc_native_c99_deref_postfix_update_32.s
 	$(TOP)/usr.bin/cc/cc -m32 -S native_c99_proto_extern.c -o /tmp/cc_native_c99_proto_extern_32.s
@@ -618,6 +636,9 @@ test:
 	! $(TOP)/usr.bin/cc/cc -std=c99 -pedantic-errors -c native_c99_computed_goto.c -o /tmp/cc_native_c99_computed_goto_pedantic_errors.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_ptr_add_ptr.c -o /tmp/cc_native_bad_ptr_add_ptr_loc.o 2>/tmp/cc_native_bad_ptr_add_ptr_loc.log
 	grep -Eq '^[^:]+:[0-9]+:[0-9]+: error: ' /tmp/cc_native_bad_ptr_add_ptr_loc.log
+	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_source_line.c -o /tmp/cc_native_bad_source_line.o 2>/tmp/cc_native_bad_source_line.log
+	grep -q "return missing + ;" /tmp/cc_native_bad_source_line.log
+	grep -Eq '^[[:space:]]*\^$' /tmp/cc_native_bad_source_line.log
 	sh run_conformance_c99.sh
 	sh run_diff_c99.sh
 	sh run_postc99_c11_c17.sh
@@ -670,6 +691,10 @@ test:
 	grep -q "asm matching constraint references invalid output index" /tmp/cc_native_bad_gnu_asm_match_idx.log
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_template_mismatch.c -o /tmp/cc_native_bad_gnu_asm_template_mismatch.o 2>/tmp/cc_native_bad_gnu_asm_template_mismatch.log
 	grep -q "asm template operand index is out of range" /tmp/cc_native_bad_gnu_asm_template_mismatch.log
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_early_clobber_tie.c -o /tmp/cc_native_bad_gnu_asm_early_clobber_tie.o 2>/tmp/cc_native_bad_gnu_asm_early_clobber_tie.log
+	grep -q "asm early-clobber output cannot be tied to an input operand" /tmp/cc_native_bad_gnu_asm_early_clobber_tie.log
+	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_gnu_asm_early_clobber_fixed.c -o /tmp/cc_native_bad_gnu_asm_early_clobber_fixed.o 2>/tmp/cc_native_bad_gnu_asm_early_clobber_fixed.log
+	grep -q "asm input constraint conflicts with early-clobber output register" /tmp/cc_native_bad_gnu_asm_early_clobber_fixed.log
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_return.c -o /tmp/cc_native_bad_attr_noreturn_return.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_attr_noreturn_nonvoid.c -o /tmp/cc_native_bad_attr_noreturn_nonvoid.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_inline_conflict.c -o /tmp/cc_native_bad_attr_inline_conflict.o
@@ -690,6 +715,9 @@ test:
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_union_init.c -o /tmp/cc_native_bad_c99_union_init.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_array_assign.c -o /tmp/cc_native_bad_c99_array_assign.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_array_update.c -o /tmp/cc_native_bad_c99_array_update.o
+	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_bitfield_addr.c -o /tmp/cc_native_bad_c99_bitfield_addr.o
+	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_bitfield_sizeof.c -o /tmp/cc_native_bad_c99_bitfield_sizeof.o
+	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_bitfield_named_zero.c -o /tmp/cc_native_bad_c99_bitfield_named_zero.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_return_void_value.c -o /tmp/cc_native_bad_c99_return_void_value.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_return_missing_value.c -o /tmp/cc_native_bad_c99_return_missing_value.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_variadic_too_few.c -o /tmp/cc_native_bad_c99_variadic_too_few.o
@@ -708,9 +736,9 @@ clean:
 	      /tmp/cc_native_bad_break.o /tmp/cc_native_bad_continue.o /tmp/cc_native_double /tmp/cc_native_void /tmp/cc_native_c99_empty_void /tmp/cc_native_variadic \
 	      /tmp/cc_native_bad_case.o /tmp/cc_native_bad_default.o /tmp/cc_native_bad_switch_dup_case.o /tmp/cc_native_bad_switch_dup_default.o /tmp/cc_native_bad_for_scope.o \
 	      /tmp/cc_native_abi_stack_int /tmp/cc_native_abi_stack_fp /tmp/cc_native_abi_mix \
-	      /tmp/cc_native_if_else /tmp/cc_native_if_abs /tmp/cc_native_c95_digraph /tmp/cc_native_c95_trigraph /tmp/cc_native_c99_phase12_trigraph_splice /tmp/cc_native_c99_ucn_ident /tmp/cc_native_c99_tokenization_ppnum /tmp/cc_native_c99_line_comment /tmp/cc_native_do_while /tmp/cc_native_switch /tmp/cc_native_c99_switch_constexpr /tmp/cc_native_c99_for_decl /tmp/cc_native_c99_for_multi_decl /tmp/cc_native_c99_types /tmp/cc_native_c99_const_qual /tmp/cc_native_c99_composite_types /tmp/cc_native_c99_inline_semantics /tmp/cc_native_c99_inline_semantics.s /tmp/cc_native_c99_typedef /tmp/cc_native_c99_multi_decl /tmp/cc_native_c99_char_hex /tmp/cc_native_c99_char_cast_sign /tmp/cc_native_c99_signed_char_type /tmp/cc_native_c99_logic /tmp/cc_native_c99_inc_expr /tmp/cc_native_c99_update /tmp/cc_native_c99_bitwise /tmp/cc_native_c99_comma /tmp/cc_native_c99_goto /tmp/cc_native_c99_goto_loop /tmp/cc_native_c99_computed_goto /tmp/cc_native_c99_ternary /tmp/cc_native_c99_cast_sizeof /tmp/cc_native_c99_expr_conversions /tmp/cc_native_c99_sizeof_array /tmp/cc_native_c99_float_cmp /tmp/cc_native_c99_long_double_type /tmp/cc_native_c99_unsigned /tmp/cc_native_c99_unsigned_literals /tmp/cc_native_c99_short /tmp/cc_native_c99_pointer /tmp/cc_native_c99_pointer_param /tmp/cc_native_c99_pointer_store /tmp/cc_native_c99_pointer_store_param /tmp/cc_native_c99_deref_compound /tmp/cc_native_c99_deref_prefix_update /tmp/cc_native_c99_deref_postfix_update /tmp/cc_native_c99_pointer_arith /tmp/cc_native_c99_index /tmp/cc_native_c99_pointer_diff /tmp/cc_native_c99_ptr_cast /tmp/cc_native_c99_ptr_size /tmp/cc_native_c99_ptrptr /tmp/cc_native_c99_ptrptrptr /tmp/cc_native_c99_ptr4 /tmp/cc_native_c99_pointer_update /tmp/cc_native_c99_octal_char /tmp/cc_native_c99_string_concat /tmp/cc_native_c99_func_name /tmp/cc_native_c99_atomic_fetch /tmp/cc_native_c99_global_array_init /tmp/cc_native_c99_storage_tentative /tmp/cc_native_c99_designated_init /tmp/cc_native_c99_compound_literal /tmp/cc_native_c99_flexible_array /tmp/cc_native_c99_pragma /tmp/cc_native_c99_stdc_pragma /tmp/cc_native_c99_struct_assign /tmp/cc_native_c99_struct_ptr_arith /tmp/cc_native_c99_struct_member_array /tmp/cc_native_c99_void_pointer /tmp/cc_native_c99_pointer_cmp /tmp/cc_native_c99_decay /tmp/cc_native_c99_block_scope_shadow /tmp/cc_native_c99_mixed_decl_stmt /tmp/cc_native_c99_return_conversion /tmp/cc_native_c99_unproto_decl_call /tmp/cc_native_c99_unproto_extern_call.s /tmp/cc_native_c99_proto_call /tmp/cc_native_c99_proto_extern.s /tmp/cc_native_c99_empty_stmt2 /tmp/cc_native_loops /tmp/cc_native_if_assign /tmp/cc_native_variadic_call /tmp/cc_native_c99_variadic_fnptr /tmp/cc_native_variadic_call.s \
+	      /tmp/cc_native_if_else /tmp/cc_native_if_abs /tmp/cc_native_c95_digraph /tmp/cc_native_c95_trigraph /tmp/cc_native_c99_phase12_trigraph_splice /tmp/cc_native_c99_ucn_ident /tmp/cc_native_c99_tokenization_ppnum /tmp/cc_native_c99_line_comment /tmp/cc_native_do_while /tmp/cc_native_switch /tmp/cc_native_c99_switch_constexpr /tmp/cc_native_c99_for_decl /tmp/cc_native_c99_for_multi_decl /tmp/cc_native_c99_types /tmp/cc_native_c99_const_qual /tmp/cc_native_c99_composite_types /tmp/cc_native_c99_inline_semantics /tmp/cc_native_c99_inline_semantics.s /tmp/cc_native_c99_typedef /tmp/cc_native_c99_multi_decl /tmp/cc_native_c99_char_hex /tmp/cc_native_c99_char_cast_sign /tmp/cc_native_c99_signed_char_type /tmp/cc_native_c99_logic /tmp/cc_native_c99_inc_expr /tmp/cc_native_c99_update /tmp/cc_native_c99_bitwise /tmp/cc_native_c99_comma /tmp/cc_native_c99_goto /tmp/cc_native_c99_goto_loop /tmp/cc_native_c99_computed_goto /tmp/cc_native_c99_ternary /tmp/cc_native_c99_cast_sizeof /tmp/cc_native_c99_expr_conversions /tmp/cc_native_c99_sizeof_array /tmp/cc_native_c99_float_cmp /tmp/cc_native_c99_long_double_type /tmp/cc_native_c99_unsigned /tmp/cc_native_c99_unsigned_literals /tmp/cc_native_c99_short /tmp/cc_native_c99_pointer /tmp/cc_native_c99_pointer_param /tmp/cc_native_c99_pointer_store /tmp/cc_native_c99_pointer_store_param /tmp/cc_native_c99_deref_compound /tmp/cc_native_c99_deref_prefix_update /tmp/cc_native_c99_deref_postfix_update /tmp/cc_native_c99_pointer_arith /tmp/cc_native_c99_index /tmp/cc_native_c99_pointer_diff /tmp/cc_native_c99_ptr_cast /tmp/cc_native_c99_ptr_size /tmp/cc_native_c99_ptrptr /tmp/cc_native_c99_ptrptrptr /tmp/cc_native_c99_ptr4 /tmp/cc_native_c99_pointer_update /tmp/cc_native_c99_octal_char /tmp/cc_native_c99_string_concat /tmp/cc_native_c99_func_name /tmp/cc_native_c99_atomic_fetch /tmp/cc_native_c99_global_array_init /tmp/cc_native_c99_storage_tentative /tmp/cc_native_c99_designated_init /tmp/cc_native_c99_compound_literal /tmp/cc_native_c99_flexible_array /tmp/cc_native_c99_pragma /tmp/cc_native_c99_stdc_pragma /tmp/cc_native_c99_struct_assign /tmp/cc_native_c99_struct_ptr_arith /tmp/cc_native_c99_struct_member_array /tmp/cc_native_c99_anonymous_struct_union /tmp/cc_native_c99_bitfield_basic /tmp/cc_native_c99_void_pointer /tmp/cc_native_c99_pointer_cmp /tmp/cc_native_c99_decay /tmp/cc_native_c99_block_scope_shadow /tmp/cc_native_c99_mixed_decl_stmt /tmp/cc_native_c99_return_conversion /tmp/cc_native_c99_unproto_decl_call /tmp/cc_native_c99_unproto_extern_call.s /tmp/cc_native_c99_proto_call /tmp/cc_native_c99_proto_extern.s /tmp/cc_native_c99_empty_stmt2 /tmp/cc_native_loops /tmp/cc_native_if_assign /tmp/cc_native_variadic_call /tmp/cc_native_c99_variadic_fnptr /tmp/cc_native_variadic_call.s \
 	      /tmp/cc_native_opt_fold /tmp/cc_native_opt_fold.s /tmp/cc_native_slot_pressure.s \
-	      /tmp/cc_native_arith_32.s /tmp/cc_native_if_else_32.s /tmp/cc_native_c95_digraph_32.s /tmp/cc_native_c95_trigraph_32.s /tmp/cc_native_c99_phase12_trigraph_splice_32.s /tmp/cc_native_c99_ucn_ident_32.s /tmp/cc_native_c99_tokenization_ppnum_32.s /tmp/cc_native_c99_line_comment_32.s /tmp/cc_native_do_while_32.s /tmp/cc_native_c99_empty_stmt2_32.s /tmp/cc_native_switch_32.s /tmp/cc_native_c99_for_decl_32.s /tmp/cc_native_c99_for_multi_decl_32.s /tmp/cc_native_c99_types_32.s /tmp/cc_native_c99_const_qual_32.s /tmp/cc_native_c99_composite_types_32.s /tmp/cc_native_c99_inline_semantics_32.s /tmp/cc_native_c99_typedef_32.s /tmp/cc_native_c99_multi_decl_32.s /tmp/cc_native_c99_logic_32.s /tmp/cc_native_c99_update_32.s /tmp/cc_native_c99_bitwise_32.s /tmp/cc_native_c99_comma_32.s /tmp/cc_native_c99_goto_32.s /tmp/cc_native_c99_goto_loop_32.s /tmp/cc_native_c99_ternary_32.s /tmp/cc_native_c99_cast_sizeof_32.s /tmp/cc_native_c99_sizeof_array_32.s /tmp/cc_native_c99_float_cmp_32.s /tmp/cc_native_c99_unsigned_32.s /tmp/cc_native_c99_unsigned_literals_32.s /tmp/cc_native_c99_short_32.s /tmp/cc_native_c99_pointer_32.s /tmp/cc_native_c99_pointer_store_32.s /tmp/cc_native_c99_pointer_arith.s /tmp/cc_native_c99_pointer_arith_32.s /tmp/cc_native_c99_index_32.s /tmp/cc_native_c99_pointer_diff_32.s /tmp/cc_native_c99_ptr_cast_32.s /tmp/cc_native_c99_ptr_size_32.s /tmp/cc_native_c99_ptrptr_32.s /tmp/cc_native_c99_ptrptrptr_32.s /tmp/cc_native_c99_ptr4_32.s /tmp/cc_native_c99_pointer_update_32.s /tmp/cc_native_c99_global_array_init_32.s /tmp/cc_native_c99_storage_tentative_32.s /tmp/cc_native_c99_designated_init_32.s /tmp/cc_native_c99_compound_literal_32.s /tmp/cc_native_c99_flexible_array_32.s /tmp/cc_native_c99_struct_assign_32.s /tmp/cc_native_c99_struct_ptr_arith_32.s /tmp/cc_native_c99_struct_member_array_32.s /tmp/cc_native_c99_deref_postfix_update_32.s /tmp/cc_native_c99_proto_extern_32.s /tmp/cc_native_c99_block_scope_shadow_32.s /tmp/cc_native_c99_mixed_decl_stmt_32.s /tmp/cc_native_c99_return_conversion_32.s /tmp/cc_native_c99_stdc_pragma_32.s /tmp/cc_native_c99_unproto_decl_call_32.s /tmp/cc_native_c99_unproto_extern_call_32.s /tmp/cc_native_c90_unproto_call_promotions_32.s /tmp/cc_native_loops_32.s /tmp/cc_native_arith_32.o /tmp/cc_native_double_32.s /tmp/cc_native_double_32.o \
+	      /tmp/cc_native_arith_32.s /tmp/cc_native_if_else_32.s /tmp/cc_native_c95_digraph_32.s /tmp/cc_native_c95_trigraph_32.s /tmp/cc_native_c99_phase12_trigraph_splice_32.s /tmp/cc_native_c99_ucn_ident_32.s /tmp/cc_native_c99_tokenization_ppnum_32.s /tmp/cc_native_c99_line_comment_32.s /tmp/cc_native_do_while_32.s /tmp/cc_native_c99_empty_stmt2_32.s /tmp/cc_native_switch_32.s /tmp/cc_native_c99_for_decl_32.s /tmp/cc_native_c99_for_multi_decl_32.s /tmp/cc_native_c99_types_32.s /tmp/cc_native_c99_const_qual_32.s /tmp/cc_native_c99_composite_types_32.s /tmp/cc_native_c99_inline_semantics_32.s /tmp/cc_native_c99_typedef_32.s /tmp/cc_native_c99_multi_decl_32.s /tmp/cc_native_c99_logic_32.s /tmp/cc_native_c99_update_32.s /tmp/cc_native_c99_bitwise_32.s /tmp/cc_native_c99_comma_32.s /tmp/cc_native_c99_goto_32.s /tmp/cc_native_c99_goto_loop_32.s /tmp/cc_native_c99_ternary_32.s /tmp/cc_native_c99_cast_sizeof_32.s /tmp/cc_native_c99_sizeof_array_32.s /tmp/cc_native_c99_float_cmp_32.s /tmp/cc_native_c99_unsigned_32.s /tmp/cc_native_c99_unsigned_literals_32.s /tmp/cc_native_c99_short_32.s /tmp/cc_native_c99_pointer_32.s /tmp/cc_native_c99_pointer_store_32.s /tmp/cc_native_c99_pointer_arith.s /tmp/cc_native_c99_pointer_arith_32.s /tmp/cc_native_c99_index_32.s /tmp/cc_native_c99_pointer_diff_32.s /tmp/cc_native_c99_ptr_cast_32.s /tmp/cc_native_c99_ptr_size_32.s /tmp/cc_native_c99_ptrptr_32.s /tmp/cc_native_c99_ptrptrptr_32.s /tmp/cc_native_c99_ptr4_32.s /tmp/cc_native_c99_pointer_update_32.s /tmp/cc_native_c99_global_array_init_32.s /tmp/cc_native_c99_storage_tentative_32.s /tmp/cc_native_c99_designated_init_32.s /tmp/cc_native_c99_compound_literal_32.s /tmp/cc_native_c99_flexible_array_32.s /tmp/cc_native_c99_struct_assign_32.s /tmp/cc_native_c99_struct_ptr_arith_32.s /tmp/cc_native_c99_struct_member_array_32.s /tmp/cc_native_c99_bitfield_basic_32.s /tmp/cc_native_c99_deref_postfix_update_32.s /tmp/cc_native_c99_proto_extern_32.s /tmp/cc_native_c99_block_scope_shadow_32.s /tmp/cc_native_c99_mixed_decl_stmt_32.s /tmp/cc_native_c99_return_conversion_32.s /tmp/cc_native_c99_stdc_pragma_32.s /tmp/cc_native_c99_unproto_decl_call_32.s /tmp/cc_native_c99_unproto_extern_call_32.s /tmp/cc_native_c90_unproto_call_promotions_32.s /tmp/cc_native_loops_32.s /tmp/cc_native_arith_32.o /tmp/cc_native_double_32.s /tmp/cc_native_double_32.o \
 	      /tmp/cc_native_bad_inc.o /tmp/cc_native_bad_goto.o /tmp/cc_native_bad_label_dup.o /tmp/cc_native_bad_bitwise_float.o /tmp/cc_native_bad_sizeof_void.o /tmp/cc_native_bad_proto_conflict.o /tmp/cc_native_bad_signed_unsigned.o /tmp/cc_native_bad_short_long.o /tmp/cc_native_bad_typedef_init.o /tmp/cc_native_bad_deref_nonptr.o /tmp/cc_native_bad_addr_expr.o /tmp/cc_native_bad_deref_compound.o /tmp/cc_native_bad_deref_postfix_update.o /tmp/cc_native_bad_ptr_add_ptr.o /tmp/cc_native_bad_index_nonptr.o /tmp/cc_native_bad_ptr_add_float.o /tmp/cc_native_bad_ptr_sub_incompat.o /tmp/cc_native_bad_ptr_cmp_incompat.o /tmp/cc_native_bad_ptr_depth5.o /tmp/cc_native_bad_cast_ptr_float.o /tmp/cc_native_bad_computed_goto_float.o /tmp/cc_native_bad_void_ptr_arith.o /tmp/cc_native_bad_attr_noreturn_return.o /tmp/cc_native_bad_attr_noreturn_nonvoid.o \
 	      /tmp/cc_native_c99_typedef_fnptr_retptr /tmp/cc_native_c99_attr_codegen /tmp/cc_native_c99_attr_codegen.s /tmp/cc_native_double_dbg.s \
 	      /tmp/cc_native_gnu_typeof_alt /tmp/cc_native_gnu_builtins /tmp/cc_native_gnu_stmt_expr /tmp/cc_native_gnu_label_decl \
@@ -731,11 +759,15 @@ clean:
 	      /tmp/cc_native_bad_gnu_nested_capture.o \
 	      /tmp/cc_native_gnu_asm_basic /tmp/cc_native_gnu_asm_basic.s /tmp/cc_native_gnu_asm_ext \
 	      /tmp/cc_native_gnu_asm_ext.s /tmp/cc_native_gnu_asm_ext_32.s \
-	      /tmp/cc_native_gnu_asm_goto /tmp/cc_native_gnu_asm_goto.s /tmp/cc_native_gnu_asm_goto_32.s \
+	      /tmp/cc_native_gnu_asm_goto /tmp/cc_native_gnu_asm_goto.s /tmp/cc_native_gnu_asm_goto_32.s /tmp/cc_native_gnu_asm_goto_outputs \
+	      /tmp/cc_native_gnu_asm_early_clobber /tmp/cc_native_gnu_asm_volatile_barrier.s \
 	      /tmp/cc_native_gnu_asm_side_effect /tmp/cc_native_gnu_asm_side_effect.s \
+	      /tmp/cc_native_gnu_void_ptr_arith /tmp/cc_native_gnu_void_ptr_arith_pedantic.o /tmp/cc_native_gnu_void_ptr_arith_pedantic.log \
 	      /tmp/cc_native_bad_gnu_asm_constraint.o /tmp/cc_native_bad_gnu_asm_constraint.log \
 	      /tmp/cc_native_bad_gnu_asm_match_idx.o /tmp/cc_native_bad_gnu_asm_match_idx.log \
 	      /tmp/cc_native_bad_gnu_asm_template_mismatch.o /tmp/cc_native_bad_gnu_asm_template_mismatch.log \
+	      /tmp/cc_native_bad_gnu_asm_early_clobber_tie.o /tmp/cc_native_bad_gnu_asm_early_clobber_tie.log \
+	      /tmp/cc_native_bad_gnu_asm_early_clobber_fixed.o /tmp/cc_native_bad_gnu_asm_early_clobber_fixed.log \
 	      /tmp/cc_native_bad_attr_inline_conflict.o /tmp/cc_native_bad_attr_hot_cold_conflict.o \
 	      /tmp/cc_native_bad_attr_alias_init.o /tmp/cc_native_bad_attr_malloc_nonptr.o \
 	      /tmp/cc_native_bad_attr_format_nonvariadic.o /tmp/cc_native_bad_attr_nonnull_empty.o \
@@ -744,13 +776,13 @@ clean:
 	      /tmp/cc_native_c99_complex_decl /tmp/cc_native_c99_imaginary_decl /tmp/cc_native_c99_complex_types /tmp/cc_native_c99_composite_types /tmp/cc_native_c99_param_array_qual /tmp/cc_native_c99_restrict_ptr /tmp/cc_native_c99_vla_decl /tmp/cc_native_c90_oldstyle /tmp/cc_native_c90_unproto_call_promotions /tmp/cc_native_c90_unproto_call_promotions.s \
 	      /tmp/cc_native_c99_integer_literals_32.s /tmp/cc_native_c99_hex_float_suffix_32.s /tmp/cc_native_c99_wide_literals_32.s \
 	      /tmp/cc_native_c99_complex_decl_32.s /tmp/cc_native_c99_imaginary_decl_32.s /tmp/cc_native_c99_composite_types_32.s /tmp/cc_native_c99_param_array_qual_32.s /tmp/cc_native_c99_restrict_ptr_32.s /tmp/cc_native_c99_vla_decl_32.s /tmp/cc_native_c90_oldstyle_32.s /tmp/cc_native_c90_unproto_call_promotions_32.s \
-	      /tmp/cc_native_bad_c99_implicit_function.o /tmp/cc_native_bad_no_implicit_int.o /tmp/cc_native_bad_c99_const_assign.o /tmp/cc_native_bad_c99_const_param_assign.o /tmp/cc_native_bad_c99_restrict_nonptr.o /tmp/cc_native_bad_c99_file_scope_auto.o /tmp/cc_native_bad_c99_extern_local_init.o /tmp/cc_native_bad_c99_flexible_array_init.o /tmp/cc_native_bad_c99_union_init.o /tmp/cc_native_bad_c99_array_assign.o /tmp/cc_native_bad_c99_array_update.o /tmp/cc_native_bad_c99_return_void_value.o /tmp/cc_native_bad_c99_return_missing_value.o /tmp/cc_native_bad_c99_variadic_too_few.o /tmp/cc_native_bad_c99_pragma_stdc_bad.o /tmp/cc_native_c90_oldstyle_c99_bad.o
+	      /tmp/cc_native_bad_c99_implicit_function.o /tmp/cc_native_bad_no_implicit_int.o /tmp/cc_native_bad_c99_const_assign.o /tmp/cc_native_bad_c99_const_param_assign.o /tmp/cc_native_bad_c99_restrict_nonptr.o /tmp/cc_native_bad_c99_file_scope_auto.o /tmp/cc_native_bad_c99_extern_local_init.o /tmp/cc_native_bad_c99_flexible_array_init.o /tmp/cc_native_bad_c99_union_init.o /tmp/cc_native_bad_c99_array_assign.o /tmp/cc_native_bad_c99_array_update.o /tmp/cc_native_bad_c99_bitfield_addr.o /tmp/cc_native_bad_c99_bitfield_sizeof.o /tmp/cc_native_bad_c99_bitfield_named_zero.o /tmp/cc_native_bad_c99_return_void_value.o /tmp/cc_native_bad_c99_return_missing_value.o /tmp/cc_native_bad_c99_variadic_too_few.o /tmp/cc_native_bad_c99_pragma_stdc_bad.o /tmp/cc_native_c90_oldstyle_c99_bad.o
 	rm -f /tmp/cc_native_warn_assign_cond.o /tmp/cc_native_warn_assign_cond.log /tmp/cc_native_warn_assign_cond_werror.o \
 	      /tmp/cc_native_c99_computed_goto_pedantic.o /tmp/cc_native_c99_computed_goto_pedantic.log /tmp/cc_native_c99_computed_goto_pedantic_errors.o \
-	      /tmp/cc_native_bad_ptr_add_ptr_loc.o /tmp/cc_native_bad_ptr_add_ptr_loc.log \
+	      /tmp/cc_native_bad_ptr_add_ptr_loc.o /tmp/cc_native_bad_ptr_add_ptr_loc.log /tmp/cc_native_bad_source_line.o /tmp/cc_native_bad_source_line.log \
 	      /tmp/cc_conformance_pass.log /tmp/cc_conformance_xfail.log /tmp/cc_diff_host.log /tmp/cc_diff_ours.log
 	rm -f /tmp/cc_native_c11_static_assert /tmp/cc_native_c11_generic /tmp/cc_native_c11_align_thread_noreturn \
-	      /tmp/cc_native_c11_atomic /tmp/cc_native_c11_atomic_wrapper_type /tmp/cc_native_c11_unicode_literals /tmp/cc_native_bad_c11_static_assert_fail.o \
+	      /tmp/cc_native_c11_atomic /tmp/cc_native_c11_atomic_wrapper_type /tmp/cc_native_c11_atomic_fence /tmp/cc_native_c11_atomic_fence.s /tmp/cc_native_c11_atomic_fence_32.s /tmp/cc_native_c11_unicode_literals /tmp/cc_native_bad_c11_static_assert_fail.o \
 	      /tmp/cc_native_bad_c11_thread_local_local.o /tmp/cc_native_c17_register /tmp/cc_native_c11_pp_version.i \
 	      /tmp/cc_native_c17_pp_version.i \
 	      /tmp/cc_native_c23_keywords /tmp/cc_native_c23_nullptr /tmp/cc_native_c23_typeof \
@@ -761,8 +793,8 @@ clean:
 	      /tmp/cc_native_c23_attr_std /tmp/cc_native_c23_attr_std.log /tmp/cc_native_c23_attr_std_werror \
 	      /tmp/cc_native_c23_attr_std_werror.log /tmp/cc_native_bad_c23_attr_fallthrough_outside.o \
 	      /tmp/cc_native_c23_attr_has.i \
-	      /tmp/cc_postc99_mode_c11.i /tmp/cc_postc99_mode_c17.i /tmp/cc_postc99_mode_c23.i \
-	      /tmp/cc_postc99_mode_c11 /tmp/cc_postc99_mode_c17 /tmp/cc_postc99_mode_c23 \
+	      /tmp/cc_postc99_mode_c11.i /tmp/cc_postc99_mode_c17.i /tmp/cc_postc99_mode_c18.i /tmp/cc_postc99_mode_c23.i /tmp/cc_postc99_mode_c2x.i \
+	      /tmp/cc_postc99_mode_c11 /tmp/cc_postc99_mode_c17 /tmp/cc_postc99_mode_c23 /tmp/cc_postc99_mode_c2x \
 	      /tmp/cc_postc99_abi_c11 /tmp/cc_postc99_abi_c17 /tmp/cc_postc99_abi_c23 \
 	      /tmp/cc_postc99_abi_c11_64.o /tmp/cc_postc99_abi_c17_64.o /tmp/cc_postc99_abi_c23_64.o \
 	      /tmp/cc_postc99_abi_c11_32.o /tmp/cc_postc99_abi_c17_32.o /tmp/cc_postc99_abi_c23_32.o \
@@ -773,9 +805,11 @@ clean:
 	      /tmp/cc_postc99_host_gcc_c23 /tmp/cc_postc99_ours_clang_c11 /tmp/cc_postc99_ours_clang_c17 \
 	      /tmp/cc_postc99_ours_clang_c23 /tmp/cc_postc99_host_clang_c11 /tmp/cc_postc99_host_clang_c17 \
 	      /tmp/cc_postc99_host_clang_c23
+	rm -f /tmp/cc_postc99_abi_* /tmp/cc_postc99_ours_* /tmp/cc_postc99_host_*
 	rm -f /tmp/cc_pp_s3.i /tmp/cc_pp_s3_p.i /tmp/cc_pp_s3_dM.i /tmp/cc_pp_s3_m.d /tmp/cc_pp_s3_mm.d /tmp/cc_pp_s3_md.d \
-	      /tmp/cc_pp_s3_md.i /tmp/cc_pp_s3_v.i /tmp/cc_pp_s3_v.log /tmp/cc_pp_s3_depth.i /tmp/cc_pp_s3_macro.i \
-	      /tmp/cc_pp_s6_probe_gnu11.i /tmp/cc_pp_s6_probe_c99.i /tmp/cc_pp_s63_clang_pragma.i /tmp/cc_pp_s63_bad_clang_pragma.i \
+	      /tmp/cc_pp_s3_md.i /tmp/cc_pp_s3_v.i /tmp/cc_pp_s3_v.log /tmp/cc_pp_s3_depth.i /tmp/cc_pp_s3_macro.i /tmp/cc_pp_s3_macro_limit.i /tmp/cc_pp_s3_token_limit.i /tmp/cc_pp_s3_output_limit.i \
+	      /tmp/cc_pp_s6_probe_gnu11.i /tmp/cc_pp_s6_probe_c99.i /tmp/cc_pp_s63_clang_pragma.i /tmp/cc_pp_s63_bad_clang_pragma.i /tmp/cc_pp_s63_bad_clang_section.i /tmp/cc_pp_s63_bad_clang_fp.i /tmp/cc_pp_s63_bad_clang_attribute.i /tmp/cc_pp_s63_bad_clang_loop.i \
+	      /tmp/cc_pp_s63_bad_clang_pragma.log /tmp/cc_pp_s63_bad_clang_section.log /tmp/cc_pp_s63_bad_clang_fp.log /tmp/cc_pp_s63_bad_clang_attribute.log /tmp/cc_pp_s63_bad_clang_loop.log \
 	      /tmp/cc_pp_cpp_mode.i /tmp/cc_pp_cpp_mode_h.i /tmp/cc_pp_cpp_mode_input.h /tmp/cpp /tmp/cc_pp_fuzz_out.i /tmp/cc_pp_fuzz_seed.c /tmp/cc_pp_fuzz_seed.i \
 	      /tmp/cc_pp_fuzz_0.c /tmp/cc_pp_fuzz_1.c /tmp/cc_pp_fuzz_2.c /tmp/cc_pp_fuzz_3.c /tmp/cc_pp_fuzz_4.c \
 	      /tmp/cc_pp_fuzz_5.c /tmp/cc_pp_fuzz_6.c /tmp/cc_pp_fuzz_7.c /tmp/cc_pp_fuzz_8.c /tmp/cc_pp_fuzz_9.c \

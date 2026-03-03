@@ -5,7 +5,13 @@ static int add_imm(int x) {
 
 static int add_named_tied(int a, int b) {
 	int lhs = a;
-	__asm__ volatile("add %[rhs], %[lhs]" : [lhs] "=&r"(lhs) : "0"(lhs), [rhs] "r"(b) : "cc", "memory");
+	__asm__ volatile("add %[rhs], %[lhs]" : [lhs] "=r"(lhs) : "0"(lhs), [rhs] "r"(b) : "cc", "memory");
+	return lhs;
+}
+
+static int add_named_early_clobber(int a, int b) {
+	int lhs = a;
+	__asm__ volatile("add %[rhs], %[lhs]" : [lhs] "+&r"(lhs) : [rhs] "r"(b) : "cc");
 	return lhs;
 }
 
@@ -21,6 +27,8 @@ static int mem_roundtrip(int v) {
 }
 
 int main(void) {
-	return (add_imm(7) == 12 && add_named_tied(5, 9) == 14 && fixed_reg_inc(3) == 4 && mem_roundtrip(11) == 11) ? 0
-	                                                                                                               : 1;
+	return (add_imm(7) == 12 && add_named_tied(5, 9) == 14 && add_named_early_clobber(5, 9) == 14 &&
+	        fixed_reg_inc(3) == 4 && mem_roundtrip(11) == 11)
+	               ? 0
+	               : 1;
 }

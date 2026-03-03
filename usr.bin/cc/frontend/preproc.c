@@ -21,6 +21,7 @@
 #define PP_MAX_EXPAND_PASSES 2
 #define PP_MAX_EXPANDED_TEXT (64 * 1024 * 1024)
 #define PP_MAX_OUTPUT_SIZE (64 * 1024 * 1024)
+#define PP_MAX_EXPANDED_TOKENS (1024 * 1024)
 #define PP_EMPTY_ARG_MARKER '\x1f'
 #define PP_HIDE_MACRO_BEGIN '\x1d'
 #define PP_HIDE_MACRO_END '\x1c'
@@ -108,6 +109,12 @@ typedef struct {
     int include_level;
     unsigned long counter_value;
     size_t output_bytes;
+    size_t max_include_depth;
+    size_t max_expand_depth;
+    size_t max_expand_passes;
+    size_t max_expanded_text;
+    size_t max_output_size;
+    size_t max_expanded_tokens;
 } pp_state_t;
 
 typedef struct {
@@ -747,6 +754,102 @@ static int parse_ident_token(const char **sp, char *out, size_t out_sz) {
     return 0;
 }
 
+static int parse_limit_value(const char *s, size_t *out) {
+    unsigned long long v;
+    char *end = NULL;
+
+    if (s == NULL || out == NULL || *s == '\0') {
+        return -1;
+    }
+    errno = 0;
+    v = strtoull(s, &end, 10);
+    if (errno != 0 || end == s || *end != '\0') {
+        return -1;
+    }
+    if (v == 0 || (size_t)v != v) {
+        return -1;
+    }
+    *out = (size_t)v;
+    return 0;
+}
+
+static size_t count_pp_tokens(const char *src) {
+    size_t i = 0;
+    size_t count = 0;
+
+    if (src == NULL) {
+        return 0;
+    }
+
+    while (src[i] != '\0') {
+        if (isspace((unsigned char)src[i])) {
+            i++;
+            continue;
+        }
+        if (is_ident_start((unsigned char)src[i])) {
+            i++;
+            while (is_ident_char((unsigned char)src[i])) {
+                i++;
+            }
+            count++;
+            continue;
+        }
+        if (isdigit((unsigned char)src[i]) || (src[i] == '.' && isdigit((unsigned char)src[i + 1]))) {
+            i++;
+            while (isalnum((unsigned char)src[i]) || src[i] == '_' || src[i] == '.' || src[i] == '+' || src[i] == '-') {
+                i++;
+            }
+            count++;
+            continue;
+        }
+        if (src[i] == '"' || src[i] == '\'') {
+            int q = (unsigned char)src[i++];
+            while (src[i] != '\0') {
+                if (src[i] == '\\' && src[i + 1] != '\0') {
+                    i += 2;
+                    continue;
+                }
+                if ((unsigned char)src[i] == (unsigned char)q) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            count++;
+            continue;
+        }
+        if ((src[i] == '<' && src[i + 1] == '<' && src[i + 2] == '=') ||
+            (src[i] == '>' && src[i + 1] == '>' && src[i + 2] == '=')) {
+            i += 3;
+            count++;
+            continue;
+        }
+        if ((src[i] == '.' && src[i + 1] == '.' && src[i + 2] == '.') ||
+            (src[i] == '<' && src[i + 1] == ':' && src[i + 2] == '>')) {
+            i += 3;
+            count++;
+            continue;
+        }
+        if ((src[i] == '+' && src[i + 1] == '+') || (src[i] == '-' && src[i + 1] == '-') ||
+            (src[i] == '&' && src[i + 1] == '&') || (src[i] == '|' && src[i + 1] == '|') ||
+            (src[i] == '<' && src[i + 1] == '<') || (src[i] == '>' && src[i + 1] == '>') ||
+            (src[i] == '=' && src[i + 1] == '=') || (src[i] == '!' && src[i + 1] == '=') ||
+            (src[i] == '<' && src[i + 1] == '=') || (src[i] == '>' && src[i + 1] == '=') ||
+            (src[i] == '+' && src[i + 1] == '=') || (src[i] == '-' && src[i + 1] == '=') ||
+            (src[i] == '*' && src[i + 1] == '=') || (src[i] == '/' && src[i + 1] == '=') ||
+            (src[i] == '%' && src[i + 1] == '=') || (src[i] == '&' && src[i + 1] == '=') ||
+            (src[i] == '|' && src[i + 1] == '=') || (src[i] == '^' && src[i + 1] == '=') ||
+            (src[i] == '#' && src[i + 1] == '#') || (src[i] == '-' && src[i + 1] == '>')) {
+            i += 2;
+            count++;
+            continue;
+        }
+        i++;
+        count++;
+    }
+    return count;
+}
+
 static int has_c_attribute_name(const char *name) {
     if (name == NULL) {
         return 0;
@@ -804,8 +907,10 @@ static int has_builtin_name(const char *name) {
         strcmp(name, "__builtin_mul_overflow") == 0 || strcmp(name, "__builtin_object_size") == 0 ||
         strcmp(name, "__builtin___memcpy_chk") == 0 || strcmp(name, "__builtin___memmove_chk") == 0 ||
         strcmp(name, "__builtin___memset_chk") == 0 || strcmp(name, "__builtin_va_start") == 0 ||
-        strcmp(name, "__builtin_va_end") == 0 || strcmp(name, "__builtin_va_copy") == 0 ||
-        strcmp(name, "__builtin_va_arg") == 0 || strcmp(name, "__builtin_trap") == 0 ||
+        strcmp(name, "__builtin_c23_va_start") == 0 || strcmp(name, "__builtin_va_end") == 0 ||
+        strcmp(name, "__builtin_c23_va_end") == 0 || strcmp(name, "__builtin_va_copy") == 0 ||
+        strcmp(name, "__builtin_c23_va_copy") == 0 || strcmp(name, "__builtin_va_arg") == 0 ||
+        strcmp(name, "__builtin_c23_va_arg") == 0 || strcmp(name, "__builtin_trap") == 0 ||
         strcmp(name, "__builtin_unreachable") == 0 || strcmp(name, "__builtin_assume") == 0 ||
         strcmp(name, "__builtin_assume_aligned") == 0 || strcmp(name, "__builtin_unpredictable") == 0 ||
         strcmp(name, "__builtin_choose_expr") == 0 ||
@@ -938,9 +1043,247 @@ static int validate_clang_pragma(const char *rest, cc_diag_t *diag, size_t line_
         }
         return 1;
     }
-    if (strcmp(name, "attribute") == 0 || strcmp(name, "loop") == 0 ||
-        strcmp(name, "section") == 0 || strcmp(name, "fp") == 0) {
+    if (strcmp(name, "attribute") == 0) {
+        char action[16];
+        p = skip_ws(p);
+        if (parse_ident_token(&p, action, sizeof(action)) != 0) {
+            set_diag(diag, line_no, 1, "malformed #pragma clang attribute");
+            return -1;
+        }
+        if (strcmp(action, "push") == 0) {
+            int depth = 0;
+            int nest = 0;
+            const char *arg_begin = NULL;
+            const char *arg_end = NULL;
+            const char *comma = NULL;
+            p = skip_ws(p);
+            if (*p != '(') {
+                set_diag(diag, line_no, 1, "malformed #pragma clang attribute push");
+                return -1;
+            }
+            arg_begin = p + 1;
+            while (*p != '\0') {
+                if (*p == '(') {
+                    depth++;
+                } else if (*p == ')') {
+                    depth--;
+                    if (depth == 0) {
+                        p++;
+                        break;
+                    }
+                }
+                p++;
+            }
+            if (depth != 0) {
+                set_diag(diag, line_no, 1, "malformed #pragma clang attribute push");
+                return -1;
+            }
+            arg_end = p - 1;
+            p = skip_ws(p);
+            if (*p != '\0') {
+                set_diag(diag, line_no, 1, "malformed #pragma clang attribute push");
+                return -1;
+            }
+            p = arg_begin;
+            while (p < arg_end) {
+                if (*p == '(') {
+                    nest++;
+                } else if (*p == ')') {
+                    if (nest > 0) {
+                        nest--;
+                    }
+                } else if (*p == ',' && nest == 0) {
+                    comma = p;
+                    break;
+                }
+                p++;
+            }
+            if (comma == NULL) {
+                set_diag(diag, line_no, 1, "malformed #pragma clang attribute push");
+                return -1;
+            }
+            p = skip_ws(comma + 1);
+            if (strncmp(p, "apply_to", 8) != 0) {
+                set_diag(diag, line_no, 1, "malformed #pragma clang attribute push");
+                return -1;
+            }
+            p += 8;
+            p = skip_ws(p);
+            if (*p != '=') {
+                set_diag(diag, line_no, 1, "malformed #pragma clang attribute push");
+                return -1;
+            }
+            p++;
+            p = skip_ws(p);
+            if (parse_ident_token(&p, action, sizeof(action)) != 0) {
+                set_diag(diag, line_no, 1, "malformed #pragma clang attribute push");
+                return -1;
+            }
+            p = skip_ws(p);
+            if (p != arg_end) {
+                set_diag(diag, line_no, 1, "malformed #pragma clang attribute push");
+                return -1;
+            }
+            return 1;
+        }
+        if (strcmp(action, "pop") == 0) {
+            p = skip_ws(p);
+            if (*p != '\0') {
+                set_diag(diag, line_no, 1, "malformed #pragma clang attribute pop");
+                return -1;
+            }
+            return 1;
+        }
+        set_diag(diag, line_no, 1, "unsupported #pragma clang attribute action");
+        return -1;
+    }
+    if (strcmp(name, "loop") == 0) {
+        char loopopt[32];
+        char loopval[32];
+        p = skip_ws(p);
+        if (parse_ident_token(&p, loopopt, sizeof(loopopt)) != 0) {
+            set_diag(diag, line_no, 1, "malformed #pragma clang loop");
+            return -1;
+        }
+        p = skip_ws(p);
+        if (*p != '(') {
+            set_diag(diag, line_no, 1, "malformed #pragma clang loop");
+            return -1;
+        }
+        p++;
+        if (parse_ident_token(&p, loopval, sizeof(loopval)) != 0) {
+            set_diag(diag, line_no, 1, "malformed #pragma clang loop option");
+            return -1;
+        }
+        p = skip_ws(p);
+        if (*p != ')') {
+            set_diag(diag, line_no, 1, "malformed #pragma clang loop option");
+            return -1;
+        }
+        p++;
+        p = skip_ws(p);
+        if (*p != '\0') {
+            set_diag(diag, line_no, 1, "malformed #pragma clang loop");
+            return -1;
+        }
+        if (strcmp(loopopt, "unroll") != 0 && strcmp(loopopt, "vectorize") != 0 && strcmp(loopopt, "interleave") != 0) {
+            set_diag(diag, line_no, 1, "unsupported #pragma clang loop option");
+            return -1;
+        }
+        if (strcmp(loopval, "enable") != 0 && strcmp(loopval, "disable") != 0 && strcmp(loopval, "full") != 0) {
+            set_diag(diag, line_no, 1, "unsupported #pragma clang loop state");
+            return -1;
+        }
         return 1;
+    }
+    if (strcmp(name, "section") == 0) {
+        int saw = 0;
+        p = skip_ws(p);
+        while (*p != '\0') {
+            char key[32];
+            const char *q;
+            size_t n = 0;
+            if (parse_ident_token(&p, key, sizeof(key)) != 0) {
+                set_diag(diag, line_no, 1, "malformed #pragma clang section");
+                return -1;
+            }
+            if (strcmp(key, "text") != 0 && strcmp(key, "data") != 0 && strcmp(key, "bss") != 0 &&
+                strcmp(key, "rodata") != 0) {
+                set_diag(diag, line_no, 1, "unsupported #pragma clang section key");
+                return -1;
+            }
+            p = skip_ws(p);
+            if (*p != '=') {
+                set_diag(diag, line_no, 1, "malformed #pragma clang section assignment");
+                return -1;
+            }
+            p++;
+            p = skip_ws(p);
+            if (*p != '"') {
+                set_diag(diag, line_no, 1, "malformed #pragma clang section string");
+                return -1;
+            }
+            p++;
+            q = p;
+            while (*q != '\0' && *q != '"') {
+                if (*q == '\\' && q[1] != '\0') {
+                    q += 2;
+                    continue;
+                }
+                q++;
+            }
+            if (*q != '"') {
+                set_diag(diag, line_no, 1, "unterminated #pragma clang section string");
+                return -1;
+            }
+            while (p < q) {
+                if ((unsigned char)*p >= 0x20 && *p != '\\') {
+                    n++;
+                }
+                p++;
+            }
+            if (n == 0) {
+                set_diag(diag, line_no, 1, "empty #pragma clang section name");
+                return -1;
+            }
+            p = q + 1;
+            p = skip_ws(p);
+            saw = 1;
+        }
+        if (!saw) {
+            set_diag(diag, line_no, 1, "malformed #pragma clang section");
+            return -1;
+        }
+        return 1;
+    }
+    if (strcmp(name, "fp") == 0) {
+        char key[32];
+        char value[32];
+        p = skip_ws(p);
+        if (parse_ident_token(&p, key, sizeof(key)) != 0) {
+            set_diag(diag, line_no, 1, "malformed #pragma clang fp");
+            return -1;
+        }
+        p = skip_ws(p);
+        if (*p != '(') {
+            set_diag(diag, line_no, 1, "malformed #pragma clang fp");
+            return -1;
+        }
+        p++;
+        if (parse_ident_token(&p, value, sizeof(value)) != 0) {
+            set_diag(diag, line_no, 1, "malformed #pragma clang fp option");
+            return -1;
+        }
+        p = skip_ws(p);
+        if (*p != ')') {
+            set_diag(diag, line_no, 1, "malformed #pragma clang fp option");
+            return -1;
+        }
+        p++;
+        p = skip_ws(p);
+        if (*p != '\0') {
+            set_diag(diag, line_no, 1, "malformed #pragma clang fp");
+            return -1;
+        }
+        if (strcmp(key, "contract") == 0) {
+            if (strcmp(value, "on") == 0 || strcmp(value, "off") == 0 || strcmp(value, "fast") == 0) {
+                return 1;
+            }
+        } else if (strcmp(key, "reassociate") == 0 || strcmp(key, "reciprocal") == 0) {
+            if (strcmp(value, "on") == 0 || strcmp(value, "off") == 0) {
+                return 1;
+            }
+        } else if (strcmp(key, "exceptions") == 0) {
+            if (strcmp(value, "ignore") == 0 || strcmp(value, "maytrap") == 0 || strcmp(value, "strict") == 0) {
+                return 1;
+            }
+        } else if (strcmp(key, "eval_method") == 0) {
+            if (strcmp(value, "source") == 0 || strcmp(value, "double") == 0 || strcmp(value, "extended") == 0) {
+                return 1;
+            }
+        }
+        set_diag(diag, line_no, 1, "unsupported #pragma clang fp option");
+        return -1;
     }
 
     set_diag(diag, line_no, 1, "unsupported #pragma clang directive");
@@ -1268,6 +1611,9 @@ static int add_builtin_macros(pp_state_t *st) {
     }
     if (st->std_is_c11 || st->std_is_c17 || st->std_is_c23) {
         if (macro_set(&st->macros, "__STDC_NO_THREADS__", 0, 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+        if (macro_set(&st->macros, "__STDC_NO_COMPLEX__", 0, 0, NULL, 0, "1") != 0) {
             return -1;
         }
         if (macro_set(&st->macros, "__STDC_UTF_16__", 0, 0, NULL, 0, "1") != 0) {
@@ -2021,6 +2367,64 @@ static int apply_flags(pp_state_t *st, const char *const *flags, size_t flag_cou
             st->no_default_includes = 1;
             continue;
         }
+        if (strcmp(f, "-fpp-max-include-depth") == 0 || strcmp(f, "-fpp-max-macro-depth") == 0 ||
+            strcmp(f, "-fpp-max-expand-passes") == 0 || strcmp(f, "-fpp-max-expanded-bytes") == 0 ||
+            strcmp(f, "-fpp-max-output-bytes") == 0 || strcmp(f, "-fpp-max-tokens") == 0) {
+            size_t val = 0;
+            if (i + 1 >= flag_count || parse_limit_value(flags[++i], &val) != 0) {
+                return -1;
+            }
+            if (strcmp(f, "-fpp-max-include-depth") == 0) {
+                st->max_include_depth = val;
+            } else if (strcmp(f, "-fpp-max-macro-depth") == 0) {
+                st->max_expand_depth = val;
+            } else if (strcmp(f, "-fpp-max-expand-passes") == 0) {
+                st->max_expand_passes = val;
+            } else if (strcmp(f, "-fpp-max-expanded-bytes") == 0) {
+                st->max_expanded_text = val;
+            } else if (strcmp(f, "-fpp-max-output-bytes") == 0) {
+                st->max_output_size = val;
+            } else {
+                st->max_expanded_tokens = val;
+            }
+            continue;
+        }
+        if (strncmp(f, "-fpp-max-include-depth=", 24) == 0) {
+            if (parse_limit_value(f + 24, &st->max_include_depth) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strncmp(f, "-fpp-max-macro-depth=", 22) == 0) {
+            if (parse_limit_value(f + 22, &st->max_expand_depth) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strncmp(f, "-fpp-max-expand-passes=", 24) == 0) {
+            if (parse_limit_value(f + 24, &st->max_expand_passes) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strncmp(f, "-fpp-max-expanded-bytes=", 24) == 0) {
+            if (parse_limit_value(f + 24, &st->max_expanded_text) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strncmp(f, "-fpp-max-output-bytes=", 22) == 0) {
+            if (parse_limit_value(f + 22, &st->max_output_size) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strncmp(f, "-fpp-max-tokens=", 17) == 0) {
+            if (parse_limit_value(f + 17, &st->max_expanded_tokens) != 0) {
+                return -1;
+            }
+            continue;
+        }
         if (strcmp(f, "-D") == 0) {
             if (i + 1 >= flag_count) {
                 return -1;
@@ -2310,10 +2714,17 @@ static int once_add(pp_state_t *st, const char *path) {
     return strvec_push(&st->include_once, key);
 }
 
-static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_counter, int enable_trigraphs) {
+static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_counter, int *out_line_no,
+                             int enable_trigraphs) {
     int c;
     int got_any = 0;
     int continue_line = 0;
+    int start_line;
+
+    if (line_counter == NULL || out_line_no == NULL) {
+        return -1;
+    }
+    start_line = *line_counter;
 
     out->len = 0;
     if (out->buf != NULL) {
@@ -2352,6 +2763,7 @@ static int read_logical_line(FILE *fp, sb_t *out, int *out_had_line, int *line_c
     }
 
     *out_had_line = got_any;
+    *out_line_no = start_line;
     return 0;
 }
 
@@ -4198,7 +4610,7 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
     pp_strvec_t local_disabled;
     int use_local_disabled = 0;
 
-    if (depth > PP_MAX_EXPAND_DEPTH) {
+    if (depth > (int)st->max_expand_depth) {
         set_diag(diag, (size_t)line, 1, "macro expansion depth exceeded");
         return NULL;
     }
@@ -4214,7 +4626,7 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
         }
         return NULL;
     }
-    for (pass = 0; pass < PP_MAX_EXPAND_PASSES; ++pass) {
+    for (pass = 0; pass < (int)st->max_expand_passes; ++pass) {
         char *next = expand_once(st, cur, file, line, depth, disabled, diag);
         if (next == NULL) {
             free(cur);
@@ -4223,8 +4635,17 @@ static char *expand_text(pp_state_t *st, const char *src, const char *file, int 
             }
             return NULL;
         }
-        if (strlen(next) > PP_MAX_EXPANDED_TEXT) {
+        if (strlen(next) > st->max_expanded_text) {
             set_diag(diag, (size_t)line, 1, "macro expansion output too large");
+            free(cur);
+            free(next);
+            if (use_local_disabled) {
+                strvec_free(disabled);
+            }
+            return NULL;
+        }
+        if (count_pp_tokens(next) > st->max_expanded_tokens) {
+            set_diag(diag, (size_t)line, 1, "macro expansion token growth limit exceeded");
             free(cur);
             free(next);
             if (use_local_disabled) {
@@ -5156,7 +5577,7 @@ static int pp_emit_text(pp_state_t *st, FILE *out, const char *s) {
     if (st->suppress_output) {
         return 0;
     }
-    if (st->output_bytes + n > PP_MAX_OUTPUT_SIZE) {
+    if (st->output_bytes + n > st->max_output_size) {
         return -1;
     }
     if (fputs(s, out) < 0) {
@@ -5216,9 +5637,10 @@ static int pp_emit_embed_file(pp_state_t *st, FILE *out, const char *path) {
 
 static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int depth, int macros_only, cc_diag_t *diag) {
     FILE *fp;
-    sb_t line;
-    sb_t stripped;
+    sb_t line = {0};
+    sb_t stripped = {0};
     int line_no = 1;
+    int cur_line = 1;
     int had_line = 0;
     int in_block_comment = 0;
     int code_paren_depth = 0;
@@ -5227,13 +5649,13 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
     size_t cond_count = 0;
     size_t cond_cap = 0;
     int saw_pragma_once = 0;
-    sb_t code_accum;
+    sb_t code_accum = {0};
     int old_include_level = st->include_level;
     const char *old_diag_file = g_pp_diag_file;
 
     g_pp_diag_file = path;
 
-    if (depth > PP_MAX_INCLUDE_DEPTH) {
+    if (depth > (int)st->max_include_depth) {
         set_diag(diag, 0, 0, "include depth exceeded");
         g_pp_diag_file = old_diag_file;
         return -1;
@@ -5259,10 +5681,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
         goto fail;
     }
 
-    memset(&line, 0, sizeof(line));
-    memset(&stripped, 0, sizeof(stripped));
-    memset(&code_accum, 0, sizeof(code_accum));
-    while (read_logical_line(fp, &line, &had_line, &line_no, st->enable_trigraphs) == 0 && had_line) {
+    while (read_logical_line(fp, &line, &had_line, &line_no, &cur_line, st->enable_trigraphs) == 0 && had_line) {
         const char *raw = line.buf != NULL ? line.buf : "";
         const char *proc;
         const char *p = skip_ws(raw);
@@ -5317,23 +5736,23 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                         }
                         inc_spec[n] = '\0';
                         if (*p != endc) {
-                            set_diag(diag, (size_t)line_no, 1, "malformed #include");
+                            set_diag(diag, (size_t)cur_line, 1, "malformed #include");
                             goto fail;
                         }
                         if (include_next) {
                             if (resolve_include_next(st, path, inc_spec, quoted, inc_path, &is_system) != 0) {
-                                set_diag(diag, (size_t)line_no, 1, "include_next file not found");
+                                set_diag(diag, (size_t)cur_line, 1, "include_next file not found");
                                 goto fail;
                             }
                         } else if (resolve_include(st, path, inc_spec, quoted, inc_path, &is_system) != 0) {
-                            set_diag(diag, (size_t)line_no, 1, "include file not found");
+                            set_diag(diag, (size_t)cur_line, 1, "include file not found");
                             goto fail;
                         }
                         if (dep_add_path(st, inc_path, is_system, 0) != 0) {
                             goto fail;
                         }
                         if (preprocess_file(st, inc_path, out, depth + 1, macros_only, diag) != 0) {
-                            fprintf(stderr, "cpp: note: in file included from %s:%d\n", path, line_no);
+                            fprintf(stderr, "cpp: note: in file included from %s:%d\n", path, cur_line);
                             goto fail;
                         }
                         if (pp_emit_line_marker(st, out, line_no, path) != 0) {
@@ -5351,12 +5770,12 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     int is_system = 0;
                     size_t n = 0;
                     if (!(st->std_is_c23 || st->std_is_gnu)) {
-                        set_diag(diag, (size_t)line_no, 1, "#embed requires c23/gnu mode");
+                        set_diag(diag, (size_t)cur_line, 1, "#embed requires c23/gnu mode");
                         goto fail;
                     }
                     p = skip_ws(p);
                     if (*p != '"' && *p != '<') {
-                        set_diag(diag, (size_t)line_no, 1, "malformed #embed");
+                        set_diag(diag, (size_t)cur_line, 1, "malformed #embed");
                         goto fail;
                     }
                     {
@@ -5368,19 +5787,19 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                         }
                         inc_spec[n] = '\0';
                         if (*p != endc) {
-                            set_diag(diag, (size_t)line_no, 1, "malformed #embed");
+                            set_diag(diag, (size_t)cur_line, 1, "malformed #embed");
                             goto fail;
                         }
                     }
                     if (resolve_include(st, path, inc_spec, quoted, inc_path, &is_system) != 0) {
-                        set_diag(diag, (size_t)line_no, 1, "embed file not found");
+                        set_diag(diag, (size_t)cur_line, 1, "embed file not found");
                         goto fail;
                     }
                     if (dep_add_path(st, inc_path, is_system, 0) != 0) {
                         goto fail;
                     }
                     if (!macros_only && pp_emit_embed_file(st, out, inc_path) != 0) {
-                        set_diag(diag, (size_t)line_no, 1, "failed to emit #embed data");
+                        set_diag(diag, (size_t)cur_line, 1, "failed to emit #embed data");
                         goto fail;
                     }
                 }
@@ -5389,7 +5808,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
             if (strncmp(kw, "define", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 6) {
                 if (active) {
                     if (parse_define_directive(st, p) != 0) {
-                        set_diag(diag, (size_t)line_no, 1, "malformed #define");
+                        set_diag(diag, (size_t)cur_line, 1, "malformed #define");
                         goto fail;
                     }
                 }
@@ -5399,7 +5818,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 if (active) {
                     p = skip_ws(p);
                     if (!is_ident_start((unsigned char)*p)) {
-                        set_diag(diag, (size_t)line_no, 1, "malformed #undef");
+                        set_diag(diag, (size_t)cur_line, 1, "malformed #undef");
                         goto fail;
                     }
                     {
@@ -5475,7 +5894,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 pp_cond_frame_t fr;
                 int cond = 0;
                 if (active) {
-                    if (eval_condition(st, p, path, line_no, &cond, diag) != 0) {
+                    if (eval_condition(st, p, path, cur_line, &cond, diag) != 0) {
                         goto fail;
                     }
                 }
@@ -5491,15 +5910,15 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
             if (strncmp(kw, "elifdef", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 7) {
                 int cond = 0;
                 if (!(st->std_is_c23 || st->std_is_gnu)) {
-                    set_diag(diag, (size_t)line_no, 1, "#elifdef requires c23/gnu mode");
+                    set_diag(diag, (size_t)cur_line, 1, "#elifdef requires c23/gnu mode");
                     goto fail;
                 }
                 if (cond_count == 0) {
-                    set_diag(diag, (size_t)line_no, 1, "unexpected #elifdef");
+                    set_diag(diag, (size_t)cur_line, 1, "unexpected #elifdef");
                     goto fail;
                 }
                 if (cond_stack[cond_count - 1].saw_else) {
-                    set_diag(diag, (size_t)line_no, 1, "unexpected #elifdef after #else");
+                    set_diag(diag, (size_t)cur_line, 1, "unexpected #elifdef after #else");
                     goto fail;
                 }
                 p = skip_ws(p);
@@ -5529,15 +5948,15 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
             if (strncmp(kw, "elifndef", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 8) {
                 int cond = 1;
                 if (!(st->std_is_c23 || st->std_is_gnu)) {
-                    set_diag(diag, (size_t)line_no, 1, "#elifndef requires c23/gnu mode");
+                    set_diag(diag, (size_t)cur_line, 1, "#elifndef requires c23/gnu mode");
                     goto fail;
                 }
                 if (cond_count == 0) {
-                    set_diag(diag, (size_t)line_no, 1, "unexpected #elifndef");
+                    set_diag(diag, (size_t)cur_line, 1, "unexpected #elifndef");
                     goto fail;
                 }
                 if (cond_stack[cond_count - 1].saw_else) {
-                    set_diag(diag, (size_t)line_no, 1, "unexpected #elifndef after #else");
+                    set_diag(diag, (size_t)cur_line, 1, "unexpected #elifndef after #else");
                     goto fail;
                 }
                 p = skip_ws(p);
@@ -5567,11 +5986,11 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
             if (strncmp(kw, "elif", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 4) {
                 int cond = 0;
                 if (cond_count == 0) {
-                    set_diag(diag, (size_t)line_no, 1, "unexpected #elif");
+                    set_diag(diag, (size_t)cur_line, 1, "unexpected #elif");
                     goto fail;
                 }
                 if (cond_stack[cond_count - 1].saw_else) {
-                    set_diag(diag, (size_t)line_no, 1, "unexpected #elif after #else");
+                    set_diag(diag, (size_t)cur_line, 1, "unexpected #elif after #else");
                     goto fail;
                 }
                 if (!cond_stack[cond_count - 1].parent_active) {
@@ -5579,7 +5998,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 } else if (cond_stack[cond_count - 1].any_taken) {
                     cond_stack[cond_count - 1].this_active = 0;
                 } else {
-                    if (eval_condition(st, p, path, line_no, &cond, diag) != 0) {
+                    if (eval_condition(st, p, path, cur_line, &cond, diag) != 0) {
                         goto fail;
                     }
                     cond_stack[cond_count - 1].this_active = cond;
@@ -5591,11 +6010,11 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
             }
             if (strncmp(kw, "else", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 4) {
                 if (cond_count == 0) {
-                    set_diag(diag, (size_t)line_no, 1, "unexpected #else");
+                    set_diag(diag, (size_t)cur_line, 1, "unexpected #else");
                     goto fail;
                 }
                 if (cond_stack[cond_count - 1].saw_else) {
-                    set_diag(diag, (size_t)line_no, 1, "duplicate #else");
+                    set_diag(diag, (size_t)cur_line, 1, "duplicate #else");
                     goto fail;
                 }
                 cond_stack[cond_count - 1].saw_else = 1;
@@ -5609,7 +6028,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
             }
             if (strncmp(kw, "endif", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 5) {
                 if (cond_count == 0) {
-                    set_diag(diag, (size_t)line_no, 1, "unexpected #endif");
+                    set_diag(diag, (size_t)cur_line, 1, "unexpected #endif");
                     goto fail;
                 }
                 cond_count--;
@@ -5623,21 +6042,21 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     char line_file[PATH_MAX];
                     const char *line_target = path;
                     p = skip_ws(p);
-                    line_expanded = expand_text(st, p, path, line_no, 0, NULL, diag);
+                    line_expanded = expand_text(st, p, path, cur_line, 0, NULL, diag);
                     if (line_expanded == NULL) {
                         goto fail;
                     }
                     p = skip_ws(line_expanded);
                     if (*p == '\0') {
                         free(line_expanded);
-                        set_diag(diag, (size_t)line_no, 1, "malformed #line");
+                        set_diag(diag, (size_t)cur_line, 1, "malformed #line");
                         goto fail;
                     }
                     errno = 0;
                     v = strtol(p, &end, 10);
                     if (end == p || errno != 0 || v <= 0) {
                         free(line_expanded);
-                        set_diag(diag, (size_t)line_no, 1, "malformed #line");
+                        set_diag(diag, (size_t)cur_line, 1, "malformed #line");
                         goto fail;
                     }
                     p = skip_ws(end);
@@ -5650,7 +6069,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                         line_file[n] = '\0';
                         if (*p != '"') {
                             free(line_expanded);
-                            set_diag(diag, (size_t)line_no, 1, "malformed #line filename");
+                            set_diag(diag, (size_t)cur_line, 1, "malformed #line filename");
                             goto fail;
                         }
                         line_target = line_file;
@@ -5659,7 +6078,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                         free(line_expanded);
                         goto fail;
                     }
-                    line_no = (int)v - 1;
+                    line_no = (int)v;
                     free(line_expanded);
                 }
                 continue;
@@ -5669,35 +6088,35 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                     const char *r = skip_ws(p);
                     char macro_name[256];
                     int pm_rc;
-                    int stdc_rc = validate_stdc_pragma(r, diag, (size_t)line_no);
+                    int stdc_rc = validate_stdc_pragma(r, diag, (size_t)cur_line);
                     int clang_rc;
                     if (stdc_rc < 0) {
                         goto fail;
                     }
-                    clang_rc = validate_clang_pragma(r, diag, (size_t)line_no);
+                    clang_rc = validate_clang_pragma(r, diag, (size_t)cur_line);
                     if (clang_rc < 0) {
                         goto fail;
                     }
                     pm_rc = parse_pragma_macro_name(r, "push_macro", macro_name, sizeof(macro_name));
                     if (pm_rc < 0) {
-                        set_diag(diag, (size_t)line_no, 1, "malformed #pragma push_macro");
+                        set_diag(diag, (size_t)cur_line, 1, "malformed #pragma push_macro");
                         goto fail;
                     }
                     if (pm_rc > 0) {
                         if (pragma_macro_push(st, macro_name) != 0) {
-                            set_diag(diag, (size_t)line_no, 1, "out of memory handling #pragma push_macro");
+                            set_diag(diag, (size_t)cur_line, 1, "out of memory handling #pragma push_macro");
                             goto fail;
                         }
                         continue;
                     }
                     pm_rc = parse_pragma_macro_name(r, "pop_macro", macro_name, sizeof(macro_name));
                     if (pm_rc < 0) {
-                        set_diag(diag, (size_t)line_no, 1, "malformed #pragma pop_macro");
+                        set_diag(diag, (size_t)cur_line, 1, "malformed #pragma pop_macro");
                         goto fail;
                     }
                     if (pm_rc > 0) {
                         if (pragma_macro_pop(st, macro_name) != 0) {
-                            set_diag(diag, (size_t)line_no, 1, "out of memory handling #pragma pop_macro");
+                            set_diag(diag, (size_t)cur_line, 1, "out of memory handling #pragma pop_macro");
                             goto fail;
                         }
                         continue;
@@ -5711,19 +6130,19 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
             if (strncmp(kw, "warning", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 7) {
                 if (active) {
                     if (!(st->std_is_c23 || st->std_is_gnu)) {
-                        set_diag(diag, (size_t)line_no, 1, "#warning requires c23/gnu mode");
+                        set_diag(diag, (size_t)cur_line, 1, "#warning requires c23/gnu mode");
                         goto fail;
                     }
                     {
                         const char *msg = skip_ws(p);
-                        fprintf(stderr, "%s:%d:1: warning: %s\n", path, line_no, msg);
+                        fprintf(stderr, "%s:%d:1: warning: %s\n", path, cur_line, msg);
                     }
                 }
                 continue;
             }
             if (strncmp(kw, "error", (size_t)(p - kw)) == 0 && (size_t)(p - kw) == 5) {
                 if (active) {
-                    set_diag(diag, (size_t)line_no, 1, "preprocessor #error");
+                    set_diag(diag, (size_t)cur_line, 1, "preprocessor #error");
                     goto fail;
                 }
                 continue;
@@ -5736,7 +6155,7 @@ static int preprocess_file(pp_state_t *st, const char *path, FILE *out, int dept
                 continue;
             }
             if (code_accum.len == 0) {
-                code_start_line = line_no;
+                code_start_line = cur_line;
             }
             if (sb_append(&code_accum, proc) != 0 || sb_append_c(&code_accum, '\n') != 0) {
                 goto fail;
@@ -5826,6 +6245,12 @@ int cc_preprocess_file(const char *in_path, const char *out_path, const char *st
     st.base_file = in_path;
     st.include_level = 0;
     st.counter_value = 0;
+    st.max_include_depth = PP_MAX_INCLUDE_DEPTH;
+    st.max_expand_depth = PP_MAX_EXPAND_DEPTH;
+    st.max_expand_passes = PP_MAX_EXPAND_PASSES;
+    st.max_expanded_text = PP_MAX_EXPANDED_TEXT;
+    st.max_output_size = PP_MAX_OUTPUT_SIZE;
+    st.max_expanded_tokens = PP_MAX_EXPANDED_TOKENS;
     st.enable_trigraphs = std_mode_enable_trigraphs(std_mode);
     st.std_version = std_mode_version(std_mode, &st.std_is_c11, &st.std_is_c17, &st.std_is_c23, &st.std_is_gnu);
     if (diag != NULL) {

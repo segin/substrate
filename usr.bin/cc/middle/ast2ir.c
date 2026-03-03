@@ -42,6 +42,15 @@ typedef struct {
     size_t hoisted_alloc_count;
 } lower_ctx_t;
 
+enum {
+    CC_ATOMIC_RELAXED = 0,
+    CC_ATOMIC_CONSUME = 1,
+    CC_ATOMIC_ACQUIRE = 2,
+    CC_ATOMIC_RELEASE = 3,
+    CC_ATOMIC_ACQ_REL = 4,
+    CC_ATOMIC_SEQ_CST = 5
+};
+
 static int emit_trap_instr(cc_ssa_function_t *sf);
 static int emit_global_addr(cc_ssa_function_t *sf, const char *name, cc_diag_t *diag);
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
@@ -687,6 +696,9 @@ static int emit_const_i64_instr(cc_ssa_function_t *sf, long v);
 static int emit_const_f64_instr(cc_ssa_function_t *sf, double v);
 static int emit_memcpy_instr(cc_ssa_function_t *sf, int dst_ptr, int src_ptr, long size, cc_diag_t *diag);
 static int emit_memset_instr(cc_ssa_function_t *sf, int dst_ptr, int fill_byte, long size, cc_diag_t *diag);
+static int eval_const_int_expr_simple(const cc_expr_t *e, long *out);
+static int emit_atomic_compiler_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
+static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag);
 static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
 static int normalize_float_value(cc_ssa_function_t *sf, int v, cc_type_t t, cc_diag_t *diag);
 static int lower_truthy_value(cc_ssa_function_t *sf, int v, cc_diag_t *diag);
@@ -851,6 +863,166 @@ static int push_instr(cc_ssa_function_t *f, cc_ssa_instr_t in) {
         f->instr_cap = ncap;
     }
     f->instrs[f->instr_count++] = in;
+    return 0;
+}
+
+static int eval_const_int_expr_simple(const cc_expr_t *e, long *out) {
+    long a;
+    long b;
+
+    if (e == NULL || out == NULL) {
+        return -1;
+    }
+    switch (e->kind) {
+    case CC_EXPR_INT:
+        *out = e->int_val;
+        return 0;
+    case CC_EXPR_CAST:
+        return eval_const_int_expr_simple(e->lhs, out);
+    case CC_EXPR_BIN:
+        if (eval_const_int_expr_simple(e->lhs, &a) != 0 || eval_const_int_expr_simple(e->rhs, &b) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case CC_BIN_ADD:
+            *out = a + b;
+            return 0;
+        case CC_BIN_SUB:
+            *out = a - b;
+            return 0;
+        case CC_BIN_MUL:
+            *out = a * b;
+            return 0;
+        case CC_BIN_DIV:
+            if (b == 0) return -1;
+            *out = a / b;
+            return 0;
+        case CC_BIN_MOD:
+            if (b == 0) return -1;
+            *out = a % b;
+            return 0;
+        case CC_BIN_SHL:
+            *out = a << (b & 63);
+            return 0;
+        case CC_BIN_SHR:
+            *out = a >> (b & 63);
+            return 0;
+        case CC_BIN_BAND:
+            *out = a & b;
+            return 0;
+        case CC_BIN_BOR:
+            *out = a | b;
+            return 0;
+        case CC_BIN_BXOR:
+            *out = a ^ b;
+            return 0;
+        case CC_BIN_EQ:
+            *out = (a == b) ? 1 : 0;
+            return 0;
+        case CC_BIN_NE:
+            *out = (a != b) ? 1 : 0;
+            return 0;
+        case CC_BIN_LT:
+            *out = (a < b) ? 1 : 0;
+            return 0;
+        case CC_BIN_LE:
+            *out = (a <= b) ? 1 : 0;
+            return 0;
+        case CC_BIN_GT:
+            *out = (a > b) ? 1 : 0;
+            return 0;
+        case CC_BIN_GE:
+            *out = (a >= b) ? 1 : 0;
+            return 0;
+        case CC_BIN_LAND:
+            *out = (a != 0 && b != 0) ? 1 : 0;
+            return 0;
+        case CC_BIN_LOR:
+            *out = (a != 0 || b != 0) ? 1 : 0;
+            return 0;
+        case CC_BIN_COMMA:
+            *out = b;
+            return 0;
+        default:
+            return -1;
+        }
+    case CC_EXPR_TERNARY:
+        if (eval_const_int_expr_simple(e->lhs, &a) != 0) {
+            return -1;
+        }
+        if (a != 0) {
+            if (e->rhs == NULL) {
+                *out = a;
+                return 0;
+            }
+            return eval_const_int_expr_simple(e->rhs, out);
+        }
+        return eval_const_int_expr_simple(e->third, out);
+    default:
+        return -1;
+    }
+}
+
+static int emit_atomic_compiler_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_ASM;
+    in.dst = -1;
+    in.lhs = -1;
+    in.rhs = -1;
+    in.asm_volatile = 1;
+    in.sym = xstrdup("");
+    in.asm_clobber_count = 1;
+    in.asm_clobbers = (char **)calloc(1, sizeof(*in.asm_clobbers));
+    if (in.sym == NULL || in.asm_clobbers == NULL) {
+        free_asm_instr_fields(&in);
+        set_diag(diag, "out of memory emitting atomic compiler barrier");
+        return -1;
+    }
+    in.asm_clobbers[0] = xstrdup("memory");
+    if (in.asm_clobbers[0] == NULL) {
+        free_asm_instr_fields(&in);
+        set_diag(diag, "out of memory emitting atomic compiler barrier clobber");
+        return -1;
+    }
+    if (push_instr(sf, in) != 0) {
+        free_asm_instr_fields(&in);
+        set_diag(diag, "out of memory appending atomic compiler barrier");
+        return -1;
+    }
+    return 0;
+}
+
+static int emit_atomic_full_barrier(cc_ssa_function_t *sf, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    const char *tmpl = g_pointer_size_bytes == 8 ? "lock; orl $0, (%%rsp)" : "lock; orl $0, (%%esp)";
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_ASM;
+    in.dst = -1;
+    in.lhs = -1;
+    in.rhs = -1;
+    in.asm_volatile = 1;
+    in.sym = xstrdup(tmpl);
+    in.asm_clobber_count = 1;
+    in.asm_clobbers = (char **)calloc(1, sizeof(*in.asm_clobbers));
+    if (in.sym == NULL || in.asm_clobbers == NULL) {
+        free_asm_instr_fields(&in);
+        set_diag(diag, "out of memory emitting atomic full barrier");
+        return -1;
+    }
+    in.asm_clobbers[0] = xstrdup("memory");
+    if (in.asm_clobbers[0] == NULL) {
+        free_asm_instr_fields(&in);
+        set_diag(diag, "out of memory emitting atomic full barrier clobber");
+        return -1;
+    }
+    if (push_instr(sf, in) != 0) {
+        free_asm_instr_fields(&in);
+        set_diag(diag, "out of memory appending atomic full barrier");
+        return -1;
+    }
     return 0;
 }
 
@@ -1317,23 +1489,25 @@ typedef enum {
     BUILTIN_ATOMIC_FETCH_SUB,
     BUILTIN_ATOMIC_EXCHANGE_N,
     BUILTIN_ATOMIC_LOAD_N,
-    BUILTIN_ATOMIC_STORE_N
+    BUILTIN_ATOMIC_STORE_N,
+    BUILTIN_ATOMIC_THREAD_FENCE,
+    BUILTIN_ATOMIC_SIGNAL_FENCE
 } builtin_kind_t;
 
 static builtin_kind_t builtin_kind(const char *name) {
     if (name == NULL) {
         return BUILTIN_NONE;
     }
-    if (strcmp(name, "__builtin_va_start") == 0) {
+    if (strcmp(name, "__builtin_va_start") == 0 || strcmp(name, "__builtin_c23_va_start") == 0) {
         return BUILTIN_VA_START;
     }
-    if (strcmp(name, "__builtin_va_end") == 0) {
+    if (strcmp(name, "__builtin_va_end") == 0 || strcmp(name, "__builtin_c23_va_end") == 0) {
         return BUILTIN_VA_END;
     }
-    if (strcmp(name, "__builtin_va_copy") == 0) {
+    if (strcmp(name, "__builtin_va_copy") == 0 || strcmp(name, "__builtin_c23_va_copy") == 0) {
         return BUILTIN_VA_COPY;
     }
-    if (strcmp(name, "__builtin_va_arg") == 0) {
+    if (strcmp(name, "__builtin_va_arg") == 0 || strcmp(name, "__builtin_c23_va_arg") == 0) {
         return BUILTIN_VA_ARG;
     }
     if (strcmp(name, "__builtin_alloca") == 0 || strcmp(name, "alloca") == 0) {
@@ -1464,6 +1638,12 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__atomic_store_n") == 0) {
         return BUILTIN_ATOMIC_STORE_N;
+    }
+    if (strcmp(name, "__atomic_thread_fence") == 0) {
+        return BUILTIN_ATOMIC_THREAD_FENCE;
+    }
+    if (strcmp(name, "__atomic_signal_fence") == 0) {
+        return BUILTIN_ATOMIC_SIGNAL_FENCE;
     }
     return BUILTIN_NONE;
 }
@@ -1927,6 +2107,201 @@ static int emit_const_u64_instr(cc_ssa_function_t *sf, unsigned long long v, cc_
         return -1;
     }
     return emit_i64_binop_instr(sf, CC_SSA_OR, hi, lo, 0, diag);
+}
+
+static int emit_bitfield_mask(cc_ssa_function_t *sf, int width, cc_diag_t *diag) {
+    unsigned long long mask_u;
+    if (width <= 0) {
+        return emit_const_i64_instr(sf, 0);
+    }
+    if (width >= 64) {
+        return emit_const_u64_instr(sf, ~0ULL, diag);
+    }
+    mask_u = (1ULL << width) - 1ULL;
+    return emit_const_u64_instr(sf, mask_u, diag);
+}
+
+static int lower_bitfield_load_from_addr(cc_ssa_function_t *sf, const cc_expr_t *e, int ptrv, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    long storage_size;
+    int v;
+    int c;
+    int maskv;
+
+    if (e == NULL || !e->member_is_bitfield) {
+        set_diag(diag, "malformed bit-field read in lowering");
+        return -1;
+    }
+    storage_size = e->member_bit_storage_size;
+    if (storage_size <= 0) {
+        storage_size = type_size_bytes(e->value_type);
+    }
+    if (storage_size <= 0) {
+        set_diag(diag, "unsupported bit-field storage size");
+        return -1;
+    }
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_LOAD;
+    in.dst = new_value(sf, CC_VAL_I64);
+    in.lhs = ptrv;
+    in.rhs = -1;
+    in.imm = storage_size;
+    in.is_unsigned = 1;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory loading bit-field storage");
+        return -1;
+    }
+    v = in.dst;
+
+    if (e->member_bit_offset > 0) {
+        c = emit_const_i64_instr(sf, e->member_bit_offset);
+        if (c < 0) {
+            return -1;
+        }
+        v = emit_i64_binop_instr(sf, CC_SSA_SHR, v, c, 1, diag);
+        if (v < 0) {
+            return -1;
+        }
+    }
+    maskv = emit_bitfield_mask(sf, e->member_bit_width, diag);
+    if (maskv < 0) {
+        return -1;
+    }
+    v = emit_i64_binop_instr(sf, CC_SSA_AND, v, maskv, 0, diag);
+    if (v < 0) {
+        return -1;
+    }
+
+    if (e->member_bit_signed && e->member_bit_width > 0 && e->member_bit_width < 64) {
+        int sh = 64 - e->member_bit_width;
+        c = emit_const_i64_instr(sf, sh);
+        if (c < 0) {
+            return -1;
+        }
+        v = emit_i64_binop_instr(sf, CC_SSA_SHL, v, c, 0, diag);
+        if (v < 0) {
+            return -1;
+        }
+        v = emit_i64_binop_instr(sf, CC_SSA_SHR, v, c, 0, diag);
+        if (v < 0) {
+            return -1;
+        }
+    }
+
+    v = cast_value(sf, v, type_to_val(e->value_type), diag);
+    if (v < 0) {
+        return -1;
+    }
+    if (is_integral_type(e->value_type) && !is_pointer_type(e->value_type)) {
+        v = normalize_integral_value(sf, v, e->value_type, diag);
+    }
+    return v;
+}
+
+static int lower_bitfield_store_to_addr(cc_ssa_function_t *sf, const cc_expr_t *e, int ptrv, int rhs, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    long storage_size;
+    int maskv;
+    int rhsv;
+    int oldv;
+    int new_bits;
+    int clear_mask;
+    int old_cleared;
+    int merged;
+    unsigned long long mask_u;
+
+    if (e == NULL || !e->member_is_bitfield) {
+        set_diag(diag, "malformed bit-field write in lowering");
+        return -1;
+    }
+    if (e->member_bit_width <= 0) {
+        set_diag(diag, "cannot assign to zero-width bit-field");
+        return -1;
+    }
+
+    storage_size = e->member_bit_storage_size;
+    if (storage_size <= 0) {
+        storage_size = type_size_bytes(e->value_type);
+    }
+    if (storage_size <= 0) {
+        set_diag(diag, "unsupported bit-field storage size");
+        return -1;
+    }
+
+    rhsv = cast_value(sf, rhs, CC_VAL_I64, diag);
+    if (rhsv < 0) {
+        return -1;
+    }
+    if (is_integral_type(e->value_type) && !is_pointer_type(e->value_type)) {
+        rhsv = normalize_integral_value(sf, rhsv, e->value_type, diag);
+        if (rhsv < 0) {
+            return -1;
+        }
+    }
+    maskv = emit_bitfield_mask(sf, e->member_bit_width, diag);
+    if (maskv < 0) {
+        return -1;
+    }
+    rhsv = emit_i64_binop_instr(sf, CC_SSA_AND, rhsv, maskv, 0, diag);
+    if (rhsv < 0) {
+        return -1;
+    }
+
+    if (e->member_bit_offset > 0) {
+        int c = emit_const_i64_instr(sf, e->member_bit_offset);
+        if (c < 0) {
+            return -1;
+        }
+        rhsv = emit_i64_binop_instr(sf, CC_SSA_SHL, rhsv, c, 0, diag);
+        if (rhsv < 0) {
+            return -1;
+        }
+    }
+    new_bits = rhsv;
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_LOAD;
+    in.dst = new_value(sf, CC_VAL_I64);
+    in.lhs = ptrv;
+    in.rhs = -1;
+    in.imm = storage_size;
+    in.is_unsigned = 1;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory loading bit-field storage for write");
+        return -1;
+    }
+    oldv = in.dst;
+
+    if (e->member_bit_width >= 64) {
+        mask_u = ~0ULL;
+    } else {
+        mask_u = ((1ULL << e->member_bit_width) - 1ULL) << e->member_bit_offset;
+    }
+    clear_mask = emit_const_u64_instr(sf, ~mask_u, diag);
+    if (clear_mask < 0) {
+        return -1;
+    }
+    old_cleared = emit_i64_binop_instr(sf, CC_SSA_AND, oldv, clear_mask, 0, diag);
+    if (old_cleared < 0) {
+        return -1;
+    }
+    merged = emit_i64_binop_instr(sf, CC_SSA_OR, old_cleared, new_bits, 0, diag);
+    if (merged < 0) {
+        return -1;
+    }
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_STORE;
+    in.dst = -1;
+    in.lhs = ptrv;
+    in.rhs = merged;
+    in.imm = storage_size;
+    if (push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory storing bit-field");
+        return -1;
+    }
+    return lower_bitfield_load_from_addr(sf, e, ptrv, diag);
 }
 
 static int builtin_bitop_width(const cc_expr_t *e) {
@@ -2587,6 +2962,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         }
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
             return lower_member_addr(tu, sf, ctx, vars, var_count, depth, e, diag);
+        }
+        if (e->member_is_bitfield) {
+            int ptrv = lower_member_addr(tu, sf, ctx, vars, var_count, depth, e, diag);
+            if (ptrv < 0) {
+                return -1;
+            }
+            return lower_bitfield_load_from_addr(sf, e, ptrv, diag);
         }
         long mem_size = type_size_bytes(e->value_type);
         int ptrv;
@@ -4199,6 +4581,38 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             return lower_builtin_ctz(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
+            if (emit_atomic_full_barrier(sf, diag) != 0) {
+                return -1;
+            }
+            return emit_const_i64_instr(sf, 0);
+        }
+        if (bk == BUILTIN_ATOMIC_THREAD_FENCE || bk == BUILTIN_ATOMIC_SIGNAL_FENCE) {
+            long mo = CC_ATOMIC_SEQ_CST;
+            int mov;
+
+            if (e->arg_count != 1 || e->args[0] == NULL) {
+                set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence lowering expects 1 argument"
+                                                                  : "__atomic_signal_fence lowering expects 1 argument");
+                return -1;
+            }
+            mov = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+            if (mov < 0) {
+                return -1;
+            }
+            if (eval_const_int_expr_simple(e->args[0], &mo) != 0) {
+                mo = CC_ATOMIC_SEQ_CST;
+            }
+            if (mo != CC_ATOMIC_RELAXED) {
+                if (bk == BUILTIN_ATOMIC_THREAD_FENCE) {
+                    if (emit_atomic_full_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
+                } else {
+                    if (emit_atomic_compiler_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
+                }
+            }
             return emit_const_i64_instr(sf, 0);
         }
         if (bk == BUILTIN_SYNC_LOCK_RELEASE) {
@@ -4228,6 +4642,9 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             if (mem_size <= 0) {
                 mem_size = g_pointer_size_bytes;
+            }
+            if (emit_atomic_compiler_barrier(sf, diag) != 0) {
+                return -1;
             }
             z = emit_const_i64_instr(sf, 0);
             if (z < 0) {
@@ -4260,6 +4677,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             int l_store = -1;
             int l_done = -1;
             long mem_size;
+            long memorder = CC_ATOMIC_SEQ_CST;
+            int need_pre_compiler = 0;
+            int need_post_compiler = 0;
+            int need_pre_full = 0;
+            int need_post_full = 0;
             cc_type_t elem_type;
             cc_ssa_instr_t bin;
             if (e->arg_count == 0 || e->args[0] == NULL) {
@@ -4285,6 +4707,58 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (mem_size <= 0) {
                 mem_size = g_pointer_size_bytes;
             }
+            if (bk == BUILTIN_ATOMIC_LOAD_N) {
+                if (e->arg_count >= 2 && e->args[1] != NULL) {
+                    if (lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag) < 0) {
+                        return -1;
+                    }
+                    if (eval_const_int_expr_simple(e->args[1], &memorder) != 0) {
+                        memorder = CC_ATOMIC_SEQ_CST;
+                    }
+                }
+            } else if (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N ||
+                       bk == BUILTIN_ATOMIC_STORE_N) {
+                if (e->arg_count >= 3 && e->args[2] != NULL) {
+                    if (lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag) < 0) {
+                        return -1;
+                    }
+                    if (eval_const_int_expr_simple(e->args[2], &memorder) != 0) {
+                        memorder = CC_ATOMIC_SEQ_CST;
+                    }
+                }
+            }
+            if (bk == BUILTIN_ATOMIC_LOAD_N) {
+                if (memorder == CC_ATOMIC_SEQ_CST) {
+                    need_pre_full = 1;
+                    need_post_full = 1;
+                } else if (memorder != CC_ATOMIC_RELAXED) {
+                    need_post_compiler = 1;
+                }
+            } else if (bk == BUILTIN_ATOMIC_STORE_N) {
+                if (memorder == CC_ATOMIC_SEQ_CST) {
+                    need_pre_full = 1;
+                    need_post_full = 1;
+                } else if (memorder != CC_ATOMIC_RELAXED) {
+                    need_pre_compiler = 1;
+                }
+            } else {
+                if (memorder == CC_ATOMIC_SEQ_CST) {
+                    need_pre_full = 1;
+                    need_post_full = 1;
+                } else if (memorder != CC_ATOMIC_RELAXED) {
+                    need_pre_compiler = 1;
+                    need_post_compiler = 1;
+                }
+            }
+            if (need_pre_full) {
+                if (emit_atomic_full_barrier(sf, diag) != 0) {
+                    return -1;
+                }
+            } else if (need_pre_compiler) {
+                if (emit_atomic_compiler_barrier(sf, diag) != 0) {
+                    return -1;
+                }
+            }
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_LOAD;
             in.dst = new_value(sf, type_to_val(elem_type));
@@ -4297,9 +4771,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             oldv = in.dst;
             if (bk == BUILTIN_ATOMIC_LOAD_N) {
-                if (e->arg_count >= 2 && e->args[1] != NULL &&
-                    lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[1], diag) < 0) {
-                    return -1;
+                if (need_post_full) {
+                    if (emit_atomic_full_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
+                } else if (need_post_compiler) {
+                    if (emit_atomic_compiler_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
                 }
                 return oldv;
             }
@@ -4313,13 +4792,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 rhsv = cast_value(sf, rhsv, type_to_val(elem_type), diag);
                 if (rhsv < 0) {
-                    return -1;
-                }
-            }
-            if (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N ||
-                bk == BUILTIN_ATOMIC_STORE_N) {
-                if (e->arg_count >= 3 && e->args[2] != NULL &&
-                    lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[2], diag) < 0) {
                     return -1;
                 }
             }
@@ -4343,6 +4815,15 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (push_instr(sf, in) != 0) {
                     return -1;
                 }
+                if (need_post_full) {
+                    if (emit_atomic_full_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
+                } else if (need_post_compiler) {
+                    if (emit_atomic_compiler_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
+                }
                 return bk == BUILTIN_SYNC_SUB_AND_FETCH ? newv : oldv;
             }
             if (bk == BUILTIN_SYNC_LOCK_TEST_AND_SET || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
@@ -4355,6 +4836,15 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 if (push_instr(sf, in) != 0) {
                     return -1;
                 }
+                if (need_post_full) {
+                    if (emit_atomic_full_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
+                } else if (need_post_compiler) {
+                    if (emit_atomic_compiler_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
+                }
                 return oldv;
             }
             if (bk == BUILTIN_ATOMIC_STORE_N) {
@@ -4366,6 +4856,15 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 in.imm = mem_size;
                 if (push_instr(sf, in) != 0) {
                     return -1;
+                }
+                if (need_post_full) {
+                    if (emit_atomic_full_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
+                } else if (need_post_compiler) {
+                    if (emit_atomic_compiler_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
                 }
                 return rhsv;
             }
@@ -4427,6 +4926,15 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 if (emit_label_instr(sf, l_done) != 0) {
                     return -1;
+                }
+                if (need_post_full) {
+                    if (emit_atomic_full_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
+                } else if (need_post_compiler) {
+                    if (emit_atomic_compiler_barrier(sf, diag) != 0) {
+                        return -1;
+                    }
                 }
                 return cmpv;
             }
@@ -4779,10 +5287,6 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->lhs != NULL && (e->lhs->kind == CC_EXPR_DEREF || e->lhs->kind == CC_EXPR_MEMBER)) {
             long mem_size = type_size_bytes_with_struct(tu, e->lhs->value_type, e->lhs->struct_id);
             int ptrv;
-            if (mem_size <= 0) {
-                set_diag(diag, "unsupported pointer store type size in lowering");
-                return -1;
-            }
             if (e->lhs->kind == CC_EXPR_DEREF) {
                 if (e->lhs->lhs == NULL) {
                     set_diag(diag, "malformed dereference assignment in lowering");
@@ -4797,6 +5301,13 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             ptrv = cast_value(sf, ptrv, CC_VAL_I64, diag);
             if (ptrv < 0) {
+                return -1;
+            }
+            if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
+                return lower_bitfield_store_to_addr(sf, e->lhs, ptrv, rhs, diag);
+            }
+            if (mem_size <= 0) {
+                set_diag(diag, "unsupported pointer store type size in lowering");
                 return -1;
             }
             rhs = normalize_float_value(sf, rhs, e->lhs->value_type, diag);
@@ -5065,6 +5576,40 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             ptrv = cast_value(sf, ptrv, CC_VAL_I64, diag);
             if (ptrv < 0) {
                 return -1;
+            }
+            if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
+                cur = lower_bitfield_load_from_addr(sf, e->lhs, ptrv, diag);
+                if (cur < 0) {
+                    return -1;
+                }
+                one = emit_const_i64_instr(sf, 1);
+                if (one < 0) {
+                    return -1;
+                }
+                one = cast_value(sf, one, want, diag);
+                if (one < 0) {
+                    return -1;
+                }
+                memset(&in, 0, sizeof(in));
+                in.op = (e->op == CC_BIN_SUB) ? CC_SSA_SUB : CC_SSA_ADD;
+                in.dst = new_value(sf, want);
+                in.lhs = cur;
+                in.rhs = one;
+                if (in.dst < 0 || push_instr(sf, in) != 0) {
+                    return -1;
+                }
+                nextv = in.dst;
+                nextv = normalize_integral_value(sf, nextv, e->value_type, diag);
+                if (nextv < 0) {
+                    return -1;
+                }
+                if (lower_bitfield_store_to_addr(sf, e->lhs, ptrv, nextv, diag) < 0) {
+                    return -1;
+                }
+                if (e->update_postfix) {
+                    return cur;
+                }
+                return nextv;
             }
             if (mem_size <= 0) {
                 set_diag(diag, "unsupported dereference update type size in lowering");

@@ -1670,6 +1670,35 @@ static const char *pick_generic_reg32(size_t idx) {
     return regs[idx % (sizeof(regs) / sizeof(regs[0]))];
 }
 
+static int reg_name_in_set(const char *reg, const char *const *set, size_t count) {
+    size_t i;
+    if (reg == NULL || set == NULL) {
+        return 0;
+    }
+    for (i = 0; i < count; ++i) {
+        if (set[i] != NULL && strcmp(reg, set[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static const char *pick_nonconflict_generic_reg(int is_64bit, size_t *idx, const char *const *forbid, size_t forbid_count) {
+    size_t start = *idx;
+    size_t probe = 0;
+    size_t max_try = is_64bit ? 6 : 6;
+
+    for (probe = 0; probe < max_try; ++probe) {
+        const char *reg = is_64bit ? pick_generic_reg64(start + probe) : pick_generic_reg32(start + probe);
+        if (!reg_name_in_set(reg, forbid, forbid_count)) {
+            *idx = start + probe + 1;
+            return reg;
+        }
+    }
+    *idx = start + 1;
+    return is_64bit ? pick_generic_reg64(start) : pick_generic_reg32(start);
+}
+
 static const char *const emit_regs64[] = {"%rax", "%rcx", "%rdx", "%rsi", "%rdi", "%r8", "%r9", "%r10", "%r11"};
 static const char *const emit_regs32[] = {"%eax", "%ecx", "%edx"};
 
@@ -1738,6 +1767,8 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
     const char **out_regs = NULL;
     int *out_write_back = NULL;
     int *out_tied_read = NULL;
+    const char **forbid_regs = NULL;
+    size_t forbid_count = 0;
     char *rendered = NULL;
 
     op_text = (char **)calloc(total, sizeof(*op_text));
@@ -1745,13 +1776,16 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
     out_regs = (const char **)calloc(out_n, sizeof(*out_regs));
     out_write_back = (int *)calloc(out_n, sizeof(*out_write_back));
     out_tied_read = (int *)calloc(out_n, sizeof(*out_tied_read));
+    forbid_regs = (const char **)calloc(out_n, sizeof(*forbid_regs));
     if ((total > 0 && (op_text == NULL || op_names == NULL)) ||
-        (out_n > 0 && (out_regs == NULL || out_write_back == NULL || out_tied_read == NULL))) {
+        (out_n > 0 &&
+         (out_regs == NULL || out_write_back == NULL || out_tied_read == NULL || forbid_regs == NULL))) {
         free(op_text);
         free(op_names);
         free(out_regs);
         free(out_write_back);
         free(out_tied_read);
+        free(forbid_regs);
         set_diag(diag, "out of memory preparing inline asm operands");
         return -1;
     }
@@ -1787,9 +1821,12 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
                 goto oom;
             }
         } else {
-            const char *reg = fixed != NULL ? fixed : (is_64bit ? pick_generic_reg64(reg_pick++) : pick_generic_reg32(reg_pick++));
+            const char *reg = fixed != NULL ? fixed : pick_nonconflict_generic_reg(is_64bit, &reg_pick, NULL, 0);
             out_regs[i] = reg;
             out_write_back[i] = 1;
+            if (c != NULL && strchr(c, '&') != NULL) {
+                forbid_regs[forbid_count++] = reg;
+            }
             op_text[i] = dup_cstr(reg);
             if (op_text[i] == NULL) {
                 goto oom;
@@ -1884,7 +1921,16 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
         }
         {
             const char *fixed = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
-            const char *reg = fixed != NULL ? fixed : (is_64bit ? pick_generic_reg64(reg_pick++) : pick_generic_reg32(reg_pick++));
+            const char *reg = NULL;
+            if (fixed != NULL) {
+                if (reg_name_in_set(fixed, forbid_regs, forbid_count)) {
+                    set_diag(diag, "asm input constraint conflicts with early-clobber output register");
+                    goto fail;
+                }
+                reg = fixed;
+            } else {
+                reg = pick_nonconflict_generic_reg(is_64bit, &reg_pick, forbid_regs, forbid_count);
+            }
             long off = slot_off(lay, v);
             op_text[slot] = dup_cstr(reg);
             if (op_text[slot] == NULL) {
@@ -1934,6 +1980,7 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
     free(out_regs);
     free(out_write_back);
     free(out_tied_read);
+    free(forbid_regs);
     return 0;
 
 oom:
@@ -1954,6 +2001,7 @@ fail:
     free(out_regs);
     free(out_write_back);
     free(out_tied_read);
+    free(forbid_regs);
     return -1;
 }
 

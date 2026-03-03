@@ -298,6 +298,12 @@ struct cc_expr {
     cc_binop_t op;
     int member_is_arrow;
     long member_offset;
+    int member_is_bitfield;
+    int member_bit_width;
+    int member_bit_offset;
+    int member_bit_storage_bits;
+    int member_bit_signed;
+    long member_bit_storage_size;
     cc_expr_t *lhs;
     cc_expr_t *rhs;
     cc_expr_t *third;
@@ -396,6 +402,12 @@ typedef struct {
     long array_dims[CC_MAX_ARRAY_DIMS];
     long offset;
     long size;
+    int is_bitfield;
+    int bit_width;
+    int bit_offset;
+    int bit_storage_bits;
+    int bit_signed;
+    long bit_storage_size;
 } cc_struct_member_t;
 
 typedef struct {

@@ -62,7 +62,15 @@ done
 echo "#define M40 1" >> "$MACRO_DEPTH"
 echo "int macro_depth = M0;" >> "$MACRO_DEPTH"
 ! "$CC_BIN" -E "$MACRO_DEPTH" -o /tmp/cc_pp_s3_macro.i
+! "$CC_BIN" -E -fpp-max-macro-depth=8 "$MACRO_DEPTH" -o /tmp/cc_pp_s3_macro_limit.i
 rm -f "$MACRO_DEPTH"
+
+TOK_LIMIT=/tmp/cc_pp_token_limit_$$.c
+echo "int tok = 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10 + 11 + 12;" > "$TOK_LIMIT"
+! "$CC_BIN" -E -fpp-max-tokens=8 "$TOK_LIMIT" -o /tmp/cc_pp_s3_token_limit.i
+rm -f "$TOK_LIMIT"
+
+! "$CC_BIN" -E -fpp-max-output-bytes=32 -I. pp_s3_main.c -o /tmp/cc_pp_s3_output_limit.i
 
 ln -sf "$CC_BIN" /tmp/cpp
 /tmp/cpp -DTESTVAL=1 driver_pp_input.c -o /tmp/cc_pp_cpp_mode.i

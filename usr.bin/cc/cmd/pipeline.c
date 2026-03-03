@@ -33,7 +33,11 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
     double t0 = 0.0;
 
     if (diag != NULL) {
-        diag->path[0] = '\0';
+        if (display_src != NULL && display_src[0] != '\0') {
+            snprintf(diag->path, sizeof(diag->path), "%s", display_src);
+        } else {
+            diag->path[0] = '\0';
+        }
         diag->line = 0;
         diag->col = 0;
         diag->error_count = 0;
@@ -59,6 +63,9 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
             snprintf(diag->message, sizeof(diag->message), "parser failed");
         }
         return -1;
+    }
+    if (diag != NULL && display_src != NULL && display_src[0] != '\0') {
+        snprintf(diag->path, sizeof(diag->path), "%s", display_src);
     }
     if (timings) {
         t_parse = now_seconds() - t0;

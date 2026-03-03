@@ -1,0 +1,7 @@
+run|match_simple.c
+run|match_variadic.c
+run|match_run_branch.c
+run|match_run_struct.c
+compile|match_compile_macro.c
+compile|match_fail_implicit_decl.c
+compile|match_fail_register_addr.c

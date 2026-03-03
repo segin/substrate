@@ -109,6 +109,7 @@ typedef struct {
     cc_type_t type;
     int type_struct_id;
     long array_len;
+    long size_bytes;
     int storage;
     int attr_flags;
     long attr_align;

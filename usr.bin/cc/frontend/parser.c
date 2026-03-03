@@ -199,6 +199,44 @@ static void diag_clear(cc_diag_t *d) {
     d->message[0] = '\0';
 }
 
+static void diag_print_source_line(const cc_diag_t *d) {
+    FILE *fp;
+    char buf[1024];
+    size_t cur = 1;
+    size_t i;
+    size_t col;
+    size_t len;
+
+    if (d == NULL || d->path[0] == '\0' || d->line == 0) {
+        return;
+    }
+    fp = fopen(d->path, "r");
+    if (fp == NULL) {
+        return;
+    }
+    while (cur < d->line && fgets(buf, sizeof(buf), fp) != NULL) {
+        cur++;
+    }
+    if (cur == d->line && fgets(buf, sizeof(buf), fp) != NULL) {
+        len = strlen(buf);
+        while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
+            buf[--len] = '\0';
+        }
+        fprintf(stderr, "    %s\n", buf);
+        col = d->col > 0 ? d->col : 1;
+        fprintf(stderr, "    ");
+        for (i = 1; i < col; ++i) {
+            if (i - 1 < len && buf[i - 1] == '\t') {
+                fputc('\t', stderr);
+            } else {
+                fputc(' ', stderr);
+            }
+        }
+        fprintf(stderr, "^\n");
+    }
+    fclose(fp);
+}
+
 static void diag_report_and_clear(cc_diag_t *d) {
     if (d == NULL || d->message[0] == '\0') {
         return;
@@ -206,6 +244,7 @@ static void diag_report_and_clear(cc_diag_t *d) {
     if (d->line != 0) {
         if (d->path[0] != '\0') {
             fprintf(stderr, "%s:%zu:%zu: error: %s\n", d->path, d->line, d->col, d->message);
+            diag_print_source_line(d);
         } else {
             fprintf(stderr, "cc:%zu:%zu: error: %s\n", d->line, d->col, d->message);
         }
@@ -1006,6 +1045,42 @@ static long parser_type_align_bytes(const parser_t *p, cc_type_t t, int struct_i
     return n;
 }
 
+static int parser_is_bitfield_base_type(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_BOOL:
+    case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
+    case CC_TYPE_UCHAR:
+    case CC_TYPE_SHORT:
+    case CC_TYPE_USHORT:
+    case CC_TYPE_INT:
+    case CC_TYPE_UINT:
+    case CC_TYPE_LONG:
+    case CC_TYPE_ULONG:
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ULONG_LONG:
+    case CC_TYPE_ENUM:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+static int parser_is_signed_int_type(cc_type_t t) {
+    switch (t) {
+    case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
+    case CC_TYPE_SHORT:
+    case CC_TYPE_INT:
+    case CC_TYPE_LONG:
+    case CC_TYPE_LONG_LONG:
+    case CC_TYPE_ENUM:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static long align_up_long(long x, long a) {
     long r;
     if (a <= 1) {
@@ -1024,6 +1099,10 @@ static int apply_struct_attrs(parser_t *p, int sid, const decl_attrs_t *attrs) {
     long forced_align = 0;
     long off = 0;
     long max_align = 1;
+    long bit_unit_off = -1;
+    long bit_unit_size = 0;
+    long bit_unit_align = 1;
+    int bit_unit_bits_used = 0;
     size_t i;
 
     if (sid < 0 || (size_t)sid >= p->struct_count) {
@@ -1046,6 +1125,10 @@ static int apply_struct_attrs(parser_t *p, int sid, const decl_attrs_t *attrs) {
     for (i = 0; i < sd->member_count; ++i) {
         long msize = sd->members[i].size;
         long malign = parser_type_align_bytes(p, sd->members[i].type, sd->members[i].type_struct_id);
+        int is_bitfield = sd->members[i].is_bitfield;
+        int bit_width = sd->members[i].bit_width;
+        long bit_storage_size = sd->members[i].bit_storage_size;
+        int bit_storage_bits = sd->members[i].bit_storage_bits;
         if (msize <= 0) {
             msize = parser_type_size_bytes(p, sd->members[i].type, sd->members[i].type_struct_id);
         }
@@ -1062,9 +1145,75 @@ static int apply_struct_attrs(parser_t *p, int sid, const decl_attrs_t *attrs) {
         if (packed) {
             malign = 1;
         }
-        off = align_up_long(off, malign);
-        sd->members[i].offset = off;
-        off += msize;
+        if (sd->is_union) {
+            sd->members[i].offset = 0;
+            if (is_bitfield) {
+                if (bit_storage_size <= 0) {
+                    bit_storage_size = msize;
+                }
+                if (bit_storage_size > off) {
+                    off = bit_storage_size;
+                }
+                sd->members[i].bit_offset = 0;
+            } else if (msize > off) {
+                off = msize;
+            }
+        } else if (is_bitfield) {
+            if (bit_storage_size <= 0) {
+                bit_storage_size = msize;
+            }
+            if (bit_storage_bits <= 0) {
+                bit_storage_bits = (int)(bit_storage_size * 8);
+            }
+            if (bit_width == 0) {
+                if (bit_unit_off >= 0) {
+                    off = bit_unit_off + bit_unit_size;
+                }
+                off = align_up_long(off, malign);
+                sd->members[i].offset = off;
+                sd->members[i].bit_offset = 0;
+                bit_unit_off = -1;
+                bit_unit_size = 0;
+                bit_unit_align = 1;
+                bit_unit_bits_used = 0;
+            } else {
+                int need_new_unit = 0;
+                if (bit_unit_off < 0 || bit_unit_size != bit_storage_size || bit_unit_align != malign ||
+                    bit_unit_bits_used + bit_width > bit_storage_bits) {
+                    need_new_unit = 1;
+                }
+                if (need_new_unit) {
+                    if (bit_unit_off >= 0) {
+                        off = bit_unit_off + bit_unit_size;
+                    }
+                    off = align_up_long(off, malign);
+                    bit_unit_off = off;
+                    bit_unit_size = bit_storage_size;
+                    bit_unit_align = malign;
+                    bit_unit_bits_used = 0;
+                }
+                sd->members[i].offset = bit_unit_off;
+                sd->members[i].bit_offset = bit_unit_bits_used;
+                bit_unit_bits_used += bit_width;
+                {
+                    long end_off = bit_unit_off + bit_unit_size;
+                    if (end_off > off) {
+                        off = end_off;
+                    }
+                }
+            }
+        } else {
+            if (bit_unit_off >= 0) {
+                off = bit_unit_off + bit_unit_size;
+                bit_unit_off = -1;
+                bit_unit_size = 0;
+                bit_unit_align = 1;
+                bit_unit_bits_used = 0;
+            }
+            off = align_up_long(off, malign);
+            sd->members[i].offset = off;
+            off += msize;
+        }
         if (malign > max_align) {
             max_align = malign;
         }
@@ -1158,7 +1307,8 @@ static int struct_ensure(parser_t *p, const char *tag, size_t len, int for_defin
 
 static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t type, int type_struct_id,
                               long array_len, int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], long offset,
-                              long size) {
+                              long size, int is_bitfield, int bit_width, int bit_offset, int bit_storage_bits,
+                              int bit_signed, long bit_storage_size) {
     cc_struct_member_t *next;
     cc_struct_def_t *sd;
     char *dup;
@@ -1193,6 +1343,12 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
     }
     sd->members[sd->member_count].offset = offset;
     sd->members[sd->member_count].size = size;
+    sd->members[sd->member_count].is_bitfield = is_bitfield;
+    sd->members[sd->member_count].bit_width = bit_width;
+    sd->members[sd->member_count].bit_offset = bit_offset;
+    sd->members[sd->member_count].bit_storage_bits = bit_storage_bits;
+    sd->members[sd->member_count].bit_signed = bit_signed;
+    sd->members[sd->member_count].bit_storage_size = bit_storage_size;
     sd->member_count++;
     return 0;
 }
@@ -1947,6 +2103,10 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             size_t tag_len = 0;
             long off = 0;
             long max_align = 1;
+            long bit_unit_off = -1;
+            long bit_unit_size = 0;
+            long bit_unit_align = 1;
+            int bit_unit_bits_used = 0;
             int is_union = (p->tok.kind == TOK_KW_UNION);
             decl_attrs_t struct_attrs;
             decl_attrs_reset(&struct_attrs);
@@ -2070,6 +2230,11 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     long malign;
                     long moff;
                     int is_bitfield = 0;
+                    int bit_width = -1;
+                    int bit_offset = 0;
+                    int bit_storage_bits = 0;
+                    int bit_signed = 0;
+                    long bit_storage_size = 0;
                     int skip_member_decl = 0;
                     decl_attrs_t mdecl_attrs;
                     decl_attrs_reset(&mdecl_attrs);
@@ -2142,8 +2307,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         }
                     }
                     if (p->tok.kind == TOK_COLON) {
-                        int paren_depth = 0;
-                        int brack_depth = 0;
+                        cc_expr_t *bw_expr = NULL;
+                        long bw = 0;
                         is_bitfield = 1;
                         if (next_tok(p) != 0) {
                             free(mname);
@@ -2154,30 +2319,24 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             free(mname);
                             return -1;
                         }
-                        while (!(paren_depth == 0 && brack_depth == 0 &&
-                                 (p->tok.kind == TOK_COMMA || p->tok.kind == TOK_SEMI))) {
-                            if (p->tok.kind == TOK_EOF) {
-                                set_diag(p->diag, p->tok.line, p->tok.col, "unterminated bit-field width");
-                                free(mname);
-                                return -1;
-                            }
-                            if (p->tok.kind == TOK_LPAREN) {
-                                paren_depth++;
-                            } else if (p->tok.kind == TOK_RPAREN) {
-                                if (paren_depth > 0) {
-                                    paren_depth--;
-                                }
-                            } else if (p->tok.kind == TOK_LBRACK) {
-                                brack_depth++;
-                            } else if (p->tok.kind == TOK_RBRACK) {
-                                if (brack_depth > 0) {
-                                    brack_depth--;
-                                }
-                            }
-                            if (next_tok(p) != 0) {
-                                free(mname);
-                                return -1;
-                            }
+                        bw_expr = parse_cond(p);
+                        if (bw_expr == NULL) {
+                            free(mname);
+                            return -1;
+                        }
+                        if (eval_const_array_bound_expr(p, bw_expr, &bw) != 0 || bw < 0 || bw > INT_MAX) {
+                            set_diag(p->diag, p->tok.line, p->tok.col,
+                                     "bit-field width must be a non-negative integer constant");
+                            free_expr(bw_expr);
+                            free(mname);
+                            return -1;
+                        }
+                        bit_width = (int)bw;
+                        free_expr(bw_expr);
+                        if (p->tok.kind != TOK_COMMA && p->tok.kind != TOK_SEMI) {
+                            set_diag(p->diag, p->tok.line, p->tok.col, "malformed bit-field width expression");
+                            free(mname);
+                            return -1;
                         }
                     } else {
                         while (p->tok.kind == TOK_LBRACK) {
@@ -2243,60 +2402,151 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     if ((mdecl_attrs.flags & CC_ATTR_ALIGNED) != 0 && mdecl_attrs.align > malign) {
                         malign = mdecl_attrs.align;
                     }
-                    if (arr_saw) {
-                        /*
-                         * Base typedef arrays (e.g. `typedef T A[N]; A m;`) already
-                         * carry one pointer level in mtype. Only apply an extra
-                         * pointer level when this declarator adds bracket suffixes.
-                         */
-                        if (mbase_arr_ndim == 0 || arr_suffix_ndim > 0) {
-                            cc_type_t ptype = ptr_of_type(mtype);
-                            if (ptype != CC_TYPE_VOID) {
-                                mtype = ptype;
+
+                    if (is_bitfield) {
+                        if (!parser_is_bitfield_base_type(mtype)) {
+                            set_diag(p->diag, p->tok.line, p->tok.col, "bit-field base type must be an integer type");
+                            free(mname);
+                            decl_attrs_clear(&mdecl_attrs);
+                            return -1;
+                        }
+                        if (arr_saw) {
+                            set_diag(p->diag, p->tok.line, p->tok.col, "bit-field cannot be declared as an array");
+                            free(mname);
+                            decl_attrs_clear(&mdecl_attrs);
+                            return -1;
+                        }
+                        if (bit_width == 0 && mname != NULL) {
+                            set_diag(p->diag, p->tok.line, p->tok.col, "zero-width bit-field cannot be named");
+                            free(mname);
+                            decl_attrs_clear(&mdecl_attrs);
+                            return -1;
+                        }
+                        bit_storage_size = parser_type_size_bytes(p, mtype, mstruct);
+                        if (bit_storage_size <= 0 || bit_storage_size > 8) {
+                            set_diag(p->diag, p->tok.line, p->tok.col, "unsupported bit-field storage type size");
+                            free(mname);
+                            decl_attrs_clear(&mdecl_attrs);
+                            return -1;
+                        }
+                        bit_storage_bits = (int)(bit_storage_size * 8);
+                        if (bit_width > bit_storage_bits) {
+                            set_diag(p->diag, p->tok.line, p->tok.col, "bit-field width exceeds storage type width");
+                            free(mname);
+                            decl_attrs_clear(&mdecl_attrs);
+                            return -1;
+                        }
+                        bit_signed = parser_is_signed_int_type(mtype) ? 1 : 0;
+                        msize = bit_storage_size;
+
+                        if (is_union) {
+                            moff = 0;
+                            bit_offset = 0;
+                            if (bit_width == 0) {
+                                msize = 0;
+                            }
+                        } else {
+                            if (bit_width == 0) {
+                                if (bit_unit_off >= 0) {
+                                    off = bit_unit_off + bit_unit_size;
+                                }
+                                off = align_up_long(off, malign);
+                                bit_unit_off = -1;
+                                bit_unit_size = 0;
+                                bit_unit_align = 1;
+                                bit_unit_bits_used = 0;
+                                moff = off;
+                                msize = 0;
                             } else {
-                                mtype = CC_TYPE_PTR_VOID;
+                                int need_new_unit = 0;
+                                if (bit_unit_off < 0 || bit_unit_size != bit_storage_size || bit_unit_align != malign ||
+                                    bit_unit_bits_used + bit_width > bit_storage_bits) {
+                                    need_new_unit = 1;
+                                }
+                                if (need_new_unit) {
+                                    if (bit_unit_off >= 0) {
+                                        off = bit_unit_off + bit_unit_size;
+                                    }
+                                    off = align_up_long(off, malign);
+                                    bit_unit_off = off;
+                                    bit_unit_size = bit_storage_size;
+                                    bit_unit_align = malign;
+                                    bit_unit_bits_used = 0;
+                                }
+                                moff = bit_unit_off;
+                                bit_offset = bit_unit_bits_used;
+                                bit_unit_bits_used += bit_width;
+                                {
+                                    long end_off = bit_unit_off + bit_unit_size;
+                                    if (end_off > off) {
+                                        off = end_off;
+                                    }
+                                }
                             }
                         }
-                        if (arr_unsized) {
-                            if (is_union) {
-                                set_diag(p->diag, p->tok.line, p->tok.col,
-                                         "flexible array member is not allowed in unions");
-                                decl_attrs_clear(&mdecl_attrs);
-                                return -1;
-                            }
-                            if (is_bitfield || mname == NULL) {
-                                set_diag(p->diag, p->tok.line, p->tok.col,
-                                         "flexible array member must be a named non-bitfield member");
-                                decl_attrs_clear(&mdecl_attrs);
-                                return -1;
-                            }
-                            if (p->tok.kind == TOK_COMMA) {
-                                set_diag(p->diag, p->tok.line, p->tok.col,
-                                         "flexible array member must terminate the declaration");
-                                decl_attrs_clear(&mdecl_attrs);
-                                return -1;
-                            }
-                            if (p->structs[sid].member_count == 0) {
-                                set_diag(p->diag, p->tok.line, p->tok.col,
-                                         "flexible array member requires at least one prior named member");
-                                decl_attrs_clear(&mdecl_attrs);
-                                return -1;
-                            }
-                            msize = 0;
-                            p->structs[sid].has_flexible_array = 1;
-                        } else if (arr_count > 0) {
-                            msize *= arr_count;
-                        } else if (arr_count == 0) {
-                            msize = 0;
+                    } else {
+                        if (!is_union && bit_unit_off >= 0) {
+                            off = bit_unit_off + bit_unit_size;
+                            bit_unit_off = -1;
+                            bit_unit_size = 0;
+                            bit_unit_align = 1;
+                            bit_unit_bits_used = 0;
                         }
+                        if (arr_saw) {
+                            /*
+                             * Base typedef arrays (e.g. `typedef T A[N]; A m;`) already
+                             * carry one pointer level in mtype. Only apply an extra
+                             * pointer level when this declarator adds bracket suffixes.
+                             */
+                            if (mbase_arr_ndim == 0 || arr_suffix_ndim > 0) {
+                                cc_type_t ptype = ptr_of_type(mtype);
+                                if (ptype != CC_TYPE_VOID) {
+                                    mtype = ptype;
+                                } else {
+                                    mtype = CC_TYPE_PTR_VOID;
+                                }
+                            }
+                            if (arr_unsized) {
+                                if (is_union) {
+                                    set_diag(p->diag, p->tok.line, p->tok.col,
+                                             "flexible array member is not allowed in unions");
+                                    decl_attrs_clear(&mdecl_attrs);
+                                    return -1;
+                                }
+                                if (mname == NULL) {
+                                    set_diag(p->diag, p->tok.line, p->tok.col,
+                                             "flexible array member must be a named member");
+                                    decl_attrs_clear(&mdecl_attrs);
+                                    return -1;
+                                }
+                                if (p->tok.kind == TOK_COMMA) {
+                                    set_diag(p->diag, p->tok.line, p->tok.col,
+                                             "flexible array member must terminate the declaration");
+                                    decl_attrs_clear(&mdecl_attrs);
+                                    return -1;
+                                }
+                                if (p->structs[sid].member_count == 0) {
+                                    set_diag(p->diag, p->tok.line, p->tok.col,
+                                             "flexible array member requires at least one prior named member");
+                                    decl_attrs_clear(&mdecl_attrs);
+                                    return -1;
+                                }
+                                msize = 0;
+                                p->structs[sid].has_flexible_array = 1;
+                            } else if (arr_count > 0) {
+                                msize *= arr_count;
+                            } else if (arr_count == 0) {
+                                msize = 0;
+                            }
+                        }
+                        moff = is_union ? 0 : align_up_long(off, malign);
                     }
-                    if (is_bitfield && p->tok.kind == TOK_COMMA) {
-                        msize = 0;
-                    }
-                    moff = is_union ? 0 : align_up_long(off, malign);
+
                     if (!skip_member_decl && mname != NULL) {
                         if (struct_member_push(p, sid, mname, mtype, mstruct, arr_saw ? arr_count : -1,
-                                               arr_saw ? arr_ndim : 0, arr_saw ? arr_dims : NULL, moff, msize) != 0) {
+                                               arr_saw ? arr_ndim : 0, arr_saw ? arr_dims : NULL, moff, msize,
+                                               is_bitfield, bit_width, bit_offset, bit_storage_bits, bit_signed,
+                                               bit_storage_size) != 0) {
                             free(mname);
                             decl_attrs_clear(&mdecl_attrs);
                             return -1;
@@ -2309,18 +2559,30 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         for (ai = 0; ai < anon->member_count; ++ai) {
                             const cc_struct_member_t *am = &anon->members[ai];
                             if (struct_member_push(p, sid, am->name, am->type, am->type_struct_id, am->array_len,
-                                                   am->array_ndim, am->array_dims, moff + am->offset, am->size) != 0) {
+                                                   am->array_ndim, am->array_dims, moff + am->offset, am->size,
+                                                   am->is_bitfield, am->bit_width, am->bit_offset, am->bit_storage_bits,
+                                                   am->bit_signed, am->bit_storage_size) != 0) {
                                 decl_attrs_clear(&mdecl_attrs);
                                 return -1;
                             }
                         }
                     }
                     if (is_union) {
-                        if (msize > off) {
+                        if (is_bitfield) {
+                            if (bit_storage_size > off) {
+                                off = bit_storage_size;
+                            }
+                        } else if (msize > off) {
                             off = msize;
                         }
-                    } else if (msize > 0) {
-                        off = moff + msize;
+                    } else if (!is_bitfield) {
+                        if (msize > 0) {
+                            off = moff + msize;
+                        }
+                    } else if (bit_width == 0) {
+                        if (moff > off) {
+                            off = moff;
+                        }
                     }
                     if (malign > max_align) {
                         max_align = malign;
@@ -6527,6 +6789,12 @@ static cc_expr_t *clone_expr(const cc_expr_t *src) {
     dst->op = src->op;
     dst->member_is_arrow = src->member_is_arrow;
     dst->member_offset = src->member_offset;
+    dst->member_is_bitfield = src->member_is_bitfield;
+    dst->member_bit_width = src->member_bit_width;
+    dst->member_bit_offset = src->member_bit_offset;
+    dst->member_bit_storage_bits = src->member_bit_storage_bits;
+    dst->member_bit_signed = src->member_bit_signed;
+    dst->member_bit_storage_size = src->member_bit_storage_size;
     dst->update_postfix = src->update_postfix;
     dst->aux_type = src->aux_type;
     dst->aux_struct_id = src->aux_struct_id;

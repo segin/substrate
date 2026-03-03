@@ -16,6 +16,7 @@ static int g_warn_all = 0;
 static int g_warn_error = 0;
 static int g_pedantic = 0;
 static int g_pedantic_errors = 0;
+static int g_std_c17 = 0;
 static int g_std_c23 = 0;
 static int g_gnu89_inline_override = -1;
 static size_t g_diag_ctx_line = 0;
@@ -41,6 +42,17 @@ static int std_mode_is_c23_or_newer(const char *std_mode) {
     }
     if (strcmp(std_mode, "c23") == 0 || strcmp(std_mode, "gnu23") == 0 || strcmp(std_mode, "c2x") == 0 ||
         strcmp(std_mode, "gnu2x") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int std_mode_is_c17_or_newer(const char *std_mode) {
+    if (std_mode == NULL || std_mode[0] == '\0') {
+        return 0;
+    }
+    if (strcmp(std_mode, "c17") == 0 || strcmp(std_mode, "gnu17") == 0 || strcmp(std_mode, "c18") == 0 ||
+        strcmp(std_mode, "gnu18") == 0 || std_mode_is_c23_or_newer(std_mode)) {
         return 1;
     }
     return 0;
@@ -82,6 +94,44 @@ static void sema_diag_clear(cc_diag_t *d) {
     d->message[0] = '\0';
 }
 
+static void sema_diag_print_source_line(const cc_diag_t *d) {
+    FILE *fp;
+    char buf[1024];
+    size_t cur = 1;
+    size_t i;
+    size_t col;
+    size_t len;
+
+    if (d == NULL || d->path[0] == '\0' || d->line == 0) {
+        return;
+    }
+    fp = fopen(d->path, "r");
+    if (fp == NULL) {
+        return;
+    }
+    while (cur < d->line && fgets(buf, sizeof(buf), fp) != NULL) {
+        cur++;
+    }
+    if (cur == d->line && fgets(buf, sizeof(buf), fp) != NULL) {
+        len = strlen(buf);
+        while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
+            buf[--len] = '\0';
+        }
+        fprintf(stderr, "    %s\n", buf);
+        col = d->col > 0 ? d->col : 1;
+        fprintf(stderr, "    ");
+        for (i = 1; i < col; ++i) {
+            if (i - 1 < len && buf[i - 1] == '\t') {
+                fputc('\t', stderr);
+            } else {
+                fputc(' ', stderr);
+            }
+        }
+        fprintf(stderr, "^\n");
+    }
+    fclose(fp);
+}
+
 static void sema_diag_report_and_clear(cc_diag_t *d) {
     if (d == NULL || d->message[0] == '\0') {
         return;
@@ -93,6 +143,7 @@ static void sema_diag_report_and_clear(cc_diag_t *d) {
     if (d->line != 0) {
         if (d->path[0] != '\0') {
             fprintf(stderr, "%s:%zu:%zu: error: %s\n", d->path, d->line, d->col, d->message);
+            sema_diag_print_source_line(d);
         } else {
             fprintf(stderr, "cc:%zu:%zu: error: %s\n", d->line, d->col, d->message);
         }
@@ -365,6 +416,21 @@ static int asm_constraint_is_imm(const char *c) {
 
 static int asm_constraint_is_flag_output(const char *c) {
     return c != NULL && strncmp(c, "=@cc", 4) == 0;
+}
+
+static int asm_constraint_match_output(const char *c) {
+    long n = 0;
+    size_t i;
+    if (c == NULL || c[0] < '0' || c[0] > '9') {
+        return -1;
+    }
+    for (i = 0; c[i] >= '0' && c[i] <= '9'; ++i) {
+        n = n * 10 + (long)(c[i] - '0');
+    }
+    if (c[i] != '\0' || n < 0) {
+        return -1;
+    }
+    return (int)n;
 }
 
 static int asm_validate_constraint(const char *c, int is_output, size_t out_count, int pointer_size, cc_diag_t *diag) {
@@ -850,7 +916,10 @@ static int struct_members_compatible(const cc_translation_unit_t *tu, const cc_s
             return 0;
         }
         if (lm->type != rm->type || lm->array_len != rm->array_len || lm->array_ndim != rm->array_ndim ||
-            lm->offset != rm->offset || lm->size != rm->size) {
+            lm->offset != rm->offset || lm->size != rm->size || lm->is_bitfield != rm->is_bitfield ||
+            lm->bit_width != rm->bit_width || lm->bit_offset != rm->bit_offset ||
+            lm->bit_storage_bits != rm->bit_storage_bits || lm->bit_signed != rm->bit_signed ||
+            lm->bit_storage_size != rm->bit_storage_size) {
             return 0;
         }
         if (memcmp(lm->array_dims, rm->array_dims, sizeof(lm->array_dims)) != 0) {
@@ -1552,23 +1621,25 @@ typedef enum {
     BUILTIN_ATOMIC_FETCH_SUB,
     BUILTIN_ATOMIC_EXCHANGE_N,
     BUILTIN_ATOMIC_LOAD_N,
-    BUILTIN_ATOMIC_STORE_N
+    BUILTIN_ATOMIC_STORE_N,
+    BUILTIN_ATOMIC_THREAD_FENCE,
+    BUILTIN_ATOMIC_SIGNAL_FENCE
 } builtin_kind_t;
 
 static builtin_kind_t builtin_kind(const char *name) {
     if (name == NULL) {
         return BUILTIN_NONE;
     }
-    if (strcmp(name, "__builtin_va_start") == 0) {
+    if (strcmp(name, "__builtin_va_start") == 0 || strcmp(name, "__builtin_c23_va_start") == 0) {
         return BUILTIN_VA_START;
     }
-    if (strcmp(name, "__builtin_va_end") == 0) {
+    if (strcmp(name, "__builtin_va_end") == 0 || strcmp(name, "__builtin_c23_va_end") == 0) {
         return BUILTIN_VA_END;
     }
-    if (strcmp(name, "__builtin_va_copy") == 0) {
+    if (strcmp(name, "__builtin_va_copy") == 0 || strcmp(name, "__builtin_c23_va_copy") == 0) {
         return BUILTIN_VA_COPY;
     }
-    if (strcmp(name, "__builtin_va_arg") == 0) {
+    if (strcmp(name, "__builtin_va_arg") == 0 || strcmp(name, "__builtin_c23_va_arg") == 0) {
         return BUILTIN_VA_ARG;
     }
     if (strcmp(name, "__builtin_expect") == 0) {
@@ -1687,6 +1758,12 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__atomic_store_n") == 0) {
         return BUILTIN_ATOMIC_STORE_N;
+    }
+    if (strcmp(name, "__atomic_thread_fence") == 0) {
+        return BUILTIN_ATOMIC_THREAD_FENCE;
+    }
+    if (strcmp(name, "__atomic_signal_fence") == 0) {
+        return BUILTIN_ATOMIC_SIGNAL_FENCE;
     }
     return BUILTIN_NONE;
 }
@@ -1879,6 +1956,63 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
     default:
         return -1;
     }
+}
+
+enum {
+    CC_ATOMIC_RELAXED = 0,
+    CC_ATOMIC_CONSUME = 1,
+    CC_ATOMIC_ACQUIRE = 2,
+    CC_ATOMIC_RELEASE = 3,
+    CC_ATOMIC_ACQ_REL = 4,
+    CC_ATOMIC_SEQ_CST = 5
+};
+
+static int atomic_memorder_is_valid(long mo) {
+    return mo >= CC_ATOMIC_RELAXED && mo <= CC_ATOMIC_SEQ_CST;
+}
+
+static int atomic_memorder_valid_for_load(long mo) {
+    return mo == CC_ATOMIC_RELAXED || mo == CC_ATOMIC_CONSUME || mo == CC_ATOMIC_ACQUIRE ||
+           mo == CC_ATOMIC_SEQ_CST;
+}
+
+static int atomic_memorder_valid_for_store(long mo) {
+    return mo == CC_ATOMIC_RELAXED || mo == CC_ATOMIC_RELEASE || mo == CC_ATOMIC_SEQ_CST;
+}
+
+static int atomic_memorder_check_arg(const cc_translation_unit_t *tu, cc_expr_t *arg, const char *builtin_name,
+                                     const char *op_kind, int allow_load_orders, int allow_store_orders,
+                                     cc_diag_t *diag) {
+    long mo = -1;
+    char msg[192];
+
+    if (arg == NULL) {
+        snprintf(msg, sizeof(msg), "%s %s memory-order argument is missing", builtin_name, op_kind);
+        set_diag(diag, msg);
+        return -1;
+    }
+    if (eval_const_int_expr(tu, arg, &mo) != 0) {
+        snprintf(msg, sizeof(msg), "%s %s memory-order argument must be an integer constant expression", builtin_name,
+                 op_kind);
+        set_diag(diag, msg);
+        return -1;
+    }
+    if (!atomic_memorder_is_valid(mo)) {
+        snprintf(msg, sizeof(msg), "%s %s memory-order argument must be in range [0,5]", builtin_name, op_kind);
+        set_diag(diag, msg);
+        return -1;
+    }
+    if (allow_load_orders && !atomic_memorder_valid_for_load(mo)) {
+        snprintf(msg, sizeof(msg), "%s load memory order must be relaxed/consume/acquire/seq_cst", builtin_name);
+        set_diag(diag, msg);
+        return -1;
+    }
+    if (allow_store_orders && !atomic_memorder_valid_for_store(mo)) {
+        snprintf(msg, sizeof(msg), "%s store memory order must be relaxed/release/seq_cst", builtin_name);
+        set_diag(diag, msg);
+        return -1;
+    }
+    return 0;
 }
 
 static int check_struct_initializer(const cc_translation_unit_t *tu, const char *name, int struct_id, cc_expr_t *init,
@@ -2092,6 +2226,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         e->value_type = m->type;
         e->struct_id = m->type_struct_id;
         e->member_offset = m->offset;
+        e->member_is_bitfield = m->is_bitfield;
+        e->member_bit_width = m->bit_width;
+        e->member_bit_offset = m->bit_offset;
+        e->member_bit_storage_bits = m->bit_storage_bits;
+        e->member_bit_signed = m->bit_signed;
+        e->member_bit_storage_size = m->bit_storage_size;
         expr_set_array_meta_decl(e, m->array_len, m->array_ndim, m->array_dims);
         return 0;
     }
@@ -2212,6 +2352,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         }
         if (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB) {
             if (e->op == CC_BIN_SUB && is_pointer_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
+                if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID || ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
+                    if (g_pedantic &&
+                        emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
+                        return -1;
+                    }
+                }
                 if (!can_convert(e->lhs->value_type, e->rhs->value_type) &&
                     !can_convert(e->rhs->value_type, e->lhs->value_type)) {
                     set_diag(diag, "incompatible pointer types in subtraction");
@@ -2222,12 +2368,24 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return 0;
             }
             if (is_pointer_type(e->lhs->value_type) && is_integral_type(e->rhs->value_type)) {
+                if (ptr_base_type(e->lhs->value_type) == CC_TYPE_VOID) {
+                    if (g_pedantic &&
+                        emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
+                        return -1;
+                    }
+                }
                 e->value_type = e->lhs->value_type;
                 e->struct_id = e->lhs->struct_id;
                 expr_copy_array_meta(e, e->lhs);
                 return 0;
             }
             if (e->op == CC_BIN_ADD && is_integral_type(e->lhs->value_type) && is_pointer_type(e->rhs->value_type)) {
+                if (ptr_base_type(e->rhs->value_type) == CC_TYPE_VOID) {
+                    if (g_pedantic &&
+                        emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
+                        return -1;
+                    }
+                }
                 e->value_type = e->rhs->value_type;
                 e->struct_id = e->rhs->struct_id;
                 expr_copy_array_meta(e, e->rhs);
@@ -2638,6 +2796,29 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = -1;
             return 0;
         }
+        if (bk == BUILTIN_ATOMIC_THREAD_FENCE || bk == BUILTIN_ATOMIC_SIGNAL_FENCE) {
+            const char *nm = bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence" : "__atomic_signal_fence";
+            if (e->arg_count != 1) {
+                set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE ? "__atomic_thread_fence expects exactly 1 argument"
+                                                                  : "__atomic_signal_fence expects exactly 1 argument");
+                return -1;
+            }
+            if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!is_integral_type(e->args[0]->value_type)) {
+                set_diag(diag, bk == BUILTIN_ATOMIC_THREAD_FENCE
+                                   ? "__atomic_thread_fence memory-order argument must be integral"
+                                   : "__atomic_signal_fence memory-order argument must be integral");
+                return -1;
+            }
+            if (atomic_memorder_check_arg(tu, e->args[0], nm, "fence", 0, 0, diag) != 0) {
+                return -1;
+            }
+            e->value_type = CC_TYPE_VOID;
+            e->struct_id = -1;
+            return 0;
+        }
         if (bk == BUILTIN_SYNC_LOCK_RELEASE) {
             if (e->arg_count != 1) {
                 set_diag(diag, "__sync_lock_release expects exactly 1 argument");
@@ -2686,6 +2867,18 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 set_diag(diag, "atomic fetch/exchange value type mismatch");
                 return -1;
             }
+            if (bk == BUILTIN_ATOMIC_FETCH_ADD || bk == BUILTIN_ATOMIC_FETCH_SUB || bk == BUILTIN_ATOMIC_EXCHANGE_N) {
+                const char *nm = bk == BUILTIN_ATOMIC_EXCHANGE_N
+                                     ? "__atomic_exchange_n"
+                                     : (bk == BUILTIN_ATOMIC_FETCH_ADD ? "__atomic_fetch_add" : "__atomic_fetch_sub");
+                if (!is_integral_type(e->args[2]->value_type)) {
+                    set_diag(diag, "atomic fetch/exchange memory-order argument must be integral");
+                    return -1;
+                }
+                if (atomic_memorder_check_arg(tu, e->args[2], nm, "operation", 0, 0, diag) != 0) {
+                    return -1;
+                }
+            }
             e->value_type = elem_type;
             e->struct_id = -1;
             return 0;
@@ -2733,6 +2926,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             if (elem_type == CC_TYPE_VOID) {
                 elem_type = CC_TYPE_INT;
             }
+            if (!is_integral_type(e->args[1]->value_type)) {
+                set_diag(diag, "__atomic_load_n memory-order argument must be integral");
+                return -1;
+            }
+            if (atomic_memorder_check_arg(tu, e->args[1], "__atomic_load_n", "load", 1, 0, diag) != 0) {
+                return -1;
+            }
             e->value_type = elem_type;
             e->struct_id = -1;
             return 0;
@@ -2757,6 +2957,13 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             }
             if (!can_convert(elem_type, e->args[1]->value_type)) {
                 set_diag(diag, "__atomic_store_n value type mismatch");
+                return -1;
+            }
+            if (!is_integral_type(e->args[2]->value_type)) {
+                set_diag(diag, "__atomic_store_n memory-order argument must be integral");
+                return -1;
+            }
+            if (atomic_memorder_check_arg(tu, e->args[2], "__atomic_store_n", "store", 0, 1, diag) != 0) {
                 return -1;
             }
             e->value_type = CC_TYPE_VOID;
@@ -3058,6 +3265,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
             return -1;
         }
+        if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
+            set_diag(diag, "cannot take address of bit-field");
+            return -1;
+        }
         if (e->lhs->kind == CC_EXPR_DEREF) {
             e->value_type = e->lhs->lhs != NULL ? e->lhs->lhs->value_type : CC_TYPE_VOID;
             if (!is_pointer_type(e->value_type)) {
@@ -3195,7 +3406,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             return -1;
         }
         if (is_pointer_type(t)) {
-            /* GNU-style extension: treat void* increments as byte-wise. */
+            if (ptr_base_type(t) == CC_TYPE_VOID) {
+                if (g_pedantic &&
+                    emit_warning(diag, e->line, e->col, "arithmetic on 'void *' is a GNU extension", 1) != 0) {
+                    return -1;
+                }
+            }
         } else if (!is_numeric_type(t)) {
             set_diag(diag, "++/-- currently require numeric or pointer scalar operands");
             return -1;
@@ -3312,6 +3528,10 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
     case CC_EXPR_SIZEOF:
         if (e->lhs != NULL) {
             if (check_expr(tu, e->lhs, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (e->lhs->kind == CC_EXPR_MEMBER && e->lhs->member_is_bitfield) {
+                set_diag(diag, "sizeof cannot be applied to bit-field");
                 return -1;
             }
             if (type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id) < 0) {
@@ -4044,6 +4264,12 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 set_diag(diag, "multiple storage-class specifiers in local declaration");
                 return -1;
             }
+            if (g_std_c17 && (s->storage & CC_STORAGE_REGISTER) != 0) {
+                if (emit_warning(diag, s->line, s->col, "'register' storage-class specifier is obsolescent in C17", 0) !=
+                    0) {
+                    return -1;
+                }
+            }
             if ((s->storage & CC_STORAGE_INLINE) != 0) {
                 set_diag(diag, "inline is only valid on function declarations");
                 return -1;
@@ -4258,6 +4484,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
         }
         for (i2 = 0; i2 < s->asm_input_count; ++i2) {
+            int tied_out = -1;
             if (s->asm_inputs[i2].expr == NULL) {
                 set_diag(diag, "asm input operand requires an expression");
                 return -1;
@@ -4272,6 +4499,12 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
             }
             if (asm_validate_constraint(s->asm_inputs[i2].constraint, 0, s->asm_output_count, g_pointer_size_bytes,
                                         diag) != 0) {
+                return -1;
+            }
+            tied_out = asm_constraint_match_output(s->asm_inputs[i2].constraint);
+            if (tied_out >= 0 && (size_t)tied_out < s->asm_output_count && s->asm_outputs[tied_out].constraint != NULL &&
+                strchr(s->asm_outputs[tied_out].constraint, '&') != NULL) {
+                set_diag(diag, "asm early-clobber output cannot be tied to an input operand");
                 return -1;
             }
         }
@@ -4943,6 +5176,13 @@ fail_global_item:
             }
             goto fail_decl;
         }
+        if (g_std_c17 && f->has_body && !f->has_prototype) {
+            char msg[256];
+            snprintf(msg, sizeof(msg), "old-style function definition is obsolescent in C17: %s", f->name);
+            if (emit_warning(diag, f->line, f->col, msg, 0) != 0) {
+                goto fail_decl;
+            }
+        }
         if ((f->attr_flags & CC_ATTR_NORETURN) != 0 && !(f->ret_type == CC_TYPE_VOID && f->ret_struct_id < 0)) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "noreturn function '%s' must have void return type",
@@ -5070,6 +5310,12 @@ fail_decl:
                 set_diag(diag, "void is not valid for named parameter type");
                 goto fail_func;
             }
+            if (g_std_c17 && (f->params[j].storage & CC_STORAGE_REGISTER) != 0) {
+                if (emit_warning(diag, f->line, f->col,
+                                 "'register' storage-class specifier is obsolescent in C17", 0) != 0) {
+                    goto fail_func;
+                }
+            }
             if (vars_find_depth(vars, var_count, f->params[j].name, 0) >= 0) {
                 set_diag(diag, "duplicate parameter name");
                 goto fail_func;
@@ -5153,6 +5399,7 @@ void cc_frontend_set_std_mode(const char *std_mode) {
     if (g_implicit_funcdecl_override >= 0) {
         g_allow_implicit_funcdecl = g_implicit_funcdecl_override ? 1 : 0;
     }
+    g_std_c17 = std_mode_is_c17_or_newer(std_mode);
     g_std_c23 = std_mode_is_c23_or_newer(std_mode);
     cc_parser_set_std_mode(std_mode);
     if (g_gnu89_inline_override >= 0) {

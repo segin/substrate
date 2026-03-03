@@ -104,6 +104,44 @@ static char *xstrdup(const char *s) {
     return p;
 }
 
+static void print_diag_source_line(const char *path, size_t line, size_t col) {
+    FILE *fp;
+    char buf[1024];
+    size_t cur = 1;
+    size_t i;
+    size_t len;
+    size_t caret_col;
+
+    if (path == NULL || path[0] == '\0' || line == 0) {
+        return;
+    }
+    fp = fopen(path, "r");
+    if (fp == NULL) {
+        return;
+    }
+    while (cur < line && fgets(buf, sizeof(buf), fp) != NULL) {
+        cur++;
+    }
+    if (cur == line && fgets(buf, sizeof(buf), fp) != NULL) {
+        len = strlen(buf);
+        while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) {
+            buf[--len] = '\0';
+        }
+        fprintf(stderr, "    %s\n", buf);
+        caret_col = col > 0 ? col : 1;
+        fprintf(stderr, "    ");
+        for (i = 1; i < caret_col; ++i) {
+            if (i - 1 < len && buf[i - 1] == '\t') {
+                fputc('\t', stderr);
+            } else {
+                fputc(' ', stderr);
+            }
+        }
+        fprintf(stderr, "^\n");
+    }
+    fclose(fp);
+}
+
 static int strvec_push(strvec_t *v, const char *s) {
     char **next;
 
@@ -354,6 +392,7 @@ static void usage(const char *prog) {
             "  -I/-D/-U           preprocessor options\n"
             "  -include/-imacros  forced preprocessor include inputs\n"
             "  -P -dM             preprocess formatting/macro dump modes\n"
+            "  -fpp-max-*         preprocessor hard limits (depth/size/token growth)\n"
             "  -M/-MM/-MD/-MMD    dependency generation modes\n"
             "  -MF/-MT/-MQ        dependency output/target controls\n"
             "  -std=c90/c95/c99/c11/c17/c23   language mode\n"
@@ -511,6 +550,13 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         if (strcmp(a, "-Werror=implicit-function-declaration") == 0) {
             o->implicit_funcdecl_override = 0;
             strvec_push(&o->c_flags, a);
+            continue;
+        }
+        if (strncmp(a, "-Werror=", 8) == 0 || strncmp(a, "-Wno-error=", 11) == 0) {
+            /*
+             * GCC/Clang compatibility: accept specific -Werror categories
+             * even if this frontend does not implement per-warning classes.
+             */
             continue;
         }
         if (strcmp(a, "-Wno-implicit-function-declaration") == 0) {
@@ -939,11 +985,38 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
             free(csv);
             continue;
         }
+        if (strcmp(a, "-fpp-max-include-depth") == 0 || strcmp(a, "-fpp-max-macro-depth") == 0 ||
+            strcmp(a, "-fpp-max-expand-passes") == 0 || strcmp(a, "-fpp-max-expanded-bytes") == 0 ||
+            strcmp(a, "-fpp-max-output-bytes") == 0 || strcmp(a, "-fpp-max-tokens") == 0) {
+            if (i + 1 >= argc) {
+                return -1;
+            }
+            if (strvec_push(&o->cpp_flags, a) != 0 || strvec_push(&o->cpp_flags, argv[i + 1]) != 0) {
+                return -1;
+            }
+            ++i;
+            continue;
+        }
+        if (strncmp(a, "-fpp-max-include-depth=", 24) == 0 || strncmp(a, "-fpp-max-macro-depth=", 22) == 0 ||
+            strncmp(a, "-fpp-max-expand-passes=", 24) == 0 || strncmp(a, "-fpp-max-expanded-bytes=", 24) == 0 ||
+            strncmp(a, "-fpp-max-output-bytes=", 22) == 0 || strncmp(a, "-fpp-max-tokens=", 17) == 0) {
+            if (strvec_push(&o->cpp_flags, a) != 0) {
+                return -1;
+            }
+            continue;
+        }
 
         if (strcmp(a, "-") == 0) {
             if (strvec_push(&o->inputs, a) != 0) {
                 return -1;
             }
+            continue;
+        }
+        if (strncmp(a, "-W", 2) == 0) {
+            /*
+             * Accept unknown warning toggles as no-ops for build-system
+             * compatibility. Keep behavior deterministic by not forwarding.
+             */
             continue;
         }
         if (a[0] == '-') {
@@ -1022,6 +1095,7 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
         if (diag.line != 0) {
             if (diag.path[0] != '\0') {
                 fprintf(stderr, "%s:%zu:%zu: error: %s\n", diag.path, diag.line, diag.col, diag.message);
+                print_diag_source_line(diag.path, diag.line, diag.col);
             } else {
                 fprintf(stderr, "cpp:%zu:%zu: error: %s\n", diag.line, diag.col, diag.message);
             }
@@ -1482,6 +1556,7 @@ int cc_main(int argc, char **argv) {
                     } else if (diag.line != 0) {
                         if (diag.path[0] != '\0') {
                             fprintf(stderr, "%s:%zu:%zu: error: %s\n", diag.path, diag.line, diag.col, diag.message);
+                            print_diag_source_line(diag.path, diag.line, diag.col);
                         } else {
                             fprintf(stderr, "cc:%zu:%zu: error: %s\n", diag.line, diag.col, diag.message);
                         }

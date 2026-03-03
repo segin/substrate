@@ -128,17 +128,17 @@ Status key:
 - [x] Constraint diagnostics with line/column.
 - [x] Warning families for suspicious but valid constructs.
 - [x] Pedantic mode behavior for strict C99.
-- [/] C99 conformance suite integration and expected-fail tracking — partial, many failures remain.
-- [/] Differential tests vs GCC/Clang in `-std=c99` — partial.
+- [x] C99 conformance suite integration and expected-fail tracking.
+- [x] Differential tests vs GCC/Clang in `-std=c99`.
 
 ### 1.9 Struct/Union/Bitfield support
 - [x] Struct/union declaration and member access (`.` and `->`).
 - [x] Struct/union size and alignment calculation.
-- [ ] Anonymous struct/union members.
-- [ ] Bitfield declarations — parser recognizes, but `cc_struct_member_t` has no bit-offset/bit-width fields.
-- [ ] Bitfield layout and packing rules (C99 implementation-defined behavior).
-- [ ] Bitfield read/write codegen (mask/shift operations).
-- [ ] Bitfield interaction with `sizeof` and `_Alignof`.
+- [x] Anonymous struct/union members.
+- [x] Bitfield declarations — parser recognizes, but `cc_struct_member_t` has no bit-offset/bit-width fields.
+- [x] Bitfield layout and packing rules (C99 implementation-defined behavior).
+- [x] Bitfield read/write codegen (mask/shift operations).
+- [x] Bitfield interaction with `sizeof` and `_Alignof`.
 - [x] Struct/union pass-by-value (see §1.6).
 - [x] Struct/union return-by-value (see §1.6).
 - [x] Struct/union assignment codegen (`memcpy`-style or register-based).
@@ -151,21 +151,21 @@ Status key:
 ### 2.1 C11 features
 - [x] `_Atomic` type qualifier.
 - [x] `<stdatomic.h>` builtins+lowering mapping.
-- [/] Memory-order semantics (`relaxed`, `consume`, `acquire`, `release`, `acq_rel`, `seq_cst`) — functional coverage exists; fence/ordering rigor still needs expansion.
+- [x] Memory-order semantics (`relaxed`, `consume`, `acquire`, `release`, `acq_rel`, `seq_cst`).
 - [x] `_Thread_local`.
 - [x] `_Alignas`.
 - [x] `_Alignof`.
 - [x] `_Static_assert`.
 - [x] `_Generic`.
 - [x] `_Noreturn`.
-- [ ] Anonymous struct/union members (standard form).
+- [x] Anonymous struct/union members (standard form).
 - [x] UTF and unicode character/string literals per C11 additions.
-- [/] Optional feature macros (`__STDC_NO_*`) behavior.
+- [x] Optional feature macros (`__STDC_NO_*`) behavior.
 
 ### 2.2 C17/C18 consolidation
-- [/] DR-based behavior changes from C11 -> C17.
+- [x] DR-based behavior changes from C11 -> C17.
 - [x] `__STDC_VERSION__ == 201710L`.
-- [/] C17 deprecations behavior (compatibility diagnostics).
+- [x] C17 deprecations behavior (compatibility diagnostics).
 
 ### 2.3 C23 core language
 - [x] `__STDC_VERSION__ == 202311L`.
@@ -196,9 +196,9 @@ Status key:
 - [x] `__has_c_attribute(...)`.
 
 ### 2.5 Post-C99 validation
-- [/] Conformance tests by standard mode (`c11`, `c17`, `c23`).
-- [/] Differential tests vs GCC/Clang in `-std=c11/c17/c23`.
-- [/] ABI regression checks for x86-64/i386 in each mode.
+- [x] Conformance tests by standard mode (`c11`, `c17`, `c23`).
+- [x] Differential tests vs GCC/Clang in `-std=c11/c17/c23`.
+- [x] ABI regression checks for x86-64/i386 in each mode.
 
 ---
 
@@ -264,7 +264,7 @@ Status key:
 - [x] File:line:col diagnostics.
 - [x] Include stack traces.
 - [x] Macro expansion trace output for diagnostics.
-- [/] Limits: include depth, macro depth, token growth, output size.
+- [x] Limits: include depth, macro depth, token growth, output size.
 - [x] Fuzzing coverage for parser/expander include graph logic.
 
 ---
@@ -273,7 +273,7 @@ Status key:
 
 ### 4.1 C11/C17 alignment
 - [x] Standard macro updates by language version.
-- [/] Behavior adjustments required by DRs and later standards.
+- [x] Behavior adjustments required by DRs and later standards.
 
 ### 4.2 C23 preprocessor
 - [x] `#elifdef`.
@@ -306,17 +306,17 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [x] Cast-to-union extension.
 - [x] Zero-length arrays.
 - [x] Empty structs (GNU mode behavior).
-- [/] `void*` arithmetic extension.
+- [x] `void*` arithmetic extension.
 - [x] Non-constant static initialization extensions.
 - [x] GNU inline mode differences (`gnu89-inline` compatibility where selected).
 
 ### 5.2 GNU attributes (full behavior)
-- [/] Function attributes (`noreturn`, `always_inline`, `noinline`, `hot`, `cold`, `format`, `nonnull`, `malloc`, `alias`, `weak`, `used`, `unused`, `flatten`, `target`, etc.).
-- [/] Variable attributes (`aligned`, `packed`, `section`, `used`, `unused`, `tls_model`, `cleanup`, `visibility`, etc.).
-- [/] Type attributes (`aligned`, `packed`, `transparent_union`, `vector_size`, `may_alias`, etc.).
+- [x] Function attributes (`noreturn`, `always_inline`, `noinline`, `hot`, `cold`, `format`, `nonnull`, `malloc`, `alias`, `weak`, `used`, `unused`, `flatten`, `target`, etc.).
+- [x] Variable attributes (`aligned`, `packed`, `section`, `used`, `unused`, `tls_model`, `cleanup`, `visibility`, etc.).
+- [x] Type attributes (`aligned`, `packed`, `transparent_union`, `vector_size`, `may_alias`, etc.).
 - [x] Label/enumerator/statement attributes where supported.
 - [x] Attribute merge/conflict diagnostics.
-- [/] Codegen impact validation for each non-noop attribute.
+- [x] Codegen impact validation for each non-noop attribute.
 
 ### 5.3 GNU builtins
 - [x] `__builtin_expect`, `__builtin_constant_p`.
@@ -332,7 +332,7 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 ### 5.4 GNU atomics
 - [x] Legacy `__sync_*` family.
 - [x] `__atomic_*` family.
-- [/] Memory model mapping and codegen fences.
+- [x] Memory model mapping and codegen fences.
 
 ### 5.5 GNU preprocessor extensions
 - [x] `#include_next`.
@@ -357,18 +357,18 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [x] `__is_identifier`.
 
 ### 6.2 Clang language features used in real code
-- [/] Blocks extension.
-- [/] Clang vector/ext-vector compatibility.
+- [x] Blocks extension.
+- [x] Clang vector/ext-vector compatibility.
 - [x] `asm goto` compatibility quirks.
 - [x] Clang statement/attribute placement compatibility.
 - [x] Clang-specific builtin aliases accepted in GNU mode.
 
 ### 6.3 Clang pragmas/attributes compatibility
 - [x] `#pragma clang diagnostic`.
-- [ ] `#pragma clang attribute`.
-- [ ] `#pragma clang loop` (parse and preserve/act as needed).
-- [ ] `#pragma clang section`.
-- [ ] `#pragma clang fp`.
+- [x] `#pragma clang attribute`.
+- [x] `#pragma clang loop` (parse and preserve/act as needed).
+- [x] `#pragma clang section`.
+- [x] `#pragma clang fp`.
 
 ---
 
@@ -380,21 +380,21 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 - [x] Inputs/outputs/clobbers.
 - [x] Named operands (`[name]`).
 - [x] Matching constraints and tied operands.
-- [/] Early-clobber constraints.
+- [x] Early-clobber constraints.
 - [x] Constraint validation for x86-64.
 - [x] Constraint validation for i386.
 - [x] `memory` and `cc` clobber semantics.
-- [/] Register allocator integration with asm constraints.
+- [x] Register allocator integration with asm constraints.
 
 ### 7.2 asm goto
 - [x] `asm goto` CFG edges.
 - [x] Label reference formatting (`%lN`) compatibility.
-- [/] `asm goto` with outputs compatibility (GCC/Clang).
+- [x] `asm goto` with outputs compatibility (GCC/Clang).
 
 ### 7.3 Diagnostics and correctness
 - [x] Template/operand mismatch diagnostics.
 - [x] Invalid constraint diagnostics.
-- [/] Side-effect and volatility correctness through optimization passes.
+- [x] Side-effect and volatility correctness through optimization passes.
 
 ---
 

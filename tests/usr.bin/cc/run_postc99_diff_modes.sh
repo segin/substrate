@@ -48,8 +48,10 @@ run_one_compiler() {
 run_compiler_matrix() {
     local host_cc="$1"
     run_one_compiler "$host_cc" c11 native_c11_generic.c "${host_cc}_c11"
+    run_one_compiler "$host_cc" c11 native_c11_static_assert.c "${host_cc}_c11_static_assert"
     run_one_compiler "$host_cc" c17 native_c17_register.c "${host_cc}_c17"
     run_one_compiler "$host_cc" c23 native_c23_binary_sep.c "${host_cc}_c23"
+    run_one_compiler "$host_cc" c23 native_c23_typeof.c "${host_cc}_c23_typeof"
 }
 
 if command -v gcc >/dev/null 2>&1; then

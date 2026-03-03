@@ -1,0 +1,7 @@
+pass_basic.c
+pass_designated.c
+pass_vla.c
+pass_compound_literal.c
+pass_restrict_ptr.c
+pass_struct_return.c
+xfail_fnptr_array_decl.c
