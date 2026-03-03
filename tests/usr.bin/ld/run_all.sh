@@ -92,6 +92,7 @@ test_x64_tls_reloc_basic.sh|LD-U-006 LD-S-003
 test_x64_ifunc_basic.sh|LD-U-006
 test_x64_got_plt_runtime_sections.sh|LD-U-006 LD-S-003
 test_i386_tls_reloc_basic.sh|LD-U-006 LD-S-003
+test_i386_got_plt_runtime_sections.sh|LD-U-006 LD-S-003
 EOF
 
 echo

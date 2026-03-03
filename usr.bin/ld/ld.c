@@ -2177,6 +2177,20 @@ static int reloc_is_x64_got_ref(uint32_t type) {
     }
 }
 
+static int reloc_is_i386_plt_ref(uint32_t type) {
+    return type == R_386_PLT32;
+}
+
+static int reloc_is_i386_got_ref(uint32_t type) {
+    switch (type) {
+    case R_386_GOT32:
+    case R_386_GOT32X:
+        return 1;
+    default:
+        return 0;
+    }
+}
+
 static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports) {
     size_t i;
 
@@ -2217,6 +2231,53 @@ static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports)
                 imp->need_plt = 1;
             }
             if (reloc_is_x64_got_ref(type)) {
+                imp->need_got = 1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int collect_dynamic_imports_i386(elfobj_t *out, dyn_import_vec_t *imports) {
+    size_t i;
+
+    if (out == NULL || imports == NULL) {
+        return -1;
+    }
+    for (i = 0; i < elf_section_count(out); ++i) {
+        elf_section_t *sec = elf_section_get(out, i);
+        size_t ri;
+        size_t rc;
+
+        if (sec == NULL) {
+            continue;
+        }
+        rc = elf_section_reloc_count(sec);
+        for (ri = 0; ri < rc; ++ri) {
+            const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+            const elf_symbol_t *sym;
+            dyn_import_t *imp;
+            uint32_t type;
+
+            if (rel == NULL) {
+                continue;
+            }
+            sym = elf_reloc_symbol(rel);
+            if (!is_runtime_import_symbol(sym)) {
+                continue;
+            }
+            type = elf_reloc_type(rel);
+            if (!reloc_is_i386_plt_ref(type) && !reloc_is_i386_got_ref(type)) {
+                continue;
+            }
+            imp = dyn_import_get_or_add(imports, elf_symbol_name(sym));
+            if (imp == NULL) {
+                return -1;
+            }
+            if (reloc_is_i386_plt_ref(type)) {
+                imp->need_plt = 1;
+            }
+            if (reloc_is_i386_got_ref(type)) {
                 imp->need_got = 1;
             }
         }
@@ -2323,6 +2384,85 @@ static int ensure_dynamic_import_sections_x64(elfobj_t *out, const dyn_import_ve
     return 0;
 }
 
+static int ensure_dynamic_import_sections_i386(elfobj_t *out, const dyn_import_vec_t *imports) {
+    size_t i;
+    size_t plt_count = 0;
+    size_t got_count = 0;
+    elf_section_t *sec;
+
+    if (out == NULL || imports == NULL) {
+        return -1;
+    }
+    for (i = 0; i < imports->count; ++i) {
+        if (imports->items[i].need_plt) {
+            plt_count++;
+        }
+        if (imports->items[i].need_got) {
+            got_count++;
+        }
+    }
+
+    if (plt_count != 0) {
+        sec = elf_find_section(out, ".plt");
+        if (sec == NULL) {
+            sec = elf_add_section(out, ".plt", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
+            if (sec == NULL) {
+                return -1;
+            }
+        }
+        if (elf_section_set_align(sec, 16) != ELF_OK || set_section_zero_data(sec, 16 * (1 + plt_count)) != 0) {
+            return -1;
+        }
+
+        sec = elf_find_section(out, ".got.plt");
+        if (sec == NULL) {
+            sec = elf_add_section(out, ".got.plt", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
+            if (sec == NULL) {
+                return -1;
+            }
+        }
+        if (elf_section_set_align(sec, 4) != ELF_OK || set_section_zero_data(sec, 4 * (3 + plt_count)) != 0) {
+            return -1;
+        }
+
+        sec = elf_find_section(out, ".rel.plt");
+        if (sec == NULL) {
+            sec = elf_add_section(out, ".rel.plt", SHT_REL, SHF_ALLOC);
+            if (sec == NULL) {
+                return -1;
+            }
+        }
+        if (elf_section_set_align(sec, 4) != ELF_OK || set_section_zero_data(sec, 8 * plt_count) != 0) {
+            return -1;
+        }
+    }
+
+    if (got_count != 0) {
+        sec = elf_find_section(out, ".got");
+        if (sec == NULL) {
+            sec = elf_add_section(out, ".got", SHT_PROGBITS, SHF_ALLOC | SHF_WRITE);
+            if (sec == NULL) {
+                return -1;
+            }
+        }
+        if (elf_section_set_align(sec, 4) != ELF_OK || set_section_zero_data(sec, 4 * got_count) != 0) {
+            return -1;
+        }
+
+        sec = elf_find_section(out, ".rel.dyn");
+        if (sec == NULL) {
+            sec = elf_add_section(out, ".rel.dyn", SHT_REL, SHF_ALLOC);
+            if (sec == NULL) {
+                return -1;
+            }
+        }
+        if (elf_section_set_align(sec, 4) != ELF_OK || set_section_zero_data(sec, 8 * got_count) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
     size_t i;
     size_t plt_slot = 0;
@@ -2331,12 +2471,18 @@ static int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
     if (ctx == NULL || out == NULL) {
         return -1;
     }
-    if (ctx->mode != 64 || (elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0)) {
+    if ((ctx->mode != 64 && ctx->mode != 32) || (elf_type(out) != ET_DYN && ctx->dso_inputs.count == 0)) {
         return 0;
     }
     dyn_import_vec_free(&ctx->dyn_imports);
-    if (collect_dynamic_imports_x64(out, &ctx->dyn_imports) != 0) {
-        return -1;
+    if (ctx->mode == 64) {
+        if (collect_dynamic_imports_x64(out, &ctx->dyn_imports) != 0) {
+            return -1;
+        }
+    } else {
+        if (collect_dynamic_imports_i386(out, &ctx->dyn_imports) != 0) {
+            return -1;
+        }
     }
     for (i = 0; i < ctx->dyn_imports.count; ++i) {
         if (ctx->dyn_imports.items[i].need_plt) {
@@ -2346,8 +2492,14 @@ static int plan_dynamic_imports(ld_ctx_t *ctx, elfobj_t *out) {
             ctx->dyn_imports.items[i].got_slot = got_slot++;
         }
     }
-    if (ensure_dynamic_import_sections_x64(out, &ctx->dyn_imports) != 0) {
-        return -1;
+    if (ctx->mode == 64) {
+        if (ensure_dynamic_import_sections_x64(out, &ctx->dyn_imports) != 0) {
+            return -1;
+        }
+    } else {
+        if (ensure_dynamic_import_sections_i386(out, &ctx->dyn_imports) != 0) {
+            return -1;
+        }
     }
     return 0;
 }
@@ -2568,6 +2720,200 @@ static int finalize_dynamic_imports_x64(elfobj_t *out, const dyn_import_vec_t *i
     free(got_buf);
     free(rela_plt_buf);
     free(rela_dyn_buf);
+    return 0;
+}
+
+static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *imports) {
+    elf_section_t *plt;
+    elf_section_t *gotplt;
+    elf_section_t *got;
+    elf_section_t *rel_plt;
+    elf_section_t *rel_dyn;
+    const elf_section_t *dynamic;
+    uint8_t *plt_buf = NULL;
+    uint8_t *gotplt_buf = NULL;
+    uint8_t *got_buf = NULL;
+    uint8_t *rel_plt_buf = NULL;
+    uint8_t *rel_dyn_buf = NULL;
+    size_t plt_sz = 0;
+    size_t gotplt_sz = 0;
+    size_t got_sz = 0;
+    size_t rel_plt_sz = 0;
+    size_t rel_dyn_sz = 0;
+    size_t i;
+    uint64_t plt_addr;
+    uint64_t gotplt_addr;
+    uint64_t got_addr = 0;
+    uint64_t dynamic_addr = 0;
+    elfobj_endian_t e;
+    int plt_pic_mode;
+
+    if (out == NULL || imports == NULL || imports->count == 0) {
+        return 0;
+    }
+    plt = elf_find_section(out, ".plt");
+    gotplt = elf_find_section(out, ".got.plt");
+    got = elf_find_section(out, ".got");
+    rel_plt = elf_find_section(out, ".rel.plt");
+    rel_dyn = elf_find_section(out, ".rel.dyn");
+    dynamic = elf_find_section(out, ".dynamic");
+    if (plt == NULL || gotplt == NULL) {
+        return 0;
+    }
+
+    plt_addr = elf_section_addr(plt);
+    gotplt_addr = elf_section_addr(gotplt);
+    if (got != NULL) {
+        got_addr = elf_section_addr(got);
+    }
+    if (dynamic != NULL) {
+        dynamic_addr = elf_section_addr(dynamic);
+    }
+    e = elf_endian(out);
+    plt_pic_mode = elf_type(out) == ET_DYN ? 1 : 0;
+
+    plt_sz = elf_section_size(plt);
+    gotplt_sz = elf_section_size(gotplt);
+    got_sz = got != NULL ? elf_section_size(got) : 0;
+    rel_plt_sz = rel_plt != NULL ? elf_section_size(rel_plt) : 0;
+    rel_dyn_sz = rel_dyn != NULL ? elf_section_size(rel_dyn) : 0;
+
+    plt_buf = (uint8_t *)calloc(1, plt_sz);
+    gotplt_buf = (uint8_t *)calloc(1, gotplt_sz);
+    if ((plt_sz != 0 && plt_buf == NULL) || (gotplt_sz != 0 && gotplt_buf == NULL)) {
+        free(plt_buf);
+        free(gotplt_buf);
+        return -1;
+    }
+    if (got_sz != 0) {
+        got_buf = (uint8_t *)calloc(1, got_sz);
+        if (got_buf == NULL) {
+            free(plt_buf);
+            free(gotplt_buf);
+            return -1;
+        }
+    }
+    if (rel_plt_sz != 0) {
+        rel_plt_buf = (uint8_t *)calloc(1, rel_plt_sz);
+        if (rel_plt_buf == NULL) {
+            free(plt_buf);
+            free(gotplt_buf);
+            free(got_buf);
+            return -1;
+        }
+    }
+    if (rel_dyn_sz != 0) {
+        rel_dyn_buf = (uint8_t *)calloc(1, rel_dyn_sz);
+        if (rel_dyn_buf == NULL) {
+            free(plt_buf);
+            free(gotplt_buf);
+            free(got_buf);
+            free(rel_plt_buf);
+            return -1;
+        }
+    }
+
+    if (plt_sz >= 16) {
+        if (plt_pic_mode) {
+            /* PIC PLT0: pushl 4(%ebx); jmp *8(%ebx); nop*4 */
+            plt_buf[0] = 0xff;
+            plt_buf[1] = 0xb3;
+            write_u32_endian(plt_buf + 2, e, 4);
+            plt_buf[6] = 0xff;
+            plt_buf[7] = 0xa3;
+            write_u32_endian(plt_buf + 8, e, 8);
+            plt_buf[12] = 0x90;
+            plt_buf[13] = 0x90;
+            plt_buf[14] = 0x90;
+            plt_buf[15] = 0x90;
+        } else {
+            /* Non-PIC PLT0: pushl *GOT+4; jmp *GOT+8; nop*4 */
+            plt_buf[0] = 0xff;
+            plt_buf[1] = 0x35;
+            write_u32_endian(plt_buf + 2, e, (uint32_t)(gotplt_addr + 4));
+            plt_buf[6] = 0xff;
+            plt_buf[7] = 0x25;
+            write_u32_endian(plt_buf + 8, e, (uint32_t)(gotplt_addr + 8));
+            plt_buf[12] = 0x90;
+            plt_buf[13] = 0x90;
+            plt_buf[14] = 0x90;
+            plt_buf[15] = 0x90;
+        }
+    }
+    if (gotplt_sz >= 12) {
+        write_u32_endian(gotplt_buf + 0, e, (uint32_t)dynamic_addr);
+        write_u32_endian(gotplt_buf + 4, e, 0);
+        write_u32_endian(gotplt_buf + 8, e, 0);
+    }
+
+    for (i = 0; i < imports->count; ++i) {
+        const dyn_import_t *imp = &imports->items[i];
+        uint32_t dynidx = 0;
+        if (dynsym_index_by_name(out, imp->name, &dynidx) != 0) {
+            continue;
+        }
+        if (imp->need_plt) {
+            size_t ent = imp->plt_slot;
+            size_t poff = 16 + (ent * 16);
+            size_t roff = ent * 8;
+            uint64_t ent_addr = plt_addr + 16 + (ent * 16);
+            uint64_t slot_addr = gotplt_addr + 12 + (ent * 4);
+            int32_t rel;
+
+            if (poff + 16 <= plt_sz) {
+                if (plt_pic_mode) {
+                    plt_buf[poff + 0] = 0xff;
+                    plt_buf[poff + 1] = 0xa3;
+                    write_u32_endian(plt_buf + poff + 2, e, (uint32_t)(12 + (ent * 4)));
+                } else {
+                    plt_buf[poff + 0] = 0xff;
+                    plt_buf[poff + 1] = 0x25;
+                    write_u32_endian(plt_buf + poff + 2, e, (uint32_t)slot_addr);
+                }
+                plt_buf[poff + 6] = 0x68;
+                write_u32_endian(plt_buf + poff + 7, e, (uint32_t)ent);
+                plt_buf[poff + 11] = 0xe9;
+                rel = (int32_t)((int64_t)plt_addr - (int64_t)(ent_addr + 16));
+                write_u32_endian(plt_buf + poff + 12, e, (uint32_t)rel);
+            }
+            if ((12 + ((ent + 1) * 4)) <= gotplt_sz) {
+                write_u32_endian(gotplt_buf + 12 + (ent * 4), e, (uint32_t)(ent_addr + 6));
+            }
+            if (rel_plt_buf != NULL && roff + 8 <= rel_plt_sz) {
+                write_u32_endian(rel_plt_buf + roff + 0, e, (uint32_t)slot_addr);
+                write_u32_endian(rel_plt_buf + roff + 4, e, (dynidx << 8) | R_386_JMP_SLOT);
+            }
+        }
+        if (imp->need_got && got != NULL) {
+            size_t ent = imp->got_slot;
+            size_t roff = ent * 8;
+            uint64_t slot_addr = got_addr + (ent * 4);
+
+            if (rel_dyn_buf != NULL && roff + 8 <= rel_dyn_sz) {
+                write_u32_endian(rel_dyn_buf + roff + 0, e, (uint32_t)slot_addr);
+                write_u32_endian(rel_dyn_buf + roff + 4, e, (dynidx << 8) | R_386_GLOB_DAT);
+            }
+        }
+    }
+
+    if (elf_section_set_data(plt, plt_buf, plt_sz) != ELF_OK ||
+        elf_section_set_data(gotplt, gotplt_buf, gotplt_sz) != ELF_OK ||
+        (got != NULL && elf_section_set_data(got, got_buf, got_sz) != ELF_OK) ||
+        (rel_plt != NULL && elf_section_set_data(rel_plt, rel_plt_buf, rel_plt_sz) != ELF_OK) ||
+        (rel_dyn != NULL && elf_section_set_data(rel_dyn, rel_dyn_buf, rel_dyn_sz) != ELF_OK)) {
+        free(plt_buf);
+        free(gotplt_buf);
+        free(got_buf);
+        free(rel_plt_buf);
+        free(rel_dyn_buf);
+        return -1;
+    }
+
+    free(plt_buf);
+    free(gotplt_buf);
+    free(got_buf);
+    free(rel_plt_buf);
+    free(rel_dyn_buf);
     return 0;
 }
 
@@ -3819,6 +4165,43 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
                 return 0;
             }
         }
+    } else if (ctx != NULL && ctx->mode == 32) {
+        if (reloc_is_i386_plt_ref(type) && imp->need_plt) {
+            sec = elf_find_section(obj, ".plt");
+            if (sec == NULL) {
+                return -1;
+            }
+            *out_addr = elf_section_addr(sec) + 16 + (imp->plt_slot * 16);
+            return 0;
+        }
+        if (reloc_is_i386_got_ref(type)) {
+            if (imp->need_got) {
+                sec = elf_find_section(obj, ".got");
+                if (sec == NULL) {
+                    return -1;
+                }
+                *out_addr = elf_section_addr(sec) + (imp->got_slot * 4);
+                return 0;
+            }
+            if (imp->need_plt) {
+                sec = elf_find_section(obj, ".got.plt");
+                if (sec == NULL) {
+                    return -1;
+                }
+                *out_addr = elf_section_addr(sec) + 12 + (imp->plt_slot * 4);
+                return 0;
+            }
+        }
+    }
+    if (name != NULL && strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0) {
+        sec = elf_find_section(obj, ".got.plt");
+        if (sec == NULL) {
+            sec = elf_find_section(obj, ".got");
+        }
+        if (sec != NULL) {
+            *out_addr = elf_section_addr(sec);
+            return 0;
+        }
     }
     return resolve_symbol_addr(obj, sym, allow_undef, out_addr, undef_name);
 }
@@ -5038,12 +5421,22 @@ static int run_internal_link(ld_ctx_t *ctx) {
         elf_close(out);
         return -1;
     }
-    if (ctx->mode == 64 && finalize_dynamic_imports_x64(out, &ctx->dyn_imports) != 0) {
-        fprintf(stderr, "ld: failed to finalize x86_64 GOT/PLT dynamic data\n");
-        symref_map_free(&undef_refs);
-        objvec_free(&inputs);
-        elf_close(out);
-        return -1;
+    if (ctx->mode == 64) {
+        if (finalize_dynamic_imports_x64(out, &ctx->dyn_imports) != 0) {
+            fprintf(stderr, "ld: failed to finalize x86_64 GOT/PLT dynamic data\n");
+            symref_map_free(&undef_refs);
+            objvec_free(&inputs);
+            elf_close(out);
+            return -1;
+        }
+    } else if (ctx->mode == 32) {
+        if (finalize_dynamic_imports_i386(out, &ctx->dyn_imports) != 0) {
+            fprintf(stderr, "ld: failed to finalize i386 GOT/PLT dynamic data\n");
+            symref_map_free(&undef_refs);
+            objvec_free(&inputs);
+            elf_close(out);
+            return -1;
+        }
     }
     if (patch_dynamic_tag_values(out) != 0) {
         fprintf(stderr, "ld: failed to finalize .dynamic tag values\n");

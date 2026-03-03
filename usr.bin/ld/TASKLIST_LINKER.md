@@ -197,9 +197,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ### 7.2 GOT/PLT
 - [x] Implement x86-64 GOT/PLT synthesis for lazy and non-lazy paths.  
   Reqs: LD-U-006, LD-S-003.
-- [ ] Implement i386 GOT/PLT synthesis for lazy and non-lazy paths.  
+- [x] Implement i386 GOT/PLT synthesis for lazy and non-lazy paths.  
   Reqs: LD-U-006, LD-S-003.
-- [ ] Wire relocation emission for `.rel[a].plt` and `.rel[a].dyn`.  
+- [x] Wire relocation emission for `.rel[a].plt` and `.rel[a].dyn`.  
   Reqs: LD-U-006.
 
 ### 7.3 TLS
