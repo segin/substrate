@@ -18,6 +18,11 @@ typedef enum {
     LD_INPUT_LIB = 1
 } ld_input_kind_t;
 
+typedef enum {
+    LD_COMPAT_GNU = 0,
+    LD_COMPAT_LLD = 1
+} ld_compat_mode_t;
+
 typedef struct {
     ld_input_kind_t kind;
     char *text;
@@ -46,6 +51,7 @@ typedef struct {
     const char *self_path;
     const char *entry_symbol;
     const char *interp_path;
+    ld_compat_mode_t compat_mode;
     strvec_t lib_paths;
     inputvec_t inputs;
 } ld_ctx_t;
@@ -53,7 +59,8 @@ typedef struct {
 static void usage(const char *prog) {
     fprintf(stderr,
             "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] "
-            "[-o output] [-L dir] [-l name] [-e symbol] [--allow-undefined] input...\n",
+            "[-o output] [-L dir] [-l name] [-e symbol] [--allow-undefined] "
+            "[--compat=gnu|lld] input...\n",
             prog);
 }
 
@@ -229,6 +236,21 @@ static int parse_mode_token(const char *tok) {
         return 32;
     }
     return 0;
+}
+
+static int parse_compat_mode(const char *tok, ld_compat_mode_t *out_mode) {
+    if (tok == NULL || out_mode == NULL) {
+        return -1;
+    }
+    if (strcmp(tok, "gnu") == 0 || strcmp(tok, "bfd") == 0 || strcmp(tok, "gold") == 0) {
+        *out_mode = LD_COMPAT_GNU;
+        return 0;
+    }
+    if (strcmp(tok, "lld") == 0) {
+        *out_mode = LD_COMPAT_LLD;
+        return 0;
+    }
+    return -1;
 }
 
 static const char *canonical_mode_name(int mode) {
@@ -1136,6 +1158,7 @@ int main(int argc, char **argv) {
     memset(&ctx, 0, sizeof(ctx));
     ctx.out_path = "a.out";
     ctx.self_path = argv[0];
+    ctx.compat_mode = LD_COMPAT_GNU;
 
     for (i = 1; i < argc; ++i) {
         const char *a = argv[i];
@@ -1147,6 +1170,26 @@ int main(int argc, char **argv) {
             inputvec_free(&ctx.inputs);
             strvec_free(&ctx.lib_paths);
             return 0;
+        }
+        if ((p = parse_arg_value(a, "--compat=", &val)) != 0) {
+            ld_compat_mode_t compat;
+            if (p == 1) {
+                if (i + 1 >= argc) {
+                    usage(argv[0]);
+                    inputvec_free(&ctx.inputs);
+                    strvec_free(&ctx.lib_paths);
+                    return 2;
+                }
+                val = argv[++i];
+            }
+            if (parse_compat_mode(val, &compat) != 0) {
+                fprintf(stderr, "ld: unsupported compatibility mode '%s' (expected gnu or lld)\n", val);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
+            ctx.compat_mode = compat;
+            continue;
         }
         if (strcmp(a, "--version") == 0 || strcmp(a, "-v") == 0) {
             ctx.query_version = 1;
@@ -1295,7 +1338,13 @@ int main(int argc, char **argv) {
         }
 
         if (a[0] == '-') {
-            fprintf(stderr, "ld: warning: unsupported option ignored: %s\n", a);
+            if (ctx.compat_mode == LD_COMPAT_LLD) {
+                fprintf(stderr, "ld: error: unsupported option in lld mode: %s\n", a);
+                inputvec_free(&ctx.inputs);
+                strvec_free(&ctx.lib_paths);
+                return 2;
+            }
+            fprintf(stderr, "ld: warning: unsupported option ignored (gnu mode): %s\n", a);
             continue;
         }
         if (inputvec_push(&ctx.inputs, LD_INPUT_FILE, a) != 0) {

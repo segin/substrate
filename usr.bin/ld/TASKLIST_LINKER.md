@@ -23,7 +23,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-002, LD-U-003.
 - [x] Implement strict parser for `-m`, `-m32`, `-m64`, including canonical aliases and diagnostics.  
   Reqs: LD-U-010, LD-E-007.
-- [ ] Add unsupported-option policy layer: warn vs error matrix by compatibility mode.  
+- [x] Add unsupported-option policy layer: warn vs error matrix by compatibility mode.  
   Reqs: LD-U-010, LD-W-003.
 
 ### 1.2 Essential GNU-compatible options
