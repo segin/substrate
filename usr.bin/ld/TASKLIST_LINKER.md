@@ -121,7 +121,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-E-006.
 
 ### 4.3 i386
-- [ ] Complete ABS/PC/GOT/PLT/TLS reloc family support used by GCC/Clang outputs.  
+- [x] Complete ABS/PC/GOT/PLT/TLS reloc family support used by GCC/Clang outputs.  
   Reqs: LD-U-006. Stories: US-001.
 - [x] Implement 8/16/32-bit overflow diagnostics and range checks.  
   Reqs: LD-E-006.
