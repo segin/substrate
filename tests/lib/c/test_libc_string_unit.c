@@ -184,6 +184,40 @@ void run_strcat_tests(void) {
     ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Basic strcat");
 }
 
+void run_strncat_tests(void) {
+    printf("Running strncat tests...\n");
+    char dest[20] = "Hello";
+
+    // Basic appending with n larger than src length
+    libc_strncat(dest, " World", 10);
+    ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Basic strncat large n");
+
+    // Appending with n smaller than src length
+    char dest2[20] = "Hello";
+    libc_strncat(dest2, " World", 3);
+    ASSERT_EQ(strcmp(dest2, "Hello Wo"), 0, "strncat truncates to n");
+
+    // Appending with n equal to src length
+    char dest3[20] = "Hello";
+    libc_strncat(dest3, " World", 6);
+    ASSERT_EQ(strcmp(dest3, "Hello World"), 0, "strncat exact length");
+
+    // Appending when src is empty
+    char dest4[20] = "Hello";
+    libc_strncat(dest4, "", 5);
+    ASSERT_EQ(strcmp(dest4, "Hello"), 0, "strncat empty src");
+
+    // Appending when dest is empty
+    char dest5[20] = "";
+    libc_strncat(dest5, "World", 5);
+    ASSERT_EQ(strcmp(dest5, "World"), 0, "strncat empty dest");
+
+    // Appending with n = 0
+    char dest6[20] = "Hello";
+    libc_strncat(dest6, " World", 0);
+    ASSERT_EQ(strcmp(dest6, "Hello"), 0, "strncat n=0");
+}
+
 void run_memcmp_tests(void) {
     printf("Running memcmp tests...\n");
 
@@ -237,6 +271,11 @@ bool test_libc_strcat(void) {
     return true;
 }
 
+bool test_libc_strncat(void) {
+    run_strncat_tests();
+    return true;
+}
+
 bool test_libc_strtok(void) {
     run_strtok_tests();
     return true;
@@ -252,6 +291,7 @@ int main(void) {
     run_strlen_tests();
     run_memmove_tests();
     run_strcat_tests();
+    run_strncat_tests();
     run_strtok_tests();
     run_memcmp_tests();
     return 0;
