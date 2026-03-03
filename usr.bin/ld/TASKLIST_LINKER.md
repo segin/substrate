@@ -117,7 +117,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-006. Stories: US-001, US-201.
 - [ ] Implement `R_X86_64_GOTPCRELX` and relaxation-aware behavior.  
   Reqs: LD-U-006.
-- [ ] Add relocation overflow and sign/zero-extension tests.  
+- [x] Add relocation overflow and sign/zero-extension tests.  
   Reqs: LD-E-006.
 
 ### 4.3 i386

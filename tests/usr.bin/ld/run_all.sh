@@ -65,6 +65,7 @@ test_unresolved_provenance.sh|LD-U-010 LD-E-001
 test_symbol_resolution_diff.sh|LD-U-007 LD-E-003
 test_relocation_error_context.sh|LD-E-006 LD-U-010
 test_rel_addend_rules.sh|LD-U-006
+test_x64_reloc_overflow_signext.sh|LD-E-006 LD-U-006
 EOF
 
 echo
