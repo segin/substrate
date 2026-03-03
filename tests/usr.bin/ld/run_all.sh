@@ -63,6 +63,7 @@ test_visibility_resolution.sh|LD-U-005 LD-S-003
 test_defsym_undefined.sh|LD-U-005
 test_unresolved_provenance.sh|LD-U-010 LD-E-001
 test_symbol_resolution_diff.sh|LD-U-007 LD-E-003
+test_relocation_error_context.sh|LD-E-006 LD-U-010
 EOF
 
 echo

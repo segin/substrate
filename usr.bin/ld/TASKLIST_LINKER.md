@@ -109,7 +109,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-006, LD-R-003.
 - [ ] Ensure addend extraction rules for REL vs RELA are architecture-correct.  
   Reqs: LD-U-006.
-- [ ] Add precise relocation error context (section+offset+symbol+type).  
+- [x] Add precise relocation error context (section+offset+symbol+type).  
   Reqs: LD-E-006, LD-U-010.
 
 ### 4.2 x86-64

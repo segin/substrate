@@ -2217,11 +2217,13 @@ static int apply_all_relocations(elfobj_t *obj, int allow_undefined) {
 
         for (ri = 0; ri < rc; ++ri) {
             const elf_reloc_t *rel = elf_section_reloc_at(sec, ri);
+            const char *sec_name = elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>";
             uint64_t off;
             uint32_t type;
             int64_t addend;
             int width;
             const elf_symbol_t *sym;
+            const char *sym_name = "<none>";
             uint64_t S = 0;
             uint64_t P;
             uint64_t outv = 0;
@@ -2236,13 +2238,16 @@ static int apply_all_relocations(elfobj_t *obj, int allow_undefined) {
             width = elf_reloc_size_for_machine(elf_machine(obj), type);
             if (width <= 0 || width > 8) {
                 free(buf);
-                fprintf(stderr, "ld: unsupported relocation width for type %u\n", type);
+                fprintf(stderr,
+                        "ld: relocation error: section=%s offset=0x%llx type=%u symbol=%s: unsupported relocation width\n",
+                        sec_name, (unsigned long long)off, type, sym_name);
                 return -1;
             }
             if (off + (uint64_t)width > sec_sz) {
                 free(buf);
-                fprintf(stderr, "ld: relocation out of range in section '%s'\n",
-                        elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
+                fprintf(stderr,
+                        "ld: relocation error: section=%s offset=0x%llx type=%u symbol=%s: relocation out of range\n",
+                        sec_name, (unsigned long long)off, type, sym_name);
                 return -1;
             }
             if (elf_reloc_has_addend(rel)) {
@@ -2253,17 +2258,23 @@ static int apply_all_relocations(elfobj_t *obj, int allow_undefined) {
             }
 
             sym = elf_reloc_symbol(rel);
+            if (sym != NULL && elf_symbol_name(sym) != NULL && elf_symbol_name(sym)[0] != '\0') {
+                sym_name = elf_symbol_name(sym);
+            }
             if (resolve_symbol_addr(obj, sym, allow_undefined, &S, &undef_name) != 0) {
                 free(buf);
-                fprintf(stderr, "ld: unresolved relocation symbol `%s`\n",
-                        undef_name != NULL ? undef_name : "<unknown>");
+                fprintf(stderr,
+                        "ld: relocation error: section=%s offset=0x%llx type=%u symbol=%s: unresolved relocation symbol\n",
+                        sec_name, (unsigned long long)off, type, undef_name != NULL ? undef_name : sym_name);
                 return -1;
             }
             P = elf_section_addr(sec) + off;
             err = elf_apply_relocation_value(obj, type, P, S, addend, &outv);
             if (err != ELF_OK) {
                 free(buf);
-                fprintf(stderr, "ld: relocation apply failed (type=%u): %s\n", type, elf_errstr(err));
+                fprintf(stderr,
+                        "ld: relocation error: section=%s offset=0x%llx type=%u symbol=%s: %s\n",
+                        sec_name, (unsigned long long)off, type, sym_name, elf_errstr(err));
                 return -1;
             }
             write_uint_bytes(buf + off, width, endian, outv);
