@@ -235,9 +235,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-S-004, LD-E-004.
 
 ### 8.3 Integration
-- [ ] Implement script-driven section placement and PHDR assignment.  
+- [x] Implement script-driven section placement and PHDR assignment.  
   Reqs: LD-U-009, LD-S-004. Stories: US-202.
-- [ ] Add extensive script compatibility corpus tests.  
+- [x] Add extensive script compatibility corpus tests.  
   Reqs: LD-U-007.
 
 ---

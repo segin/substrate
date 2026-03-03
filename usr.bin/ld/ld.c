@@ -854,6 +854,30 @@ typedef struct {
     const char *err_msg;
 } lds_eval_ctx_t;
 
+typedef struct {
+    char *name;
+    uint32_t type;
+    uint32_t flags;
+    uint64_t align;
+} lds_phdr_entry_t;
+
+typedef struct {
+    lds_phdr_entry_t *items;
+    size_t count;
+    size_t cap;
+} lds_phdr_vec_t;
+
+typedef struct {
+    char *section_name;
+    char *phdr_name;
+} lds_sec_phdr_map_t;
+
+typedef struct {
+    lds_sec_phdr_map_t *items;
+    size_t count;
+    size_t cap;
+} lds_sec_phdr_vec_t;
+
 static void lds_tok_free(lds_tok_t *tok) {
     if (tok == NULL) {
         return;
@@ -911,6 +935,106 @@ static int lds_tokvec_push(lds_tokvec_t *v, const lds_tok_t *tok) {
         v->cap = ncap;
     }
     if (lds_tok_dup(&v->items[v->count], tok) != 0) {
+        return -1;
+    }
+    v->count++;
+    return 0;
+}
+
+static void lds_phdr_vec_free(lds_phdr_vec_t *v) {
+    size_t i;
+
+    if (v == NULL) {
+        return;
+    }
+    for (i = 0; i < v->count; ++i) {
+        free(v->items[i].name);
+    }
+    free(v->items);
+    v->items = NULL;
+    v->count = 0;
+    v->cap = 0;
+}
+
+static int lds_phdr_vec_push(lds_phdr_vec_t *v, const char *name, uint32_t type, uint32_t flags, uint64_t align) {
+    lds_phdr_entry_t *next;
+
+    if (v == NULL || name == NULL || name[0] == '\0') {
+        return -1;
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
+        next = (lds_phdr_entry_t *)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        v->items = next;
+        v->cap = ncap;
+    }
+    v->items[v->count].name = xstrdup(name);
+    if (v->items[v->count].name == NULL) {
+        return -1;
+    }
+    v->items[v->count].type = type;
+    v->items[v->count].flags = flags;
+    v->items[v->count].align = align;
+    v->count++;
+    return 0;
+}
+
+static int lds_phdr_vec_find(const lds_phdr_vec_t *v, const char *name) {
+    size_t i;
+
+    if (v == NULL || name == NULL) {
+        return -1;
+    }
+    for (i = 0; i < v->count; ++i) {
+        if (v->items[i].name != NULL && strcmp(v->items[i].name, name) == 0) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+static void lds_sec_phdr_vec_free(lds_sec_phdr_vec_t *v) {
+    size_t i;
+
+    if (v == NULL) {
+        return;
+    }
+    for (i = 0; i < v->count; ++i) {
+        free(v->items[i].section_name);
+        free(v->items[i].phdr_name);
+    }
+    free(v->items);
+    v->items = NULL;
+    v->count = 0;
+    v->cap = 0;
+}
+
+static int lds_sec_phdr_vec_push(lds_sec_phdr_vec_t *v, const char *section_name, const char *phdr_name) {
+    lds_sec_phdr_map_t *next;
+
+    if (v == NULL || section_name == NULL || phdr_name == NULL ||
+        section_name[0] == '\0' || phdr_name[0] == '\0') {
+        return -1;
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
+        next = (lds_sec_phdr_map_t *)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        v->items = next;
+        v->cap = ncap;
+    }
+    v->items[v->count].section_name = xstrdup(section_name);
+    v->items[v->count].phdr_name = xstrdup(phdr_name);
+    if (v->items[v->count].section_name == NULL || v->items[v->count].phdr_name == NULL) {
+        free(v->items[v->count].section_name);
+        free(v->items[v->count].phdr_name);
+        v->items[v->count].section_name = NULL;
+        v->items[v->count].phdr_name = NULL;
         return -1;
     }
     v->count++;
@@ -2620,6 +2744,364 @@ static int parse_linker_script_file(const char *path, ld_ctx_t *ctx, const elfob
     lds_ast_free(&ast);
     strvec_free(&include_stack);
     return rc;
+}
+
+static int phdr_type_from_token(const char *tok, uint32_t *out_type) {
+    if (tok == NULL || out_type == NULL) {
+        return -1;
+    }
+    if (strcmp(tok, "PT_LOAD") == 0) {
+        *out_type = PT_LOAD;
+    } else if (strcmp(tok, "PT_DYNAMIC") == 0) {
+        *out_type = PT_DYNAMIC;
+    } else if (strcmp(tok, "PT_NOTE") == 0) {
+        *out_type = PT_NOTE;
+    } else if (strcmp(tok, "PT_TLS") == 0) {
+        *out_type = PT_TLS;
+    } else if (strcmp(tok, "PT_GNU_EH_FRAME") == 0) {
+        *out_type = PT_GNU_EH_FRAME;
+    } else if (strcmp(tok, "PT_GNU_RELRO") == 0) {
+        *out_type = PT_GNU_RELRO;
+    } else if (strcmp(tok, "PT_GNU_STACK") == 0) {
+        *out_type = PT_GNU_STACK;
+    } else if (strcmp(tok, "PT_GNU_PROPERTY") == 0) {
+        *out_type = PT_GNU_PROPERTY;
+    } else if (strcmp(tok, "PT_INTERP") == 0) {
+        *out_type = PT_INTERP;
+    } else if (strcmp(tok, "PT_PHDR") == 0) {
+        *out_type = PT_PHDR;
+    } else {
+        return -1;
+    }
+    return 0;
+}
+
+static uint32_t phdr_default_flags(uint32_t type) {
+    enum {
+        LD_PF_X = 0x1u,
+        LD_PF_W = 0x2u,
+        LD_PF_R = 0x4u
+    };
+
+    if (type == PT_LOAD) {
+        return LD_PF_R;
+    }
+    if (type == PT_DYNAMIC || type == PT_TLS || type == PT_GNU_STACK) {
+        return LD_PF_R | LD_PF_W;
+    }
+    return LD_PF_R;
+}
+
+static int parse_script_phdr_and_map_plan(const char *path, lds_phdr_vec_t *phdrs, lds_sec_phdr_vec_t *maps) {
+    unsigned char *buf = NULL;
+    size_t sz = 0;
+    lds_lexer_t lx;
+    lds_tok_t tok;
+    int brace_depth = 0;
+    int phdrs_depth = 0;
+    int sections_depth = 0;
+    int section_body_depth = 0;
+    char *active_section = NULL;
+
+    if (path == NULL || phdrs == NULL || maps == NULL) {
+        return -1;
+    }
+    if (read_file(path, &buf, &sz) != 0) {
+        return -1;
+    }
+    memset(&lx, 0, sizeof(lx));
+    lx.buf = buf;
+    lx.len = sz;
+    lx.path = path;
+    lx.line = 1;
+    lx.col = 1;
+
+    for (;;) {
+        if (lds_lex_next(&lx, &tok) != 0) {
+            free(buf);
+            free(active_section);
+            return -1;
+        }
+        if (tok.kind == LDS_TOK_EOF) {
+            lds_tok_free(&tok);
+            break;
+        }
+        if (tok.kind == LDS_TOK_IDENT && tok.text != NULL && strcmp(tok.text, "PHDRS") == 0) {
+            lds_tok_t t2;
+            if (lds_lex_next(&lx, &t2) != 0) {
+                lds_tok_free(&tok);
+                free(buf);
+                free(active_section);
+                return -1;
+            }
+            if (t2.kind == LDS_TOK_LBRACE) {
+                phdrs_depth = 1;
+                brace_depth++;
+            }
+            lds_tok_free(&t2);
+            lds_tok_free(&tok);
+            continue;
+        }
+        if (tok.kind == LDS_TOK_IDENT && tok.text != NULL && strcmp(tok.text, "SECTIONS") == 0) {
+            lds_tok_t t2;
+            if (lds_lex_next(&lx, &t2) != 0) {
+                lds_tok_free(&tok);
+                free(buf);
+                free(active_section);
+                return -1;
+            }
+            if (t2.kind == LDS_TOK_LBRACE) {
+                sections_depth = 1;
+                brace_depth++;
+            }
+            lds_tok_free(&t2);
+            lds_tok_free(&tok);
+            continue;
+        }
+
+        if (phdrs_depth == 1 && tok.kind == LDS_TOK_IDENT && tok.text != NULL) {
+            char *phdr_name = xstrdup(tok.text);
+            lds_tok_t type_tok;
+            uint32_t type;
+            uint32_t flags;
+            uint64_t align = 0x1000;
+            int done = 0;
+            if (phdr_name == NULL) {
+                lds_tok_free(&tok);
+                free(buf);
+                free(active_section);
+                return -1;
+            }
+            if (lds_lex_next(&lx, &type_tok) != 0) {
+                free(phdr_name);
+                lds_tok_free(&tok);
+                free(buf);
+                free(active_section);
+                return -1;
+            }
+            if (type_tok.kind != LDS_TOK_IDENT || type_tok.text == NULL ||
+                phdr_type_from_token(type_tok.text, &type) != 0) {
+                lds_tok_free(&type_tok);
+                free(phdr_name);
+                lds_tok_free(&tok);
+                free(buf);
+                free(active_section);
+                return -1;
+            }
+            flags = phdr_default_flags(type);
+            lds_tok_free(&type_tok);
+
+            while (!done) {
+                lds_tok_t at;
+                if (lds_lex_next(&lx, &at) != 0) {
+                    free(phdr_name);
+                    lds_tok_free(&tok);
+                    free(buf);
+                    free(active_section);
+                    return -1;
+                }
+                if (at.kind == LDS_TOK_IDENT && at.text != NULL && strcmp(at.text, "FLAGS") == 0) {
+                    lds_tok_t lp;
+                    lds_tokvec_t expr;
+                    lds_eval_ctx_t ec;
+                    uint64_t v = 0;
+                    int pdepth = 1;
+
+                    memset(&expr, 0, sizeof(expr));
+                    if (lds_lex_next(&lx, &lp) != 0 || lp.kind != LDS_TOK_LPAREN) {
+                        lds_tok_free(&lp);
+                        lds_tok_free(&at);
+                        free(phdr_name);
+                        lds_tok_free(&tok);
+                        free(buf);
+                        free(active_section);
+                        return -1;
+                    }
+                    lds_tok_free(&lp);
+                    while (pdepth > 0) {
+                        lds_tok_t et;
+                        if (lds_lex_next(&lx, &et) != 0) {
+                            lds_tok_free(&at);
+                            free(phdr_name);
+                            lds_tok_free(&tok);
+                            lds_tokvec_free(&expr);
+                            free(buf);
+                            free(active_section);
+                            return -1;
+                        }
+                        if (et.kind == LDS_TOK_LPAREN) {
+                            pdepth++;
+                            if (lds_tokvec_push(&expr, &et) != 0) {
+                                lds_tok_free(&et);
+                                lds_tok_free(&at);
+                                free(phdr_name);
+                                lds_tok_free(&tok);
+                                lds_tokvec_free(&expr);
+                                free(buf);
+                                free(active_section);
+                                return -1;
+                            }
+                        } else if (et.kind == LDS_TOK_RPAREN) {
+                            pdepth--;
+                            if (pdepth > 0 && lds_tokvec_push(&expr, &et) != 0) {
+                                lds_tok_free(&et);
+                                lds_tok_free(&at);
+                                free(phdr_name);
+                                lds_tok_free(&tok);
+                                lds_tokvec_free(&expr);
+                                free(buf);
+                                free(active_section);
+                                return -1;
+                            }
+                        } else if (lds_tokvec_push(&expr, &et) != 0) {
+                            lds_tok_free(&et);
+                            lds_tok_free(&at);
+                            free(phdr_name);
+                            lds_tok_free(&tok);
+                            lds_tokvec_free(&expr);
+                            free(buf);
+                            free(active_section);
+                            return -1;
+                        }
+                        lds_tok_free(&et);
+                    }
+                    memset(&ec, 0, sizeof(ec));
+                    if (expr.count > 0 && lds_eval_expr_slice(&ec, expr.items, 0, expr.count, &v) == 0) {
+                        flags = (uint32_t)(v & 0x7u);
+                    }
+                    lds_tokvec_free(&expr);
+                } else if (at.kind == LDS_TOK_SEMI) {
+                    done = 1;
+                }
+                lds_tok_free(&at);
+            }
+
+            if (type != PT_PHDR && type != PT_GNU_STACK) {
+                if (type != PT_LOAD) {
+                    align = 8;
+                }
+            } else {
+                align = 8;
+            }
+            if (lds_phdr_vec_push(phdrs, phdr_name, type, flags, align) != 0) {
+                free(phdr_name);
+                lds_tok_free(&tok);
+                free(buf);
+                free(active_section);
+                return -1;
+            }
+            free(phdr_name);
+            lds_tok_free(&tok);
+            continue;
+        }
+
+        if (sections_depth == 1 && tok.kind == LDS_TOK_IDENT && tok.text != NULL && tok.text[0] == '.') {
+            free(active_section);
+            active_section = xstrdup(tok.text);
+            section_body_depth = 0;
+        } else if (sections_depth >= 2 && tok.kind == LDS_TOK_RBRACE && section_body_depth == sections_depth) {
+            section_body_depth = sections_depth - 1;
+        } else if (sections_depth >= 1 && section_body_depth == 1 && tok.kind == LDS_TOK_COLON && active_section != NULL) {
+            lds_tok_t p;
+            if (lds_lex_next(&lx, &p) == 0) {
+                if (p.kind == LDS_TOK_IDENT && p.text != NULL &&
+                    lds_sec_phdr_vec_push(maps, active_section, p.text) != 0) {
+                    lds_tok_free(&p);
+                    lds_tok_free(&tok);
+                    free(buf);
+                    free(active_section);
+                    return -1;
+                }
+                lds_tok_free(&p);
+            }
+            free(active_section);
+            active_section = NULL;
+            section_body_depth = 0;
+        }
+
+        if (tok.kind == LDS_TOK_LBRACE) {
+            brace_depth++;
+            if (phdrs_depth > 0) {
+                phdrs_depth++;
+            }
+            if (sections_depth > 0) {
+                sections_depth++;
+                if (active_section != NULL && section_body_depth == 0) {
+                    section_body_depth = sections_depth;
+                }
+            }
+        } else if (tok.kind == LDS_TOK_RBRACE) {
+            if (brace_depth > 0) {
+                brace_depth--;
+            }
+            if (phdrs_depth > 0) {
+                phdrs_depth--;
+            }
+            if (sections_depth > 0) {
+                sections_depth--;
+            }
+            if (sections_depth == 0) {
+                free(active_section);
+                active_section = NULL;
+                section_body_depth = 0;
+            }
+        } else if (tok.kind == LDS_TOK_SEMI && sections_depth == 1) {
+            free(active_section);
+            active_section = NULL;
+            section_body_depth = 0;
+        }
+        lds_tok_free(&tok);
+    }
+
+    free(buf);
+    free(active_section);
+    return 0;
+}
+
+static int add_script_segments_from_plan(elfobj_t *obj, const ld_ctx_t *ctx, const lds_phdr_vec_t *phdrs,
+                                         const lds_sec_phdr_vec_t *maps) {
+    elf_segment_t **segs;
+    size_t i;
+
+    if (obj == NULL || ctx == NULL || phdrs == NULL || phdrs->count == 0) {
+        return 0;
+    }
+    if (elf_add_segment(obj, PT_PHDR, 0x4u, 8) == NULL) {
+        return -1;
+    }
+    if (ctx->interp_path != NULL && ctx->interp_path[0] != '\0') {
+        if (elf_add_interp_segment(obj, ctx->interp_path) == NULL) {
+            return -1;
+        }
+    }
+    segs = (elf_segment_t **)calloc(phdrs->count, sizeof(*segs));
+    if (segs == NULL) {
+        return -1;
+    }
+    for (i = 0; i < phdrs->count; ++i) {
+        segs[i] = elf_add_segment(obj, phdrs->items[i].type, phdrs->items[i].flags, phdrs->items[i].align);
+        if (segs[i] == NULL) {
+            free(segs);
+            return -1;
+        }
+    }
+    for (i = 0; i < maps->count; ++i) {
+        int pidx = lds_phdr_vec_find(phdrs, maps->items[i].phdr_name);
+        elf_section_t *sec;
+        if (pidx < 0) {
+            continue;
+        }
+        sec = elf_find_section(obj, maps->items[i].section_name);
+        if (sec == NULL) {
+            continue;
+        }
+        if (elf_segment_add_section(segs[(size_t)pidx], sec) != ELF_OK) {
+            free(segs);
+            return -1;
+        }
+    }
+    free(segs);
+    return 1;
 }
 
 static int parse_u64_dec(const char *s, size_t n, uint64_t *out) {
@@ -7618,9 +8100,31 @@ static int add_default_segments(elfobj_t *obj, const ld_ctx_t *ctx) {
     elf_section_t *dyn;
     size_t i;
     int execstack_mode;
+    lds_phdr_vec_t script_phdrs;
+    lds_sec_phdr_vec_t script_maps;
+    int applied = 0;
 
     if (obj == NULL || ctx == NULL) {
         return -1;
+    }
+    memset(&script_phdrs, 0, sizeof(script_phdrs));
+    memset(&script_maps, 0, sizeof(script_maps));
+    if (ctx->script_path != NULL && ctx->script_path[0] != '\0') {
+        if (parse_script_phdr_and_map_plan(ctx->script_path, &script_phdrs, &script_maps) == 0 &&
+            script_phdrs.count > 0) {
+            applied = add_script_segments_from_plan(obj, ctx, &script_phdrs, &script_maps);
+            lds_phdr_vec_free(&script_phdrs);
+            lds_sec_phdr_vec_free(&script_maps);
+            if (applied < 0) {
+                return -1;
+            }
+            if (applied > 0) {
+                return 0;
+            }
+        } else {
+            lds_phdr_vec_free(&script_phdrs);
+            lds_sec_phdr_vec_free(&script_maps);
+        }
     }
 
     if (elf_add_segment(obj, PT_PHDR, LD_PF_R, 8) == NULL) {
