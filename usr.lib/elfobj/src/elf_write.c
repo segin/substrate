@@ -47,6 +47,48 @@ static int find_alloc_file_bias(const out_sec_t *secs, size_t sec_count, uint64_
     return 0;
 }
 
+static uint32_t count_gnu_verdef_entries(const out_sec_t *sec, elfobj_endian_t endian) {
+    size_t off = 0;
+    uint32_t count = 0;
+
+    if (sec == NULL || sec->data == NULL || sec->size < 20) {
+        return 0;
+    }
+    while (off + 20 <= sec->size) {
+        uint32_t next = elf__rd32(sec->data + off + 16, endian);
+        count++;
+        if (next == 0) {
+            break;
+        }
+        if (next < 20 || next > sec->size - off) {
+            break;
+        }
+        off += next;
+    }
+    return count;
+}
+
+static uint32_t count_gnu_verneed_entries(const out_sec_t *sec, elfobj_endian_t endian) {
+    size_t off = 0;
+    uint32_t count = 0;
+
+    if (sec == NULL || sec->data == NULL || sec->size < 16) {
+        return 0;
+    }
+    while (off + 16 <= sec->size) {
+        uint32_t next = elf__rd32(sec->data + off + 12, endian);
+        count++;
+        if (next == 0) {
+            break;
+        }
+        if (next < 16 || next > sec->size - off) {
+            break;
+        }
+        off += next;
+    }
+    return count;
+}
+
 static elf_err_t out_push(out_sec_t **secs, size_t *count, size_t *cap, const out_sec_t *in) {
     void *next;
     if (*count == *cap) {
@@ -478,6 +520,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         size_t hash_index = (size_t)-1;
         size_t gnu_hash_index = (size_t)-1;
         size_t gnu_versym_index = (size_t)-1;
+        size_t gnu_verdef_index = (size_t)-1;
+        size_t gnu_verneed_index = (size_t)-1;
         size_t rela_plt_index = (size_t)-1;
         size_t rel_plt_index = (size_t)-1;
         size_t rela_dyn_index = (size_t)-1;
@@ -499,6 +543,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 gnu_hash_index = i;
             } else if (strcmp(nm, ".gnu.version") == 0) {
                 gnu_versym_index = i;
+            } else if (strcmp(nm, ".gnu.version_d") == 0) {
+                gnu_verdef_index = i;
+            } else if (strcmp(nm, ".gnu.version_r") == 0) {
+                gnu_verneed_index = i;
             } else if (strcmp(nm, ".rela.plt") == 0) {
                 rela_plt_index = i;
             } else if (strcmp(nm, ".rel.plt") == 0) {
@@ -549,6 +597,30 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                     secs[gnu_versym_index].entsize = 2;
                 }
                 secs[gnu_versym_index].link = (uint32_t)dynsym_index;
+            }
+            if (gnu_verdef_index != (size_t)-1) {
+                if (secs[gnu_verdef_index].entsize == 0) {
+                    secs[gnu_verdef_index].entsize = 20;
+                }
+                if (dynstr_index != (size_t)-1) {
+                    secs[gnu_verdef_index].link = (uint32_t)dynstr_index;
+                }
+                if (secs[gnu_verdef_index].info == 0) {
+                    secs[gnu_verdef_index].info =
+                        count_gnu_verdef_entries(&secs[gnu_verdef_index], obj->endian);
+                }
+            }
+            if (gnu_verneed_index != (size_t)-1) {
+                if (secs[gnu_verneed_index].entsize == 0) {
+                    secs[gnu_verneed_index].entsize = 16;
+                }
+                if (dynstr_index != (size_t)-1) {
+                    secs[gnu_verneed_index].link = (uint32_t)dynstr_index;
+                }
+                if (secs[gnu_verneed_index].info == 0) {
+                    secs[gnu_verneed_index].info =
+                        count_gnu_verneed_entries(&secs[gnu_verneed_index], obj->endian);
+                }
             }
             if (rela_plt_index != (size_t)-1) {
                 if (secs[rela_plt_index].entsize == 0) {

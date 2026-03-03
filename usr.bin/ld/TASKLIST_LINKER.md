@@ -211,9 +211,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-007.
 
 ### 7.4 Symbol versioning
-- [ ] Implement `.gnu.version`, `.gnu.version_d`, `.gnu.version_r` generation.  
+- [x] Implement `.gnu.version`, `.gnu.version_d`, `.gnu.version_r` generation.  
   Reqs: LD-S-003. Stories: US-201.
-- [ ] Add version-script integration tests against GNU behavior.  
+- [x] Add version-script integration tests against GNU behavior.  
   Reqs: LD-U-007.
 
 ---

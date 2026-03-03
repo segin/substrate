@@ -195,6 +195,11 @@ typedef enum {
 #define DT_DEBUG 21
 #define DT_TEXTREL 22
 #define DT_JMPREL 23
+#define DT_VERSYM 0x6ffffff0
+#define DT_VERDEF 0x6ffffffc
+#define DT_VERDEFNUM 0x6ffffffd
+#define DT_VERNEED 0x6ffffffe
+#define DT_VERNEEDNUM 0x6fffffff
 #endif
 
 #ifndef STB_LOCAL

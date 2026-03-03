@@ -148,6 +148,8 @@ typedef struct {
     inputvec_t inputs;
 } ld_ctx_t;
 
+static int dynstr_append_cstr(uint8_t **buf, size_t *len, size_t *cap, const char *name, uint32_t *out_off);
+
 static void usage(const char *prog) {
     fprintf(stderr,
             "usage: %s [-m32|-m64|-m <emulation>] [-r|-shared|-pie|-static] "
@@ -1384,6 +1386,30 @@ typedef struct {
     size_t cap;
 } verdef_table_t;
 
+typedef struct {
+    char *name;
+    uint16_t index;
+    uint32_t name_off;
+} dyn_verdef_t;
+
+typedef struct {
+    char *file;
+    char *name;
+    uint16_t index;
+    uint32_t file_off;
+    uint32_t name_off;
+} dyn_verneed_t;
+
+typedef struct {
+    dyn_verdef_t *defs;
+    size_t def_count;
+    size_t def_cap;
+    dyn_verneed_t *needs;
+    size_t need_count;
+    size_t need_cap;
+    uint16_t next_index;
+} dyn_ver_plan_t;
+
 static uint16_t read_u16_endian(const uint8_t *p, elfobj_endian_t endian) {
     if (endian == ELFOBJ_ENDIAN_BE) {
         return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
@@ -1524,6 +1550,194 @@ static const char *verdef_lookup(const verdef_table_t *tab, uint16_t index) {
         }
     }
     return NULL;
+}
+
+static void dyn_ver_plan_init(dyn_ver_plan_t *plan) {
+    if (plan == NULL) {
+        return;
+    }
+    memset(plan, 0, sizeof(*plan));
+    plan->next_index = 2;
+}
+
+static void dyn_ver_plan_free(dyn_ver_plan_t *plan) {
+    size_t i;
+
+    if (plan == NULL) {
+        return;
+    }
+    for (i = 0; i < plan->def_count; ++i) {
+        free(plan->defs[i].name);
+    }
+    free(plan->defs);
+    for (i = 0; i < plan->need_count; ++i) {
+        free(plan->needs[i].file);
+        free(plan->needs[i].name);
+    }
+    free(plan->needs);
+    memset(plan, 0, sizeof(*plan));
+}
+
+static int dyn_ver_plan_alloc_index(dyn_ver_plan_t *plan, uint16_t *out) {
+    if (plan == NULL || out == NULL) {
+        return -1;
+    }
+    if (plan->next_index >= VER_NDX_HIDDEN) {
+        return -1;
+    }
+    *out = plan->next_index++;
+    return 0;
+}
+
+static int dyn_ver_plan_get_or_add_def(dyn_ver_plan_t *plan, const char *name, uint16_t *out_index) {
+    dyn_verdef_t *next;
+    uint16_t idx;
+    size_t i;
+
+    if (plan == NULL || name == NULL || name[0] == '\0' || out_index == NULL) {
+        return -1;
+    }
+    for (i = 0; i < plan->def_count; ++i) {
+        if (strcmp(plan->defs[i].name, name) == 0) {
+            *out_index = plan->defs[i].index;
+            return 0;
+        }
+    }
+    if (dyn_ver_plan_alloc_index(plan, &idx) != 0) {
+        return -1;
+    }
+    if (plan->def_count == plan->def_cap) {
+        size_t ncap = plan->def_cap == 0 ? 8 : plan->def_cap * 2;
+        next = (dyn_verdef_t *)realloc(plan->defs, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        plan->defs = next;
+        plan->def_cap = ncap;
+    }
+    plan->defs[plan->def_count].name = xstrdup(name);
+    if (plan->defs[plan->def_count].name == NULL) {
+        return -1;
+    }
+    plan->defs[plan->def_count].index = idx;
+    plan->defs[plan->def_count].name_off = UINT32_MAX;
+    plan->def_count++;
+    *out_index = idx;
+    return 0;
+}
+
+static int dyn_ver_plan_get_or_add_need(dyn_ver_plan_t *plan, const char *file, const char *name, uint16_t *out_index) {
+    dyn_verneed_t *next;
+    uint16_t idx;
+    size_t i;
+
+    if (plan == NULL || file == NULL || name == NULL || file[0] == '\0' || name[0] == '\0' || out_index == NULL) {
+        return -1;
+    }
+    for (i = 0; i < plan->need_count; ++i) {
+        if (strcmp(plan->needs[i].file, file) == 0 && strcmp(plan->needs[i].name, name) == 0) {
+            *out_index = plan->needs[i].index;
+            return 0;
+        }
+    }
+    if (dyn_ver_plan_alloc_index(plan, &idx) != 0) {
+        return -1;
+    }
+    if (plan->need_count == plan->need_cap) {
+        size_t ncap = plan->need_cap == 0 ? 8 : plan->need_cap * 2;
+        next = (dyn_verneed_t *)realloc(plan->needs, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        plan->needs = next;
+        plan->need_cap = ncap;
+    }
+    plan->needs[plan->need_count].file = xstrdup(file);
+    plan->needs[plan->need_count].name = xstrdup(name);
+    if (plan->needs[plan->need_count].file == NULL || plan->needs[plan->need_count].name == NULL) {
+        free(plan->needs[plan->need_count].file);
+        free(plan->needs[plan->need_count].name);
+        return -1;
+    }
+    plan->needs[plan->need_count].index = idx;
+    plan->needs[plan->need_count].file_off = UINT32_MAX;
+    plan->needs[plan->need_count].name_off = UINT32_MAX;
+    plan->need_count++;
+    *out_index = idx;
+    return 0;
+}
+
+static int dyn_ver_plan_ensure_def_index(dyn_ver_plan_t *plan, const char *name, uint16_t index) {
+    dyn_verdef_t *next;
+    size_t i;
+
+    if (plan == NULL || name == NULL || name[0] == '\0' || index <= VER_NDX_GLOBAL || index >= VER_NDX_HIDDEN) {
+        return -1;
+    }
+    for (i = 0; i < plan->def_count; ++i) {
+        if (strcmp(plan->defs[i].name, name) == 0) {
+            return plan->defs[i].index == index ? 0 : -1;
+        }
+    }
+    if (plan->def_count == plan->def_cap) {
+        size_t ncap = plan->def_cap == 0 ? 8 : plan->def_cap * 2;
+        next = (dyn_verdef_t *)realloc(plan->defs, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        plan->defs = next;
+        plan->def_cap = ncap;
+    }
+    plan->defs[plan->def_count].name = xstrdup(name);
+    if (plan->defs[plan->def_count].name == NULL) {
+        return -1;
+    }
+    plan->defs[plan->def_count].index = index;
+    plan->defs[plan->def_count].name_off = UINT32_MAX;
+    plan->def_count++;
+    if (plan->next_index <= index) {
+        plan->next_index = (uint16_t)(index + 1);
+    }
+    return 0;
+}
+
+static int dyn_ver_plan_ensure_need_index(dyn_ver_plan_t *plan, const char *file, const char *name, uint16_t index) {
+    dyn_verneed_t *next;
+    size_t i;
+
+    if (plan == NULL || file == NULL || name == NULL || file[0] == '\0' || name[0] == '\0' ||
+        index <= VER_NDX_GLOBAL || index >= VER_NDX_HIDDEN) {
+        return -1;
+    }
+    for (i = 0; i < plan->need_count; ++i) {
+        if (strcmp(plan->needs[i].file, file) == 0 && strcmp(plan->needs[i].name, name) == 0) {
+            return plan->needs[i].index == index ? 0 : -1;
+        }
+    }
+    if (plan->need_count == plan->need_cap) {
+        size_t ncap = plan->need_cap == 0 ? 8 : plan->need_cap * 2;
+        next = (dyn_verneed_t *)realloc(plan->needs, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        plan->needs = next;
+        plan->need_cap = ncap;
+    }
+    plan->needs[plan->need_count].file = xstrdup(file);
+    plan->needs[plan->need_count].name = xstrdup(name);
+    if (plan->needs[plan->need_count].file == NULL || plan->needs[plan->need_count].name == NULL) {
+        free(plan->needs[plan->need_count].file);
+        free(plan->needs[plan->need_count].name);
+        return -1;
+    }
+    plan->needs[plan->need_count].index = index;
+    plan->needs[plan->need_count].file_off = UINT32_MAX;
+    plan->needs[plan->need_count].name_off = UINT32_MAX;
+    plan->need_count++;
+    if (plan->next_index <= index) {
+        plan->next_index = (uint16_t)(index + 1);
+    }
+    return 0;
 }
 
 static int load_dso_verdef_table(const elfobj_t *obj, verdef_table_t *out) {
@@ -1892,6 +2106,426 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
         fprintf(stderr, "ld: trace: dso %s\n", path);
     }
     elf_close(obj);
+    return 0;
+}
+
+static uint32_t dynsym_name_off_raw(const uint8_t *dynsym, size_t dynsym_len, size_t entsz,
+                                    elfobj_endian_t endian, size_t index) {
+    size_t off = index * entsz;
+
+    if (dynsym == NULL || entsz == 0 || off > dynsym_len || dynsym_len - off < entsz) {
+        return 0;
+    }
+    return read_u32_endian(dynsym + off, endian);
+}
+
+static int dynsym_shndx_raw(const uint8_t *dynsym, size_t dynsym_len, size_t entsz, elfobj_class_t cls,
+                            elfobj_endian_t endian, size_t index, uint16_t *out_shndx) {
+    size_t off = index * entsz;
+
+    if (dynsym == NULL || entsz == 0 || out_shndx == NULL || off > dynsym_len || dynsym_len - off < entsz) {
+        return -1;
+    }
+    if (cls == ELFOBJ_CLASS_64) {
+        *out_shndx = read_u16_endian(dynsym + off + 6, endian);
+    } else {
+        *out_shndx = read_u16_endian(dynsym + off + 14, endian);
+    }
+    return 0;
+}
+
+static int versym_read_raw(const uint8_t *versym, size_t versym_len, elfobj_endian_t endian, size_t index,
+                           uint16_t *out_ver) {
+    size_t off = index * 2;
+
+    if (versym == NULL || out_ver == NULL || off > versym_len || versym_len - off < 2) {
+        return -1;
+    }
+    *out_ver = read_u16_endian(versym + off, endian);
+    return 0;
+}
+
+static int versym_write_raw(uint8_t *versym, size_t versym_len, elfobj_endian_t endian, size_t index, uint16_t ver) {
+    size_t off = index * 2;
+
+    if (versym == NULL || off > versym_len || versym_len - off < 2) {
+        return -1;
+    }
+    write_u16_endian(versym + off, endian, ver);
+    return 0;
+}
+
+static int dso_has_versioned_export(const ld_ctx_t *ctx, const char *path, const char *base, size_t base_len,
+                                    const char *ver_name) {
+    char *at_name = NULL;
+    char *atat_name = NULL;
+    symstate_t state;
+    int matched = 0;
+
+    if (ctx == NULL || path == NULL || base == NULL || base_len == 0 || ver_name == NULL || ver_name[0] == '\0') {
+        return 0;
+    }
+    memset(&state, 0, sizeof(state));
+    at_name = make_versioned_symbol(base, base_len, "@", ver_name);
+    atat_name = make_versioned_symbol(base, base_len, "@@", ver_name);
+    if (at_name == NULL || atat_name == NULL ||
+        symset_add(&state.unresolved, at_name) != 0 || symset_add(&state.unresolved, atat_name) != 0 ||
+        shared_object_matches_unresolved(path, (ld_ctx_t *)ctx, &state, &matched) != 0) {
+        free(at_name);
+        free(atat_name);
+        symstate_free(&state);
+        return 0;
+    }
+    free(at_name);
+    free(atat_name);
+    symstate_free(&state);
+    return matched != 0;
+}
+
+static const char *resolve_version_need_provider(const ld_ctx_t *ctx, const char *base, size_t base_len,
+                                                 const char *ver_name) {
+    size_t i;
+
+    if (ctx == NULL || base == NULL || base_len == 0 || ver_name == NULL || ver_name[0] == '\0') {
+        return NULL;
+    }
+    for (i = 0; i < ctx->dso_inputs.count; ++i) {
+        const char *path = ctx->dso_inputs.items[i];
+        const char *leaf;
+        if (path == NULL || path[0] == '\0') {
+            continue;
+        }
+        if (!dso_has_versioned_export(ctx, path, base, base_len, ver_name)) {
+            continue;
+        }
+        leaf = strrchr(path, '/');
+        return leaf != NULL ? leaf + 1 : path;
+    }
+    return NULL;
+}
+
+static int dyn_ver_plan_assign_dynstr_offsets(dyn_ver_plan_t *plan, uint8_t **dynstr_buf, size_t *dynstr_len,
+                                              size_t *dynstr_cap) {
+    size_t i;
+
+    if (plan == NULL || dynstr_buf == NULL || dynstr_len == NULL || dynstr_cap == NULL) {
+        return -1;
+    }
+    for (i = 0; i < plan->def_count; ++i) {
+        if (plan->defs[i].name_off != UINT32_MAX) {
+            continue;
+        }
+        if (dynstr_append_cstr(dynstr_buf, dynstr_len, dynstr_cap, plan->defs[i].name, &plan->defs[i].name_off) != 0) {
+            return -1;
+        }
+    }
+    for (i = 0; i < plan->need_count; ++i) {
+        if (plan->needs[i].file_off == UINT32_MAX &&
+            dynstr_append_cstr(dynstr_buf, dynstr_len, dynstr_cap, plan->needs[i].file, &plan->needs[i].file_off) != 0) {
+            return -1;
+        }
+        if (plan->needs[i].name_off == UINT32_MAX &&
+            dynstr_append_cstr(dynstr_buf, dynstr_len, dynstr_cap, plan->needs[i].name, &plan->needs[i].name_off) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int build_gnu_verdef_data(const dyn_ver_plan_t *plan, elfobj_endian_t endian, uint8_t **out_buf, size_t *out_sz) {
+    uint8_t *buf;
+    size_t i;
+    size_t off;
+
+    if (out_buf == NULL || out_sz == NULL || plan == NULL || plan->def_count == 0) {
+        return -1;
+    }
+    if (plan->def_count > SIZE_MAX / 28) {
+        return -1;
+    }
+    *out_sz = plan->def_count * 28;
+    buf = (uint8_t *)calloc(1, *out_sz);
+    if (buf == NULL) {
+        return -1;
+    }
+    off = 0;
+    for (i = 0; i < plan->def_count; ++i) {
+        size_t next = i + 1 < plan->def_count ? 28 : 0;
+        write_u16_endian(buf + off + 0, endian, 1);
+        write_u16_endian(buf + off + 2, endian, 0);
+        write_u16_endian(buf + off + 4, endian, plan->defs[i].index);
+        write_u16_endian(buf + off + 6, endian, 1);
+        write_u32_endian(buf + off + 8, endian, elf_hash_sysv(plan->defs[i].name));
+        write_u32_endian(buf + off + 12, endian, 20);
+        write_u32_endian(buf + off + 16, endian, (uint32_t)next);
+        write_u32_endian(buf + off + 20, endian, plan->defs[i].name_off);
+        write_u32_endian(buf + off + 24, endian, 0);
+        off += 28;
+    }
+    *out_buf = buf;
+    return 0;
+}
+
+static int build_gnu_verneed_data(const dyn_ver_plan_t *plan, elfobj_endian_t endian, uint8_t **out_buf, size_t *out_sz,
+                                  size_t *out_need_file_count) {
+    typedef struct {
+        const char *file;
+        uint32_t file_off;
+        size_t count;
+    } need_file_t;
+
+    need_file_t *files = NULL;
+    uint8_t *buf = NULL;
+    size_t file_count = 0;
+    size_t file_cap = 0;
+    size_t total = 0;
+    size_t i;
+    size_t off;
+
+    if (out_buf == NULL || out_sz == NULL || out_need_file_count == NULL || plan == NULL || plan->need_count == 0) {
+        return -1;
+    }
+    for (i = 0; i < plan->need_count; ++i) {
+        size_t j;
+        int found = 0;
+        for (j = 0; j < file_count; ++j) {
+            if (strcmp(files[j].file, plan->needs[i].file) == 0) {
+                files[j].count++;
+                found = 1;
+                break;
+            }
+        }
+        if (found) {
+            continue;
+        }
+        if (file_count == file_cap) {
+            size_t ncap = file_cap == 0 ? 4 : file_cap * 2;
+            need_file_t *next = (need_file_t *)realloc(files, ncap * sizeof(*next));
+            if (next == NULL) {
+                free(files);
+                return -1;
+            }
+            files = next;
+            file_cap = ncap;
+        }
+        files[file_count].file = plan->needs[i].file;
+        files[file_count].file_off = plan->needs[i].file_off;
+        files[file_count].count = 1;
+        file_count++;
+    }
+    for (i = 0; i < file_count; ++i) {
+        if (files[i].count > ((size_t)UINT16_MAX)) {
+            free(files);
+            return -1;
+        }
+        if (files[i].count > (SIZE_MAX - total - 16) / 16) {
+            free(files);
+            return -1;
+        }
+        total += 16 + (files[i].count * 16);
+    }
+
+    buf = (uint8_t *)calloc(1, total);
+    if (buf == NULL) {
+        free(files);
+        return -1;
+    }
+    off = 0;
+    for (i = 0; i < file_count; ++i) {
+        size_t this_sz = 16 + (files[i].count * 16);
+        size_t aux_written = 0;
+        size_t j;
+        size_t aux_off = off + 16;
+
+        write_u16_endian(buf + off + 0, endian, 1);
+        write_u16_endian(buf + off + 2, endian, (uint16_t)files[i].count);
+        write_u32_endian(buf + off + 4, endian, files[i].file_off);
+        write_u32_endian(buf + off + 8, endian, 16);
+        write_u32_endian(buf + off + 12, endian, (uint32_t)(i + 1 < file_count ? this_sz : 0));
+
+        for (j = 0; j < plan->need_count; ++j) {
+            if (strcmp(plan->needs[j].file, files[i].file) != 0) {
+                continue;
+            }
+            write_u32_endian(buf + aux_off + 0, endian, elf_hash_sysv(plan->needs[j].name));
+            write_u16_endian(buf + aux_off + 4, endian, 0);
+            write_u16_endian(buf + aux_off + 6, endian, plan->needs[j].index);
+            write_u32_endian(buf + aux_off + 8, endian, plan->needs[j].name_off);
+            write_u32_endian(buf + aux_off + 12, endian, aux_written + 1 < files[i].count ? 16 : 0);
+            aux_off += 16;
+            aux_written++;
+        }
+        off += this_sz;
+    }
+    free(files);
+    *out_buf = buf;
+    *out_sz = total;
+    *out_need_file_count = file_count;
+    return 0;
+}
+
+static int plan_symbol_version_sections(ld_ctx_t *ctx, elfobj_t *out, uint8_t **dynstr_buf, size_t *dynstr_len,
+                                        size_t *dynstr_cap, const uint8_t *dynsym_buf, size_t dynsym_len, size_t entsz,
+                                        uint8_t *versym_buf, size_t versym_len, size_t *out_verdef_count,
+                                        size_t *out_verneed_count) {
+    dyn_ver_plan_t plan;
+    elfobj_endian_t endian;
+    size_t nsyms;
+    size_t i;
+    uint8_t *verdef_data = NULL;
+    uint8_t *verneed_data = NULL;
+    size_t verdef_sz = 0;
+    size_t verneed_sz = 0;
+    size_t need_file_count = 0;
+
+    if (ctx == NULL || out == NULL || dynstr_buf == NULL || dynstr_len == NULL || dynstr_cap == NULL ||
+        dynsym_buf == NULL || entsz == 0 || versym_buf == NULL || out_verdef_count == NULL || out_verneed_count == NULL) {
+        return -1;
+    }
+    if ((dynsym_len % entsz) != 0) {
+        return -1;
+    }
+    nsyms = dynsym_len / entsz;
+    if (versym_len < nsyms * 2) {
+        return -1;
+    }
+    *out_verdef_count = 0;
+    *out_verneed_count = 0;
+
+    dyn_ver_plan_init(&plan);
+    endian = elf_endian(out);
+    for (i = 1; i < nsyms; ++i) {
+        uint32_t noff = dynsym_name_off_raw(dynsym_buf, dynsym_len, entsz, endian, i);
+        const char *name = safe_strtab_name(*dynstr_buf, *dynstr_len, noff);
+        const char *base;
+        size_t base_len;
+        const char *ver_name;
+        int is_default_name;
+        uint16_t shndx;
+        uint16_t curr_ver;
+        uint16_t curr_base;
+        int curr_hidden;
+        uint16_t assigned = VER_NDX_GLOBAL;
+
+        if (name == NULL || name[0] == '\0') {
+            continue;
+        }
+        split_symbol_version(name, &base, &base_len, &ver_name, &is_default_name);
+        if (ver_name == NULL || ver_name[0] == '\0') {
+            continue;
+        }
+        if (dynsym_shndx_raw(dynsym_buf, dynsym_len, entsz, elf_class(out), endian, i, &shndx) != 0 ||
+            versym_read_raw(versym_buf, versym_len, endian, i, &curr_ver) != 0) {
+            dyn_ver_plan_free(&plan);
+            return -1;
+        }
+        curr_base = (uint16_t)(curr_ver & (uint16_t)~VER_NDX_HIDDEN);
+        curr_hidden = (curr_ver & VER_NDX_HIDDEN) != 0;
+        if (shndx != SHN_UNDEF) {
+            if (curr_base > VER_NDX_GLOBAL) {
+                if (dyn_ver_plan_ensure_def_index(&plan, ver_name, curr_base) != 0) {
+                    dyn_ver_plan_free(&plan);
+                    return -1;
+                }
+                assigned = curr_base;
+            } else if (dyn_ver_plan_get_or_add_def(&plan, ver_name, &assigned) != 0) {
+                dyn_ver_plan_free(&plan);
+                return -1;
+            }
+            if (curr_hidden || !is_default_name) {
+                assigned = (uint16_t)(assigned | VER_NDX_HIDDEN);
+            }
+            if (versym_write_raw(versym_buf, versym_len, endian, i, assigned) != 0) {
+                dyn_ver_plan_free(&plan);
+                return -1;
+            }
+            continue;
+        }
+        {
+            const char *provider = resolve_version_need_provider(ctx, base, base_len, ver_name);
+            if (provider == NULL && ctx->dso_inputs.count != 0) {
+                const char *path = ctx->dso_inputs.items[0];
+                const char *leaf = path != NULL ? strrchr(path, '/') : NULL;
+                provider = leaf != NULL ? leaf + 1 : path;
+            }
+            if (provider == NULL) {
+                continue;
+            }
+            if (curr_base > VER_NDX_GLOBAL) {
+                if (dyn_ver_plan_ensure_need_index(&plan, provider, ver_name, curr_base) != 0) {
+                    dyn_ver_plan_free(&plan);
+                    return -1;
+                }
+                assigned = curr_base;
+            } else if (dyn_ver_plan_get_or_add_need(&plan, provider, ver_name, &assigned) != 0) {
+                dyn_ver_plan_free(&plan);
+                return -1;
+            }
+            if (curr_hidden) {
+                assigned = (uint16_t)(assigned | VER_NDX_HIDDEN);
+            }
+            if (versym_write_raw(versym_buf, versym_len, endian, i, assigned) != 0) {
+                dyn_ver_plan_free(&plan);
+                return -1;
+            }
+        }
+    }
+    if (plan.def_count == 0 && plan.need_count == 0) {
+        dyn_ver_plan_free(&plan);
+        return 0;
+    }
+    if (dyn_ver_plan_assign_dynstr_offsets(&plan, dynstr_buf, dynstr_len, dynstr_cap) != 0) {
+        dyn_ver_plan_free(&plan);
+        return -1;
+    }
+    if (plan.def_count != 0) {
+        elf_section_t *sec = elf_find_section(out, ".gnu.version_d");
+        if (build_gnu_verdef_data(&plan, endian, &verdef_data, &verdef_sz) != 0) {
+            dyn_ver_plan_free(&plan);
+            return -1;
+        }
+        if (sec == NULL) {
+            sec = elf_add_section(out, ".gnu.version_d", SHT_GNU_verdef, SHF_ALLOC);
+            if (sec == NULL) {
+                free(verdef_data);
+                dyn_ver_plan_free(&plan);
+                return -1;
+            }
+        }
+        if (elf_section_set_align(sec, 4) != ELF_OK || elf_section_set_data(sec, verdef_data, verdef_sz) != ELF_OK) {
+            free(verdef_data);
+            dyn_ver_plan_free(&plan);
+            return -1;
+        }
+        *out_verdef_count = plan.def_count;
+    }
+    if (plan.need_count != 0) {
+        elf_section_t *sec = elf_find_section(out, ".gnu.version_r");
+        if (build_gnu_verneed_data(&plan, endian, &verneed_data, &verneed_sz, &need_file_count) != 0) {
+            free(verdef_data);
+            dyn_ver_plan_free(&plan);
+            return -1;
+        }
+        if (sec == NULL) {
+            sec = elf_add_section(out, ".gnu.version_r", SHT_GNU_verneed, SHF_ALLOC);
+            if (sec == NULL) {
+                free(verdef_data);
+                free(verneed_data);
+                dyn_ver_plan_free(&plan);
+                return -1;
+            }
+        }
+        if (elf_section_set_align(sec, 4) != ELF_OK || elf_section_set_data(sec, verneed_data, verneed_sz) != ELF_OK) {
+            free(verdef_data);
+            free(verneed_data);
+            dyn_ver_plan_free(&plan);
+            return -1;
+        }
+        *out_verneed_count = need_file_count;
+    }
+    free(verdef_data);
+    free(verneed_data);
+    dyn_ver_plan_free(&plan);
     return 0;
 }
 
@@ -3052,6 +3686,8 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     size_t dynamic_cap = 0;
     size_t hash_sz = 0;
     size_t gnu_hash_sz = 0;
+    size_t verdef_count = 0;
+    size_t verneed_count = 0;
     size_t i;
     size_t entsz;
     int need_dyn;
@@ -3191,6 +3827,8 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
 
     for (i = 0; i < elf_symbol_count(out); ++i) {
         const elf_symbol_t *sym = elf_symbol_at(out, i);
+        const char *emit_name = NULL;
+        char *emit_name_tmp = NULL;
         uint8_t entry[24];
         uint8_t info;
         uint8_t other;
@@ -3203,7 +3841,31 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         if (!dynsym_should_export(ctx, out, sym)) {
             continue;
         }
-        if (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, elf_symbol_name(sym), &name_off) != 0) {
+        emit_name = elf_symbol_name(sym);
+        if (emit_name != NULL && elf_symbol_version(sym) > VER_NDX_GLOBAL) {
+            const char *base_name;
+            size_t base_len;
+            const char *ver_name;
+            int is_default_name;
+            split_symbol_version(emit_name, &base_name, &base_len, &ver_name, &is_default_name);
+            if (ver_name != NULL && base_name != NULL && base_len != strlen(emit_name)) {
+                emit_name_tmp = (char *)malloc(base_len + 1);
+                if (emit_name_tmp == NULL) {
+                    free(dynstr_buf);
+                    free(dynsym_buf);
+                    free(dynamic_buf);
+                    free(versym_buf);
+                    free(hash_buf);
+                    free(gnu_hash_buf);
+                    return -1;
+                }
+                memcpy(emit_name_tmp, base_name, base_len);
+                emit_name_tmp[base_len] = '\0';
+                emit_name = emit_name_tmp;
+            }
+        }
+        if (dynstr_append_cstr(&dynstr_buf, &dynstr_len, &dynstr_cap, emit_name, &name_off) != 0) {
+            free(emit_name_tmp);
             free(dynstr_buf);
             free(dynsym_buf);
             free(dynamic_buf);
@@ -3212,6 +3874,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
             free(gnu_hash_buf);
             return -1;
         }
+        free(emit_name_tmp);
 
         info = (uint8_t)(((elf_symbol_bind(sym) & 0x0f) << 4) | (elf_symbol_type(sym) & 0x0f));
         other = (uint8_t)(elf_symbol_visibility(sym) & 0x03);
@@ -3262,6 +3925,18 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         }
     }
 
+    if (plan_symbol_version_sections(ctx, out, &dynstr_buf, &dynstr_len, &dynstr_cap,
+                                     dynsym_buf, dynsym_len, entsz, versym_buf, versym_len,
+                                     &verdef_count, &verneed_count) != 0) {
+        free(dynstr_buf);
+        free(dynsym_buf);
+        free(dynamic_buf);
+        free(versym_buf);
+        free(hash_buf);
+        free(gnu_hash_buf);
+        return -1;
+    }
+
     if (hash_sec != NULL) {
         hash_buf = build_sysv_hash_section(dynsym_buf, dynsym_len, dynstr_buf, dynstr_len,
                                            entsz, elf_endian(out), &hash_sz);
@@ -3302,6 +3977,44 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(hash_buf);
         free(gnu_hash_buf);
         return -1;
+    }
+    if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                             elf_class(out), elf_endian(out), DT_VERSYM, 0) != 0) {
+        free(dynstr_buf);
+        free(dynsym_buf);
+        free(dynamic_buf);
+        free(versym_buf);
+        free(hash_buf);
+        free(gnu_hash_buf);
+        return -1;
+    }
+    if (verdef_count != 0) {
+        if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                                 elf_class(out), elf_endian(out), DT_VERDEF, 0) != 0 ||
+            dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                                 elf_class(out), elf_endian(out), DT_VERDEFNUM, verdef_count) != 0) {
+            free(dynstr_buf);
+            free(dynsym_buf);
+            free(dynamic_buf);
+            free(versym_buf);
+            free(hash_buf);
+            free(gnu_hash_buf);
+            return -1;
+        }
+    }
+    if (verneed_count != 0) {
+        if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                                 elf_class(out), elf_endian(out), DT_VERNEED, 0) != 0 ||
+            dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                                 elf_class(out), elf_endian(out), DT_VERNEEDNUM, verneed_count) != 0) {
+            free(dynstr_buf);
+            free(dynsym_buf);
+            free(dynamic_buf);
+            free(versym_buf);
+            free(hash_buf);
+            free(gnu_hash_buf);
+            return -1;
+        }
     }
 
     if (gotplt_sec != NULL) {
@@ -3406,6 +4119,9 @@ static int patch_dynamic_tag_values(elfobj_t *out) {
     elf_section_t *dynamic;
     elf_section_t *dynstr;
     elf_section_t *dynsym;
+    elf_section_t *versym;
+    elf_section_t *verdef;
+    elf_section_t *verneed;
     elf_section_t *gotplt;
     elf_section_t *rela_plt;
     elf_section_t *rel_plt;
@@ -3420,6 +4136,9 @@ static int patch_dynamic_tag_values(elfobj_t *out) {
     uint64_t dynsym_addr = 0;
     uint64_t dynstr_size = 0;
     uint64_t dynsym_entsz;
+    uint64_t versym_addr = 0;
+    uint64_t verdef_addr = 0;
+    uint64_t verneed_addr = 0;
     uint64_t gotplt_addr = 0;
     uint64_t jmprel_addr = 0;
     uint64_t jmprel_size = 0;
@@ -3437,6 +4156,9 @@ static int patch_dynamic_tag_values(elfobj_t *out) {
     }
     dynstr = elf_find_section(out, ".dynstr");
     dynsym = elf_find_section(out, ".dynsym");
+    versym = elf_find_section(out, ".gnu.version");
+    verdef = elf_find_section(out, ".gnu.version_d");
+    verneed = elf_find_section(out, ".gnu.version_r");
     gotplt = elf_find_section(out, ".got.plt");
     rela_plt = elf_find_section(out, ".rela.plt");
     rel_plt = elf_find_section(out, ".rel.plt");
@@ -3449,6 +4171,15 @@ static int patch_dynamic_tag_values(elfobj_t *out) {
     dynsym_addr = elf_section_addr(dynsym);
     dynstr_size = elf_section_size(dynstr);
     dynsym_entsz = elf_class(out) == ELFOBJ_CLASS_64 ? 24u : 16u;
+    if (versym != NULL) {
+        versym_addr = elf_section_addr(versym);
+    }
+    if (verdef != NULL) {
+        verdef_addr = elf_section_addr(verdef);
+    }
+    if (verneed != NULL) {
+        verneed_addr = elf_section_addr(verneed);
+    }
     if (gotplt != NULL) {
         gotplt_addr = elf_section_addr(gotplt);
     }
@@ -3520,6 +4251,24 @@ static int patch_dynamic_tag_values(elfobj_t *out) {
                 write_u64_endian(p + 8, elf_endian(out), gotplt_addr);
             } else {
                 write_u32_endian(p + 4, elf_endian(out), (uint32_t)gotplt_addr);
+            }
+        } else if (tag == DT_VERSYM) {
+            if (elf_class(out) == ELFOBJ_CLASS_64) {
+                write_u64_endian(p + 8, elf_endian(out), versym_addr);
+            } else {
+                write_u32_endian(p + 4, elf_endian(out), (uint32_t)versym_addr);
+            }
+        } else if (tag == DT_VERDEF) {
+            if (elf_class(out) == ELFOBJ_CLASS_64) {
+                write_u64_endian(p + 8, elf_endian(out), verdef_addr);
+            } else {
+                write_u32_endian(p + 4, elf_endian(out), (uint32_t)verdef_addr);
+            }
+        } else if (tag == DT_VERNEED) {
+            if (elf_class(out) == ELFOBJ_CLASS_64) {
+                write_u64_endian(p + 8, elf_endian(out), verneed_addr);
+            } else {
+                write_u32_endian(p + 4, elf_endian(out), (uint32_t)verneed_addr);
             }
         } else if (tag == DT_JMPREL) {
             if (elf_class(out) == ELFOBJ_CLASS_64) {

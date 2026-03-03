@@ -16,6 +16,11 @@ echo "== ld test dashboard =="
 echo "root: $ROOT"
 echo
 
+echo "Building libelfobj (NATIVE_BUILD=1)..."
+make -C "$ROOT/usr.lib/elfobj" NATIVE_BUILD=1 -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)" >/dev/null
+echo "libelfobj: PASS"
+echo
+
 echo "Building ld (NATIVE_BUILD=1)..."
 make -C "$ROOT/usr.bin/ld" NATIVE_BUILD=1 -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)" >/dev/null
 echo "Build: PASS"
@@ -61,6 +66,8 @@ test_dynamic_needed_as_needed.sh|LD-E-005 LD-S-003
 test_dynsym_dynstr_exports.sh|LD-S-003
 test_dynamic_tag_invariants.sh|LD-S-003
 test_gnu_versym_basic.sh|LD-S-003
+test_gnu_verdef_from_symver.sh|LD-U-005 LD-S-003
+test_gnu_verneed_from_symver.sh|LD-U-005 LD-S-003
 test_hash_style_matrix.sh|LD-U-001 LD-S-003
 test_symbol_precedence.sh|LD-U-005 LD-E-003
 test_unresolved_matrix.sh|LD-E-001 LD-E-002
