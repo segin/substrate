@@ -13,6 +13,7 @@
 int vm86_bios_call(int int_no, struct vm86_regs *regs);
 
 /* Low memory buffer addresses (must be < 1MB and not conflict with stack/code) */
+#define BIOS_STRING_BUFFER   0x3000
 #define VBE_INFO_BLOCK_ADDR  0xA000
 #define VBE_MODE_INFO_ADDR   0xA200
 
@@ -62,7 +63,40 @@ static void bios_putc(char c) {
 }
 
 static void bios_puts(const char *s) {
-    while (*s) bios_putc(*s++);
+    char *buf = (char *)BIOS_STRING_BUFFER;
+    struct vm86_regs regs;
+
+    while (*s) {
+        size_t len = 0;
+
+        // Convert \n to \r\n and copy to low memory buffer
+        while (*s && len < 511) { // Leave room for potentially 2 chars (\r, \n)
+            if (*s == '\n') {
+                buf[len++] = '\r';
+            }
+            buf[len++] = *s++;
+        }
+
+        if (len == 0) continue;
+
+        // Get cursor position (AH=0x03, BH=0)
+        memset(&regs, 0, sizeof(regs));
+        regs.eax = 0x0300;
+        regs.ebx = 0x0000;
+        vm86_bios_call(0x10, &regs);
+
+        uint16_t cursor_pos = regs.edx & 0xFFFF; // DH = row, DL = col
+
+        // Write string (AH=0x13, AL=0x01: update cursor)
+        memset(&regs, 0, sizeof(regs));
+        regs.eax = 0x1301;
+        regs.ebx = 0x0007; // Page 0, Light Grey
+        regs.ecx = len;
+        regs.edx = cursor_pos;
+        regs.es  = BIOS_STRING_BUFFER >> 4;
+        regs.ebp = BIOS_STRING_BUFFER & 0xF;
+        vm86_bios_call(0x10, &regs);
+    }
 }
 
 static int bios_getc(void) {
