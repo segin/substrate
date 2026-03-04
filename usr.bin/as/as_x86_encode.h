@@ -60,6 +60,7 @@ typedef struct {
     int has_index;
     as_x86_reg_t index;
     unsigned scale;
+    unsigned size_bits;
     int has_disp;
     int32_t disp;
     int disp_only;

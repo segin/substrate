@@ -315,6 +315,34 @@ static int is_x86_segment_text(const char *s) {
            streq_ci(s, "ss");
 }
 
+static int intel_mem_size_bits(const char *s) {
+    if (s == NULL) {
+        return 0;
+    }
+    if (streq_ci(s, "byte")) {
+        return 8;
+    }
+    if (streq_ci(s, "word")) {
+        return 16;
+    }
+    if (streq_ci(s, "dword")) {
+        return 32;
+    }
+    if (streq_ci(s, "qword")) {
+        return 64;
+    }
+    if (streq_ci(s, "xmmword")) {
+        return 128;
+    }
+    if (streq_ci(s, "ymmword")) {
+        return 256;
+    }
+    if (streq_ci(s, "zmmword")) {
+        return 512;
+    }
+    return 0;
+}
+
 static int is_arm_register_text(const char *s) {
     if (s == NULL || s[0] == '\0') {
         return 0;
@@ -1019,6 +1047,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     int lbr;
     int rbr;
     int seg_tok;
+    int saw_ptr = 0;
     as_mem_operand_t mem;
     as_token_t *disp_toks = NULL;
     size_t disp_count = 0;
@@ -1030,7 +1059,35 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     lbr = find_punct(tokv, n, "[");
     rbr = find_punct(tokv, n, "]");
     if (lbr < 0 || rbr < 0 || rbr <= lbr) {
+        set_err(ctx, "%s:%u: malformed Intel memory operand", tokv[0].file, tokv[0].line);
         return -1;
+    }
+
+    for (i = 0; i < (size_t)lbr; ++i) {
+        if (streq_ci(tokv[i].text, "ptr")) {
+            int bits;
+            saw_ptr = 1;
+            if (i == 0) {
+                set_err(ctx, "%s:%u: malformed Intel size qualifier", tokv[0].file, tokv[0].line);
+                return -1;
+            }
+            bits = intel_mem_size_bits(tokv[i - 1].text);
+            if (bits == 0) {
+                set_err(ctx, "%s:%u: unsupported Intel size qualifier '%s'", tokv[0].file, tokv[0].line, tokv[i - 1].text);
+                return -1;
+            }
+            if (mem.size_bits != 0 && mem.size_bits != bits) {
+                set_err(ctx, "%s:%u: malformed Intel size qualifier", tokv[0].file, tokv[0].line);
+                return -1;
+            }
+            mem.size_bits = bits;
+        }
+    }
+    if (!saw_ptr && lbr > 0) {
+        int bits = intel_mem_size_bits(tokv[0].text);
+        if (bits != 0) {
+            mem.size_bits = bits;
+        }
     }
 
     seg_tok = -1;
@@ -1101,6 +1158,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             free(mem.base_reg);
             free(mem.index_reg);
             free(mem.segment_reg);
+            set_err(ctx, "%s:%u: out of memory", tokv[0].file, tokv[0].line);
             return -1;
         }
         disp_toks[disp_count++] = tokv[i];
@@ -1113,6 +1171,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             free(mem.base_reg);
             free(mem.index_reg);
             free(mem.segment_reg);
+            set_err(ctx, "%s:%u: malformed Intel memory displacement", tokv[0].file, tokv[0].line);
             return -1;
         }
     }
@@ -1693,7 +1752,9 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
         }
 
         if (parse_line_tokens(&ctx, tokens->items + i, j - i, &st) != 0) {
-            set_err(&ctx, "%s:%u: parse error", tokens->items[i].file, tokens->items[i].line);
+            if (ctx.errbuf != NULL && ctx.errbuf_sz > 0 && ctx.errbuf[0] == '\0') {
+                set_err(&ctx, "%s:%u: parse error", tokens->items[i].file, tokens->items[i].line);
+            }
             free_stmt(&st);
             free_local_defs(&ctx.local_defs);
             return -1;

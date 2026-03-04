@@ -85,6 +85,7 @@ typedef struct {
     char *index_reg;
     int scale;
     char *segment_reg;
+    int size_bits;
     as_expr_t *disp;
 } as_mem_operand_t;
 

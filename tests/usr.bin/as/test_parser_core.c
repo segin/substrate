@@ -114,6 +114,7 @@ static void verify_x86(const char *path) {
     if (st == NULL || st->u.instr.syntax_intel == 0 || st->u.instr.operand_count != 2 ||
         st->u.instr.operands[0].kind != AS_OPERAND_REGISTER || st->u.instr.operands[1].kind != AS_OPERAND_MEMORY ||
         st->u.instr.operands[1].u.mem.base_reg == NULL || strcmp(st->u.instr.operands[1].u.mem.base_reg, "ebx") != 0 ||
+        st->u.instr.operands[1].u.mem.size_bits != 32 ||
         st->u.instr.operands[1].u.mem.disp == NULL || st->u.instr.operands[1].u.mem.disp->kind != AS_EXPR_CONST ||
         st->u.instr.operands[1].u.mem.disp->value != 8) {
         fail("intel size-qualifier memory parse failed");
@@ -150,6 +151,22 @@ static void verify_x86(const char *path) {
         st->u.instr.operands[0].u.mem.disp == NULL || st->u.instr.operands[0].u.mem.disp->kind != AS_EXPR_CONST ||
         st->u.instr.operands[0].u.mem.disp->value != 4) {
         fail("att segment-override memory parse failed");
+    }
+
+    st = find_instr(&parsed, 16, "mov");
+    if (st == NULL || st->u.instr.syntax_intel == 0 || st->u.instr.operand_count != 2 ||
+        st->u.instr.operands[0].kind != AS_OPERAND_REGISTER || st->u.instr.operands[1].kind != AS_OPERAND_MEMORY ||
+        st->u.instr.operands[1].u.mem.size_bits != 16 || st->u.instr.operands[1].u.mem.disp == NULL ||
+        st->u.instr.operands[1].u.mem.disp->kind != AS_EXPR_CONST || st->u.instr.operands[1].u.mem.disp->value != 2) {
+        fail("intel word ptr qualifier parse failed");
+    }
+
+    st = find_instr(&parsed, 17, "mov");
+    if (st == NULL || st->u.instr.syntax_intel == 0 || st->u.instr.operand_count != 2 ||
+        st->u.instr.operands[1].kind != AS_OPERAND_MEMORY || st->u.instr.operands[1].u.mem.size_bits != 64 ||
+        st->u.instr.operands[1].u.mem.disp == NULL || st->u.instr.operands[1].u.mem.disp->kind != AS_EXPR_CONST ||
+        st->u.instr.operands[1].u.mem.disp->value != 16) {
+        fail("intel qword ptr qualifier parse failed");
     }
 
     as_parse_result_free(&parsed);

@@ -94,6 +94,9 @@ The assembler shall, by default, parse x86 instructions in AT&T syntax (source-f
 **REQ-AS-037** *(Ubiquitous)*
 The assembler shall implement Intel syntax parsing and lowering in-tree and shall not delegate Intel syntax handling to external tools (`nasm`, `yasm`, GNU `as`, or compiler wrappers).
 
+**REQ-AS-038** *(Ubiquitous)*
+When parsing x86 Intel memory operands, the assembler shall recognize `byte ptr`, `word ptr`, `dword ptr`, `qword ptr`, `xmmword ptr`, `ymmword ptr`, and `zmmword ptr` qualifiers.
+
 ### 4.4 Directives
 
 **REQ-AS-040** *(Ubiquitous)*

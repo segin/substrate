@@ -143,6 +143,9 @@ toolchain flows, including:
 AT&T syntax is default.
 Intel syntax is available with
 .Fl msyntax=intel .
+Intel memory qualifiers
+.Cm byte|word|dword|qword|xmmword|ymmword|zmmword ptr
+are recognized on x86 memory operands.
 ISA-level gating is controlled by
 .Fl march
 .Pq x86-64-v1/v2/v3/v4 .

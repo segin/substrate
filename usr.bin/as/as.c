@@ -861,7 +861,7 @@ static void print_target_help(const as_ctx_t *ctx) {
     puts("    core integer ops, jumps/calls/returns, basic x87/MMX/SSE names");
     puts("    prefixes: lock, rep/repe/repne, segment overrides, rex");
     puts("    syntax: -msyntax=att|intel, .intel_syntax/.att_syntax");
-    puts("    current gap: Intel size-qualifier parsing (byte ptr/word ptr/...) is partial");
+    puts("    Intel memory qualifiers parsed: byte/word/dword/qword/xmmword/ymmword/zmmword ptr");
     puts("  x86-64:");
     puts("    baseline x86-64 plus ISA levels x86-64-v2/v3/v4");
     puts("  ARMv7 / AArch64:");

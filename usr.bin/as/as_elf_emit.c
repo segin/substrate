@@ -288,6 +288,104 @@ static int parse_x86_reg(const char *name, as_x86_reg_t *out) {
     return -1;
 }
 
+static int x86_reg_width_bits(const char *name) {
+    const char *p = name;
+    size_t n;
+
+    if (p == NULL || p[0] == '\0') {
+        return 0;
+    }
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    n = strlen(p);
+    if (n == 0) {
+        return 0;
+    }
+    if (n >= 3 && (p[0] == 'x' || p[0] == 'X') && (p[1] == 'm' || p[1] == 'M') && (p[2] == 'm' || p[2] == 'M')) {
+        return 128;
+    }
+    if (n >= 3 && (p[0] == 'y' || p[0] == 'Y') && (p[1] == 'm' || p[1] == 'M') && (p[2] == 'm' || p[2] == 'M')) {
+        return 256;
+    }
+    if (n >= 3 && (p[0] == 'z' || p[0] == 'Z') && (p[1] == 'm' || p[1] == 'M') && (p[2] == 'm' || p[2] == 'M')) {
+        return 512;
+    }
+    if (n >= 2 && (p[0] == 'm' || p[0] == 'M') && (p[1] == 'm' || p[1] == 'M')) {
+        return 64;
+    }
+    if (streq_ci(p, "al") || streq_ci(p, "ah") || streq_ci(p, "bl") || streq_ci(p, "bh") || streq_ci(p, "cl") ||
+        streq_ci(p, "ch") || streq_ci(p, "dl") || streq_ci(p, "dh") || streq_ci(p, "sil") || streq_ci(p, "dil") ||
+        streq_ci(p, "spl") || streq_ci(p, "bpl")) {
+        return 8;
+    }
+    if (n >= 3 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1]) && (p[n - 1] == 'b' || p[n - 1] == 'B')) {
+        return 8;
+    }
+    if (streq_ci(p, "ax") || streq_ci(p, "bx") || streq_ci(p, "cx") || streq_ci(p, "dx") || streq_ci(p, "si") ||
+        streq_ci(p, "di") || streq_ci(p, "sp") || streq_ci(p, "bp") || streq_ci(p, "ip")) {
+        return 16;
+    }
+    if (n >= 3 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1]) && (p[n - 1] == 'w' || p[n - 1] == 'W')) {
+        return 16;
+    }
+    if (n > 1 && (p[0] == 'e' || p[0] == 'E')) {
+        return 32;
+    }
+    if (n >= 3 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1]) && (p[n - 1] == 'd' || p[n - 1] == 'D')) {
+        return 32;
+    }
+    if (streq_ci(p, "rax") || streq_ci(p, "rbx") || streq_ci(p, "rcx") || streq_ci(p, "rdx") || streq_ci(p, "rsi") ||
+        streq_ci(p, "rdi") || streq_ci(p, "rsp") || streq_ci(p, "rbp") || streq_ci(p, "rip")) {
+        return 64;
+    }
+    if (n >= 2 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1])) {
+        return 64;
+    }
+    return 0;
+}
+
+static int mnemonic_needs_uniform_width(const char *mn) {
+    return streq_ci(mn, "mov") || streq_ci(mn, "add") || streq_ci(mn, "sub") || streq_ci(mn, "and") ||
+           streq_ci(mn, "or") || streq_ci(mn, "xor") || streq_ci(mn, "cmp") || streq_ci(mn, "test") ||
+           streq_ci(mn, "xchg");
+}
+
+static int infer_uniform_operand_width_bits(const as_instruction_t *insn, const size_t *op_index, size_t op_count,
+                                            int *out_bits, char *errbuf, size_t errbuf_sz) {
+    size_t j;
+    int bits = 0;
+
+    if (insn == NULL || op_index == NULL || out_bits == NULL) {
+        return -1;
+    }
+    for (j = 0; j < op_count; ++j) {
+        const as_operand_t *op = &insn->operands[op_index[j]];
+        int cur = 0;
+
+        if (op->kind == AS_OPERAND_REGISTER && op->u.reg != NULL) {
+            cur = x86_reg_width_bits(op->u.reg);
+        } else if (op->kind == AS_OPERAND_MEMORY && op->u.mem.size_bits > 0) {
+            cur = op->u.mem.size_bits;
+        }
+        if (cur == 0) {
+            continue;
+        }
+        if (bits == 0) {
+            bits = cur;
+            continue;
+        }
+        if (bits != cur) {
+            if (errbuf != NULL && errbuf_sz > 0) {
+                snprintf(errbuf, errbuf_sz, "conflicting operand sizes");
+            }
+            return -1;
+        }
+    }
+    *out_bits = bits;
+    return 0;
+}
+
 static as_x86_seg_t map_seg(const char *s) {
     if (s == NULL) return AS_X86_SEG_NONE;
     if (streq_ci(s, "cs")) return AS_X86_SEG_CS;
@@ -765,6 +863,7 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
     case AS_OPERAND_MEMORY:
         dst->kind = AS_X86_OP_MEM;
         memset(&dst->u.mem, 0, sizeof(dst->u.mem));
+        dst->u.mem.size_bits = (unsigned)(op->u.mem.size_bits > 0 ? op->u.mem.size_bits : 0);
         if (op->u.mem.base_reg != NULL) {
             if (is64 && streq_ci(op->u.mem.base_reg, "rip")) {
                 dst->u.mem.rip_relative = 1;
@@ -954,6 +1053,26 @@ static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigne
         op_index[0] = 2;
         op_index[1] = 1;
         op_index[2] = 0;
+    }
+
+    if (intel_syntax && suffix == '\0' && mnemonic_needs_uniform_width(mnbuf) && in.op_count > 0) {
+        int bits = 0;
+        if (infer_uniform_operand_width_bits(&st->u.instr, op_index, in.op_count, &bits, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+        if (bits == 8) {
+            snprintf(encerr, encerr_sz, "unsupported Intel size qualifier: byte");
+            return -1;
+        }
+        if (bits == 16) {
+            in.operand_size_override = 1;
+        } else if (bits == 64) {
+            if (!cfg->is_64) {
+                snprintf(encerr, encerr_sz, "unsupported Intel size qualifier: qword in 32-bit mode");
+                return -1;
+            }
+            in.rex_w = 1;
+        }
     }
 
     if (streq_ci(mnbuf, "mov") && in.op_count == 2) {
