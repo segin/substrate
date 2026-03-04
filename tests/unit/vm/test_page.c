@@ -16,6 +16,12 @@ bool test_vm_page_queue_ops(void) {
     p2.prev = p2.next = NULL;
     p1.flags = 0;
     p2.flags = 0;
+    p1.object = NULL;
+    p2.object = NULL;
+    p1.pv_list = NULL;
+    p2.pv_list = NULL;
+    p1.ref_count = 0;
+    p2.ref_count = 0;
     
     vm_page_init();
     
@@ -30,7 +36,10 @@ bool test_vm_page_flags(void) {
     vm_page_t p;
     p.magic_head = p.magic_tail = VM_PAGE_MAGIC;
     p.flags = 0;
-    
+    p.object = NULL;
+    p.pv_list = NULL;
+    p.ref_count = 0;
+
     vm_page_init();
     vm_page_free(&p);
     

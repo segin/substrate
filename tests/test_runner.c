@@ -143,6 +143,7 @@ bool run_pipe_race(void) {
 }
 
 extern bool test_mmap_batch_run(void);
+extern bool test_proc_status_injection(void);
 
 typedef struct {
     const char *name;
@@ -236,6 +237,7 @@ test_case_t tests[] = {
     {"div64", run_div64_tests},
     {"pipe_race", run_pipe_race},
     {"mmap_batch", test_mmap_batch_run},
+    {"proc_status_injection", test_proc_status_injection},
     {NULL, NULL}
 };
 
