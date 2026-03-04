@@ -59,6 +59,7 @@ usr.lib/     shared libraries for tooling/runtime support (elfobj, demangle, ...
 include/     userspace public headers
 tests/       unit/integration/regression/property/fuzz harnesses
 docs/specs/  detailed subsystem specs
+docs/tasks/  refactored task planning sections and requirement/story tracking
 dist/        target root filesystem staging
 host_dist/   host install staging for native validation tools
 ```
