@@ -653,6 +653,7 @@ test:
 	sh run_pp_gnu_ext.sh
 	sh run_pp_clang_feature_probe.sh
 	sh run_pp_clang_pragma.sh
+	sh run_pp_cmd_injection_test.sh
 	sh run_simd_intrinsics.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
