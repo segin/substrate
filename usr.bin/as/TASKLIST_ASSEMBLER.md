@@ -10,17 +10,17 @@ Goal: finish standalone assembler behavior without external syntax/tool handoff,
 - [ ] Parse Intel register forms without `%` prefix.
 - [ ] Parse Intel immediates without `$` prefix.
 - [ ] Parse destination-first operand order for x86 integer/vector instructions.
-- [ ] Parse Intel memory forms:
-  - [ ] `[base]`
-  - [ ] `[base + disp]`
-  - [ ] `[base + index*scale + disp]`
-  - [ ] Segment overrides (`gs:[...]`, etc.).
+- [x] Parse Intel memory forms:
+  - [x] `[base]`
+  - [x] `[base + disp]`
+  - [x] `[base + index*scale + disp]`
+  - [x] Segment overrides (`gs:[...]`, etc.).
 - [ ] Parse Intel size qualifiers (`byte ptr`, `word ptr`, `dword ptr`, `qword ptr`, `xmmword ptr`, `ymmword ptr`, `zmmword ptr`).
 
 ### 1.2 Lowering and Encoding
 - [ ] Normalize Intel operand order to shared internal operand model.
-- [ ] Ensure Intel and AT&T forms encode identical bytes for semantically equivalent instructions.
-- [ ] Ensure Intel syntax path uses in-tree encoders only (no `nasm`, no `gas` handoff).
+- [x] Ensure Intel and AT&T forms encode identical bytes for semantically equivalent instructions.
+- [x] Ensure Intel syntax path uses in-tree encoders only (no `nasm`, no `gas` handoff).
 - [ ] Handle Intel-specific mnemonics/forms (`movabs`, legacy aliases, string ops).
 
 ### 1.3 Diagnostics and UX
@@ -61,8 +61,8 @@ Goal: finish standalone assembler behavior without external syntax/tool handoff,
 ---
 
 ## 3. Completion Criteria
-- [ ] `tests/usr.bin/as/test_unit_matrix.sh` passes.
-- [ ] `tests/usr.bin/as/test_integration_matrix.sh` passes.
-- [ ] New Intel and binary-mode test suites pass.
-- [ ] `docs/specs/as_spec.md` and `usr.man/man1/as.1` updated to reflect final behavior.
+- [x] `tests/usr.bin/as/test_unit_matrix.sh` passes.
+- [x] `tests/usr.bin/as/test_integration_matrix.sh` passes.
+- [x] New Intel and binary-mode test suites pass.
+- [x] `docs/specs/as_spec.md` and `usr.man/man1/as.1` updated to reflect final behavior.
 - [ ] Remove this tasklist when all boxes are complete.

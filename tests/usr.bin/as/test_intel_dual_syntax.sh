@@ -71,6 +71,34 @@ objcopy -O binary --only-section=.text "$TMP/mem_perm_att.o" "$TMP/mem_perm_att.
 objcopy -O binary --only-section=.text "$TMP/mem_perm_intel.o" "$TMP/mem_perm_intel.text"
 cmp "$TMP/mem_perm_att.text" "$TMP/mem_perm_intel.text"
 
+cat > "$TMP/seg_att.s" <<'SRC'
+.text
+.globl seg_mem
+.type seg_mem,@function
+seg_mem:
+    mov %gs:4(%ebx), %ecx
+    ret
+.size seg_mem, .-seg_mem
+SRC
+
+cat > "$TMP/seg_intel.s" <<'SRC'
+.intel_syntax noprefix
+.text
+.globl seg_mem
+.type seg_mem,@function
+seg_mem:
+    mov ecx, gs:[ebx + 4]
+    ret
+.size seg_mem, .-seg_mem
+.att_syntax prefix
+SRC
+
+"$AS" -32 -o "$TMP/seg_att.o" "$TMP/seg_att.s"
+"$AS" -32 -o "$TMP/seg_intel.o" "$TMP/seg_intel.s"
+objcopy -O binary --only-section=.text "$TMP/seg_att.o" "$TMP/seg_att.text"
+objcopy -O binary --only-section=.text "$TMP/seg_intel.o" "$TMP/seg_intel.text"
+cmp "$TMP/seg_att.text" "$TMP/seg_intel.text"
+
 cat > "$TMP/ambig_intel.s" <<'SRC'
 .intel_syntax noprefix
 .text

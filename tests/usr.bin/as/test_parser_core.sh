@@ -18,7 +18,9 @@ mov $target+4, %ebx
 .intel_syntax noprefix
 mov eax, dword ptr [ebx + 8]
 mov edx, [ebx + esi*4 + 32]
+mov ecx, gs:[ebx + 4]
 .att_syntax prefix
+mov %gs:4(%ebx), %ecx
 SRC
 
 cat > "$TMP/arm.s" <<'SRC'

@@ -130,6 +130,28 @@ static void verify_x86(const char *path) {
         fail("intel base/index/scale/disp parse failed");
     }
 
+    st = find_instr(&parsed, 12, "mov");
+    if (st == NULL || st->u.instr.syntax_intel == 0 || st->u.instr.operand_count != 2 ||
+        st->u.instr.operands[1].kind != AS_OPERAND_MEMORY ||
+        st->u.instr.operands[1].u.mem.segment_reg == NULL ||
+        strcmp(st->u.instr.operands[1].u.mem.segment_reg, "gs") != 0 ||
+        st->u.instr.operands[1].u.mem.base_reg == NULL || strcmp(st->u.instr.operands[1].u.mem.base_reg, "ebx") != 0 ||
+        st->u.instr.operands[1].u.mem.disp == NULL || st->u.instr.operands[1].u.mem.disp->kind != AS_EXPR_CONST ||
+        st->u.instr.operands[1].u.mem.disp->value != 4) {
+        fail("intel segment-override memory parse failed");
+    }
+
+    st = find_instr(&parsed, 14, "mov");
+    if (st == NULL || st->u.instr.syntax_intel != 0 || st->u.instr.operand_count != 2 ||
+        st->u.instr.operands[0].kind != AS_OPERAND_MEMORY ||
+        st->u.instr.operands[0].u.mem.segment_reg == NULL ||
+        strcmp(st->u.instr.operands[0].u.mem.segment_reg, "gs") != 0 ||
+        st->u.instr.operands[0].u.mem.base_reg == NULL || strcmp(st->u.instr.operands[0].u.mem.base_reg, "ebx") != 0 ||
+        st->u.instr.operands[0].u.mem.disp == NULL || st->u.instr.operands[0].u.mem.disp->kind != AS_EXPR_CONST ||
+        st->u.instr.operands[0].u.mem.disp->value != 4) {
+        fail("att segment-override memory parse failed");
+    }
+
     as_parse_result_free(&parsed);
     as_token_vec_free(&toks);
 }
