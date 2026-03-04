@@ -130,6 +130,14 @@ typedef struct {
     uint32_t last_alloc_bit;
 } ext2_fs_t;
 
+#define EXT2_DCACHE_SIZE 16
+
+typedef struct {
+    char name[64];
+    uint8_t name_len;
+    uint32_t inode_num;
+} ext2_dcache_entry_t;
+
 // EXT2 file/directory node context
 typedef struct {
     ext2_fs_t *fs;
@@ -140,6 +148,10 @@ typedef struct {
     // Readdir cache for sequential access optimization
     uint64_t last_readdir_idx;
     uint32_t last_readdir_pos;
+
+    // Directory entry cache
+    ext2_dcache_entry_t dcache[EXT2_DCACHE_SIZE];
+    uint32_t dcache_idx;
 
     // Scratch buffers for I/O operations (protected by lock)
     mutex_t lock;
