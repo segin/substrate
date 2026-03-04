@@ -54,6 +54,7 @@ typedef struct {
     int emit_listing;
     int statistics;
     int target_help;
+    int invoked_from_cc;
     int warn_enabled;
     int fatal_warnings;
     const char *in_path;
@@ -183,6 +184,7 @@ static void usage(const char *prog) {
             "usage: %s [-32|-64] [-c] [-g] [-I dir] [-D name[=value]] [-march cpu] [-mtune cpu] "
             "[-O elf|binary] "
             "[-msyntax=att|intel] [-W|--warn|--no-warn|--fatal-warnings] "
+            "[--from-cc] "
             "[-al[=file]] [--defsym sym=val] [--statistics] [--target-help] "
             "[-Wa opts] [--max-input-bytes N] [--max-line-bytes N] [--max-token-length N] "
             "[--max-macro-depth N] [--max-include-depth N] [-o output] input.s|input.S\n",
@@ -1001,6 +1003,10 @@ int main(int argc, char **argv) {
         }
         if (strcmp(arg, "--statistics") == 0) {
             ctx.statistics = 1;
+            continue;
+        }
+        if (strcmp(arg, "--from-cc") == 0) {
+            ctx.invoked_from_cc = 1;
             continue;
         }
         if (strcmp(arg, "-c") == 0) {
