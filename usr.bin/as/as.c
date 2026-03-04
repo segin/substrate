@@ -749,6 +749,7 @@ static int run_native_backend(const as_ctx_t *ctx) {
     ecfg.is_64 = ctx->mode == AS_MODE_64 ? 1u : 0u;
     ecfg.use_rela = ctx->mode == AS_MODE_64 ? 1u : 0u;
     ecfg.x86_64_isa_level = (unsigned)x64_isa_level_from_march(ctx->march);
+    ecfg.intel_syntax = (unsigned)(ctx->syntax_intel ? 1 : 0);
 
     if (as_lex_file(src_path, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
         as_diag(AS_E_BACKEND, "%s", errbuf);

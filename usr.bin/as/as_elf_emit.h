@@ -16,6 +16,7 @@ typedef struct {
     unsigned is_64;
     unsigned use_rela;
     unsigned x86_64_isa_level;
+    unsigned intel_syntax;
 } as_elf_cfg_t;
 
 int as_elf_emit_file(const as_parse_result_t *parsed,
