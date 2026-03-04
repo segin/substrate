@@ -474,6 +474,8 @@ typedef struct {
 int cc_parse_file(const char *path, cc_translation_unit_t *out, cc_diag_t *diag);
 int cc_sema_check(const cc_translation_unit_t *tu, cc_diag_t *diag);
 void cc_tu_free(cc_translation_unit_t *tu);
+int cc_builtin_is_recognized(const char *name);
+int cc_builtin_bswap_bits(const char *name);
 void cc_frontend_set_pointer_size(int bytes);
 void cc_frontend_set_std_mode(const char *std_mode);
 void cc_frontend_set_gnu89_inline_mode(int enabled, int override_set);

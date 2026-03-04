@@ -1472,19 +1472,7 @@ static int expr_is_array_pointer_chain(const cc_translation_unit_t *tu, var_entr
 }
 
 static int builtin_bswap_bits(const char *name) {
-    if (name == NULL) {
-        return 0;
-    }
-    if (strcmp(name, "__builtin_bswap16") == 0) {
-        return 16;
-    }
-    if (strcmp(name, "__builtin_bswap32") == 0) {
-        return 32;
-    }
-    if (strcmp(name, "__builtin_bswap64") == 0) {
-        return 64;
-    }
-    return 0;
+    return(cc_builtin_bswap_bits(name));
 }
 
 typedef enum {

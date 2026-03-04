@@ -78,6 +78,27 @@ Major kernel layers:
 
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
 
+Planned x86 Unix personality targets:
+- Substrate native ABI (primary)
+- Linux
+- FreeBSD
+- NetBSD
+- OpenBSD
+- Solaris / SVR4 family
+- SunOS 4.x (Sun386i)
+- Microsoft Xenix `MS-X/86`
+- Microsoft Xenix `MS-X/286`
+- Microsoft Xenix `MS-X/386`
+- SCO Xenix `SCO-X/86`
+- SCO Xenix `SCO-X/286`
+- SCO Xenix `SCO-X/386`
+- SCO Unix 3.2v2 (`SCO-U/3.2v2`)
+- SCO Unix 3.2v4 / ODT3 (`SCO-U/ODT3`)
+- SCO OpenServer 5 (`SCO-OSR5`)
+- iBCS2 compatibility targets
+- ELKS (16-bit Linux-like) personality
+- Minix `a.out` compatibility path
+
 ## 6. Userland and Libraries
 
 Userland is split by role:

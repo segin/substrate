@@ -1483,7 +1483,7 @@ static int int_regs_alloc(FILE *fp, const cc_ssa_function_t *f, const slot_layou
                           int avoid) {
     int i;
     int victim = -1;
-    int farthest_next_use = -1;
+    int *next_use = NULL;
 
     if (prefer >= 0 && prefer < st->reg_count) {
         if (st->reg_val[prefer] < 0) {
@@ -1500,28 +1500,21 @@ static int int_regs_alloc(FILE *fp, const cc_ssa_function_t *f, const slot_layou
         }
     }
 
-    if (prefer >= 0 && prefer < st->reg_count && prefer != avoid) {
-        victim = prefer;
-    } else {
+    next_use = (int *)malloc((size_t)st->reg_count * sizeof(*next_use));
+    if (next_use != NULL) {
         for (i = 0; i < st->reg_count; ++i) {
-            int next_use;
-            if (i == avoid) {
-                continue;
-            }
-            if (st->reg_val[i] < 0) {
-                return i;
-            }
-            next_use = value_next_use(f, st->reg_val[i], st->cur_index);
-            if (next_use < 0) {
-                victim = i;
-                break;
-            }
-            if (victim < 0 || next_use > farthest_next_use) {
-                victim = i;
-                farthest_next_use = next_use;
+            if (st->reg_val[i] >= 0) {
+                next_use[i] = value_next_use(f, st->reg_val[i], st->cur_index);
+            } else {
+                next_use[i] = -1;
             }
         }
+        victim = cc_backend_pick_spill_victim(st->reg_val, next_use, st->reg_dirty, st->reg_count, avoid, prefer);
+        free(next_use);
+    } else {
+        victim = cc_backend_pick_spill_victim(st->reg_val, NULL, st->reg_dirty, st->reg_count, avoid, prefer);
     }
+
     if (victim < 0) {
         victim = 0;
     }
@@ -2123,12 +2116,10 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
         }
         bytes = in->imm > 0 ? (int)in->imm : 1;
         bytes = ((bytes + slot_size - 1) / slot_size) * slot_size;
-        if (raw_frame > INT32_MAX - bytes) {
-            set_diag(diag, "stack frame too large for stack allocation layout");
+        if (cc_backend_checked_frame_add(&raw_frame, bytes, diag, "stack allocation layout") != 0) {
             slot_layout_free(out);
             return -1;
         }
-        raw_frame += bytes;
         out->stackalloc_off[in->dst] = -raw_frame;
     }
     out->frame_bytes = raw_frame;
@@ -2577,7 +2568,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
          * After "push %rbp", %rsp is already 8 mod 16, so keep frame size a
          * multiple of 16 to preserve that alignment at internal call sites.
          */
-        frame = (raw_frame + 15) & ~15;
+        frame = cc_backend_align_frame_size(raw_frame, 16);
 
         fprintf(fp, "\n");
         emit_text_section(fp, f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL);
@@ -3738,7 +3729,12 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         if (build_slot_layout(f, 8, &lay, diag) != 0) {
             return -1;
         }
-        frame = (lay.frame_bytes + 16 + 15) & ~15;
+        frame = lay.frame_bytes;
+        if (cc_backend_checked_frame_add(&frame, 16, diag, "i386 call scratch area") != 0) {
+            slot_layout_free(&lay);
+            return -1;
+        }
+        frame = cc_backend_align_frame_size(frame, 16);
         scratch_off = -frame;
 
         fprintf(fp, "\n");

@@ -1563,19 +1563,7 @@ static int is_bitwise_op(cc_binop_t op) {
 }
 
 static int builtin_bswap_bits(const char *name) {
-    if (name == NULL) {
-        return 0;
-    }
-    if (strcmp(name, "__builtin_bswap16") == 0) {
-        return 16;
-    }
-    if (strcmp(name, "__builtin_bswap32") == 0) {
-        return 32;
-    }
-    if (strcmp(name, "__builtin_bswap64") == 0) {
-        return 64;
-    }
-    return 0;
+    return(cc_builtin_bswap_bits(name));
 }
 
 typedef enum {
@@ -3126,7 +3114,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
             }
             if (strncmp(e->ident, "__builtin_", 10) == 0) {
-                /* Fallback for unimplemented builtin signatures. */
+                if (!cc_builtin_is_recognized(e->ident)) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "unsupported builtin function: %s", e->ident);
+                    }
+                    return -1;
+                }
                 e->value_type = CC_TYPE_INT;
                 e->struct_id = -1;
                 return 0;

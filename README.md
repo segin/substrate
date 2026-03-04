@@ -45,6 +45,28 @@ That original design intent remains:
 - `usr.bin/ld`: linker.
 - `usr.lib/elfobj`: ELF object model and manipulation library shared by tooling.
 
+## Planned Unix Binary Support
+
+Substrate binary-compatibility personality targets are:
+- Substrate native ABI (primary)
+- Linux (planned/active personality support)
+- FreeBSD (planned/active personality support)
+- NetBSD (planned)
+- OpenBSD (planned)
+- Solaris / SVR4 family (planned)
+- SunOS 4.x (Sun386i) compatibility path (planned)
+- Microsoft Xenix personality `MS-X/86` (planned)
+- Microsoft Xenix personality `MS-X/286` (planned)
+- Microsoft Xenix personality `MS-X/386` (planned)
+- SCO Xenix personality `SCO-X/86` (planned)
+- SCO Xenix personality `SCO-X/286` (planned)
+- SCO Xenix personality `SCO-X/386` (planned)
+- SCO personality `SCO-U/3.2v2` (planned)
+- SCO personality `SCO-U/ODT3` (planned)
+- SCO personality `SCO-OSR5` (planned)
+- iBCS2 compatibility layer targets (planned)
+- ELKS (16-bit Linux-like) personality with Minix-style `a.out` loader path (planned)
+
 ## Repository Layout
 
 ```text
@@ -69,6 +91,49 @@ Substrate uses two build modes:
 - Host build (`NATIVE_BUILD=1`): builds host-runnable binaries for validation and bring-up.
 
 Key rule: host mode is for validation/bootstrap only; target libraries and ABI behavior must remain Substrate-correct.
+
+## Host Toolchain Install (`host_dist` / `host_install`)
+
+Build host-runnable Substrate tools into `host_dist/`:
+
+```sh
+make host_dist
+```
+
+Install that tree to `/opt/substrate`:
+
+```sh
+sudo rm -rf /opt/substrate
+sudo make HOST_DIST_PREFIX=/opt/substrate host_install
+```
+
+Use installed tools:
+
+```sh
+export PATH=/opt/substrate/usr/bin:/opt/substrate/bin:$PATH
+which cc as ld
+```
+
+## Using Substrate Toolchain On Linux (for Linux binaries)
+
+Use Substrate `cc/as/ld` from `/opt/substrate` first in `PATH`, then compile normally:
+
+```sh
+export PATH=/opt/substrate/usr/bin:/opt/substrate/bin:$PATH
+cc -m64 hello.c -o hello64
+cc -m32 hello.c -o hello32
+```
+
+To force exact backend tools for a build:
+
+```sh
+AS=/opt/substrate/usr/bin/as LD=/opt/substrate/usr/bin/ld cc -m64 hello.c -o hello64
+```
+
+Notes:
+- `cc` currently uses host runtime objects/libraries for Linux linkage (`crt*.o`, `libgcc`, libc) via host `gcc` path discovery.
+- `-m32` / `-m64` selects Linux i386 / x86_64 ABI output mode.
+- `-v` or `-###` prints stage commands so you can verify Substrate tools are being invoked.
 
 ## Documentation
 

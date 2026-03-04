@@ -1,8 +1,10 @@
 #include "as_elf_emit.h"
+#include "as_x86_encode.h"
 
 #include "elfobj.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -125,6 +127,406 @@ static int bytebuf_append_u64_le(bytebuf_t *b, uint64_t v, unsigned width) {
         b->data[b->len + i] = (unsigned char)((v >> (i * 8)) & 0xffu);
     }
     b->len += width;
+    return 0;
+}
+
+static int streq_ci(const char *a, const char *b) {
+    size_t i;
+
+    if (a == NULL || b == NULL) {
+        return 0;
+    }
+    for (i = 0; a[i] != '\0' && b[i] != '\0'; ++i) {
+        char ca = a[i];
+        char cb = b[i];
+        if (ca >= 'A' && ca <= 'Z') {
+            ca = (char)(ca + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (ca != cb) {
+            return 0;
+        }
+    }
+    return a[i] == '\0' && b[i] == '\0';
+}
+
+static int parse_int64(const char *s, long long *out) {
+    char *end;
+    long long v;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    v = strtoll(s, &end, 0);
+    if (end == s || *end != '\0') {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int eval_expr_const(const as_expr_t *e, long long *out) {
+    long long l;
+    long long r;
+
+    if (e == NULL || out == NULL) {
+        return -1;
+    }
+    switch (e->kind) {
+    case AS_EXPR_CONST:
+        *out = e->value;
+        return 0;
+    case AS_EXPR_UNARY:
+        if (eval_expr_const(e->lhs, &l) != 0) {
+            return -1;
+        }
+        if (e->op == AS_EXPR_OP_NEG) {
+            *out = -l;
+            return 0;
+        }
+        if (e->op == AS_EXPR_OP_BNOT) {
+            *out = ~l;
+            return 0;
+        }
+        return -1;
+    case AS_EXPR_BINARY:
+        if (eval_expr_const(e->lhs, &l) != 0 || eval_expr_const(e->rhs, &r) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case AS_EXPR_OP_ADD:
+            *out = l + r;
+            return 0;
+        case AS_EXPR_OP_SUB:
+            *out = l - r;
+            return 0;
+        case AS_EXPR_OP_MUL:
+            *out = l * r;
+            return 0;
+        case AS_EXPR_OP_DIV:
+            if (r == 0) return -1;
+            *out = l / r;
+            return 0;
+        case AS_EXPR_OP_MOD:
+            if (r == 0) return -1;
+            *out = l % r;
+            return 0;
+        case AS_EXPR_OP_OR:
+            *out = l | r;
+            return 0;
+        case AS_EXPR_OP_AND:
+            *out = l & r;
+            return 0;
+        case AS_EXPR_OP_XOR:
+            *out = l ^ r;
+            return 0;
+        case AS_EXPR_OP_SHL:
+            *out = l << (r & 63);
+            return 0;
+        case AS_EXPR_OP_SHR:
+            *out = l >> (r & 63);
+            return 0;
+        default:
+            return -1;
+        }
+    default:
+        return -1;
+    }
+}
+
+static int expr_has_symbol(const as_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == AS_EXPR_SYMBOL || e->kind == AS_EXPR_LOCAL_REF) {
+        return 1;
+    }
+    if (expr_has_symbol(e->lhs) || expr_has_symbol(e->rhs)) {
+        return 1;
+    }
+    return 0;
+}
+
+static int parse_x86_reg(const char *name, as_x86_reg_t *out) {
+    static const struct {
+        const char *name;
+        as_x86_reg_t reg;
+    } map[] = {
+        {"al", AS_X86_REG_RAX}, {"ax", AS_X86_REG_RAX}, {"eax", AS_X86_REG_RAX}, {"rax", AS_X86_REG_RAX},
+        {"cl", AS_X86_REG_RCX}, {"cx", AS_X86_REG_RCX}, {"ecx", AS_X86_REG_RCX}, {"rcx", AS_X86_REG_RCX},
+        {"dl", AS_X86_REG_RDX}, {"dx", AS_X86_REG_RDX}, {"edx", AS_X86_REG_RDX}, {"rdx", AS_X86_REG_RDX},
+        {"bl", AS_X86_REG_RBX}, {"bx", AS_X86_REG_RBX}, {"ebx", AS_X86_REG_RBX}, {"rbx", AS_X86_REG_RBX},
+        {"spl", AS_X86_REG_RSP}, {"sp", AS_X86_REG_RSP}, {"esp", AS_X86_REG_RSP}, {"rsp", AS_X86_REG_RSP},
+        {"bpl", AS_X86_REG_RBP}, {"bp", AS_X86_REG_RBP}, {"ebp", AS_X86_REG_RBP}, {"rbp", AS_X86_REG_RBP},
+        {"sil", AS_X86_REG_RSI}, {"si", AS_X86_REG_RSI}, {"esi", AS_X86_REG_RSI}, {"rsi", AS_X86_REG_RSI},
+        {"dil", AS_X86_REG_RDI}, {"di", AS_X86_REG_RDI}, {"edi", AS_X86_REG_RDI}, {"rdi", AS_X86_REG_RDI},
+        {"r8b", AS_X86_REG_R8}, {"r8w", AS_X86_REG_R8}, {"r8d", AS_X86_REG_R8}, {"r8", AS_X86_REG_R8},
+        {"r9b", AS_X86_REG_R9}, {"r9w", AS_X86_REG_R9}, {"r9d", AS_X86_REG_R9}, {"r9", AS_X86_REG_R9},
+        {"r10b", AS_X86_REG_R10}, {"r10w", AS_X86_REG_R10}, {"r10d", AS_X86_REG_R10}, {"r10", AS_X86_REG_R10},
+        {"r11b", AS_X86_REG_R11}, {"r11w", AS_X86_REG_R11}, {"r11d", AS_X86_REG_R11}, {"r11", AS_X86_REG_R11},
+        {"r12b", AS_X86_REG_R12}, {"r12w", AS_X86_REG_R12}, {"r12d", AS_X86_REG_R12}, {"r12", AS_X86_REG_R12},
+        {"r13b", AS_X86_REG_R13}, {"r13w", AS_X86_REG_R13}, {"r13d", AS_X86_REG_R13}, {"r13", AS_X86_REG_R13},
+        {"r14b", AS_X86_REG_R14}, {"r14w", AS_X86_REG_R14}, {"r14d", AS_X86_REG_R14}, {"r14", AS_X86_REG_R14},
+        {"r15b", AS_X86_REG_R15}, {"r15w", AS_X86_REG_R15}, {"r15d", AS_X86_REG_R15}, {"r15", AS_X86_REG_R15},
+    };
+    size_t i;
+
+    if (name == NULL || out == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (streq_ci(name, map[i].name)) {
+            *out = map[i].reg;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static as_x86_seg_t map_seg(const char *s) {
+    if (s == NULL) return AS_X86_SEG_NONE;
+    if (streq_ci(s, "cs")) return AS_X86_SEG_CS;
+    if (streq_ci(s, "ds")) return AS_X86_SEG_DS;
+    if (streq_ci(s, "es")) return AS_X86_SEG_ES;
+    if (streq_ci(s, "fs")) return AS_X86_SEG_FS;
+    if (streq_ci(s, "gs")) return AS_X86_SEG_GS;
+    if (streq_ci(s, "ss")) return AS_X86_SEG_SS;
+    return AS_X86_SEG_NONE;
+}
+
+static int is_rel_mnemonic(const char *mn) {
+    if (mn == NULL || mn[0] == '\0') {
+        return 0;
+    }
+    if (streq_ci(mn, "call") || streq_ci(mn, "jmp")) {
+        return 1;
+    }
+    if ((mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0') {
+        return 1;
+    }
+    return 0;
+}
+
+static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
+                               char *errbuf, size_t errbuf_sz) {
+    long long v;
+
+    memset(dst, 0, sizeof(*dst));
+    if (op == NULL) {
+        dst->kind = AS_X86_OP_NONE;
+        return 0;
+    }
+
+    switch (op->kind) {
+    case AS_OPERAND_REGISTER:
+        dst->kind = AS_X86_OP_REG;
+        if (parse_x86_reg(op->u.reg, &dst->u.reg) != 0) {
+            snprintf(errbuf, errbuf_sz, "unknown x86 register: %s", op->u.reg != NULL ? op->u.reg : "<null>");
+            return -1;
+        }
+        return 0;
+    case AS_OPERAND_IMMEDIATE:
+    case AS_OPERAND_LABEL_REF:
+        if (is_rel_mnemonic(mnemonic)) {
+            dst->kind = AS_X86_OP_REL;
+            if (eval_expr_const(op->u.expr, &v) == 0) {
+                dst->u.rel = (int32_t)v;
+            } else {
+                dst->u.rel = 0;
+            }
+            return 0;
+        }
+        dst->kind = AS_X86_OP_IMM;
+        if (eval_expr_const(op->u.expr, &v) == 0) {
+            dst->u.imm = (int32_t)v;
+            return 0;
+        }
+        if (expr_has_symbol(op->u.expr)) {
+            dst->u.imm = 0;
+            return 0;
+        }
+        snprintf(errbuf, errbuf_sz, "non-constant immediate in %s", mnemonic != NULL ? mnemonic : "<insn>");
+        return -1;
+    case AS_OPERAND_MEMORY:
+        dst->kind = AS_X86_OP_MEM;
+        memset(&dst->u.mem, 0, sizeof(dst->u.mem));
+        if (op->u.mem.base_reg != NULL) {
+            if (is64 && streq_ci(op->u.mem.base_reg, "rip")) {
+                dst->u.mem.rip_relative = 1;
+            } else if (parse_x86_reg(op->u.mem.base_reg, &dst->u.mem.base) == 0) {
+                dst->u.mem.has_base = 1;
+            } else {
+                snprintf(errbuf, errbuf_sz, "unknown x86 base register: %s", op->u.mem.base_reg);
+                return -1;
+            }
+        }
+        if (op->u.mem.index_reg != NULL) {
+            if (parse_x86_reg(op->u.mem.index_reg, &dst->u.mem.index) == 0) {
+                dst->u.mem.has_index = 1;
+            } else {
+                snprintf(errbuf, errbuf_sz, "unknown x86 index register: %s", op->u.mem.index_reg);
+                return -1;
+            }
+        }
+        dst->u.mem.scale = op->u.mem.scale > 0 ? (unsigned)op->u.mem.scale : 1u;
+        if (op->u.mem.disp != NULL) {
+            if (eval_expr_const(op->u.mem.disp, &v) == 0) {
+                dst->u.mem.has_disp = 1;
+                dst->u.mem.disp = (int32_t)v;
+            } else if (expr_has_symbol(op->u.mem.disp)) {
+                dst->u.mem.has_disp = 1;
+                dst->u.mem.disp = 0;
+            } else {
+                snprintf(errbuf, errbuf_sz, "unsupported memory displacement expression");
+                return -1;
+            }
+        }
+        if (!dst->u.mem.has_base && !dst->u.mem.has_index) {
+            dst->u.mem.disp_only = 1;
+            if (!dst->u.mem.has_disp) {
+                dst->u.mem.has_disp = 1;
+                dst->u.mem.disp = 0;
+            }
+        }
+        return 0;
+    default:
+        snprintf(errbuf, errbuf_sz, "unsupported operand kind for x86 encode");
+        return -1;
+    }
+}
+
+static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
+    size_t i;
+    unsigned width = 0;
+    long long v;
+
+    if (d == NULL || d->name == NULL) {
+        return 0;
+    }
+    if (strcmp(d->name, ".byte") == 0) width = 1;
+    else if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".2byte") == 0) width = 2;
+    else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) width = 4;
+    else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) width = 8;
+
+    if (width != 0) {
+        for (i = 0; i < d->arg_count; ++i) {
+            if (parse_int64(d->args[i], &v) != 0) {
+                return -1;
+            }
+            if (bytebuf_append_u64_le(buf, (uint64_t)v, width) != 0) {
+                return -1;
+            }
+        }
+        return 1;
+    }
+
+    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0) {
+        if (d->arg_count < 1 || parse_int64(d->args[0], &v) != 0 || v < 0) {
+            return -1;
+        }
+        if (bytebuf_append_zeros(buf, (size_t)v) != 0) {
+            return -1;
+        }
+        return 1;
+    }
+
+    if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
+        size_t align = 1;
+        size_t need;
+        if (d->arg_count < 1 || parse_int64(d->args[0], &v) != 0 || v < 0) {
+            return -1;
+        }
+        if (strcmp(d->name, ".p2align") == 0) {
+            if (v >= (long long)(sizeof(size_t) * CHAR_BIT - 1)) {
+                return -1;
+            }
+            align = (size_t)1u << (unsigned)v;
+        } else {
+            align = (size_t)v;
+        }
+        if (align == 0 || (align & (align - 1)) != 0) {
+            return -1;
+        }
+        need = (align - (buf->len & (align - 1))) & (align - 1);
+        if (need > 0 && bytebuf_append_zeros(buf, need) != 0) {
+            return -1;
+        }
+        return 1;
+    }
+
+    return 0;
+}
+
+static int emit_text_program(emit_ctx_t *ctx) {
+    bytebuf_t text;
+    size_t i;
+    unsigned char code[32];
+    size_t code_len;
+    char encerr[256];
+
+    memset(&text, 0, sizeof(text));
+
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        int drc;
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            drc = append_directive_data(&text, &st->u.directive);
+            if (drc < 0) {
+                free(text.data);
+                return -1;
+            }
+            continue;
+        }
+        if (st->kind != AS_STMT_INSTRUCTION) {
+            continue;
+        }
+
+        {
+            as_x86_insn_t in;
+            size_t j;
+
+            memset(&in, 0, sizeof(in));
+            in.mnemonic = st->u.instr.mnemonic;
+            in.seg_override = map_seg(st->u.instr.segment_override);
+            in.op_count = st->u.instr.operand_count > 3 ? 3 : st->u.instr.operand_count;
+
+            for (j = 0; j < in.op_count; ++j) {
+                if (convert_operand_x86(&st->u.instr.operands[j], in.mnemonic, &in.ops[j], ctx->cfg->is_64, encerr,
+                                        sizeof(encerr)) != 0) {
+                    set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
+                    free(text.data);
+                    return -1;
+                }
+            }
+
+            if (ctx->cfg->is_64) {
+                if (as_x86_encode_x86_64(&in, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+                    set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
+                    free(text.data);
+                    return -1;
+                }
+            } else {
+                if (as_x86_encode_i386(&in, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+                    set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
+                    free(text.data);
+                    return -1;
+                }
+            }
+            if (bytebuf_append(&text, code, code_len) != 0) {
+                free(text.data);
+                return -1;
+            }
+        }
+    }
+
+    if (ctx->text_sec != NULL && elf_section_set_data(ctx->text_sec, text.data, text.len) != ELF_OK) {
+        free(text.data);
+        return -1;
+    }
+    free(text.data);
     return 0;
 }
 
@@ -516,12 +918,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
         }
 
         if (strcmp(s->name, ".text") == 0 && s->subsection == 0) {
-            static unsigned char text_pad[512];
             ctx.text_sec = es;
-            if (elf_section_set_data(es, text_pad, sizeof(text_pad)) != ELF_OK) {
-                set_err(&ctx, "failed to seed .text data");
-                goto fail;
-            }
         }
         if (strcmp(s->name, ".data") == 0 && s->subsection == 0) {
             ctx.data_sec = es;
@@ -536,13 +933,18 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
         }
     }
     if (ctx.text_sec == NULL) {
-        static unsigned char text_pad2[512];
         ctx.text_sec = elf_add_section(ctx.obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
-        if (ctx.text_sec == NULL || elf_section_set_align(ctx.text_sec, 16) != ELF_OK ||
-            elf_section_set_data(ctx.text_sec, text_pad2, sizeof(text_pad2)) != ELF_OK) {
+        if (ctx.text_sec == NULL || elf_section_set_align(ctx.text_sec, 16) != ELF_OK) {
             set_err(&ctx, "failed to create .text");
             goto fail;
         }
+    }
+
+    if (emit_text_program(&ctx) != 0) {
+        if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
+            set_err(&ctx, "failed to emit text instructions");
+        }
+        goto fail;
     }
 
     if (emit_data_program(&ctx, data) != 0) {
@@ -582,16 +984,14 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
 
     collect_directive_presence(parsed, &has_file_loc, &has_cfi);
     if (has_file_loc) {
-        static const unsigned char dbg_line_stub[] = {0x00, 0x00, 0x00, 0x00, 0x02, 0x00};
-        if (ensure_section_exists(&ctx, ".debug_line", SHT_PROGBITS, 0, 1, dbg_line_stub, sizeof(dbg_line_stub)) != 0) {
+        if (ensure_section_exists(&ctx, ".debug_line", SHT_PROGBITS, 0, 1, NULL, 0) != 0) {
             set_err(&ctx, "failed to emit .debug_line");
             goto fail;
         }
     }
     if (has_cfi) {
-        static const unsigned char eh_stub[] = {0x14, 0x00, 0x00, 0x00};
-        if (ensure_section_exists(&ctx, ".eh_frame", SHT_PROGBITS, SHF_ALLOC, 4, eh_stub, sizeof(eh_stub)) != 0 ||
-            ensure_section_exists(&ctx, ".eh_frame_hdr", SHT_PROGBITS, SHF_ALLOC, 4, eh_stub, sizeof(eh_stub)) != 0) {
+        if (ensure_section_exists(&ctx, ".eh_frame", SHT_PROGBITS, SHF_ALLOC, 4, NULL, 0) != 0 ||
+            ensure_section_exists(&ctx, ".eh_frame_hdr", SHT_PROGBITS, SHF_ALLOC, 4, NULL, 0) != 0) {
             set_err(&ctx, "failed to emit .eh_frame/.eh_frame_hdr");
             goto fail;
         }
