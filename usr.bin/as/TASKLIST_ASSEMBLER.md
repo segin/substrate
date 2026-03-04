@@ -29,10 +29,10 @@ Goal: finish standalone assembler behavior without external syntax/tool handoff,
 - [x] Add `--target-help` notes documenting Intel syntax coverage and known gaps.
 
 ### 1.4 Tests
-- [ ] Add dual-syntax golden tests: AT&T source and Intel source produce identical `.text` bytes.
+- [x] Add dual-syntax golden tests: AT&T source and Intel source produce identical `.text` bytes.
 - [ ] Add Intel memory-addressing conformance tests (base/index/scale/disp permutations).
 - [ ] Add Intel size-qualifier tests that validate selected opcode width/prefix.
-- [ ] Add negative tests for ambiguous Intel forms with expected diagnostics.
+- [x] Add negative tests for ambiguous Intel forms with expected diagnostics.
 
 ---
 
