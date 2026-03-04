@@ -169,6 +169,18 @@ void run_memmove_tests(void) {
     ASSERT_TRUE(strncmp(buf, "0101236789", 10) == 0, "Overlapping backward");
 }
 
+void run_strcspn_tests(void) {
+    printf("Running strcspn tests...\n");
+    ASSERT_EQ(libc_strcspn("hello", "l"), 2, "strcspn basic");
+    ASSERT_EQ(libc_strcspn("hello", "ol"), 2, "strcspn first of multiple");
+    ASSERT_EQ(libc_strcspn("hello", "z"), 5, "strcspn not found");
+    ASSERT_EQ(libc_strcspn("hello", ""), 5, "strcspn empty reject");
+    ASSERT_EQ(libc_strcspn("", "z"), 0, "strcspn empty string");
+    ASSERT_EQ(libc_strcspn("", ""), 0, "strcspn both empty");
+    ASSERT_EQ(libc_strcspn("hello", "h"), 0, "strcspn found at start");
+    ASSERT_EQ(libc_strcspn("hello", "o"), 4, "strcspn found at end");
+}
+
 void run_strtok_tests(void) {
     printf("Running strtok tests...\n");
     char str[] = "A string to tokenize";
@@ -237,6 +249,11 @@ bool test_libc_strcat(void) {
     return true;
 }
 
+bool test_libc_strcspn(void) {
+    run_strcspn_tests();
+    return true;
+}
+
 bool test_libc_strtok(void) {
     run_strtok_tests();
     return true;
@@ -254,6 +271,7 @@ int main(void) {
     run_strcat_tests();
     run_strtok_tests();
     run_memcmp_tests();
+    run_strcspn_tests();
     return 0;
 }
 #endif
