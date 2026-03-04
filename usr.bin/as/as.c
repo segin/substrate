@@ -165,7 +165,7 @@ static void as_diag(as_error_code_t code, const char *fmt, ...) {
     if (g_emit_error_codes) {
         fprintf(stderr, "[%s] ", as_error_code_name(code));
     }
-    fprintf(stderr, "as: ");
+    fprintf(stderr, "as: error: ");
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);

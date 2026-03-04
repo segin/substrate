@@ -309,6 +309,227 @@ static int is_rel_mnemonic(const char *mn) {
     return 0;
 }
 
+static int is_size_suffixable_base(const char *mn) {
+    static const char *const names[] = {
+        "add", "sub", "and", "or", "xor", "cmp", "mov", "lea", "imul", "shl",
+        "shr", "sar", "ror", "bt", "bts", "movsx", "movzx", "test",
+    };
+    size_t i;
+
+    if (mn == NULL) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcmp(mn, names[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int has_x86_size_suffix(const char *mn, char *suffix_out) {
+    size_t n;
+    char c;
+    char tmp[32];
+
+    if (mn == NULL) {
+        return 0;
+    }
+    n = strlen(mn);
+    if (n < 2) {
+        return 0;
+    }
+    c = mn[n - 1];
+    if (c != 'b' && c != 'w' && c != 'l' && c != 'q') {
+        return 0;
+    }
+    if (n >= sizeof(tmp)) {
+        return 0;
+    }
+    memcpy(tmp, mn, n - 1);
+    tmp[n - 1] = '\0';
+    if (!is_size_suffixable_base(tmp)) {
+        return 0;
+    }
+    if (suffix_out != NULL) {
+        *suffix_out = c;
+    }
+    return 1;
+}
+
+static int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, char *suffix_out) {
+    size_t i;
+    size_t n;
+    char suffix = '\0';
+
+    if (src == NULL || dst == NULL || dst_sz == 0) {
+        return -1;
+    }
+    n = strlen(src);
+    if (n + 1 > dst_sz) {
+        return -1;
+    }
+    for (i = 0; i < n; ++i) {
+        dst[i] = (char)tolower((unsigned char)src[i]);
+    }
+    dst[n] = '\0';
+
+    if (has_x86_size_suffix(dst, &suffix)) {
+        dst[n - 1] = '\0';
+    } else {
+        suffix = '\0';
+    }
+    if (suffix_out != NULL) {
+        *suffix_out = suffix;
+    }
+    return 0;
+}
+
+static int parse_xmm_reg(const char *name, unsigned *out) {
+    const char *p = name;
+    unsigned v = 0;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (!(p[0] == 'x' || p[0] == 'X') || !(p[1] == 'm' || p[1] == 'M') || !(p[2] == 'm' || p[2] == 'M')) {
+        return -1;
+    }
+    p += 3;
+    if (!isdigit((unsigned char)*p)) {
+        return -1;
+    }
+    while (isdigit((unsigned char)*p)) {
+        v = (v * 10u) + (unsigned)(*p - '0');
+        ++p;
+    }
+    if (*p != '\0' || v > 15u) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int parse_st_index(const char *s, unsigned *out) {
+    const char *p;
+    unsigned v = 0;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    p = s;
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (!(p[0] == 's' || p[0] == 'S') || !(p[1] == 't' || p[1] == 'T') || p[2] != '(') {
+        return -1;
+    }
+    p += 3;
+    if (!isdigit((unsigned char)*p)) {
+        return -1;
+    }
+    while (isdigit((unsigned char)*p)) {
+        v = (v * 10u) + (unsigned)(*p - '0');
+        ++p;
+    }
+    if (*p != ')' || p[1] != '\0' || v > 7u) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
+                             unsigned char *out, size_t out_cap, size_t *out_len) {
+    const as_operand_t *a;
+    const as_operand_t *b;
+    const as_operand_t *src;
+    const as_operand_t *dst;
+    char mnbuf[32];
+    unsigned xr;
+    unsigned xm;
+    unsigned stidx;
+
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    if (insn == NULL || out == NULL || out_cap < 8) {
+        return -1;
+    }
+    if (normalize_x86_mnemonic(insn->mnemonic, mnbuf, sizeof(mnbuf), NULL) != 0) {
+        return -1;
+    }
+    if (insn->prefixes != 0 || insn->segment_override != NULL) {
+        return -1;
+    }
+
+    a = insn->operand_count > 0 ? &insn->operands[0] : NULL;
+    b = insn->operand_count > 1 ? &insn->operands[1] : NULL;
+    src = intel_syntax ? b : a;
+    dst = intel_syntax ? a : b;
+
+    if (strcmp(mnbuf, "fld1") == 0) {
+        if (insn->operand_count != 0) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = 0xe8;
+        if (out_len != NULL) {
+            *out_len = 2;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "fstp") == 0) {
+        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_COPROCESSOR ||
+            parse_st_index(a->u.coproc, &stidx) != 0) {
+            return -1;
+        }
+        out[0] = 0xdd;
+        out[1] = (unsigned char)(0xd8u + stidx);
+        if (out_len != NULL) {
+            *out_len = 2;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "pxor") == 0 || strcmp(mnbuf, "movdqa") == 0) {
+        unsigned char opcode = strcmp(mnbuf, "pxor") == 0 ? 0xef : 0x6f;
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_xmm_reg(src->u.reg, &xm) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+            return -1;
+        }
+        out[0] = 0x66;
+        out[1] = 0x0f;
+        out[2] = opcode;
+        out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+        if (out_len != NULL) {
+            *out_len = 4;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "cvtsi2sd") == 0) {
+        as_x86_reg_t gr;
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_x86_reg(src->u.reg, &gr) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+            return -1;
+        }
+        out[0] = 0xf2;
+        out[1] = 0x0f;
+        out[2] = 0x2a;
+        out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (gr & 7u));
+        if (out_len != NULL) {
+            *out_len = 4;
+        }
+        return 0;
+    }
+
+    return -1;
+}
+
 static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
                                char *errbuf, size_t errbuf_sz) {
     long long v;
@@ -328,7 +549,6 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
         }
         return 0;
     case AS_OPERAND_IMMEDIATE:
-    case AS_OPERAND_LABEL_REF:
         if (is_rel_mnemonic(mnemonic)) {
             dst->kind = AS_X86_OP_REL;
             if (eval_expr_const(op->u.expr, &v) == 0) {
@@ -349,6 +569,23 @@ static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_
         }
         snprintf(errbuf, errbuf_sz, "non-constant immediate in %s", mnemonic != NULL ? mnemonic : "<insn>");
         return -1;
+    case AS_OPERAND_LABEL_REF:
+        if (is_rel_mnemonic(mnemonic)) {
+            dst->kind = AS_X86_OP_REL;
+            if (eval_expr_const(op->u.expr, &v) == 0) {
+                dst->u.rel = (int32_t)v;
+            } else {
+                dst->u.rel = 0;
+            }
+            return 0;
+        }
+        dst->kind = AS_X86_OP_MEM;
+        memset(&dst->u.mem, 0, sizeof(dst->u.mem));
+        dst->u.mem.scale = 1;
+        dst->u.mem.disp_only = 1;
+        dst->u.mem.has_disp = 1;
+        dst->u.mem.disp = 0;
+        return 0;
     case AS_OPERAND_MEMORY:
         dst->kind = AS_X86_OP_MEM;
         memset(&dst->u.mem, 0, sizeof(dst->u.mem));
@@ -487,18 +724,64 @@ static int emit_text_program(emit_ctx_t *ctx) {
         {
             as_x86_insn_t in;
             size_t j;
+            size_t op_index[3] = {0, 1, 2};
+            char mnbuf[32];
+            char suffix = '\0';
+            int intel_syntax = (ctx->cfg->intel_syntax != 0);
 
             memset(&in, 0, sizeof(in));
-            in.mnemonic = st->u.instr.mnemonic;
+            if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
+                set_err(ctx, "%s:%u: unsupported mnemonic length", st->file != NULL ? st->file : "<input>", st->line);
+                free(text.data);
+                return -1;
+            }
+            in.mnemonic = mnbuf;
             in.seg_override = map_seg(st->u.instr.segment_override);
+            in.lock_prefix = (st->u.instr.prefixes & AS_PREFIX_LOCK) != 0;
+            if ((st->u.instr.prefixes & AS_PREFIX_REPNE) != 0) {
+                in.rep_prefix = 2;
+            } else if ((st->u.instr.prefixes & (AS_PREFIX_REP | AS_PREFIX_REPE)) != 0) {
+                in.rep_prefix = 1;
+            }
             in.op_count = st->u.instr.operand_count > 3 ? 3 : st->u.instr.operand_count;
+            if (suffix == 'w') {
+                in.operand_size_override = 1;
+            } else if (suffix == 'q') {
+                in.rex_w = 1;
+            }
+
+            if (!intel_syntax && in.op_count == 2) {
+                op_index[0] = 1;
+                op_index[1] = 0;
+            } else if (!intel_syntax && in.op_count == 3 && streq_ci(mnbuf, "imul")) {
+                op_index[0] = 2;
+                op_index[1] = 1;
+                op_index[2] = 0;
+            }
+
+            if (!ctx->cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, sizeof(code), &code_len) == 0) {
+                if (bytebuf_append(&text, code, code_len) != 0) {
+                    free(text.data);
+                    return -1;
+                }
+                continue;
+            }
 
             for (j = 0; j < in.op_count; ++j) {
-                if (convert_operand_x86(&st->u.instr.operands[j], in.mnemonic, &in.ops[j], ctx->cfg->is_64, encerr,
+                if (convert_operand_x86(&st->u.instr.operands[op_index[j]], in.mnemonic, &in.ops[j], ctx->cfg->is_64, encerr,
                                         sizeof(encerr)) != 0) {
                     set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
                     free(text.data);
                     return -1;
+                }
+            }
+            if (in.seg_override == AS_X86_SEG_NONE) {
+                for (j = 0; j < in.op_count; ++j) {
+                    const as_operand_t *op = &st->u.instr.operands[op_index[j]];
+                    if (op->kind == AS_OPERAND_MEMORY && op->u.mem.segment_reg != NULL) {
+                        in.seg_override = map_seg(op->u.mem.segment_reg);
+                        break;
+                    }
                 }
             }
 

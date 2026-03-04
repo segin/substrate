@@ -78,6 +78,8 @@ typedef struct {
 typedef struct {
     const char *mnemonic;
     as_x86_seg_t seg_override;
+    int lock_prefix;
+    int rep_prefix;
     int rex_w;
     int operand_size_override;
     int address_size_override;
