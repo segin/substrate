@@ -1,0 +1,10839 @@
+# TASKS.md
+
+## Substrate Operating System - Development Tasks
+
+This document tracks the progress and remaining tasks for the Substrate operating system.
+
+### 1. Kernel Core (`sys/core`, `sys/kern`)
+- [ ] **Memory Management:**
+    - [ ] **Physical Memory Manager (PMM Refactor):**
+
+        > **Files:** `sys/core/pmm.c`, `sys/vm/phys_mem.c`, `sys/vm/vm_page.h`.
+        >
+        > **Architecture:** Two-phase allocator — watermark (bootstrap) →
+        > buddy (runtime). Returns kernel virtual addresses (0xC0000000+).
+
+        - [x] **Boot Memory Detection:**
+            - [x] Parse Multiboot Memory Map (`mmap`).
+            - [x] Parse e820 Memory Map (legacy BIOS fallback).
+            - [x] **Hardening:**
+                - [x] Sanitize memory map entries: validate type, clamp to 32‑bit address space.
+                - [x] Reject overlapping or zero‑length regions.
+                - [x] Calculate and report total usable RAM (64‑bit accumulation for >4 GB physical).
+                - [x] Identify kernel physical bounds from linker symbols (`_kernel_start`, `_kernel_end`).
+                - [x] Exclude kernel text/data/BSS region from free pool.
+                - [x] Exclude Multiboot info structure and module regions.
+                - [x] Reserve BIOS/ACPI regions (type 3/4) and memory holes.
+        - [x] **Bootstrap Watermark Allocator:**
+            - [x] Bump allocator for early boot before buddy is ready.
+            - [x] `pmm_watermark_init(start, end)`: initialize allocator with usable range.
+            - [x] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment.
+            - [x] `pmm_watermark_used()`: report bytes consumed.
+            - [x] Used for: `vm_page_t` array, initial page tables, kernel stacks.
+            - [x] Watermark region clamped to avoid exceeding available low memory.
+        - [x] **Dynamic Metadata:**
+            - [x] Calculate `vm_page_t` array size based on actual detected RAM.
+            - [x] Allocate array via watermark allocator.
+            - [x] Remove hardcoded 128 MB static limit.
+            - [x] Fallback to static bitmap if RAM < 4 MB (constrained environments).
+        - [x] **Buddy Allocator:**
+            - [x] Orders 0–10 (4 KB – 4 MB pages).
+            - [x] **Free Lists:** per‑order doubly‑linked free page lists.
+            - [x] `vm_phys_alloc_page()`: O(1) single-page allocation from order‑0 free list.
+            - [x] `vm_phys_alloc_contiguous(order)`: allocate 2^order contiguous pages.
+            - [x] `vm_phys_free_page(page)`: return page and coalesce with buddy if free.
+            - [x] `vm_phys_free_contiguous(page, order)`: return and coalesce multi-page block.
+            - [x] **Buddy Coalescing:** merge adjacent free pages up through orders.
+            - [x] **Buddy Splitting:** split higher-order blocks when lower order is empty.
+            - [x] Interrupt‑safe: disable interrupts during alloc/free.
+        - [x] **Public API (returning kernel virtual addresses):**
+            - [x] `pmm_alloc_block()`: allocate single page, return 0xC0000000+ virtual address.
+            - [x] `pmm_free_block(vaddr)`: free single page given virtual address.
+            - [x] `pmm_alloc_contiguous(count)`: allocate `count` contiguous pages.
+            - [x] `pmm_free_contiguous(vaddr, count)`: free contiguous block.
+            - [x] `pmm_get_page(phys_addr)`: look up `vm_page_t` for physical address.
+        - [x] **Safety & Integration:**
+            - [x] Fine-grained spinlock for SMP access (`vm_phys_lock`).
+            - [x] Interrupt disable/restore guards in all API entry points.
+            - [x] Direct interface with `vm_page.c` queues.
+            - [x] Low memory watermark: warn when free pages drop below threshold.
+        - [ ] **NUMA-Aware Allocation (deferred):**
+            - [ ] Per-node free lists.
+            - [ ] Node affinity for allocation (prefer local node).
+            - [ ] Cross-node fallback when local node exhausted.
+        - [ ] **Testing:**
+            - [ ] Unit: watermark allocator — sequential allocations, alignment, exhaustion.
+            - [ ] Unit: buddy allocator — alloc/free single pages, verify O(1) behavior.
+            - [ ] Unit: buddy coalescing — free adjacent pages, verify order promotion.
+            - [ ] Unit: buddy splitting — exhaust order 0, verify split from higher order.
+            - [ ] Unit: contiguous allocation — various orders, verify alignment.
+            - [ ] Unit: memory map parsing — Multiboot and e820 with edge cases (overlaps, holes).
+            - [ ] Property: `alloc → free → alloc` returns same page (no leak).
+            - [ ] Property: free page count + allocated count = total pages (invariant).
+            - [ ] Property: buddy free list integrity (no cycles, all entries valid).
+            - [ ] Integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: PMM architecture (watermark → buddy transition).
+            - [ ] Internal doc: virtual vs physical address API convention.
+
+    - [ ] **Memory Management (BSD/Mach Design):**
+
+        - [ ] **Physical Memory (Machine Independent):**
+
+            > **Files:** `sys/vm/vm_page.h`, `sys/vm/vm_page.c`, `sys/vm/phys_mem.c`.
+
+            - [x] **`vm_page_t` Structure:**
+                - [x] `phys_addr`: physical address of this page frame.
+                - [x] `flags`: state flags (see below).
+                - [x] `wire_count`: wired reference count (cannot be paged out while > 0).
+                - [x] `ref_count`: general reference count (for COW sharing).
+                - [x] `order`: buddy allocator order (0 = single page).
+                - [x] `object`: back-pointer to owning `vm_object` (anonymous, vnode, device).
+                - [x] `pindex`: page index within owning object.
+                - [x] `pv_list`: list of `pv_entry` structs for pmap backlinks (which PTEs map this page).
+                - [x] **State Flags:**
+                    - [x] `PG_BUSY`: page is being I/O'd (don't touch).
+                    - [x] `PG_VALID`: page contains valid data.
+                    - [x] `PG_DIRTY`: page has been modified since last writeback.
+                    - [x] `PG_ACTIVE`: page is on active queue.
+                    - [x] `PG_INACTIVE`: page is on inactive queue.
+                    - [x] `PG_FREE`: page is on free queue.
+                    - [x] `PG_ZERO`: page is known to be zeroed.
+                    - [x] `PG_SWAPPED`: page contents are on swap.
+                - [x] **Initialization:**
+                    - [x] Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator).
+                    - [x] Initialize all pages as `PG_FREE`, link into free lists.
+                - [x] **Accessors:**
+                    - [x] `pmm_get_page(pa)`: PA-to-page lookup (O(1) via array index).
+                    - [x] `vm_page_to_phys(page)`: page-to-PA conversion.
+                - [x] **Ownership Tracking:**
+                    - [x] Track which `vm_object` (anonymous, vnode, device) owns each page.
+                    - [x] `vm_page_insert(page, object, pindex)`: link page to object.
+                    - [x] `vm_page_remove(page)`: unlink page from object.
+                - [x] **Pmap Backlinks (`pv_entry`):**
+                    - [x] Track which pmaps/PTEs reference this physical page.
+                    - [x] `pv_entry`: `{pmap, va, next}` — singly-linked list per page.
+                    - [x] Used for reverse mapping: given a physical page, find all virtual mappings.
+                    - [x] Essential for TLB shootdown and page eviction.
+
+            - [x] **Page Queues:**
+                - [x] **Queue Types:**
+                    - [x] **Free Queue:** pages available for immediate allocation.
+                    - [x] **Active Queue:** recently accessed pages (LRU head).
+                    - [x] **Inactive Queue:** eviction candidates (LRU tail).
+                    - [x] **Wired Queue:** kernel/DMA pages that cannot be paged out.
+                    - [x] **Laundry Queue:** dirty pages waiting to be written to backing store.
+                - [x] **Queue Operations:**
+                    - [x] `vm_page_activate(page)`: move to active queue, set `PG_ACTIVE`.
+                    - [x] `vm_page_deactivate(page)`: move to inactive queue, clear `PG_ACTIVE`.
+                    - [x] `vm_page_wire(page)`: increment wire count, move to wired queue.
+                    - [x] `vm_page_unwire(page)`: decrement wire count, move to inactive if count reaches 0.
+                    - [x] `vm_page_free(page)`: return to free queue, clear all flags.
+                    - [x] `vm_page_launder(page)`: move to laundry queue for async writeback.
+                - [x] **LRU Scanning (`vm_pageout_scan`):**
+                    - [x] Periodic scan of active queue.
+                    - [x] Check PTE accessed (A) bit via `pmap_is_referenced()`.
+                    - [x] Clear A bit via `pmap_clear_reference()`.
+                    - [x] Move unreferenced pages to inactive queue tail.
+                    - [x] Second-chance algorithm: pages touched again stay active.
+                - [x] **Page Daemon (`vm_pageout`):**
+                    - [x] Background kernel thread (`pagedaemon`).
+                    - [x] Sleep on `vm_pages_needed` wakeup channel.
+                    - [x] `vm_page_launder()`: write dirty pages to backing store.
+                    - [x] `vm_page_try_to_free()`: attempt to free clean inactive pages.
+                    - [x] Priority-based scanning phases: Inactive → Laundry → Active.
+                    - [x] OOM killer hook: kill process if cannot free memory.
+                - [x] **Thresholds:**
+                    - [x] `vm_page_free_min`: absolute minimum free pages (16 default; panic below).
+                    - [x] `vm_page_free_target`: target free pages (64 default; daemon sleeps above).
+                    - [x] `vm_page_inactive_target`: target inactive queue length.
+                    - [x] `vm_page_free_reserved`: reserved for kernel emergencies (8 default).
+                    - [x] Dynamic threshold adjustment based on total RAM.
+                - [x] **Statistics (`vm_stat`):**
+                    - [x] `free_count`, `active_count`, `inactive_count`, `wire_count`, `laundry_count`.
+                    - [x] `pageins`: pages read from disk.
+                    - [x] `pageouts`: pages written to disk.
+                    - [x] `faults`: total page faults handled.
+                    - [x] `cow_faults`: copy-on-write faults.
+                    - [x] `reactivations`: pages moved back to active.
+                    - [x] `zero_fill_pages`: pages satisfied by zero-fill.
+                    - [x] `/proc/vmstat` or sysctl interface for userspace exposure.
+
+            - [ ] **Testing:**
+                - [ ] Unit: page queue transitions (free→active→inactive→laundry→free).
+                - [ ] Unit: wire/unwire reference counting.
+                - [ ] Unit: `vm_page_insert` / `vm_page_remove` object linkage.
+                - [ ] Unit: `pv_entry` list manipulation (insert, remove, lookup).
+                - [ ] Unit: page daemon thresholds — verify scan triggers at correct free count.
+                - [ ] Property: queue length invariant — sum of all queue counts = total pages.
+                - [ ] Property: no page appears on two queues simultaneously.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: page queue state machine and transitions.
+                - [ ] Internal doc: page daemon algorithm and tuning parameters.
+
+        - [ ] **PMAP Layer (Machine Dependent — i386):**
+
+            > **Files:** `sys/arch/i386/pmap.c`, `pmap.h`.
+            >
+            > **Architecture:** Two-level page tables (PD + PT). 3 GB/1 GB
+            > user/kernel split. Recursive mapping at PDE 1023.
+
+            - [ ] **Initialization (`pmap_bootstrap`):**
+                - [ ] Initialize kernel page directory from static bootstrap allocation.
+                - [ ] Set up recursive mapping at PD entry 1023 (self-reference at 0xFFC00000).
+                - [ ] Map kernel space (0xC0000000+) with global flag if CPUID reports PGE.
+                - [ ] Detect CPU features: PSE (4 MB pages), PGE (global pages), PAE (36‑bit physical).
+                - [ ] Initialize pmap lock for SMP safety.
+                - [ ] Identity-map LAPIC MMIO region (0xFEE00000) with PCD flag.
+                - [ ] Record `kernel_pmap` as authoritative kernel address space.
+
+            - [ ] **Core PTE Manipulation:**
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: insert/update PTE.
+                    - [ ] Allocate page table on demand when PDE is empty.
+                    - [ ] Set `PG_U` (user), `PG_W` (write), `PG_G` (global) flags per `prot`.
+                    - [ ] Invalidate TLB entry for updated VA.
+                    - [ ] Update `pv_entry` list for the physical page.
+                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB.
+                    - [ ] Remove `pv_entry` for this mapping.
+                    - [ ] Free page table if all entries empty (optional reclamation).
+                - [ ] `pmap_kenter(va, pa)`: kernel-only fast path (no locking, no pv_entry).
+                - [ ] `pmap_kremove(va)`: kernel-only removal.
+                - [ ] `pmap_extract(pmap, va)`: return physical address for VA (read PTE).
+                - [ ] `pmap_zero_page(phys)`: zero a physical page via temporary mapping.
+                - [ ] `pmap_copy_page(src_phys, dst_phys)`: copy between physical pages.
+
+            - [ ] **Context Switch (`pmap_activate`):**
+                - [ ] Load `pmap->pdir_phys` into CR3.
+                - [ ] Update `curpmap` thread-local pointer.
+                - [ ] Set TSS ESP0 for kernel stack (scheduler integration).
+
+            - [ ] **Recursive Paging:**
+                - [ ] Reserve PDE 1023 for self-referencing.
+                - [ ] `V_PD` macro: access current PD at 0xFFFFF000.
+                - [ ] `V_PT(n)` macro: access page table `n` at 0xFFC00000 + n×4096.
+                - [ ] All PTE manipulation uses recursive window (no temporary mappings needed).
+
+            - [ ] **Higher-Half Transition:**
+                - [ ] Stable 3 GB/1 GB split: user 0x00000000–0xBFFFFFFF, kernel 0xC0000000–0xFFFFFFFF.
+                - [ ] LMA=0x100000 (1 MB), VMA=0xC0100000 (kernel linked at high address).
+                - [ ] Boot trampoline in `boot.S` enables paging with identity + high mapping.
+
+            - [ ] **Per-Process Address Space (`pmap_t`):**
+                - [ ] **Data Structure:**
+                    - [ ] `pdir` / `pdir_phys`: virtual and physical address of page directory.
+                    - [ ] `ref_count`: reference count for COW sharing.
+                    - [ ] `resident_count`: count of resident pages.
+                    - [ ] `wired_count`: count of wired (unpageable) pages.
+                    - [ ] `stats` (`pmap_stats`): per-pmap counters (faults, cow_faults, zero_fills, protection changes).
+                    - [ ] `lock`: spinlock for SMP safety.
+                    - [ ] `asid`: address space ID (future PCID support, currently 0).
+                    - [ ] `list_entry`: linkage for global pmap list (TLB shootdown).
+                - [ ] **`pmap_create()` — Create New Address Space:**
+                    - [ ] Allocate one 4 KB page for page directory.
+                    - [ ] Zero user portion (PDEs 0–767).
+                    - [ ] Copy kernel PDEs (768–1022) from `kernel_pmap` (shared by reference).
+                    - [ ] Set up recursive mapping in PDE 1023.
+                    - [ ] Initialize reference count to 1.
+                    - [ ] Add to global pmap list.
+                    - [ ] Minimum overhead: 1 PD (4 KB) + PTs allocated on demand.
+                - [ ] **`pmap_destroy()` — Destroy Address Space:**
+                    - [ ] Decrement reference count; return if still referenced (COW children).
+                    - [ ] Walk all user PDEs (0–767):
+                        - [ ] For each present PDE, walk all 1024 PTEs.
+                        - [ ] For each present PTE, free physical page (or decrement refcount).
+                        - [ ] Free page table page.
+                    - [ ] Free page directory page.
+                    - [ ] Remove from global pmap list.
+                - [ ] **`pmap_reference()` / `pmap_release()`:**
+                    - [ ] Atomic increment/decrement of reference count.
+                    - [ ] `pmap_release()`: call `pmap_destroy()` if refcount reaches 0.
+                - [ ] **`pmap_fork()` — Copy-on-Write Fork:**
+                    - [ ] Create new pmap via `pmap_create()`.
+                    - [ ] Walk parent's user PTEs:
+                        - [ ] Copy PTE to child with write bit cleared.
+                        - [ ] Clear write bit in parent too (both now COW).
+                        - [ ] Increment physical page reference count.
+                    - [ ] Track COW pages in pmap stats.
+                - [ ] **Kernel PDE Synchronization:**
+                    - [ ] `kernel_pmap` is authoritative for PDEs 768–1022.
+                    - [ ] `pmap_create()` copies kernel PDEs on creation.
+                    - [ ] `pmap_growkernel(va)`: when kernel maps new pages (vmalloc), update all pmaps.
+                        - [ ] Walk global pmap list and copy new kernel PDEs.
+                    - [ ] Alternatively share kernel PTs by reference (current approach).
+
+            - [ ] **`pmap_protect()` — Change Page Protections:**
+                - [ ] Walk range and update PTE protection bits (R/W, U/S).
+                - [ ] Handle protection upgrade (read → read/write) and downgrade.
+                - [ ] Track protection changes for COW handling.
+                - [ ] Batch TLB invalidations for large ranges (`TLB_BATCH_THRESHOLD`).
+
+            - [ ] **`pmap_copy()` — Copy Mappings Between Address Spaces:**
+                - [ ] Copy PTE entries from source to destination pmap.
+                - [ ] Set up COW if requested (clear write bit in both).
+                - [ ] Increment physical page reference counts.
+                - [ ] Support partial range copy (for `vfork`/`clone`).
+                - [ ] Handle mixed COW and private mappings (`PG_PRIVATE` check).
+
+            - [ ] **Page Reference/Modification Tracking:**
+                - [ ] `pmap_is_referenced(pmap, va)`: check PTE Accessed (A) bit.
+                - [ ] `pmap_is_modified(pmap, va)`: check PTE Dirty (D) bit.
+                - [ ] `pmap_clear_reference(pmap, va)`: clear A bit, invalidate TLB.
+                - [ ] `pmap_clear_modify(pmap, va)`: clear D bit, invalidate TLB.
+                - [ ] `pmap_test_and_clear_ref(page)`: atomic test-and-clear for A bit across all mappings.
+                - [ ] `pmap_test_and_clear_modify(page)`: atomic test-and-clear for D bit.
+                - [ ] Batch variants: `pmap_is_referenced_range()`, `pmap_is_modified_range()`.
+                - [ ] `pmap_track_access(page)`: per-page access frequency tracking for aging.
+                - [ ] Export referenced/modified info to VM layer for page replacement decisions.
+
+            - [ ] **Copy-on-Write System:**
+                - [ ] Mark shared pages read-only in both parent and child.
+                - [ ] **COW Fault Handler:**
+                    - [ ] On write fault to COW page: allocate new physical page.
+                    - [ ] Copy contents from original page.
+                    - [ ] Map new page R/W at faulting VA.
+                    - [ ] Decrement original page refcount.
+                    - [ ] If refcount == 1, optionally remap original R/W in remaining owner.
+                - [ ] `pmap_page_is_cow(page)`: check if page is COW-shared.
+                - [ ] COW statistics: faults, pages saved, duplications.
+                - [ ] `SYS_GET_COW_STATS` (241) syscall and `/proc/cow_stats` procfs entry.
+
+            - [ ] **TLB Management:**
+                - [ ] **Single CPU:**
+                    - [ ] `invlpg(va)`: invalidate single page.
+                    - [ ] CR3 reload: flush entire TLB (expensive, avoid when possible).
+                    - [ ] Track flush statistics.
+                - [ ] **SMP TLB Shootdown:**
+                    - [ ] IPI (Inter-Processor Interrupt) mechanism.
+                    - [ ] `pmap_shootdown_page(va)`: invalidate single page on all CPUs.
+                    - [ ] `pmap_shootdown_range(va, len)`: invalidate range.
+                    - [ ] `pmap_shootdown_all()`: full TLB flush on all CPUs.
+                    - [ ] Deferred shootdown for batch operations.
+                    - [ ] Shootdown completion barrier (wait for all CPUs to acknowledge).
+                - [ ] **INVPCID (future x86_64):**
+                    - [ ] Detect INVPCID support via CPUID.
+                    - [ ] Invalidate by PCID+VA, PCID only, or all-except-global.
+
+            - [ ] **Large Page Support:**
+                - [ ] **4 MB PSE Pages (i386):**
+                    - [ ] Detect PSE via CPUID, set CR4.PSE.
+                    - [ ] Use PDE with PS=1 for 4 MB mappings.
+                    - [ ] `pmap_enter_large(pmap, va, pa, prot, flags)`: create 4 MB mapping.
+                    - [ ] Align VA and PA to 4 MB boundary.
+                    - [ ] Use for kernel text/data to reduce TLB pressure.
+                    - [ ] Demotion: split 4 MB page into 1024 × 4 KB on partial unmap/protect.
+                    - [ ] Promotion: coalesce 1024 aligned 4 KB pages into 4 MB (deferred).
+                - [ ] **2 MB / 1 GB Pages (x86_64 — see x86_64 PMAP below).**
+
+            - [ ] **Global Page Support (PGE):**
+                - [ ] Detect PGE via CPUID, set CR4.PGE.
+                - [ ] Mark kernel pages with `PG_G` flag.
+                - [ ] Global pages survive CR3 reload (not flushed).
+                - [ ] Use CR4 toggle or `INVPCID` to flush global pages when needed.
+
+            - [ ] **ASID/PCID Support (future x86_64):**
+                - [ ] ASID pool management (allocate, free, recycle).
+                - [ ] Assign ASID on pmap creation.
+                - [ ] Include ASID in CR3 on context switch.
+                - [ ] Avoid full TLB flush when switching between processes with different ASIDs.
+
+            - [ ] **PAE Mode (Physical Address Extension — deferred):**
+                - [ ] Three-level page tables: PDPT (4 entries) → PD → PT.
+                - [ ] 64‑bit PTEs: support for NX (No Execute) bit.
+                - [ ] Physical addresses up to 36 bits (64 GB).
+                - [ ] PDPT must be in first 4 GB and 32‑byte aligned.
+
+            - [ ] **PMAP Statistics and Debugging:**
+                - [ ] Per-pmap counters: resident, wired, mapped, faults, cow_faults.
+                - [ ] Global counters: total_pmaps, active_pmaps.
+                - [ ] `pmap_dump(pmap)`: debug dump of pmap contents (PDEs + PTEs).
+                - [ ] `pmap_check(pmap)`: consistency verification (detect leaked pages, orphan PTs).
+                - [ ] Export stats via syscall (`sys_pmap_stats`).
+
+            - [ ] **Page Aging Algorithm Integration:**
+                - [ ] Periodic scanning of all resident pages.
+                - [ ] Decrement age counter if not referenced.
+                - [ ] Pages with age 0 become eviction candidates.
+                - [ ] Support for multiple aging policies (Clock, LRU approximation).
+                - [ ] Hardware A/D bit emulation not needed on x86 (native support).
+
+            - [ ] **Testing:**
+                - [ ] Unit: `pmap_create` → `pmap_destroy` lifecycle (no leaked pages).
+                - [ ] Unit: `pmap_enter` + `pmap_extract` round-trip.
+                - [ ] Unit: `pmap_protect` upgrade and downgrade.
+                - [ ] Unit: `pmap_fork` COW — write to child triggers fault, parent unaffected.
+                - [ ] Unit: `pmap_copy` partial range with mixed COW/private.
+                - [ ] Unit: reference/modification tracking — set/clear/test A and D bits.
+                - [ ] Unit: large page enter/remove (4 MB PSE).
+                - [ ] Unit: TLB shootdown — verify `invlpg` called on remote CPUs.
+                - [ ] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`).
+                - [ ] Property: `pmap_destroy` frees exactly `resident_count` pages.
+                - [ ] Property: recursive mapping at PDE 1023 is self-consistent.
+                - [ ] Integration: fork process, write to COW pages, verify isolation in QEMU.
+                - [ ] Integration: stress test — 100 `pmap_create`/`pmap_destroy` cycles, verify no PMM leak.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: i386 pmap architecture (2-level, recursive, COW).
+                - [ ] Internal doc: TLB management strategy (single CPU + SMP shootdown).
+                - [ ] Internal doc: per-process address space layout (3 GB/1 GB split).
+
+        - [ ] **PMAP Layer (Machine Dependent — x86_64):**
+
+            > **Files:** `sys/arch/x86_64/pmap.c`, `pmap.h`.
+            >
+            > **Architecture:** Four-level page tables (PML4 → PDPT → PD → PT).
+            > Recursive mapping at PML4 entry 510. Canonical 48-bit virtual addressing.
+
+            - [ ] **Initialization (`pmap_bootstrap`):**
+                - [ ] Initialize kernel PML4 from static bootstrap allocation.
+                - [ ] Set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000).
+                - [ ] Map kernel space at canonical upper half (−2 GB).
+                - [ ] Initialize pmap lock for SMP safety.
+                - [ ] Enable NX bit via IA32_EFER.NXE.
+                - [ ] Detect CPU features: PCID, INVPCID, 1 GB pages, PGE.
+
+            - [ ] **Core PTE Manipulation:**
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: walk PML4 → PDPT → PD → PT.
+                    - [ ] Allocate intermediate page table levels on demand.
+                    - [ ] Set NX (No Execute) bit for data pages.
+                    - [ ] Handle user/supervisor, read/write, global flags.
+                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB.
+                - [ ] `pmap_kenter(va, pa)` / `pmap_kremove(va)`: kernel fast paths.
+                - [ ] `pmap_extract(pmap, va)`: return physical address.
+                - [ ] `pmap_zero_page(phys)` / `pmap_copy_page(src, dst)`: page utilities.
+
+            - [ ] **Context Switch (`pmap_activate`):**
+                - [ ] Load `pmap->pml4_phys` into CR3.
+                - [ ] Handle PCID if available (include PCID in CR3 bits 11:0).
+                - [ ] Set `noflush` bit (CR3 bit 63) to avoid TLB flush on PCID switch.
+                - [ ] Update `curpmap` pointer.
+
+            - [ ] **Recursive Paging:**
+                - [ ] Reserve PML4 entry 510 for self-referencing.
+                - [ ] `V_PML4`, `V_PDPT(n)`, `V_PD(n)`, `V_PT(n)` macros for accessing page table levels.
+                - [ ] All PTE manipulation via recursive window.
+
+            - [ ] **Per-Process Address Space:**
+                - [ ] `pmap_create()`: allocate new PML4, copy kernel mappings (entries 256–511).
+                - [ ] `pmap_destroy()`: free all user page table levels (PT → PD → PDPT → PML4) and PML4 itself.
+                - [ ] `pmap_reference()` / `pmap_release()`: reference counting.
+                - [ ] `pmap_fork()`: COW fork with 4-level walk.
+
+            - [ ] **`pmap_protect`:** walk range, update PTE bits (R/W, NX, U/S), invalidate TLB.
+
+            - [ ] **Reference/Modification Tracking:**
+                - [ ] Same API as i386: `pmap_is_referenced`, `pmap_is_modified`, `pmap_clear_*`, `pmap_test_and_clear_*`.
+                - [ ] Range and batch variants.
+
+            - [ ] **Copy-on-Write:** same architecture as i386 (`pmap_fork`, `pmap_page_is_cow`).
+
+            - [ ] **TLB Management:**
+                - [ ] IPI-based SMP shootdown (`pmap_shootdown_page/range/all`).
+                - [ ] INVPCID instruction support (if available):
+                    - [ ] Type 0: invalidate specific PCID + VA.
+                    - [ ] Type 1: invalidate all entries for a PCID.
+                    - [ ] Type 2: invalidate all entries including globals.
+                    - [ ] Type 3: invalidate all entries except globals.
+
+            - [ ] **Large Page Support:**
+                - [ ] **2 MB Pages:** PDE with PS=1, no PT needed.
+                    - [ ] `pmap_enter_2mb(pmap, va, pa, prot, flags)`.
+                    - [ ] `pmap_remove_2mb(pmap, va)`.
+                    - [ ] Automatic promotion: coalesce 512 adjacent 4 KB pages.
+                    - [ ] Demotion: split on partial unmap/protect.
+                - [ ] **1 GB Pages:** PDPTE with PS=1, no PD/PT needed.
+                    - [ ] `pmap_enter_1gb(pmap, va, pa, prot, flags)`.
+                    - [ ] `pmap_remove_1gb(pmap, va)`.
+                    - [ ] Detect support via CPUID (leaf 0x80000001, bit 26).
+                    - [ ] Use for large kernel mappings and huge anonymous regions.
+
+            - [ ] **Global Page Support (PGE):**
+                - [ ] Set CR4.PGE, mark kernel pages with `PG_G`.
+                - [ ] `pmap_set_global(pmap, va)` / `pmap_mark_kernel_global()`.
+
+            - [ ] **PCID Support (Process Context Identifiers):**
+                - [ ] Detect PCID via CPUID (leaf 1, ECX bit 17).
+                - [ ] Detect INVPCID via CPUID (leaf 7, EBX bit 10).
+                - [ ] Set CR4.PCIDE to enable.
+                - [ ] PCID pool: allocate 12-bit IDs (max 4096), recycle via generation counter.
+                - [ ] `pmap_pcid_alloc()` / `pmap_pcid_free()`: pool management.
+                - [ ] Assign PCID on `pmap_create()`, include in CR3 on activate.
+                - [ ] Avoid TLB flush on context switch between different PCIDs.
+
+            - [ ] **NX (No Execute) Bit:**
+                - [ ] Enable via IA32_EFER.NXE MSR.
+                - [ ] Set NX (bit 63 of PTE) for stack, heap, data pages.
+                - [ ] Clear NX for code pages.
+                - [ ] Enforce W^X: pages cannot be both writable and executable.
+
+            - [ ] **5-Level Paging (LA57 — deferred):**
+                - [ ] Detect via CPUID (leaf 7, ECX bit 16).
+                - [ ] PML5 adds 57-bit virtual addressing (128 PB).
+                - [ ] Recursive mapping adjustment for 5 levels.
+
+            - [ ] **PMAP Statistics and Debugging:**
+                - [ ] Same per-pmap and global counters as i386.
+                - [ ] `pmap_dump(pmap)`: debug dump of 4-level page tables.
+                - [ ] `pmap_check(pmap)`: consistency verification.
+
+            - [ ] **Testing:**
+                - [ ] Unit: 4-level page table walk — `pmap_enter` at various canonical addresses.
+                - [ ] Unit: NX enforcement — execute from NX page triggers fault.
+                - [ ] Unit: PCID allocation and recycling under exhaustion.
+                - [ ] Unit: 2 MB page enter/remove.
+                - [ ] Unit: 1 GB page enter/remove (if CPU supports).
+                - [ ] Unit: `pmap_fork` with 4-level walk — COW isolation.
+                - [ ] Unit: INVPCID types 0–3 dispatch.
+                - [ ] Property: PML4 entries 256–511 always match `kernel_pmap`.
+                - [ ] Integration: boot x86_64 kernel, verify user processes get isolated address spaces.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: x86_64 pmap architecture (4-level, PCID, NX).
+                - [ ] Internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros).
+                - [ ] Internal doc: large page promotion/demotion strategy.
+        - [ ] **VM Subsystem (Machine Independent):**
+
+            > **Files:** `sys/vm/vm_map.c`, `vm_fault.c`, `vm_object.c`,
+            > `vm_page.c`, `vm_pager.c`, `vm_swap.c`, `uma_core.c`.
+            >
+            > **Architecture:** BSD/Mach-inspired VM with vm_map → vm_map_entry →
+            > vm_object → vm_page hierarchy. Shadow objects for COW.
+
+            - [ ] **VM Map (`vm_map`):**
+                - [ ] `vm_map` structure representing a process's virtual address space.
+                - [ ] Red-black tree of `vm_map_entry` for O(log N) lookup by VA.
+                - [ ] Linked list of entries for sequential traversal.
+                - [ ] `vm_map_create(pmap, min, max)`: create new map.
+                - [ ] `vm_map_destroy(map)`: tear down entire map.
+                - [ ] `vm_map_lock` / `vm_map_unlock`: reader/writer locking.
+            - [ ] **VM Map Entries (`vm_map_entry`):**
+                - [ ] Represent contiguous virtual regions (text, data, stack, mmap).
+                - [ ] Fields: `start`, `end`, `offset`, `protection`, `max_protection`.
+                - [ ] `object`: backing `vm_object` (anonymous or vnode-backed).
+                - [ ] `inheritance`: share, copy, none (for fork behavior).
+                - [ ] `wired_count`: prevent pageout for this region.
+                - [ ] `vm_map_insert(map, object, offset, start, end, prot)`.
+                - [ ] `vm_map_remove(map, start, end)`: remove entries in range.
+                - [ ] `vm_map_lookup(map, va, &entry)`: find entry containing VA.
+                - [ ] `vm_map_protect(map, start, end, new_prot)`.
+                - [ ] `vm_map_inherit(map, start, end, inheritance)`.
+                - [ ] Entry merging: coalesce adjacent entries with same attributes.
+            - [ ] **VM Objects (`vm_object`):**
+                - [ ] Abstract backing store (anonymous memory, vnode/file, device).
+                - [ ] `resident_pages`: radix tree or hash of `vm_page_t` by page index.
+                - [ ] `ref_count`: number of map entries referencing this object.
+                - [ ] `shadow`: pointer to shadow object (for COW chains).
+                - [ ] `pager`: associated pager (swap, vnode, device, default).
+                - [ ] `vm_object_allocate(size)`: create anonymous object.
+                - [ ] `vm_object_reference(obj)` / `vm_object_deallocate(obj)`.
+                - [ ] `vm_object_page_lookup(obj, pindex)`: find resident page.
+                - [ ] `vm_object_page_insert(obj, page, pindex)`.
+                - [ ] `vm_object_shadow(obj, offset, size)`: create shadow for COW.
+                - [ ] `vm_object_collapse(obj)`: collapse shadow chain when possible.
+            - [ ] **Fault Handler (`vm_fault`):**
+                - [ ] High-level page fault resolution.
+                - [ ] `vm_fault(map, va, fault_type)`: main entry point.
+                - [ ] Look up `vm_map_entry` for faulting VA.
+                - [ ] Check protection against fault type.
+                - [ ] Walk shadow object chain to find page or pager.
+                - [ ] If page found in object: map it via `pmap_enter`.
+                - [ ] If page not found: call pager to fetch from backing store.
+                - [ ] **Zero-fill on demand:** anonymous pages filled with zeros on first access.
+                - [ ] **Prefaulting:** heuristic to load surrounding pages during I/O.
+            - [ ] **Copy-on-Write (COW):**
+                - [ ] `vm_fault` logic for write to read-only shared page.
+                - [ ] Create shadow object on fork.
+                - [ ] Mark parent entries as copy-on-write.
+                - [ ] On write fault: allocate new page, copy contents, update PTE.
+                - [ ] Decrement original page refcount.
+                - [ ] Shadow chain collapse: when shadow has all pages, absorb parent.
+            - [ ] **Swap Subsystem:**
+                - [ ] **Swap Pager (`vm_pager`):**
+                    - [ ] Generic pager interface: `pager_get(obj, pindex)`, `pager_put(obj, pindex)`.
+                    - [ ] Swap pager: move pages to/from swap device.
+                    - [ ] Vnode pager: read/write file-backed pages via VFS.
+                    - [ ] Device pager: direct mapping of device memory (framebuffer, MMIO).
+                    - [ ] Default pager: zero-fill for anonymous memory.
+                - [ ] **Backing Store (`vm_swap`):**
+                    - [ ] Support swap partitions and swap files.
+                    - [ ] Swap space allocation bitmap.
+                    - [ ] `swapon(path)` / `swapoff(path)` syscalls.
+                    - [ ] Per-page swap block tracking.
+                - [ ] **Page Replacement Policy:**
+                    - [ ] Clock/LRU algorithm using A/D bits.
+                    - [ ] Integration with page daemon and page queues.
+            - [ ] **Advanced Features:**
+                - [ ] **File-backed mmap (`MAP_FILE`):**
+                    - [ ] Vnode pager triggers VFS `read` on page fault.
+                    - [ ] Dirty page tracking and `msync` writeback.
+                    - [ ] `MAP_PRIVATE`: COW on write (shadow object).
+                    - [ ] `MAP_SHARED`: write-through to file.
+                - [ ] **Reference Counting & Shared Memory:**
+                    - [ ] `vm_page_t` refcounts: track mappings to each physical frame.
+                    - [ ] `vm_object` refcounts: track regions sharing backing store.
+                    - [ ] `MAP_SHARED` write-through for multi-process shared memory.
+                - [ ] **Lazy Faulting:**
+                    - [ ] Demand paging: allocate frames only on access (zero-fill on demand).
+                    - [ ] Prefaulting: heuristic to load surrounding pages during I/O.
+                    - [ ] Read-ahead for sequential file access patterns.
+            - [ ] **Testing:**
+                - [ ] Unit: vm_map insert/remove/lookup/protect.
+                - [ ] Unit: vm_object create/reference/deallocate/shadow/collapse.
+                - [ ] Unit: vm_fault resolution for anonymous, file-backed, and COW pages.
+                - [ ] Unit: swap pager round-trip (page out → page in).
+                - [ ] Property: vm_map entries are non-overlapping and sorted.
+                - [ ] Property: vm_object refcount reaches 0 only when no entries reference it.
+                - [ ] Integration: mmap anonymous memory, write, fork, verify COW isolation.
+                - [ ] Integration: mmap file, read, modify, msync, verify on-disk.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: VM hierarchy (map → entry → object → page).
+                - [ ] Internal doc: COW shadow chain and collapse algorithm.
+                - [ ] Internal doc: pager interface contract.
+
+    - [ ] **Kernel Allocator (UMA/Slab):**
+
+        > **Files:** `sys/vm/uma_core.c`, `sys/vm/vm_kmem.c`.
+
+        - [ ] **UMA Core (`uma_core.c`):**
+            - [ ] Zone creation: `uma_zcreate(name, size, ctor, dtor, init, fini, align, flags)`.
+            - [ ] Zone destruction: `uma_zdestroy(zone)`.
+            - [ ] `uma_zalloc(zone, flags)`: allocate object from zone.
+            - [ ] `uma_zfree(zone, item)`: free object to zone.
+            - [ ] **Per-CPU Caches (Magazines):**
+                - [ ] Lockless fast-path allocations via per-CPU magazine layer.
+                - [ ] Magazine swap on empty/full (loaded ↔ previous).
+                - [ ] Depot layer: global pool of full/empty magazines.
+            - [ ] **Slab Management:**
+                - [ ] Slab allocation from VM (page-sized).
+                - [ ] Free list within slab for object tracking.
+                - [ ] Partial/full/empty slab lists per zone.
+            - [ ] **Alignment/Coloring:**
+                - [ ] CPU cache line alignment for objects.
+                - [ ] Slab coloring to reduce cache set conflicts.
+            - [ ] **Constructors/Destructors:**
+                - [ ] `ctor` callback on allocation (after init).
+                - [ ] `dtor` callback on free (before fini).
+                - [ ] `init` once per slab object lifetime.
+                - [ ] `fini` once when slab freed.
+            - [ ] **Reclamation:**
+                - [ ] Shrinker callbacks to free unused slabs under memory pressure.
+                - [ ] Bucket draining back to slabs.
+                - [ ] Memory pressure feedback integration with page daemon.
+        - [ ] **Debugging & Safety:**
+            - [ ] **Redzones:** guard bytes before/after objects with canary values.
+            - [ ] **Poisoning:** fill freed memory with 0xDEADBEEF to catch use-after-free.
+            - [ ] **Leak Detection:** track active allocations per zone.
+            - [ ] **Foreign Pointer Protection:** validate pointer belongs to zone on free.
+            - [ ] **`uma_find_slab()` Optimization:** replace O(N) linear search with hash table.
+        - [ ] **General Allocator (`kmalloc`/`kfree`):**
+            - [ ] Power-of-two zones: back `kmalloc` with UMA zones for sizes 16, 32, 64, ..., 4096.
+            - [ ] Large allocations: bypass UMA for >4 KB (direct `vm_map` allocation).
+            - [ ] `krealloc(ptr, size)`: resize allocation.
+            - [ ] Statistics: track memory usage by `malloc_type` (subsystem).
+        - [ ] **Testing:**
+            - [ ] Unit: zone create/alloc/free/destroy lifecycle.
+            - [ ] Unit: per-CPU cache hit/miss paths.
+            - [ ] Unit: slab allocation and free list integrity.
+            - [ ] Unit: ctor/dtor/init/fini callback ordering.
+            - [ ] Unit: redzone corruption detection.
+            - [ ] Unit: poison detection on use-after-free.
+            - [ ] Property: total allocated + free = zone capacity.
+            - [ ] Stress: 10000 alloc/free cycles across multiple zones.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: UMA architecture (zone → slab → magazine → per-CPU cache).
+            - [ ] Internal doc: `kmalloc` power-of-two zone selection.
+
+    - [ ] **User Memory Syscalls:**
+        - [ ] `sys_mmap(addr, len, prot, flags, fd, offset)`: map memory.
+            - [ ] `MAP_ANONYMOUS`: zero-fill anonymous mapping.
+            - [ ] `MAP_PRIVATE`: file-backed COW mapping.
+            - [ ] `MAP_SHARED`: file-backed write-through mapping.
+            - [ ] `MAP_FIXED`: map at exact address (unmap existing).
+            - [ ] Alignment to page boundary.
+        - [ ] `sys_munmap(addr, len)`: unmap region.
+        - [ ] `sys_mprotect(addr, len, prot)`: change protection.
+        - [ ] `sys_brk(addr)` / `sys_sbrk(incr)`: adjust data segment.
+        - [ ] `sys_msync(addr, len, flags)`: sync dirty pages to backing store.
+
+    - [ ] **SMP & Interrupts:**
+
+        > **Files:** `sys/arch/i386/apic.c`, `sys/arch/i386/ioapic.c`,
+        > `sys/arch/i386/smp.c`, `sys/kern/percpu.c`.
+
+        - [ ] **Discovery:**
+            - [ ] Parse ACPI MADT (APIC) to find processor entries.
+            - [ ] Fallback: parse MP Tables (Intel MultiProcessor Spec).
+            - [ ] Record BSP and AP LAPIC IDs.
+        - [ ] **Local APIC (LAPIC):**
+            - [ ] Map LAPIC MMIO base (default 0xFEE00000).
+            - [ ] Set Spurious Interrupt Vector Register (SVR): enable APIC, set vector.
+            - [ ] **Timer:**
+                - [ ] Calibrate against PIT or ACPI PM Timer.
+                - [ ] Set Divider Configuration Register (DCR).
+                - [ ] Periodic mode for scheduler tick.
+                - [ ] One-shot mode for high-resolution sleeps.
+            - [ ] Error Status Register (ESR) and LVT Error vector.
+            - [ ] **IPI (Inter-Processor Interrupt):**
+                - [ ] ICR (Interrupt Command Register) writing logic.
+                - [ ] Send fixed, lowest priority, NMI, INIT, SIPI IPIs.
+                - [ ] Wait for delivery status (busy bit clear).
+        - [ ] **I/O APIC:**
+            - [ ] Enumerate I/O APICs from MADT.
+            - [ ] `ioapic_read` / `ioapic_write` via index/window registers.
+            - [ ] **Redirection Table:**
+                - [ ] Mask/unmask IRQs.
+                - [ ] Set delivery mode (fixed, lowest priority).
+                - [ ] Set destination (physical/logical).
+                - [ ] Set polarity and trigger mode (active high/low, edge/level).
+            - [ ] Legacy ISA IRQ (0–15) → Global System Interrupt (GSI) mapping.
+        - [ ] **AP Bootstrap:**
+            - [ ] Allocate low-memory trampoline page (under 1 MB).
+            - [ ] Copy 16-bit real mode entry code to trampoline.
+            - [ ] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence.
+            - [ ] AP enters protected mode, enables paging, jumps to C entry.
+        - [ ] **Per-CPU Data:**
+            - [ ] GS-base (or FS-base) for CPU-local variable access.
+            - [ ] Per-CPU GDTs and TSSs.
+            - [ ] Per-CPU scheduler runqueues.
+            - [ ] Per-CPU interrupt stacks.
+        - [ ] **Synchronization:**
+            - [ ] Spinlock implementation (ticket locks or MCS locks).
+            - [ ] `lock` prefix for atomic operations.
+            - [ ] Deadlock detection (lock ordering validation).
+            - [ ] Audit all global data structures for race conditions.
+        - [ ] **Testing:**
+            - [ ] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`.
+            - [ ] Unit: LAPIC timer calibration accuracy.
+            - [ ] Unit: IPI send/receive between CPUs.
+            - [ ] Unit: per-CPU data isolation.
+
+    - [ ] **Scheduling (MLFQ Scheduler):**
+
+        > **Files:** `sys/kern/sched.c`, `sys/kern/sched_smp.c`,
+        > `sys/kern/turnstile.c`, `sys/kern/sleepq.c`.
+
+        - [ ] **Algorithm (ULE/MLFQ):**
+            - [ ] Multilevel queues: Realtime, Timeshare, Idle priority classes.
+            - [ ] Interactiveness heuristics: boost I/O-bound threads.
+            - [ ] Priority decay for CPU-bound threads.
+            - [ ] Time slice assignment based on priority class.
+        - [ ] **SMP Scalability:**
+            - [ ] Per-CPU runqueues (eliminate global scheduler lock).
+            - [ ] Work-stealing load balancing when a CPU goes idle.
+            - [ ] CPU affinity (`sched_setaffinity` masks).
+            - [ ] IPI-based preemption of remote CPUs.
+        - [ ] **Synchronization Primitives:**
+            - [ ] **Turnstiles:** priority inheritance for mutexes (prevent priority inversion).
+            - [ ] **Sleep Queues:** hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
+        - [ ] **Context Switching:**
+            - [ ] FPU lazy save: CR0.TS exception for deferred FPU context.
+            - [ ] PCB: refined for thread/process separation.
+            - [ ] `switch_to(old, new)`: save/restore callee-saved registers, swap stacks.
+        - [ ] **Kernel Process (PID 0 — Swapper/Idle):**
+            - [ ] Pageout daemon work in idle loop.
+            - [ ] Ensures valid process context always exists.
+        - [ ] **Process Bitness Tracking:**
+            - [ ] `enum proc_bitness` (16/32/64) field in process struct.
+            - [ ] `proc_set_bitness()` / `proc_get_bitness()` with permission checks.
+            - [ ] Bitness inheritance on fork, transition on exec.
+        - [ ] **Testing:**
+            - [ ] Unit: priority queue insertion/removal ordering.
+            - [ ] Unit: turnstile priority inheritance chain.
+            - [ ] Unit: sleep queue hash distribution.
+            - [ ] Integration: verify load balancing with CPU-intensive workload.
+            - [ ] Integration: verify interactiveness boost for I/O workload.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: MLFQ algorithm and priority classes.
+            - [ ] Internal doc: SMP load balancing and work stealing.
+
+    - [ ] **Synchronization:**
+
+        - [ ] **Kernel Primitives:**
+            - [ ] Spinlocks (with GCC C11 atomic builtins).
+            - [ ] Mutexes (backed by sleep queues).
+            - [ ] Semaphores (counting, backed by sleep queues).
+            - [ ] Reader/writer locks.
+
+        - [ ] **Userspace Synchronization (Futex):**
+
+            > **Files:** `sys/kern/futex.c`, `sys/kern/futex.h`.
+
+            - [ ] **Core Operations:**
+                - [ ] `FUTEX_WAIT`: atomic compare-and-sleep on user-space word.
+                    - [ ] `futex_cmpxchg_user()`: validated userspace CMPXCHG.
+                    - [ ] `validate_uaddr()`: ensure address is in user space.
+                - [ ] `FUTEX_WAKE`: wake up N waiters on a futex word.
+                - [ ] `FUTEX_REQUEUE`: move waiters from one futex to another.
+                    - [ ] Atomic compare before requeue (`FUTEX_CMP_REQUEUE`).
+            - [ ] **Advanced Features:**
+                - [ ] `FUTEX_ROBUST_LIST`: handle owner death.
+                    - [ ] `sys_set_robust_list()` / `sys_get_robust_list()`.
+                    - [ ] `futex_exit_cleanup()`: walk robust list on process exit.
+                    - [ ] Mark owned futexes as `FUTEX_OWNER_DIED`.
+                - [ ] `FUTEX_PI`: priority inheritance support.
+                    - [ ] `futex_lock_pi()` / `futex_unlock_pi()`.
+                    - [ ] `pi_boost_owner()` / `pi_deboost_owner()`.
+                    - [ ] Lock holder inherits waiter's priority.
+            - [ ] **Performance:**
+                - [ ] Hash table bucketing for wait queues (O(1) lookup by address).
+                - [ ] Per-bucket spinlocks.
+            - [ ] **Testing:**
+                - [ ] Unit: FUTEX_WAIT/WAKE basic handshake.
+                - [ ] Unit: FUTEX_REQUEUE moves waiters correctly.
+                - [ ] Unit: robust list cleanup on exit.
+                - [ ] Unit: PI inheritance — low priority holder boosted.
+                - [ ] Property: no orphaned waiters after process exit.
+
+        - [ ] **NTSYNC Driver (Windows NT Sync Primitives):**
+
+            > **Files:** `sys/kern/ntsync.c`, `sys/kern/ntsync.h`.
+
+            - [ ] **Core Infrastructure:**
+                - [ ] `/dev/ntsync` char device with instance-based isolation.
+                - [ ] `ntsync_instance` structure per open file description.
+                - [ ] Object handle management (object FDs returned from ioctls).
+            - [ ] **Semaphore Object:**
+                - [ ] `NTSYNC_IOC_CREATE_SEM`: create semaphore (count, max).
+                - [ ] `NTSYNC_IOC_SEM_POST`: increment semaphore count.
+                - [ ] `NTSYNC_IOC_READ_SEM`: query semaphore state.
+            - [ ] **Mutex Object:**
+                - [ ] `NTSYNC_IOC_CREATE_MUTEX`: create mutex (owner, count).
+                - [ ] `NTSYNC_IOC_MUTEX_UNLOCK`: release mutex ownership.
+                - [ ] `NTSYNC_IOC_READ_MUTEX`: query mutex state.
+                - [ ] `NTSYNC_IOC_KILL_OWNER`: mark mutex as abandoned.
+            - [ ] **Event Object:**
+                - [ ] `NTSYNC_IOC_CREATE_EVENT`: create event (signaled, manual/auto-reset).
+                - [ ] `NTSYNC_IOC_SET_EVENT` / `NTSYNC_IOC_RESET_EVENT` / `NTSYNC_IOC_PULSE_EVENT`.
+                - [ ] `NTSYNC_IOC_READ_EVENT`: query event state.
+            - [ ] **Wait Operations:**
+                - [ ] `NTSYNC_IOC_WAIT_ANY`: wait for any of N objects.
+                - [ ] `NTSYNC_IOC_WAIT_ALL`: wait for all N objects simultaneously.
+                - [ ] Alert event support (optional extra wakeup source).
+                - [ ] Timeout handling (MONOTONIC/REALTIME clocks).
+            - [ ] **Internal Mechanics:**
+                - [ ] Wait queue per object with priority ordering.
+                - [ ] Atomic acquisition semantics (spinlock-protected).
+                - [ ] Cross-object atomicity for WAIT_ALL (multi-lock).
+            - [ ] **Testing:**
+                - [ ] Unit: semaphore create/post/read lifecycle.
+                - [ ] Unit: mutex create/lock/unlock/abandon.
+                - [ ] Unit: event set/reset/pulse.
+                - [ ] Unit: WAIT_ANY with mixed object types.
+                - [ ] Unit: WAIT_ALL atomicity (all-or-nothing).
+                - [ ] Unit: timeout expiry (WNOHANG equivalent).
+
+    - [ ] **Signals:**
+
+        > **Files:** `sys/kern/signal.c`, `sys/kern/sigprop.c`,
+        > `sys/arch/i386/signal.c` (arch-specific delivery).
+
+        - [ ] **Signal Infrastructure:**
+            - [ ] **Per-Process State (`process_t`):**
+                - [ ] `sig_actions[NSIG]`: array of `struct sigaction` per signal.
+                - [ ] `sig_catch`: bitmask of signals with handlers.
+                - [ ] `sig_ignore`: bitmask of signals set to SIG_IGN.
+            - [ ] **Per-Thread State (`thread_t`):**
+                - [ ] `sig_pending`: bitmask of pending signals.
+                - [ ] `sig_mask`: current signal mask (blocked signals).
+                - [ ] `sig_alt_stack`: alternative signal stack (`stack_t`).
+                - [ ] `sig_on_stack`: flag for currently executing on alt stack.
+            - [ ] **Signal Properties Table (`sigprop.c`):**
+                - [ ] Default actions: Terminate, Core, Stop, Ignore, Continue.
+                - [ ] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT.
+                - [ ] Unmaskable: SIGKILL, SIGSTOP (SA_CANTMASK).
+
+        - [ ] **Signal Syscalls:**
+            - [ ] **`sys_sigaction(sig, act, oact)`:**
+                - [ ] Validate signal number (1 ≤ sig ≤ NSIG, not SIGKILL/SIGSTOP).
+                - [ ] Return old action in `oact`, install new from `act`.
+                - [ ] Update `sig_catch`/`sig_ignore` bitmasks.
+                - [ ] Handle flags: `SA_RESETHAND`, `SA_NODEFER`, `SA_RESTART`, `SA_NOCLDSTOP`, `SA_NOCLDWAIT`, `SA_SIGINFO`, `SA_ONSTACK`.
+            - [ ] **`sys_sigprocmask(how, set, oset)`:**
+                - [ ] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK.
+                - [ ] Filter out SIGKILL/SIGSTOP from mask.
+            - [ ] **`sys_sigpending(set)`:** return pending & ~masked signals.
+            - [ ] **`sys_sigsuspend(mask)`:** atomically set mask and sleep; restore on return; always EINTR.
+            - [ ] **`sys_sigaltstack(ss, oss)`:**
+                - [ ] Install/query alternative signal stack.
+                - [ ] Validate `ss_size ≥ MINSIGSTKSZ`.
+                - [ ] Handle `SS_DISABLE`; error if on alt stack.
+            - [ ] **`sys_kill(pid, sig)`:**
+                - [ ] `pid > 0`: specific process.
+                - [ ] `pid == 0`: current process group.
+                - [ ] `pid == -1`: all processes (except init).
+                - [ ] `pid < -1`: process group `|pid|`.
+                - [ ] `sig == 0`: permission check only.
+                - [ ] Permission: same UID or CAP_KILL.
+            - [ ] **`sys_sigreturn(scp)`:**
+                - [ ] Validate sigcontext pointer.
+                - [ ] Verify CS/SS have RPL=3 (user mode).
+                - [ ] Restore GPRs, eflags (mask IOPL/VM/RF), eip.
+                - [ ] Restore signal mask from context.
+            - [ ] **`sys_sigwait(set, sig)`:** synchronous signal consumption (no handler).
+            - [ ] **`sys_sigtimedwait(set, info, timeout)`:** like sigwait with timeout + siginfo.
+
+        - [ ] **Signal Generation:**
+            - [ ] `psignal(p, sig)`: send to process.
+                - [ ] Init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1.
+                - [ ] Select best thread for delivery (not masked).
+                - [ ] If SIGCONT, wake stopped threads; clear pending stops.
+                - [ ] If sleeping interruptibly, wake thread.
+            - [ ] `pgsignal(pgrp, sig)`: send to process group.
+            - [ ] `trapsignal(p, sig, code)`: synchronous trap signal (from exception handler).
+                - [ ] Pass `code` via `siginfo_t` (`si_code`).
+                - [ ] Sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL.
+            - [ ] `sigexit(p, sig)`: terminate with signal.
+                - [ ] Core dump if SA_CORE: call `coredump()`.
+                - [ ] Set exit status to indicate signal termination.
+            - [ ] **Terminal Signals (TTY):**
+                - [ ] SIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp.
+                - [ ] SIGTSTP (Ctrl+Z) to foreground pgrp.
+                - [ ] SIGTTIN: background process reads from TTY.
+                - [ ] SIGTTOU: background process writes to TTY (if TOSTOP).
+                - [ ] SIGHUP: controlling terminal hangup.
+
+        - [ ] **Signal Delivery (Architecture-Specific — i386):**
+            - [ ] **`sendsig()` — Frame Construction:**
+                - [ ] Calculate user stack pointer from `regs->useresp`.
+                - [ ] Subtract `sizeof(struct sigframe)`.
+                - [ ] Align stack to 16-byte boundary (System V ABI).
+            - [ ] **`struct sigframe` Layout:**
+                - [ ] `retaddr`: return address pointing to trampoline.
+                - [ ] `sig`: signal number (first handler argument).
+                - [ ] `sc`: `struct sigcontext` with saved registers.
+            - [ ] **`struct sigcontext` Population:**
+                - [ ] Save segment registers (gs, fs, es, ds).
+                - [ ] Save GPRs (edi, esi, ebp, esp, ebx, edx, ecx, eax).
+                - [ ] Save trap info (trapno, err).
+                - [ ] Save control (eip, cs, eflags, user_esp, user_ss).
+            - [ ] **Handler Invocation:**
+                - [ ] `copyout()` frame to user stack (with fault handling).
+                - [ ] Set `regs->useresp` and `regs->eip` to frame/handler.
+            - [ ] **SA_SIGINFO Extended Frame:**
+                - [ ] Construct `siginfo_t` (si_signo, si_code, si_addr, etc.).
+                - [ ] Construct `ucontext_t` with machine context.
+                - [ ] Handler signature: `void handler(int, siginfo_t *, void *)`.
+            - [ ] **Alt Stack Handling:**
+                - [ ] If `SA_ONSTACK` and alt stack configured: use alt stack SP.
+                - [ ] Set `sig_on_stack` flag.
+
+        - [ ] **Signal Trampoline:**
+            - [ ] Map trampoline page at fixed address (e.g., 0xFFFF1000).
+            - [ ] Page: user-readable, executable, not writable.
+            - [ ] Code: `mov $SYS_sigreturn, %eax; int $0x80`.
+            - [ ] **VDSO Integration (future):**
+                - [ ] Embed trampoline in VDSO page.
+                - [ ] Use `AT_SYSINFO` auxiliary vector entry.
+
+        - [ ] **Signal Mask Management:**
+            - [ ] During handler: block current signal (unless SA_NODEFER) + `sa_mask`.
+            - [ ] Restore original mask in `sys_sigreturn`.
+            - [ ] **Inheritance:**
+                - [ ] `fork()`: child inherits pending signals and mask.
+                - [ ] `exec()`: reset all handlers to SIG_DFL (except SIG_IGN).
+
+        - [ ] **Signal Checking Points:**
+            - [ ] Return from interrupt/exception: `signal_handle_pending()` if returning to user mode.
+            - [ ] Return from syscall: check pending, return EINTR if interruptible.
+            - [ ] Sleep wakeup: `sched_sleep()` returns on signal (EINTR).
+
+        - [ ] **Special Signal Handling:**
+            - [ ] SIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads.
+            - [ ] SIGSTOP: cannot be caught/blocked/ignored; stops all threads.
+            - [ ] SIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED.
+            - [ ] SIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics.
+            - [ ] Job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore.
+
+        - [ ] **PID 1 (Init) Protection:**
+            - [ ] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler.
+            - [ ] If init exits, system halts/panics.
+            - [ ] Init adopts orphaned processes.
+
+        - [ ] **Core Dump (future):**
+            - [ ] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
+            - [ ] `coredump()`: write ELF core format (`/cores/core.PID`).
+            - [ ] Respect `RLIMIT_CORE`.
+
+        - [ ] **Testing:**
+            - [ ] Unit: `sys_sigaction` install/replace/reset handler.
+            - [ ] Unit: `sys_sigprocmask` block/unblock/setmask.
+            - [ ] Unit: `sys_kill` to specific PID, pgrp, all.
+            - [ ] Unit: `psignal` thread selection (prefer unmasked).
+            - [ ] Unit: `sendsig` frame construction and `sigreturn` restoration.
+            - [ ] Unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU.
+            - [ ] Unit: SA_RESTART — interrupted syscall restarted.
+            - [ ] Unit: SA_SIGINFO — extended frame with siginfo + ucontext.
+            - [ ] Property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant).
+            - [ ] Integration: fork, send SIGINT to child, verify termination.
+            - [ ] Integration: job control stop/continue cycle.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: signal lifecycle (generation → delivery → handler → sigreturn).
+            - [ ] Internal doc: i386 signal frame layout.
+            - [ ] Internal doc: signal checking points and SA_RESTART logic.
+
+    - [ ] **Refactor kmain:**
+        - [ ] Move early i386 boot code to `sys/arch/i386/early_boot.c`.
+        - [ ] Create `init_memory` helper.
+        - [ ] Create `init_root_fs` helper.
+        - [ ] Clean up `kmain` flow.
+
+    - [ ] **Kernel Core Maintenance:**
+        - [ ] Refactor `spinlock.c` to use GCC C11 atomic builtins.
+        - [ ] Rewrite `swapper.c` idle loop (race-free).
+        - [ ] Cleanup `sleepq.c` formatting and style.
+        - [ ] Remove obsolete `sys/kern/stubs.c`.
+        - [ ] Modularize `sys/kern/lib.c` into `sys/lib/`.
+        - [ ] Audit `mutex.c` and `semaphore.c` for race conditions.
+        - [ ] Fix `sched_smp.c` CPU ID assumption.
+
+    - [ ] **Update Kernel Documentation:**
+        - [ ] Document Console/UART subsystem changes.
+        - [ ] Document kmain initialization flow.
+        - [ ] Update ARCHITECTURE.md.
+
+    - [ ] **Process Lifecycle & Job Control:**
+
+        - [ ] **Process Termination (`exit` / `_exit`):**
+
+            > `sys_exit(status)` and `sys__exit(status)` both call internal `proc_exit(code)`.
+
+            - [ ] **Phase 1 — State Transition (RUNNING → DYING):**
+                - [ ] Set `p_state` = SDYING.
+                - [ ] Record exit status in `p_xstat`.
+                - [ ] Prevent further scheduling.
+            - [ ] **Phase 2 — Resource Release:**
+                - [ ] **File Descriptors:** `fd_close_all(p)` — close all, decrement refcounts.
+                - [ ] **Virtual Memory:** `pmap_release(p->pmap)` — free user page tables, switch to kernel pmap.
+                - [ ] **VM Map:** release `vm_map` and all `vm_map_entry` structures.
+                - [ ] **CWD / Root:** decrement cwd and root vnode refcounts.
+                - [ ] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY.
+                - [ ] **Pending Signals:** clear all.
+                - [ ] **Timers:** cancel ITIMER_REAL/VIRTUAL/PROF and alarm().
+                - [ ] **System V IPC:** detach shmem, undo semaphores, remove owned msg queues.
+                - [ ] **POSIX IPC:** unlink owned semaphores/shared memory.
+                - [ ] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters.
+                - [ ] **Kernel Locks:** release held mutexes, cancel pending lock requests.
+            - [ ] **Phase 3 — Thread Termination:**
+                - [ ] Set `t->state = THREAD_ZOMBIE` for each thread.
+                - [ ] Interrupt non-current threads, wait for zombie state.
+                - [ ] Free thread stacks and structures.
+                - [ ] Current thread becomes reaper.
+            - [ ] **Phase 4 — Resource Usage Finalization:**
+                - [ ] `rusage_finalize(p)`: accumulate thread times.
+                - [ ] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`.
+            - [ ] **Phase 5 — Orphan Reparenting:**
+                - [ ] `proc_reparent_children(p)`: move children to init.
+                - [ ] Acquire `proctree_lock`.
+                - [ ] For each child: set `p_parent = init`, move to init's children list.
+                - [ ] Wake init if child is zombie.
+                - [ ] If init dying: reparent to swapper (PID 0) or panic.
+            - [ ] **Phase 6 — Process Group / Session Cleanup:**
+                - [ ] Remove from process group; free `struct pgrp` if last member.
+                - [ ] If session leader: SIGHUP to foreground, revoke TTY, mark no leader.
+                - [ ] Check for orphaned process groups → SIGHUP + SIGCONT.
+            - [ ] **Phase 7 — Parent Notification:**
+                - [ ] `psignal(parent, SIGCHLD)`.
+                - [ ] If SA_NOCLDWAIT: auto-reap (no zombie).
+                - [ ] Wake parent on `p_children` channel.
+            - [ ] **Phase 8 — Zombie State (DYING → ZOMBIE):**
+                - [ ] Set `p_state` = SZOMB.
+                - [ ] Only pid, ppid, xstat, rusage remain valid.
+            - [ ] **Phase 9 — Final Context Switch:**
+                - [ ] `current_thread->state = THREAD_ZOMBIE`.
+                - [ ] `sched_yield()` — never returns.
+            - [ ] **Accounting:**
+                - [ ] `acct_process(code)`: write accounting record (command, times, status).
+
+        - [ ] **Edge Cases:**
+            - [ ] Init (PID 1) exit: kernel halts/panics with warning.
+            - [ ] Killed by signal during exit: ignore signals once SDYING.
+            - [ ] Locks held during exit: log warning, force release.
+            - [ ] OOM during exit: must not allocate (only free).
+            - [ ] Vfork exit: wake parent immediately.
+            - [ ] Thread group exit: all threads terminated on any `exit()`.
+
+        - [ ] **Wait Subsystem (`wait4` / `waitpid`):**
+            - [ ] **Search Logic:**
+                - [ ] `pid > 0`: specific child.
+                - [ ] `pid == -1`: any child.
+                - [ ] `pid == 0`: same process group.
+                - [ ] `pid < -1`: process group `|pid|`.
+            - [ ] **WNOHANG:** return 0 if no zombies, ECHILD if no children.
+            - [ ] **Blocking Wait:** `sched_sleep(&p_children)`, handle EINTR, re-scan.
+            - [ ] **Reaping (ZOMBIE → FREE):**
+                - [ ] Copy xstat and rusage to user buffer.
+                - [ ] Remove from siblings list and process group.
+                - [ ] Free process structure.
+            - [ ] **Job Control (`WUNTRACED` / `WCONTINUED`):**
+                - [ ] Report stopped children (SSTOP).
+                - [ ] Report continued children (P_CONTINUED flag).
+
+        - [ ] **Process Groups & Sessions:**
+            - [ ] **Core Structures:**
+                - [ ] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr).
+                - [ ] `struct session`: `s_id`, `s_leader`, `s_ttyvp`, `s_login`.
+                - [ ] Invariants: every process → one group → one session.
+            - [ ] **Session Management:**
+                - [ ] `sys_setsid()`: create new session + pgrp; EPERM if already leader; detach CTTY.
+                - [ ] `sys_getsid(pid)`: return session ID.
+            - [ ] **Group Management:**
+                - [ ] `sys_setpgid(pid, pgid)`: join/create group; must be same session.
+                - [ ] `sys_getpgid(pid)`: return group ID.
+            - [ ] **Controlling Terminal (CTTY):**
+                - [ ] `TIOCSCTTY`: assign CTTY (session leader, no existing CTTY, TTY unowned).
+                - [ ] `TIOCNOTTY`: release CTTY, SIGHUP to foreground group.
+                - [ ] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check).
+            - [ ] **Orphaned Process Groups:**
+                - [ ] Detection: no member with parent in different group of same session.
+                - [ ] Action: SIGHUP + SIGCONT to stopped members.
+
+        - [ ] **Testing:**
+            - [ ] Unit: proc_exit phases 1–9 ordering and resource cleanup.
+            - [ ] Unit: wait4 search logic (specific, any, pgrp).
+            - [ ] Unit: WNOHANG returns 0 / ECHILD correctly.
+            - [ ] Unit: orphan reparenting to init.
+            - [ ] Unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY.
+            - [ ] Unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery.
+            - [ ] Property: no zombie leaks (all zombies eventually reaped or auto-reaped).
+            - [ ] Integration: fork → exec → exit → waitpid cycle.
+            - [ ] Integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: process exit 9-phase teardown.
+            - [ ] Internal doc: wait4 search semantics and blocking.
+            - [ ] Internal doc: session/pgrp lifecycle and CTTY ownership.
+
+### 2. Architecture (`sys/arch`)
+- [x] **i386:**
+    - [x] Complete GDT/TSS setup for user-mode switching.
+    - [x] **Verification:**
+        - [x] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
+        - [x] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies -->
+    - [x] Implement Exception Handling (Page Fault, GPF, etc.).
+    - [x] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
+    - [x] **Advanced Diagnostics (Missing):** <!-- All items complete -->
+        - [x] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it -->
+        - [x] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() -->
+        - [x] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() -->
+        - [x] **Invalid Opcode Decoding:** Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 -->
+    - [x] **VM86 Mode (i386 only):** <!-- All items complete -->
+        - [x] **Initialization:** <!-- All items complete -->
+            - [x] Set `EFLAGS.VM` bit. <!-- vm86.c:47 sets 0x20000 -->
+            - [x] Setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range -->
+        - [x] **GPF Handler:** <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler -->
+            - [x] Detect if fault occurred in VM86 mode. <!-- idt.c:192 checks (regs->eflags & 0x20000) -->
+            - [x] **Opcode Emulation:** <!-- All items complete -->
+                - [x] Emulate `CLI` / `STI` (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF -->
+                - [x] Emulate `PUSHF` / `POPF`. <!-- vm86.c: 0x9C/0x9D -->
+                - [x] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) -->
+                - [x] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE -->
+        - [x] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() -->
+    - [ ] **LDT & 16-bit Support:**
+        - [ ] **Baseline Audit + Scope Freeze (existing code path):**
+            - [ ] Audit current implementation in `sys/arch/i386/ldt.c`, scheduler hook in `sys/arch/i386/sched.c`, and tests in `tests/sys/test_ldt.c`.
+            - [ ] Produce gap list: what is already implemented vs missing for production-safe 16-bit support.
+            - [ ] Freeze ownership model (per-process LDT attached to `process_t`) and locking policy.
+            - [ ] **Acceptance:** Gap report merged and this checklist updated with resolved scope.
+        - [ ] **API, ABI, and Privilege Model:**
+            - [ ] Unify `struct user_desc` definitions (`sys/include/sys/ldt.h` vs `sys/arch/i386/syscall.h`) into one authoritative ABI header.
+            - [ ] Define supported `modify_ldt` operations and exact return semantics (`LDT_READ`, `LDT_WRITE`, `LDT_READ_DEFAULT`).
+            - [ ] Define permission model:
+                - [ ] Current kernel policy (root/euid checks) for privileged operations.
+                - [ ] Forward-compatible mapping to `CAP_SYS_ADMIN` once capability framework lands.
+            - [ ] Define hard rejection rules (system descriptors, kernel DPL, invalid type bits, malformed 16-bit flags).
+            - [ ] Document ABI and errors (`EINVAL`, `EFAULT`, `EPERM`, `ENOMEM`, `ENOSYS`) in `ARCHITECTURE.md` and `man/man2/modify_ldt.2`.
+            - [ ] **Acceptance:** Header/API contract is single-sourced and syscall behavior is documented.
+        - [ ] **Kernel LDT Core Hardening (`sys/arch/i386/ldt.c`):**
+            - [ ] Refactor into explicit helpers (`ldt_alloc`, `ldt_set`, `ldt_clear`, `ldt_free`) with one validation entry point.
+            - [ ] Add strict descriptor validation for 16-bit semantics (`seg_32bit=0`, granularity/type constraints, DPL=3 only for user).
+            - [ ] Ensure all pointer arguments use safe `copyin`/`copyout` handling and bounded lengths.
+            - [ ] Add bounds checks for index/count and reject partial/ambiguous user_desc payloads.
+            - [ ] Add internal diagnostics/counters for validation failures and allocation failures.
+            - [ ] **Acceptance:** Invalid descriptors are deterministically rejected and stress alloc/set/free has no leaks/corruption.
+        - [ ] **Syscall + Personality + `lib/sys` Integration:**
+            - [ ] Keep native personality (`perso_native.c`) wired to hardened `sys_modify_ldt`.
+            - [ ] Add Linux personality wiring for `modify_ldt` compatibility path (or explicit `ENOSYS` until complete).
+            - [ ] Add userspace wrapper in `lib/sys/` (`modify_ldt.c`) and include it in `lib/sys/Makefile`.
+            - [ ] Add public userspace declaration in `include/sys/ldt.h` (or equivalent exported syscall header).
+            - [ ] Ensure syscall prototypes come from headers only (no manual file-local `extern` declarations).
+            - [ ] **Acceptance:** `libsys` exposes `modify_ldt()` and personality behavior is explicit/tested.
+        - [ ] **Lifecycle Safety (switch/fork/exec/exit/SMP):**
+            - [ ] Ensure context switch path loads/clears `LDTR` correctly for LDT and no-LDT processes.
+            - [ ] Add LDT inheritance policy in `proc_fork` (`sys/pm/process.c`) with explicit copy/reference behavior.
+            - [ ] Add LDT replacement/cleanup in exec path (`exec_dispatch`/ELF load path) so stale LDT state cannot survive exec.
+            - [ ] Add guaranteed LDT cleanup in process exit path (`proc_exit`) and process teardown.
+            - [ ] Define SMP safety for LDT updates (reload rules for running thread vs remote CPUs).
+            - [ ] **Acceptance:** fork/exec/exit stress shows no stale selectors, no cross-process bleed, no double-free.
+        - [ ] **Verification Matrix (expand existing LDT tests):**
+            - [ ] Extend `tests/sys/test_ldt.c` with negative cases (bad DPL/type/system descriptors/index overflow).
+            - [ ] Add unit/property tests for descriptor encode/decode invariants (host-friendly where possible).
+            - [ ] Add fuzz target for `sys_modify_ldt` argument space (size, flags, malformed descriptors, race sequences).
+            - [ ] Add integration test with 16-bit path (VM86 and/or ELKS personality) validating CS/DS/SS behavior.
+            - [ ] Add regression tests for lifecycle events (fork inheritance, exec replacement, exit cleanup).
+            - [ ] Wire tests into regular test targets (`make -C tests/sys`, CI scripts) with pass/fail gates.
+            - [ ] **Acceptance:** All LDT unit/property/fuzz/integration tests pass and no existing suites regress.
+- [x] **x86_64:** <!-- boot/, gdt.c, idt.c, isr.S, switch.S -->
+    - [x] **Bootstrap:** Implement Long Mode entry (`boot.S`). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup -->
+    - [x] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks -->
+    - [x] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC -->
+    - [x] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub -->
+    - [x] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 -->
+
+### 3. Drivers (`sys/drivers`)
+- [ ] **Storage Subsystem (Unified SCSI Stack):**
+
+    > **Files:** `sys/drivers/storage/scsi/scsi.h`, `scsi.c`, `scsi_dev.c`,
+    > `scsi_ctl.c`, `atapi_scsi.c`/`.h`, `virtio_scsi.c`.
+    >
+    > **Architecture:** CAM-inspired mid-layer with transport-independent
+    > command execution. No artificial sd/sr split — everything is a
+    > `scsi_device` with type-specific behavior.
+
+    - [ ] **Core Architecture (CAM/Mid-layer):**
+
+        - [ ] **Data Structures (`scsi.h`):**
+            - [ ] `scsi_request_t`: command execution context.
+                - [ ] CDB storage (up to `SCSI_MAX_CDB_LEN` = 16 bytes).
+                - [ ] `cdb_len`: actual CDB length (6, 10, 12, or 16).
+                - [ ] `data`/`data_len`: DMA buffer pointer and transfer length.
+                - [ ] `flags`: direction (`SCSI_REQ_READ`, `SCSI_REQ_WRITE`), and options.
+                - [ ] `status`: SCSI status byte (GOOD, CHECK CONDITION, BUSY, etc.).
+                - [ ] `sense_data[SCSI_SENSE_LEN]`: auto-sense buffer (32 bytes).
+                - [ ] `sense_len`: actual sense data returned.
+                - [ ] `timeout_ms`: per-command timeout.
+                - [ ] `retries` / `max_retries`: retry counters (default 3, media error = 0).
+                - [ ] `callback`: async completion function pointer.
+                - [ ] `submit_time` / `start_time` / `elapsed_ms`: timing instrumentation.
+                - [ ] Queue linkage (`next` pointer).
+            - [ ] `scsi_device_t`: target representation.
+                - [ ] Addressing: `bus`, `target` (0–15), `lun` (0–255).
+                - [ ] Identity from INQUIRY: `vendor[9]`, `product[17]`, `revision[5]`, `serial[21]`.
+                - [ ] `type`: peripheral device type (disk=0x00, tape=0x01, cdrom=0x05, etc.).
+                - [ ] `removable`: RMB bit from INQUIRY.
+                - [ ] `scsi_version`: SPC version from INQUIRY.
+                - [ ] `capacity`: total sectors (from READ CAPACITY).
+                - [ ] `sector_size`: bytes/sector (512 for disk, 2048 for CD-ROM).
+                - [ ] `flags`: online/offline, write-protected, supports TCQ.
+                - [ ] Command queue: `queue_head`/`queue_tail`, `queue_depth`, `max_queue_depth`.
+                - [ ] `link`: back-pointer to transport interface.
+                - [ ] Registry linkage (`next` pointer).
+            - [ ] `scsi_link_t`: transport adapter interface.
+                - [ ] `name[32]`: adapter name (e.g., `"atapi0"`, `"virtio-scsi0"`).
+                - [ ] `execute(link, request)`: function pointer — transport-specific command dispatch.
+                - [ ] `max_targets` / `max_luns`: bus topology limits.
+                - [ ] `adapter_queue_depth`: HBA-level parallelism.
+                - [ ] `flags`: DMA-capable, supports tagged queueing, ordered tags.
+                - [ ] Statistics: `cmds_completed`, `cmds_failed`, `bytes_read`, `bytes_written`.
+            - [ ] `scsi_sense_fixed`: SPC-3 fixed-format sense data (36 bytes).
+                - [ ] `response_code` (0x70 current, 0x71 deferred).
+                - [ ] `sense_key` (bits 0–3), `ILI` (bit 5), `EOM` (bit 6), `FileMark` (bit 7).
+                - [ ] `info[4]`: command-specific information.
+                - [ ] `asc` / `ascq`: Additional Sense Code / Qualifier.
+            - [ ] `scsi_inquiry_data`: standard INQUIRY response (36+ bytes).
+                - [ ] `device_type` (bits 0–4), `qualifier` (bits 5–7).
+                - [ ] `rmb` (bit 7), `version`, `response_format`.
+                - [ ] `additional_length`, `flags` (CmdQue, etc.).
+                - [ ] Vendor/Product/Revision strings (space-padded).
+            - [ ] `scsi_report_luns_data`: REPORT LUNS response (up to 64 LUNs).
+
+        - [ ] **Initialization (`scsi_init`):**
+            - [ ] Initialize device registry (pre-allocate pool of `scsi_device_t`, 64 max).
+            - [ ] Initialize request pool (pre-allocate `scsi_request_t`, 128 max).
+            - [ ] Initialize free lists for both pools.
+            - [ ] Call `scsi_dev_init()` and `scsi_ctl_init()`.
+
+        - [ ] **Transport Registration:**
+            - [ ] `scsi_register_link(link)`: register HBA/transport adapter.
+                - [ ] Validate `execute` callback is non-NULL.
+                - [ ] Add to global link list (max 8 links).
+                - [ ] Trigger bus scan on the new link.
+            - [ ] `scsi_unregister_link(link)`: unregister adapter.
+                - [ ] Detach all devices on this link.
+                - [ ] Free associated resources.
+
+        - [ ] **Device Discovery:**
+            - [ ] `scsi_scan_bus(link, bus)`: enumerate all targets on a bus.
+                - [ ] Iterate target IDs 0..`link->max_targets - 1`.
+                - [ ] For each target: INQUIRY at LUN 0, then REPORT LUNS for multi-LUN.
+                - [ ] Fallback: sequential LUN probing if REPORT LUNS fails (old devices).
+            - [ ] `scsi_probe_lun(link, bus, target, lun)`: probe a single LUN.
+                - [ ] Send TEST UNIT READY.
+                - [ ] Send INQUIRY; parse device type, vendor, product, revision.
+                - [ ] If device type is valid: `scsi_device_register()`.
+                - [ ] Send READ CAPACITY (10 or 16) for block devices.
+                - [ ] Trigger `scsi_auto_attach()` on success.
+            - [ ] `scsi_device_register(dev)`: add to global device list.
+                - [ ] Check for duplicate (same bus:target:lun).
+                - [ ] Assign monotonically increasing device number.
+                - [ ] Log discovery: `"scsi: B:T:L vendor product [type]"`.
+            - [ ] `scsi_device_unregister(dev)`: remove from list.
+            - [ ] `scsi_device_lookup(bus, target, lun)`: find registered device.
+
+        - [ ] **Command Execution:**
+            - [ ] **Request Lifecycle:**
+                - [ ] `scsi_request_alloc()`: allocate from pool (or return NULL if exhausted).
+                - [ ] `scsi_request_init(req, dev)`: zero fields, link to device, set default timeout (30s) and retries (3).
+                - [ ] `scsi_request_free(req)`: return to free pool.
+            - [ ] **Synchronous Execution:**
+                - [ ] `scsi_execute_sync(dev, cdb, cdb_len, data, data_len, flags, timeout_ms)`:
+                    - [ ] Allocate request, fill CDB/buffer, call `scsi_execute()`, block until complete, return status.
+            - [ ] **Core Execution (`scsi_execute`):**
+                - [ ] Record `submit_time` timestamp.
+                - [ ] Retry loop: attempt up to `max_retries + 1` times.
+                - [ ] Call `link->execute(link, req)` to dispatch to transport.
+                - [ ] Record `start_time`, measure `elapsed_ms`.
+                - [ ] On CHECK CONDITION: auto-request sense, parse sense key.
+                    - [ ] UNIT ATTENTION (sense key 6): retry automatically (medium changed).
+                    - [ ] NOT READY (sense key 2): retry with delay (device spinning up).
+                    - [ ] MEDIUM ERROR (sense key 3): no retry (data loss).
+                    - [ ] ABORTED COMMAND (sense key 0xB): retry.
+                - [ ] On BUSY / TASK SET FULL: backoff and retry.
+                - [ ] Update link statistics on completion.
+            - [ ] **Async Queue Management:**
+                - [ ] `scsi_queue_request(req)`: enqueue to device's command queue.
+                    - [ ] Respect `max_queue_depth` (drop or backpressure).
+                - [ ] `scsi_process_queue(dev)`: dequeue and execute pending requests.
+                - [ ] `scsi_abort_request(req)`: cancel pending request (remove from queue, invoke callback with error).
+                - [ ] `scsi_complete_request(req, status)`: mark done, invoke callback, trigger queue processing.
+
+        - [ ] **Sense Data Parsing:**
+            - [ ] `scsi_sense_key(sense, len)`: extract sense key from fixed or descriptor format.
+            - [ ] `scsi_sense_asc(sense, len)`: extract ASC (Additional Sense Code).
+            - [ ] `scsi_sense_ascq(sense, len)`: extract ASCQ (Additional Sense Code Qualifier).
+            - [ ] `scsi_sense_string(sense, len, buf, buflen)`: human-readable sense string.
+            - [ ] Sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED.
+            - [ ] Common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present).
+
+        - [ ] **CDB Builders:**
+            - [ ] `scsi_cdb_test_unit_ready(cdb)`: 6-byte TUR.
+            - [ ] `scsi_cdb_inquiry(cdb, len)`: 6-byte INQUIRY with allocation length.
+            - [ ] `scsi_cdb_request_sense(cdb, len)`: 6-byte REQUEST SENSE.
+            - [ ] `scsi_cdb_read_capacity_10(cdb)`: 10-byte READ CAPACITY.
+            - [ ] `scsi_cdb_read_10(cdb, lba, count)`: 10-byte READ.
+            - [ ] `scsi_cdb_write_10(cdb, lba, count)`: 10-byte WRITE.
+            - [ ] `scsi_cdb_read_16(cdb, lba, count)`: 16-byte READ (LBA > 2TB).
+            - [ ] `scsi_cdb_write_16(cdb, lba, count)`: 16-byte WRITE (LBA > 2TB).
+            - [ ] `scsi_cdb_mode_sense_6(cdb, page, len)` / `scsi_cdb_mode_sense_10(cdb, page, len)`.
+            - [ ] `scsi_cdb_start_stop(cdb, start, load_eject)`: START STOP UNIT.
+            - [ ] `scsi_cdb_sync_cache(cdb, lba, count)`: SYNCHRONIZE CACHE (10).
+            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`.
+
+        - [ ] **Standard Command Wrappers:**
+            - [ ] `scsi_test_unit_ready(dev)`: send TUR, return 0 on GOOD.
+            - [ ] `scsi_inquiry(dev, inq)`: send INQUIRY, fill `scsi_inquiry_data`.
+            - [ ] `scsi_read_capacity(dev, sectors, sector_size)`: READ CAPACITY (10 or 16), fill output.
+            - [ ] `scsi_request_sense(dev, sense, len)`: explicit REQUEST SENSE.
+            - [ ] `scsi_start_stop(dev, start, load_eject)`: START STOP UNIT.
+            - [ ] `scsi_report_luns(dev, luns)`: REPORT LUNS, parse big-endian LUN list.
+            - [ ] `scsi_synchronize_cache(dev)`: SYNCHRONIZE CACHE (write-back).
+            - [ ] `scsi_mode_sense(dev, page, buffer, len)`: MODE SENSE (for caching, geometry pages).
+
+    - [ ] **High-Level Device Driver (`scsi_dev.c`):**
+
+        - [ ] **Block Device Callbacks:**
+            - [ ] `scsi_blk_read(blkdev, sector, count, buffer)`: build READ(10) CDB, execute sync, return sector count or -1.
+            - [ ] `scsi_blk_write(blkdev, sector, count, buffer)`: build WRITE(10) CDB, execute sync; reject writes to CD-ROM.
+            - [ ] Handle sector size translation (512 vs 2048 for CD-ROM).
+            - [ ] Support READ(16)/WRITE(16) for devices with capacity > 2TB.
+        - [ ] **Device Type Handling:**
+            - [ ] **Direct Access (Type 0x00 — Disk):**
+                - [ ] READ CAPACITY for sector count and size.
+                - [ ] Cache flush via SYNCHRONIZE CACHE on unmount/shutdown.
+                - [ ] Device name: `scsiN` (sequential numbering).
+            - [ ] **CD-ROM / DVD (Type 0x05 — ROM):**
+                - [ ] `scsi_read_toc(dev, buffer, buflen)`: READ TOC/PMA/ATIP (CDB 0x43).
+                - [ ] `scsi_lock_door(dev, lock)`: PREVENT/ALLOW MEDIUM REMOVAL (CDB 0x1E).
+                - [ ] Sector size: 2048 bytes (data CD standard).
+                - [ ] Handle UNIT ATTENTION on media change: re-read capacity.
+            - [ ] **WORM / Optical (Types 0x04, 0x07):**
+                - [ ] Same as disk but write-once semantics; reject overwrites.
+            - [ ] **Sequential Access (Type 0x01 — Tape) — deferred.**
+        - [ ] **Attach / Detach:**
+            - [ ] `scsi_dev_attach(scsi_dev)`: create `scsi_blk_dev_t`, register block device.
+                - [ ] Only attach block-capable types (disk, cdrom, optical, worm).
+                - [ ] Set sector size based on device type.
+                - [ ] Log: `"scsi: attached scsiN (type) [vendor product]"`.
+            - [ ] `scsi_dev_detach(scsi_dev)`: unregister block device, remove from list.
+            - [ ] `scsi_dev_lookup(name)`: find block device by name (e.g., `"scsi0"`).
+            - [ ] `scsi_dev_init()`: initialize unified device subsystem.
+            - [ ] `scsi_auto_attach(dev)`: called on discovery — create generic node + block device.
+
+    - [ ] **Controller Interface (`scsi_ctl.c`):**
+
+        - [ ] **Device Node Hierarchy:**
+            - [ ] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`): generic SCSI pass-through node.
+                - [ ] `scsi_create_generic_node(dev)`: create DevFS entry.
+                - [ ] `sg_ioctl(node, request, arg)`: ioctl handler for generic nodes.
+            - [ ] `/dev/storage/scsi/B` (e.g., `0`): bus controller endpoint.
+                - [ ] `scsi_create_bus_node(link, bus_id)`: create DevFS entry.
+                - [ ] `bus_ioctl(node, request, arg)`: ioctl handler for bus operations.
+            - [ ] `/dev/storage/scsiN` (e.g., `scsi0`): high-level block device alias.
+        - [ ] **ioctl Operations:**
+            - [ ] `SCSI_IOCTL_SCAN` (0x5301): trigger bus rescan.
+            - [ ] `SCSI_IOCTL_GET_INFO` (0x5302): return `scsi_ioctl_info_t` (bus, target, lun, type, vendor, product, capacity).
+            - [ ] `SCSI_IOCTL_GET_IDLUN` (0x5303): return packed bus:target:lun.
+            - [ ] `SCSI_IOCTL_GET_COUNT` (0x5304): return device count on bus.
+            - [ ] `SCSI_IOCTL_SEND_CMD` (0x5305): pass-through raw SCSI CDB with data buffer.
+                - [ ] Copy CDB from userspace, validate length.
+                - [ ] Execute via `scsi_execute_sync()`, copy results back.
+                - [ ] Require appropriate privilege (root or CAP_SYS_RAWIO).
+
+    - [ ] **Transport/HBA Drivers (Low-Level):**
+
+        - [ ] **ATAPI Transport (`atapi_scsi.c`, `atapi_scsi.h`):**
+            - [ ] `atapi_link`: `scsi_link_t` instance for ATA secondary (ATAPI) devices.
+            - [ ] `atapi_execute(link, req)`: translate `scsi_request_t` to ATA PACKET command.
+                - [ ] Select drive (master/slave) via device register.
+                - [ ] Write PACKET command (0xA0) to command register.
+                - [ ] Wait for DRQ, then PIO-out the CDB (12 or 16 bytes, padded to 12).
+                - [ ] Wait for DRQ for data phase; PIO-in/out data buffer.
+                - [ ] Read status register for errors; auto-request sense on CHECK CONDITION.
+            - [ ] `atapi_init()`: register link, set max_targets=2 (master/slave per channel).
+            - [ ] Support: primary + secondary IDE channels (4 possible ATAPI devices).
+            - [ ] Support: tertiary + quaternary channels (if IDE driver supports them).
+
+        - [ ] **USB Mass Storage (deferred):**
+            - [ ] **Bulk-Only Transport (BOT):**
+                - [ ] Build Command Block Wrapper (CBW): 31-byte header with signature (0x43425355), tag, transfer length, flags, LUN, CDB.
+                - [ ] Send CBW via Bulk-OUT endpoint.
+                - [ ] Transfer data via Bulk-IN (read) or Bulk-OUT (write) endpoint.
+                - [ ] Receive Command Status Wrapper (CSW): 13-byte response with signature (0x53425355), tag, residue, status.
+                - [ ] CSW status: 0=passed, 1=failed (issue REQUEST SENSE), 2=phase error (reset recovery).
+            - [ ] **Reset Recovery:**
+                - [ ] Bulk-Only Mass Storage Reset (class-specific request 0xFF).
+                - [ ] Clear HALT on Bulk-IN and Bulk-OUT endpoints.
+            - [ ] **Integration:**
+                - [ ] Register `scsi_link_t` per USB device (bridge to SCSI mid-layer).
+                - [ ] Set max_targets=1, max_luns from GET MAX LUN request.
+                - [ ] Handle device disconnect: unregister link, detach all devices.
+
+        - [ ] **VirtIO-SCSI (`virtio_scsi.c`):**
+            - [ ] `vscsi_execute(link, req)`: map `scsi_request_t` to virtio request descriptor.
+                - [ ] Build request header: LUN (8-byte SAM encoding), tag, task attributes, CDB.
+                - [ ] Attach data buffers as scatter-gather (device-readable for writes, device-writable for reads).
+                - [ ] Attach response buffer (sense data, residual, status).
+                - [ ] Submit to request virtqueue; wait for used buffer notification.
+            - [ ] `vscsi_setup_event_buffers()`: pre-populate event virtqueue.
+            - [ ] `vscsi_process_events()`: handle hotplug add/remove, transport reset, parameter change events.
+            - [ ] Control virtqueue: INQUIRY, REPORT LUNS, task management via control queue.
+            - [ ] Multi-queue support: one request virtqueue per vCPU (if negotiated).
+
+        - [ ] **iSCSI (deferred):**
+            - [ ] TCP-based SCSI transport.
+            - [ ] Login, discovery, full-feature phase.
+            - [ ] PDU framing, session management.
+
+    - [ ] **Testing:**
+        - [ ] **Unit Tests:**
+            - [ ] CDB builder correctness: verify byte layout for READ(10), WRITE(10), INQUIRY, READ CAPACITY.
+            - [ ] Sense data parsing: fixed format with all 16 sense keys.
+            - [ ] Sense data parsing: common ASC/ASCQ pairs.
+            - [ ] Device registry: register, lookup, unregister, duplicate detection.
+            - [ ] Request allocation: pool exhaustion, free and reuse.
+            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`.
+        - [ ] **Property Tests:**
+            - [ ] All CDB builders produce valid length CDBs (6/10/12/16).
+            - [ ] Request pool invariant: allocated + free = total pool size.
+            - [ ] Device list: no duplicates (unique bus:target:lun).
+        - [ ] **Integration Tests:**
+            - [ ] VirtIO-SCSI disk: boot QEMU with `-device virtio-scsi-pci -device scsi-hd`, verify discovery + read/write.
+            - [ ] ATAPI CD-ROM: boot QEMU with `-cdrom`, verify READ CAPACITY + READ TOC + sector read.
+            - [ ] Bus rescan: add device to VirtIO-SCSI via hotplug, verify auto-attach.
+            - [ ] Generic passthrough: send INQUIRY via `SCSI_IOCTL_SEND_CMD` from userspace, verify response.
+            - [ ] Error path: simulate CHECK CONDITION, verify retry and sense reporting.
+
+    - [ ] **Documentation:**
+        - [ ] Internal doc: SCSI mid-layer architecture (link/device/request lifecycle).
+        - [ ] Internal doc: transport driver interface (`scsi_link_t.execute` contract).
+        - [ ] Internal doc: CDB reference and sense key/ASC/ASCQ table.
+        - [ ] Internal doc: device node hierarchy and ioctl interface.
+- [ ] **ATA/IDE (Legacy):** <!-- ide.c, ide.h -->
+
+    > **Files:** `sys/drivers/storage/ide/ide.c`, `ide.h`.
+    >
+    > **Current state:** supports primary/secondary channels, PIO (LBA28/48),
+    > DMA (bus master), ATAPI packet commands, master/slave device selection.
+    > Channel struct hardcoded for 2 channels.
+
+    - [ ] **Channel Architecture:**
+        - [ ] **Primary Channel:** I/O 0x1F0, Control 0x3F6, IRQ 14.
+        - [ ] **Secondary Channel:** I/O 0x170, Control 0x376, IRQ 15.
+        - [ ] **Tertiary Channel:** I/O 0x1E8, Control 0x3EE, IRQ 11.
+            - ISA add‑in IDE controllers (e.g., Sound Blaster AWE32/64, Promise DC4030).
+            - Linux equivalents: `/dev/hde` (master), `/dev/hdf` (slave).
+        - [ ] **Quaternary Channel:** I/O 0x168, Control 0x36E, IRQ 10 (or 9).
+            - ISA add‑in IDE controllers, secondary port.
+            - Linux equivalents: `/dev/hdg` (master), `/dev/hdh` (slave).
+        - [ ] Expand `ide_channel_t` array from 2 to 4 entries.
+        - [ ] Expand `ide_device_t` array from 4 to 8 entries (2 per channel × 4 channels).
+        - [ ] Add `ATA_TERTIARY_IO` (0x1E8), `ATA_TERTIARY_CTRL` (0x3EE), `ATA_QUATERNARY_IO` (0x168), `ATA_QUATERNARY_CTRL` (0x36E) defines to `ide.h`.
+        - [ ] Probe all four channels during `ide_init()` — detect presence by reading status register (0xFF = empty bus).
+        - [ ] Support configurable channel I/O bases (for PCI IDE controllers with non‑standard BARs).
+    - [ ] **PCI IDE Controller Discovery:**
+        - [ ] Scan PCI class 0x01 subclass 0x01 (IDE Controller) for native/compatibility mode.
+        - [ ] Read PCI Programming Interface byte to determine:
+            - Bit 0: Primary channel in native mode (use BAR0/BAR1) vs compatibility mode (0x1F0/0x3F6).
+            - Bit 2: Secondary channel in native mode (use BAR2/BAR3) vs compatibility mode (0x170/0x376).
+            - Bit 7: Bus Master capable (use BAR4 for DMA registers).
+        - [ ] For native‑mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line.
+        - [ ] Detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 — typically expose as separate PCI functions).
+        - [ ] ISA tertiary/quaternary probing: if PCI does not enumerate additional channels, probe legacy I/O ports at 0x1E8 and 0x168 for device presence.
+    - [ ] **Device Identification (`ide_identify` / `ide_identify_atapi`):**
+        - [ ] Issue IDENTIFY DEVICE (0xEC) or IDENTIFY PACKET DEVICE (0xA1).
+        - [ ] Parse model, serial, firmware revision strings (byte‑swap from ATA word format).
+        - [ ] Extract LBA28 sector count (words 60–61) and LBA48 sector count (words 100–103).
+        - [ ] Extract supported command sets: DMA, LBA48, SMART, NCQ, TRIM.
+        - [ ] Extract supported DMA modes: MWDMA (words 63), UDMA (word 88).
+        - [ ] Detect 48‑bit addressing support (command set word 83 bit 10).
+    - [ ] **PIO Mode Transfers:**
+        - [ ] **LBA28 Read/Write:** `ide_read_sectors()` / `ide_write_sectors()` — 28‑bit LBA, max 256 sectors.
+        - [ ] **LBA48 Read/Write:** `ide_read_sectors_ext()` / `ide_write_sectors_ext()` — 48‑bit LBA, max 65536 sectors.
+        - [ ] Wait‑for‑BSY / wait‑for‑DRQ polling loops with bounded timeout.
+        - [ ] Error detection: check ERR bit after command completion, decode error register.
+        - [ ] 400 ns delay after writing command register (read alternate status 4 times).
+    - [ ] **DMA Transfers:**
+        - [ ] **Bus Master Register Access:**
+            - [ ] `ide_bm_start(channel, write)`: set direction, start DMA.
+            - [ ] `ide_bm_stop(channel)`: clear start bit.
+            - [ ] `ide_bm_status(channel)`: read status (active, error, interrupt).
+            - [ ] `ide_bm_clear_interrupt(channel)`: write 1 to clear interrupt bit.
+        - [ ] **PRDT (Physical Region Descriptor Table) Setup:**
+            - [ ] `ide_prdt_setup(channel, buffer, byte_count)`: build scatter‑gather list.
+            - [ ] Each PRD entry: 4‑byte aligned phys address + byte count + EOT flag.
+            - [ ] PRDT must not cross 64 KB boundary.
+            - [ ] Max 32 PRD entries (128 KB transfer).
+        - [ ] **DMA Read/Write:** `ide_dma_read()` / `ide_dma_write()` — issue DMA command, start bus master, wait for IRQ.
+        - [ ] **UDMA Mode Negotiation:**
+            - [ ] Read supported UDMA modes from IDENTIFY word 88.
+            - [ ] Issue SET FEATURES (0xEF) subcommand 0x03 with transfer mode.
+            - [ ] Track active DMA mode per device (`ide_device_t.dma_mode`).
+    - [ ] **ATAPI (SCSI Transport):**
+        - [ ] `ide_atapi_packet(channel, drive, cdb, cdb_len, buffer, buf_len, write)`: send CDB via PACKET command (0xA0).
+        - [ ] Handle DRQ‑based data transfer (PIO) or DMA‑based transfer.
+        - [ ] `ide_atapi_read_capacity()`: SCSI READ CAPACITY (0x25).
+        - [ ] `ide_atapi_read_sectors()`: SCSI READ (10) (0x28).
+        - [ ] `ide_atapi_read_toc()`: SCSI READ TOC (0x43) for CD‑ROM.
+        - [ ] Medium change detection (unit attention sense key).
+    - [ ] **IRQ Handling:**
+        - [ ] `ide_irq_handler(irq)`: acknowledge interrupt, signal DMA completion.
+        - [ ] IRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary).
+        - [ ] Support shared IRQs for PCI native‑mode controllers.
+    - [ ] **Software Reset:**
+        - [ ] Issue SRST via device control register (bit 2).
+        - [ ] Wait for BSY clear on both master and slave.
+        - [ ] Re‑identify devices after reset.
+    - [ ] **Power Management (deferred):**
+        - [ ] STANDBY IMMEDIATE (0xE0), IDLE IMMEDIATE (0xE1).
+        - [ ] CHECK POWER MODE (0xE5).
+        - [ ] Spin‑down timer configuration.
+    - [ ] **Naming Convention:**
+        - [ ] Primary master: `ide0`, primary slave: `ide1`.
+        - [ ] Secondary master: `ide2`, secondary slave: `ide3`.
+        - [ ] Tertiary master: `ide4`, tertiary slave: `ide5`.
+        - [ ] Quaternary master: `ide6`, quaternary slave: `ide7`.
+        - [ ] Register with `/dev/storage/ideN` DevFS nodes.
+    - [ ] **Error Handling:**
+        - [ ] Decode ATA error register bits (BBK, UNC, IDNF, ABRT, TK0NF, AMNF).
+        - [ ] Retry failed reads up to 3 times before reporting error.
+        - [ ] Log device faults and media errors to kernel console.
+        - [ ] Handle timeout (device not responding) gracefully — mark device offline.
+    - [ ] **Testing:**
+        - [ ] Unit: IDENTIFY parsing (model string byte‑swap, LBA48 detection, DMA mode extraction).
+        - [ ] Unit: PRDT construction (alignment, boundary, EOT flag).
+        - [ ] Integration: PIO read/write round‑trip on QEMU `-hda` disk.
+        - [ ] Integration: DMA read/write round‑trip on QEMU with bus master.
+        - [ ] Integration: ATAPI CD‑ROM read capacity + read sectors on QEMU `-cdrom`.
+        - [ ] Integration: tertiary/quaternary channel detection on QEMU with `-device ide-hd,bus=ide.2,...` (or equivalent).
+    - [ ] **Documentation:**
+        - [ ] Internal doc: ATA/IDE register map and command reference.
+        - [ ] Internal doc: channel probing strategy (PCI native vs ISA compatibility vs legacy tertiary/quaternary).
+
+- [ ] **Floppy Disk Controller (`sys/drivers/storage/floppy/`):**
+
+    > Supports standard PC floppy disk controller (Intel 82077AA / NEC µPD765
+    > compatible). Up to 4 drives (2 per controller, though most PCs have 1 controller).
+    > Naming: `fd0`–`fd3` at `/dev/storage/fdN`.
+
+    - [ ] **Controller Initialization (`fdc_init`):**
+        - [ ] Detect FDC presence: read MSR (Main Status Register) at 0x3F4.
+        - [ ] Issue RESET command: assert bit 2 of DOR (Digital Output Register, 0x3F2), then deassert.
+        - [ ] Wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4).
+        - [ ] Configure controller: CONFIGURE command (implied seek, FIFO threshold).
+        - [ ] Set data rate via CCR (Configuration Control Register, 0x3F7): 500kbps for HD, 300kbps for DD, 250kbps for SD.
+        - [ ] Enable DMA channel 2 for data transfers (ISA DMA).
+    - [ ] **I/O Registers (base 0x3F0):**
+        - [ ] 0x3F2: DOR (Digital Output Register) — drive select, motor control, DMA/IRQ enable, reset.
+        - [ ] 0x3F4: MSR (Main Status Register) — RQM, DIO, NDMA, busy flags.
+        - [ ] 0x3F5: Data Register (FIFO) — command/result/data bytes.
+        - [ ] 0x3F7: DIR (Digital Input Register, read) — disk change detect (bit 7).
+        - [ ] 0x3F7: CCR (Configuration Control Register, write) — data rate select.
+    - [ ] **DMA Configuration:**
+        - [ ] ISA DMA channel 2 (8‑bit transfers).
+        - [ ] Program DMA controller (ports 0x04, 0x05, 0x81, 0x0A, 0x0B, 0x0C) for read/write.
+        - [ ] DMA buffer must be below 16 MB (ISA 24‑bit addressing).
+        - [ ] Allocate bounce buffer in low memory if kernel buffer is above 16 MB.
+    - [ ] **Drive Detection:**
+        - [ ] Query CMOS (RTC port 0x70/0x71, register 0x10) for drive types:
+            - Bits 7–4: drive 0 type, bits 3–0: drive 1 type.
+            - 0=none, 1=360K, 2=1.2M, 3=720K, 4=1.44M, 5=2.88M.
+        - [ ] Support up to 4 drives: drives 0–1 on primary FDC (0x3F0), drives 2–3 on secondary FDC (0x370, rare).
+        - [ ] Register detected drives with DevFS as `/dev/storage/fd0`..`/dev/storage/fd3`.
+    - [ ] **Motor Control:**
+        - [ ] Motor on: set DOR motor bits (bits 4–7) for target drive.
+        - [ ] Spin‑up delay: wait 300–500 ms after motor on before I/O.
+        - [ ] Motor off timer: auto‑stop motor after 2–3 seconds of inactivity.
+        - [ ] Track motor state per drive to avoid redundant spin‑up.
+    - [ ] **Media Types:**
+        - [ ] 3.5" HD: 1.44 MB — 80 cylinders, 2 heads, 18 sectors/track, 512 bytes/sector.
+        - [ ] 3.5" DD: 720 KB — 80 cylinders, 2 heads, 9 sectors/track.
+        - [ ] 3.5" ED: 2.88 MB — 80 cylinders, 2 heads, 36 sectors/track (rare).
+        - [ ] 5.25" HD: 1.2 MB — 80 cylinders, 2 heads, 15 sectors/track.
+        - [ ] 5.25" DD: 360 KB — 40 cylinders, 2 heads, 9 sectors/track.
+        - [ ] Store geometry per drive in `fdc_drive_t` struct.
+    - [ ] **Seek and Recalibrate:**
+        - [ ] RECALIBRATE command: move head to cylinder 0 (issued on init and after errors).
+        - [ ] SEEK command: move to target cylinder.
+        - [ ] Wait for IRQ6 after seek; issue SENSE INTERRUPT to confirm.
+        - [ ] Track current cylinder per drive to avoid redundant seeks.
+    - [ ] **Read/Write Operations:**
+        - [ ] READ DATA command (MT=1, MFM=1): multi‑track read with DMA.
+        - [ ] WRITE DATA command (MT=1, MFM=1): multi‑track write with DMA.
+        - [ ] CHS‑to‑LBA and LBA‑to‑CHS conversion for block device interface.
+        - [ ] Convert sector addresses: `cylinder = LBA / (heads * spt)`, `head = (LBA / spt) % heads`, `sector = (LBA % spt) + 1`.
+        - [ ] Read result bytes (ST0, ST1, ST2, C, H, R, N) after each command to check success.
+        - [ ] Retry on error: recalibrate and retry up to 3 times, then fail.
+    - [ ] **Format Track:**
+        - [ ] FORMAT TRACK command: write sector headers for an entire track.
+        - [ ] Build format buffer with (C, H, R, N) tuples for each sector.
+        - [ ] Used by disk formatting utilities.
+    - [ ] **Disk Change Detection:**
+        - [ ] Read DIR bit 7 (DSKCHG) to detect media removal/insertion.
+        - [ ] On change: invalidate cached geometry, re‑detect media type.
+        - [ ] Seek to cylinder 1 and back to cylinder 0 to clear DSKCHG bit.
+    - [ ] **IRQ Handling:**
+        - [ ] IRQ 6 handler: set completion flag, wake waiting thread.
+        - [ ] SENSE INTERRUPT STATUS command after IRQ to read ST0 and current cylinder.
+    - [ ] **Error Handling:**
+        - [ ] Decode ST0/ST1/ST2 result bytes for error classification.
+        - [ ] ST0 bits 7–6: interrupt code (00=normal, 01=abnormal, 10=invalid, 11=drive not ready).
+        - [ ] ST1: missing address mark, write protect, no data, overrun, CRC error.
+        - [ ] ST2: wrong cylinder, bad cylinder, missing data address mark.
+        - [ ] Automatic retry with recalibrate on recoverable errors.
+    - [ ] **Block Device Interface:**
+        - [ ] Register with storage subsystem as block device.
+        - [ ] `fdc_read(drive, lba, count, buffer)` / `fdc_write(drive, lba, count, buffer)`.
+        - [ ] Sector size: 512 bytes (standard).
+        - [ ] Report device capacity based on detected media geometry.
+    - [ ] **Testing:**
+        - [ ] Unit: CHS↔LBA conversion for all supported media geometries.
+        - [ ] Unit: DMA buffer address validation (below 16 MB, page‑aligned).
+        - [ ] Unit: CMOS drive type parsing.
+        - [ ] Integration: read/write/verify cycle on QEMU with `-fda` / `-fdb` images.
+        - [ ] Integration: disk change detection on QEMU.
+        - [ ] Integration: format + read‑back on blank floppy image.
+    - [ ] **Documentation:**
+        - [ ] Internal doc: FDC register map and command reference.
+        - [ ] Internal doc: DMA programming for ISA channel 2.
+        - [ ] Internal doc: media type detection and geometry tables.
+
+
+- [ ] **AHCI:**
+    - [ ] **HBA Initialization:**
+        - [ ] Enable AHCI Mode (GHC.AE).
+        - [ ] Perform HBA Reset processes (GHC.HR).
+        - [ ] Capability detection (CAP, CAP2).
+        - [ ] MSI-X / Interrupt setup.
+    - [ ] **Port Enumeration:**
+        - [ ] Check Implemented Ports (PI).
+        - [ ] Determine Port Type (SSTS.DET).
+        - [ ] Allocate Command Lists and FIS Receive areas (aligned 1K/256B).
+        - [ ] Start Command Engine (CMD.ST) and FIS Receive (CMD.FRE).
+    - [ ] **Command Handling:**
+        - [ ] Build Command Tables (PRDTs).
+        - [ ] Issue commands via Command Issue (CI) bitmask.
+        - [ ] Handle completion interrupts.
+- [ ] **NVMe:**
+    - [ ] **Controller Initialization:**
+        - [ ] Check CAP (Capabilities) register (Timeout, Doorbell stride).
+        - [ ] Disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0.
+        - [ ] Configure Admin Queue Attributes (AQA).
+        - [ ] Create Admin Submission/Completion Queues (ASQ/ACQ).
+        - [ ] Enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1.
+    - [ ] **Namespace Discovery:**
+        - [ ] Issue `Identify Controller` command.
+        - [ ] Issue `Identify Namespace` for active NSIDs.
+    - [ ] **I/O Queue Creation:**
+        - [ ] Determine number of queues supported.
+        - [ ] Issue `Create I/O Completion Queue`.
+        - [ ] Issue `Create I/O Submission Queue`.
+    - [ ] **Block I/O:**
+        - [ ] PRP (Physical Region Page) List construction for data buffers.
+        - [ ] Issue Read/Write NVM commands.
+- [ ] **Partitioning & DevFS:**
+    - [x] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c -->
+    - [x] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS. <!-- geom_subr.c -->
+- [ ] **Input:** <!-- ps2.c, keyboard.c, mouse.c, input.h -->
+
+    - [ ] **PS/2 Controller (`sys/drivers/input/ps2.c`, `ps2.h`):**
+
+        > **Files:** `ps2.c` (controller driver), `ps2.h` (registers,
+        > commands, status bits, device commands).
+
+        - [ ] **I/O Primitives:**
+            - [ ] `ps2_wait_write()`: spin on status port bit 1 (input buffer empty), timeout guard.
+            - [ ] `ps2_wait_read()`: spin on status port bit 0 (output buffer full), timeout guard.
+            - [ ] `ps2_write_command(cmd)`: wait‑then‑write to port 0x64.
+            - [ ] `ps2_write_data(data)`: wait‑then‑write to port 0x60.
+            - [ ] `ps2_read_data()`: wait‑then‑read from port 0x60 (return 0xFF on timeout).
+            - [ ] `ps2_read_data_timeout(data, loops)`: bounded read with explicit loop count.
+            - [ ] `ps2_flush()`: drain up to 16 stale bytes from output buffer.
+            - [ ] `ps2_write_aux(data)`: write to port 2 device via `0xD4` prefix.
+            - [ ] `ps2_send_command_with_response(cmd, response)`: write command, read single response byte.
+        - [ ] **Initialization Sequence (`ps2_init`):**
+            - [ ] Step 1: Disable both ports (`0xAD`, `0xA7`) to prevent IRQs during setup.
+            - [ ] Step 2: Flush output buffer (`ps2_flush()`).
+            - [ ] Step 3: Read configuration byte (`0x20`), disable IRQs (bits 0‑1), enable translation (bit 6), set system flag (bit 2), write back (`0x60`).
+            - [ ] Step 4: Controller self‑test (`0xAA`) — expect `0x55`; abort on failure/timeout.
+            - [ ] Step 4b: Re‑write configuration byte (self‑test may reset it).
+            - [ ] Step 5: Dual‑channel detection — enable port 2 (`0xA8`), re‑read config, check bit 5 (P2 clock); disable port 2 again.
+            - [ ] Step 6: Interface tests — `0xAB` (port 1), `0xA9` (port 2 if dual), expect `0x00`.
+            - [ ] Step 7: Enable ports (`0xAE`, `0xA8`).
+            - [ ] Step 8: Enable IRQs — set config bits 0 (and 1 if dual).
+            - [ ] Step 9: Mouse init on port 2 — reset (`0xFF`), wait ACK (`0xFA`) + BAT (`0xAA`) + device ID, enable data reporting (`0xF4`).
+        - [ ] **Error Recovery:**
+            - [ ] Retry self‑test once on failure (some controllers need two attempts).
+            - [ ] Log port test failure codes to kernel console.
+            - [ ] Continue with single‑channel if port 2 test fails.
+            - [ ] Timeout constants tuned per real hardware profiles (QEMU, Bochs, real i8042).
+
+    - [ ] **Keyboard Driver (`sys/drivers/input/keyboard.c`, `keyboard.h`):**
+
+        > **Files:** `keyboard.c` (IRQ1 handler, scancode decoder, key
+        > buffer), `keyboard.h` (public API).
+
+        - [ ] **IRQ1 Handler (`keyboard_handler`):**
+            - [ ] Read scancode from port 0x60.
+            - [ ] Harvest entropy from TSC + scancode into RNG pool.
+            - [ ] Dispatch to scancode decoder state machine.
+            - [ ] Send EOI (or rely on IDT dispatcher).
+        - [ ] **Scancode Set Decoding:**
+            - [ ] **Set 1 (XT‑compatible, default with translation):**
+                - [ ] Single‑byte make codes (0x01–0x58).
+                - [ ] Single‑byte break codes (make | 0x80).
+                - [ ] Extended prefix `0xE0` → two‑byte sequences:
+                    - [ ] Right Ctrl (E0 1D / E0 9D), Right Alt (E0 38 / E0 B8).
+                    - [ ] Arrow keys (E0 48/50/4B/4D).
+                    - [ ] Insert (E0 52), Delete (E0 53), Home (E0 47), End (E0 4F).
+                    - [ ] Page Up (E0 49), Page Down (E0 51).
+                    - [ ] Print Screen (E0 2A E0 37 / E0 B7 E0 AA).
+                    - [ ] Pause/Break (E1 1D 45 E1 9D C5 — three‑byte E1 sequence).
+                - [ ] Discard spurious `0xE1` prefix after handling Pause.
+            - [ ] **Set 2 (AT) — Optional Future:**
+                - [ ] Stub for native Set 2 decoding (for controllers without translation).
+                - [ ] `0xF0` break prefix instead of bit 7.
+        - [ ] **Scancode‑to‑Keycode Translation:**
+            - [ ] Define `KEY_*` keycodes independent of scancode set (internal enum/defines).
+            - [ ] Map Set 1 scancodes to keycodes via lookup table.
+            - [ ] Separate table for extended (E0‑prefixed) scancodes.
+        - [ ] **Modifier Tracking:**
+            - [ ] Track left/right independently: `kbd_lshift`/`kbd_rshift`, `kbd_lctrl`/`kbd_rctrl`, `kbd_lalt`/`kbd_ralt`.
+            - [ ] Aggregate flags: `kbd_shift`, `kbd_ctrl`, `kbd_alt`.
+            - [ ] Caps Lock toggle state (latch on make, ignore break).
+            - [ ] Num Lock toggle state.
+            - [ ] Scroll Lock toggle state.
+            - [ ] Update LED indicator state to match lock toggles (see LED Control below).
+        - [ ] **Keymap (Scancode/Keycode → Character):**
+            - [ ] **US QWERTY layout tables:**
+                - [ ] `kbd_us[128]`: unshifted ASCII mapping.
+                - [ ] `kbd_us_shifted[128]`: shifted ASCII mapping.
+                - [ ] Caps Lock interaction: uppercase letters but not symbols.
+                - [ ] Num Lock interaction: numpad keys → digits vs navigation.
+            - [ ] **Ctrl character generation:**
+                - [ ] `Ctrl+A..Z` → 0x01..0x1A.
+                - [ ] `Ctrl+[` → ESC (0x1B), `Ctrl+\` → FS (0x1C), `Ctrl+]` → GS (0x1D).
+            - [ ] **Alt character generation:**
+                - [ ] Alt sets bit 7 (traditional) or generates ESC prefix (VT convention).
+            - [ ] **Dead key / Compose key support (deferred):** stub interface.
+            - [ ] **Switchable keymap infrastructure:**
+                - [ ] `struct keymap` with base, shift, ctrl, altgr tables.
+                - [ ] Runtime keymap switching API (`keyboard_set_keymap()`).
+                - [ ] Additional layouts: DE, FR, UK (deferred — provide registration API only).
+        - [ ] **Function Key and Special Key Handling:**
+            - [ ] F1–F12 → generate escape sequences (VT100: `ESC O P`..`ESC O [` or `ESC [ 11~`..`ESC [ 24~`).
+            - [ ] Arrow keys → `ESC [ A/B/C/D`.
+            - [ ] Home/End/Ins/Del/PgUp/PgDn → `ESC [ 1~/2~/3~/4~/5~/6~` (or xterm variants).
+            - [ ] Alt+F1..F12 → VT switching (`vt_activate(n)`).
+            - [ ] Ctrl+F9 → debug process dump.
+            - [ ] SysRq / Print Screen → kernel debug hook (deferred).
+        - [ ] **Key Repeat (Typematic):**
+            - [ ] Send `0xF3` command to keyboard device with delay/rate parameters.
+            - [ ] Default: 250 ms delay, 30 Hz repeat (or use BIOS defaults).
+            - [ ] Alternatively implement software repeat via timer tick (deferred).
+        - [ ] **LED Control:**
+            - [ ] Send `0xED` command to keyboard device with LED status byte.
+            - [ ] Bit 0 = Scroll Lock, Bit 1 = Num Lock, Bit 2 = Caps Lock.
+            - [ ] Update LEDs on lock key toggle.
+            - [ ] Handle ACK (`0xFA`) / Resend (`0xFE`) responses.
+        - [ ] **Key Buffer (`kbd_buffer`):**
+            - [ ] Circular buffer (256 entries).
+            - [ ] `kbd_push(c)`: enqueue translated character.
+            - [ ] `keyboard_getc()`: dequeue character (returns 0 if empty).
+            - [ ] Overflow policy: drop newest keystrokes (preserve existing behavior).
+            - [ ] Consider expanding to store raw `input_event` structs instead of chars.
+        - [ ] **Input Subsystem Integration:**
+            - [ ] Register `input_dev_t` with `name="PS/2 Keyboard"`, `caps=EV_KEY`.
+            - [ ] Call `input_report_key(dev, keycode, 1)` on key press.
+            - [ ] Call `input_report_key(dev, keycode, 0)` on key release (currently missing).
+            - [ ] Call `input_sync(dev)` after each event.
+        - [ ] **VT/TTY Integration:**
+            - [ ] Push translated character to active VT's TTY via `tty_flip_buffer_push()`.
+            - [ ] Fallback to `console_push_char()` if no TTY attached.
+            - [ ] Respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it).
+
+    - [ ] **Mouse Driver (`sys/drivers/input/mouse.c`, `mouse.h`):**
+
+        > **Files:** `mouse.c` (IRQ12 handler, packet decoder, event
+        > queue), `mouse.h` (structures, public API).
+
+        - [ ] **IRQ12 Handler (`mouse_handler`):**
+            - [ ] Read status port to confirm data available (bit 0).
+            - [ ] Read data byte from port 0x60.
+            - [ ] Harvest entropy from TSC + data byte.
+            - [ ] Feed byte to packet state machine.
+        - [ ] **Packet Decoding:**
+            - [ ] **Standard PS/2 Mouse (3‑byte):**
+                - [ ] Byte 0: buttons (bits 0–2), sign bits (bits 4–5), overflow (bits 6–7), alignment bit 3 (always 1).
+                - [ ] Byte 1: X movement (signed 9‑bit with sign from byte 0 bit 4).
+                - [ ] Byte 2: Y movement (signed 9‑bit with sign from byte 0 bit 5, Y‑axis inverted).
+                - [ ] Realignment: if byte 0 bit 3 != 1, resync by discarding bytes.
+            - [ ] **IntelliMouse Extension (4‑byte) — deferred:**
+                - [ ] Detect via magic sample‑rate sequence (200, 100, 80 → ID 0x03).
+                - [ ] Byte 3: Z‑axis (scroll wheel), signed 4‑bit.
+            - [ ] **IntelliMouse Explorer (5‑button) — deferred:**
+                - [ ] Detect via magic sequence (200, 200, 80 → ID 0x04).
+                - [ ] Byte 3: Z‑axis (bits 0–3), buttons 4–5 (bits 4–5).
+            - [ ] **Overflow Handling:**
+                - [ ] If overflow bits (byte 0 bits 6–7) are set, clamp movement to max delta.
+        - [ ] **Mouse State:**
+            - [ ] Track cumulative `mouse_x`, `mouse_y` (absolute position for cursor).
+            - [ ] Track button state (`mouse_buttons`, bits 0=left, 1=right, 2=middle).
+            - [ ] Configurable resolution/acceleration (deferred).
+        - [ ] **Event Queue:**
+            - [ ] Circular buffer of `mouse_event_t` (64 entries).
+            - [ ] `mouse_q_push(dx, dy, buttons)`: enqueue relative event.
+            - [ ] `mouse_get_event(ev)`: dequeue event (returns 0 if empty).
+            - [ ] `mouse_get_state(x, y, buttons)`: poll current absolute position + buttons.
+        - [ ] **Input Subsystem Integration:**
+            - [ ] Register `input_dev_t` with `name="PS/2 Mouse"`, `caps=EV_REL|EV_KEY`.
+            - [ ] Report `REL_X`, `REL_Y`, `REL_WHEEL` (when supported).
+            - [ ] Report `BTN_LEFT` (0x110), `BTN_RIGHT` (0x111), `BTN_MIDDLE` (0x112).
+            - [ ] `input_sync()` after each complete packet.
+
+    - [ ] **Input Subsystem (`sys/input.h`):**
+        - [ ] Abstract `input_event` structure (type, code, value, timestamp).
+        - [ ] `input_register_device(dev)` / `input_unregister_device(dev)`.
+        - [ ] `input_report_key()`, `input_report_rel()`, `input_report_abs()`.
+        - [ ] `input_sync()` — event boundary marker.
+        - [ ] `/dev/input/eventN` character device interface for userspace.
+        - [ ] Event filtering: consumers subscribe to device + event type.
+
+    - [ ] **Hot‑Plug Detection (deferred):**
+        - [ ] Monitor controller status for device insertion/removal.
+        - [ ] Re‑run device identification (`0xF2`) on port activity change.
+        - [ ] (De)register input devices dynamically.
+
+    - [ ] **Testing:**
+        - [ ] **Unit Tests:**
+            - [ ] Scancode Set 1 decoding: verify all single‑byte and E0‑extended codes.
+            - [ ] Modifier tracking: all combinations of shift/ctrl/alt/capslock/numlock.
+            - [ ] Keymap: verify ASCII output for full US‑QWERTY layout (unshifted, shifted, ctrl).
+            - [ ] Key buffer: fill, overflow, drain, verify FIFO order.
+            - [ ] Mouse packet decoding: standard 3‑byte packets with known dx/dy/buttons.
+            - [ ] Mouse packet realignment: inject byte with bit 3 clear, verify resync.
+            - [ ] Mouse overflow: inject overflow bits, verify clamping.
+            - [ ] Mouse event queue: fill, overflow, drain.
+        - [ ] **Property Tests:**
+            - [ ] Key buffer invariant: `0 <= head, tail < KBD_BUFFER_SIZE`, head == tail ↔ empty.
+            - [ ] Mouse queue invariant: `0 <= head, tail < MOUSE_QUEUE_SIZE`.
+            - [ ] Randomized scancode sequences never crash handler or corrupt state.
+        - [ ] **Integration Tests:**
+            - [ ] Boot kernel in QEMU, inject keyboard scancodes via monitor (`sendkey`), verify TTY output.
+            - [ ] Boot kernel, inject mouse events, verify `mouse_get_state()` returns expected position.
+            - [ ] Alt+F1..F12 switches VT correctly.
+            - [ ] Ctrl+C / Ctrl+D / Ctrl+Z generate correct control characters.
+
+    - [ ] **Documentation:**
+        - [ ] Internal doc: PS/2 controller initialization sequence and error handling.
+        - [ ] Internal doc: scancode set 1 table and extended key mapping.
+        - [ ] Internal doc: input subsystem event model and device registration.
+
+- [ ] **Console Subsystem (`sys/console`):**
+    - [ ] **TTY Subsystem (Core):**
+        - [ ] **Structures (`tty_t`):**
+            - [ ] **Buffers & Queues:**
+                - [x] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data.
+                - [x] **Write Buffer (Output):** Queue for driver consumption.
+                - [x] **Canon Buffer (Cooked):** Line-editing buffer for `ICANON` mode.
+                - [x] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`.
+            - [x] **State Control (`termios`):**
+                - [x] `c_iflag`: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON).
+                - [x] `c_oflag`: Output modes (OPOST, ONLCR, OXTABS).
+                - [ ] `c_cflag`: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS).
+                - [x] `c_lflag`: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP).
+                - [x] `c_cc`: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME, VSTART, VSTOP, VWERASE).
+                - [x] `winsize`: Window size tracking (rows/cols) + `SIGWINCH`.
+            - [x] **Line Discipline (`N_TTY`):**
+                - [x] **Input Processing (`n_tty_receive_buf`):**
+                    - [x] Parity checks and stripping.
+                    - [x] Newline translation (CR->NL).
+                    - [x] Software flow control (XON/XOFF detection).
+                    - [x] Signal generation check (`ISIG`).
+                - [x] **Canonical Editing (`n_tty_read`):**
+                    - [x] Backspace/Delete handling (`VERASE`).
+                    - [x] Line kill (`VKILL`).
+                    - [x] Word erase (`VWERASE`).
+                    - [x] EOF handling (`VEOF` / Ctrl+D).
+                - [x] **Output Post-processing (`n_tty_write`):**
+                    - [x] Newline expansion (NL -> CR/NL).
+                    - [x] Tab expansion (optional).
+                - [x] **Echoing Logic:**
+                    - [x] Raw echo (input char -> output).
+                    - [x] Control char echo (`^C`).
+                    - [x] Erase echo (backspace-space-backspace sequence).
+            - [x] **Driver Interface (`tty_driver`):**
+                - [x] `install` / `remove`: setup private data.
+                - [x] `open` / `close`: hardware init/shutdown.
+                - [x] `write`: device output path.
+                - [x] `put_char`: optimized single-char write.
+                - [x] `flush_chars`: kick hardware transmission.
+                - [x] `write_room`: check available hardware buffer space.
+                - [x] `chars_in_buffer`: check pending bytes.
+                - [x] `ioctl`: hardware-specific controls.
+                - [x] `throttle` / `unthrottle`: hardware flow control hooks.
+            - [x] **Session/Job Control:**
+                - [x] `tty_struct.session`: Pointer to current session.
+                - [x] `tty_struct.pgrp`: Pointer to foreground process group.
+                - [x] `tty_check_change()`: Verify background writes (`SIGTTOU`).
+        - [x] **API:**
+            - [x] `tty_init()`: Initialize subsystem.
+            - [x] `tty_alloc()`: Create a new TTY device.
+            - [x] `tty_register_device()`: Register with DevFS `/dev/ttyX`.
+            - [x] `tty_open`, `tty_close`: Refcounting and session logic.
+            - [x] `tty_read`, `tty_write`: Dispatch to ldisc.
+            - [x] `tty_ioctl`:
+                - [x] `TIOCSCTTY`: Become controlling TTY.
+                - [x] `TIOCSPGRP` / `TIOCGPGRP`: Manage foreground group.
+                - [x] `TCGETS` / `TCSETS`: Termios get/set.
+                - [x] `TIOCGWINSZ`: Window size.
+    - [x] **Virtual Terminal (VT) Layer:**
+        - [x] **VT Management:** Array of `vt_state_t` structures (vt0..vtN).
+        - [x] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`).
+        - [ ] **Emulation:** VT102 state machine (escape codes).
+    - [x] **Backend Drivers:**
+        - [x] **VGA Text Mode Console:**
+            - [x] **Initialization:**
+                - [x] Detect VGA presence (BIOS/PCI enumeration).
+                - [x] Set 80x25 or 80x50 text mode.
+                - [x] Map video memory (0xB8000) into kernel address space.
+                - [x] Initialize attribute byte defaults (white on black).
+            - [x] **Text Output:**
+                - [x] Implement `vga_putchar(char c, uint8_t attr)`.
+                - [x] Handle control characters (CR, LF, BS, TAB, BEL).
+                - [x] Implement `vga_write(const char *buf, size_t len)`.
+                - [x] Tab stop handling (configurable tab width).
+            - [x] **Cursor Control:**
+                - [x] Read/write hardware cursor position (CRTC registers 0x0E/0x0F).
+                - [x] Cursor shape control (underline, block, invisible).
+                - [x] Cursor blink enable/disable.
+            - [x] **Scrolling:**
+                - [x] Software scroll (memmove video buffer).
+                - [x] Hardware scroll (CRTC start address register).
+                - [x] Scroll region support (VT102 DECSTBM).
+            - [x] **Attributes:**
+                - [x] 16-color foreground/background palette.
+                - [x] Blink/bright background toggle (attribute controller).
+                - [x] Reverse video, bold, underline emulation.
+            - [x] **TTY Binding:**
+                - [x] Register as `tty_driver` for `/dev/tty[1-N]`.
+                - [x] Implement `tty_driver->write()` callback.
+                - [ ] Implement `tty_driver->ioctl()` for VGA-specific controls.
+        - [x] **Keyboard Input (PS/2 to TTY):**
+            - [x] Fix PS/2 driver build errors (constant mismatches in `test_ps2.c`).
+            - [x] **Input Path:**
+                - [x] Hook keyboard driver to TTY input queue.
+                - [x] Convert scancodes to ASCII via keymap.
+                - [x] Handle modifier keys (Shift, Ctrl, Alt, AltGr).
+                - [ ] Generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A).
+            - [ ] **Special Keys:**
+                - [ ] Function keys (F1-F12) to escape sequences.
+                - [ ] Arrow keys to ANSI escape sequences.
+                - [ ] Insert, Delete, Home, End, PgUp, PgDn sequences.
+                - [ ] Numeric keypad handling (NumLock state).
+            - [ ] **Console Switching:**
+                - [ ] Alt+F1..F12 for virtual console switch.
+                - [ ] Ctrl+Alt+Del for reboot/shutdown hook.
+                - [ ] SysRq key handling (magic SysRq sequences).
+            - [ ] **LED Control:**
+                - [ ] Sync Caps Lock, Num Lock, Scroll Lock LEDs.
+                - [ ] LED state persistence across console switches.
+        - [ ] **Framebuffer Console (Graphical):**
+            - [ ] **Core Infrastructure:**
+                - [ ] `struct fb_info` device abstraction.
+                - [ ] Framebuffer registration/deregistration API.
+                - [ ] Memory mapping (physical to kernel virtual).
+                - [ ] `/dev/fb/[0-N]` device node creation.
+            - [ ] **Drivers:**
+                - [ ] **VESA VBE (Linear Framebuffer):**
+                    - [ ] VBE 2.0+ detection and capability query.
+                    - [ ] Mode enumeration and selection.
+                    - [ ] Linear framebuffer mapping (LFB base address).
+                    - [ ] Protected mode interface (PM32 entry points).
+                    - [ ] EDID retrieval for monitor detection.
+                - [ ] **UEFI GOP (Graphics Output Protocol):**
+                    - [ ] GOP protocol location and initialization.
+                    - [ ] Mode query and switching.
+                    - [ ] Framebuffer base and stride retrieval.
+                    - [ ] EFI runtime services integration.
+                - [ ] **Bochs Graphics Adapter (BGA):**
+                    - [ ] BGA detection (PCI vendor/device ID, I/O ports).
+                    - [ ] VBE DISPI register interface.
+                    - [ ] Mode setting (resolution, bpp, enable LFB).
+                    - [ ] Virtual resolution and display offset.
+                    - [ ] Bank switching (legacy mode fallback).
+                - [ ] **VirtIO-GPU:**
+                    - [ ] VirtIO device discovery and setup.
+                    - [ ] Resource creation (2D scanout).
+                    - [ ] Transfer to host (flush dirty regions).
+                    - [ ] Display info query (resolution, format).
+                    - [ ] Cursor image upload and positioning.
+            - [ ] **Pixel Formats:**
+                - [ ] 8-bit indexed (palette-based).
+                - [ ] 16-bit (RGB565, ARGB1555).
+                - [ ] 24-bit (RGB888, BGR888).
+                - [ ] 32-bit (ARGB8888, XRGB8888, ABGR8888).
+                - [ ] Endianness handling (little/big endian).
+                - [ ] Format conversion routines.
+            - [ ] **Rendering:**
+                - [ ] **Font Support:**
+                    - [ ] PSF1 font parser (256/512 glyphs, fixed width).
+                    - [ ] PSF2 font parser (Unicode table, variable metrics).
+                    - [ ] BDF/PCF font support (optional).
+                    - [ ] Built-in fallback font (8x16 VGA ROM font).
+                    - [ ] Font glyph cache (hash table lookup).
+                    - [ ] Unicode to glyph mapping (cmap).
+                - [ ] **Blitting Operations:**
+                    - [ ] `fb_fillrect()`: Solid color fill with ROP support.
+                    - [ ] `fb_copyarea()`: Screen-to-screen blit.
+                    - [ ] `fb_imageblit()`: Mono/color image to framebuffer.
+                    - [ ] Accelerated ops detection and fallback.
+                    - [ ] Clipping (viewport bounds checking).
+                - [ ] **Character Rendering:**
+                    - [ ] Glyph rendering with foreground/background colors.
+                    - [ ] Bold rendering (shift and OR, or bold font).
+                    - [ ] Italic rendering (shear transform, or italic font).
+                    - [ ] Underline and strikethrough rendering.
+                    - [ ] Reverse video attribute.
+                - [ ] **Performance:**
+                    - [ ] Double buffering (offscreen back buffer).
+                    - [ ] Dirty rectangle tracking.
+                    - [ ] Deferred updates (batch flush on vsync).
+                    - [ ] Write-combining memory type (PAT/MTRR).
+            - [ ] **Cursor:**
+                - [ ] **Software Cursor:**
+                    - [ ] XOR cursor rendering.
+                    - [ ] Cursor save/restore (background preservation).
+                    - [ ] Cursor blink timer integration.
+                - [ ] **Hardware Cursor:**
+                    - [ ] Cursor image upload (ARGB format).
+                    - [ ] Cursor position registers.
+                    - [ ] Hot spot offset configuration.
+                    - [ ] Cursor enable/disable.
+            - [ ] **Emulation (VT102/ANSI):**
+                - [ ] **Parser State Machine:**
+                    - [ ] Ground state (printable characters).
+                    - [ ] Escape state (ESC received).
+                    - [ ] CSI state (ESC [ sequences).
+                    - [ ] OSC state (Operating System Commands).
+                    - [ ] DCS state (Device Control Strings).
+                    - [ ] Parameter accumulation and parsing.
+                - [ ] **Cursor Control Sequences:**
+                    - [ ] CUU/CUD/CUF/CUB (cursor movement).
+                    - [ ] CUP/HVP (absolute positioning).
+                    - [ ] CNL/CPL (next/previous line).
+                    - [ ] CHA/VPA (column/row absolute).
+                    - [ ] SC/RC (save/restore cursor position).
+                    - [ ] DECSC/DECRC (save/restore with attributes).
+                - [ ] **Erase Sequences:**
+                    - [ ] ED (erase display: to end, to start, all).
+                    - [ ] EL (erase line: to end, to start, all).
+                    - [ ] ECH (erase characters).
+                    - [ ] DCH/ICH (delete/insert characters).
+                    - [ ] DL/IL (delete/insert lines).
+                - [ ] **Attribute Sequences (SGR):**
+                    - [ ] Reset (SGR 0).
+                    - [ ] Bold/dim/italic/underline/blink/reverse/hidden.
+                    - [ ] 8-color foreground/background (30-37, 40-47).
+                    - [ ] Bright colors (90-97, 100-107).
+                    - [ ] 256-color mode (38;5;N, 48;5;N).
+                    - [ ] 24-bit true color (38;2;R;G;B, 48;2;R;G;B).
+                - [ ] **Scrolling:**
+                    - [ ] DECSTBM (set top/bottom margins).
+                    - [ ] SU/SD (scroll up/down).
+                    - [ ] IND/RI (index/reverse index).
+                    - [ ] Smooth scroll support (optional).
+                - [ ] **Modes:**
+                    - [ ] DECCKM (cursor key mode: application/normal).
+                    - [ ] DECAWM (auto-wrap mode).
+                    - [ ] DECOM (origin mode: absolute/relative).
+                    - [ ] DECTCEM (cursor visibility).
+                    - [ ] Alternate screen buffer (DECSET 1049).
+                    - [ ] Bracketed paste mode (DECSET 2004).
+                - [ ] **Character Sets:**
+                    - [ ] G0/G1/G2/G3 character set designation.
+                    - [ ] SI/SO (shift in/out for G0/G1).
+                    - [ ] DEC Special Graphics (line drawing).
+                    - [ ] UTF-8 decoding and Unicode support.
+                - [ ] **Tabs:**
+                    - [ ] HTS (horizontal tab set).
+                    - [ ] TBC (tab clear: current, all).
+                    - [ ] CHT/CBT (cursor horizontal tab forward/back).
+                    - [ ] Default tab stops (every 8 columns).
+                - [ ] **Reports:**
+                    - [ ] DSR (device status report).
+                    - [ ] CPR (cursor position report).
+                    - [ ] DA (device attributes).
+                    - [ ] DECID (terminal ID).
+            - [ ] **TTY Binding:**
+                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`.
+                - [ ] `tty_driver->write()` with escape sequence processing.
+                - [ ] `tty_driver->ioctl()` for FB-specific controls.
+                - [ ] Window size tracking (TIOCGWINSZ/TIOCSWINSZ).
+        - [ ] **Serial Console (Headless):**
+            - [ ] **UART Drivers:**
+                - [ ] 8250/16550 UART driver (I/O port and MMIO).
+                - [ ] Baud rate configuration (divisor latch).
+                - [ ] Line control (data bits, parity, stop bits).
+                - [ ] FIFO control (16550A FIFO enable, trigger level).
+                - [ ] Modem control signals (DTR, RTS).
+                - [ ] Modem status signals (CTS, DSR, DCD, RI).
+                - [ ] Interrupt-driven I/O (IRQ handler).
+                - [ ] Polling mode fallback (for early boot).
+            - [ ] **Console Output:**
+                - [ ] VT102 pass-through (raw escape sequences).
+                - [ ] Output buffering and flow control.
+                - [ ] XON/XOFF software flow control.
+                - [ ] RTS/CTS hardware flow control.
+                - [ ] Break signal transmission.
+            - [ ] **Console Input:**
+                - [ ] Character reception and buffering.
+                - [ ] Break signal detection.
+                - [ ] Framing and parity error handling.
+                - [ ] Overrun error handling.
+            - [ ] **TTY Binding:**
+                - [ ] Register as `tty_driver` for `/dev/ttyS[0-N]`.
+                - [ ] `tty_driver->write()` callback.
+                - [ ] `tty_driver->ioctl()` for serial-specific controls.
+                - [ ] `tty_driver->set_termios()` for baud/parity changes.
+            - [ ] **Kernel Console:**
+                - [ ] Early boot console (before TTY init).
+                - [ ] `console=ttyS0,115200n8` kernel parameter parsing.
+                - [ ] Kernel panic output to serial.
+                - [ ] SysRq over serial (break + key).
+    - [ ] **Features:**
+        - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles.
+        - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.??
+- [x] **RNG Subsystem (`/dev/random`, `/dev/urandom`):** <!-- random.c, random_internal.h, sys/random.h -->
+    - [x] **Core Infrastructure:**
+        - [x] **Data Structures:**
+            - [x] Define `struct entropy_pool` (input pool, output pool, counters). <!-- random_internal.h -->
+            - [x] Define `struct chacha20_ctx` (key, counter, block buffer). <!-- random_internal.h -->
+            - [x] Define `struct rng_state` (global RNG state, seeded flag, reseed counter). <!-- random_internal.h -->
+            - [x] Create `spinlock_t entropy_lock` for pool access. <!-- random.c -->
+            - [x] Create `spinlock_t output_lock` for CSPRNG state. <!-- random.c -->
+            - [x] Define entropy estimation structures (bits per source). <!-- random_internal.h -->
+        - [x] **Header Files:**
+            - [x] Create `sys/include/sys/random.h` (public API).
+            - [x] Create `sys/kern/random_internal.h` (internal structures).
+            - [x] Define `GRND_NONBLOCK`, `GRND_RANDOM`, `GRND_INSECURE` flags. <!-- sys/random.h -->
+        - [x] **Initialization:**
+            - [x] Implement `random_init()` called from `kmain`. <!-- random.c:449, main.c -->
+            - [x] Initialize entropy pools to zero. <!-- random.c:454 -->
+            - [x] Initialize CSPRNG state. <!-- random.c:456-458 -->
+            - [x] Set initial seeded flag to false. <!-- random.c:453 (memset) -->
+            - [x] Register `/dev/random` and `/dev/urandom` device nodes. <!-- random.c:478-494 -->
+    - [x] **CSPRNG Algorithm (ChaCha20):** <!-- random.c:30-159 -->
+        - [x] **Core Implementation:**
+            - [x] Implement ChaCha20 quarter-round function. <!-- random.c:33-38 QR macro -->
+            - [x] Implement ChaCha20 column and diagonal rounds. <!-- random.c:48-58 -->
+            - [x] Implement ChaCha20 block function (20 rounds). <!-- random.c:41-63 -->
+            - [x] Implement keystream generation with counter increment. <!-- random.c:107-115 -->
+            - [x] Implement output serialization (little-endian). <!-- random.c:100-105 -->
+        - [x] **Key Management:**
+            - [x] Implement `chacha20_init(ctx, key, nonce)`. <!-- random.c:66-91 -->
+            - [x] Implement `chacha20_rekey(ctx)` (fast-key-erasure). <!-- random.c:140-154 -->
+            - [x] Implement `chacha20_wipe(ctx)` (secure zeroing). <!-- random.c:157-159 -->
+        - [x] **Output Generation:**
+            - [x] Implement `chacha20_extract(ctx, buf, len)`. <!-- random.c:119-137 -->
+            - [x] Buffer partial blocks for efficiency. <!-- random.c:123-134 -->
+            - [x] Rekey after every 1MB of output (configurable). <!-- random.c:397-401 RESEED_INTERVAL -->
+        - [ ] **Testing:**
+            - [ ] RFC 7539 test vectors (known answer tests).
+            - [ ] Block function correctness tests.
+            - [ ] Counter wraparound handling tests.
+    - [x] **Entropy Mixing (Input Pool):** <!-- random.c:161-224 -->
+        - [x] **Mixing Function:**
+            - [x] Implement LFSR-based mixing (Linux-style). <!-- random.c:177-192 -->
+            - [x] Implement CRC32-based fast mixing. <!-- Uses twist table -->
+            - [x] Implement SHA-256 compression for extraction. <!-- Simplified compression random.c:198-206 -->
+            - [x] Implement twist table for polynomial feedback. <!-- random.c:166-169 -->
+        - [x] **Pool Management:**
+            - [x] Define input pool size (4096 bits / 512 bytes). <!-- random_internal.h ENTROPY_POOL_SIZE -->
+            - [x] Implement `pool_mix_bytes(pool, data, len)`. <!-- random.c:177-195 -->
+            - [x] Implement `pool_extract_bytes(pool, out, len)`. <!-- random.c:209-224 -->
+            - [x] Track estimated entropy bits in pool. <!-- entropy_pool.entropy_count -->
+        - [x] **Entropy Estimation:**
+            - [x] Conservative entropy crediting (bits per event). <!-- random.c:317-321 -->
+            - [x] Overflow protection (cap at pool size). <!-- random.c:318-320 -->
+            - [x] Debit entropy on extraction. <!-- random.c:361 -->
+            - [x] Track total entropy collected since boot. <!-- entropy_pool.total_harvested -->
+    - [x] **Entropy Sources & Harvesting:** <!-- random.c:303-345 -->
+        - [x] **Harvesting Infrastructure:**
+            - [x] Implement `random_harvest(data, len, bits, source)` (general API). <!-- random.c:307-326 -->
+            - [x] Implement `random_harvest_fast(data, len)` (ISR-safe, no lock). <!-- random.c:328-341 -->
+            - [x] Implement `random_harvest_direct(data, len, bits)` (high-quality). <!-- random.c:343-345 -->
+            - [x] Define `enum entropy_source` (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG). <!-- sys/random.h -->
+            - [x] Per-source entropy rate limiting. <!-- rng_state.harvest_count[] -->
+        - [x] **Timing-Based Sources:**
+            - [x] **Interrupt Timing:**
+                - [x] Hook `pit_handler` for timer jitter (TSC delta). <!-- via isr_handler(IRQ0) -->
+                - [x] Hook `isr_handler` for interrupt timing. <!-- idt.c:isr_handler -->
+                - [x] Mix TSC low bits on each interrupt. <!-- random_harvest_fast -->
+                - [x] Credit ~1 bit per interrupt timing sample. <!-- using random_harvest_fast (mixing only) -->
+            - [x] **Keyboard/Mouse:** <!-- keyboard.c, mouse.c -->
+                - [x] Hook `keyboard_handler` (scancode + timing). <!-- keyboard.c:68-72 -->
+                - [x] Hook PS/2 mouse driver (movement + timing). <!-- mouse.c:54-58 -->
+                - [x] Credit ~2-4 bits per HID event. <!-- Uses random_harvest_fast -->
+            - [x] **Disk I/O:**
+                - [x] Hook IDE/AHCI/VirtIO completion interrupts. <!-- Hooked virtio_blk (sync), ide -->
+                - [x] Mix seek time / completion jitter.
+                - [x] Credit ~1 bit per I/O completion.
+            - [ ] **Network:**
+                - [ ] Hook network packet arrival (timing + data).
+                - [ ] Mix packet timing and partial payload.
+                - [ ] Credit ~2 bits per packet timing.
+        - [x] **Hardware RNG (RDRAND/RDSEED):** <!-- random.c:226-301 -->
+            - [x] **Detection:**
+                - [x] CPUID feature detection for RDRAND (ECX bit 30). <!-- random.c:241-244 -->
+                - [x] CPUID feature detection for RDSEED (EBX bit 18). <!-- random.c:251-254 -->
+                - [x] Runtime availability flags. <!-- rng_state.has_rdrand, has_rdseed -->
+            - [x] **Implementation:**
+                - [x] Implement `rdrand32()`, `rdrand64()` with retry loop. <!-- random.c:266-287 -->
+                - [x] Implement `rdseed32()`, `rdseed64()` with failure handling.
+                - [x] Fallback path when HWRNG unavailable. <!-- random.c:267 -->
+            - [x] **Integration:**
+                - [x] Periodic HWRNG harvesting (if available). <!-- random.c:464-468 -->
+                - [x] Mix HWRNG output into entropy pool. <!-- random.c:295 -->
+                - [ ] Use HWRNG for fast-path output (XOR with CSPRNG).
+                - [x] Credit ~32 bits per RDRAND invocation (conservative). <!-- random.c:296 -->
+        - [ ] **Jitter Entropy (CPU Timing):**
+            - [ ] Use BogoMIPS calibration loop for jitter measurement.
+            - [ ] Implement `jitterentropy_collect()` (memory access timing).
+            - [ ] CPU execution jitter measurement.
+            - [ ] Memory access timing variations.
+            - [ ] Minimum samples before crediting.
+        - [ ] **VirtIO Entropy Device:**
+            - [ ] VirtIO RNG device detection (device type 4).
+            - [ ] Request entropy from hypervisor.
+            - [ ] Mix hypervisor-provided randomness.
+            - [ ] Credit appropriately (host-dependent quality).
+    - [x] **Reseeding & State Management:** <!-- random.c:356-372 -->
+        - [x] **Reseed Logic:**
+            - [x] Implement `random_reseed()` (extract from input pool). <!-- random.c:356-372 -->
+            - [x] Minimum entropy threshold before first seed (256 bits). <!-- random.c:389, 471 -->
+            - [x] Reseed interval (time-based or output-based). <!-- RESEED_INTERVAL, random.c:397 -->
+            - [x] Reseed on entropy pool reaching threshold. <!-- random.c:389-391 -->
+        - [x] **Seeded State Tracking:**
+            - [x] Track `rng_seeded` boolean. <!-- rng_state.seeded -->
+            - [x] Track `reseed_count` for auditing. <!-- rng_state.reseed_count -->
+            - [x] Implement `random_is_seeded()` query. <!-- random.c:351-353 -->
+            - [x] Block reads until first seed (for `/dev/random`). <!-- random.c:382-392 -->
+        - [ ] **Catastrophic Reseed:**
+            - [ ] Full state replacement on seed file load.
+            - [ ] Wipe previous state before new key material.
+            - [ ] Notify waiters after reseed.
+    - [x] **Device Interfaces:** <!-- random.c:410-494 -->
+        - [x] **`/dev/random` (Blocking):**
+            - [x] Implement `random_dev_open()`. <!-- implicit via fs_node_t -->
+            - [x] Implement `random_dev_read()` with blocking. <!-- random.c:415-421 -->
+            - [x] Block until minimum entropy available. <!-- random.c:382-392 -->
+            - [x] Wait queue for blocked readers (`random_wait`).
+            - [x] Wakeup on entropy addition.
+            - [ ] Implement `random_dev_poll()` (POLLIN when seeded).
+        - [x] **`/dev/urandom` (Non-blocking):**
+            - [x] Implement `urandom_dev_read()` (always returns data). <!-- random.c:424-430 -->
+            - [ ] Warn once if read before seeded (dmesg).
+            - [x] High throughput (CSPRNG stream). <!-- ChaCha20 stream -->
+            - [x] No entropy debit (unlimited output). <!-- GRND_INSECURE -->
+        - [x] **Shared Implementation:**
+            - [x] Device major/minor number allocation. <!-- implicit -->
+            - [x] `struct file_operations` registration. <!-- fs_node_t callbacks -->
+            - [x] Character device creation. <!-- devfs_register_device -->
+            - [x] Permissions check (world-readable). <!-- inherits from devfs -->
+        - [ ] **`getrandom()` Syscall:**
+            - [ ] Implement `sys_getrandom(buf, len, flags)`.
+            - [ ] `GRND_RANDOM` flag (use blocking pool).
+            - [ ] `GRND_NONBLOCK` flag (return EAGAIN if not seeded).
+            - [ ] `GRND_INSECURE` flag (return data even if not seeded).
+            - [ ] Personality support (native, Linux, FreeBSD).
+            - [ ] Register syscall number in all personality tables.
+        - [ ] **Kernel Internal API:**
+            - [ ] Implement `get_random_bytes(buf, len)` (kernel consumers).
+            - [ ] Implement `get_random_u32()`, `get_random_u64()`.
+            - [ ] Implement `get_random_bytes_wait(buf, len)` (blocking).
+            - [ ] Early boot fallback (before seeded).
+    - [ ] **IOCTLs & Administrative Interface:**
+        - [ ] **IOCTL Commands:**
+            - [ ] `RNDGETENTCNT`: Return entropy estimate (bits).
+            - [ ] `RNDADDTOENTCNT`: Add to entropy count (privileged).
+            - [ ] `RNDADDENTROPY`: Add entropy data + credit (privileged).
+            - [ ] `RNDZAPENTCNT`: Zero entropy count (privileged).
+            - [ ] `RNDCLEARPOOL`: Clear entropy pool (privileged).
+            - [ ] `RNDRESEEDCRNG`: Force CSPRNG reseed (privileged).
+        - [ ] **Implementation:**
+            - [ ] Implement `random_dev_ioctl()` dispatcher.
+            - [ ] Privilege checks (CAP_SYS_ADMIN or root).
+            - [ ] Input validation for user-provided entropy.
+            - [ ] Copyin/copyout for userspace buffers.
+        - [ ] **Sysctl Interface (Optional):**
+            - [ ] `kern.random.entropy_avail` (read-only).
+            - [ ] `kern.random.poolsize` (read-only).
+            - [ ] `kern.random.uuid` (read-only, per-read UUID).
+            - [ ] `kern.random.boot_id` (read-only, boot UUID).
+    - [ ] **Security & Correctness:**
+        - [ ] **Fork Safety:**
+            - [ ] Implement `random_reseed_on_fork()` hook.
+            - [ ] Call from `proc_fork()` after child creation.
+            - [ ] Mix PID, timestamp into child's CSPRNG state.
+            - [ ] Ensure parent and child diverge immediately.
+            - [ ] Wipe any copied CSPRNG buffer in child.
+        - [ ] **Exec Safety:**
+            - [ ] Wipe userspace-visible RNG state on `execve`.
+            - [ ] Reset any per-process CSPRNG state.
+            - [ ] Ensure no entropy leakage across exec boundary.
+        - [ ] **Memory Protection:**
+            - [ ] Use `explicit_bzero()` for sensitive state clearing.
+            - [ ] Mark CSPRNG state pages non-swappable.
+            - [ ] Clear key material immediately after rekey.
+            - [ ] Avoid leaving entropy in temporary buffers.
+        - [ ] **Backtracking Resistance:**
+            - [ ] Fast-key-erasure design (rekey after extraction).
+            - [ ] Cannot recover previous output given current state.
+            - [ ] Wipe intermediate state after each operation.
+        - [ ] **Prediction Resistance:**
+            - [ ] Periodic reseed from entropy pool.
+            - [ ] Mix in fresh entropy continuously.
+            - [ ] HWRNG XOR for defense-in-depth.
+        - [ ] **Audit & Logging:**
+            - [ ] Log first seed event.
+            - [ ] Log reseed events (rate-limited).
+            - [ ] Log HWRNG initialization status.
+            - [ ] Log warnings for uninitialized reads.
+    - [ ] **Boot-time Entropy & Seed File:**
+        - [ ] **Early Boot Entropy:**
+            - [ ] Collect BIOS/firmware timestamps.
+            - [ ] Collect Multiboot structure addresses.
+            - [ ] Collect memory map contents.
+            - [ ] Collect interrupt timing during init.
+        - [ ] **Seed File Support:**
+            - [ ] Read seed file from root filesystem on mount.
+            - [ ] Expected path: `/var/db/entropy/seed`.
+            - [ ] Seed file format: raw 256 bytes minimum.
+            - [ ] Mix seed file into entropy pool.
+            - [ ] Immediately overwrite seed file with fresh randomness.
+        - [ ] **Shutdown Handling:**
+            - [ ] Write fresh seed file on clean shutdown.
+            - [ ] Ensure seed file written before unmount.
+            - [ ] Atomic write (write temp, rename).
+    - [ ] **Performance Optimization:**
+        - [ ] **Fast Path:**
+            - [ ] Per-CPU CSPRNG state (avoid lock contention).
+            - [ ] Batch output generation (64-byte blocks).
+            - [ ] Minimize lock hold time.
+            - [ ] Lockless entropy harvesting counters.
+        - [ ] **Benchmarking:**
+            - [ ] Create `sys/tests/bench_rng.c` for throughput.
+            - [ ] Measure `get_random_bytes()` MB/s.
+            - [ ] Measure `read(/dev/urandom)` MB/s.
+            - [ ] Measure entropy harvesting overhead.
+            - [ ] Profile lock contention under load.
+        - [ ] **Optimization Targets:**
+            - [ ] Target: >100 MB/s for `/dev/urandom`.
+            - [ ] Target: <1μs for `get_random_u32()`.
+            - [ ] Target: <100ns for `random_harvest_fast()`.
+    - [ ] **Testing:**
+        - [ ] **Unit Tests:**
+            - [ ] `test_chacha20.c`: RFC 7539 test vectors.
+            - [ ] `test_entropy_pool.c`: Mixing function correctness.
+            - [ ] `test_rng_seeding.c`: Reseed logic validation.
+            - [ ] `test_rng_fork.c`: Parent/child output divergence.
+            - [ ] `test_rng_exec.c`: State wipe on exec.
+            - [ ] `test_getrandom.c`: Syscall interface validation.
+        - [ ] **Statistical Tests:**
+            - [ ] Dieharder test suite integration.
+            - [ ] NIST SP 800-22 test suite.
+            - [ ] TestU01 BigCrush (optional).
+            - [ ] Minimum: Frequency, runs, and chi-square tests.
+        - [ ] **Integration Tests:**
+            - [ ] Boot-to-seeded timing measurement.
+            - [ ] Stress test under heavy read load.
+            - [ ] Multi-process concurrent read test.
+            - [ ] HWRNG fallback path testing.
+    - [ ] **Documentation:**
+        - [ ] **Man Pages:**
+            - [ ] `man4/random.4`: Device interface documentation.
+            - [ ] `man2/getrandom.2`: Syscall documentation.
+            - [ ] Document blocking vs non-blocking behavior.
+            - [ ] Document entropy sources and estimation.
+            - [ ] Document security properties and limitations.
+        - [ ] **Kernel Documentation:**
+            - [ ] Architecture overview in `doc/random.md`.
+            - [ ] Entropy source hookup guide.
+            - [ ] Security model documentation.
+            - [ ] Performance tuning guide.
+
+### 4. Filesystem (`sys/fs`, `sys/vfs`)
+- [ ] **VFS Subsystem Refactor (BSD-style):**
+
+    > **Files:** `sys/vfs/vfs.h`, `vfs.c`, `vnode.h`, `vnode_ops.c`,
+    > `namecache.c`, `bio.c`, `buf.h`, `vnode_lock.c`, `vfs_mount.c`.
+    >
+    > **Architecture:** BSD-style VFS with vnodes, mount points, namei
+    > lookup, buffer cache, and per-filesystem operations vectors.
+
+    - [ ] **Core Structures & Life Cycle:**
+        - [ ] **`struct vnode`:**
+            - [ ] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD.
+            - [ ] `v_tag`: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.
+            - [ ] `v_op` (operations vector), `v_data` (private fs data).
+            - [ ] `v_mount` (pointer to mount point).
+            - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
+            - [ ] `v_writecount` (writers count).
+            - [ ] `v_flag`: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc.
+            - [ ] `v_lock` (exclusive/shared lockmgr lock).
+            - [ ] `v_numoutput` (pending async writes for fsync).
+            - [ ] `v_hash` (hash chain for vnode cache lookup).
+            - [ ] **Life Cycle:**
+                - [ ] `getnewvnode(tag, mp, ops, vpp)`: allocate from zone, recycle LRU if pool full.
+                - [ ] `vref(vp)`: increment use count.
+                - [ ] `vrele(vp)`: decrement use count, trigger inactive/reclaim if zero.
+                - [ ] `vput(vp)`: unlock and vrele.
+                - [ ] `vget(vp, flags)`: lock and vref (with LK_NOWAIT support).
+                - [ ] `vgone(vp)`: mark for doom/destruction.
+                - [ ] `vclean(vp, flags)`: disassociate from filesystem data.
+                - [ ] `vinvalbuf(vp, flags)`: invalidate all buffers for vnode.
+                - [ ] `vflush(mp, skipvp, flags)`: flush all vnodes for mount point.
+        - [ ] **`struct mount`:**
+            - [ ] `mnt_vnodecovered` (vnode mounted on).
+            - [ ] `mnt_op` (VFS ops vector).
+            - [ ] `mnt_data` (private fs data).
+            - [ ] `mnt_flag`: MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS, MNT_ASYNC, MNT_UNION, MNT_LOCAL.
+            - [ ] `mnt_nvnodelist` (list of active vnodes).
+            - [ ] `mnt_stat` (cached `struct statfs`).
+            - [ ] `mnt_maxsymlinklen`: max symlink target stored inline.
+            - [ ] `mnt_lock`: mount-level reader/writer lock.
+        - [ ] **`struct file`:**
+            - [ ] `f_type`: DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE.
+            - [ ] `f_data` (pointer to vnode/socket/pipe).
+            - [ ] `f_flag`: FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT, O_CLOEXEC.
+            - [ ] `f_ops` (file operations vector: read, write, ioctl, poll, close, stat).
+            - [ ] `f_offset` (current file offset, atomic for concurrent access).
+            - [ ] `f_count` (reference count).
+            - [ ] `f_cred` (credentials at open time).
+
+    - [ ] **Pathname Lookup (`namei`):**
+        - [ ] **`struct nameidata`:** lookup state, path string, purpose (LOOKUP/CREATE/DELETE/RENAME).
+        - [ ] **`struct componentname`:** current component, `cn_flags`, `cn_nameptr`, `cn_namelen`.
+        - [ ] **Lookup Logic:**
+            - [ ] Parse `/` delimiters, handle multiple consecutive slashes.
+            - [ ] Handle `.` (current directory) and `..` (parent directory).
+            - [ ] Cross mount points via `mnt_vnodecovered`/`v_mountedhere`.
+            - [ ] Symbolic link resolution with recursion limit (MAXSYMLINKS = 32).
+            - [ ] Handle trailing slash on non-directory (ENOTDIR).
+            - [ ] Handle `AT_FDCWD` and `*at()` syscall relative lookups.
+        - [ ] **Name Cache (`nchash`):**
+            - [ ] Global hash table: `(directory vnode, name)` → target vnode.
+            - [ ] Negative entries: cache "does not exist" results.
+            - [ ] `cache_lookup(dvp, vpp, cnp)`: check cache.
+            - [ ] `cache_enter(dvp, vp, cnp)`: add to cache.
+            - [ ] `cache_purge(vp)`: remove all entries for vnode.
+            - [ ] `cache_purgevfs(mp)`: remove all entries for mount point.
+            - [ ] LRU eviction of cache entries under memory pressure.
+            - [ ] Reader/writer lock for SMP scalability.
+
+    - [ ] **Operations Vectors:**
+        - [ ] **`vfs_ops` (Filesystem-level):**
+            - [ ] `vfs_mount(mp, path, data, ndp, p)`: mount filesystem at path.
+            - [ ] `vfs_start(mp, flags, p)`: post-mount initialization.
+            - [ ] `vfs_unmount(mp, mntflags, p)`: unmount, flush, free.
+                - [ ] `MNT_FORCE`: forced unmount (kill active references).
+            - [ ] `vfs_root(mp, vpp)`: return root vnode.
+            - [ ] `vfs_statfs(mp, sbp, p)`: fill `struct statfs` (f_blocks, f_bfree, f_bavail, f_files, f_ffree).
+            - [ ] `vfs_sync(mp, waitfor, cred, p)`: sync dirty buffers.
+                - [ ] `MNT_WAIT` (synchronous) / `MNT_NOWAIT` (asynchronous).
+            - [ ] `vfs_vget(mp, ino, vpp)`: get vnode by inode number.
+            - [ ] `vfs_fhtovp(mp, fhp, vpp)`: NFS file handle → vnode.
+            - [ ] `vfs_init(vfsp)`: filesystem type initialization (register).
+            - [ ] `vfs_uninit(vfsp)`: filesystem type teardown (unregister).
+        - [ ] **`vnode_ops` (File-level):**
+            - [ ] **Name Resolution:**
+                - [ ] `vop_lookup(dvp, vpp, cnp)`: look up component in directory.
+                - [ ] `vop_cachedlookup(dvp, vpp, cnp)`: cache-first wrapper.
+            - [ ] **Creation/Deletion:**
+                - [ ] `vop_create(dvp, vpp, cnp, vap)`: create regular file.
+                - [ ] `vop_mknod(dvp, vpp, cnp, vap)`: create device node (block/char/FIFO).
+                - [ ] `vop_mkdir(dvp, vpp, cnp, vap)`: create directory (with `.` and `..`).
+                - [ ] `vop_whiteout(dvp, cnp, flags)`: UnionFS whiteout entry.
+                - [ ] `vop_remove(dvp, vp, cnp)`: unlink directory entry.
+                - [ ] `vop_rmdir(dvp, vp, cnp)`: remove empty directory.
+            - [ ] **Access/Attributes:**
+                - [ ] `vop_access(vp, mode, cred, p)`: check r/w/x permissions (POSIX semantics).
+                - [ ] `vop_getattr(vp, vap, cred, p)`: stat (mode, nlink, uid, gid, size, times).
+                - [ ] `vop_setattr(vp, vap, cred, p)`: chmod/chown/truncate/utimes.
+                - [ ] `vop_pathconf(vp, name, retval)`: POSIX pathconf (`_PC_LINK_MAX`, `_PC_NAME_MAX`, etc.).
+            - [ ] **I/O Operations:**
+                - [ ] `vop_open(vp, mode, cred, p)`: open callback (access check, device init).
+                - [ ] `vop_close(vp, fflag, cred, p)`: close callback (sync on last close).
+                - [ ] `vop_read(vp, uio, ioflag, cred)`: read via buffer cache, update atime.
+                - [ ] `vop_write(vp, uio, ioflag, cred)`: write, extend file, update mtime.
+                    - [ ] Flags: `IO_APPEND`, `IO_SYNC`, `IO_UNIT`.
+                - [ ] `vop_ioctl(vp, cmd, data, fflag, cred, p)`: device control.
+                - [ ] `vop_poll(vp, events, cred, p)`: select/poll (POLLIN/POLLOUT/POLLHUP/POLLERR).
+                - [ ] `vop_fsync(vp, cred, waitfor, p)`: flush dirty data.
+                - [ ] `vop_bmap(vp, bn, vpp, bnp, runp)`: logical→physical block mapping.
+                - [ ] `vop_strategy(vp, bp)`: submit buffer to block device.
+            - [ ] **Directories:**
+                - [ ] `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`: read `struct dirent` entries.
+            - [ ] **Links:**
+                - [ ] `vop_link(dvp, vp, cnp)`: create hard link (increment nlink).
+                - [ ] `vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp)`: rename/move (atomic within FS).
+                    - [ ] Same-directory rename, cross-directory rename, overwrite existing.
+                    - [ ] Directory rename: update `..` entry, detect cycles.
+                - [ ] `vop_symlink(dvp, vpp, cnp, vap, target)`: create symbolic link.
+                - [ ] `vop_readlink(vp, uio, cred)`: read symlink target.
+            - [ ] **VM/Memory Integration:**
+                - [ ] `vop_inactive(vp, p)`: last FD closed — truncate if nlink=0, sync dirty.
+                - [ ] `vop_reclaim(vp, p)`: vnode recycled — free fs-private data.
+                - [ ] `vop_lock(vp, flags, p)`: lockmgr lock (LK_SHARED/EXCLUSIVE/NOWAIT/UPGRADE).
+                - [ ] `vop_unlock(vp, flags, p)`: lockmgr unlock.
+                - [ ] `vop_islocked(vp, p)`: query lock status.
+                - [ ] `vop_print(vp)`: debug dump (type, flags, refcount, fs info).
+                - [ ] `vop_advlock(vp, id, op, fl, flags)`: POSIX advisory locking (F_GETLK/F_SETLK/F_SETLKW).
+
+    - [ ] **Native Build Integration (`native_dist`):**
+        - [ ] Update `native_dist` target to build userspace with `HOSTCC`.
+        - [ ] Sanitize `Makefile.inc` for non-cross builds.
+        - [ ] Verify `bin/` and `sbin/` builds on host.
+        - [ ] Host output directory: `host_dist`.
+
+    - [ ] **Compiler Construction Tools:**
+        - [ ] **`yacc` (LALR(1) Parser Generator):**
+            - [ ] Initial skeleton (`usr.bin/yacc`).
+            - [ ] Grammar file parsing (rules, precedence, %token/%type).
+            - [ ] LALR(1) parse table generation (states, actions, gotos).
+            - [ ] Conflict resolution (shift/reduce, reduce/reduce).
+            - [ ] Output `y.tab.c` and `y.tab.h`.
+            - [ ] `-d` flag for header generation.
+            - [ ] `-v` flag for verbose state output (`y.output`).
+        - [ ] **`lex` (Lexical Analyzer Generator):**
+            - [ ] Regular expression to NFA conversion (Thompson's construction).
+            - [ ] NFA to DFA conversion (subset construction).
+            - [ ] DFA minimization (Hopcroft's algorithm).
+            - [ ] Output `lex.yy.c`.
+            - [ ] Character class support (`[a-zA-Z]`, POSIX classes).
+            - [ ] Start conditions (exclusive/inclusive).
+            - [ ] `yywrap()` and `yylex()` interface.
+
+    - [ ] **Buffer Cache Integration (`bio`):**
+
+        > **Files:** `sys/vfs/buf.h`, `sys/vfs/bio.c`.
+        >
+        > **Architecture:** Traditional BSD buffer cache with delayed write,
+        > LRU eviction, and VM page integration.
+
+        - [ ] **`struct buf` Definition:**
+            - [ ] Fields: `b_flags`, `b_data`, `b_bcount`, `b_blkno`, `b_lblkno`, `b_vp`, `b_rcred`, `b_wcred`, `b_resid`, `b_iodone`, `b_error`.
+            - [ ] Flags: `B_BUSY`, `B_DONE`, `B_ERROR`, `B_DELWRI`, `B_PHYS`, `B_READ`, `B_WRITE`, `B_ASYNC`, `B_INVAL`, `B_NOCACHE`, `B_CACHE`.
+            - [ ] Hash chain linkage for lookup by `(vp, blkno)`.
+        - [ ] **Buffer Queues:**
+            - [ ] `BQ_LOCKED`: buffers currently in use.
+            - [ ] `BQ_CLEAN`: clean LRU (eligible for reuse).
+            - [ ] `BQ_DIRTY`: delayed write queue.
+            - [ ] `BQ_EMPTY`: free buffer headers without data.
+        - [ ] **Buffer Cache Functions:**
+            - [ ] `getblk(vp, blkno, size, slpflag, slptimeo)`: get from cache or allocate.
+            - [ ] `bread(vp, blkno, size, cred, bpp)`: synchronous read (getblk + I/O + biowait).
+            - [ ] `breada(vp, blkno, size, rablkno, rabsize, cred, bpp)`: read-ahead variant.
+            - [ ] `bwrite(bp)`: synchronous write.
+            - [ ] `bawrite(bp)`: asynchronous write (initiate, return immediately).
+            - [ ] `bdwrite(bp)`: delayed write (mark B_DELWRI, release).
+            - [ ] `brelse(bp)`: release buffer to appropriate queue.
+            - [ ] `incore(vp, blkno)`: check if block is in cache.
+        - [ ] **Synchronization:**
+            - [ ] `biowait(bp)`: sleep until B_DONE.
+            - [ ] `biodone(bp)`: mark complete, call `b_iodone`, wakeup.
+        - [ ] **Flushing:**
+            - [ ] `bufsync(freq)`: periodic daemon to write dirty buffers.
+            - [ ] `sync()` syscall: flush all dirty buffers.
+            - [ ] `update` daemon (`syncer` kthread): periodic sync every 30 seconds.
+
+    - [ ] **VM Integration (Unified Buffer Cache):**
+        - [ ] **VNode Pager:**
+            - [ ] `vnode_pager_getpages()`: read pages from vnode into `vm_page` array.
+            - [ ] `vnode_pager_putpages()`: write dirty pages to vnode.
+            - [ ] Integrate with buffer cache (shared backing pages).
+        - [ ] **Page Cache Integration:**
+            - [ ] Buffer data backed by `vm_page_t` (not `kmalloc`).
+            - [ ] Unified memory accounting for file cache and buffer cache.
+            - [ ] Zero-copy I/O: mmap shares pages with buffer cache.
+
+    - [ ] **Concurrency & Locking:**
+        - [ ] **VNode Locks (`lockmgr`):**
+            - [ ] `lockmgr(lkp, flags, interlock, p)`: unified lock manager.
+            - [ ] Modes: `LK_SHARED`, `LK_EXCLUSIVE`, `LK_UPGRADE`, `LK_DOWNGRADE`, `LK_DRAIN`.
+            - [ ] `LK_NOWAIT`: non-blocking (return EBUSY).
+            - [ ] Priority inheritance for blocked threads.
+            - [ ] Multiple concurrent readers, single exclusive writer.
+        - [ ] **Interlock:** `v_interlock` mutex for vnode fields (v_usecount, v_flag, v_numoutput).
+        - [ ] **Mount Lock:** `mnt_lock` prevents unmount during vnode operations.
+        - [ ] **Namecache Lock:** reader/writer lock on `nchash` for concurrent lookups.
+        - [ ] **Buffer Lock:** per-buffer `B_BUSY` flag with sleep/wakeup.
+
+    - [ ] **Testing:**
+        - [ ] Unit: vnode lifecycle — `getnewvnode`, `vref`, `vrele`, `vput`, `vget`, `vgone`.
+        - [ ] Unit: name cache — `cache_lookup` hit/miss, `cache_enter`, `cache_purge`, negative entries.
+        - [ ] Unit: namei — simple path, `.`/`..`, mount crossing, symlink resolution, MAXSYMLINKS.
+        - [ ] Unit: vop_create/remove/mkdir/rmdir on ext2.
+        - [ ] Unit: vop_rename same-dir and cross-dir.
+        - [ ] Unit: vop_read/write/fsync round-trip.
+        - [ ] Unit: buffer cache — getblk/bread/bwrite/brelse lifecycle.
+        - [ ] Unit: buffer cache — bdwrite delayed write, then sync flushes.
+        - [ ] Unit: lockmgr — shared/exclusive/upgrade/downgrade/nowait.
+        - [ ] Property: vnode refcount never goes negative.
+        - [ ] Property: no buffer leaks after mount/unmount cycle.
+        - [ ] Integration: mount ext2 → create file → write → read → unlink → unmount.
+        - [ ] Integration: mount FAT32 → readdir → LFN resolution.
+    - [ ] **Documentation:**
+        - [ ] Man pages: `vnode(9)`, `namei(9)`, `VOP_LOOKUP(9)`, `VOP_READ(9)`, `VOP_WRITE(9)`.
+        - [ ] Man pages: `bread(9)`, `bwrite(9)`, `getblk(9)`, `brelse(9)`, `biodone(9)`.
+        - [ ] Man pages: `lockmgr(9)`, `VFS_MOUNT(9)`, `VFS_UNMOUNT(9)`.
+        - [ ] Internal doc: VFS architecture (vnode→mount→vfs_ops→vnode_ops).
+        - [ ] Internal doc: buffer cache lifecycle (getblk→bread→bdwrite→sync).
+
+- [ ] **Legacy/Feature Gaps:**
+    - [ ] Ensure all FS drivers implement complete write paths.
+    - [ ] **`fsck`:** port e2fsprogs or implement native consistency checker.
+    - [ ] **Quotas:** per-user/group disk quotas (UFS/ext2).
+
+- [ ] **EXT2 (Native Filesystem):**
+
+    > **Files:** `sys/fs/ext2/ext2.c`, `ext2.h`, `ext2_vfsops.c`, `ext2_vnops.c`.
+
+    - [ ] Inode allocation/freeing (bitmap-based).
+    - [ ] Block allocation/freeing (bitmap-based, block groups).
+    - [ ] Directory entry creation/deletion.
+    - [ ] **Extended Features:**
+        - [ ] ext2 revision 1: variable inode size, file type in dir entry.
+        - [ ] Sparse superblock: superblock copies only in select block groups.
+        - [ ] Large file support (>2 GB via triple-indirect blocks).
+    - [ ] **VFS Integration:**
+        - [ ] Implement `ext2_mount` / `ext2_unmount` / `ext2_root` / `ext2_statfs`.
+        - [ ] Implement `ext2_lookup` / `ext2_create` / `ext2_remove` / `ext2_rename`.
+        - [ ] Implement `ext2_read` / `ext2_write` / `ext2_fsync`.
+        - [ ] Implement `ext2_readdir` / `ext2_mkdir` / `ext2_rmdir`.
+        - [ ] Implement `ext2_link` / `ext2_symlink` / `ext2_readlink`.
+    - [ ] **Testing:**
+        - [ ] Unit: inode/block alloc/free round-trip.
+        - [ ] Unit: directory entry CRUD.
+        - [ ] Integration: create ext2 image, mount, file ops, unmount, fsck verify.
+        - [ ] Fuzz: mount corrupted ext2 images (malformed superblock, bitmap, inodes).
+
+- [ ] **FAT16/32:**
+
+    > **Files:** `sys/fs/fat/fat.c`, `fat.h`.
+
+    - [ ] FAT parsing and cluster chain following.
+    - [ ] Long File Name (LFN) support (VFAT entries).
+    - [ ] **FAT12 Support:** for floppy disk images.
+    - [ ] **VFS Integration:**
+        - [ ] Implement `fat_mount` / `fat_unmount` / `fat_root` / `fat_statfs`.
+        - [ ] Implement `fat_lookup` / `fat_create` / `fat_remove` / `fat_rename`.
+        - [ ] Implement `fat_read` / `fat_write`.
+        - [ ] Implement `fat_readdir` (8.3 + LFN merging).
+        - [ ] Implement `fat_mkdir` / `fat_rmdir`.
+    - [ ] **Write Support:**
+        - [ ] FAT table update (both copies).
+        - [ ] Cluster allocation/freeing.
+        - [ ] Directory entry creation with LFN slots.
+        - [ ] File truncation (free cluster chain).
+    - [ ] **Testing:**
+        - [ ] Unit: FAT chain parsing (FAT12, FAT16, FAT32).
+        - [ ] Unit: LFN slot reassembly.
+        - [ ] Integration: create FAT image, mount, file ops, unmount, verify with `dosfsck`.
+        - [ ] Fuzz: mount corrupted FAT images.
+
+- [ ] **UDF (Universal Disk Format):**
+
+    > **Files:** `sys/fs/udf/udf.h`, `udf.c`, `udf_write.c`.
+
+    - [ ] **On-Disk Structures (`udf.h`):**
+        - [ ] `udf_tag` (Descriptor Tag — 16 bytes, CRC).
+        - [ ] `udf_avdp` (Anchor Volume Descriptor Pointer).
+        - [ ] `udf_pvd` (Primary Volume Descriptor).
+        - [ ] `udf_pd` (Partition Descriptor).
+        - [ ] `udf_lvd` (Logical Volume Descriptor).
+        - [ ] `udf_fsd` (File Set Descriptor).
+        - [ ] `udf_fe` / `udf_efe` (File Entry / Extended File Entry).
+        - [ ] `udf_fid` (File Identifier Descriptor).
+        - [ ] `udf_short_ad` / `udf_long_ad` (Allocation Descriptors).
+    - [ ] **Read-Only Support (`udf.c`):**
+        - [ ] `udf_read_tag()`: tag CRC verification.
+        - [ ] `udf_find_avdp()`: locate Anchor at sector 256.
+        - [ ] `udf_read_vds()`: parse Volume Descriptor Sequence.
+        - [ ] `udf_read_partition()` / `udf_read_lvd()` / `udf_read_fsd()`.
+        - [ ] `udf_read_fe()`: read File Entry (inode equivalent).
+        - [ ] `udf_read_file()`: read file data via allocation descriptors.
+        - [ ] `udf_readdir()`: iterate directory FIDs.
+        - [ ] `udf_finddir()`: lookup by name.
+        - [ ] `udf_mount()`: VFS mount integration.
+    - [ ] **Write Support (`udf_write.c`):**
+        - [ ] `udf_read_space_bitmap()`: parse unallocated space.
+        - [ ] `udf_alloc_block()` / `udf_free_block()`: space bitmap management.
+        - [ ] `udf_create_fe()`: create new File Entry.
+        - [ ] `udf_write_file()`: write file data.
+        - [ ] `udf_add_fid()` / `udf_remove_fid()`: directory entry management.
+        - [ ] `udf_truncate()`: truncate/extend file.
+    - [ ] **Testing:**
+        - [ ] Unit: tag CRC verification.
+        - [ ] Unit: allocation/deallocation round-trip.
+        - [ ] Property: alloc→free→alloc returns same block.
+        - [ ] Fuzz: mount corrupted UDF images (bad descriptors, invalid CRCs).
+    - [ ] **Documentation:**
+        - [ ] Man pages: `udf(5)` (filesystem description), `udf(4)` (kernel driver).
+
+- [ ] **ISO 9660 / CD-ROM (future):**
+    - [ ] Primary Volume Descriptor parsing.
+    - [ ] Rock Ridge extensions (POSIX metadata).
+    - [ ] Joliet extensions (Unicode filenames).
+    - [ ] Multi-session support.
+    - [ ] El Torito boot catalog parsing (informational).
+
+- [ ] **DevFS (`/dev`):**
+    - [ ] Device Registry: drivers register character/block devices.
+    - [ ] VFS glue: auto-generate vnode nodes on device registration.
+    - [ ] **Device Nodes:**
+        - [ ] `null`, `zero`, `full` (data sink/source/full-error).
+        - [ ] `random` / `urandom` (CSPRNG).
+        - [ ] `tty` (proxy to current process controlling terminal).
+        - [ ] `mem` / `kmem` (physical/kernel memory access).
+        - [ ] `port` (I/O port access).
+        - [ ] `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/0,1,2`).
+        - [ ] `console` (system console).
+        - [ ] `ptmx` (pseudo-terminal master multiplexer).
+    - [ ] **Dynamic Updates:**
+        - [ ] Hot-plug: add/remove nodes on device attach/detach.
+        - [ ] Permissions: default mode from driver, overridable via `devfs.rules`.
+    - [ ] **Testing:**
+        - [ ] Unit: register/unregister device nodes.
+        - [ ] Unit: read from `/dev/zero`, write to `/dev/null`, read from `/dev/random`.
+        - [ ] Unit: `/dev/full` returns ENOSPC on write.
+
+- [ ] **ProcFS (`/proc`):**
+    - [ ] **Per-Process:**
+        - [ ] `/proc/[pid]/stat`: process state (Linux-compatible format).
+        - [ ] `/proc/[pid]/status`: human-readable status.
+        - [ ] `/proc/[pid]/maps`: memory map regions.
+        - [ ] `/proc/[pid]/cmdline`: NUL-separated command line.
+        - [ ] `/proc/[pid]/environ`: NUL-separated environment.
+        - [ ] `/proc/[pid]/fd/`: open FD symlinks.
+        - [ ] `/proc/[pid]/cwd`, `/proc/[pid]/exe`, `/proc/[pid]/root`: symlinks.
+        - [ ] `/proc/[pid]/task/`: per-thread subdirectories.
+    - [ ] **System-wide:**
+        - [ ] `/proc/cpuinfo`, `/proc/meminfo`, `/proc/uptime`, `/proc/loadavg`.
+        - [ ] `/proc/vmstat`: VM statistics counters.
+        - [ ] `/proc/filesystems`: registered filesystem types.
+        - [ ] `/proc/mounts`: mounted filesystems.
+        - [ ] `/proc/partitions`: block device partitions.
+    - [ ] `/proc/self`: symlink to calling process PID.
+    - [ ] Dynamic content generation: virtual files populated on `read()`.
+    - [ ] Personality awareness: detect caller (Linux/FreeBSD) and adjust format.
+    - [ ] **Testing:**
+        - [ ] Unit: each `/proc` file returns valid parseable content.
+        - [ ] Unit: `/proc/self` resolves to calling PID.
+        - [ ] Integration: `ps` and `top` read from procfs correctly.
+
+- [ ] **SysFS (`/sys`):**
+    - [ ] KObject hierarchy: represent kernel objects (drivers, buses, devices).
+    - [ ] Attributes: map kernel variables to readable/writable files.
+    - [ ] `/sys/class/net/`: network interface properties.
+    - [ ] `/sys/block/`: block device attributes.
+    - [ ] `/sys/devices/system/cpu/`: CPU topology.
+    - [ ] `/sys/kernel/`: misc kernel tunables.
+    - [ ] **Testing:**
+        - [ ] Unit: kobj create/register/unregister.
+        - [ ] Unit: attribute read/write.
+
+- [ ] **9P Filesystem (Plan 9):**
+
+    > **Files:** `sys/fs/9p/`.
+
+    - [ ] **Protocol:**
+        - [ ] Tversion/Rversion (protocol negotiation).
+        - [ ] Tattach/Rattach (mount).
+        - [ ] Twalk/Rwalk (path traversal).
+        - [ ] Topen/Ropen (file open).
+        - [ ] Tread/Rread / Twrite/Rwrite (data transfer).
+        - [ ] Tclunk/Rclunk (close FID).
+        - [ ] Tstat/Rstat / Twstat/Rwstat (metadata).
+        - [ ] Tcreate/Rcreate (create file/directory).
+        - [ ] Tremove/Rremove (remove file/directory).
+    - [ ] **VFS Integration:**
+        - [ ] `p9fs_mount` / `p9fs_unmount`.
+        - [ ] `p9fs_lookup` / `p9fs_readdir`.
+        - [ ] `p9fs_read` / `p9fs_write`.
+    - [ ] **Transport:**
+        - [ ] VirtIO-9P transport (via `virtio_9p` driver).
+        - [ ] TCP transport (for networked 9P).
+    - [ ] **Testing:**
+        - [ ] Integration: mount 9P share from QEMU host, read/write files.
+### 5. System Calls & Personalities
+- [ ] **System Call ABI (64-bit Clean):**
+    - [x] **Type Definitions:**
+        - [x] Define `off_t`, `time_t`, `ino_t`, `blkcnt_t` as 64-bit types in `sys/types.h`.
+        - [ ] Verify alignment requirements (8-byte alignment for 64-bit types on i386 stack).
+    - [ ] **System Call Audit:**
+        - [ ] Audit all existing syscalls for argument types (int vs long vs long long).
+        - [ ] Identify syscalls needing 64-bit arguments pair splitting on 32-bit (e.g. `lseek`, `truncate`, `mmap`).
+    - [ ] **Kernel Refactoring:**
+        - [x] Native `sys_lseek` takes 64-bit offset (split hi/lo on 32-bit stack).
+        - [ ] Native `sys_ftruncate` takes 64-bit length (split hi/lo on 32-bit stack).
+        - [ ] `sys_mmap` offset is 64-bit (using split words on i386).
+        - [x] `struct stat` uses 64-bit `ino_t`, `off_t`, `blkcnt_t`, `time_t`.
+    - [x] **LibC Wrappers:**
+        - [x] Update `lseek` wrapper to pass high/low words on 32-bit.
+        - [x] Update `ftruncate` wrapper.
+        - [x] Update `stat`/`fstat` wrappers.
+    - [ ] **Personality Compatibility:**
+        - [ ] Ensure 32-bit Linux personality handles register splitting for 64-bit args correctly.
+        - [ ] Ensure native personality mandates 64-bit types.
+    - [ ] **Testing:**
+        - [ ] **Large File Support (LFS):** Test creating/seeking > 2GB files.
+        - [ ] **Y2038:** Test time_t overflow handling.
+- [ ] **Mechanisms:**
+        - [ ] **PTY Subsystem (Unix98/System V) - Massive Expansion:**
+            - [ ] **Core PTY Driver (`/dev/pts/` + `/dev/ptmx`):**
+                - [ ] **DevPTS Filesystem (`pts_fs`):**
+                    - [ ] `pts_mount()`: Mount logic.
+                    - [ ] `pts_lookup()`: Resolve PTY indices to vnodes.
+                    - [ ] `pts_getattr()`: Synthesize attributes (uid/gid/mode).
+                    - [ ] `pts_readdir()`: List active PTYs.
+                - [ ] **Multiplexer (`/dev/ptmx`):**
+                    - [ ] `ptmx_open()`: Allocate next free `pts` index (0..255+).
+                    - [ ] Create master/slave `tty` structures.
+                    - [ ] Initialize queues and termios defaults.
+                - [ ] **Data Path:**
+                    - [ ] **Master Write:** Input to Slave Read queue.
+                    - [ ] **Slave Write:** Input to Master Read queue.
+                    - [ ] **Ring Buffers:** Lockless (or locked) circular buffers.
+            - [ ] **IOCTL API (`libc` support):**
+                - [ ] `TIOCGPTN` (Get PTY Number): Return index for `ptsname()`.
+                - [ ] `TIOCSPTLCK` (Lock/Unlock): Handle `unlockpt()` (prevent race conditions).
+                - [ ] `TIOCGPKT` (Packet Mode): Control byte for master (flush/stop/start/ioctl).
+                - [ ] `TIOCSIG` (Signal): Send specific signal to slave process group.
+            - [ ] **Line Discipline (`N_TTY`):**
+                - [ ] **Input Processing (`c_iflag`):**
+                    - [ ] `IGNBRK`, `BRKINT` (Break handling).
+                    - [ ] `IGNPAR`, `PARMRK`, `INPCK` (Parity).
+                    - [ ] `ISTRIP` (Strip 8th bit).
+                    - [ ] `INLCR`, `IGNCR`, `ICRNL` (CR/LF mapping).
+                    - [ ] `IXON`, `IXOFF` (Software flow control XON/XOFF).
+                - [ ] **Output Processing (`c_oflag`):**
+                    - [ ] `OPOST` (Enable processing).
+                    - [ ] `ONLCR` (NL -> CR/NL translation).
+                - [ ] **Local Processing (`c_lflag`):**
+                    - [ ] `ISIG` (Signal generation: VINTR, VQUIT, VSUSP).
+                    - [ ] `ICANON` (Canonical mode / Line editing).
+                    - [ ] `ECHO`, `ECHOE` (Erase), `ECHOK` (Kill), `ECHONL`.
+                    - [ ] `IEXTEN` (Extended processing).
+                    - [ ] `TOSTOP` (Background write SIGTTOU).
+                - [ ] **Control Characters (`c_cc`):**
+                    - [ ] `VEOF`, `VEOL` (End of file/line).
+                    - [ ] `VERASE`, `VKILL` (Editing).
+                    - [ ] `VMIN`, `VTIME` (Non-canonical read timing).
+    
+        - [x] **`sys_statvfs`:** Filesystem statistics.
+            - [x] Implement `sys_statvfs`/`sys_fstatvfs`.
+            - [x] Integrate with `vfs_statfs`.
+
+        - [ ] **BSD-style Sys_mount Interface & Mount Framework:**
+            - [ ] **ABI Application Interface:**
+                - [ ] Define `sys_mount` syscall signature (type, source, target, flags, data/len).
+                - [ ] Create `sys/sys/mount.h` with syscall definitions.
+                - [ ] Define `struct mount_args` equivalent for versioned arguments.
+                - [ ] Document calling conventions and flag semantics in comments.
+                - [ ] Add build-time assertions for structure size and alignment.
+            - [ ] **Filesystem Type Registration:**
+                - [ ] Define `struct vfsconf` or equivalent for filesystem metadata.
+                - [ ] Create `vfs_register()` / `vfs_unregister()` API.
+                - [ ] Implement internal hashtable/list for filesystem types.
+                - [ ] Add capability reporting per filesystem type.
+                - [ ] Ensure filesystem names are validated and namespaced.
+            - [ ] **Mount Lifecycle & VFS Integration:**
+                - [ ] Define `struct mount` (kernel generic mount structure).
+                - [ ] Implement `vfs_mount_alloc()` and `vfs_mount_free()`.
+                - [ ] Implement mount binding to VFS namespace (vnode attachment).
+                - [ ] Implement reference counting and busy checks.
+                - [ ] Ensure mounts can be stacked or nested safely.
+            - [ ] **Generic Option Parsing:**
+                - [ ] Design generic mount option parser (key=value string/blob).
+                - [ ] Create API for filesystems to retrieve options.
+                - [ ] Implement type-safe option getters (int, string, bool).
+                - [ ] Validate standard options (ro, nosuid, nodev, noexec) generically.
+                - [ ] Ensure strict validation and copying of userspace data.
+            - [ ] **Virtual Filesystem Support (`/dev`, `/proc`):**
+                - [ ] Define mount handler for `devfs` (mounting `/dev`).
+                - [ ] Define mount handler for `procfs` (mounting `/proc`).
+                - [ ] Implement userspace-driven mounting of virtual filesystems via `sys_mount`.
+                - [ ] Ensure root vnodes are correctly tied to mount points.
+            - [ ] **Privilege & Security Model:**
+                - [ ] Add `suser()` / `cap_check()` for mount syscall.
+                - [ ] Implement `sys_mount` flag validation (detect conflicting flags).
+                - [ ] Ensure mount points are valid directories.
+                - [ ] Prevent mounting over critical system paths without override.
+                - [ ] Audit for mount-related vulnerabilities (symlinks, race conditions).
+            - [ ] **Error Handling & Diagnostics:**
+                - [ ] Define `EUNKNOWNFS` and other specific error codes.
+                - [ ] Propagate errors from filesystem-specific init back to syscall.
+                - [ ] Add kernel logging for failed mount attempts.
+            - [ ] **Unmount Semantics:**
+                - [ ] Define `sys_unmount` syscall signature and flags (FORCE, DETACH).
+                - [ ] Implement VFS layer unmount logic (busy checks).
+                - [ ] Add filesystem-specific `unmount` callback.
+                - [ ] Safe teardown of virtual and real filesystems.
+            - [ ] **Userland Interfaces & Tooling:**
+                - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc.
+                - [ ] Create/Update `mount(8)` utility in `bin/` capable of mounting `/dev`.
+                - [ ] Support `mount -t type dev dir` syntax.
+                - [ ] Update early boot (init) to mount `/dev` and `/proc` explicitly.
+            - [ ] **Testing & Verification:**
+                - [ ] Unit tests for mount argument parsing and validation.
+                - [ ] Integration tests mounting and unmounting `/dev` and `/proc` from userspace.
+                - [ ] Tests for error conditions (invalid FS type, bad options, permission failure).
+                - [ ] Property and fuzz tests targeting mount option parsing.
+            - [ ] **Audit & Refactor:**
+                - [ ] Audit existing VFS code for assumptions preventing userspace mounting.
+                - [ ] Remove hardcoded kernel mounts once userspace tools work.
+                - [ ] Clean up temporary hacks in `vfs_init`.
+            - [ ] **Documentation:**
+                - [ ] Create `man/man2/mount.2` describing syscall ABI and flags.
+                - [ ] Create `man/man2/unmount.2`.
+                - [ ] Write Filesystem Developer Guide describing how to implement a mount handler.
+        - [x] Implement `sys_ioctl` framework.
+        - [x] Implement `sys_pipe` and `sys_dup2`.
+        - [ ] **Compatibility Syscalls (Deep Dive):**
+            - [ ] **BSD-style `sys_mount` Framework:**
+                - [ ] **Group 1: `sys_mount` ABI Definition**
+                    - [ ] Define canonical `mount(2)` signature with options blob support. <!-- sys/include/sys/syscall.h, sys/kern/syscall.c -->
+                        - Affected: `sys/include/sys/syscall.h`.
+                        - Signature: `int sys_mount(const char *type, const char *path, int flags, void *data, size_t datalen)`.
+                        - Acceptance: Syscall table updated.
+                    - [ ] Implement versioned `struct mount_args` for ABI stability. <!-- include/sys/mount.h -->
+                        - Affected: `include/sys/mount.h`.
+                        - Logic: Include struct size/version field.
+                        - Acceptance: Kernel validates struct boundaries from userspace.
+                    - [ ] Document MNT_* flags and error code semantics (EFAULT, EINVAL, EPERM). <!-- docs/abi/mount.md -->
+                        - Affected: Documentation/ABI guide.
+                        - Acceptance: Developer documentation exists.
+                    - [ ] Add runtime validation for userspace structure alignment and size. <!-- sys/kern/vfs_mount.c -->
+                        - Affected: `sys/kern/vfs_mount.c`.
+                        - Acceptance: Improperly aligned pointers from userland trigger EFAULT.
+                - [ ] **Group 2: Filesystem Type Registration**
+                    - [ ] Implement central `vfs_register` string-to-vfsops registry. <!-- sys/vfs/vfs_conf.c -->
+                        - Affected: `sys/vfs/vfs_conf.c`, `struct vfsconf`.
+                        - Acceptance: `get_vfs_by_name()` returns correct ops vector.
+                    - [ ] Implement `vfs_unregister` for safe filesystem module removal. <!-- sys/vfs/vfs_conf.c -->
+                        - Affected: `sys/vfs/vfs_conf.c`.
+                        - Logic: Prevent unregistering if mounts still exist.
+                        - Acceptance: `rmmod` equivalent is safe.
+                    - [ ] Add capability reporting to `struct vfsops` (e.g. read-only only). <!-- sys/vfs/vfs.h -->
+                        - Affected: `sys/include/vfs/vfs.h`.
+                        - Acceptance: VFS layer rejects writable mount requests for RO-only filesystems.
+                    - [ ] Implement FS name validation and namespacing logic. <!-- sys/vfs/vfs_conf.c -->
+                        - Affected: `sys/vfs/vfs_conf.c`.
+                        - Acceptance: FS names are alphanumeric and unique.
+                - [ ] **Group 3: Mount Lifecycle & VFS Integration**
+                    - [ ] Implement `vfs_mount_alloc()` to initialize `struct mount` instances. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `sys/vfs/vfs_mount.c`, `struct mount`.
+                        - Acceptance: Mount structure initialized with default refcounts and flags.
+                    - [ ] Implement binding logic to attach root vnode to namespace. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `namei`, `v_mountedhere`.
+                        - Acceptance: `namei` correctly crosses into new mount points.
+                    - [ ] Implement mount reference-counting for safety during unmount. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `struct mount: mnt_ref`.
+                        - Acceptance: Mount structure is not freed while vnodes are active.
+                    - [ ] Implement nested mount support and loop detection. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `sys_mount` lookup logic.
+                        - Acceptance: Mounting on a directory within another mount works.
+                - [ ] **Group 4: Userspace Mount Option Handling**
+                    - [ ] Implement generic mount option parser for key-value strings. <!-- sys/vfs/vfs_options.c -->
+                        - Affected: `sys/vfs/vfs_options.c`.
+                        - Logic: Safe parsing of `key=val,key2=val2`.
+                        - Acceptance: Option blob correctly converted to internal dict/struct.
+                    - [ ] Implement safe copying and validation of userspace option blobs. <!-- sys/vfs/vfs_options.c -->
+                        - Affected: `copyin()` in `sys_mount`.
+                        - Acceptance: No direct kernel dereference of user-provided option strings.
+                    - [ ] Support filesystem-specific options passed via the parser. <!-- sys/vfs/vfs_options.c -->
+                        - Affected: `vfsops: mount` callback receives parsed options.
+                        - Acceptance: FS-specific flags (e.g., `uid=1000`) reach the driver.
+                    - [ ] Define and document option precedence and fallback behaviors. <!-- man/man2/mount.2 -->
+                        - Affected: `man/man2/mount.2`.
+                        - Acceptance: Clear rules for conflicting flags vs. options.
+                - [ ] **Group 5: Virtual Filesystem Mounting (`/dev`, `/proc`)**
+                    - [ ] Define DevFS mount handler with root vnode generation. <!-- sys/fs/devfs/devfs_vfsops.c -->
+                        - Affected: `sys/fs/devfs/`.
+                        - Acceptance: `/dev` can be mounted via `sys_mount`.
+                    - [ ] Define ProcFS mount handler with dynamic PID-based population. <!-- sys/fs/procfs/procfs_vfsops.c -->
+                        - Affected: `sys/fs/procfs/`.
+                        - Acceptance: `/proc` can be mounted via `sys_mount`.
+                    - [ ] Implement userspace-driven mounting of `/dev` and `/proc` entirely from `init`. <!-- bin/init/main.c -->
+                        - Affected: `init` source, startup sequence.
+                        - Acceptance: `/dev` and `/proc` are established by userspace, not kernel core.
+                    - [ ] Define mandatory mount options for virtual filesystems. <!-- sys/fs/virtual_fs.h -->
+                        - Affected: `devfs`, `procfs` drivers.
+                        - Acceptance: Attempts to mount virtual FS with invalid options are rejected.
+                - [ ] **Group 6: Permission & Security Model**
+                    - [ ] Implement capability-checks (CAP_SYS_ADMIN) for `sys_mount`. <!-- sys/kern/vfs_mount.c -->
+                        - Affected: `sys/kern/vfs_mount.c`, `cap_check()`.
+                        - Acceptance: Non-privileged users cannot execute `mount`.
+                    - [ ] Implement `MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV` enforcement. <!-- sys/vfs/vfs_vnode.c -->
+                        - Affected: VFS permission checks.
+                        - Acceptance: Vnode operations honor mount-level security flags.
+                    - [ ] Audit and harden against mount-point escape attacks. <!-- sys/vfs/vfs_lookup.c -->
+                        - Affected: `namei`, `..` handling across mounts.
+                        - Acceptance: `..` from a mount root stays within the covering directory.
+                    - [ ] Implement mount-point target validation (must be directory, must be owned). <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `sys_mount` preamble.
+                        - Acceptance: Mounting on files or inaccessible directories fails with ENOTDIR/EPERM.
+                - [ ] **Group 7: Error Handling & Diagnostics**
+                    - [ ] Define granular E* error codes for mount failures (ENODEV, EINVAL, ENOTDIR, EBUSY). <!-- sys/include/sys/errno.h -->
+                        - Affected: `sys/include/sys/errno.h`.
+                        - Acceptance: Errors distinguish between "FS not found" vs "Invalid options".
+                    - [ ] Implement structured kernel logging for mount/unmount operations. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `klog`, `printf`.
+                        - Acceptance: Mount attempts (success/fail) are recorded in dmesg.
+                    - [ ] Ensure clean error propagation from FS driver to userspace. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `vfsops` return values.
+                        - Acceptance: Driver-specific errors reach the syscall return value.
+                - [ ] **Group 8: Unmount Support**
+                    - [ ] Define `sys_unmount(path, flags)` syscall interface. <!-- sys/include/sys/syscall.h -->
+                        - Affected: `sys/kern/vfs_mount.c`.
+                        - Acceptance: Unmount capability exposed to userspace.
+                    - [ ] Implement `vfs_unmount()` core with resource reclamation. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `struct mount`, `vfsops: unmount`.
+                        - Acceptance: Unmounting frees all related kernel memory.
+                    - [ ] Implement `MNT_FORCE` and `MNT_DEFERRED` unmount logic. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `vfs_unmount()`.
+                        - Logic: Force unmount even if busy; Deferred unmount when last ref drops.
+                        - Acceptance: Busy filesystems can be forcefully detached.
+                - [ ] **Group 9: Userland Interfaces & Tooling**
+                    - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc. <!-- lib/libc/sys/mount.S -->
+                        - Affected: `lib/libc/include/sys/mount.h`, wrappers.
+                        - Acceptance: Standard C programs can call `mount()`.
+                    - [ ] Implement basic `mount(8)` utility for shell usage. <!-- bin/mount/mount.c -->
+                        - Affected: `bin/mount/`.
+                        - Acceptance: `mount -t proc proc /proc` works from the shell.
+                    - [ ] Document required invocation patterns for early boot mounting in `/sbin/init`. <!-- docs/boot.md -->
+                        - Affected: Boot documentation.
+                        - Acceptance: Clear guide on establishing `/dev` and `/proc`.
+                - [ ] **Group 10: Testing & Verification**
+                    - [ ] Unit tests for `mount_args` parsing and alignment validation. <!-- sys/tests/test_vfs_mount.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: Fuzzed ABI structures are handled safely.
+                    - [ ] Integration test: Mount/unmount sequence for DevFS and ProcFS. <!-- sys/tests/test_vfs_integration.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: Real-world virtual FS lifecycle works.
+                    - [ ] Negative tests for error conditions (unknown FS, bad options, permission failure). <!-- sys/tests/test_vfs_errors.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: All edge cases return correct errno.
+                    - [ ] Property and fuzz tests targeting mount option parsing. <!-- sys/tests/test_vfs_fuzz.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: Parser handles arbitrarily corrupted strings without crashing kernel.
+                - [ ] **Group 11: Audit & Refactor**
+                    - [ ] Audit existing VFS code for assumptions precluding userspace mounting. <!-- sys/vfs/ -->
+                        - Affected: `vfs` core.
+                        - Acceptance: Refactor any hardcoded kernel-private mount logic.
+                    - [ ] Eliminate existing TODOs in `vfs_mount.c` and `syscall.c`. <!-- sys/kern/syscall.c -->
+                        - Affected: `sys_mount` implementation.
+                        - Acceptance: No placeholder mount paths remain.
+                - [ ] **Group 12: Documentation**
+                    - [ ] Create `mount(2)` manpage describing ABI, flags, and options. <!-- man/man2/mount.2 -->
+                        - Affected: `man/`.
+                        - Acceptance: Complete reference for system programmers.
+                    - [ ] Create Filesystem Developer Guide for `vfsops` implementations. <!-- docs/vfs_dev.md -->
+                        - Affected: `docs/`.
+                        - Acceptance: Guide exists for new FS type authors.
+                    - [ ] Document virtual filesystem mount semantics and expected behaviors. <!-- docs/virtual_fs.md -->
+                        - Affected: `docs/`.
+                        - Acceptance: Behavior of `/dev` and `/proc` is well-defined.
+                - [ ] **Commit-Atomic Expansion (`sys_mount`/mount framework)**
+                    - [ ] **Execution Rule:** Enforce "one checklist item = one commit" for all items in this expansion.
+                        - Affected: `TASKS.md`, PR/commit policy for `sys_mount` series.
+                        - Required tests: N/A (process/policy task; verify by commit history review).
+                        - Acceptance: Every item below lands as an isolated commit with matching scope and message.
+                    - [ ] **1. `sys_mount` ABI Definition**
+                        - [ ] Reserve and wire canonical syscall numbers for `SYS_mount` and `SYS_unmount` in native/Linux/FreeBSD personality dispatch tables.
+                            - Affected: `sys/include/sys/syscall.h`, `sys/kern/syscall.c`, `sys/exec/perso/perso_native.c`, `sys/exec/perso/perso_linux.c`, `sys/exec/perso/perso_freebsd.c`.
+                            - Required tests: syscall table regression (`sys/tests/test_syscall_dispatch.c`), personality dispatch smoke tests.
+                            - Acceptance: `mount`/`unmount` numbers are stable and routed correctly across supported personalities.
+                        - [ ] Define canonical kernel entry signature for `sys_mount` with filesystem type, source, target, flags, and options blob pointer/length.
+                            - Affected: `sys/include/sys/syscall.h`, `sys/kern/vfs_mount.c`.
+                            - Required tests: compile-time prototype checks, syscall invocation smoke test from `libsys`.
+                            - Acceptance: Kernel exposes one extensible ABI surface for all filesystem types.
+                        - [ ] Introduce versioned userspace ABI container (`struct mount_args`/`mount_args_v1`) with size/version fields and explicit reserved bytes.
+                            - Affected: `include/sys/mount.h`, `sys/include/sys/mount.h`, `lib/sys/include/sys/mount.h`.
+                            - Required tests: ABI layout test (`tests/include/test_mount_args_layout.c`), cross-header consistency test.
+                            - Acceptance: ABI structure is forward-compatible and identical between kernel/userspace headers.
+                        - [ ] Add compile-time `_Static_assert` checks for `struct mount_args` size/alignment/field offsets in both kernel and userspace headers.
+                            - Affected: `include/sys/mount.h`, `sys/include/sys/mount.h`.
+                            - Required tests: build-time assertion pass in `make -C sys`, `make -C lib/c`, `make -C bin`.
+                            - Acceptance: Builds fail immediately if ABI layout drifts.
+                        - [ ] Add runtime ABI validation in `sys_mount` for userspace struct size/version/alignment and reserved-field zeroing.
+                            - Affected: `sys/kern/vfs_mount.c`.
+                            - Required tests: negative ABI tests (`sys/tests/test_mount_abi_validation.c`) for short/oversized/misaligned payloads.
+                            - Acceptance: Invalid ABI payloads return deterministic `EINVAL`/`EFAULT` without kernel memory exposure.
+                        - [ ] Document calling convention, flag semantics, and baseline errno contract for `sys_mount` ABI.
+                            - Affected: `docs/abi/mount.md`.
+                            - Required tests: docs review + manpage cross-check task linkage.
+                            - Acceptance: ABI doc explicitly describes arguments, ownership rules, and error mapping.
+                    - [ ] **2. Filesystem Type Registration**
+                        - [ ] Define `vfsconf`/filesystem-type descriptor with name, mount callbacks, and capability vector.
+                            - Affected: `sys/vfs/vfs.h`, `sys/vfs/vfs_conf.h`.
+                            - Required tests: unit tests for descriptor initialization (`sys/tests/test_vfsconf.c`).
+                            - Acceptance: Every filesystem registers through one shared descriptor contract.
+                        - [ ] Implement central filesystem registry (name to mount-handler map) with lookup, duplicate detection, and lifecycle hooks.
+                            - Affected: `sys/vfs/vfs_conf.c`.
+                            - Required tests: registry tests (`sys/tests/test_vfs_registry.c`) for add/find/duplicate handling.
+                            - Acceptance: Registry supports deterministic lookup and rejects conflicting registrations.
+                        - [ ] Add built-in filesystem registration path during VFS init with explicit ordering and failure handling.
+                            - Affected: `sys/vfs/vfs_init.c`, `sys/vfs/vfs_conf.c`, built-in FS init files.
+                            - Required tests: boot-time VFS init test, kernel smoke boot with registry dump.
+                            - Acceptance: Built-in filesystems are visible in registry before first mount request.
+                        - [ ] Add loadable-module registration API (`vfs_register_module`/`vfs_unregister_module`) with busy-mount rejection on unload.
+                            - Affected: `sys/vfs/vfs_conf.c`, module interface headers.
+                            - Required tests: module lifecycle tests (`tests/sys/test_vfs_module_registry.c`) including unload-while-mounted rejection.
+                            - Acceptance: Module-backed filesystems can register/unregister safely without dangling handlers.
+                        - [ ] Require each filesystem to publish mount capability bits (virtual, device-backed, supports_force_unmount, supports_ro, etc.).
+                            - Affected: `sys/vfs/vfs.h`, per-filesystem `*_vfsops.c`.
+                            - Required tests: capability contract tests (`sys/tests/test_vfs_capabilities.c`).
+                            - Acceptance: VFS can enforce behavior based on advertised filesystem capabilities.
+                        - [ ] Enforce filesystem name validation and namespacing policy (e.g., `virt.procfs`, `virt.devfs`, `disk.ext2`) at registration.
+                            - Affected: `sys/vfs/vfs_conf.c`, `sys/vfs/vfs_conf.h`.
+                            - Required tests: invalid-name/namespace collision tests in `sys/tests/test_vfs_registry.c`.
+                            - Acceptance: Non-conforming filesystem names are rejected with `EINVAL`.
+                    - [ ] **3. Mount Lifecycle and VFS Integration**
+                        - [ ] Define mount object lifecycle states (`NEW`, `ALLOCATED`, `BOUND`, `ROOT_ATTACHED`, `ACTIVE`, `DYING`, `DEAD`) and legal transitions.
+                            - Affected: `sys/vfs/mount.h`, `sys/vfs/vfs_mount.c`.
+                            - Required tests: lifecycle state machine tests (`sys/tests/test_mount_state_machine.c`).
+                            - Acceptance: Mount state transitions are explicit and invalid transitions are rejected/asserted.
+                        - [ ] Implement `vfs_mount_alloc()`/`vfs_mount_free()` with refcount initialization, lock setup, and failure rollback.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/mount.h`.
+                            - Required tests: allocation/rollback tests (`sys/tests/test_vfs_mount_alloc.c`).
+                            - Acceptance: No leaks or partial objects remain after failed allocation/mount setup.
+                        - [ ] Implement namespace bind step that attaches mount instance to target vnode (`v_mountedhere`) and records covering vnode.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vnode.h`, `sys/vfs/namei.c`.
+                            - Required tests: integration traversal tests (`sys/tests/test_mount_namespace_bind.c`).
+                            - Acceptance: Path resolution crosses into mounted root vnode correctly.
+                        - [ ] Implement root-vnode attach/activate flow so filesystem mount handler returns root vnode before mount activation.
+                            - Affected: `sys/vfs/vfs_mount.c`, per-filesystem mount handlers.
+                            - Required tests: mount activation tests (`sys/tests/test_mount_activation.c`) for success/failure paths.
+                            - Acceptance: Mount is only visible as active after root vnode is valid and pinned.
+                        - [ ] Define unmount reference-counting and busy rules (active vnode refs, cwd/root refs, open fds) with deterministic `EBUSY` behavior.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vnode.c`.
+                            - Required tests: busy-reference integration tests (`sys/tests/test_unmount_busy_refs.c`).
+                            - Acceptance: Busy filesystems cannot unmount unless allowed by force policy.
+                        - [ ] Implement safe nested/stacked mount handling and mount-loop detection for recursive or cyclic bind attempts.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/namei.c`.
+                            - Required tests: nested mount tests and loop rejection tests (`sys/tests/test_mount_nested.c`).
+                            - Acceptance: Legitimate nested mounts work; loop/cycle attempts fail with defined errno.
+                        - [ ] Define mount propagation behavior (private/shared/slave) and implement either support or explicit `ENOTSUP` for non-private modes.
+                            - Affected: `sys/vfs/mount.h`, `sys/kern/vfs_mount.c`, `docs/abi/mount.md`.
+                            - Required tests: propagation flag tests (`sys/tests/test_mount_propagation_flags.c`).
+                            - Acceptance: Semantics are explicit; unsupported propagation flags are rejected predictably.
+                    - [ ] **4. Userspace Mount Option Handling**
+                        - [ ] Define generic kernel mount-option format and parser API for userspace-provided option strings/blobs.
+                            - Affected: `sys/vfs/vfs_options.h`, `sys/vfs/vfs_options.c`, `include/sys/mount.h`.
+                            - Required tests: parser unit tests (`sys/tests/test_mount_options_parser.c`).
+                            - Acceptance: Generic parser produces typed option map without filesystem coupling.
+                        - [ ] Implement `copyin`-first option ingestion with strict length limits, NUL termination rules, and integer overflow checks.
+                            - Affected: `sys/kern/vfs_mount.c`, `sys/vfs/vfs_options.c`.
+                            - Required tests: boundary/overflow negative tests (`sys/tests/test_mount_options_copyin.c`).
+                            - Acceptance: Kernel never dereferences userspace option pointers directly.
+                        - [ ] Add typed getters/validators for standard options (`ro`, `rw`, `nosuid`, `nodev`, `noexec`) in generic layer.
+                            - Affected: `sys/vfs/vfs_options.c`, `sys/vfs/mount.h`.
+                            - Required tests: standard-option validation tests (`sys/tests/test_mount_options_standard.c`).
+                            - Acceptance: Standard options are parsed and validated consistently across filesystems.
+                        - [ ] Add pass-through mechanism for filesystem-specific options with per-filesystem schema validation callback.
+                            - Affected: `sys/vfs/vfs_options.c`, `sys/vfs/vfs.h`, per-filesystem mount handlers.
+                            - Required tests: FS-specific option tests (`sys/tests/test_mount_options_fs_specific.c`) for ext2/devfs/procfs.
+                            - Acceptance: Filesystem-specific options flow through generic framework and fail cleanly on schema mismatch.
+                        - [ ] Define option precedence and defaulting rules (syscall flags vs generic options vs filesystem defaults).
+                            - Affected: `sys/kern/vfs_mount.c`, `docs/abi/mount.md`, `man/man2/mount.2`.
+                            - Required tests: precedence matrix tests (`sys/tests/test_mount_option_precedence.c`).
+                            - Acceptance: Conflicting inputs resolve deterministically and are documented.
+                    - [ ] **5. Virtual Filesystem Mounting (`/dev`, `/proc`)**
+                        - [ ] Register `devfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, `nodev-safe` behavior).
+                            - Affected: `sys/fs/devfs/devfs_vfsops.c`, `sys/vfs/vfs_conf.c`.
+                            - Required tests: devfs registration tests (`sys/tests/test_devfs_registry.c`).
+                            - Acceptance: `devfs` is mountable only via generic `sys_mount` path.
+                        - [ ] Register `procfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, dynamic entries).
+                            - Affected: `sys/fs/procfs/procfs_vfsops.c`, `sys/vfs/vfs_conf.c`.
+                            - Required tests: procfs registration tests (`sys/tests/test_procfs_registry.c`).
+                            - Acceptance: `procfs` is mountable only via generic `sys_mount` path.
+                        - [ ] Implement userspace-driven mount flow in early init to mount `/dev` and `/proc` through `sys_mount` (no kernel-only implicit mount path).
+                            - Affected: `sbin/init/*`, boot init scripts, `docs/boot.md`.
+                            - Required tests: boot integration test (`tests/integration/test_boot_mount_virtual_fs.sh`).
+                            - Acceptance: System boots with `/dev` and `/proc` established by userspace `mount` calls.
+                        - [ ] Ensure virtual filesystem handlers always provide a root vnode and support required dynamic population semantics.
+                            - Affected: `sys/fs/devfs/*`, `sys/fs/procfs/*`, `sys/vfs/vfs_mount.c`.
+                            - Required tests: runtime vnode population tests (`sys/tests/test_virtualfs_root_vnode.c`).
+                            - Acceptance: Root vnode is valid immediately after mount; dynamic nodes appear correctly.
+                        - [ ] Define and enforce allowed mount options for `devfs`/`procfs` (including explicit "no options" policy where applicable).
+                            - Affected: `sys/fs/devfs/devfs_vfsops.c`, `sys/fs/procfs/procfs_vfsops.c`, `man/man5/procfs.5`, `man/man5/devfs.5`.
+                            - Required tests: virtual-fs option validation tests (`sys/tests/test_virtualfs_mount_options.c`).
+                            - Acceptance: Unsupported options return `EINVAL` and accepted options are applied.
+                    - [ ] **6. Permission and Security Model**
+                        - [ ] Define mount authorization policy (`superuser` and/or `CAP_SYS_ADMIN` equivalent) and enforce it in syscall entry path.
+                            - Affected: `sys/kern/vfs_mount.c`, capability framework headers.
+                            - Required tests: permission tests (`sys/tests/test_mount_permissions.c`) for privileged/unprivileged callers.
+                            - Acceptance: Unauthorized mount/unmount attempts fail with `EPERM`.
+                        - [ ] Implement and enforce mount security flags (`MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV`) in VFS operation paths.
+                            - Affected: `sys/vfs/vnode_ops.c`, `sys/vfs/exec.c`, device open paths.
+                            - Required tests: security-flag behavior tests (`sys/tests/test_mount_security_flags.c`).
+                            - Acceptance: Runtime behavior matches each security flag's contract.
+                        - [ ] Harden target path resolution against symlink races and traversal escapes during mount.
+                            - Affected: `sys/vfs/namei.c`, `sys/kern/vfs_mount.c`.
+                            - Required tests: race/symlink attack tests (`sys/tests/test_mount_path_race.c`).
+                            - Acceptance: Mount operation resolves target atomically and cannot be redirected post-validation.
+                        - [ ] Enforce namespace isolation constraints so mount operations cannot escape caller namespace/chroot boundaries.
+                            - Affected: `sys/vfs/vfs_mount.c`, process namespace/chroot handling.
+                            - Required tests: namespace isolation tests (`sys/tests/test_mount_namespace_isolation.c`).
+                            - Acceptance: Mount scope stays confined to caller-visible namespace.
+                        - [ ] Perform mount-security audit pass and land hardening fixes for common vulnerabilities (`..` escape, TOCTOU, malformed options, refcount abuse).
+                            - Affected: `sys/vfs/*`, `sys/kern/vfs_mount.c`, audit notes in `docs/security/mount_audit.md`.
+                            - Required tests: regression suite (`sys/tests/test_mount_security_regression.c`).
+                            - Acceptance: Audit findings are tracked and all identified high-risk issues are closed or explicitly deferred with rationale.
+                    - [ ] **7. Error Handling and Diagnostics**
+                        - [ ] Define canonical errno mapping table for mount/unmount failures (unknown fs, invalid options, permission, busy target, invalid target).
+                            - Affected: `sys/kern/vfs_mount.c`, `docs/abi/mount.md`.
+                            - Required tests: errno mapping tests (`sys/tests/test_mount_errno_map.c`).
+                            - Acceptance: Each failure class returns stable, documented errno.
+                        - [ ] Ensure filesystem-specific mount errors propagate unchanged through VFS core and syscall boundary when safe.
+                            - Affected: `sys/vfs/vfs_mount.c`, per-filesystem `*_vfsops.c`.
+                            - Required tests: per-filesystem error propagation tests (`sys/tests/test_mount_error_passthrough.c`).
+                            - Acceptance: Userspace receives actionable FS-specific failure codes.
+                        - [ ] Add structured kernel logging for mount/unmount attempts (caller, fs type, source, target, flags, result).
+                            - Affected: `sys/kern/vfs_mount.c`, kernel logging subsystem.
+                            - Required tests: log-format tests (`sys/tests/test_mount_logging.c`) and integration checks from boot logs.
+                            - Acceptance: Successful and failed operations emit consistent diagnostic records.
+                        - [ ] Add diagnostic counters for mount/unmount successes/failures by errno and filesystem type.
+                            - Affected: `sys/vfs/vfs_stats.c`, `/proc` or sysctl exposure.
+                            - Required tests: stats counter tests (`sys/tests/test_mount_stats.c`).
+                            - Acceptance: Counters are queryable and match observed operation totals.
+                    - [ ] **8. Unmount Support**
+                        - [ ] Define `sys_unmount` ABI (`target`, `flags`) including supported lazy/force semantics and unsupported-flag behavior.
+                            - Affected: `include/sys/mount.h`, `sys/include/sys/syscall.h`, `docs/abi/mount.md`.
+                            - Required tests: ABI/flag validation tests (`sys/tests/test_unmount_abi.c`).
+                            - Acceptance: `sys_unmount` contract is explicit and version-stable.
+                        - [ ] Implement core unmount teardown pipeline (deactivate mount, detach namespace, flush/release resources, final free).
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/mount.h`.
+                            - Required tests: teardown integration tests (`sys/tests/test_unmount_teardown.c`).
+                            - Acceptance: Unmount reclaims resources without leaks or dangling mount links.
+                        - [ ] Enforce busy unmount rejection by default and force-unmount override only for filesystems that advertise support.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vfs.h`, per-filesystem capability declarations.
+                            - Required tests: busy/force policy tests (`sys/tests/test_unmount_force_policy.c`).
+                            - Acceptance: Busy mounts return `EBUSY` unless force is both requested and supported.
+                        - [ ] Validate safe teardown parity for both virtual and device-backed filesystems.
+                            - Affected: `sys/fs/devfs/*`, `sys/fs/procfs/*`, `sys/fs/ext2/*`, `sys/vfs/vfs_mount.c`.
+                            - Required tests: mixed filesystem teardown integration tests (`sys/tests/test_unmount_virtual_real.c`).
+                            - Acceptance: Unmount sequence is correct for `/dev`, `/proc`, and real filesystems.
+                    - [ ] **9. Userland Interfaces and Tooling**
+                        - [ ] Add `mount(2)` and `unmount(2)` wrappers in `libsys` and exported libc headers using the canonical ABI.
+                            - Affected: `lib/sys/`, `include/sys/mount.h`, libc syscall wrapper wiring.
+                            - Required tests: wrapper syscall tests (`tests/libsys/test_mount_wrappers.c`).
+                            - Acceptance: Userland C programs can call wrappers without raw syscall usage.
+                        - [ ] Implement/extend `mount(8)` utility to issue generic `sys_mount` requests and support both real and virtual filesystem targets.
+                            - Affected: `bin/mount/*`, build files under `bin/`.
+                            - Required tests: utility integration tests (`tests/bin/mount/test_mount_cli.sh`).
+                            - Acceptance: `mount` utility can mount `/dev`, `/proc`, and at least one real filesystem type.
+                        - [ ] Align `mount(8)` invocation semantics with Substrate conventions (`mount <device> <mount_point> <filesystem_type>`) while retaining option support.
+                            - Affected: `bin/mount/*`, `man/man8/mount.8`.
+                            - Required tests: CLI argument parsing tests (`tests/bin/mount/test_mount_args.c`).
+                            - Acceptance: Utility accepts documented Substrate command form and rejects ambiguous input.
+                        - [ ] Update early initialization flow to mount mandatory virtual filesystems (`/dev`, `/proc`) from userspace before dependent services start.
+                            - Affected: `sbin/init/*`, `etc/init.sh`, boot docs.
+                            - Required tests: boot-sequence integration test (`tests/integration/test_init_mount_order.sh`).
+                            - Acceptance: Services relying on `/dev` and `/proc` start only after successful userspace mounts.
+                    - [ ] **10. Testing and Verification**
+                        - [ ] Add kernel unit tests for `mount_args` ABI parsing, size/version/alignment validation, and userspace copy safety.
+                            - Affected: `sys/tests/test_mount_abi_validation.c`.
+                            - Required tests: `make -C sys/tests test_mount_abi_validation`.
+                            - Acceptance: ABI parser handles valid/invalid inputs deterministically without faults.
+                        - [ ] Add kernel unit tests for filesystem registry behavior (register/lookup/duplicate/unregister busy path).
+                            - Affected: `sys/tests/test_vfs_registry.c`.
+                            - Required tests: `make -C sys/tests test_vfs_registry`.
+                            - Acceptance: Registry invariants hold under normal and error paths.
+                        - [ ] Add integration tests for mounting and unmounting `/dev` and `/proc` fully from userspace.
+                            - Affected: `tests/integration/test_mount_virtual_fs.sh`.
+                            - Required tests: full-system boot/integration run including init path.
+                            - Acceptance: Virtual filesystems can be mounted/unmounted repeatedly without reboot or leaks.
+                        - [ ] Add negative integration tests for unknown filesystem names, malformed options, invalid targets, permission failures, and busy unmounts.
+                            - Affected: `tests/integration/test_mount_errors.sh`.
+                            - Required tests: integration error suite execution in CI.
+                            - Acceptance: Each failure mode returns expected errno and leaves namespace unchanged.
+                        - [ ] Add property and fuzz targets for option parser and syscall boundary handling (size fuzzing, pointer fuzzing, option grammar fuzzing).
+                            - Affected: `tests/property/test_mount_options_prop.c`, `tests/fuzz/fuzz_mount_syscall.c`.
+                            - Required tests: property runner + fuzz runner with crash-free threshold.
+                            - Acceptance: No crashes, memory corruption, or unbounded parse behavior under fuzzed inputs.
+                    - [ ] **11. Audit and Refactor**
+                        - [ ] Audit VFS core, filesystem drivers, and init path for assumptions that mounts are kernel-internal only.
+                            - Affected: `sys/vfs/*`, `sys/fs/*`, `sys/core/main.c`, init sources.
+                            - Required tests: audit checklist review + regression boot tests.
+                            - Acceptance: All blockers to userspace-driven mounting are identified and tracked.
+                        - [ ] Refactor minimal/placeholder mount logic to require filesystem-specific mount handlers through shared VFS contracts.
+                            - Affected: `sys/vfs/vfs_mount.c`, filesystem `*_vfsops.c`.
+                            - Required tests: filesystem mount-path integration tests.
+                            - Acceptance: No filesystem bypasses generic mount framework.
+                        - [ ] Remove hardcoded or implicit virtual filesystem mount paths from kernel bootstrap once userspace flow is in place.
+                            - Affected: `sys/core/*`, `sys/kern/*` boot mount code.
+                            - Required tests: boot integration tests with userspace-only `/dev`/`/proc` mounting.
+                            - Acceptance: Kernel no longer auto-mounts `/dev` or `/proc` outside explicit compatibility mode.
+                        - [ ] Resolve or remove TODO/FIXME placeholders in mount/syscall/VFS paths with complete implementation tasks.
+                            - Affected: `sys/kern/vfs_mount.c`, `sys/vfs/*`, related headers/docs.
+                            - Required tests: full mount test matrix + static grep check for stale mount TODO markers.
+                            - Acceptance: Mount path has no placeholder logic in active code paths.
+                    - [ ] **12. Documentation**
+                        - [ ] Write `mount(2)` man page documenting syscall ABI, argument ownership, flags, and errno behavior.
+                            - Affected: `man/man2/mount.2`.
+                            - Required tests: manpage lint + ABI cross-check against `include/sys/mount.h`.
+                            - Acceptance: `mount(2)` man page is complete and matches implemented ABI.
+                        - [ ] Write `unmount(2)` man page documenting teardown semantics, busy/force behavior, and error codes.
+                            - Affected: `man/man2/unmount.2`.
+                            - Required tests: manpage lint + integration behavior cross-check.
+                            - Acceptance: `unmount(2)` man page covers supported flags and edge cases.
+                        - [ ] Write filesystem developer guide for mount handler implementation, registration, and capability reporting.
+                            - Affected: `docs/filesystems/mount-handler-guide.md`.
+                            - Required tests: doc review checklist with at least one existing filesystem validated against guide.
+                            - Acceptance: Guide is sufficient for adding a new filesystem mount handler without tribal knowledge.
+                        - [ ] Document virtual filesystem mount semantics for `/dev` and `/proc`, including expected behavior during early boot.
+                            - Affected: `docs/vfs/virtual-mounts.md`, `man/man5/devfs.5`, `man/man5/procfs.5`, `docs/boot.md`.
+                            - Required tests: documentation consistency review with init scripts and integration tests.
+                            - Acceptance: `/dev` and `/proc` behavior and required boot invocation patterns are explicitly specified.
+            - [ ] **`sys_clone` (Process/Thread Creation):**
+                - [ ] **Context Duplication:**
+                    - [ ] `CLONE_VM`: Share address space (refcount pmap).
+                    - [ ] `CLONE_FS`: Share cwd/root (refcount nodes).
+                    - [ ] `CLONE_FILES`: Share FD table (refcount table).
+                    - [ ] `CLONE_SIGHAND`: Share signal handlers.
+                - [ ] **Stack & TLS:**
+                    - [ ] Switch to user-provided stack (`child_stack`).
+                    - [ ] Implement `CLONE_SETTLS`: Set GDT entries (GS base).
+                - [ ] **Thread Grouping:**
+                    - [ ] `CLONE_THREAD`: Join thread group (`pgrp`/`tgid`).
+                    - [ ] `CLONE_PARENT`: Share parent process.
+            - [ ] **Event Notification:**
+                - [ ] **`sys_select` / `sys_poll`:**
+                    - [ ] `select_wait` queueing logic.
+                        - [ ] Define `struct poll_table` (wait queue list).
+                        - [ ] Implement `poll_initwait()` / `poll_freewait()`.
+                        - [ ] Per-FD `poll` method calls `poll_wait(wait_queue, poll_table)`.
+                    - [ ] Timeout handling (sleep with timeout).
+                        - [ ] Convert `struct timeval` / `int timeout_ms` to kernel ticks.
+                        - [ ] Use `sched_sleep_timeout(chan, ticks)` or similar.
+                        - [ ] Handle `EINTR` on signal during sleep.
+                    - [ ] Bitmask/Revents populating.
+                        - [ ] `select`: Populate `readfds`, `writefds`, `exceptfds` bitmasks.
+                        - [ ] `poll`: Populate `revents` field in each `struct pollfd`.
+                        - [ ] Return count of ready FDs.
+                    - [ ] **Wait Queue Infrastructure:**
+                        - [ ] Define `struct wait_queue_head` (spinlock + list head).
+                        - [ ] Define `struct wait_queue_entry` (thread ref + callback).
+                        - [ ] Implement `init_waitqueue_head()`.
+                        - [ ] Implement `add_wait_queue()` / `remove_wait_queue()`.
+                        - [ ] Implement `wake_up()` / `wake_up_interruptible()`.
+                    - [ ] **Driver Integration:**
+                        - [ ] Add `poll` method to `fs_node_t` (already done).
+                        - [ ] TTY: Wake readers on `tty_flip_buffer_push`.
+                        - [ ] Pipe: Wake readers/writers on data availability.
+                        - [ ] Socket: Wake on connection/data events.
+                - [ ] **`sys_epoll`:**
+                    - [ ] `epoll_create`: Allocate event context.
+                        - [ ] Define `struct eventpoll` (rb-tree of interests, ready list).
+                        - [ ] Allocate anonymous FD pointing to `eventpoll`.
+                        - [ ] Initialize spinlock and wait queue.
+                    - [ ] `epoll_ctl`: Add/Modify/Remove file descriptors (O(1) logic).
+                        - [ ] `EPOLL_CTL_ADD`: Insert into rb-tree, register callback with target FD.
+                        - [ ] `EPOLL_CTL_MOD`: Update event mask in existing entry.
+                        - [ ] `EPOLL_CTL_DEL`: Remove from rb-tree, unregister callback.
+                        - [ ] Handle `EEXIST`/`ENOENT` error cases.
+                    - [ ] `epoll_wait`: Block on event list.
+                        - [ ] Check ready list (events already triggered).
+                        - [ ] If empty, sleep on eventpoll wait queue.
+                        - [ ] Copy ready events to userspace `struct epoll_event` array.
+                        - [ ] Handle `maxevents` limit and timeout.
+                        - [ ] Edge-triggered (`EPOLLET`): Remove from ready list after report.
+                        - [ ] Level-triggered: Keep in ready list if still active.
+            - [ ] **`sys_execve` (Loader Dispatch):**
+                - [ ] Path lookup and permission check.
+                - [ ] Read first 128 bytes (Shebang/Magic detection).
+                - [ ] Dispatch to correct loader (ELF, Script, COFF, PE).
+                - [ ] Argument/Environment copying to new userspace stack.
+                - [x] **Bitness Integration:** Update loaders (ELF/PE/AOUT) to set process bitness based on binary format.
+            - [ ] **IPC Subsystem:**
+                - [ ] **SysV Shared Memory:**
+                    - [ ] `shmid_ds` structure and key lookup.
+                    - [ ] `shmget`: Create/Find segment.
+                    - [ ] `shmat`: Map segment into `vm_map`.
+                    - [ ] `shmdt`: Unmap.
+                - [ ] **SysV Semaphores:**
+                    - [ ] `semid_ds` and semaphore arrays.
+                    - [ ] `semop`: Atomic increment/decrement/wait.
+                    - [ ] SEM_UNDO logic.
+                - [ ] **SysV Message Queues:**
+                    - [ ] `msqid_ds` and message linked list.
+                    - [ ] `msgsnd`/`msgrcv`: Blocking and non-blocking delivery.
+                - [ ] **POSIX Shared Memory:**
+                    - [ ] `/dev/shm` TmpFS integration.
+                    - [ ] `shm_open`: File descriptor based access.
+                - [ ] **POSIX Semaphores:**
+                    - [ ] Named (`sem_open`) vs Unnamed (`sem_init`).
+                    - [ ] `sem_t` structure.
+
+    - [x] Implement `sys_time` and RTC reading.
+    - [x] **Emulation Path Lookup:** Check `/perso/<perso>/` before root for foreign personalities.
+    - [ ] **Debugging & Tracing:**
+        - [ ] **KDB:** Built-in kernel debugger (peek/poke memory, register dump, stack trace).
+        - [ ] **Serial Console:** Interactive GDB stub over UART.
+        - [ ] **DTrace:** (As planned in ideas) Dynamic tracing framework.
+- [ ] **64-bit System Call ABI Enforcement:**
+    - [ ] **Type Definitions & Alignment:**
+        - [ ] Define `off_t`, `time_t`, `ino_t`, `dev_t` as 64-bit integers in all architectures (i386/x86_64).
+        - [ ] Verify `size_t` and `ssize_t` match register width but critical structures use explicit width types (e.g., `uint64_t`).
+        - [ ] Audit `stat`, `statfs` structures for 64-bit alignment and padding.
+        - [ ] Ensure `struct timespec` and `struct timeval` use 64-bit seconds types.
+    - [ ] **System Call Audit:**
+        - [ ] Audit all file system calls (`open`, `seek`, `truncate`, `mmap`) for 64-bit offset support.
+        - [ ] Audit time-related syscalls (`clock_gettime`, `nanosleep`, `utimensat`) for 64-bit timespecs.
+        - [ ] Audit resource limit syscalls (`getrlimit`, `setrlimit`) for 64-bit values.
+        - [ ] Audit `recvmsg`/`sendmsg` for `struct msghdr` compatibility.
+    - [ ] **Kernel Refactoring:**
+        - [ ] Refactor `sys_lseek` to take 64-bit offset (split high/low registers on 32-bit if needed, or use register pairs).
+        - [ ] Refactor `sys_truncate` / `sys_ftruncate` for 64-bit lengths.
+        - [ ] Ensure VFS layer uses 64-bit offsets exclusively.
+        - [ ] Implement `sys_pselect6` / `sys_ppoll` with 64-bit timeout support.
+    - [ ] **LibC Wrappers (`lib/c`):**
+        - [ ] Update `lseek` to pass 64-bit arguments correctly (EDX:EAX on i386).
+        - [ ] Ensure `_FILE_OFFSET_BITS=64` semantics are default.
+        - [ ] Implement `stat` wrapper mapping to 64-bit kernel structure.
+    - [ ] **Personality Compatibility:**
+        - [ ] Implement translation for legacy 32-bit syscalls (Linux `old_mmap`, `stat64` vs `stat`).
+        - [ ] FreeBSD 32-bit shim layer updates per ABI.
+    - [ ] **Testing & Verification:**
+        - [ ] Add regression tests for large file support (>2GB and >4GB).
+        - [ ] Verify time_t overflow behavior (Year 2038 compliance).
+        - [ ] Verify structure layout with `pahole` or offsets test.
+    - [ ] **Documentation:**
+        - [ ] Document the 64-bit ABI in `docs/kernel/syscall_abi.md`.
+        - [ ] Update `man2` pages for affected syscalls.
+- [ ] **Personalities:**
+    - [ ] **Xenix & SCO Compatibility (The 6 Flavors):**
+        - [ ] **Variants:**
+            - [ ] **Microsoft Xenix 8086 (`MS-X/86`):**
+                - [ ] **Loader:** Support Magic `0x140` (Old Microsoft 8086 `x.out`).
+                - [ ] **Execution:** Pure Real Mode / VM86 Container.
+                - [ ] **Memory:** Small/Middle Memory Models (Separate I/D segments).
+                - [ ] **Emulation:** Trap `int 10h`/`int 13h` BIOS calls if used.
+            - [ ] **SCO Xenix 8086 (`SCO-X/86`):**
+                - [ ] **Validation:** Verify syscall differences from MS variant.
+                - [ ] **Extensions:** Support early SCO-specific `ioctl`s or IPC.
+            - [ ] **Microsoft Xenix 286 (`MS-X/286`):** Protected mode (LDTs).
+            - [ ] **SCO Xenix 286 (`SCO-X/286`):** Enhanced 286 support.
+            - [ ] **Microsoft Xenix 386 (`MS-X/386`):** Early 32-bit (pre-1987).
+            - [ ] **SCO Xenix 386 (`SCO-X/386`):** The widespread 32-bit standard (v2.3).
+            - [ ] **SCO Unix 3.2v2 (`SCO-U/3.2v2`):** COFF based, SVR3.2 compat.
+            - [ ] **SCO Unix 3.2v4 (`SCO-U/ODT3`):** Enhanced System V ABI (ODT 3.0).
+            - [ ] **SCO OpenServer 5 (`SCO-OSR5`):** Advanced COFF/ELF hybrid features.
+        - [ ] **Binary Loaders:**
+            - [ ] **`x.out` (Microsoft / Xenix):**
+                - [ ] **Header:** Magic 0x206 (286 Small), 0x20C (N86), 0x140 (8086).
+                - [ ] **Segments:** TEXT (RX), DATA (RW), BSS (Zero).
+                - [ ] **Symbol Table:** Generic Xenix symbol format.
+            - [ ] **COFF (Common Object File Format) - SCO/SVR3:**
+                - [ ] **File Header (`filehdr`):**
+                    - [ ] Magic: 0x14C (i386).
+                    - [ ] Number of sections.
+                    - [ ] Time/Date stamp (ignored or used for link verification).
+                    - [ ] Pointer to symbol table / Number of symbols.
+                - [ ] **Optional Header (`aouthdr`):**
+                    - [ ] Magic: 0x10B (ZMAGIC - Demand Paged).
+                        - [ ] Define `AOUT_ZMAGIC` constant (0x10B).
+                        - [ ] Validate magic number, reject unsupported types (OMAGIC, NMAGIC).
+                    - [ ] `tsize` (Text size), `dsize` (Data size), `bsize` (BSS size).
+                        - [ ] Parse `tsize` from offset 4 (uint32_t).
+                        - [ ] Parse `dsize` from offset 8 (uint32_t).
+                        - [ ] Parse `bsize` from offset 12 (uint32_t).
+                        - [ ] Validate sizes are reasonable (< 2GB, page-aligned for ZMAGIC).
+                    - [ ] `entry` (Entry point virtual address).
+                        - [ ] Parse `entry` from offset 16 (uint32_t).
+                        - [ ] Validate entry is within `.text` segment bounds.
+                    - [ ] `text_start`, `data_start`.
+                        - [ ] Parse `text_start` from offset 20 (uint32_t).
+                        - [ ] Parse `data_start` from offset 24 (uint32_t).
+                        - [ ] Validate `text_start` < `data_start` or handle BSS-only cases.
+                - [ ] **Section Headers (`scnhdr`):**
+                    - [ ] Name (`.text`, `.data`, `.bss`, `.lib`).
+                        - [ ] Parse 8-byte section name (may be NUL-padded).
+                        - [ ] Handle long names (pointer to string table, `/offset` format).
+                        - [ ] Identify special sections (`.lib`, `.comment`, `.debug`).
+                    - [ ] `paddr` (Physical), `vaddr` (Virtual).
+                        - [ ] Parse `paddr` from offset 8 (uint32_t).
+                        - [ ] Parse `vaddr` from offset 12 (uint32_t).
+                        - [ ] Validate `vaddr` is user-space address (< 0xC0000000).
+                    - [ ] `size`, `scnptr` (File offset).
+                        - [ ] Parse `size` from offset 16 (uint32_t).
+                        - [ ] Parse `scnptr` from offset 20 (uint32_t).
+                        - [ ] Validate `scnptr + size` <= file size.
+                    - [ ] Flags (`STYP_TEXT`, `STYP_DATA`, `STYP_BSS`).
+                        - [ ] Define flag constants: `STYP_TEXT=0x20`, `STYP_DATA=0x40`, `STYP_BSS=0x80`.
+                        - [ ] Map flags to pmap protections (RX, RW, RW-zero).
+                        - [ ] Handle `STYP_LIB` (0x800) for shared library sections.
+                - [ ] **SCO Shared Libraries (`.lib` section):**
+                    - [ ] Parse `.lib` section header.
+                        - [ ] Locate section with name `.lib` or flag `STYP_LIB`.
+                        - [ ] Read section content from `scnptr` offset.
+                    - [ ] **Path entries:** Absolute path to shared library.
+                        - [ ] Parse path table offset from `.lib` header.
+                        - [ ] Iterate path entries (NUL-terminated strings).
+                        - [ ] Resolve library path (search `/shlib`, `/usr/shlib`).
+                        - [ ] Load and map referenced shared libraries recursively.
+                    - [ ] **Offset entries:** Import method (static jump table).
+                        - [ ] Parse import table offset and count.
+                        - [ ] Build jump table at fixed address (`0x08000000` typical).
+                        - [ ] Populate jump stubs (`jmp [addr]`) for each import.
+                        - [ ] Handle import ordinals vs. named imports.
+            - [ ] **OMF (Intel Object Module Format) - 286/386:**
+                - [ ] **Record Types:**
+                    - [ ] `0x80` (`THEADR`): Module Name.
+                    - [ ] `0x88` (`COMENT`): Compiler info / Memory model.
+                    - [ ] `0x98` (`SEGDEF`): Segment Definition (Attributes, Size).
+                    - [ ] `0x9A` (`GRPDEF`): Group Definition (DGROUP).
+                    - [ ] `0xA0` (`LEDATA`): Logical Enumerated Data (Content).
+                    - [ ] `0xB0` (`FIXUPP`): Relocation Records (Segment-relative, Self-relative).
+                    - [ ] `0x8A` (`MODEND`): Module End (Main entry point).
+                - [ ] **Loading Logic:** Multi-pass linker/loader to resolve inter-segment references.
+        - [ ] **System Call Interface:**
+            - [ ] **Mechanisms (ABI Differences):**
+                - [ ] **iBCS2 / SCO:**
+                    - [ ] `lcall 7,0` (Call Gate 0).
+                - [ ] **Linux:**
+                    - [ ] `int 0x80` (Interrupt Vector 128).
+                - [ ] **Legacy / Special:**
+                    - [ ] `int 0x21` (DOS emulation in VM86).
+                    - [ ] `int 0x7F` (Older Xenix).
+            - [ ] **ABI Translation:**
+            - [ ] **ABI Translation (iBCS2):**
+                - [ ] **Stack Frame Decoding:**
+                    - [ ] 16-bit client: arguments at `SS:SP+2` (2-byte words).
+                    - [ ] 32-bit client: arguments at `SS:ESP+4` (4-byte words).
+                - [ ] **CXENIX Dispatcher (Syscall 0x07):**
+                    - [ ] Sub-function handling (table driven) for Xenix extensions.
+                    - [ ] `rdchk` (check for data), `nap` (millisecond sleep).
+                    - [ ] `ftime` (System V time).
+                - [ ] **Shared Memory (Xenix):**
+                    - [ ] `sdget`, `sdfree` (Create/Destroy shared data).
+                    - [ ] `sdenter`, `sdleave` (Attach/Detach).
+                    - [ ] **Memory mapping:** Map high memory segments via LDT.
+                    - [ ] `xsbrk` (Extended break for huge data).
+                - [ ] **VM86 Support:**
+                    - [ ] `v86_init`: Initialize VM86 task state.
+                    - [ ] `v86_sleep`: Wait for interrupt/event.
+                    - [ ] Monitor BIOS calls trapped via GPF/Invalid Opcode.
+    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:**
+    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:**
+        - [ ] **16-Bit Execution Environment:**
+            - [ ] **LDT Setup:**
+                - [ ] Descriptor 0: NULL.
+                - [ ] Descriptor 1: CS (Code), 16-bit conforming/non-conforming.
+                - [ ] Descriptor 2: DS (Data), 16-bit expand-up/down.
+            - [ ] **Segmentation Logic:**
+                - [ ] **Small Model:** CS != DS/SS.
+                - [ ] **Tiny Model:** CS == DS == SS (COM file style).
+                - [ ] **Stack:** 16-bit Stack Pointer (`SP`) wraparound handling.
+        - [ ] **Loader (`a.out` Minix):**
+            - [ ] **Header:** 32-byte header (Magic, HeaderLen, Text/Data/Bss sizes).
+            - [ ] **Load:** Read segments into allocated low-memory pages.
+            - [ ] **Relocation:** Applying fixups if not position independent.
+        - [ ] **Syscall Interface (`int 0x80`):**
+            - [ ] **Trap:** IDT entry 0x80 handling 16-bit caller.
+            - [ ] **Argument Fetch:**
+                - [ ] Read `BX` (First arg), `CX` (Second), `DX` (Third), `SI`, `DI`.
+                - [ ] Or read stack arguments if used.
+            - [ ] **Pointer Thunking:**
+                - [ ] Convert `DS:BX` (16:16) -> Linear Address (`LDT[DS].Base + BX`).
+                - [ ] Bounds checking against segment limit.
+    - [ ] **Linux (Massive Expansion):**
+        - [x] ELF Loader personality detection (brandelf support).
+        - [ ] **Signal Compatibility:**
+            - [ ] **Mapping:** Translate Linux signal numbers to native (e.g., SIGCHLD, SIGSTOP).
+            - [ ] **Sigaction:** Translate `linux_sigaction` structure (mask bits).
+            - [ ] **Trampoline:** Linux-compatible signal return trampoline.
+        - [ ] **Error Codes:**
+            - [ ] Map internal errno to Linux errno (arch-specific).
+        - [ ] **FS Path Translation:**
+            - [ ] `/proc` -> `/compat/linux/proc` redirection.
+            - [ ] `/sys` -> `/compat/linux/sys` redirection.
+            - [ ] `at()` syscalls family support.
+        - [ ] **Networking (`socketcall`):**
+            - [ ] Multiplexer syscall 102 (`sys_socketcall`).
+            - [ ] **Socket Creation & Binding:**
+                - [ ] `SYS_SOCKET`: Validate domain/type/proto, allocate socket.
+                - [ ] `SYS_BIND`: Copy address from user, call internal bind.
+                - [ ] `SYS_CONNECT`: Copy address, initiate connection.
+            - [ ] **Data Flow:**
+                - [ ] `SYS_SEND`/`SYS_RECV`: Simple IO wrappers.
+                - [ ] `SYS_SENDTO`/`SYS_RECVFROM`: UDP/Connectionless wrappers.
+                - [ ] `SYS_SENDMSG`/`SYS_RECVMSG`: Complex message structure scatter/gather.
+            - [ ] **State & Options:**
+                - [ ] `SYS_LISTEN`: Set backlog.
+                - [ ] `SYS_ACCEPT`: New socket file descriptor creation.
+                - [ ] `SYS_GETSOCKNAME`/`SYS_GETPEERNAME`: Address retrieval.
+                - [ ] `SYS_SETSOCKOPT`/`SYS_GETSOCKOPT`: Option translation (Linux <-> Native).
+                - [ ] `SYS_SHUTDOWN`: Connection termination.
+                - [ ] `SYS_SOCKETPAIR`: Connected pair creation.
+        - [ ] **IPC Multiplexer (`sys_ipc`):**
+            - [ ] Multiplexer syscall 117.
+            - [ ] **Semaphores (`sem*`):**
+                - [ ] `SEMOP`: Atomic array operations.
+                - [ ] `SEMGET`: Get/Create semaphore set.
+                - [ ] `SEMCTL`: Control operations (GETVAL, SETVAL, IPC_RMID).
+            - [ ] **Message Queues (`msg*`):**
+                - [ ] `MSGSND`: Send message with priority.
+                - [ ] `MSGRCV`: Receive message (blocking/non-blocking).
+                - [ ] `MSGGET`: Get/Create message queue.
+                - [ ] `MSGCTL`: Control operations.
+            - [ ] **Shared Memory (`shm*`):**
+                - [ ] `SHMAT`: Attach segment to address space.
+                - [ ] `SHMDT`: Detach segment.
+                - [ ] `SHMGET`: Get/Create shared memory segment.
+                - [ ] `SHMCTL`: Control operations (lock/unlock/remove).
+        - [ ] **Ioctls (`sys_ioctl`):**
+            - [ ] **Termios:**
+                - [ ] `TCGETS`: Translate native termios to Linux termios.
+                - [ ] `TCSETS`/`TCSETSW`/`TCSETSF`: Translate Linux termios to native.
+            - [ ] **Sockio:**
+                - [ ] `SIOCGIFNAME`: Get interface name by index.
+                - [ ] `SIOCGIFADDR`: Get interface IP address.
+                - [ ] `SIOCGIFBRDADDR`: Get broadcast address.
+                - [ ] `SIOCGIFNETMASK`: Get network mask.
+        - [ ] **Process Creation (`sys_clone` extended):**
+            - [ ] **Flags Handling:**
+                - [ ] `CLONE_PARENT_SETTID`: Store Child TID at `parent_tidptr`.
+                - [ ] `CLONE_CHILD_CLEARTID`: Store Child TID at `child_tidptr` and clear on exit.
+                - [ ] `CLONE_SETTLS`: Set GDT/FS/GS base for Thread Local Storage.
+                - [ ] `CLONE_FILES`: Share file descriptor table (refcounting).
+                - [ ] `CLONE_FS`: Share filesystem info (cwd, root).
+                - [ ] `CLONE_SIGHAND`: Share signal handlers.
+                - [ ] `CLONE_VM`: Share address space (threads).
+    - [ ] **Minix/386:**
+        - [ ] Implement `send`/`receive` message passing syscalls.
+        - [ ] Map Minix 3 kernel messages to native calls.
+    - [ ] **FreeBSD:**
+        - [x] ELF Loader personality detection.
+        - [ ] Complete `thr_new` implementation.
+        - [ ] **FreeBSD 14.3 Compatibility (i386):**
+            - [x] Implement `struct kinfo_proc` (FreeBSD 14.3 layout).
+            - [ ] **Binary Compatibility:**
+                - [ ] Investigate need for virtual `/dev/kmem` emulation for legacy binaries.
+            - [ ] **Native Porting:**
+                - [ ] Implement `libkvm` shim in `libsys` for porting BSD tools to native ABI.
+            - [ ] **Process Translation:** Logic to map native `process_t` to `kinfo_proc`.
+    - [ ] **BSD-Style `sysctl` Syscall Surface (Native + Compat):**
+        - [ ] **Native Syscall ABI Contract:**
+            - [ ] Define canonical native `sysctl` syscall argument contract with versioned request structure.
+            - [ ] Define strict userspace pointer/length validation rules for old/new buffers.
+            - [ ] Define canonical atomic read/write semantics when both old and new values are present.
+            - [ ] Define canonical size-discovery semantics when old buffer pointer is NULL.
+            - [ ] Define canonical subtree-enumeration request contract for user tooling.
+            - [ ] Define canonical metadata-query request contract (type, flags, description, ABI class).
+            - [ ] Add syscall table entries and personality dispatch wiring for native ABI.
+        - [ ] **MIB + Name Resolution Paths:**
+            - [ ] Implement MIB-based syscall path end-to-end (`int *name`, `u_int namelen`).
+            - [ ] Implement kernel name-to-MIB translation operation for userspace helpers.
+            - [ ] Implement kernel MIB-to-name translation operation for diagnostics/tooling.
+            - [ ] Define max name depth and token-length limits with explicit `EINVAL` behavior.
+            - [ ] Add strict rejection path for mixed name/MIB invocation modes.
+        - [ ] **Error and Compatibility Semantics:**
+            - [ ] Define BSD-consistent errno mapping (`ENOENT`, `ENOMEM`, `EINVAL`, `EFAULT`, `EPERM`, `EACCES`, `ENOTDIR`).
+            - [ ] Implement forward-compat handling for unknown request-structure extensions.
+            - [ ] Implement backward-compat handling for older request versions.
+            - [ ] Add compatibility tests for partial reads, retry loops, and concurrent value mutation.
+        - [ ] **Permission & Capability Enforcement:**
+            - [ ] Wire syscall path into unified `sysctl` access-control hooks.
+            - [ ] Enforce read/write separation at syscall boundary before handler invocation.
+            - [ ] Enforce capability-gated writes for privileged nodes.
+            - [ ] Add per-personality gate checks before exposing compatibility namespace nodes.
+        - [ ] **Personality Integration & Overlays:**
+            - [ ] Define personality overlay model (native base tree + personality-specific branches).
+            - [ ] Implement FreeBSD compatibility overlay for `__sysctl` expectations.
+            - [ ] Implement NetBSD/OpenBSD compatibility overlay scaffolding with explicit unsupported-node behavior.
+            - [ ] Implement per-personality node visibility filters in traversal and enumeration paths.
+            - [ ] Add compatibility shims translating personality-specific MIBs to native internal nodes where feasible.
+        - [ ] **Userspace ABI Tests (Syscall Layer):**
+            - [ ] Add integration tests for native MIB reads/writes, size probes, and metadata queries.
+            - [ ] Add integration tests for enumeration of children and deep subtree walks.
+            - [ ] Add negative tests for malformed pointers, truncated MIBs, and invalid type writes.
+            - [ ] Add race tests for concurrent read/write against lock-protected nodes.
+            - [ ] Add ABI snapshot tests ensuring stable syscall behavior across kernel revisions.
+    - [ ] **BSD Family (NetBSD/OpenBSD):**
+        - [ ] Implement `__sysctl` personality entrypoint backed by shared native `sysctl` core.
+        - [ ] Implement NetBSD/OpenBSD-specific compatibility mapping table for legacy MIB constants.
+        - [ ] Add personality tests validating expected `__sysctl` behavior and errno semantics.
+        - [ ] Support BSD-specific syscalls (`ktrace`, `pledge`/`unveil`).
+    - [ ] **Solaris (SVR4):**
+        - [ ] Implement SVR4 syscalls (`getdents64`, `stream` ioctls).
+        - [ ] Support Solaris door IPC emulation.
+    - [/] **Exec Implementation & Binary Loaders:**
+        - [x] **ELF Loader Improvements:**
+            - [x] **Stack Setup:** Properly terminate argv/envp vectors.
+            - [x] **Default Environment:** Populate PATH and TERM.
+            - [x] **Auxiliary Vector:** Populate AT_PHDR/PHENT/PHNUM/ENTRY for TLS support.
+            - [x] **Interpreter:** Handle `PT_INTERP` (load ld.so).
+            - [x] **Auxiliary Vector:**
+                - [x] Populate `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`.
+                - [x] Populate `AT_ENTRY`, `AT_BASE` (interpreter base).
+                - [x] Populate `AT_EXECFN`, `AT_PLATFORM`.
+                - [x] Populate `AT_RANDOM`, `AT_SECURE`.
+        - [ ] **Shebang Support (`exec_script`):**
+            - [ ] Parse `#!` line.
+            - [ ] Handle recursion depth limits (prevent loops).
+            - [ ] Argument parsing (`#! /bin/sh -x`).
+        - [ ] **COFF Loader (Legacy/Static):**
+            - [ ] Parse File Header and Optional Header.
+            - [ ] Map Sections (Text, Data, BSS) to fixed addresses.
+            - [ ] Basic relocation support (for Xenix 386).
+        - [ ] **PE Loader (EFI/Native):**
+            - [ ] Parse DOS Header -> PE Header.
+            - [ ] Parse Data Directories (Import/Export/Reloc).
+            - [ ] Map Image Base and Sections.
+            - [ ] **EFI Support:**
+                - [ ] Implement IAT (Import Address Table) patching.
+            - [ ] **Substrate Native PE:**
+                - [ ] Define Subsystem ID for Substrate (e.g., in `sys/pe.h`).
+                - [ ] **Native Syscalls:** Thunks for syscall instruction directly in PE text.
+                - [ ] **Relocations:** Full `.reloc` processing (Base Relocations) for ASLR/PIC.
+        - [ ] **a.out Loader (Legacy/Multi-OS):**
+             > See [docs/aout_loader_spec.md](docs/aout_loader_spec.md) for implementation specs.
+            - [ ] **Legacy a.out:** Implement `exec_aout` for OMAGIC/QMAGIC/ZMAGIC binaries.
+            - [ ] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic.
+            - [ ] **SunOS 4.0.x (Sun386i):** Support Sun386i `a.out` format and personality.
+        - [ ] **Personality / Migration:**
+            - [ ] **Syscall Translation:** Remap foreign syscall numbers to native.
+            - [ ] **Errno Translation:** Remap error codes.
+            - [ ] **Signal Translation:** Remap signal numbers.
+        - [ ] **fork() Completeness:**
+            - [ ] **Copy-on-Write:** Duplication of VM space (refcounts).
+            - [ ] **File Descriptors:** Increment refcounts on all FDs.
+            - [ ] `vfork`: Shared VM space, parent blocked until child exec/exit.
+
+### 6. C Library (`lib/c`)
+- [ ] **`sysctl` Userspace API (`lib/c`):**
+    - [ ] **Headers & ABI Contracts:**
+        - [ ] Define and export canonical declarations in `include/sys/sysctl.h`.
+        - [ ] Define and export stable userspace data types for MIB paths and metadata results.
+        - [ ] Add compile-time guards for structure size/alignment ABI stability.
+        - [ ] Document thread-safety guarantees and reentrancy expectations in headers.
+    - [ ] **Core libc Entry Points:**
+        - [ ] Implement `sysctl()` libc wrapper with strict argument validation.
+        - [ ] Implement `sysctlbyname()` using name-to-MIB translation helper flow.
+        - [ ] Implement `sysctlnametomib()` with deterministic retry behavior.
+        - [ ] Implement helper for dynamic buffer sizing/retry loop (`ENOMEM` growth pattern).
+        - [ ] Implement typed convenience helpers (`int`, `uint`, `quad`, `string`) with explicit bounds checks.
+    - [ ] **Thread Safety & Robustness:**
+        - [ ] Ensure no static mutable buffers in libc `sysctl` helpers.
+        - [ ] Ensure all helpers preserve `errno` semantics consistently on failure.
+        - [ ] Add cancellation-safety review for wrappers used in multi-threaded callers.
+        - [ ] Add overflow-safe arithmetic helpers for buffer growth and MIB conversion.
+    - [ ] **Testing (libc Side):**
+        - [ ] Add unit tests for wrapper argument validation and errno behavior.
+        - [ ] Add unit tests for name-to-MIB and MIB-to-name translation helpers.
+        - [ ] Add integration tests for size-probe + retry loops across changing kernel values.
+        - [ ] Add thread-stress tests for concurrent wrapper usage.
+        - [ ] Add fuzz tests for malformed dotted names and oversized MIB arrays.
+    - [ ] **Manpages & Usage Guidance:**
+        - [ ] Add `man/man3/sysctl.3` documenting libc contract and thread-safety.
+        - [ ] Add `man/man3/sysctlbyname.3` with buffer sizing examples.
+        - [ ] Add `man/man3/sysctlnametomib.3` with name/MIB conversion examples.
+        - [ ] Update `man/man2/sysctl.2` to align kernel syscall semantics with libc helper behavior.
+        - [ ] Add `SEE ALSO` cross-links between `sysctl(2)` and `sysctl(3)` pages.
+- [ ] **Stdio:**
+    - [ ] **`FILE` Structure & Buffer Management (`lib/c/src/stdio/`):**
+        - [ ] Define internal `FILE` structure (`_flags`, `_buf`, `_bufsiz`, `_cnt`, `_ptr`, `_fd`, `_lbfsize`, `_close`/`_read`/`_write`/`_seek` function pointers).
+        - [ ] Implement three buffer modes:
+            - [ ] `_IOFBF` (fully buffered): flush on buffer full or explicit `fflush()`.
+            - [ ] `_IOLBF` (line buffered): flush on newline or buffer full.
+            - [ ] `_IONBF` (unbuffered): every `fputc()`/`fwrite()` calls `write()` immediately.
+        - [ ] Implement `setvbuf(FILE *stream, char *buf, int mode, size_t size)`:
+            - [ ] Validate `mode` is `_IOFBF`, `_IOLBF`, or `_IONBF`.
+            - [ ] Allow user-supplied buffer or `NULL` for auto-allocation.
+            - [ ] Must be called after `fopen()` but before any I/O.
+            - [ ] Return 0 on success, non-zero on failure.
+        - [ ] Implement `setbuf(FILE *stream, char *buf)` as wrapper for `setvbuf()`.
+        - [ ] Implement `setlinebuf(FILE *stream)` (BSD extension).
+        - [ ] Implement `fflush(FILE *stream)`:
+            - [ ] Write buffered output data via `write()` syscall.
+            - [ ] Handle partial writes (retry loop).
+            - [ ] If `stream == NULL`, flush all open output streams.
+            - [ ] Return 0 on success, `EOF` on error (set `errno`).
+        - [ ] Pre-allocate `stdin`, `stdout`, `stderr` `FILE` objects:
+            - [ ] `stdin`: fd 0, `_IOLBF` default.
+            - [ ] `stdout`: fd 1, `_IOLBF` if `isatty()`, else `_IOFBF`.
+            - [ ] `stderr`: fd 2, `_IONBF` always.
+        - [ ] Implement `__sinit()` / stream initialization on first use (lazy init pattern).
+    - [ ] **File Open/Close Operations:**
+        - [ ] `fopen(const char *path, const char *mode)`:
+            - [ ] Parse mode string: `"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, with `"b"` (binary, no-op on POSIX) and `"x"` (C11 exclusive create).
+            - [ ] Map to `open()` flags: `O_RDONLY`, `O_WRONLY|O_CREAT|O_TRUNC`, `O_WRONLY|O_CREAT|O_APPEND`, etc.
+            - [ ] Allocate `FILE`, assign fd, set default buffer.
+            - [ ] Return `NULL` on failure (set `errno`).
+        - [ ] `fdopen(int fd, const char *mode)`: wrap existing fd in `FILE`.
+        - [ ] `freopen(const char *path, const char *mode, FILE *stream)`:
+            - [ ] Flush and close existing fd.
+            - [ ] Re-open with new path/mode, reuse `FILE` object.
+            - [ ] If `path == NULL`, change mode of existing fd (C99 extension).
+        - [ ] `fclose(FILE *stream)`:
+            - [ ] Flush output buffer via `fflush()`.
+            - [ ] Free allocated buffer (if library-allocated).
+            - [ ] `close()` underlying fd.
+            - [ ] Free `FILE` structure.
+            - [ ] Return 0 on success, `EOF` on error.
+        - [ ] `fcloseall()` (extension): close all open streams.
+    - [ ] **Character & Line I/O:**
+        - [ ] `fgetc(FILE *stream)` / `getc()` macro: read one byte from buffer or refill.
+        - [ ] `fputc(int c, FILE *stream)` / `putc()` macro: write one byte to buffer or flush.
+        - [ ] `getchar()` / `putchar()`: wrappers for `stdin`/`stdout`.
+        - [ ] `ungetc(int c, FILE *stream)`: push back one character (at least 1 byte guaranteed).
+        - [ ] `fgets(char *s, int n, FILE *stream)`: read line up to `n-1` chars or newline.
+        - [ ] `fputs(const char *s, FILE *stream)`: write string (no trailing newline).
+        - [ ] `gets_s()` (C11 bounds-checked, optional) — or `gets()` removed per C11.
+        - [ ] `puts(const char *s)`: write string + newline to `stdout`.
+    - [ ] **Block I/O:**
+        - [ ] `fread(void *ptr, size_t size, size_t nmemb, FILE *stream)`:
+            - [ ] Read `size * nmemb` bytes, buffered.
+            - [ ] Handle partial reads, return number of complete elements.
+            - [ ] Set EOF/error indicators on short read.
+        - [ ] `fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)`:
+            - [ ] Write `size * nmemb` bytes through buffer.
+            - [ ] Return number of complete elements written.
+    - [ ] **File Positioning:**
+        - [ ] `fseek(FILE *stream, long offset, int whence)`:
+            - [ ] Flush output buffer before seeking.
+            - [ ] Discard input buffer on seek.
+            - [ ] `whence`: `SEEK_SET`, `SEEK_CUR`, `SEEK_END`.
+            - [ ] Return 0 on success, -1 on error.
+        - [ ] `ftell(FILE *stream)`: return current position (accounting for buffer offset).
+        - [ ] `rewind(FILE *stream)`: `fseek(stream, 0, SEEK_SET)` + clear error indicator.
+        - [ ] `fgetpos(FILE *stream, fpos_t *pos)` / `fsetpos(FILE *stream, const fpos_t *pos)`: opaque position save/restore.
+        - [ ] `fseeko()` / `ftello()` (POSIX): `off_t` variants for large file support.
+    - [ ] **Error & EOF Handling:**
+        - [ ] `feof(FILE *stream)`: return non-zero if EOF indicator set.
+        - [ ] `ferror(FILE *stream)`: return non-zero if error indicator set.
+        - [ ] `clearerr(FILE *stream)`: clear both EOF and error indicators.
+        - [ ] `perror(const char *s)`: print `s: strerror(errno)\n` to `stderr`.
+    - [ ] **Temporary Files:**
+        - [ ] `tmpfile()`: create anonymous temporary `FILE` (deleted on close).
+        - [ ] `tmpnam(char *s)` (deprecated) / `mkstemp()` integration.
+    - [ ] **Complete `printf` Family Implementation (User & Kernel):**
+        - [x] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
+        - [x] **User:** `lib/c` implementation.
+        - [x] **Flags:**
+            - [x] `-` (Left-align within field width).
+            - [x] `+` (Force sign for positive numbers).
+            - [x] ` ` (Space prefix for positive numbers).
+            - [x] `#` (Alternate form: 0x for hex, force decimal point).
+            - [x] `0` (Zero-padding).
+        - [x] **Width & Precision:**
+            - [x] Numeric width (e.g., `%5d`).
+            - [x] Dynamic width `*` (from argument).
+            - [x] Numeric precision (e.g., `%.5d`).
+            - [x] Dynamic precision `.*`(from argument).
+            - [x] Combined width/precision (e.g., `%5.2f`).
+            - [x] Negative width logic (treat as `-` flag + positive width).
+        - [x] **Length Modifiers:**
+            - [x] `hh` (signed/unsigned char).
+            - [x] `h` (signed/unsigned short).
+            - [x] `l` (long, wint_t).
+            - [x] `ll` (long long).
+            - [x] `j` (intmax_t, uintmax_t).
+            - [x] `z` (size_t, ssize_t).
+            - [x] `t` (ptrdiff_t).
+            - [x] `L` (long double).
+        - [x] **Conversion Specifiers:**
+            - [x] **Integers:** `d`, `i` (signed decimal).
+            - [x] **Unsigned:** `u` (decimal), `o` (octal).
+            - [x] **Hex:** `x`, `X` (lower/upper case).
+            - [x] **Floating Point (Basic):** `f`, `F` (decimal notation).
+            - [x] **Scientific:** `e`, `E` (exponential notation).
+            - [x] **Significant:** `g`, `G` (shortest representation).
+            - [x] **Hex Float:** `a`, `A` (C99 hex float - placeholder).
+            - [x] **Characters:** `c` (char), `lc` (wint_t).
+            - [x] **Strings:** `s` (char*), `ls` (wchar_t*).
+            - [x] **Pointer:** `p` (implementation defined, usually %08x or %016x).
+            - [x] **Count:** `n` (store number of chars written to int*).
+            - [x] **Literal:** `%` (print percent sign).
+        - [ ] **Complex/Compound Cases:**
+            - [x] Prefix combinations (e.g., `%20#llx`).
+            - [x] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).
+            - [x] "0" flag ignored if "-" is present.
+            - [x] "0" flag ignored if precision is specified for integers.
+            - [x] Space ignored if "+" is present.
+        - [ ] **`printf` Family Wrappers:**
+            - [ ] `fprintf(FILE *stream, const char *fmt, ...)`: output to `FILE` via buffer.
+            - [ ] `printf(const char *fmt, ...)`: wrapper for `fprintf(stdout, ...)`.
+            - [ ] `sprintf(char *str, const char *fmt, ...)`: output to string (no bounds check).
+            - [ ] `snprintf(char *str, size_t size, const char *fmt, ...)`: bounded output to string.
+            - [ ] `dprintf(int fd, const char *fmt, ...)` (POSIX): output to fd directly.
+            - [ ] `asprintf(char **ret, const char *fmt, ...)` (BSD extension): auto-allocating sprintf.
+            - [ ] `vfprintf()`, `vprintf()`, `vsprintf()`, `vsnprintf()`, `vdprintf()`, `vasprintf()`: `va_list` variants.
+    - [ ] **Complete `scanf` Family Implementation:**
+        - [ ] **Core `vfscanf()` Engine:**
+            - [ ] Literal character matching (non-`%` characters, whitespace collapsing).
+            - [ ] `%%` literal percent matching.
+            - [ ] Assignment suppression (`*` flag).
+            - [ ] Maximum field width.
+            - [ ] **Length Modifiers:** `hh`, `h`, `l`, `ll`, `j`, `z`, `t`, `L`.
+            - [ ] **Conversion Specifiers:**
+                - [ ] `d` (decimal integer), `i` (auto-detect base: 0x/0/decimal).
+                - [ ] `u` (unsigned decimal), `o` (octal), `x`/`X` (hex).
+                - [ ] `f`, `e`, `g`, `a` (floating-point input parsing).
+                - [ ] `c` (character, no whitespace skip), `s` (string, whitespace-delimited).
+                - [ ] `[` (scanset): character class matching, `^` negation, `]` as first char.
+                - [ ] `p` (pointer), `n` (store chars consumed).
+            - [ ] Return number of successfully assigned items, or `EOF`.
+            - [ ] Handle input exhaustion mid-conversion.
+        - [ ] **`scanf` Family Wrappers:**
+            - [ ] `fscanf(FILE *stream, const char *fmt, ...)`.
+            - [ ] `scanf(const char *fmt, ...)`: wrapper for `fscanf(stdin, ...)`.
+            - [ ] `sscanf(const char *str, const char *fmt, ...)`: scan from string.
+            - [ ] `vfscanf()`, `vscanf()`, `vsscanf()`: `va_list` variants.
+    - [ ] **Testing:**
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_stdio.c`):**
+            - [ ] Test `fopen()`/`fclose()` for all mode strings (`"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, `"wx"`).
+            - [ ] Test `fopen()` returns `NULL` for non-existent file in `"r"` mode.
+            - [ ] Test `fdopen()` wraps existing fd correctly.
+            - [ ] Test `freopen()` changes mode and reuses `FILE`.
+            - [ ] Test `fread()`/`fwrite()` round-trip: write data, rewind, read back, compare.
+            - [ ] Test `fread()` partial read at EOF returns correct element count.
+            - [ ] Test `fwrite()` returns correct element count on success.
+            - [ ] Test `fgetc()`/`fputc()` byte-by-byte I/O.
+            - [ ] Test `ungetc()`: push back one char, re-read it.
+            - [ ] Test `ungetc(EOF)` is a no-op.
+            - [ ] Test `fgets()` reads up to newline, NUL-terminates.
+            - [ ] Test `fgets()` with buffer smaller than line.
+            - [ ] Test `fputs()`/`puts()` output correctness.
+            - [ ] Test `fseek()`/`ftell()` positioning in all `SEEK_*` modes.
+            - [ ] Test `rewind()` resets position and clears error.
+            - [ ] Test `fgetpos()`/`fsetpos()` round-trip.
+            - [ ] Test `feof()` returns non-zero only after read past end.
+            - [ ] Test `ferror()`/`clearerr()` flag management.
+            - [ ] Test `fflush(stdout)` forces write.
+            - [ ] Test `fflush(NULL)` flushes all streams.
+            - [ ] Test `setvbuf()` with `_IONBF` causes immediate writes.
+            - [ ] Test `setvbuf()` with `_IOLBF` flushes on newline.
+            - [ ] Test `setvbuf()` with `_IOFBF` accumulates until buffer full.
+            - [ ] Test `tmpfile()` returns valid `FILE` that is auto-deleted.
+            - [ ] Test `perror()` output format.
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_printf.c`):**
+            - [ ] Test `sprintf()` all integer conversions with all length modifiers.
+            - [ ] Test `sprintf()` all floating-point conversions: `%f`, `%e`, `%g`, `%a`.
+            - [ ] Test `snprintf()` truncation: verify NUL-termination and returned count.
+            - [ ] Test `snprintf()` with `size == 0` returns required length without writing.
+            - [ ] Test `fprintf()` to file, then read back and compare.
+            - [ ] Test `dprintf()` to pipe fd.
+            - [ ] Test `asprintf()` allocates correct buffer size.
+            - [ ] Test `%n` conversion stores correct count.
+            - [ ] Test width, precision, flag combinations exhaustively.
+            - [ ] Test `%%` literal output.
+            - [ ] Test `NULL` string argument to `%s` (implementation-defined, should not crash).
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_scanf.c`):**
+            - [ ] Test `sscanf()` integer conversions: `%d`, `%i`, `%u`, `%o`, `%x`.
+            - [ ] Test `sscanf()` `%i` auto-base detection: `0x` (hex), `0` (octal), decimal.
+            - [ ] Test `sscanf()` floating-point: `%f`, `%e`, `%g`.
+            - [ ] Test `sscanf()` `%c` reads exact count (no whitespace skip).
+            - [ ] Test `sscanf()` `%s` reads whitespace-delimited token.
+            - [ ] Test `sscanf()` `%[` scanset: `%[a-z]`, `%[^0-9]`, `%[]abc]`.
+            - [ ] Test `sscanf()` `%n` stores chars consumed.
+            - [ ] Test `sscanf()` assignment suppression: `%*d` skips but doesn't assign.
+            - [ ] Test `sscanf()` field width limits.
+            - [ ] Test `sscanf()` return value: count of successful assignments.
+            - [ ] Test `sscanf()` returns `EOF` on immediate input failure.
+            - [ ] Test `fscanf()` from file.
+            - [ ] Test `scanf()` length modifiers: `%hhd`, `%hd`, `%ld`, `%lld`, `%jd`, `%zd`, `%td`.
+        - [ ] **Property Tests (`tests/lib/c/property/prop_stdio.c`):**
+            - [ ] Property: `sprintf(buf, "%d", x); sscanf(buf, "%d", &y)` ⇒ `x == y` for all `int x`.
+            - [ ] Property: `sprintf(buf, "%u", x); sscanf(buf, "%u", &y)` ⇒ `x == y` for all `unsigned x`.
+            - [ ] Property: `snprintf(buf, n, fmt, ...)` return value ≥ 0 and ≤ what `sprintf` would produce.
+            - [ ] Property: `snprintf(buf, n, ...)` always NUL-terminates if `n > 0`.
+            - [ ] Property: `fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f)` ⇒ `memcmp(data, out, n) == 0`.
+            - [ ] Property: `ftell()` after `fseek(f, off, SEEK_SET)` returns `off`.
+            - [ ] Property: `ungetc(c, f); fgetc(f)` returns `c` for any valid `c` ≠ `EOF`.
+        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_printf.c`):**
+            - [ ] Fuzz `snprintf()` with random format strings and random arguments.
+            - [ ] Verify no buffer overflows (write to bounded buffer, check sentinel bytes).
+            - [ ] Verify return value consistency (re-call with larger buffer, compare output).
+            - [ ] Fuzz `vsnprintf()` with extreme widths/precisions.
+        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_scanf.c`):**
+            - [ ] Fuzz `sscanf()` with random format strings and random input strings.
+            - [ ] Verify no crashes, no buffer overflows, return value ≥ 0 or `EOF`.
+            - [ ] Fuzz scanset patterns (`%[...]`) with adversarial character classes.
+    - [ ] **Man Pages:**
+        - [ ] `man/man3/fopen.3` — File open. Covers `fopen()`, `fdopen()`, `freopen()`. Mode string parsing, `"x"` flag. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/fclose.3` — File close. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/fread.3` — Block I/O. Covers `fread()` and `fwrite()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/fgets.3` — Line input. Covers `fgets()`, `fputs()`, `gets()` removal note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/fgetc.3` — Character I/O. Covers `fgetc()`, `getc()`, `getchar()`, `fputc()`, `putc()`, `putchar()`, `ungetc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [ ] `man/man3/fseek.3` — File positioning. Covers `fseek()`, `ftell()`, `rewind()`, `fgetpos()`, `fsetpos()`, `fseeko()`, `ftello()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/fflush.3` — Flush stream. Document `NULL` argument behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/setvbuf.3` — Set stream buffering. Covers `setvbuf()`, `setbuf()`, `setlinebuf()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/feof.3` — Stream status. Covers `feof()`, `ferror()`, `clearerr()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [ ] `man/man3/perror.3` — Print error message. SYNOPSIS, DESCRIPTION, SEE ALSO.
+        - [ ] `man/man3/tmpfile.3` — Temporary files. Covers `tmpfile()` and `tmpnam()` deprecation note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/printf.3` — Formatted output. Covers `printf()`, `fprintf()`, `sprintf()`, `snprintf()`, `dprintf()`, `asprintf()` and `v*` variants. Full format specification. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/scanf.3` — Formatted input. Covers `scanf()`, `fscanf()`, `sscanf()` and `v*` variants. Full format specification including scansets. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+- [x] **String/Mem:**
+    - [x] Optimize `memcpy`, `memset`, `memmove`.
+    - [/] **Math Library (`lib/m/`):**
+        - [/] **Architecture & Environment:**
+            - [x] `math.h` header definition.
+            - [x] `math_errhandling` (errno support).
+            - [x] `__fpclassify` internal helper.
+            - [ ] **FENV (Floating-Point Environment):**
+                - [ ] **Header (`include/fenv.h`) Definition (C99/POSIX):**
+                    - [ ] Define `fenv_t` type (full x87 environment: CW, SW, TW, FIP, FCS, FDP, FDS, MXCSR on SSE-capable).
+                    - [ ] Define `fexcept_t` type (exception status word snapshot).
+                    - [ ] Define exception flag macros:
+                        - [ ] `FE_INVALID` (bit 0, x87 IE).
+                        - [ ] `FE_DENORMAL` (bit 1, x87 DE — non-standard extension, guard with `#ifdef`).
+                        - [ ] `FE_DIVBYZERO` (bit 2, x87 ZE).
+                        - [ ] `FE_OVERFLOW` (bit 3, x87 OE).
+                        - [ ] `FE_UNDERFLOW` (bit 4, x87 UE).
+                        - [ ] `FE_INEXACT` (bit 5, x87 PE).
+                        - [ ] `FE_ALL_EXCEPT` (bitwise OR of all supported exception flags).
+                    - [ ] Define rounding mode macros:
+                        - [ ] `FE_TONEAREST` (CW bits 10-11 = 00).
+                        - [ ] `FE_DOWNWARD` (CW bits 10-11 = 01).
+                        - [ ] `FE_UPWARD` (CW bits 10-11 = 10).
+                        - [ ] `FE_TOWARDZERO` (CW bits 10-11 = 11).
+                    - [ ] Define `FE_DFL_ENV` macro (pointer to default environment, `((const fenv_t *)-1)` or static).
+                    - [ ] Provide function prototypes for all `fe*` functions.
+                    - [ ] Include guard (`_FENV_H`) and C++ `extern "C"` wrapper.
+                - [ ] **Exception Handling Functions:**
+                    - [ ] `feclearexcept(int excepts)`:
+                        - [ ] Read x87 status word via `fnstsw`.
+                        - [ ] Clear requested exception bits.
+                        - [ ] Restore via `fldenv` (requires full env save/modify/restore cycle).
+                        - [ ] If SSE present, also clear bits in MXCSR via `ldmxcsr`.
+                        - [ ] Return 0 on success, non-zero on failure.
+                    - [ ] `fegetexceptflag(fexcept_t *flagp, int excepts)`:
+                        - [ ] Read x87 status word via `fnstsw`.
+                        - [ ] Mask with `excepts`, store into `*flagp`.
+                        - [ ] If SSE present, OR in MXCSR exception bits.
+                        - [ ] Return 0 on success.
+                    - [ ] `feraiseexcept(int excepts)`:
+                        - [ ] Raise specified exceptions by performing operations that trigger them (e.g., divide-by-zero for `FE_DIVBYZERO`, 0.0/0.0 for `FE_INVALID`).
+                        - [ ] Alternatively: save env, set SW bits, load env, then `fwait` to trigger trap.
+                        - [ ] Ensure `FE_OVERFLOW` and `FE_UNDERFLOW` also set `FE_INEXACT` per C99 7.6.2.3.
+                        - [ ] Return 0 on success.
+                    - [ ] `fesetexceptflag(const fexcept_t *flagp, int excepts)`:
+                        - [ ] Save full x87 environment via `fnstenv`.
+                        - [ ] Replace status word exception bits (masked by `excepts`) from `*flagp`.
+                        - [ ] Restore via `fldenv` — must NOT raise exceptions (set bits only).
+                        - [ ] If SSE present, update MXCSR accordingly.
+                        - [ ] Return 0 on success.
+                    - [ ] `fetestexcept(int excepts)`:
+                        - [ ] Read x87 status word via `fnstsw`.
+                        - [ ] If SSE present, OR in MXCSR sticky bits.
+                        - [ ] Return bitwise AND of current exceptions with `excepts`.
+                - [ ] **Rounding Mode Functions:**
+                    - [ ] `fegetround()`:
+                        - [ ] Read x87 control word via `fnstcw`.
+                        - [ ] Extract rounding mode bits (bits 10-11).
+                        - [ ] Return corresponding `FE_*` rounding constant.
+                    - [ ] `fesetround(int rdir)`:
+                        - [ ] Validate `rdir` is one of `FE_TONEAREST`, `FE_DOWNWARD`, `FE_UPWARD`, `FE_TOWARDZERO`.
+                        - [ ] Read x87 control word via `fnstcw`.
+                        - [ ] Modify rounding mode bits (bits 10-11).
+                        - [ ] Write back via `fldcw`.
+                        - [ ] If SSE present, also update MXCSR rounding bits (bits 13-14).
+                        - [ ] Return 0 on success, non-zero for invalid `rdir`.
+                - [ ] **Environment Save/Restore Functions:**
+                    - [ ] `fegetenv(fenv_t *envp)`:
+                        - [ ] Save full x87 environment via `fnstenv` into `*envp`.
+                        - [ ] Restore control word afterwards (x87 `fnstenv` masks all exceptions as side effect, so re-load CW).
+                        - [ ] If SSE present, also save MXCSR into `*envp`.
+                        - [ ] Return 0 on success.
+                    - [ ] `feholdexcept(fenv_t *envp)`:
+                        - [ ] Save current environment into `*envp` via `fnstenv`.
+                        - [ ] Clear all exception flags in status word.
+                        - [ ] Mask all exceptions in control word (set exception mask bits 0-5).
+                        - [ ] Install this non-stop environment via `fldenv`.
+                        - [ ] If SSE present, save and mask MXCSR similarly.
+                        - [ ] Return 0 on success.
+                        - [ ] This enables non-stop (non-trapping) FP mode for temporary computation.
+                    - [ ] `fesetenv(const fenv_t *envp)`:
+                        - [ ] If `envp == FE_DFL_ENV`, load default environment (e.g., `fninit` then adjust, or load a static default).
+                        - [ ] Else, load full x87 environment from `*envp` via `fldenv`.
+                        - [ ] If SSE present, also restore MXCSR from `*envp`.
+                        - [ ] Must NOT raise exceptions — install state silently.
+                        - [ ] Return 0 on success.
+                    - [ ] `feupdateenv(const fenv_t *envp)`:
+                        - [ ] Read currently raised exceptions via `fetestexcept(FE_ALL_EXCEPT)`.
+                        - [ ] Install `*envp` (or default) via `fesetenv(envp)`.
+                        - [ ] Re-raise the previously pending exceptions via `feraiseexcept()`.
+                        - [ ] Return 0 on success.
+                        - [ ] This is the "merge exceptions then restore" primitive.
+                - [ ] **`FENV_ACCESS` Pragma Support:**
+                    - [ ] Document compiler interaction: `#pragma STDC FENV_ACCESS ON` advisory.
+                    - [ ] Ensure `fenv.h` includes comment noting GCC `#pragma GCC optimize ("no-fast-math")` equivalent.
+                    - [ ] Add `FENV_ACCESS` documentation in header and man pages.
+                - [ ] **Implementation Details (i386/x87 Backend — `lib/m/src/fenv.c`):**
+                    - [ ] All functions implemented as i386 inline assembly or `.S` file for x87 `fnstcw`/`fldcw`/`fnstsw`/`fnstenv`/`fldenv`/`fnclex`/`fwait`.
+                    - [ ] SSE/MXCSR path gated by runtime or compile-time `__SSE__` check.
+                    - [ ] `fenv_t` layout must match x87 `fnstenv`/`fldenv` 28-byte block (+ optional MXCSR field).
+                    - [ ] Ensure `fninit` is used (not `finit`) to avoid waiting for pending exceptions during default-env setup.
+                    - [ ] All functions are `__attribute__((noinline))` to prevent optimizer from reordering FP state access.
+                - [ ] **Testing:**
+                    - [ ] **Unit Tests (`tests/lib/m/unit/test_fenv.c`):**
+                        - [ ] Test `feclearexcept()`: raise each exception, clear it, verify via `fetestexcept()`.
+                        - [ ] Test `feclearexcept(FE_ALL_EXCEPT)`: clear all, verify none pending.
+                        - [ ] Test `feclearexcept(0)`: no-op, verify no side effects.
+                        - [ ] Test `fegetexceptflag()` / `fesetexceptflag()`: round-trip flag save/restore.
+                        - [ ] Test `fesetexceptflag()` does NOT raise exceptions (just sets sticky bits).
+                        - [ ] Test `feraiseexcept()`: raise individual exceptions, verify via `fetestexcept()`.
+                        - [ ] Test `feraiseexcept(FE_OVERFLOW)` also sets `FE_INEXACT` (C99 requirement).
+                        - [ ] Test `feraiseexcept(FE_UNDERFLOW)` also sets `FE_INEXACT`.
+                        - [ ] Test `feraiseexcept()` with multiple flags ORed together.
+                        - [ ] Test `fetestexcept()`: verify returns only requested bits.
+                        - [ ] Test `fegetround()` default is `FE_TONEAREST`.
+                        - [ ] Test `fesetround()` / `fegetround()` round-trip for all four modes.
+                        - [ ] Test `fesetround()` with invalid argument returns non-zero.
+                        - [ ] Test `fesetround()` actually affects rounding: add 1.0 + tiny value and check direction.
+                        - [ ] Test `fegetenv()` / `fesetenv()` round-trip preserves full state.
+                        - [ ] Test `fesetenv(FE_DFL_ENV)` resets to default (no exceptions, `FE_TONEAREST`).
+                        - [ ] Test `feholdexcept()`: saves state, clears exceptions, masks all traps.
+                        - [ ] Test `feholdexcept()` followed by exception-raising operations don't trap.
+                        - [ ] Test `feupdateenv()`: merges pending exceptions from non-stop region back after restore.
+                        - [ ] Test `feupdateenv()` re-raises exceptions from before `feholdexcept()` was called.
+                        - [ ] Test interaction: `feholdexcept()` → compute with exceptions → `feupdateenv()` → verify merged.
+                    - [ ] **Property Tests (`tests/lib/m/property/prop_fenv.c`):**
+                        - [ ] Property: `fesetround(m); fegetround() == m` for all valid `m`.
+                        - [ ] Property: `fesetround(invalid)` returns non-zero and does not change mode.
+                        - [ ] Property: `feclearexcept(e); fetestexcept(e) == 0` for any valid exception mask `e`.
+                        - [ ] Property: `feraiseexcept(e); (fetestexcept(e) & e) == e` for any valid `e`.
+                        - [ ] Property: `fegetexceptflag(&f, e); feclearexcept(FE_ALL_EXCEPT); fesetexceptflag(&f, e); fetestexcept(e)` equals original.
+                        - [ ] Property: `fegetenv(&env); /* modify state */; fesetenv(&env)` restores original rounding and exceptions.
+                        - [ ] Property: `fesetenv(FE_DFL_ENV); fegetround() == FE_TONEAREST && fetestexcept(FE_ALL_EXCEPT) == 0`.
+                        - [ ] Property: `feholdexcept()` results in `fetestexcept(FE_ALL_EXCEPT) == 0` and non-stop mode.
+                        - [ ] Property: `feupdateenv()` preserves exceptions raised during non-stop region.
+                        - [ ] Property: exception flags are sticky — `feraiseexcept(e)` followed by unrelated FP ops retains `e`.
+                    - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_fenv.c`):**
+                        - [ ] Fuzz random combinations of exception flag bits to `feclearexcept()` / `feraiseexcept()` / `fetestexcept()`.
+                        - [ ] Fuzz random rounding mode values to `fesetround()` (including invalid values).
+                        - [ ] Fuzz random sequences of `fegetenv()`/`fesetenv()`/`feholdexcept()`/`feupdateenv()` interleaved with FP operations.
+                        - [ ] Fuzz random `fexcept_t` values through `fegetexceptflag()`/`fesetexceptflag()` round-trips.
+                        - [ ] Verify no crashes, no undefined behavior, status word consistency after each fuzzed sequence.
+                - [ ] **Man Pages:**
+                    - [ ] `man/man7/fenv.7` — Overview of floating-point environment, x87/SSE interaction, `FENV_ACCESS` pragma, and usage patterns.
+                    - [ ] `man/man3/feclearexcept.3` — Clear floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fegetexceptflag.3` — Get floating-point exception flags. Covers `fegetexceptflag()` and `fesetexceptflag()` together (paired save/restore API). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/feraiseexcept.3` — Raise floating-point exceptions. Document `FE_OVERFLOW`/`FE_UNDERFLOW` implying `FE_INEXACT`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fetestexcept.3` — Test floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fegetround.3` — Get/set floating-point rounding mode. Covers `fegetround()` and `fesetround()` together. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fegetenv.3` — Get/set floating-point environment. Covers `fegetenv()` and `fesetenv()`. SYNOPSIS, DESCRIPTION (document `FE_DFL_ENV`), RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/feholdexcept.3` — Save environment and enter non-stop mode. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES (show `feholdexcept()` → compute → `feupdateenv()` pattern), SEE ALSO.
+                    - [ ] `man/man3/feupdateenv.3` — Restore environment and re-raise saved exceptions. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+            - [ ] **Type Variants (f, l suffixes):**
+                - [ ] **Float Variants (`f` suffix — `lib/m/src/mathf.c`):**
+                    - [ ] Implement `sinf()`, `cosf()`, `tanf()`, `asinf()`, `acosf()`, `atanf()`, `atan2f()`.
+                    - [ ] Implement `sinhf()`, `coshf()`, `tanhf()`, `asinhf()`, `acoshf()`, `atanhf()`.
+                    - [ ] Implement `expf()`, `exp2f()`, `expm1f()`, `logf()`, `log2f()`, `log10f()`, `log1pf()`.
+                    - [ ] Implement `powf()`, `sqrtf()`, `cbrtf()`, `hypotf()`.
+                    - [ ] Implement `fabsf()`, `fmodf()`, `remainderf()`, `remquof()`, `fmaf()`.
+                    - [ ] Implement `fmaxf()`, `fminf()`, `fdimf()`.
+                    - [ ] Implement `ceilf()`, `floorf()`, `truncf()`, `roundf()`, `rintf()`, `nearbyintf()`.
+                    - [ ] Implement `lroundf()`, `llroundf()`, `lrintf()`, `llrintf()`.
+                    - [ ] Implement `frexpf()`, `ldexpf()`, `modff()`, `scalbnf()`, `scalblnf()`.
+                    - [ ] Implement `ilogbf()`, `logbf()`, `nextafterf()`, `nexttowardf()`, `copysignf()`, `nanf()`.
+                    - [ ] Implement `erff()`, `erfcf()`, `tgammaf()`, `lgammaf()`.
+                    - [ ] Implement `sincosf()`.
+                - [ ] **Long Double Variants (`l` suffix — `lib/m/src/mathl.c`):**
+                    - [ ] Implement `sinl()`, `cosl()`, `tanl()`, `asinl()`, `acosl()`, `atanl()`, `atan2l()`.
+                    - [ ] Implement `sinhl()`, `coshl()`, `tanhl()`, `asinhl()`, `acoshl()`, `atanhl()`.
+                    - [ ] Implement `expl()`, `exp2l()`, `expm1l()`, `logl()`, `log2l()`, `log10l()`, `log1pl()`.
+                    - [ ] Implement `powl()`, `sqrtl()`, `cbrtl()`, `hypotl()`.
+                    - [ ] Implement `fabsl()`, `fmodl()`, `remainderl()`, `remquol()`, `fmal()`.
+                    - [ ] Implement `fmaxl()`, `fminl()`, `fdiml()`.
+                    - [ ] Implement `ceill()`, `floorl()`, `truncl()`, `roundl()`, `rintl()`, `nearbyintl()`.
+                    - [ ] Implement `lroundl()`, `llroundl()`, `lrintl()`, `llrintl()`.
+                    - [ ] Implement `frexpl()`, `ldexpl()`, `modfl()`, `scalbnl()`, `scalblnl()`.
+                    - [ ] Implement `ilogbl()`, `logbl()`, `nextafterl()`, `nexttowardl()`, `copysignl()`, `nanl()`.
+                    - [ ] Implement `erfl()`, `erfcl()`, `tgammal()`, `lgammal()`.
+                    - [ ] Implement `sincosl()`.
+                - [ ] **i386 Note:** On x87, `long double` is 80-bit extended precision (native FPU format). `float`/`double` variants should use x87 internally and truncate on return.
+            - [ ] **Generic Math (`<tgmath.h>`):**
+                - [ ] Implement C99/C11 `<tgmath.h>` type-generic macros:
+                    - [ ] Dispatch to `f`, ` `, or `l` suffix based on argument type via `_Generic` (C11) or `__builtin_choose_expr` + `__builtin_types_compatible_p` (GCC extension).
+                    - [ ] Cover all math functions with type-generic wrappers: trig, hyperbolic, exp/log, pow/sqrt, rounding, manipulation, fenv-interacting.
+                    - [ ] Include complex variants dispatch (if/when `<complex.h>` is implemented).
+                    - [ ] Ensure macro expansion does not evaluate arguments multiple times (use statement expressions if needed).
+                - [ ] **Testing (`tests/lib/m/unit/test_tgmath.c`):**
+                    - [ ] Test type dispatch: `sin((float)x)` calls `sinf()`, `sin((double)x)` calls `sin()`, `sin((long double)x)` calls `sinl()`.
+                    - [ ] Test all covered function families dispatch correctly.
+                    - [ ] Test no double-evaluation of arguments with side effects.
+                - [ ] **Man Pages:**
+                    - [ ] `man/man7/tgmath.7` — Type-generic math macros overview, dispatch rules, C11 `_Generic` usage. SYNOPSIS, DESCRIPTION, EXAMPLES, SEE ALSO.
+        - [/] **Classification & Comparison (C99/C23/POSIX):**
+            - [x] `fpclassify()`
+            - [x] `isfinite()`
+            - [x] `isinf()`
+            - [x] `isnan()`
+            - [x] `isnormal()`
+            - [x] `signbit()`
+            - [ ] `isgreater()`, `isgreaterequal()`, `isless()`, `islessequal()`, `islessgreater()`, `isunordered()`:
+                - [ ] Implement as macros using `__builtin_isgreater` etc. (GCC) or manual quiet-NaN-safe comparisons.
+                - [ ] Must not raise `FE_INVALID` on unordered operands (unlike plain `<`/`>`).
+            - [ ] `iseqsig()`, `issignaling()` (C23):
+                - [ ] `iseqsig()`: equality comparison that DOES raise `FE_INVALID` on NaN.
+                - [ ] `issignaling()`: detect signaling NaN via bit pattern inspection.
+            - [ ] `iscanonical()`, `issubnormal()`, `iszero()` (C23):
+                - [ ] `iscanonical()`: always 1 for IEEE 754 binary formats (all values canonical).
+                - [ ] `issubnormal()`: `fpclassify(x) == FP_SUBNORMAL`.
+                - [ ] `iszero()`: `fpclassify(x) == FP_ZERO`.
+            - [ ] **Testing (`tests/lib/m/unit/test_classify.c`):**
+                - [ ] Test `fpclassify()` returns correct category for: `+0.0`, `-0.0`, `1.0`, `-1.0`, `INFINITY`, `-INFINITY`, `NAN`, `DBL_MIN/2` (denorm), `DBL_MAX`.
+                - [ ] Test `isfinite()` true for normals/denormals/zeros, false for inf/nan.
+                - [ ] Test `isinf()` true for `±INFINITY` only.
+                - [ ] Test `isnan()` true for `NAN`, quiet NaN, signaling NaN.
+                - [ ] Test `isnormal()` false for zero, denormal, inf, nan.
+                - [ ] Test `signbit()` for `+0.0`, `-0.0`, `+1.0`, `-1.0`, `+INFINITY`, `-INFINITY`, `NAN`, `-NAN`.
+                - [ ] Test `isgreater()` etc. do NOT raise `FE_INVALID` when one operand is NaN.
+                - [ ] Test `isunordered()` true iff either operand is NaN.
+                - [ ] Test `iseqsig()` raises `FE_INVALID` on NaN operand.
+                - [ ] Test `issignaling()` detects sNaN bit pattern.
+                - [ ] Test float, double, and long double variants.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_classify.c`):**
+                - [ ] Property: exactly one of `isinf(x)`, `isnan(x)`, `isfinite(x)` is true for any `x`.
+                - [ ] Property: `isnormal(x)` implies `isfinite(x)`.
+                - [ ] Property: `issubnormal(x)` implies `isfinite(x) && !isnormal(x) && !iszero(x)`.
+                - [ ] Property: `signbit(-x) != signbit(x)` for all non-NaN `x`.
+                - [ ] Property: `isunordered(x, y)` iff `isnan(x) || isnan(y)`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/fpclassify.3` — Floating-point classification. Covers `fpclassify()`, `isfinite()`, `isinf()`, `isnan()`, `isnormal()`, `signbit()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/isgreater.3` — Quiet comparison macros. Covers `isgreater()` through `isunordered()`. Document non-signaling NaN behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [/] **Basic Arithmetic:**
+            - [x] `fabs()`
+            - [x] `fmod()`
+            - [x] `remainder()`
+            - [x] `remquo()`:
+                - [x] Compute remainder AND store low-order bits of quotient in `*quo`.
+                - [x] Sign of `*quo` is sign of `x/y`.
+                - [x] At least 3 bits of quotient stored.
+            - [x] `fmax()`
+            - [x] `fmin()`
+            - [x] `fdim()`
+            - [x] `fma()` (Fused Multiply-Add):
+                - [x] Compute `(x * y) + z` with single rounding (as if infinite precision intermediate).
+                - [x] Critical for numerical accuracy in dot-products, compensated summation.
+                - [x] On x87: no hardware FMA — use software double-double decomposition or Dekker's algorithm.
+                - [x] Raise `FE_INEXACT`/`FE_OVERFLOW`/`FE_UNDERFLOW` appropriately.
+            - [x] `fmaximum()`, `fminimum()`, `fmaximum_num()`, `fminimum_num()`, `fmaximum_mag()`, `fminimum_mag()` (C23):
+                - [x] `fmaximum()`/`fminimum()`: NaN-propagating (NaN if either operand is NaN).
+                - [x] `fmaximum_num()`/`fminimum_num()`: NaN-ignoring (return the non-NaN operand).
+                - [x] `fmaximum_mag()`/`fminimum_mag()`: Compare absolute values, NaN-propagating.
+                - [x] All distinguish `+0.0` from `-0.0`: `fmaximum(+0.0, -0.0) == +0.0`.
+            - [ ] **Testing (`tests/lib/m/unit/test_arith.c`):**
+                - [ ] Test `fabs()`: positive, negative, zero, -0.0, ∞, -∞, NaN.
+                - [ ] Test `fmod()`: basic cases, sign of result matches dividend, zero dividend, NaN propagation.
+                - [ ] Test `remainder()`: IEEE remainder (can be negative), ties to even quotient.
+                - [ ] Test `remquo()`: remainder matches `remainder()`, quotient low bits correct.
+                - [ ] Test `fma()`: `fma(a, b, c)` vs naive `a*b+c` — detect cases where single rounding differs.
+                - [ ] Test `fma()` special values: 0×∞+NaN, ∞×finite±∞.
+                - [ ] Test `fmax()`/`fmin()`: NaN handling (return non-NaN), ±0.0 distinction.
+                - [ ] Test `fdim()`: positive difference, zero when x ≤ y, NaN propagation.
+                - [ ] Test C23 `fmaximum()`/`fminimum()` NaN propagation vs `fmax()`/`fmin()` NaN-ignoring.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_arith.c`):**
+                - [ ] Property: `fabs(x) >= 0` for all `x` (including `-0.0` → `+0.0`).
+                - [ ] Property: `fmod(x, y)` has same sign as `x` and `|fmod(x,y)| < |y|`.
+                - [ ] Property: `fma(x, y, 0.0) == x * y` for exact products (no rounding needed).
+                - [ ] Property: `fmax(x, y) >= x && fmax(x, y) >= y` for non-NaN inputs.
+                - [ ] Property: `fdim(x, y) + y >= x` for finite non-NaN inputs.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/fabs.3` — Absolute value. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/fmod.3` — Floating-point remainder. Covers `fmod()` and `remainder()` with IEEE semantics differences. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/remquo.3` — Remainder with quotient. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/fma.3` — Fused multiply-add. Document precision advantage. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/fmax.3` — Maximum/minimum. Covers `fmax()`, `fmin()`, `fdim()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+        - [/] **Rounding:**
+            - [x] `ceil()`
+            - [x] `floor()`
+            - [x] `trunc()`
+            - [x] `round()`
+            - [x] `rint()`
+            - [ ] `nearbyint()`:
+                - [ ] Same as `rint()` but does NOT raise `FE_INEXACT`.
+                - [ ] On x87: save/mask inexact exception, call `frndint`, restore flags.
+            - [ ] `lround()`, `llround()`:
+                - [ ] Round to nearest, ties away from zero (like `round()`), return `long`/`long long`.
+                - [ ] Raise `FE_INVALID` and return `LONG_MIN`/`LONG_MAX` on overflow or NaN.
+            - [ ] `lrint()`, `llrint()`:
+                - [ ] Round using current rounding mode (like `rint()`), return `long`/`long long`.
+                - [ ] On x87: `fistp` stores directly to integer.
+                - [ ] Raise `FE_INVALID` on overflow/NaN, `FE_INEXACT` if value was not integer.
+            - [ ] `roundeven()` (C23):
+                - [ ] Round to nearest, ties to even (same as default `FE_TONEAREST` `rint()`).
+                - [ ] Explicit function — does not depend on current rounding mode.
+            - [ ] `fromfp()`, `fromfpx()`, `ufromfp()`, `ufromfpx()` (C23):
+                - [ ] Convert to integer type with explicit rounding mode and width.
+                - [ ] `fromfp()`: signed, `ufromfp()`: unsigned.
+                - [ ] `*x` variants raise `FE_INEXACT` on non-integer input; non-`x` variants do not.
+            - [ ] **Testing (`tests/lib/m/unit/test_round.c`):**
+                - [ ] Test `ceil()`: `ceil(1.1)==2.0`, `ceil(-1.1)==-1.0`, `ceil(0.0)==0.0`, `ceil(-0.0)==-0.0`.
+                - [ ] Test `floor()`: `floor(1.9)==1.0`, `floor(-1.1)==-2.0`.
+                - [ ] Test `trunc()`: `trunc(1.9)==1.0`, `trunc(-1.9)==-1.0`.
+                - [ ] Test `round()`: ties away from zero: `round(0.5)==1.0`, `round(-0.5)==-1.0`.
+                - [ ] Test `rint()`: honors current rounding mode (test with `fesetround()`).
+                - [ ] Test `nearbyint()`: same as `rint()` but does NOT raise `FE_INEXACT` (verify via `fetestexcept()`).
+                - [ ] Test `lround()`/`llround()`: overflow → `LONG_MAX`/`LONG_MIN` + `FE_INVALID`.
+                - [ ] Test `lrint()`/`llrint()`: current rounding mode, `FE_INEXACT` on non-integer.
+                - [ ] Test `roundeven()`: `roundeven(0.5)==0.0`, `roundeven(1.5)==2.0` (ties to even).
+                - [ ] Test all rounding functions with: ±0.0, ±∞, NaN, ±0.5, ±1.5, large values.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_round.c`):**
+                - [ ] Property: `ceil(x) >= x` for all finite `x`.
+                - [ ] Property: `floor(x) <= x` for all finite `x`.
+                - [ ] Property: `|trunc(x)| <= |x|` for all finite `x`.
+                - [ ] Property: `floor(x) <= round(x) <= ceil(x)` for all `x` where the three are defined.
+                - [ ] Property: `rint(x) == x` for integer values of `x`.
+                - [ ] Property: rounding functions are idempotent: `ceil(ceil(x)) == ceil(x)`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/ceil.3` — Round upward. Covers `ceil()`, `ceilf()`, `ceill()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/floor.3` — Round downward. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/round.3` — Round to nearest, ties away from zero. Covers `round()`, `lround()`, `llround()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/rint.3` — Round to nearest integer using current mode. Covers `rint()`, `nearbyint()`, `lrint()`, `llrint()`. Document `FE_INEXACT` difference. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/trunc.3` — Round toward zero. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [/] **Exponential, Logarithmic & Power:**
+            - [x] `exp()`
+            - [x] `exp2()`
+            - [x] `expm1()`
+            - [ ] `exp10()`, `exp10m1()`, `exp2m1()` (C23):
+                - [ ] `exp10(x)`: compute `10^x`. On x87: `x * log2(10)` → `f2xm1`/`fscale`.
+                - [ ] `exp10m1(x)`: compute `10^x - 1` accurately for small `x`.
+                - [ ] `exp2m1(x)`: compute `2^x - 1` accurately for small `x` (direct `f2xm1` for |x| < 1).
+            - [x] `log()`
+            - [x] `log2()`
+            - [x] `log10()`
+            - [x] `log1p()`
+            - [ ] `log10p1()`, `log2p1()`, `logp1()` (C23):
+                - [ ] `logp1(x)`: alias for `log1p(x)` — compute `ln(1+x)` accurately for small `x`.
+                - [ ] `log2p1(x)`: compute `log2(1+x)` accurately. On x87: use `fyl2xp1` for |x| < 1-√2/2.
+                - [ ] `log10p1(x)`: compute `log10(1+x)` accurately.
+            - [x] `pow()`
+            - [ ] `pown()`, `powr()`, `rootn()`, `compound()` (C23):
+                - [ ] `pown(x, n)`: `x` raised to integer power `n` (`intmax_t`). Binary exponentiation.
+                - [ ] `powr(x, y)`: `e^(y * ln(x))`, domain x ≥ 0. Different NaN/±0 semantics from `pow()`.
+                - [ ] `rootn(x, n)`: n-th root of `x`. `rootn(x, 2) == sqrt(x)`, `rootn(x, 3) == cbrt(x)`.
+                - [ ] `compound(x, n)`: `(1+x)^n` computed stably for small `x`.
+            - [x] `sqrt()`
+            - [ ] `rsqrt()` (C23):
+                - [ ] Reciprocal square root: `1/sqrt(x)`.
+                - [ ] On x87: `fsqrt` then `fdivr` with 1.0.
+            - [x] `cbrt()`
+            - [x] `hypot()`
+            - [ ] **Testing (`tests/lib/m/unit/test_explog.c`):**
+                - [ ] Test `exp(0)==1`, `exp(1)≈M_E`, `exp(-∞)==0`, `exp(+∞)==+∞`, `exp(NaN)==NaN`.
+                - [ ] Test `exp2(0)==1`, `exp2(10)==1024`.
+                - [ ] Test `expm1(0)==0`, `expm1(tiny)≈tiny` (accuracy for small x vs naive `exp(x)-1`).
+                - [ ] Test `log(1)==0`, `log(M_E)≈1`, `log(0)==-∞`, `log(-1)==NaN` + `FE_INVALID`, `log(+∞)==+∞`.
+                - [ ] Test `log2(1)==0`, `log2(1024)==10`.
+                - [ ] Test `log10(1)==0`, `log10(1000)==3`.
+                - [ ] Test `log1p(0)==0`, `log1p(tiny)≈tiny` (accuracy for small x).
+                - [ ] Test `pow(2,10)==1024`, `pow(-1,2)==1`, `pow(0,0)==1` (C99 convention).
+                - [ ] Test `pow(x, 0)==1` for all x (including ∞, NaN per C99 F.9.4.4).
+                - [ ] Test `sqrt(4)==2`, `sqrt(0)==0`, `sqrt(-1)==NaN`, `sqrt(+∞)==+∞`.
+                - [ ] Test `cbrt(-8)==-2`, `cbrt(0)==0`.
+                - [ ] Test `hypot(3,4)==5`, `hypot(x,0)==fabs(x)`, `hypot(∞,NaN)==∞`.
+                - [ ] Test `rsqrt(4)==0.5`, `rsqrt(0)==+∞`, `rsqrt(-1)==NaN`.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_explog.c`):**
+                - [ ] Property: `exp(log(x)) ≈ x` for positive finite `x` (within ULP tolerance).
+                - [ ] Property: `log(exp(x)) ≈ x` for moderate `x` (no overflow/underflow).
+                - [ ] Property: `exp2(log2(x)) ≈ x` for positive finite `x`.
+                - [ ] Property: `sqrt(x) * sqrt(x) ≈ x` for positive `x`.
+                - [ ] Property: `hypot(x,y) >= fabs(x) && hypot(x,y) >= fabs(y)`.
+                - [ ] Property: `pow(x, 1.0) == x` for all `x`.
+                - [ ] Property: `expm1(x) + 1 ≈ exp(x)` for all `x` (accuracy comparison, not equality).
+                - [ ] Property: `log1p(expm1(x)) ≈ x` for moderate `x`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/exp.3` — Exponential functions. Covers `exp()`, `exp2()`, `expm1()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/log.3` — Logarithmic functions. Covers `log()`, `log2()`, `log10()`, `log1p()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/pow.3` — Power functions. Covers `pow()`, `sqrt()`, `cbrt()`, `hypot()`. Document special value semantics extensively (C99 Annex F). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [/] **Trigonometric:**
+            - [x] `sin()`
+            - [x] `cos()`
+            - [x] `tan()`
+            - [x] `asin()`
+            - [x] `acos()`
+            - [x] `atan()`
+            - [x] `atan2()`
+            - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23):
+                - [ ] `sinpi(x)`: compute `sin(π·x)` exactly at integer and half-integer points.
+                - [ ] `cospi(x)`: compute `cos(π·x)` exactly at integer and half-integer points.
+                - [ ] `tanpi(x)`: compute `tan(π·x)` exactly, including singularity at half-integers.
+                - [ ] Key benefit: exact values without `M_PI` multiplication error.
+            - [ ] `asinpi()`, `acospi()`, `atanpi()`, `atan2pi()` (C23):
+                - [ ] Inverse functions returning result in units of π (i.e., divided by π).
+                - [ ] `asinpi(x)` ∈ [-0.5, 0.5], `acospi(x)` ∈ [0, 1], `atanpi(x)` ∈ [-0.5, 0.5].
+                - [ ] `atan2pi(y, x)` ∈ [-1, 1].
+            - [ ] **Testing (`tests/lib/m/unit/test_trig.c`):**
+                - [ ] Test `sin(0)==0`, `sin(π/2)≈1`, `sin(π)≈0`, `sin(NaN)==NaN`.
+                - [ ] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`.
+                - [ ] Test `tan(0)==0`, `tan(π/4)≈1`.
+                - [ ] Test `asin(0)==0`, `asin(1)≈π/2`, `asin(2)==NaN` (domain error).
+                - [ ] Test `acos(1)==0`, `acos(0)≈π/2`, `acos(-1)≈π`.
+                - [ ] Test `atan(0)==0`, `atan(1)≈π/4`, `atan(+∞)≈π/2`.
+                - [ ] Test `atan2(0,1)==0`, `atan2(1,0)≈π/2`, `atan2(0,-1)≈π`, `atan2(-1,0)≈-π/2`.
+                - [ ] Test `sinpi(0.5)==1`, `sinpi(1)==0`, `sinpi(0)==0` (exact).
+                - [ ] Test `cospi(0)==1`, `cospi(0.5)==0`, `cospi(1)==-1` (exact).
+                - [ ] Test large argument accuracy: `sin(1e15)` — verify range reduction correctness.
+                - [ ] Test `sincos()` agrees with individual `sin()` and `cos()` calls.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_trig.c`):**
+                - [ ] Property: `sin(x)² + cos(x)² ≈ 1` (Pythagorean identity) for all finite `x`.
+                - [ ] Property: `sin(-x) == -sin(x)` (odd function).
+                - [ ] Property: `cos(-x) == cos(x)` (even function).
+                - [ ] Property: `asin(sin(x)) ≈ x` for `x ∈ [-π/2, π/2]`.
+                - [ ] Property: `|sin(x)| <= 1` and `|cos(x)| <= 1` for all finite `x`.
+                - [ ] Property: `atan2(sin(x), cos(x)) ≈ x` for `x ∈ (-π, π]`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/sin.3` — Trigonometric functions. Covers `sin()`, `cos()`, `tan()`, `sincos()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/asin.3` — Inverse trigonometric functions. Covers `asin()`, `acos()`, `atan()`, `atan2()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [x] **Hyperbolic:**
+            - [x] `sinh()`
+            - [x] `cosh()`
+            - [x] `tanh()`
+            - [x] `asinh()`
+            - [x] `acosh()`
+            - [x] `atanh()`
+            - [ ] **Testing (`tests/lib/m/unit/test_hyper.c`):**
+                - [ ] Test `sinh(0)==0`, `cosh(0)==1`, `tanh(0)==0`.
+                - [ ] Test `sinh(1)≈1.1752`, `cosh(1)≈1.5431`, `tanh(1)≈0.7616`.
+                - [ ] Test `sinh(+∞)==+∞`, `cosh(+∞)==+∞`, `tanh(+∞)==1`.
+                - [ ] Test `asinh(0)==0`, `acosh(1)==0`, `atanh(0)==0`.
+                - [ ] Test `acosh(x)` domain: `acosh(0.5)` → NaN/domain error.
+                - [ ] Test `atanh(±1)` → ±∞ (pole error).
+                - [ ] Test NaN propagation for all hyperbolic functions.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_hyper.c`):**
+                - [ ] Property: `cosh(x)² - sinh(x)² ≈ 1` (hyperbolic Pythagorean identity).
+                - [ ] Property: `sinh(-x) == -sinh(x)` (odd).
+                - [ ] Property: `cosh(-x) == cosh(x)` (even).
+                - [ ] Property: `tanh(x) == sinh(x)/cosh(x)` for moderate `x`.
+                - [ ] Property: `asinh(sinh(x)) ≈ x` for all `x`.
+                - [ ] Property: `|tanh(x)| < 1` for all finite `x`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/sinh.3` — Hyperbolic functions. Covers `sinh()`, `cosh()`, `tanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/asinh.3` — Inverse hyperbolic functions. Covers `asinh()`, `acosh()`, `atanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [/] **Manipulation:**
+            - [x] `frexp()`
+            - [x] `ldexp()`
+            - [x] `modf()`
+            - [x] `scalbn()`
+            - [ ] `scalbln()`:
+                - [ ] Same as `scalbn()` but exponent is `long` instead of `int`.
+            - [ ] `ilogb()`, `logb()`:
+                - [ ] `ilogb(x)`: extract unbiased exponent as `int`. `ilogb(0)` → `FP_ILOGB0`, `ilogb(∞)` → `INT_MAX`, `ilogb(NaN)` → `FP_ILOGBNAN`.
+                - [ ] `logb(x)`: extract unbiased exponent as `double`. `logb(0)` → `-∞` (pole), `logb(±∞)` → `+∞`.
+            - [x] `nextafter()`
+            - [ ] `nexttoward()`:
+                - [ ] Like `nextafter()` but second argument is `long double` for direction.
+            - [ ] `nextup()`, `nextdown()` (C23):
+                - [ ] `nextup(x)`: next representable value toward +∞.
+                - [ ] `nextdown(x)`: next representable value toward -∞.
+            - [x] `copysign()`
+            - [ ] `nan()`:
+                - [ ] `nan(tagp)`: convert string tag to quiet NaN. `nan("") == NAN`, `nan("123")` → NaN with tag payload.
+            - [ ] **Testing (`tests/lib/m/unit/test_manip.c`):**
+                - [ ] Test `frexp()` / `ldexp()` round-trip: `ldexp(frexp(x, &e), e) == x`.
+                - [ ] Test `frexp()` result ∈ [0.5, 1.0) for positive normals.
+                - [ ] Test `frexp(0.0)` returns 0.0 with exponent 0.
+                - [ ] Test `modf()`: integer + fractional parts sum to original.
+                - [ ] Test `scalbn(x, n) == x * 2^n` for moderate `n`.
+                - [ ] Test `ilogb()`: `ilogb(1.0)==0`, `ilogb(2.0)==1`, `ilogb(0.5)==-1`.
+                - [ ] Test `ilogb(0)` returns `FP_ILOGB0`, `ilogb(NaN)` returns `FP_ILOGBNAN`.
+                - [ ] Test `logb()`: `logb(1.0)==0`, `logb(0)==-∞`.
+                - [ ] Test `nextafter(1.0, 2.0)` returns next representable above 1.0.
+                - [ ] Test `nextafter(0.0, 1.0)` returns smallest denormal.
+                - [ ] Test `nextafter(x, x) == x` for all `x`.
+                - [ ] Test `copysign(1.0, -1.0) == -1.0`.
+                - [ ] Test `nan("")` returns NaN, `isnan(nan("tag"))` is true.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_manip.c`):**
+                - [ ] Property: `ldexp(frexp(x, &e), e) == x` for all finite non-zero `x`.
+                - [ ] Property: `modf(x, &i); (i + frac) == x` for finite `x`.
+                - [ ] Property: `copysign(fabs(x), y)` has sign of `y` and magnitude of `x`.
+                - [ ] Property: `nextafter(x, y) != x` when `x != y` (for finite `x`, `y`).
+                - [ ] Property: `scalbn(x, 0) == x`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/frexp.3` — Extract mantissa and exponent. Covers `frexp()` and `ldexp()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/modf.3` — Decompose to integer and fractional parts. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/scalbn.3` — Scale by power of radix. Covers `scalbn()` and `scalbln()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/ilogb.3` — Extract exponent. Covers `ilogb()` and `logb()`. Document special return values. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/nextafter.3` — Next representable value. Covers `nextafter()`, `nexttoward()`, `nextup()`, `nextdown()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/copysign.3` — Copy sign of a number. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/nan.3` — Generate quiet NaN. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+        - [ ] **Error & Gamma Functions (POSIX/C11):**
+            - [ ] `erf()`, `erfc()`:
+                - [ ] `erf(x)`: error function, `2/√π · ∫₀ˣ e^{-t²} dt`. Range: [-1, 1].
+                - [ ] `erfc(x)`: complementary error function, `1 - erf(x)`. More accurate than `1 - erf(x)` for large `x`.
+                - [ ] Implementation: rational polynomial approximation (Cody's or Abramowitz & Stegun).
+                - [ ] `erf(0)==0`, `erf(+∞)==1`, `erf(-∞)==-1`, `erfc(0)==1`, `erfc(+∞)==0`.
+            - [ ] `tgamma()`, `lgamma()` (with `signgam`):
+                - [ ] `tgamma(x)`: true Gamma function, `Γ(x)`.
+                - [ ] `tgamma(n) == (n-1)!` for positive integers.
+                - [ ] Poles at non-positive integers: `tgamma(0)` → ±∞, `tgamma(-1)` → NaN + `FE_INVALID`.
+                - [ ] `lgamma(x)`: natural log of absolute value of Gamma: `ln|Γ(x)|`.
+                - [ ] Set external `signgam` to sign of `Γ(x)` (+1 or -1).
+                - [ ] `lgamma_r(x, &signp)`: reentrant variant (BSD extension).
+                - [ ] Implementation: Stirling's approximation for large x, Lanczos or rational approximation for small x.
+            - [ ] **Testing (`tests/lib/m/unit/test_gamma.c`):**
+                - [ ] Test `erf(0)==0`, `erf(1)≈0.8427`, `erf(+∞)==1`, `erf(-∞)==-1`.
+                - [ ] Test `erfc(0)==1`, `erfc(+∞)==0`, `erfc(x) + erf(x) ≈ 1`.
+                - [ ] Test `tgamma(1)==1`, `tgamma(2)==1`, `tgamma(5)==24`, `tgamma(0.5)≈√π`.
+                - [ ] Test `tgamma(0)` → ±∞ (pole), `tgamma(-1)` → NaN.
+                - [ ] Test `lgamma(1)==0`, `lgamma(2)==0`, `lgamma(5)≈ln(24)`.
+                - [ ] Test `signgam` is set correctly after `lgamma()` calls.
+                - [ ] Test NaN propagation for all error/gamma functions.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_gamma.c`):**
+                - [ ] Property: `erfc(x) + erf(x) ≈ 1.0` for all finite `x`.
+                - [ ] Property: `erf(-x) == -erf(x)` (odd function).
+                - [ ] Property: `exp(lgamma(x)) ≈ |tgamma(x)|` for `x` where `tgamma(x)` is finite.
+                - [ ] Property: `tgamma(x+1) ≈ x * tgamma(x)` for positive `x` (recurrence relation).
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/erf.3` — Error functions. Covers `erf()` and `erfc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/tgamma.3` — Gamma functions. Covers `tgamma()`, `lgamma()`, `lgamma_r()`, `signgam`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] **Bessel Functions (POSIX/XSI):**
+            - [ ] `j0()`, `j1()`, `jn()`:
+                - [ ] Bessel functions of the first kind: `J₀(x)`, `J₁(x)`, `Jₙ(x)`.
+                - [ ] `j0(0)==1`, `j1(0)==0`, `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`.
+                - [ ] Implementation: polynomial/rational approximation for small x, asymptotic expansion for large x, Miller's backward recurrence for `jn()`.
+            - [ ] `y0()`, `y1()`, `yn()`:
+                - [ ] Bessel functions of the second kind: `Y₀(x)`, `Y₁(x)`, `Yₙ(x)`.
+                - [ ] Singular at `x=0`: `y0(0)==-∞`, `y1(0)==-∞`.
+                - [ ] Domain: `x > 0` only. `y0(-1)` → NaN + `FE_INVALID`.
+            - [ ] **Testing (`tests/lib/m/unit/test_bessel.c`):**
+                - [ ] Test `j0(0)==1`, `j1(0)==0`.
+                - [ ] Test `j0(x)` known values: `j0(2.4048...)≈0` (first zero).
+                - [ ] Test `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`.
+                - [ ] Test `y0(x)`, `y1(x)` known values.
+                - [ ] Test `y0(0)==-∞`, `y1(0)==-∞`.
+                - [ ] Test domain: `y0(-1)` → NaN, `y1(-1)` → NaN.
+                - [ ] Test NaN propagation.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_bessel.c`):**
+                - [ ] Property: `jn(n, x)` satisfies Bessel recurrence: `J_{n-1}(x) + J_{n+1}(x) = (2n/x) * J_n(x)`.
+                - [ ] Property: `|j0(x)| <= 1` for all `x >= 0`.
+                - [ ] Property: `yn(n, x)` satisfies same recurrence.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/j0.3` — Bessel functions. Covers `j0()`, `j1()`, `jn()`, `y0()`, `y1()`, `yn()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+    - [ ] **Comprehensive Math Library Tests (Cross-Cutting):**
+        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_math.c`):**
+            - [ ] Fuzz all implemented math functions with random `double` inputs (including denormals, ±0, ±∞, NaN, max/min values).
+            - [ ] Verify no crashes, no SIGFPE (unless expected), consistent NaN propagation.
+            - [ ] Verify errno is set correctly for domain/range errors.
+            - [ ] Verify `fetestexcept()` flags raised appropriately.
+        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_mathf.c`):**
+            - [ ] Same as above but for all `float` variant functions.
+        - [ ] **Accuracy Tests (`tests/lib/m/unit/test_accuracy.c`):**
+            - [ ] Compare all math functions against known high-precision reference values (MPFR or hardcoded tables).
+            - [ ] Verify results within 1 ULP for correctly-rounded functions, 2-3 ULP for faithfully-rounded.
+            - [ ] Test at boundary values: smallest/largest normal, smallest denormal, values near singularities.
+    - [ ] **Optimizations (i386/x87 Inline Assembly):**
+        - [ ] **Trigonometric Functions:**
+            - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.
+            - [ ] `sincos()`: Use `fsincos` if supported, else combine.
+            - [ ] `tan()`: Use `fptan`; push `1.0` then `fptan`, ignore the 1.0.
+            - [ ] `atan2()`: Use `fpatan`.
+            - [ ] **Range Reduction:** Implement `fprem1` loop for arguments > 2^63 (Intel Manual reduction).
+        - [ ] **Logarithms & Exponentials:**
+            - [ ] `log2(x)`: Load 1.0, load x, use `fyl2x`.
+            - [ ] `log(x)`: Load ln(2), load x, use `fyl2x`.
+            - [ ] `log10(x)`: Load log10(2), load x, use `fyl2x`.
+            - [ ] `pow(x, y)`:
+                - [ ] If y is integer, use binary exponentiation.
+                - [ ] Else: `y * log2(x)` -> `frndint` -> `f2xm1` -> `fscale`.
+            - [ ] `exp2(x)`: `f2xm1` (for -1 < x < 1) with `fscale` for integer part.
+        - [ ] **Basic Arithmetic:**
+            - [ ] `sqrt()`: `fsqrt`.
+            - [ ] `fabs()`: `fabs`.
+            - [ ] `fmod()`: `fprem`.
+            - [ ] `remainder()`: `fprem1` (IEEE compliant remainder).
+        - [ ] **Rounding & Manipulation:**
+            - [ ] `rint()`: `frndint` (honors current CW rounding mode).
+            - [ ] `nearbyint()`: `frndint` (without raising inexact exception).
+            - [ ] `scalbn(x, n)`: Load x, load n, `fscale`.
+            - [ ] `lrint()` / `llrint()`: `fistp` (store integer).
+        - [ ] **Testing (`tests/lib/m/unit/test_x87_opt.c`):**
+            - [ ] Verify x87-optimized functions produce identical results to generic C implementations.
+            - [ ] Test x87 range reduction: `sin(x)` for `x > 2^63` matches software range reduction.
+            - [ ] Test `fprem` loop termination (C1 flag check).
+            - [ ] Benchmark x87 vs generic: verify speedup for core functions.
+            - [ ] Test `nearbyint()` x87 path does NOT raise `FE_INEXACT` (vs `rint()` which does).
+            - [ ] Test `fistp` path for `lrint()`/`llrint()` matches current rounding mode.
+        - [ ] **Man Pages:**
+            - [ ] `man/man7/math_x87.7` — i386/x87 math optimizations overview. Document which functions use hardware instructions, range reduction strategy, accuracy guarantees, and when generic fallback is used. SYNOPSIS, DESCRIPTION, NOTES, SEE ALSO.
+- [ ] **Dynamic Linker (`/libexec/ld.so`) - Production Quality BSD-Style Implementation:**
+    - [ ] **Implementation Checklist (Commit-Atomic, Production Gate):**
+        - **1. Specification & Design**
+            - [x] Freeze `ld.so` scope, ABI targets, and unsupported-feature policy.
+                - Files/Headers: `docs/ld.so-design.md`, `docs/abi/elf-rtld-scope.md`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/spec/test_scope_matrix.c`; property `tests/libexec/ld.so/property/prop_feature_matrix.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_parser.c`.
+                - Docs: define supported/deferred/rejected feature matrix in `docs/ld.so-design.md`.
+                - Acceptance: scope matrix exists and every targeted ELF feature has a disposition and rationale.
+            - [x] Publish architecture relocation matrix for i386 now and x86_64 stub policy.
+                - Files/Headers: `docs/ld.so-reloc-matrix.md`, `libexec/ld.so/rtld_reloc_types.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_matrix_sync.c`; property `tests/libexec/ld.so/property/prop_reloc_matrix_totality.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_type_decoder.c`.
+                - Docs: add architecture matrix and unsupported relocation behavior.
+                - Acceptance: each relocation used by targeted ABIs maps to an implemented or explicitly rejected handler.
+            - [x] Specify deterministic symbol-resolution precedence and scope graph rules.
+                - Files/Headers: `docs/ld.so-symbol-resolution.md`, `libexec/ld.so/rtld_scope.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_scope_precedence.c`; property `tests/libexec/ld.so/property/prop_deterministic_lookup.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_inputs.c`.
+                - Docs: document preload/executable/dependency/path precedence and tie-breakers.
+                - Acceptance: two identical dependency graphs produce identical resolution results across runs.
+            - [x] Specify DT_RPATH/DT_RUNPATH, DT_SONAME, and versioning policy.
+                - Files/Headers: `docs/ld.so-path-and-version-policy.md`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_runpath_policy.c`; property `tests/libexec/ld.so/property/prop_soname_identity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_runpath_tokens.c`.
+                - Docs: define RPATH vs RUNPATH behavior, SONAME matching, and versioned symbol policy.
+                - Acceptance: policy doc is authoritative and referenced by loader manpages.
+        - **2. Loader Core: ELF Parsing & Mapping**
+            - [ ] Implement hardened ELF header/program-header parser with overflow guards.
+                - Files/Headers: `libexec/ld.so/elf_parse.c`, `libexec/ld.so/elf_parse.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_elf_parse_headers.c`; property `tests/libexec/ld.so/property/prop_header_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_elf_headers.c`.
+                - Docs: document parser invariants and rejection reasons in `docs/ld.so-design.md`.
+                - Acceptance: malformed/truncated headers are rejected without crash or out-of-bounds access.
+            - [ ] Implement dynamic table parser for required `DT_*` entries with strict bounds checking.
+                - Files/Headers: `libexec/ld.so/elf_dynamic.c`, `libexec/ld.so/elf_dynamic.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dynamic_table_parse.c`; property `tests/libexec/ld.so/property/prop_dt_tag_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dynamic_table.c`.
+                - Docs: add required/optional `DT_*` tag table.
+                - Acceptance: loader extracts required dynamic metadata and rejects conflicting/invalid tables.
+            - [ ] Implement page-aligned segment mapping with exact `PROT_*` transitions.
+                - Files/Headers: `libexec/ld.so/elf_map.c`, `libexec/ld.so/elf_map.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_segment_mapping.c`; property `tests/libexec/ld.so/property/prop_mapping_alignment.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_segment_layouts.c`.
+                - Docs: document mapping/protection lifecycle and W^X constraints.
+                - Acceptance: mapped segment permissions match ELF flags and pass integration probes.
+            - [ ] Implement fallback read-into-memory path for unsupported mmap edge cases.
+                - Files/Headers: `libexec/ld.so/elf_map_fallback.c`, `libexec/ld.so/elf_map.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_map_fallback.c`; property `tests/libexec/ld.so/property/prop_fallback_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_map_fallback_inputs.c`.
+                - Docs: describe when fallback mode is used and performance/security tradeoffs.
+                - Acceptance: fallback path loads valid DSOs with identical runtime behavior to mmap path.
+        - **3. Dependency Resolution & Loading Order**
+            - [ ] Implement recursive `DT_NEEDED` graph construction with cycle detection metadata.
+                - Files/Headers: `libexec/ld.so/rtld_dep.c`, `libexec/ld.so/rtld_dep.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dep_graph.c`; property `tests/libexec/ld.so/property/prop_cycle_termination.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_needed_graph.c`.
+                - Docs: describe cycle handling and graph node states.
+                - Acceptance: cyclic dependency sets terminate and produce deterministic load plans.
+            - [ ] Implement topological load-order planner for reloc/init phases.
+                - Files/Headers: `libexec/ld.so/rtld_order.c`, `libexec/ld.so/rtld_order.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_load_order.c`; property `tests/libexec/ld.so/property/prop_topo_validity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_order_inputs.c`.
+                - Docs: define ordering differences for relocation and constructor traversal.
+                - Acceptance: planned order always satisfies dependency-before-dependent invariant.
+            - [ ] Implement per-process DSO registry with SONAME identity and refcounts.
+                - Files/Headers: `libexec/ld.so/rtld_obj.c`, `libexec/ld.so/rtld_obj.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dso_registry.c`; property `tests/libexec/ld.so/property/prop_refcount_balance.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dso_identity.c`.
+                - Docs: document object lifecycle states and refcount semantics.
+                - Acceptance: duplicate loads reuse existing objects and maintain correct reference counts.
+            - [ ] Implement full search policy (`LD_PRELOAD`, `LD_LIBRARY_PATH`, RUNPATH/RPATH, cache, defaults).
+                - Files/Headers: `libexec/ld.so/rtld_search.c`, `libexec/ld.so/rtld_search.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_search_policy.c`; property `tests/libexec/ld.so/property/prop_search_precedence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_search_tokens.c`.
+                - Docs: add path precedence algorithm and token expansion rules.
+                - Acceptance: lookup order matches specification for all precedence edge cases.
+        - **4. Relocations & Binding**
+            - [ ] Implement REL/RELA dispatcher and relocation pass sequencing.
+                - Files/Headers: `libexec/ld.so/rtld_reloc.c`, `libexec/ld.so/rtld_reloc.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_dispatch.c`; property `tests/libexec/ld.so/property/prop_reloc_idempotence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_records.c`.
+                - Docs: document relocation pipeline and ordering guarantees.
+                - Acceptance: required relocation records execute in deterministic order without corruption.
+            - [ ] Implement core i386 relocation handlers (relative, absolute, pc-relative, glob-dat, jmp-slot).
+                - Files/Headers: `libexec/ld.so/rtld_reloc_i386.c`, `libexec/ld.so/rtld_reloc_i386.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_i386_core.c`; property `tests/libexec/ld.so/property/prop_i386_reloc_equations.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_i386_relocs.c`.
+                - Docs: enumerate implemented relocation formulas and constraints.
+                - Acceptance: relocation outputs match expected addresses for all supported i386 test fixtures.
+            - [ ] Implement copy relocation support with explicit executable-only safety checks.
+                - Files/Headers: `libexec/ld.so/rtld_copyreloc.c`, `libexec/ld.so/rtld_copyreloc.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_copy_reloc.c`; property `tests/libexec/ld.so/property/prop_copy_reloc_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_copy_reloc.c`.
+                - Docs: document copy-reloc constraints and rejection cases.
+                - Acceptance: data symbols requiring copy relocations initialize correctly without out-of-bounds copies.
+            - [ ] Implement lazy PLT resolver and GOT patch path.
+                - Files/Headers: `libexec/ld.so/rtld_plt.S`, `libexec/ld.so/rtld_bind.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_lazy_bind.c`; property `tests/libexec/ld.so/property/prop_bind_fixpoint.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_plt_indices.c`.
+                - Docs: describe PLT0 calling convention and resolver contract.
+                - Acceptance: first call resolves symbol and subsequent calls bypass resolver.
+            - [ ] Implement eager binding path for `RTLD_NOW` and `LD_BIND_NOW`.
+                - Files/Headers: `libexec/ld.so/rtld_now.c`, `libexec/ld.so/rtld_bind.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_bind_now.c`; property `tests/libexec/ld.so/property/prop_now_equals_lazy_endstate.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_bind_modes.c`.
+                - Docs: document lazy vs eager behavioral differences.
+                - Acceptance: eager mode resolves all bindable PLT relocations before control transfer.
+            - [ ] Add atomic GOT patching and locking for concurrent lazy binding.
+                - Files/Headers: `libexec/ld.so/rtld_bind_lock.c`, `libexec/ld.so/rtld_lock.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_atomic_got_patch.c`; property `tests/libexec/ld.so/property/prop_no_double_patch.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_concurrent_bind.c`.
+                - Docs: define lock/atomic invariants for runtime binding.
+                - Acceptance: concurrent first-call binding is race-free and resolves exactly once per slot.
+        - **5. Symbol Resolution & Interposition**
+            - [ ] Implement SYSV `DT_HASH` and GNU `DT_GNU_HASH` lookup backends.
+                - Files/Headers: `libexec/ld.so/rtld_hash.c`, `libexec/ld.so/rtld_hash.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_hash_lookup.c`; property `tests/libexec/ld.so/property/prop_hash_backend_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_hash_tables.c`.
+                - Docs: document hash backend selection and fallback.
+                - Acceptance: symbol lookup returns identical results across supported hash table variants.
+            - [ ] Implement weak/strong, visibility, and undefined-weak rules.
+                - Files/Headers: `libexec/ld.so/rtld_sym.c`, `libexec/ld.so/rtld_sym.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_symbol_strength.c`; property `tests/libexec/ld.so/property/prop_visibility_rules.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_symbol_attrs.c`.
+                - Docs: add symbol binding and visibility decision table.
+                - Acceptance: symbol selection follows ABI rules for weak/strong and visibility combinations.
+            - [ ] Implement preload-based interposition and global/local scope boundaries.
+                - Files/Headers: `libexec/ld.so/rtld_scope.c`, `libexec/ld.so/rtld_scope.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_interposition.c`; property `tests/libexec/ld.so/property/prop_scope_isolation.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_graphs.c`.
+                - Docs: document interposition precedence with `LD_PRELOAD`.
+                - Acceptance: preload libraries can override eligible global symbols without leaking local scope symbols.
+            - [ ] Implement versioned symbol matching (`DT_VERSYM`, `DT_VERNEED`, `DT_VERDEF`) when present.
+                - Files/Headers: `libexec/ld.so/rtld_versym.c`, `libexec/ld.so/rtld_versym.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_symbol_versions.c`; property `tests/libexec/ld.so/property/prop_version_match_totality.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_version_sections.c`.
+                - Docs: describe version requirement matching and failure messages.
+                - Acceptance: loader resolves only symbols satisfying requested versions and emits deterministic errors otherwise.
+        - **6. TLS (Thread-Local Storage)**
+            - [ ] Implement `PT_TLS` parsing and per-module TLS metadata registration.
+                - Files/Headers: `libexec/ld.so/rtld_tls.c`, `libexec/ld.so/rtld_tls.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_metadata.c`; property `tests/libexec/ld.so/property/prop_tls_layout_valid.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_segments.c`.
+                - Docs: document TLS metadata fields and invariants.
+                - Acceptance: each loaded module has validated TLS metadata with aligned sizes and offsets.
+            - [ ] Implement static TLS layout computation for startup objects.
+                - Files/Headers: `libexec/ld.so/rtld_tls_layout.c`, `libexec/ld.so/rtld_tls_layout.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_static_tls_layout.c`; property `tests/libexec/ld.so/property/prop_tls_alignment.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_layout.c`.
+                - Docs: describe layout algorithm and alignment constraints.
+                - Acceptance: static TLS blocks are non-overlapping, aligned, and accessible for all startup modules.
+            - [ ] Implement dynamic TLS allocation and `__tls_get_addr()` resolver.
+                - Files/Headers: `libexec/ld.so/rtld_tls_get_addr.S`, `libexec/ld.so/rtld_tls_dyn.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_get_addr.c`; property `tests/libexec/ld.so/property/prop_tls_addr_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_get_addr.c`.
+                - Docs: define `__tls_get_addr` ABI contract and failure modes.
+                - Acceptance: dynamic TLS lookups return correct per-thread addresses across repeated calls.
+            - [ ] Integrate TLS module lifecycle with `dlopen`/`dlclose` and pthread creation.
+                - Files/Headers: `libexec/ld.so/rtld_tls_lifecycle.c`, `lib/pthreads/pthread_tls_hooks.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_dlopen.c`; property `tests/libexec/ld.so/property/prop_tls_isolation_threads.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_lifecycle.c`.
+                - Docs: document TLS lifecycle events and teardown rules.
+                - Acceptance: TLS data is isolated per thread and modules loaded after startup are usable from all threads.
+        - **7. Constructors / Destructors / Initialization Order**
+            - [ ] Implement parser for `DT_PREINIT_ARRAY`, `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI`, `DT_FINI_ARRAY`.
+                - Files/Headers: `libexec/ld.so/rtld_init.c`, `libexec/ld.so/rtld_init.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_init_fini_parse.c`; property `tests/libexec/ld.so/property/prop_init_entry_validity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_init_arrays.c`.
+                - Docs: document supported initializer/finalizer sources.
+                - Acceptance: loader discovers all supported constructor/destructor entry points in fixtures.
+            - [ ] Implement dependency-respecting constructor execution order.
+                - Files/Headers: `libexec/ld.so/rtld_init_order.c`, `libexec/ld.so/rtld_order.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ctor_order.c`; property `tests/libexec/ld.so/property/prop_ctor_partial_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ctor_graphs.c`.
+                - Docs: define constructor ordering algorithm and corner cases.
+                - Acceptance: constructors run once and in dependency-correct order for complex graphs.
+            - [ ] Implement reverse-order destructor execution for process exit and `dlclose`.
+                - Files/Headers: `libexec/ld.so/rtld_fini.c`, `libexec/ld.so/rtld_fini.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dtor_order.c`; property `tests/libexec/ld.so/property/prop_dtor_reverse_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dtor_sequences.c`.
+                - Docs: describe exit vs unload finalization semantics.
+                - Acceptance: destructors run once in reverse dependency order under exit and unload paths.
+        - **8. `dlopen` / `dlsym` / `dlclose` Runtime API**
+            - [ ] Implement `dlfcn.h` ABI surface and libdl entry points skeleton.
+                - Files/Headers: `include/dlfcn.h`, `lib/dl/Makefile`, `lib/dl/dl_api.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlfcn_header.c`; property `tests/lib/dl/property/prop_flag_roundtrip.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlfcn_inputs.c`.
+                - Docs: document exported API and flag support matrix.
+                - Acceptance: headers and exported symbols compile and link for target userland.
+            - [ ] Implement `dlopen()` with `RTLD_LAZY`, `RTLD_NOW`, `RTLD_LOCAL`, and `RTLD_GLOBAL`.
+                - Files/Headers: `lib/dl/dlopen.c`, `libexec/ld.so/rtld_dlopen.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlopen_flags.c`; property `tests/lib/dl/property/prop_scope_visibility_flags.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlopen_flags.c`.
+                - Docs: add `dlopen(3)` flag semantics and examples.
+                - Acceptance: requested flags change scope and binding behavior exactly as documented.
+            - [ ] Implement `dlsym()` with `RTLD_DEFAULT`, `RTLD_NEXT`, and handle-scoped lookups.
+                - Files/Headers: `lib/dl/dlsym.c`, `libexec/ld.so/rtld_dlsym.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlsym_handles.c`; property `tests/lib/dl/property/prop_dlsym_deterministic.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlsym_names.c`.
+                - Docs: define lookup origin and pseudo-handle behavior.
+                - Acceptance: pseudo-handle and explicit-handle lookups return expected symbols in precedence order.
+            - [ ] Implement `dlclose()` refcounting, unload decision, and `RTLD_NODELETE` behavior.
+                - Files/Headers: `lib/dl/dlclose.c`, `libexec/ld.so/rtld_dlclose.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlclose_refcount.c`; property `tests/lib/dl/property/prop_refcount_never_negative.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlclose_sequences.c`.
+                - Docs: document unload eligibility and nodelete semantics.
+                - Acceptance: unload occurs only when allowed and references are balanced.
+            - [ ] Implement `dlerror()` with thread-local last-error storage semantics.
+                - Files/Headers: `lib/dl/dlerror.c`, `libexec/ld.so/rtld_error.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlerror_tls.c`; property `tests/lib/dl/property/prop_dlerror_clear_once.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlerror_messages.c`.
+                - Docs: specify error lifecycle and thread safety guarantees.
+                - Acceptance: each thread observes independent last-error state that clears on retrieval.
+            - [ ] Implement `dladdr()` and `dlinfo()` for common tooling requests.
+                - Files/Headers: `lib/dl/dladdr.c`, `lib/dl/dlinfo.c`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dladdr_dlinfo.c`; property `tests/lib/dl/property/prop_addr_to_object.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlinfo_requests.c`.
+                - Docs: add `dladdr(3)` and `dlinfo(3)` request coverage table.
+                - Acceptance: tooling-visible metadata is stable and accurate for loaded objects.
+        - **9. Environment, Configuration & Security**
+            - [ ] Implement parser for supported `LD_*` variables with strict token validation.
+                - Files/Headers: `libexec/ld.so/rtld_env.c`, `libexec/ld.so/rtld_env.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_env_parse.c`; property `tests/libexec/ld.so/property/prop_env_parse_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ld_env.c`.
+                - Docs: enumerate accepted variables and parse rules.
+                - Acceptance: malformed env values are rejected safely with deterministic errors.
+            - [ ] Enforce secure-exec mode to ignore all unsafe `LD_*` inputs.
+                - Files/Headers: `libexec/ld.so/rtld_secure.c`, `libexec/ld.so/rtld_secure.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_ignore_env.c`; property `tests/libexec/ld.so/property/prop_secure_env_zero_effect.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_secure_env.c`.
+                - Docs: document secure-exec behavior in design and manpages.
+                - Acceptance: setuid/setgid/secure mode ignores user-controlled `LD_*` knobs.
+            - [ ] Enforce secure preload policy (deny user-controlled preload paths and objects).
+                - Files/Headers: `libexec/ld.so/rtld_preload_secure.c`, `libexec/ld.so/rtld_search.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_preload.c`; property `tests/libexec/ld.so/property/prop_preload_secure_rejection.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_preload_secure.c`.
+                - Docs: specify trusted preload directories and rejection reasons.
+                - Acceptance: secure mode never loads preloads from untrusted/user-writable locations.
+            - [ ] Validate ownership and permissions of DSOs before secure-mode use.
+                - Files/Headers: `libexec/ld.so/rtld_fs_secure.c`, `libexec/ld.so/rtld_fs_secure.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_permissions.c`; property `tests/libexec/ld.so/property/prop_secure_path_monotonicity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_secure_stat.c`.
+                - Docs: document permission and ownership checks for secure execution.
+                - Acceptance: libraries failing secure ownership/permission checks are rejected with explicit diagnostics.
+            - [ ] Implement `PT_GNU_RELRO` finalization and read-only remap after relocations.
+                - Files/Headers: `libexec/ld.so/rtld_relro.c`, `libexec/ld.so/rtld_relro.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_relro_apply.c`; property `tests/libexec/ld.so/property/prop_relro_write_blocked.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_relro_ranges.c`.
+                - Docs: add RELRO requirements and interaction with `BIND_NOW`.
+                - Acceptance: RELRO pages become read-only after relocation and remain non-writable.
+            - [ ] Implement sysroot/chroot-aware path canonicalization for loader lookups.
+                - Files/Headers: `libexec/ld.so/rtld_path.c`, `libexec/ld.so/rtld_path.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_sysroot_paths.c`; property `tests/libexec/ld.so/property/prop_no_escape_from_sysroot.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_path_canon.c`.
+                - Docs: define path resolution behavior in chroot/container contexts.
+                - Acceptance: resolved library paths cannot escape configured root boundaries.
+        - **10. Caching & `ldconfig`**
+            - [ ] Define `ld.so.cache` binary format and versioning contract.
+                - Files/Headers: `include/ldso_cache.h`, `docs/ld.so-cache-format.md`.
+                - Tests (unit/property/fuzz): unit `tests/sbin/ldconfig/unit/test_cache_format.c`; property `tests/sbin/ldconfig/property/prop_cache_roundtrip.c`; fuzz `tests/sbin/ldconfig/fuzz/fuzz_cache_parser.c`.
+                - Docs: publish cache format, endianness, and compatibility policy.
+                - Acceptance: cache format spec is versioned and parser compatibility rules are explicit.
+            - [ ] Implement secure cache reader in loader with ownership/permission validation.
+                - Files/Headers: `libexec/ld.so/rtld_cache.c`, `libexec/ld.so/rtld_cache.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_cache_reader_secure.c`; property `tests/libexec/ld.so/property/prop_cache_lookup_consistency.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_cache_reader.c`.
+                - Docs: document cache trust model and fallback policy.
+                - Acceptance: untrusted/stale/corrupt cache is ignored safely and lookup falls back to path search.
+            - [ ] Implement `ldconfig(8)` cache writer and SONAME symlink management.
+                - Files/Headers: `sbin/ldconfig/ldconfig.c`, `sbin/ldconfig/Makefile`.
+                - Tests (unit/property/fuzz): unit `tests/sbin/ldconfig/unit/test_ldconfig_scan.c`; property `tests/sbin/ldconfig/property/prop_soname_link_consistency.c`; fuzz `tests/sbin/ldconfig/fuzz/fuzz_ldconfig_inputs.c`.
+                - Docs: add `man/man8/ldconfig.8`.
+                - Acceptance: `ldconfig` generates a valid cache and expected SONAME symlinks for configured dirs.
+        - **11. Performance & Optimizations**
+            - [ ] Optimize hash lookup fast path with GNU hash bloom prefilter.
+                - Files/Headers: `libexec/ld.so/rtld_hash_gnu.c`, `libexec/ld.so/rtld_hash.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_gnu_hash_bloom.c`; property `tests/libexec/ld.so/property/prop_hash_false_positive_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_gnu_hash.c`.
+                - Docs: record algorithm and expected complexity.
+                - Acceptance: lookup fast path is measurably faster than SYSV-only baseline on benchmark corpus.
+            - [ ] Batch relocations by page locality to reduce protection flips and page faults.
+                - Files/Headers: `libexec/ld.so/rtld_reloc_batch.c`, `libexec/ld.so/rtld_reloc.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_batch.c`; property `tests/libexec/ld.so/property/prop_batch_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_batch.c`.
+                - Docs: document batching constraints and correctness invariants.
+                - Acceptance: batched relocation mode preserves correctness and reduces startup cost in benchmarks.
+            - [ ] Add optional prebinding/prelink experiment behind explicit build flag.
+                - Files/Headers: `libexec/ld.so/rtld_prebind.c`, `libexec/ld.so/config.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_prebind_flag.c`; property `tests/libexec/ld.so/property/prop_prebind_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_prebind_metadata.c`.
+                - Docs: document prebinding as experimental and disabled by default.
+                - Acceptance: prebind mode is off by default and does not change default correctness guarantees.
+        - **12. Diagnostics, Auditing & Tracing**
+            - [ ] Implement `LD_DEBUG` category parser and structured debug logger.
+                - Files/Headers: `libexec/ld.so/rtld_debug.c`, `libexec/ld.so/rtld_debug.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ld_debug_categories.c`; property `tests/libexec/ld.so/property/prop_debug_filtering.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_debug_env.c`.
+                - Docs: document debug categories and output format.
+                - Acceptance: selected debug categories produce stable, parseable logs without leaking unrelated events.
+            - [ ] Implement `r_debug` / `_dl_debug_state` updates for debugger attach flow.
+                - Files/Headers: `libexec/ld.so/rtld_gdb.c`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_r_debug_states.c`; property `tests/libexec/ld.so/property/prop_debug_state_transitions.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_link_map_lists.c`.
+                - Docs: describe debugger handshake and state transitions.
+                - Acceptance: debugger-visible link-map state transitions are correct for add/remove events.
+            - [ ] Implement optional audit hook interface for load/bind events.
+                - Files/Headers: `libexec/ld.so/rtld_audit.c`, `libexec/ld.so/rtld_audit.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_audit_callbacks.c`; property `tests/libexec/ld.so/property/prop_audit_event_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_audit_modules.c`.
+                - Docs: publish audit hook ABI and safety caveats.
+                - Acceptance: enabled audit modules receive deterministic callbacks without changing default behavior.
+            - [ ] Add trace-friendly one-line event mode for ktrace/strace correlation.
+                - Files/Headers: `libexec/ld.so/rtld_trace.c`, `libexec/ld.so/rtld_trace.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_trace_format.c`; property `tests/libexec/ld.so/property/prop_trace_event_completeness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_trace_strings.c`.
+                - Docs: define stable trace keys and field semantics.
+                - Acceptance: trace mode emits machine-parseable events with stable keys.
+        - **13. Error Handling & Robustness**
+            - [ ] Define centralized loader error catalog with stable error codes.
+                - Files/Headers: `libexec/ld.so/rtld_errcodes.h`, `libexec/ld.so/rtld_error.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_error_catalog.c`; property `tests/libexec/ld.so/property/prop_error_code_uniqueness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_error_format.c`.
+                - Docs: document error code meanings and operator guidance.
+                - Acceptance: each fatal/non-fatal condition maps to a unique, documented loader error code.
+            - [ ] Implement high-context unresolved-symbol and relocation-failure diagnostics.
+                - Files/Headers: `libexec/ld.so/rtld_diag.c`, `libexec/ld.so/rtld_error.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_diag_unresolved.c`; property `tests/libexec/ld.so/property/prop_diag_contains_context.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_diag_tokens.c`.
+                - Docs: specify diagnostic format including SONAME/path/reloc offset.
+                - Acceptance: failures report symbol, requester, candidate scope, and failing location deterministically.
+            - [ ] Add fault-injection hooks for OOM, short-read, and mprotect failures.
+                - Files/Headers: `libexec/ld.so/rtld_faultinject.c`, `libexec/ld.so/rtld_faultinject.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fault_injection.c`; property `tests/libexec/ld.so/property/prop_fault_paths_no_leak.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_fault_sequences.c`.
+                - Docs: document fault-injection controls for test-only builds.
+                - Acceptance: injected failures exit cleanly without deadlock, memory corruption, or descriptor leaks.
+            - [ ] Add malformed-DSO fuzzing harnesses for parser, relocator, and resolver subsystems.
+                - Files/Headers: `tests/libexec/ld.so/fuzz/BUILD.md`, `tests/libexec/ld.so/fuzz/fuzz_rtld_driver.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fuzz_seed_regression.c`; property `tests/libexec/ld.so/property/prop_fuzz_seed_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_rtld_driver.c`.
+                - Docs: publish fuzz seed corpus management and crash triage workflow.
+                - Acceptance: fuzz targets run continuously in CI without known crashing seeds.
+        - **14. Thread Safety & Concurrency**
+            - [ ] Implement documented loader lock hierarchy and invariants.
+                - Files/Headers: `libexec/ld.so/rtld_lock.c`, `libexec/ld.so/rtld_lock.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_lock_hierarchy.c`; property `tests/libexec/ld.so/property/prop_lock_order_no_cycle.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_lock_sequences.c`.
+                - Docs: add lock-order and reentrancy rules to design docs.
+                - Acceptance: lock acquisition graph is acyclic and validated by stress tests.
+            - [ ] Make `dlopen`/`dlsym`/`dlclose` reentrant-safe under concurrent callers.
+                - Files/Headers: `libexec/ld.so/rtld_api_locking.c`, `lib/dl/dl_thread.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_api_thread_safety.c`; property `tests/lib/dl/property/prop_parallel_api_equivalence.c`; fuzz `tests/lib/dl/fuzz/fuzz_parallel_api.c`.
+                - Docs: define API-level thread-safety guarantees and caveats.
+                - Acceptance: high-concurrency stress suite shows no deadlocks or data races.
+            - [ ] Add concurrent lazy-bind stress runner with race-detection instrumentation.
+                - Files/Headers: `tests/libexec/ld.so/integration/test_lazy_bind_race.c`, `tests/ci/test-ldso-race.sh`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_bind_race_guards.c`; property `tests/libexec/ld.so/property/prop_lazy_bind_single_winner.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_lazy_bind_interleave.c`.
+                - Docs: document race-stress methodology and expected invariants.
+                - Acceptance: resolver races are absent across repeated high-thread-count runs.
+        - **15. Unloading & Resource Cleanup**
+            - [ ] Implement unload-eligibility analysis for reference graph and static TLS constraints.
+                - Files/Headers: `libexec/ld.so/rtld_unload.c`, `libexec/ld.so/rtld_unload.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_unload_eligibility.c`; property `tests/libexec/ld.so/property/prop_no_unload_if_referenced.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_unload_graphs.c`.
+                - Docs: document reasons unloading can be denied.
+                - Acceptance: loader unloads only safe modules and reports explicit denial reason otherwise.
+            - [ ] Implement module teardown pipeline (dtors, TLS teardown, unmap, registry removal).
+                - Files/Headers: `libexec/ld.so/rtld_teardown.c`, `libexec/ld.so/rtld_obj.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_teardown_pipeline.c`; property `tests/libexec/ld.so/property/prop_teardown_no_dangling.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_teardown_paths.c`.
+                - Docs: define teardown ordering guarantees.
+                - Acceptance: successful unload leaves no mapped segments, live TLS entries, or stale link-map entries.
+            - [ ] Add long-run load/unload churn leak tests under sanitizers.
+                - Files/Headers: `tests/libexec/ld.so/integration/test_churn_leaks.c`, `tests/ci/test-ldso-leaks.sh`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_leak_accounting.c`; property `tests/libexec/ld.so/property/prop_churn_stable_memory.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_churn_sequences.c`.
+                - Docs: document churn-test thresholds and failure triage.
+                - Acceptance: leak and UAF checks remain clean after sustained churn workload.
+        - **16. ABI & Tooling Compatibility**
+            - [ ] Implement `dl_iterate_phdr()` and stable `dl_phdr_info` traversal semantics.
+                - Files/Headers: `lib/dl/dl_iterate_phdr.c`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dl_iterate_phdr.c`; property `tests/lib/dl/property/prop_phdr_iteration_complete.c`; fuzz `tests/lib/dl/fuzz/fuzz_phdr_callbacks.c`.
+                - Docs: add `man/man3/dl_iterate_phdr.3`.
+                - Acceptance: callbacks observe all loaded objects in a deterministic order.
+            - [ ] Export and maintain `link_map`/`r_debug` ABI for debuggers and unwinders.
+                - Files/Headers: `include/link.h`, `libexec/ld.so/rtld_linkmap.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_link_map_layout.c`; property `tests/libexec/ld.so/property/prop_link_map_consistency.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_link_map_ops.c`.
+                - Docs: define stable fields and compatibility guarantees.
+                - Acceptance: debugger and unwinder smoke tests consume exported link-map structures successfully.
+            - [ ] Add compatibility shims and behavioral toggles required by common third-party software.
+                - Files/Headers: `libexec/ld.so/rtld_compat.c`, `libexec/ld.so/rtld_compat.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_compat_modes.c`; property `tests/libexec/ld.so/property/prop_compat_toggle_isolation.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_compat_knobs.c`.
+                - Docs: document each shim, rationale, and default state.
+                - Acceptance: designated compatibility test corpus passes without regressing default semantics.
+        - **17. Installer & Packaging**
+            - [ ] Define and enforce interpreter install path and `PT_INTERP` contract.
+                - Files/Headers: `Makefile.inc`, `sys/exec/elf_interp.c`, `docs/ld.so-install-layout.md`.
+                - Tests (unit/property/fuzz): unit `tests/sys/exec/unit/test_interp_path.c`; property `tests/sys/exec/property/prop_interp_path_stability.c`; fuzz `tests/sys/exec/fuzz/fuzz_interp_strings.c`.
+                - Docs: specify canonical interpreter path and compatibility symlink policy.
+                - Acceptance: built executables reference installed loader path consistently.
+            - [ ] Add packaging rules for `ld.so`, `libdl.so`, symlinks, ownership, and mode bits.
+                - Files/Headers: `Makefile`, `lib/dl/Makefile`, `tools/pkg/ldso.manifest`.
+                - Tests (unit/property/fuzz): unit `tests/tools/pkg/unit/test_ldso_manifest.c`; property `tests/tools/pkg/property/prop_symlink_chain_valid.c`; fuzz `tests/tools/pkg/fuzz/fuzz_pkg_manifest.c`.
+                - Docs: document package contents and upgrade path.
+                - Acceptance: packaging output installs runtime linker assets with correct paths and permissions.
+            - [ ] Add upgrade/rollback safety checks for loader and cache transitions.
+                - Files/Headers: `tools/pkg/ldso-upgrade.sh`, `tools/pkg/ldso-rollback.sh`.
+                - Tests (unit/property/fuzz): unit `tests/tools/pkg/unit/test_upgrade_checks.c`; property `tests/tools/pkg/property/prop_upgrade_rollback_inverse.c`; fuzz `tests/tools/pkg/fuzz/fuzz_upgrade_metadata.c`.
+                - Docs: document operational playbook for loader upgrades.
+                - Acceptance: upgrade and rollback scripts preserve bootability and loader consistency.
+        - **18. Tests & CI**
+            - [ ] Create dedicated `ld.so` unit-test targets in build system.
+                - Files/Headers: `tests/libexec/ld.so/Makefile`, `tests/Makefile`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_smoke_runner.c`; property `tests/libexec/ld.so/property/prop_runner_inputs.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_runner_bootstrap.c`.
+                - Docs: document test target names and invocation.
+                - Acceptance: `make` targets execute loader unit suites reliably in CI and local runs.
+            - [ ] Add property-test harness for symbol resolution and relocation invariants.
+                - Files/Headers: `tests/libexec/ld.so/property/prop_harness.c`, `tests/libexec/ld.so/property/fixtures/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_property_seed_replay.c`; property `tests/libexec/ld.so/property/prop_harness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_property_inputs.c`.
+                - Docs: describe property generation strategy and shrinking/repro workflow.
+                - Acceptance: property suite consistently exercises randomized dependency/relocation scenarios with reproducible seeds.
+            - [ ] Add coverage-guided fuzz targets and corpus minimization workflow.
+                - Files/Headers: `tests/libexec/ld.so/fuzz/CMakeLists.txt`, `tests/libexec/ld.so/fuzz/corpus/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fuzz_harness_build.c`; property `tests/libexec/ld.so/property/prop_corpus_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_elf_fullstack.c`.
+                - Docs: define fuzz runtime budgets and crash-handling policy.
+                - Acceptance: fuzz jobs run in CI with a managed corpus and no untriaged crashes.
+            - [ ] Add sanitizer CI matrix (ASAN/UBSAN required; optional TSAN where supported).
+                - Files/Headers: `tests/ci/test-ldso.sh`, `.github/workflows/ci.yml`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_sanitizer_smoke.c`; property `tests/libexec/ld.so/property/prop_sanitizer_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_sanitizer_mode.c`.
+                - Docs: document sanitizer expectations and suppression policy.
+                - Acceptance: all loader tests pass under required sanitizers in CI.
+            - [ ] Add multi-arch job plan (i386 active, x86_64 gated) and regression baseline snapshots.
+                - Files/Headers: `tests/ci/test-ldso-matrix.sh`, `tests/libexec/ld.so/regressions/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_matrix_config.c`; property `tests/libexec/ld.so/property/prop_regression_snapshot_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_matrix_inputs.c`.
+                - Docs: document CI matrix and architecture readiness criteria.
+                - Acceptance: CI records stable regression baselines and gates changes by architecture policy.
+        - **19. Documentation & Manpages**
+            - [ ] Write `ld.so(8)` covering runtime behavior, search paths, env vars, secure mode, and diagnostics.
+                - Files/Headers: `man/man8/ld.so.8`.
+                - Tests (unit/property/fuzz): unit `tests/man/unit/test_ldso_man_sections.c`; property `tests/man/property/prop_ldso_man_examples_build.c`; fuzz `tests/man/fuzz/fuzz_man_escape_sequences.c`.
+                - Docs: ensure required sections include DESCRIPTION, SECURITY, ENVIRONMENT, FILES, SEE ALSO.
+                - Acceptance: manpage is complete, reviewable, and matches implemented behavior.
+            - [ ] Write `dlopen(3)`, `dlsym(3)`, `dlclose(3)`, and `dlerror(3)` with error semantics and examples.
+                - Files/Headers: `man/man3/dlopen.3`, `man/man3/dlsym.3`, `man/man3/dlclose.3`, `man/man3/dlerror.3`.
+                - Tests (unit/property/fuzz): unit `tests/man/unit/test_dlfcn_man_sections.c`; property `tests/man/property/prop_dlfcn_examples_compile.c`; fuzz `tests/man/fuzz/fuzz_dlfcn_man_tokens.c`.
+                - Docs: include LIBRARY, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO sections.
+                - Acceptance: API manpages compile with documentation checks and reflect runtime flags accurately.
+            - [ ] Write `dladdr(3)`, `dlinfo(3)`, and `dl_iterate_phdr(3)` tooling-focused documentation.
+                - Files/Headers: `man/man3/dladdr.3`, `man/man3/dlinfo.3`, `man/man3/dl_iterate_phdr.3`.
+                - Tests (unit/property/fuzz): unit `tests/man/unit/test_linker_tooling_man_sections.c`; property `tests/man/property/prop_tooling_examples_compile.c`; fuzz `tests/man/fuzz/fuzz_tooling_man_markup.c`.
+                - Docs: document supported requests, callbacks, and structure fields.
+                - Acceptance: tooling manpages align with exported headers and runtime behavior.
+            - [ ] Publish loader security threat model and operational hardening guide.
+                - Files/Headers: `docs/security/ldso-threat-model.md`, `docs/security/ldso-hardening.md`.
+                - Tests (unit/property/fuzz): unit `tests/docs/unit/test_security_doc_links.c`; property `tests/docs/property/prop_security_rule_coverage.c`; fuzz `tests/docs/fuzz/fuzz_security_doc_parser.c`.
+                - Docs: include trust boundaries, attack surfaces, and mitigation checklist.
+                - Acceptance: threat model is reviewed and maps to implemented safeguards and tests.
+        - **20. Refactor & Audit Directive**
+            - [ ] Audit existing loader/runtime code and record reuse/refactor/delete decisions per file.
+                - Files/Headers: `docs/ldso-audit-inventory.md`, `libexec/ld.so/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_audit_inventory_sync.c`; property `tests/libexec/ld.so/property/prop_inventory_complete.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_inventory_parser.c`.
+                - Docs: maintain decision log with risk classification for each legacy file.
+                - Acceptance: inventory lists all relevant files and assigns an explicit action with rationale.
+            - [ ] Convert loader-related TODO/FIXME markers into standalone commit-atomic tasks.
+                - Files/Headers: `TASKS.md`, `libexec/ld.so/*.c`, `lib/dl/*.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_no_untracked_todos.c`; property `tests/libexec/ld.so/property/prop_todo_to_task_bijection.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_todo_scanner_input.c`.
+                - Docs: update audit inventory with TODO migration status.
+                - Acceptance: no loader TODO/FIXME remains without a corresponding tracked checklist item.
+            - [ ] Add final ship gate checklist for correctness, security, performance, docs, and CI sign-off.
+                - Files/Headers: `docs/ldso-ship-gate.md`, `tests/ci/test-ldso-ship-gate.sh`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ship_gate_schema.c`; property `tests/libexec/ld.so/property/prop_ship_gate_all_required.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ship_gate_yaml.c`.
+                - Docs: define required sign-off artifacts and rollback criteria.
+                - Acceptance: release is blocked until all ship-gate checks are green and documented.
+- [ ] **System Interface Libraries:**
+
+    - [ ] **Native Kernel Introspection (`libsys` / `libkernel`):**
+
+        > **Files:** `lib/sys/`, `lib/sys/include/sys/sysinfo.h`.
+        >
+        > **Architecture:** Thin wrapper over syscalls + structured parsing
+        > of `/proc` and `/sys`. Thread-safe with per-thread error state.
+
+        - [ ] **Core Architecture:**
+            - [ ] Define `libsys` as the canonical native interface to kernel internals.
+            - [ ] Thin wrapper over syscalls + structured `/proc` and `/sys` parsing.
+            - [ ] Sync and async query modes (for monitoring tools).
+            - [ ] Thread-safe design with per-thread error state (`errno`-like).
+            - [ ] Versioned ABI with `libsys.so.1` soname.
+        - [ ] **Data Sources:**
+            - [ ] **`sysctl` MIBs (System Control):**
+                - [ ] **`kern` (Kernel):**
+                    - [ ] `kern.ostype` (string): OS name (e.g., "Substrate").
+                    - [ ] `kern.osrelease` (string): release version.
+                    - [ ] `kern.osrevision` (int): revision number.
+                    - [ ] `kern.version` (string): full version string.
+                    - [ ] `kern.hostname` (string): system hostname (RW).
+                    - [ ] `kern.domainname` (string): NIS domain name (RW).
+                    - [ ] `kern.boottime` (struct timeval): boot timestamp.
+                    - [ ] `kern.maxproc` (int): maximum processes.
+                    - [ ] `kern.maxfiles` (int): maximum open files system-wide.
+                    - [ ] `kern.securelevel` (int): security level (RW, monotonically increasing).
+                    - [ ] `kern.argmax` (int): maximum `exec` argument length.
+                    - [ ] `kern.ngroups` (int): maximum supplementary groups.
+                - [ ] **`hw` (Hardware):**
+                    - [ ] `hw.machine` (string): machine architecture (e.g., "i386").
+                    - [ ] `hw.model` (string): CPU model name.
+                    - [ ] `hw.ncpu` (int): number of active CPUs.
+                    - [ ] `hw.ncpuonline` (int): number of online CPUs.
+                    - [ ] `hw.byteorder` (int): 4321 (big) or 1234 (little).
+                    - [ ] `hw.physmem` (long): total physical memory bytes.
+                    - [ ] `hw.usermem` (long): non-kernel memory bytes.
+                    - [ ] `hw.pagesize` (int): system page size (4096).
+                    - [ ] `hw.disknames` (string): comma-separated disk device names.
+                    - [ ] `hw.sensors` (struct): hardware sensor data (temperature, fan, voltage).
+                - [ ] **`vm` (Virtual Memory):**
+                    - [ ] `vm.loadavg` (struct loadavg): 1, 5, 15 min load averages.
+                    - [ ] `vm.swap_usage` (struct swap_stat): swap total/used/free.
+                    - [ ] `vm.vmtotal` (struct vmtotal): system-wide VM statistics.
+                    - [ ] `vm.overcommit` (int): memory overcommit policy.
+                    - [ ] `vm.swappiness` (int): page-out aggressiveness.
+                    - [ ] `vm.vfs_cache_pressure` (int): VFS inode/dentry cache reclaim pressure.
+                - [ ] **`net` (Network):**
+                    - [ ] `net.inet.ip.stats` (struct ipstat): IP packet counters.
+                    - [ ] `net.inet.ip.forwarding` (int): IPv4 forwarding enabled.
+                    - [ ] `net.inet.tcp.stats` (struct tcpstat): TCP connection stats.
+                    - [ ] `net.inet.udp.stats` (struct udpstat): UDP packet stats.
+                    - [ ] `net.link.generic.system.ifcount` (int): interface count.
+                    - [ ] `net.inet.icmp.stats` (struct icmpstat): ICMP packet stats.
+                - [ ] **`debug` (Debugging):**
+                    - [ ] `debug.klog` (string): kernel log ring buffer.
+                    - [ ] `debug.traceflags` (int): kernel tracing flags.
+            - [ ] **`procfs` Structures (Process Filesystem):**
+                - [ ] `/proc/[pid]/stat`: process state, stats, metrics (Linux-compatible format).
+                - [ ] `/proc/[pid]/status`: human-readable status info.
+                - [ ] `/proc/[pid]/maps`: memory map regions and permissions.
+                - [ ] `/proc/[pid]/cmdline`: command line arguments (NUL-separated).
+                - [ ] `/proc/[pid]/environ`: environment variables (NUL-separated).
+                - [ ] `/proc/[pid]/fd/`: open file descriptors (symlinks to paths).
+                - [ ] `/proc/[pid]/cwd`: symlink to current working directory.
+                - [ ] `/proc/[pid]/exe`: symlink to executable.
+                - [ ] `/proc/[pid]/root`: symlink to root directory.
+                - [ ] `/proc/[pid]/task/`: per-thread subdirectories.
+                - [ ] `/proc/meminfo`: global memory usage.
+                - [ ] `/proc/cpuinfo`: CPU capabilities and model info.
+                - [ ] `/proc/uptime`: system uptime and idle time.
+                - [ ] `/proc/loadavg`: load averages and process counts.
+                - [ ] `/proc/vmstat`: VM statistics counters.
+                - [ ] `/proc/self`: symlink to calling process's `/proc/[pid]`.
+            - [ ] **`sysfs` Structures (System Filesystem):**
+                - [ ] `/sys/class/net/`: network interface properties.
+                - [ ] `/sys/block/`: block device attributes (`size`, `stat`, `queue/`).
+                - [ ] `/sys/devices/system/cpu/`: CPU topology and frequency scaling.
+                - [ ] `/sys/devices/system/memory/`: memory block hotplug.
+                - [ ] `/sys/kernel/`: misc kernel tunables.
+            - [ ] **Netlink Sockets (Linux Compatibility):**
+                - [ ] `NETLINK_ROUTE`: interface/address/route management (`RTM_*` messages).
+                - [ ] `NETLINK_KOBJECT_UEVENT`: hotplug/device events.
+                - [ ] `NETLINK_GENERIC`: generic netlink families.
+            - [ ] **Direct Standard Syscalls:**
+                - [ ] `sysinfo()`: system uptime, total RAM, free RAM, procs.
+                - [ ] `uname()`: system identification (sysname, nodename, release, version, machine).
+                - [ ] `getrlimit()` / `setrlimit()`: process resource limits.
+                - [ ] `clock_gettime()`: high-resolution system clocks.
+                - [ ] `sysctl()`: generic MIB interface.
+        - [ ] **Process Information API (`lib/sys`):**
+            - [ ] `sys_proc_count()`: total number of processes.
+            - [ ] `sys_proc_list(pid_t *pids, size_t *count)`: list all PIDs.
+            - [ ] `sys_proc_info(pid_t pid, sys_procinfo_t *info)`: detailed process info (incl. `bitness`).
+            - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)`: list threads.
+            - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)`: list open FDs.
+            - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)`: memory mappings.
+            - [ ] `sys_proc_cwd(pid_t pid, char *buf, size_t len)`: current working directory.
+            - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)`: executable path.
+            - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)`: command line.
+            - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)`: environment.
+        - [ ] **Memory Statistics API (`lib/sys`):**
+            - [ ] `sys_vm_stats(sys_vmstat_t *stats)`: global VM statistics.
+            - [ ] `sys_vm_info(sys_vminfo_t *info)`: memory zone info (DMA, Normal, HighMem).
+            - [ ] `sys_vm_swap(sys_swapinfo_t *swap)`: swap usage statistics.
+            - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)`: buffer cache statistics.
+            - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)`: slab allocator stats.
+        - [ ] **CPU Information API (`lib/sys`):**
+            - [ ] `sys_cpu_count()`: number of CPUs (online/possible/present).
+            - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)`: per-CPU info (model, MHz, cache).
+            - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)`: per-CPU time accounting.
+            - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)`: load averages.
+            - [ ] `sys_cpu_topology(int cpu, sys_cputopo_t *topo)`: socket/core/thread topology.
+        - [ ] **System Information API (`lib/sys`):**
+            - [ ] `sys_uptime(struct timespec *ts)`: system uptime.
+            - [ ] `sys_boottime(struct timespec *ts)`: boot timestamp.
+            - [ ] `sys_hostname(char *buf, size_t len)`: system hostname.
+            - [ ] `sys_domainname(char *buf, size_t len)`: NIS/YP domain name.
+            - [ ] `sys_kernel_version(sys_version_t *ver)`: kernel version info.
+        - [ ] **Network Information API (`lib/sys`):**
+            - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)`: list interfaces.
+            - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)`: addresses.
+            - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)`: interface statistics.
+            - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)`: routing table.
+            - [ ] `sys_net_arp(sys_arpentry_t *entries, size_t *count)`: ARP table.
+        - [ ] **Disk / Storage Information API (`lib/sys`):**
+            - [ ] `sys_disk_list(sys_diskinfo_t *disks, size_t *count)`: list block devices.
+            - [ ] `sys_disk_stats(const char *dev, sys_diskstat_t *stats)`: I/O stats per device.
+            - [ ] `sys_mount_list(sys_mountinfo_t *mounts, size_t *count)`: mounted filesystems.
+        - [ ] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
+            - [ ] `sys_procinfo_t`: pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
+            - [ ] `sys_vmstat_t`: total, free, available, buffers, cached, swap_total, swap_free.
+            - [ ] `sys_cpuinfo_t`: vendor, model, family, stepping, mhz, cache_size, flags.
+            - [ ] `sys_cputopo_t`: socket_id, core_id, thread_id, numa_node.
+            - [ ] `sys_netif_t`: name, index, flags, mtu, hwaddr, type.
+            - [ ] `sys_diskinfo_t`: name, size, sector_size, model, serial.
+            - [ ] `sys_mountinfo_t`: device, mountpoint, fstype, flags.
+
+    - [ ] **BSD Compatibility Shim (`libkvm`):**
+
+        > **Architecture:** Userspace-only implementation using `libsys` —
+        > no `/dev/kmem` access. Source-level compatibility with FreeBSD/
+        > NetBSD/OpenBSD `libkvm` API.
+
+        - [ ] **Design Goals:**
+            - [ ] FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility.
+            - [ ] Implement entirely in userspace using `libsys`.
+            - [ ] Support `kinfo_proc`, `kinfo_vmentry`, `kinfo_file` structures.
+            - [ ] Maintain BSD ABI for source-level portability.
+        - [ ] **Wrapper Layer:**
+            - [ ] Map `kvm_*` calls to equivalent `libsys` functions.
+            - [ ] Structure translation between native `sys_procinfo_t` and BSD `kinfo_proc`.
+            - [ ] Error message buffering (`kvm_geterr`).
+        - [ ] **Core Functions:**
+            - [ ] `kvm_open(execfile, corefile, swapfile, flags, errstr)`: initialize context.
+            - [ ] `kvm_openfiles(...)`: extended open.
+            - [ ] `kvm_close(kd)`: close and free.
+            - [ ] `kvm_geterr(kd)`: error message from last failure.
+        - [ ] **Process Functions:**
+            - [ ] `kvm_getprocs(kd, op, arg, cnt)`: process list as `kinfo_proc` array.
+                - [ ] `KERN_PROC_ALL`: all processes.
+                - [ ] `KERN_PROC_PID`: specific PID.
+                - [ ] `KERN_PROC_PGRP`: by process group.
+                - [ ] `KERN_PROC_SESSION`: by session.
+                - [ ] `KERN_PROC_UID`: by user ID.
+                - [ ] `KERN_PROC_RUID`: by real user ID.
+                - [ ] `KERN_PROC_TTY`: by controlling terminal.
+            - [ ] `kvm_getargv(kd, kp, nchr)`: command line arguments.
+            - [ ] `kvm_getenvv(kd, kp, nchr)`: environment variables.
+            - [ ] `kvm_getproc2(kd, op, arg, elem_size, cnt)`: extended proc info.
+        - [ ] **Virtual Memory Functions:**
+            - [ ] `kvm_getfiles(kd, op, arg, cnt)`: open file list.
+            - [ ] `kvm_getvmmap(kd, kp, cnt)`: VM mappings for process.
+        - [ ] **Kernel Symbol Functions:**
+            - [ ] `kvm_nlist(kd, nl)`: look up kernel symbols from `/proc/kallsyms` or kernel ELF.
+            - [ ] `kvm_read(kd, addr, buf, len)`: read kernel memory (via `/proc/kcore`).
+            - [ ] `kvm_write(kd, addr, buf, len)`: write kernel memory (privileged).
+        - [ ] **Data Structures (BSD-compatible):**
+            - [ ] `struct kinfo_proc`: BSD process info (ki_pid, ki_ppid, ki_pgid, ki_uid, ki_comm, ki_stat, etc.).
+            - [ ] `struct kinfo_vmentry`: BSD VM mapping (kve_start, kve_end, kve_protection, kve_path).
+            - [ ] `struct kinfo_file`: BSD open file (kf_fd, kf_type, kf_offset, kf_path).
+            - [ ] `struct nlist`: symbol lookup request/response (n_name, n_type, n_value).
+
+    - [ ] **Linux Compatibility Shim (`libproc`):**
+
+        > **Architecture:** `libprocps`/`procps-ng` compatible API backed by
+        > `libsys` and `/proc` parsing.
+
+        - [ ] `openproc(flags, ...)`: process enumeration context with filtering.
+            - [ ] `PROC_FILLMEM`: fill memory statistics.
+            - [ ] `PROC_FILLCOM`: fill command name.
+            - [ ] `PROC_FILLARG`: fill command line arguments.
+            - [ ] `PROC_FILLENV`: fill environment.
+            - [ ] `PROC_FILLSTATUS`: fill status info.
+            - [ ] `PROC_FILLUSR`: fill user/group names.
+            - [ ] `PROC_PID`: filter by PID list.
+            - [ ] `PROC_UID`: filter by UID list.
+        - [ ] `closeproc(pt)`: close context and free resources.
+        - [ ] `readproc(pt, p)`: read next process entry.
+        - [ ] `readproctab(flags, ...)`: read all processes into array.
+        - [ ] `look_up_our_self(p)`: get info about calling process.
+        - [ ] `get_proc_stats(pid, ps)`: per-process `/proc/[pid]/stat` parsing.
+        - [ ] **`proc_t` Structure:**
+            - [ ] PID, PPID, PGID, SID, TPGID.
+            - [ ] State, priority, nice.
+            - [ ] User/system/start times.
+            - [ ] RSS, VSize, shared, text, data.
+            - [ ] Command name, command line.
+        - [ ] **System-wide:**
+            - [ ] `meminfo()`: parse `/proc/meminfo`.
+            - [ ] `cpuinfo()`: parse `/proc/cpuinfo`.
+            - [ ] `uptime(uptime, idle)`: parse `/proc/uptime`.
+            - [ ] `loadavg(av1, av5, av15)`: parse `/proc/loadavg`.
+
+    - [ ] **Dependencies:**
+        - [ ] Kernel syscall interfaces for introspection (no `/dev/kmem`).
+        - [ ] `/proc` filesystem with Linux-compatible structure.
+        - [ ] `/sys` filesystem for hardware introspection.
+        - [ ] Kernel symbol export mechanism for `kvm_nlist()`.
+
+    - [ ] **Testing:**
+        - [ ] **libsys:**
+            - [ ] Unit: each `sys_proc_*` function against known process state.
+            - [ ] Unit: each `sys_vm_*` function returns sane values.
+            - [ ] Unit: each `sys_cpu_*` function with multi-CPU QEMU.
+            - [ ] Unit: each `sys_net_*` function with loopback interface.
+            - [ ] Unit: `sysctl` MIB reads for all `kern.*`, `hw.*`, `vm.*` nodes.
+            - [ ] Property: `sys_proc_list` count matches `sys_proc_count`.
+            - [ ] Thread safety: concurrent calls from 8 threads.
+            - [ ] Performance: 10000 `sys_proc_info` calls latency benchmark.
+        - [ ] **libkvm:**
+            - [ ] Unit: `kvm_open` / `kvm_close` lifecycle.
+            - [ ] Unit: `kvm_getprocs` with each `KERN_PROC_*` filter.
+            - [ ] Unit: `kvm_getargv` / `kvm_getenvv` string retrieval.
+            - [ ] Unit: `kvm_nlist` symbol lookup.
+            - [ ] Compatibility: compile and run BSD `top`, `ps`, `fstat` against libkvm.
+        - [ ] **libproc:**
+            - [ ] Unit: `openproc` / `readproc` / `closeproc` cycle.
+            - [ ] Unit: filter flags (PROC_PID, PROC_UID) correctness.
+            - [ ] Compatibility: compile and run `procps-ng` tools (ps, top, free, vmstat).
+    - [ ] **Documentation:**
+        - [ ] Man pages: `libsys(3)`, `sysctl(3)`, `kvm_open(3)`, `kvm_getprocs(3)`.
+        - [ ] Man pages: `openproc(3)`, `readproc(3)`, `readproctab(3)`.
+        - [ ] Internal doc: libsys → libkvm → libproc layering.
+
+    - [ ] **User Authentication Library (`lib/auth/`):**
+
+        > **Files:** `lib/auth/passwd.c`, `lib/auth/shadow.c`,
+        > `lib/auth/crypt.c`, `lib/auth/group.c`, `lib/auth/auth.c`.
+
+        - [ ] **Password Database (`/etc/passwd`):**
+            - [ ] **Structures:** `struct passwd` (pw_name, pw_passwd, pw_uid, pw_gid, pw_gecos, pw_dir, pw_shell).
+            - [ ] **Parser:** tokenize `user:pwd:uid:gid:gecos:home:shell` (colon-delimited).
+            - [ ] **Lookup API:**
+                - [ ] `getpwnam(const char *name)`: look up by name.
+                - [ ] `getpwuid(uid_t uid)`: look up by UID.
+            - [ ] **Iteration API:**
+                - [ ] `setpwent()`: open/rewind passwd database.
+                - [ ] `getpwent()`: get next entry.
+                - [ ] `endpwent()`: close database.
+            - [ ] **Thread Safety:**
+                - [ ] `getpwnam_r(name, pwd, buf, buflen, result)`: reentrant variant.
+                - [ ] `getpwuid_r(uid, pwd, buf, buflen, result)`: reentrant variant.
+                - [ ] `getpwent_r(pwd, buf, buflen, result)`: reentrant variant.
+            - [ ] **Edge Cases:**
+                - [ ] Handle malformed lines (missing fields, non-numeric uid/gid).
+                - [ ] Handle NIS/YP `+` entries (stub or pass-through).
+                - [ ] Handle entries with empty gecos or shell fields.
+
+        - [ ] **Group Database (`/etc/group`):**
+            - [ ] **Structures:** `struct group` (gr_name, gr_passwd, gr_gid, gr_mem).
+            - [ ] **Parser:** tokenize `name:passwd:gid:member1,member2,...`.
+            - [ ] **Lookup API:**
+                - [ ] `getgrnam(const char *name)`: look up by name.
+                - [ ] `getgrgid(gid_t gid)`: look up by GID.
+            - [ ] **Iteration API:** `setgrent()`, `getgrent()`, `endgrent()`.
+            - [ ] **Thread Safety:** `getgrnam_r()`, `getgrgid_r()`, `getgrent_r()`.
+            - [ ] **Supplementary Groups:**
+                - [ ] `getgrouplist(user, group, groups, ngroups)`: enumerate memberships.
+                - [ ] `initgroups(user, group)`: set supplementary groups for process.
+
+        - [ ] **Shadow Database (`/etc/shadow`):**
+            - [ ] **Structures:** `struct spwd` (sp_namp, sp_pwdp, sp_lstchg, sp_min, sp_max, sp_warn, sp_inact, sp_expire, sp_flag).
+            - [ ] **Parser:** tokenize `user:hash:lastchg:min:max:warn:inact:expire:flag`.
+            - [ ] **API:** `getspnam(name)`, `setspent()`, `getspent()`, `endspent()`.
+            - [ ] **Thread Safety:** `getspnam_r()`, `getspent_r()`.
+            - [ ] **Security:**
+                - [ ] File permissions: readable only by root (mode 0600).
+                - [ ] Refuse to open if euid ≠ 0.
+                - [ ] Lock file during writes (advisory locking).
+
+        - [ ] **Cryptography (Password Hashing):**
+            - [ ] **`crypt(key, salt)` Interface:**
+                - [ ] Detect hash type by salt prefix (`$1$`, `$5$`, `$6$`, `$2b$`).
+                - [ ] Legacy DES for salts without `$` prefix.
+                - [ ] Return hash string in thread-local static buffer.
+            - [ ] **`crypt_r(key, salt, data)` Reentrant:**
+                - [ ] Thread-safe version with caller-provided `struct crypt_data`.
+            - [ ] **Algorithms:**
+                - [ ] **DES:** legacy support (8-char key limit, 2-char salt).
+                - [ ] **MD5 (`$1$`):** BSD/Linux standard, 1000 rounds.
+                - [ ] **SHA-256 (`$5$`):** configurable rounds (default 5000).
+                - [ ] **SHA-512 (`$6$`):** configurable rounds (default 5000), preferred.
+                - [ ] **Bcrypt (`$2b$`):** cost-factor based, memory-hard (optional).
+            - [ ] **Salt Generation:**
+                - [ ] `crypt_gensalt(prefix, count, rbytes, nrbytes)`: generate random salt.
+                - [ ] Use `/dev/urandom` for entropy.
+                - [ ] Base64 encoding for salt string.
+
+        - [ ] **High-Level Authentication:**
+            - [ ] `auth_verify_password(user, clear_text)`:
+                - [ ] Retrieve shadow entry (requires root or shadow group).
+                - [ ] Extract salt from stored hash.
+                - [ ] Hash clear_text with extracted salt via `crypt()`.
+                - [ ] Constant-time comparison of computed vs stored hash.
+                - [ ] Return 0 on success, -1 on failure (no timing leak).
+            - [ ] `auth_check_expiry(user)`:
+                - [ ] Check password expiry (`sp_max`, `sp_lstchg`).
+                - [ ] Check account expiry (`sp_expire`).
+                - [ ] Check inactive days (`sp_inact`).
+                - [ ] Return status: OK, WARN, EXPIRED, LOCKED.
+
+        - [ ] **PAM Integration (future):**
+            - [ ] Define PAM module interface (`pam_sm_authenticate`, etc.).
+            - [ ] Implement `pam_unix.so` using `lib/auth` functions.
+            - [ ] Configuration via `/etc/pam.d/` or `/etc/pam.conf`.
+
+        - [ ] **Testing:**
+            - [ ] Unit: `getpwnam` / `getpwuid` with known `/etc/passwd` content.
+            - [ ] Unit: `getgrnam` / `getgrgid` with known `/etc/group` content.
+            - [ ] Unit: `getspnam` with known `/etc/shadow` content.
+            - [ ] Unit: `crypt()` produces correct hash for each algorithm ($1$, $5$, $6$).
+            - [ ] Unit: `crypt_gensalt` produces valid salts.
+            - [ ] Unit: `auth_verify_password` correct + incorrect passwords.
+            - [ ] Unit: `auth_check_expiry` for OK, WARN, EXPIRED, LOCKED states.
+            - [ ] Unit: reentrant `_r` variants are thread-safe.
+            - [ ] Property: `getpwent` iteration covers all entries in `/etc/passwd`.
+            - [ ] Property: constant-time comparison — timing does not vary with input.
+            - [ ] Security: `getspnam` fails if euid ≠ 0.
+            - [ ] Fuzz: parser handles malformed `/etc/passwd`, `/etc/group`, `/etc/shadow`.
+        - [ ] **Documentation:**
+            - [ ] Man pages: `getpwnam(3)`, `getpwuid(3)`, `getpwent(3)`.
+            - [ ] Man pages: `getgrnam(3)`, `getgrgid(3)`, `getgrent(3)`.
+            - [ ] Man pages: `getspnam(3)`, `shadow(5)`.
+            - [ ] Man pages: `crypt(3)`, `crypt_gensalt(3)`.
+            - [ ] Man pages: `passwd(5)`, `group(5)`.
+
+### 6a. System Call Wrapper Library (`lib/sys`)
+- [x] **Foundation:**
+    - [x] Create `lib/sys/` directory structure.
+    - [x] Implement `syscall.S`: Raw i386 `int $0x80` entry (6 args via ebx-ebp).
+    - [x] Create `include/sys/syscall.h`: `SYS_*` constants and `syscall()` prototype.
+    - [x] Add to `lib/Makefile` SUBDIRS.
+- [x] **VM Information Syscalls:**
+    - [x] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
+        - [x] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
+        - [x] `lib/sys/sysinfo.c`: Wrapper function.
+        - [x] Man page: `sysinfo(2)`.
+    - [x] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
+        - [x] `lib/sys/getpagesize.c`: Wrapper function.
+        - [x] Man page: `getpagesize(2)`.
+    - [x] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
+        - [x] `lib/sys/mlock.c`: Wrapper functions.
+        - [x] Man pages: `mlock(2)`, `munlock(2)`.
+- [ ] **Process Information Syscalls:**
+    - [x] `getpid()`/`getppid()` wrappers.
+        - [x] `lib/sys/getpid.c`: Wrapper functions.
+        - [x] Man pages: `getpid(2)`, `getppid(2)`.
+    - [x] `getuid()`/`getgid()`/`geteuid()`/`getegid()` wrappers.
+        - [x] `lib/sys/getuid.c`: Wrapper functions.
+        - [x] Man pages: `getuid(2)`, `getgid(2)`, `geteuid(2)`, `getegid(2)`.
+    - [x] `getpgid()`/`setpgid()`/`getpgrp()` wrappers.
+        - [x] `lib/sys/pgrp.c`: Wrapper functions.
+        - [x] Man pages: `getpgid(2)`, `setpgid(2)`, `getpgrp(2)`.
+    - [x] `getsid()`/`setsid()` wrappers.
+        - [x] `lib/sys/pgrp.c`: Wrapper functions.
+        - [x] Man pages: `getsid(2)`, `setsid(2)`.
+    - [x] `getrusage()` wrapper: Resource usage (user/sys time, memory).
+        - [x] Kernel: Hooked up `sys_getrusage()`.
+        - [x] `lib/sys/getrusage.c`: Wrapper function.
+        - [x] Man page: `getrusage(2)`.
+    - [x] `times()` wrapper: Process times (user, sys, children).
+        - [x] Kernel: Hooked up `sys_times()`.
+        - [x] `lib/sys/times.c`: Wrapper function.
+        - [x] Man page: `times(2)`.
+- [x] **Special-Purpose Syscalls:**
+    - [x] `vm86()` wrapper (SYS_vm86): Enter VM86 mode.
+        - [x] `lib/sys/vm86.c`: Typed wrapper.
+        - [x] Man page: `vm86(2)`.
+    - [x] `ptrace()` wrapper: Process tracing.
+        - [x] `lib/sys/ptrace.c`: Wrapper function.
+        - [x] Man page: `ptrace(2)`.
+    - [x] `reboot()` wrapper: System reboot/power off.
+        - [x] `lib/sys/reboot.c`: Wrapper function.
+        - [x] Man page: `reboot(2)`.
+- [x] **Sysctl Interface:**
+    - [x] `sysctl()` wrapper: Kernel tunable access.
+        - [x] Kernel: Hooked up `sys_sysctl()` MIB tree.
+        - [x] `lib/sys/sysctl.c`: Wrapper function.
+        - [x] Man page: `sysctl(2)`.
+
+### 6b. Editline Library (`lib/edit`)
+
+> **Files:** `editline.c`, `readline.c`, `history.c`, `terminal.c`,
+> `el.h` (internal), `histedit.h` (public API in `lib/edit/` and
+> `include/histedit.h`).
+>
+> **Current state:** skeletal — `el_init`/`el_end`/`el_reset`/`el_set`/
+> `el_get`/`el_line` exist. `el_gets` handles basic insert, backspace,
+> `^C`, `^D`, `^L`, and arrow‑key cursor movement + history nav.
+> History supports `H_ENTER`/`H_FIRST`/`H_LAST`/`H_PREV`/`H_NEXT`/
+> `H_SETSIZE`. Terminal supports raw/orig mode switching.
+
+- [x] **Core Foundation (`editline.c`, `el.h`, `histedit.h`):**
+    - [x] Create `lib/edit/` directory structure.
+    - [x] Implement `el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr)`: allocate `EditLine`, initialize line buffer (1024‑byte default), store streams.
+    - [x] Implement `el_end(EditLine *el)`: restore terminal, free line buffer and state.
+    - [x] Implement `el_reset(EditLine *el)`: zero `len`/`cursor`, NUL‑terminate buffer.
+    - [x] Implement `el_line(EditLine *el)`: return `LineInfo` with `buffer`/`cursor`/`lastchar` pointers.
+    - [x] Define `struct editline` (streams, terminal, line, history, prompt).
+    - [x] Define `struct line` (buffer, cap, len, cursor, `LineInfo`).
+    - [x] Define `struct terminal` (orig/raw `termios`, `is_raw` flag).
+    - [x] Add `prog` name storage for error messages.
+    - [x] Add `editor_mode` field to `struct editline` (enum: `ED_EMACS`, `ED_VI`).
+    - [x] Add `signal_state` field to `struct editline` (saved dispositions + mask).
+    - [x] Add `completion` callback pointer and client data to `struct editline`.
+    - [x] Add `rprompt` (right‑prompt) pointer to `struct editline`.
+    - [x] Dynamic line‑buffer growth: `realloc` when `len + 1 >= cap` (double strategy, capped at 1 MiB).
+    - [x] Implement `el_resize(EditLine *el)`: force terminal size re‑query and redraw.
+    - [x] Thread‑safety: document that `EditLine` is not thread‑safe (single‑thread contract).
+
+- [x] **Line Editing Engine (`readline.c`):**
+    - [x] **Character Insertion:**
+        - [x] Insert printable ASCII at cursor with `memmove` rightward shift.
+        - [x] Reject insertion when buffer is at capacity (grow or beep).
+        - [x] Support overwrite/replace mode toggle (Insert key).
+    - [x] **Deletion:**
+        - [x] Backspace (`^H` / 0x7F): delete char before cursor.
+        - [x] Delete (`^D`): delete char at cursor (or EOF on empty line).
+        - [x] `kill-line` (`^K`): delete from cursor to end of line, save to kill ring.
+        - [x] `backward-kill-line` (`^U`): delete from start to cursor, save to kill ring.
+        - [x] `kill-word` (`M-d`): delete from cursor to end of word, save to kill ring.
+        - [x] `backward-kill-word` (`M-^H` / `M-DEL`): delete word before cursor, save to kill ring.
+        - [x] `delete-char-or-list` (configurable `^D` variant): list completions if at end, else delete.
+    - [x] **Cursor Navigation:**
+        - [x] Left/Right arrow keys (ESC `[D` / ESC `[C`).
+        - [x] `beginning-of-line` (`^A`): move to column 0.
+        - [x] `end-of-line` (`^E`): move to `lastchar`.
+        - [x] `forward-word` (`M-f`): skip to next word boundary.
+        - [x] `backward-word` (`M-b`): skip to previous word boundary.
+        - [x] Home / End keys (ESC `[H`, ESC `[F`, and alternate sequences ESC `[1~` / ESC `[4~`).
+    - [x] **Screen Refresh (`refresh_line`):**
+        - [x] `\\r` + `CSI K` + prompt + buffer + cursor reposition via `CSI %dD`.
+        - [x] Handle multi‑line buffers: track physical rows, scroll window.
+        - [x] Calculate visible width accounting for prompt length and terminal columns.
+        - [x] Handle lines wider than terminal width (horizontal scrolling or wrapping).
+        - [x] Optimize refresh: track dirty region and only redraw changed portion.
+    - [x] **History Navigation:**
+        - [x] Up arrow (`ESC [A`): `H_PREV` — load previous history entry.
+        - [x] Down arrow (`ESC [B`): `H_NEXT` — load next or reset to empty.
+        - [x] Save current input before first history navigation; restore on down‑past‑end.
+        - [x] `history-search-backward` (`^R`): incremental reverse search.
+        - [x] `history-search-forward` (`^S`): incremental forward search.
+        - [x] `beginning-of-history` (`M-<`): jump to oldest entry.
+        - [x] `end-of-history` (`M->`): jump to newest / current input.
+    - [x] **Special Keys:**
+        - [x] `^C`: print `^C`, reset line, reprint prompt.
+        - [x] `^L`: clear screen (`CSI H` + `CSI 2J`), refresh line.
+        - [x] Enter (`\\n` / `\\r`): accept line, restore terminal, return buffer.
+        - [x] `^T` (`transpose-chars`): swap char at cursor with previous.
+        - [x] `^W` (`unix-word-rubout`): kill word backward (whitespace‑delimited).
+        - [x] `^Y` (`yank`): paste most recent kill‑ring entry.
+        - [x] `M-y` (`yank-pop`): cycle through kill ring after yank.
+        - [x] `^_` (`undo`): undo last editing operation.
+    - [x] **Escape Sequence Decoding:**
+        - [x] Two‑byte CSI: `ESC [` + final byte.
+        - [x] Three‑byte CSI with numeric parameter: `ESC [ <digit> ~` (Delete, Insert, PgUp, PgDn).
+        - [x] SS3 sequences: `ESC O A`/`B`/`C`/`D` (alternate arrow encoding).
+        - [x] Extended CSI: `ESC [ 1 ; <mod> <final>` (Shift/Ctrl/Alt + arrow/Home/End).
+        - [x] Timeout on incomplete escape (avoid blocking on bare ESC).
+    - [x] **Kill Ring:**
+        - [x] Circular buffer (8 entries default).
+        - [x] `kill-line`, `kill-word`, `backward-kill-word`, `backward-kill-line` all push to ring.
+        - [x] Consecutive kills append to the same ring entry.
+        - [x] `yank` inserts most recent; `yank-pop` rotates.
+    - [x] **Undo System:**
+        - [x] Record each editing operation (insert, delete, cursor move) as an undo entry.
+        - [x] `^_` pops the undo stack and reverts the operation.
+        - [x] Limit undo stack depth (256 entries default).
+
+- [x] **Emacs Key‑Binding Map:**
+    - [x] **Implemented:**
+        - [x] Printable self‑insert (0x20–0x7E).
+        - [x] Backspace / Delete.
+        - [x] `^C` (interrupt), `^D` (delete/EOF), `^L` (clear screen).
+        - [x] Arrow keys (cursor movement + history).
+    - [x] **Required Additions:**
+        - [x] `^A` — `beginning-of-line`.
+        - [x] `^B` — `backward-char`.
+        - [x] `^E` — `end-of-line`.
+        - [x] `^F` — `forward-char`.
+        - [x] `^K` — `kill-line`.
+        - [x] `^N` — `next-history` (alias for down‑arrow).
+        - [x] `^P` — `previous-history` (alias for up‑arrow).
+        - [x] `^R` — `reverse-search-history`.
+        - [x] `^S` — `forward-search-history`.
+        - [x] `^T` — `transpose-chars`.
+        - [x] `^U` — `unix-line-discard`.
+        - [x] `^W` — `unix-word-rubout`.
+        - [x] `^Y` — `yank`.
+        - [x] `^_` — `undo`.
+        - [x] `M-b` — `backward-word`.
+        - [x] `M-c` — `capitalize-word`.
+        - [x] `M-d` — `kill-word`.
+        - [x] `M-f` — `forward-word`.
+        - [x] `M-l` — `downcase-word`.
+        - [x] `M-u` — `upcase-word`.
+        - [x] `M-y` — `yank-pop`.
+        - [x] `M-<` — `beginning-of-history`.
+        - [x] `M->` — `end-of-history`.
+        - [x] `M-.` — `yank-last-arg` (insert last arg of previous command).
+        - [x] `Tab` (`^I`) — `complete` (filename completion).
+
+- [ ] **Vi Mode (`EL_EDITOR "vi"`):**
+    - [ ] **Mode State Machine:**
+        - [ ] Insert mode (default on entry): self‑insert, ESC → command mode.
+        - [ ] Command mode: motion, edit, and search commands.
+        - [ ] Replace mode (`R`): overwrite characters, ESC → command mode.
+        - [ ] Track mode in `struct editline` (`vi_mode` enum: `VI_INSERT`, `VI_COMMAND`, `VI_REPLACE`).
+    - [ ] **Insert‑Mode Keys:**
+        - [ ] `ESC` — switch to command mode.
+        - [ ] `^H` / Backspace — delete backward.
+        - [ ] `^W` — delete word backward.
+        - [ ] `^U` — delete to start of line.
+        - [ ] `^D` — EOF / delete char.
+    - [ ] **Command‑Mode Motion:**
+        - [ ] `h` / `l` — left / right one char.
+        - [ ] `w` / `W` — forward word / WORD.
+        - [ ] `b` / `B` — backward word / WORD.
+        - [ ] `e` / `E` — end of word / WORD.
+        - [ ] `0` — beginning of line.
+        - [ ] `$` — end of line.
+        - [ ] `^` — first non‑blank character.
+        - [ ] `f<c>` / `F<c>` — find char forward / backward.
+        - [ ] `t<c>` / `T<c>` — find char till forward / backward.
+        - [ ] `;` / `,` — repeat / reverse last find.
+    - [ ] **Command‑Mode Editing:**
+        - [ ] `i` — enter insert mode at cursor.
+        - [ ] `a` — enter insert mode after cursor.
+        - [ ] `I` — insert at beginning of line.
+        - [ ] `A` — insert at end of line.
+        - [ ] `x` — delete char at cursor.
+        - [ ] `X` — delete char before cursor.
+        - [ ] `r<c>` — replace char at cursor with `<c>`.
+        - [ ] `R` — enter replace mode.
+        - [ ] `d<motion>` — delete over motion (e.g., `dw`, `d$`, `dd`).
+        - [ ] `c<motion>` — change over motion (delete + insert mode).
+        - [ ] `D` — delete to end of line (`d$`).
+        - [ ] `C` — change to end of line (`c$`).
+        - [ ] `s` — substitute char (delete + insert).
+        - [ ] `S` — substitute entire line.
+        - [ ] `y<motion>` — yank over motion.
+        - [ ] `p` / `P` — paste after / before cursor.
+        - [ ] `u` — undo last change.
+        - [ ] `.` — repeat last edit command.
+        - [ ] `~` — toggle case of char at cursor.
+    - [ ] **Command‑Mode History:**
+        - [ ] `j` / `k` — next / previous history.
+        - [ ] `/pattern` — search history backward.
+        - [ ] `?pattern` — search history forward.
+        - [ ] `n` / `N` — repeat search / reverse.
+    - [ ] **Command‑Mode Misc:**
+        - [ ] `v` — invoke `$VISUAL` or `$EDITOR` on current line.
+        - [ ] `#` — comment out line (prepend `#`, accept).
+        - [ ] Count prefixes: `3dw` = delete 3 words.
+
+- [ ] **Terminal Abstraction (`terminal.c`):**
+    - [x] **Raw Mode:**
+        - [x] `terminal_set_raw(EditLine *el)`: save orig termios, set raw (no echo, no canon, no signals, CS8, VMIN=1, VTIME=0).
+        - [x] `terminal_set_orig(EditLine *el)`: restore saved termios.
+    - [ ] **Capability Queries:**
+        - [ ] Query terminal dimensions via `ioctl(TIOCGWINSZ)`.
+        - [ ] Fallback to `$COLUMNS` / `$LINES` environment variables.
+        - [ ] Fallback to 80×24 default.
+        - [ ] Cache dimensions; invalidate on `SIGWINCH`.
+    - [ ] **Termcap/Terminfo Support:**
+        - [ ] Query `$TERM` and look up capabilities.
+        - [ ] Support cursor motion: `cm` (absolute), `le`/`nd`/`up`/`do` (relative).
+        - [ ] Support clear: `cl` (screen), `ce` (to end of line), `cd` (to end of screen).
+        - [ ] Support insert/delete: `ic`/`dc` (char), `al`/`dl` (line).
+        - [ ] Support attributes: `md` (bold), `me` (reset), `so`/`se` (standout).
+        - [ ] Support scrolling: `sr` (reverse), `sf` (forward).
+        - [ ] Hardcoded ANSI/VT100 fallback when termcap unavailable.
+    - [ ] **Output Buffering:**
+        - [ ] Buffer terminal writes and flush in batches (reduce syscall overhead).
+        - [ ] Ensure flush on prompt display and before blocking reads.
+
+- [ ] **Signal Handling:**
+    - [ ] **`SIGWINCH` Handler:**
+        - [ ] Install handler in `el_gets`; remove on return.
+        - [ ] On receipt: re‑query `TIOCGWINSZ`, update stored dimensions, force full redraw.
+    - [ ] **`SIGINT` Handler:**
+        - [ ] If `EL_SIGNAL` is set: install handler in `el_gets`.
+        - [ ] On receipt: discard current line, print `^C\\n`, reset buffer, reprint prompt (do not exit).
+    - [ ] **`SIGQUIT` Handler:**
+        - [ ] If `EL_SIGNAL` is set: install handler, ignore `SIGQUIT` during editing.
+    - [ ] **`SIGTSTP` / `SIGCONT` Handler:**
+        - [ ] `SIGTSTP`: restore terminal, send `SIGTSTP` to self.
+        - [ ] `SIGCONT`: re‑enter raw mode, redraw prompt + buffer.
+    - [ ] **`SIGTERM` / `SIGHUP` Handler:**
+        - [ ] Restore terminal, propagate signal (allow clean shell exit).
+    - [ ] **Signal Mask Discipline:**
+        - [ ] Save old signal dispositions in `el_gets` entry, restore on exit.
+        - [ ] Use `sigaction` (not `signal`) for reliable semantics.
+        - [ ] Set `SA_RESTART` where appropriate.
+
+- [ ] **Key Map Subsystem:**
+    - [ ] **Key Map Structure:**
+        - [ ] Define `el_keymap_t` as a 256‑entry table mapping byte → action (function pointer or nested map pointer).
+        - [ ] Support multi‑byte key sequences via chained keymaps (e.g., ESC → sub‑map).
+        - [ ] Default keymaps: `emacs_keymap`, `vi_insert_keymap`, `vi_command_keymap`.
+    - [ ] **Key Binding API:**
+        - [ ] `el_set(el, EL_BIND, key_sequence, command_name)`: bind key to named command.
+        - [ ] `el_set(el, EL_BIND, key_sequence, NULL)`: unbind key.
+        - [ ] Parse key sequence notation: `^A`, `\\e`, `\\M-`, `\\C-`, `\\e[A`, literal chars.
+    - [ ] **Action Registry:**
+        - [ ] Register all built‑in editing commands with string names.
+        - [ ] Support user‑defined custom action callbacks via `el_set(el, EL_ADDFN, name, help, func)`.
+        - [ ] `el_set(el, EL_BIND, "-a", ...)`: bind in vi alternate (command) keymap.
+
+- [ ] **Programmable Completion:**
+    - [ ] **Completion Callback:**
+        - [ ] `el_set(el, EL_ADDFN, "complete", "Complete", completion_fn)`: register custom completion function.
+        - [ ] Callback signature: `unsigned char fn(EditLine *el, int ch)`.
+        - [ ] Default: filename completion (glob + opendir scan).
+    - [ ] **Filename Completion Engine:**
+        - [ ] Extract word under cursor (back to whitespace or special char).
+        - [ ] Expand `~` prefix before lookup.
+        - [ ] `opendir` + `readdir` scan for matching prefixes.
+        - [ ] If single match: insert remainder + trailing space (or `/` for directory).
+        - [ ] If multiple matches: insert common prefix, then list alternatives on second tab.
+        - [ ] Display alternatives in columns (use terminal width).
+    - [ ] **Integration with Shell:**
+        - [ ] Shell provides custom completion callback that understands builtins, paths, variables, hostnames.
+        - [ ] Document callback interface in `editline(3)`.
+
+- [ ] **Tokenizer (`tok_init` / `tok_str` / `tok_end`):**
+    - [ ] `tok_init(const char *ifs)`: create tokenizer context with IFS string.
+    - [ ] `tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv)`: tokenize line content into argv.
+    - [ ] `tok_reset(Tokenizer *tok)`: reset tokenizer state.
+    - [ ] `tok_end(Tokenizer *tok)`: free tokenizer resources.
+    - [ ] Handle single‑quoting, double‑quoting, and backslash‑escaping.
+    - [ ] Handle continuation (incomplete quotes → return continuation status).
+    - [ ] Add `Tokenizer` typedef and API to `histedit.h`.
+
+- [ ] **`el_set()` / `el_get()` Operations:**
+    - [x] `EL_PROMPT` (0): set/get prompt string pointer. **(Implemented)**
+    - [ ] `EL_PROMPT_ESC`: set prompt function with escape‑char marking (for non‑printing sequences).
+    - [x] `EL_TERMINAL` (1): set terminal type string. **(Stub, unused)**
+    - [x] `EL_EDITOR` (2): set editor mode (`"emacs"` or `"vi"`). **(Stub — sets field but no vi mode)**
+    - [x] `EL_SIGNAL` (3): enable/disable signal handling during `el_gets`. **(Stub)**
+    - [ ] `EL_BIND` (4): bind key sequence → editor command.
+    - [ ] `EL_ECHOTC` (5): echo a termcap string.
+    - [ ] `EL_SETTC` (6): set a termcap value.
+    - [x] `EL_REFRESH` (7): force screen refresh. **(Stub)**
+    - [x] `EL_HIST` (8): set history function + context. **(Implemented — stores `History *`)**
+    - [ ] `EL_ADDFN`: register user‑defined editing function.
+    - [ ] `EL_SETFN`: replace an existing named function.
+    - [ ] `EL_RPROMPT`: set right‑side prompt string/function.
+    - [ ] `EL_CLIENTDATA`: set/get opaque user pointer.
+    - [ ] `EL_SETTY`: set tty mode and character assignments.
+    - [ ] `EL_GETFP`: get FILE * (in/out/err).
+    - [ ] `EL_SETFP`: set FILE * (in/out/err).
+    - [ ] `EL_EDITMODE`: enable/disable editing (passthrough mode).
+
+- [ ] **`el_source()` and `.editrc` Parsing:**
+    - [ ] `el_source(EditLine *el, const char *file)`: read and execute editrc commands.
+    - [ ] Default path: `~/.editrc` if `file` is `NULL`.
+    - [ ] **Supported `.editrc` Commands:**
+        - [ ] `bind [-a] [-e] [-v] [-s] [key [command]]`: bind key to command.
+        - [ ] `echotc cap [arg ...]`: execute termcap string.
+        - [ ] `edit [on|off]`: enable/disable editing.
+        - [ ] `settc cap value`: set termcap variable.
+        - [ ] `setty [-a] [-d] [-q] [-x] mode ...`: set tty modes.
+    - [ ] Comment lines (`#`) and blank lines.
+    - [ ] Per‑program sections: `prog:command args` (match `prog` against `el->prog`).
+    - [ ] Error reporting: print line number and diagnostic on parse errors, continue.
+
+- [ ] **History Management (`history.c`):**
+    - [x] **Core (Implemented):**
+        - [x] `history_init()`: allocate `History` with linked list, default max 100.
+        - [x] `history_end(History *h)`: free all nodes and list.
+        - [x] `H_SETSIZE` (1): set maximum entries; evict oldest on overflow.
+        - [x] `H_ENTER` (10): add entry (skip duplicates of tail).
+        - [x] `H_FIRST` (3): set cursor to head.
+        - [x] `H_LAST` (4): set cursor to tail.
+        - [x] `H_PREV` (5): move cursor backward (toward oldest).
+        - [x] `H_NEXT` (6): move cursor forward (toward newest).
+    - [ ] **Missing Operations:**
+        - [ ] `H_GETSIZE` (2): return current entry count via `HistEvent.num`.
+        - [ ] `H_CURR` (7): return current entry without moving cursor.
+        - [ ] `H_SET` (8): set cursor to entry by number.
+        - [ ] `H_ADD` (9): append text to current entry (multi‑line continuation).
+        - [ ] `H_APPEND` (11): append string to last entry.
+        - [ ] `H_END` (12): move cursor past end (sentinel, `ev.str = NULL`).
+        - [ ] `H_NEXT_STR` (13): search forward for entry containing string.
+        - [ ] `H_PREV_STR` (14): search backward for entry containing string.
+        - [ ] `H_NEXT_EVENT` (15): move to next entry matching event number.
+        - [ ] `H_PREV_EVENT` (16): move to previous entry matching event number.
+        - [ ] `H_LOAD` (17): load history from file (one entry per line).
+        - [ ] `H_SAVE` (18): save history to file.
+        - [ ] `H_CLEAR` (19): clear all entries.
+    - [ ] **History Numbering:**
+        - [ ] Assign monotonically increasing event numbers to entries.
+        - [ ] Set `HistEvent.num` on all operations that return an entry.
+    - [ ] **Unique History (Dedup):**
+        - [ ] Option to suppress consecutive duplicate entries (already done for tail).
+        - [ ] Option to remove all duplicates on insert (keep most recent).
+    - [ ] **Timestamp Support:**
+        - [ ] Store entry timestamp (for save/load fidelity with extended format).
+    - [ ] **File Format:**
+        - [ ] Simple format: one entry per line, newlines escaped as `\\n`.
+        - [ ] Write atomically (tmp + rename) to prevent corruption.
+
+- [ ] **Readline Compatibility Layer (`readline.c` — extended):**
+    - [x] **Implemented:**
+        - [x] `el_gets(EditLine *el, int *count)`: main read loop with raw mode, insert, backspace, arrows, history, `^C`, `^D`, `^L`.
+    - [ ] **API Shim Functions (for applications using readline(3)):**
+        - [ ] `readline(const char *prompt)`: wrapper that creates/reuses `EditLine`, calls `el_gets`, returns `strdup`'d result.
+        - [ ] `add_history(const char *line)`: wrapper around `history(h, &ev, H_ENTER, line)`.
+        - [ ] `rl_bind_key(int key, rl_command_func_t *function)`: map to `el_set(EL_BIND, ...)`.
+        - [ ] `rl_set_prompt(const char *prompt)`: map to `el_set(EL_PROMPT, ...)`.
+        - [ ] `rl_on_new_line()`: map to refresh.
+        - [ ] `rl_forced_update_display()`: map to `el_set(EL_REFRESH)`.
+    - [ ] **Readline Variables (Global Shims):**
+        - [ ] `rl_line_buffer`: pointer to current line buffer.
+        - [ ] `rl_point`: cursor position.
+        - [ ] `rl_end`: end of buffer position.
+        - [ ] `rl_readline_name`: application name.
+        - [ ] `rl_attempted_completion_function`: completion callback.
+    - [ ] **Header:** provide `readline/readline.h` and `readline/history.h` compatibility headers.
+
+- [ ] **UTF‑8 / Wide‑Character Support:**
+    - [ ] **Input Decoding:**
+        - [ ] Decode multi‑byte UTF‑8 sequences on input into `wchar_t` codepoints.
+        - [ ] Validate sequences: reject overlong encodings, surrogates, values > U+10FFFF.
+        - [ ] Handle incomplete sequences at read boundary (buffer and re‑read).
+    - [ ] **Display Width:**
+        - [ ] Use `wcwidth()` / project‑local equivalent to determine display width of each codepoint.
+        - [ ] Handle zero‑width combining characters (display width 0).
+        - [ ] Handle CJK double‑width characters (display width 2).
+        - [ ] Handle non‑printable characters (display as `^X` or `\uXXXX`).
+    - [ ] **Cursor Navigation:**
+        - [ ] `forward-char` / `backward-char` move by codepoint, not byte.
+        - [ ] `forward-word` / `backward-word` recognize Unicode word boundaries (letter/digit vs punctuation).
+        - [ ] Delete/backspace remove entire multi‑byte codepoint.
+    - [ ] **Line Buffer:**
+        - [ ] Store as UTF‑8 bytes internally (no wchar_t buffer).
+        - [ ] Cursor and length track byte positions; convert to character positions for display.
+    - [ ] **Locale Integration:**
+        - [ ] Detect locale encoding via `nl_langinfo(CODESET)` or `$LC_CTYPE`.
+        - [ ] Fall back to ASCII‑only mode if locale is not UTF‑8.
+
+- [ ] **Multi‑Line Editing:**
+    - [ ] Detect `\\n` within line buffer (e.g., from continuation or `el_insertstr`).
+    - [ ] Track logical lines vs physical screen rows.
+    - [ ] Up/Down arrow within multi‑line buffer: move between logical lines (not history).
+    - [ ] Correct cursor positioning across wrapped physical lines.
+    - [ ] `el_gets` continuation support: return continuation indicator for incomplete input (unmatched quotes, trailing `\\`).
+
+- [ ] **Testing:**
+    - [ ] **Unit Tests (`tests/lib/edit/`):**
+        - [ ] **Line Buffer Tests:**
+            - [ ] Insert at beginning, middle, end.
+            - [ ] Delete at beginning, middle, end.
+            - [ ] Cursor movement: forward/backward char, word, begin/end of line.
+            - [ ] Buffer growth: insert beyond initial capacity.
+            - [ ] Kill and yank: `^K`, `^U`, `^Y`.
+            - [ ] Undo: verify each operation reverts.
+        - [ ] **History Tests:**
+            - [ ] `H_ENTER` respects max size eviction.
+            - [ ] `H_PREV` / `H_NEXT` traverse entire list correctly.
+            - [ ] `H_NEXT_STR` / `H_PREV_STR` find correct entries.
+            - [ ] `H_LOAD` / `H_SAVE` round‑trip (write then read back, compare).
+            - [ ] `H_CLEAR` empties all entries.
+            - [ ] Duplicate suppression: consecutive and all‑duplicates modes.
+        - [ ] **Key Map Tests:**
+            - [ ] Bind, unbind, rebind a key; verify action dispatches correctly.
+            - [ ] Multi‑byte sequence binding (ESC `[A` → `previous-history`).
+            - [ ] Per‑program `.editrc` binding.
+        - [ ] **Tokenizer Tests:**
+            - [ ] Simple whitespace splitting.
+            - [ ] Quoted strings (single, double).
+            - [ ] Backslash escaping within quotes.
+            - [ ] Continuation detection (incomplete quotes).
+        - [ ] **`.editrc` Parser Tests:**
+            - [ ] Valid `bind` commands.
+            - [ ] Comment and blank line handling.
+            - [ ] Program‑specific sections.
+            - [ ] Malformed line: error message + continue.
+        - [ ] **Emacs Binding Tests:**
+            - [ ] Verify all `^A`–`^Z` and `M-*` bindings dispatch to correct actions.
+        - [ ] **Vi Mode Tests:**
+            - [ ] Insert → command → insert transitions.
+            - [ ] Motion commands (`w`, `b`, `e`, `$`, `0`).
+            - [ ] Edit commands (`d`, `c`, `x`, `r`, `p`).
+            - [ ] Count prefixes (`3dw`).
+            - [ ] Search (`/`, `?`, `n`, `N`).
+    - [ ] **Property Tests:**
+        - [ ] Line buffer invariants: `0 <= cursor <= len < cap`, buffer NUL‑terminated.
+        - [ ] History invariants: `size <= max_size`, doubly‑linked list consistency.
+        - [ ] Randomized editing sequences (insert, delete, move, undo) never crash or corrupt.
+        - [ ] Kill ring: yank always produces previously killed text.
+    - [ ] **Fuzz Tests:**
+        - [ ] Fuzz `el_gets` input stream with random bytes (harness: in‑memory `FILE *`).
+        - [ ] Fuzz `.editrc` parser with random config files.
+        - [ ] Fuzz tokenizer with random line buffers.
+    - [ ] **Integration Tests:**
+        - [ ] Drive `el_gets` via PTY: send escape sequences, verify output bytes.
+        - [ ] History file round‑trip: save, load, compare.
+        - [ ] Readline-compat: build a minimal readline app against `libedit`, verify prompt + completion.
+
+- [ ] **Documentation:**
+    - [x] Man page: `editline(3)` — overview of the library. **(Exists)**
+    - [x] Man page: `el_init(3)`, `el_gets(3)`, `el_set(3)`, `el_get(3)`, `el_line(3)`, `el_end(3)`, `el_reset(3)`, `el_source(3)`, `el_resize(3)` — API reference. **(Exists)**
+    - [x] Man page: `editrc(5)` — `.editrc` file format and commands. **(Exists)**
+    - [x] Man page: `history(3)` — history API (`history_init`, `history_end`, `H_*` ops). **(Exists)**
+    - [ ] Man page: `tok_init(3)` — tokenizer API.
+    - [ ] Update `editline(3)` with vi mode documentation.
+    - [ ] Update `editline(3)` with completion callback documentation.
+    - [ ] Update `history(3)` with `H_LOAD` / `H_SAVE` / timestamps documentation.
+    - [ ] Document readline compatibility layer and header shim.
+
+### 7. Userland Binaries (`bin/`)
+- [ ] **Shell (`sh`):**
+    - [ ] **Code Audit & Infrastructure:**
+        - [ ] Audit `lexer.c`, `parser.c`, `expand.c`, `exec.c`, `sh.c` for naive implementations or TODOs.
+        - [ ] Setup coverage-guided fuzzing for the parser and expansion engine.
+    - [ ] **Invocation & Startup:**
+        - [x] Handle `sh -c` correctly.
+        - [x] Handle `sh -s` correctly.
+        - [x] Detect and handle login shell behavior.
+        - [x] Argument parsing and POSIX option processing.
+        - [x] Interactive vs non-interactive mode detection.
+        - [x] Startup files: `ENV` and profile handling.
+        - [x] Locale and environment initialization.
+        - [x] Signal disposition at startup.
+    - [x] **Lexical Analysis:**
+        - [x] Delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
+        - [x] Quoting (`'` single, `"` double) and escaping (`\`).
+        - [x] Operators (`&&`, `||`, `>>`, `<<`, `<&`, `>&`).
+        - [x] Comment handling (`#`).
+        - [x] Line continuation rules (backslash-newline).
+        - [x] Here-document lexing (quoted vs unquoted delimiters).
+    - [x] **Shell Grammar & Parsing:**
+        - [x] Simple commands.
+        - [x] Pipelines.
+        - [x] Lists (`;`, `&`, `&&`, `||`).
+        - [x] Compound commands (`if`, `while`, `for`, `case`).
+        - [x] Grouping `{}` and subshells `()`.
+        - [x] Function definitions.
+        - [x] Precedence and associativity verification.
+        - [x] Robust error recovery and diagnostics.
+    - [x] **Expansions (Exact Order):**
+        - [x] **1. Tilde Expansion**
+        - [x] **2. Parameter Expansion:**
+            - [x] Basic `$VAR`, `${VAR}`.
+            - [x] `${VAR:-def}`, `${VAR:=def}`, `${VAR:?err}`, `${VAR:+alt}`.
+            - [x] `${#VAR}` (Length).
+            - [x] `${VAR%pat}`, `${VAR%%pat}` (Suffix).
+            - [x] `${VAR#pat}`, `${VAR##pat}` (Prefix).
+            - [x] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`.
+            - [x] Nested parameter expansions.
+        - [x] **3. Command Substitution** (`$(cmd)`).
+        - [x] **4. Arithmetic Expansion** (`$(( ... ))`).
+        - [x] **5. Field Splitting:** Use `$IFS` for unquoted expansions.
+        - [x] **6. Pathname Expansion:** Globbing (`*`, `?`, `[...]`).
+        - [x] **7. Quote Removal:** Final pass.
+    - [x] **Redirections:**
+        - [x] Input/Output (`<`, `>`, `>>`).
+        - [x] FD duplication (`<&`, `>&`).
+        - [x] Here-documents (`<<`).
+        - [x] Proper ordering and evaluation timing.
+        - [x] Error handling and rollback (save/restore).
+    - [x] **Execution Engine:**
+        - [x] Builtin vs external command resolution.
+        - [x] PATH search rules.
+        - [x] `exec` behavior (shell replacement).
+        - [x] Process forking model.
+        - [x] Job control hooks integration.
+        - [x] Exit status propagation.
+        - [x] `set -e` semantics.
+    - [x] **Builtin Commands:**
+        - [x] `:` (Null command).
+        - [x] `.` (Dot/Source).
+        - [x] `break`.
+        - [x] `continue`.
+        - [x] `cd` (including `CDPATH`).
+        - [x] `command`.
+        - [x] `eval`.
+        - [x] `exec`.
+        - [x] `exit`.
+        - [x] `export`.
+        - [x] `getopts`.
+        - [x] `read`.
+        - [x] `readonly`.
+        - [x] `return`.
+        - [x] `set`.
+        - [x] `unset`.
+        - [x] `shift`.
+        - [x] `times`.
+        - [x] `trap`.
+        - [x] `umask`.
+        - [x] `wait`.
+    - [x] **Variables & Environment:**
+        - [x] Shell vs Environment variable distinction.
+        - [x] Scope rules (Global, Local, Function).
+        - [x] Export semantics.
+        - [x] Read-only enforcement.
+    - [x] **Functions:**
+        - [x] Definition and Invocation.
+        - [x] Local variables scoping.
+        - [x] Return behavior.
+    - [x] **Job Control:**
+        - [x] Foreground/Background.
+        - [x] Process groups.
+        - [x] Signal forwarding.
+    - [x] **Signals & Traps:**
+        - [x] Default signal handling.
+        - [x] `trap` builtin integration.
+    - [x] **Testing & Compliance:**
+        - [x] Unit tests for all modules.
+        - [x] Script-based conformance tests.
+        - [x] Coverage-guided fuzzing.
+        - [x] Man page (`sh(1)`).
+    - [ ] **Interactive Features:**
+        - [ ] **Prompt Handling (PS1):**
+            - [x] **Invocation Semantics:**
+                - [x] Determine interactive mode logic (only evaluate PS1 if `is_interactive`).
+                - [x] Suppress PS1 evaluation in non-interactive/script mode.
+                - [x] Implement re-evaluation trigger before `readline` or input loop.
+                - [x] Handle `set -x` (xtrace) interactions (ensure PS1 expansion isn't traced unless necessary/specified).
+                - [x] Handle `set -e` interactions (errors in PS1 expansion should not exit shell).
+            - [x] **Expansion Pipeline:**
+                - [x] Integrate PS1 expansion into core expansion engine.
+                - [x] Enable **Parameter Expansion** for PS1.
+                - [x] Enable **Command Substitution** for PS1.
+                - [x] Enable **Arithmetic Expansion** for PS1.
+                - [x] Disable **Quote Removal** (PS1 retains quotes, or strictly follows POSIX requirements).
+            - [x] **Escape Sequence Parsing:**
+                - [x] Implement parser for backslash escapes in PS1.
+                - [x] Support `\!` (history number) escape.
+                - [x] Support `\$` (uid-based suffix `#`/`$`) escape.
+                - [x] Support `\\` (literal backslash) escape.
+                - [x] Handle undefined escapes deterministically (e.g., print literal char).
+                - [x] Support **Common Escapes** (`\u`, `\h`, `\w`) using standard libc functions.
+            - [x] **State-Dependent Elements:**
+                - [x] Implement effective UID check for `\$`.
+                - [x] Expose exit status `?` to prompt expansion without resetting it.
+            - [x] **Error Handling:**
+                - [x] Graceful failure on expansion error (fallback to default string).
+                - [x] Prevent shell crash on malformed PS1 (OOM safety).
+                - [x] Bound recursion depth for PS1 expansion (verified single-pass).
+            - [x] **Performance:**
+                - [x] Prioritize memory leak checks for repeated PS1 expansion.
+                - [x] Verify no state mutation during prompt rendering.
+            - [x] **Testing:**
+                - [x] Unit test: Escape sequence parser (implemented in `tests/test_prompt.c`).
+                - [x] Unit test: Expansion order validation.
+                - [x] Edge case: Empty PS1.
+                - [x] Edge case: Deeply nested command substitution in PS1.
+                - [x] Fuzz test: `fuzz_ps1_parser.c`.
+            - [x] **Documentation:**
+                - [x] Document PS1 expansion behavior in `sh(1)`.
+                - [x] Document supported escapes.
+        - [ ] **Extended Prompt Formatting (Opt-in):**
+            - [x] **Mode Selection:**
+                - [x] Implement configuration option (e.g., `set -o promptvars` or custom shopt) to enable extended parsing.
+                - [x] Define precedence logic (POSIX PS1 behavior default vs Extended).
+                - [x] Ensure `sh` in non-interactive mode treats prompt formatting as no-op or pure string.
+                - [x] Expose current prompt mode via read-only shell variable (e.g., `SHELL_PROMPT_MODE`).
+            - [x] **Format Grammar:**
+                - [x] Define formal grammar for `%` escapes (e.g., `%n`, `%m`, `%~`).
+                - [x] Define Parameterized token syntax (e.g., `%F{red}`, `%K{blue}`).
+                - [x] Define Conditional token syntax (e.g., `%(condition.true.false)`).
+                - [x] Explicitly list reserved/unsupported tokens for future compatibility.
+            - [x] **Token Parsing:**
+                - [x] Implement dedicated predictive parser for prompt strings (separate from main shell parser).
+                - [x] Handle escaped `%` characters (`%%`).
+                - [x] Handle unknown/malformed sequences (emit literal or error without crash).
+                - [x] Ensure parsing is deterministic and stateless.
+            - [x] **Expansion Semantics:**
+                - [x] Define expansion order: Extended Tokens -> Parameter Expansion -> Command Sub -> Arith.
+                - [x] Isolate prompt expansions to prevent shell state mutation (sandbox execution).
+                - [x] Implement recursion depth limits for nested prompts.
+                - [x] Ensure non-printing characters in expansions are correctly marked.
+            - [x] **Dynamic Elements:**
+                - [x] `%~` / `%d`: Current Working Directory (Collapse $HOME to ~).
+                - [x] `%n`: Current Username.
+                - [x] `%m` / `%M`: Hostname (Short/Long).
+                - [x] `%#`: UID superuser status (`#` vs `%`).
+                - [x] `%?`: Last exit code.
+                - [x] `%L`: Shell nesting level/depth.
+                - [x] `%j`: Number of background jobs.
+            - [x] **Styling & Attributes:**
+                - [x] Support `%F{color}` / `%f`: Foreground color (ANSI).
+                - [x] Support `%K{color}` / `%k`: Background color (ANSI).
+                - [x] Support `%B` / `%b`: Bold attribute.
+                - [x] Support `%U` / `%u`: Underline attribute.
+                - [x] Implement logic to calculate visible width vs escape sequence width (for line wrapping).
+            - [x] **Rendering Engine:**
+                - [x] Implement efficient string builder for prompt assembly.
+                - [x] Memory Management: Ensure no leaks across repeated prompt evaluations.
+                - [x] Optimization: Cache static parts of the prompt if possible.
+                - [x] Clean separation: `parse_prompt()`, `expand_tokens()`, `render_string()`.
+            - [x] **Error Handling:**
+                - [x] Define fallback behavior (e.g., print raw string) if parsing fails.
+                - [x] Signal safety: Ensure expansion is safe during signal handling if used there.
+                - [x] Guard against exponential expansion attacks.
+            - [x] **Testing:**
+                - [x] Unit: Parser validation for standard tokens.
+                - [x] Unit: Width calculation correctness with ANSI codes.
+                - [x] Integration: Enable extended mode and verify prompt appearance.
+                - [x] Fuzzing: `fuzz_extended_prompt.c` targets parser.
+                - [x] Property: Randomized prompt strings don't crash shell.
+            - [x] **Documentation:**
+                - [x] Document new `%` escapes in `sh(1)`.
+                - [x] Explicitly contrast POSIX PS1 vs Extended Mode handling.
+                - [x] Document color/attribute codes.
+                - [x] Document limits (depth, length, etc).
+- [ ] **Core Utilities:**
+    - [x] **`ls` - List directory contents (Production Quality Rewrite):**
+        - [x] **Audit & Refactor Existing Code:**
+            - [x] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features.
+            - [x] Document all functionality gaps and bugs.
+            - [x] Create refactoring plan: modular architecture with separate files for options, output, sorting, traversal.
+            - [x] Extract option parsing into `ls_opts.c` and `ls_opts.h`.
+            - [x] Extract output formatting into `ls_print.c` and `ls_print.h`.
+            - [x] Extract sorting logic into `ls_sort.c` and `ls_sort.h`.
+            - [x] Extract directory traversal into `ls_traverse.c` and `ls_traverse.h`.
+            - [x] Write unit tests for each extracted module before proceeding.
+        - [x] **CLI Options:**
+            - [x] **Filtering:**
+                - [x] `-a`, `--all`: List all files including hidden ones.
+                - [x] `-A`, `--almost-all`: List all except `.` and `..`.
+                - [x] `-d`, `--directory`: List directories themselves, not their contents.
+                - [x] `-I PATTERN`, `--ignore=PATTERN`: Do not list implied entries matching PATTERN.
+            - [x] **Output Format:**
+                - [x] `-l`: Long listing format (permissions, ownership, size, time).
+                - [x] `-1`: Force single-column output.
+                - [x] `-C`: Force multi-column output (default for terminal).
+                - [x] `-m`: Comma-separated output.
+                - [x] `-x`: List entries by lines instead of columns.
+                - [x] `-g`: Like `-l` but omit owner.
+                - [x] `-o`: Like `-l` but omit group.
+                - [x] `-n`, `--numeric-uid-gid`: Like `-l` but show numeric UID/GID.
+            - [x] **Sorting:**
+                - [x] `-r`, `--reverse`: Reverse order while sorting.
+                - [x] `-S`: Sort by file size (largest first).
+                - [x] `-t`: Sort by modification time (newest first).
+                - [x] `-u`: Sort by access time (with `-lt`), show atime (with `-l`).
+                - [x] `-c`: Sort by ctime (with `-lt`), show ctime (with `-l`).
+                - [x] `-U`: Do not sort; list in directory order.
+                - [x] `-f`: Do not sort, enable `-aU`, disable `-ls --color`.
+                - [x] `-v`: Natural sort of version numbers within text.
+            - [x] **Symlink Handling:**
+                - [x] `-L`, `--dereference`: Follow symlinks and show target's info.
+                - [x] `-H`: Follow symlinks only on command line arguments.
+            - [x] **Size & Units:**
+                - [x] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
+                - [x] `-k`, `--kibibytes`: Use 1024-byte blocks.
+                - [x] `-s`, `--size`: Print allocated size of each file, in blocks.
+                - [x] `--block-size=SIZE`: Scale sizes by SIZE before printing.
+                - [x] `--si`: Use powers of 1000 not 1024.
+            - [x] **File Type Indicators:**
+                - [x] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.
+                - [x] `-p`: Append `/` indicator to directories.
+                - [x] `--file-type`: Likewise, except do not append `*`.
+            - [x] **Inode & Block:**
+                - [x] `-i`, `--inode`: Print inode number of each file.
+            - [x] **Recursion:**
+                - [x] `-R`, `--recursive`: List subdirectories recursively.
+                - [x] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`.
+            - [x] **Color:**
+                - [x] `--color=auto`: Colorize when stdout is a terminal.
+                - [x] `--color=always`: Always colorize output.
+                - [x] `--color=never`: Never colorize output.
+                - [x] Parse `LS_COLORS` environment variable.
+                - [x] Default color scheme for file types (dir, link, exec, etc.).
+            - [x] **Width Control:**
+                - [x] `--width=N`: Set output width to N columns.
+                - [x] `-w N`: Same as `--width=N`.
+                - [x] Read `COLUMNS` environment variable.
+                - [x] Query terminal width via `ioctl(TIOCGWINSZ)`.
+                - [x] Fallback to 80 columns for pipes/non-terminals.
+            - [x] **Timestamps:**
+                - [x] `--time=WORD`: Use time WORD (atime, access, use, ctime, status, mtime, modification).
+                - [x] `--time-style=STYLE`: Use STYLE (full-iso, long-iso, iso, locale)., +FORMAT).
+            - [x] **Miscellaneous:**
+                - [x] `-q`, `--hide-control-chars`: Print `?` for non-graphic characters.
+                - [x] `--show-control-chars`: Show non-graphic characters as-is (default).
+                - [x] `-N`, `--literal`: Print raw entry names (don't quote).
+                - [x] `-Q`, `--quote-name`: Enclose entry names in double quotes.
+                - [x] `--quoting-style=WORD`: Quoting style (literal, shell, shell-always, c, escape).
+                - [x] `--help`: Display help.
+                - [x] `--version`: Display version.
+        - [x] **Output Modes:**
+            - [x] Implement long format (`-l`) with all columns.
+            - [x] Implement multi-column format (default for terminal).
+            - [x] Implement single-column format (`-1`).
+            - [x] Implement comma-separated format (`-m`).
+            - [x] Implement by-lines format (`-x`).
+            - [x] Auto-detect terminal vs pipe; select output mode accordingly.
+            - [x] Handle very narrow terminals (< 20 columns) gracefully.
+        - [x] **Long Format Details:**
+            - [x] **File Mode String:**
+                - [x] File type indicator (d, l, c, b, p, s, -).
+                - [x] Owner rwx permissions.
+                - [x] Group rwx permissions.
+                - [x] Other rwx permissions.
+                - [x] Setuid bit (`s`/`S` in owner execute).
+                - [x] Setgid bit (`s`/`S` in group execute).
+                - [x] Sticky bit (`t`/`T` in other execute).
+                - [x] ACL indicator (`+`) when extended attributes present.
+                - [x] Extended attribute indicator (`@`) for xattrs.
+            - [x] **Link Count:** Print hard link count.
+            - [x] **Owner:** Print username (or UID if `-n`).
+            - [x] **Group:** Print group name (or GID if `-n`).
+            - [x] **Size:** Print file size in bytes (or human-readable if `-h`).
+            - [x] **Device Major/Minor:** Print major,minor for block/char devices.
+            - [x] **Timestamps:**
+                - [x] Default to mtime.
+                - [x] Support atime with `-u`.
+                - [x] Support ctime with `-c`.
+                - [x] Recent files (< 6 months): show month, day, time.
+                - [x] Old files (>= 6 months): show month, day, year.
+                - [x] Custom time formats via `--time-style`.
+            - [x] **Filename:** Print file name.
+            - [x] **Symlink Target:** Print ` -> target` for symlinks.
+            - [x] **Total Block Count:** Print `total N` line for each directory.
+        - [x] **Symlink Behavior:**
+            - [x] Default: `lstat()` for symlinks, show link info.
+            - [x] `-L`: `stat()` for symlinks, show target info.
+            - [x] Show `-> target` in long listing.
+            - [x] Handle broken symlinks gracefully (show with error indicator).
+            - [x] Detect symlink loops and report error.
+        - [x] **Recursive Traversal (`-R`):**
+            - [x] Implement depth-first traversal.
+            - [x] Print directory header for each subdirectory.
+            - [x] Handle permission denied on subdirs (warn and continue).
+            - [x] Implement cycle detection (detect hardlink loops and symlink loops).
+            - [x] Option to not cross filesystem boundaries (`--one-file-system`/`-x` GNU ext).
+            - [x] Respect `-d` to not recurse even with `-R`.
+        - [x] **Sorting & Collation:**
+            - [x] Implement name sort (default, case-sensitive).
+            - [x] Implement case-insensitive name sort (locale-aware).
+            - [x] Implement size sort (`-S`).
+            - [x] Implement time sort (`-t`, `-u`, `-c`).
+            - [x] Implement extension sort (`-X` GNU ext).
+            - [x] Implement version sort (`-v`).
+            - [x] Implement reverse sort (`-r`).
+            - [x] Implement no-sort (`-U`, `-f`).
+            - [x] Use stable sort with tie-breakers (name as secondary).
+            - [x] Locale-aware collation via `strcoll()`.
+            - [x] Directories first option (GNU ext).
+        - [x] **Column/Width Layout:**
+            - [x] Calculate printable width of each filename.
+            - [x] Account for ANSI color escape sequences (non-printing).
+            - [x] Account for combining characters (zero-width).
+            - [x] Account for wide characters (CJK, double-width).
+            - [x] Use `wcwidth()` / `wcswidth()` for Unicode handling.
+            - [x] Pack columns to fit terminal width.
+            - [x] Handle filenames wider than terminal width.
+            - [x] Align columns consistently.
+        - [x] **Permissions/ACLs/Extended Attributes:**
+            - [x] Detect ACLs via `acl_get_file()` or `getxattr("system.posix_acl_access")`.
+            - [x] Show `+` suffix on mode string when ACLs present.
+            - [x] Detect extended attributes via `listxattr()`.
+            - [x] Show `@` suffix when xattrs present (macOS style).
+            - [x] Fallback gracefully when ACL/xattr APIs unavailable.
+            - [x] Option to list xattr names (`-@` BSD ext).
+        - [x] **User/Group Name Caching:**
+            - [x] Implement UID->username cache.
+            - [x] Implement GID->groupname cache.
+            - [x] Handle missing users/groups (print numeric ID).
+            - [x] Limit cache size to prevent memory bloat.
+        - [x] **Error Handling:**
+            - [x] Per-file errors: warn and continue.
+            - [x] Directory open errors: warn and continue to next arg.
+            - [x] Memory allocation failures: exit with proper code.
+            - [x] Exit code 0: success.
+            - [x] Exit code 1: minor problems (cannot access file).
+            - [x] Exit code 2: serious trouble (cannot access command-line arg).
+            - [x] Never crash on any input.
+        - [x] **Performance:**
+            - [x] Minimize syscalls: batch `stat()` calls where possible.
+            - [x] Use `lstat()` by default; only `stat()` when `-L`.
+            - [x] Consider `fts(3)` or custom traversal for `-R`.
+            - [x] Buffer output for efficiency.
+            - [x] Avoid repeated `getpwuid()`/`getgrgid()` via caching.
+            - [x] Profile with large directories (10K+ entries).
+        - [x] **Tests:**
+            - [x] **Unit Tests:**
+                - [x] Test mode string formatting for all file types.
+                - [x] Test mode string with setuid/setgid/sticky.
+                - [x] Test size formatting (bytes, KB, MB, GB, TB).
+                - [x] Test human-readable size formatting.
+                - [x] Test timestamp formatting (recent vs old).
+                - [x] Test column width calculation.
+                - [x] Test sorting algorithms (all modes).
+                - [x] Test collation with locale.
+            - [x] **Integration Tests:**
+                - [x] Empty directory.
+                - [x] Directory with hidden files.
+                - [x] Directory with symlinks (valid and broken).
+                - [x] Directory with special files (devices, sockets, FIFOs).
+                - [x] Deep directory tree (`-R`).
+                - [x] Large directory (1000+ files).
+                - [x] Permission denied scenarios.
+                - [x] Symlink loops.
+                - [x] Files with spaces, quotes, newlines in names.
+                - [x] Mixed sorting criteria.
+            - [x] **Property Tests:**
+                - [x] Random filenames don't crash (fuzzing).
+                - [x] Binary characters in filenames handled.
+                - [x] Control characters handled.
+                - [x] Unicode filenames (combining chars, CJK).
+                - [x] Very long filenames (PATH_MAX-1).
+            - [x] **Acceptance Tests:**
+                - [x] `ls` empty directory -> empty output.
+                - [x] `ls -a` -> shows `.` and `..`.
+                - [x] `ls -l` -> correct 9-column output.
+                - [x] `ls -lh` -> human sizes (K, M, G).
+                - [x] `ls -R` -> descends into subdirectories.
+                - [x] `ls -lS` -> sorted by size descending.
+                - [x] `ls -lt` -> sorted by mtime descending.
+                - [x] `ls -F` -> indicators appended.
+                - [x] `ls --color=always | cat` -> contains ANSI codes.
+                - [x] `ls -i` -> inode numbers shown.
+        - [x] **Documentation:**
+            - [x] Write `ls(1)` man page covering all options.
+            - [x] Document output formats with examples.
+            - [x] Document sorting behavior.
+            - [x] Document color configuration (`LS_COLORS`).
+            - [x] Document width calculation algorithm (developer notes).
+            - [x] Document locale/Unicode handling (developer notes).
+            - [x] Document ACL/xattr detection (developer notes).
+        - [x] **Accessibility & Machine Parsing:**
+            - [x] Document `-1` for machine-parseable output.
+            - [x] Document `--quoting-style` for safe parsing.
+            - [x] Ensure no extra whitespace or formatting breaks parsing.
+            - [x] Test with common UNIX text processing tools (`awk`, `cut`).
+        - [x] **Acceptance Criteria:**
+            - [x] All CLI options implemented and tested.
+            - [x] Long format matches expected field layout.
+            - [x] Sorting produces correct order for all modes.
+            - [x] No crashes on any valid or malformed filenames.
+            - [x] Handles directories with 100K+ entries without OOM.
+            - [x] Color output respects terminal capabilities.
+            - [x] Exit codes match documented behavior.
+            - [x] Man page complete and accurate.
+            - [x] All tests pass in CI.
+    - [x] **`cp` - Copy files and directories (Production Quality Rewrite):**
+        - [x] **Audit & Refactor Existing Code:**
+            - [x] Audit existing `bin/cp/cp.c` for TODO comments, fragile code, and incomplete features.
+            - [x] Document all functionality gaps and bugs.
+            - [x] Create refactoring plan: modular architecture with separate files.
+            - [x] Extract option parsing into `cp_opts.c` and `cp_opts.h`.
+            - [x] Extract copy engine into `cp_copy.c` and `cp_copy.h`.
+            - [x] Extract metadata preservation into `cp_preserve.c` and `cp_preserve.h`.
+            - [x] Extract atomic replace logic into `cp_atomic.c` and `cp_atomic.h`.
+            - [x] Write unit tests for each extracted module.
+        - [x] **Basic CLI Options:**
+            - [x] `-r`, `-R`, `--recursive`: Copy directories recursively.
+            - [x] `-f`, `--force`: Force overwrite, remove destination if needed.
+            - [x] `-i`, `--interactive`: Prompt before overwrite.
+            - [x] `-n`, `--no-clobber`: Do not overwrite existing files.
+            - [x] `-v`, `--verbose`: Explain what is being done.
+            - [x] `-d`: Same as `--no-dereference --preserve=links`.
+            - [x] `--help`: Display help and exit.
+            - [x] `--version`: Display version and exit.
+        - [x] **Preservation Options:**
+            - [x] `-p`: Preserve mode, ownership, timestamps.
+            - [x] `-a`, `--archive`: Same as `-dR --preserve=all`.
+            - [x] `--preserve=LIST`: Preserve specified attributes.
+                - [x] `--preserve=mode`: Preserve file mode bits.
+                - [x] `--preserve=ownership`: Preserve owner and group.
+                - [x] `--preserve=timestamps`: Preserve atime and mtime.
+                - [x] `--preserve=links`: Preserve hard links in source tree.
+                - [x] `--preserve=xattr`: Preserve extended attributes.
+                - [x] `--preserve=all`: All of the above.
+            - [x] `--no-preserve=LIST`: Do not preserve specified attributes.
+        - [x] **Link Options:**
+            - [x] `-l`, `--link`: Create hard links instead of copying.
+            - [x] `-s`, `--symbolic-link`: Create symbolic links instead of copying.
+            - [x] `-L`, `--dereference`: Always follow symlinks in source.
+            - [x] `-P`, `--no-dereference`: Never follow symlinks (default).
+            - [x] `-H`: Follow symlinks on command line only.
+        - [x] **Sparse File Options:**
+            - [x] `--sparse=auto`: Detect and create sparse files automatically (default).
+            - [x] `--sparse=always`: Always create sparse files (even for regular data).
+            - [x] `--sparse=never`: Never create sparse files.
+            - [x] Implement `SEEK_DATA`/`SEEK_HOLE` for hole detection.
+            - [x] Fallback to zero-block detection when `SEEK_HOLE` unavailable.
+        - [x] **Buffer & Performance Options:**
+            - [x] `-b SIZE`, `--buffer-size=SIZE`: Set IO buffer size.
+            - [x] Default buffer size (64KB or configurable).
+            - [x] Use `copy_file_range()` when available and beneficial.
+            - [x] Use `sendfile()` as optimization on Linux.
+            - [x] Fallback to portable `read()`/`write()` loop.
+            - [x] Profile and tune buffer sizes for various file sizes.
+        - [x] **Backup Options:**
+            - [x] `-b`, `--backup`: Make backup of each existing destination file.
+            - [x] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never).
+            - [x] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`).
+        - [x] **Target Directory Options:**
+            - [x] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Copy all sources into target dir.
+            - [x] `-T`, `--no-target-directory`: Treat destination as normal file.
+        - [x] **Miscellaneous Options:**
+            - [x] `--reflink=WHEN`: Control clone/CoW (auto, always, never).
+            - [x] `--remove-destination`: Remove existing dest files before copy.
+            - [x] `-u`, `--update`: Copy only when source is newer or dest missing.
+        - [x] **Basic Copy Operations:**
+            - [x] **Single File to File:**
+                - [x] Create destination file with correct mode.
+                - [x] Copy data from source to destination.
+                - [x] Preserve metadata as requested.
+                - [x] Handle existing destination per flags.
+            - [x] **Multiple Files to Directory:**
+                - [x] Verify destination is a directory.
+                - [x] Construct destination paths correctly.
+                - [x] Process each source file.
+                - [x] Handle errors per-file (warn and continue).
+            - [x] **Directory Recursion (`-R`/`-a`):**
+                - [x] Create destination directory structure.
+                - [x] Traverse source directory depth-first.
+                - [x] Copy regular files, symlinks, devices, FIFOs.
+                - [x] Preserve directory permissions after contents copied.
+                - [x] Handle permission denied (warn and continue).
+        - [x] **Atomic Replace:**
+            - [x] Create temporary file in destination directory.
+            - [x] Use unique naming (`.cp.XXXXXX` pattern).
+            - [x] Copy all data to temporary file.
+            - [x] Set correct permissions on temporary file.
+            - [x] Call `fsync()` on file descriptor.
+            - [x] `rename()` temporary file to destination.
+            - [x] Handle rename failure (cross-device, permissions).
+            - [x] Clean up temporary file on any failure.
+            - [x] Atomic replace for regular files only.
+        - [x] **Hardlink Graph Preservation:**
+            - [x] Detect when multiple source files are hard links to same inode.
+            - [x] Maintain map of (source_dev, source_ino) -> destination_path.
+            - [x] On second encounter, create hard link to first copy.
+            - [x] Efficient hash map implementation for large trees.
+            - [x] Handle cross-device scenarios (cannot preserve links).
+        - [x] **Extended Attributes & ACLs:**
+            - [x] Detect platform support for xattrs (`getxattr()`, `setxattr()`).
+            - [x] List source file xattrs with `listxattr()`.
+            - [x] Copy each xattr to destination.
+            - [x] Handle xattr size limits.
+            - [x] Detect platform support for ACLs.
+            - [x] Copy ACLs when `--preserve=all` or `--preserve=xattr`.
+            - [x] Graceful degradation when APIs unavailable.
+            - [x] Warn when preservation fails (non-fatal).
+        - [x] **Special Files:**
+            - [x] **Symlinks:** Copy link target or create symlink based on flags.
+            - [x] **Block Devices:** Use `mknod()` with `-R`.
+            - [x] **Character Devices:** Use `mknod()` with `-R`.
+            - [x] **FIFOs:** Use `mkfifo()` with `-R`.
+            - [x] **Sockets:** Skip or warn (cannot copy).
+        - [x] **Cross-Device Handling:**
+            - [x] Detect cross-device copy (stat source and dest dirs).
+            - [x] `-l` (hardlink) fails across devices with clear error.
+            - [x] `-s` (symlink) works across devices.
+            - [x] Regular copy works across devices.
+            - [x] Hardlink preservation fails across devices (warn).
+        - [x] **Error Handling & Robustness:**
+            - [x] Handle `EINTR` during read/write (retry).
+            - [x] Handle partial writes (continue from where left off).
+            - [x] Handle `ENOSPC` (disk full) gracefully.
+            - [x] Handle `EDQUOT` (quota exceeded) gracefully.
+            - [x] Clean up partial destination on failure.
+            - [x] Signal handling: catch SIGINT/SIGTERM, cleanup, exit.
+            - [x] Write robust signal-safe cleanup routines.
+            - [x] Exit code 0: success.
+            - [x] Exit code 1: some files could not be copied.
+            - [x] Never crash on any input.
+        - [x] **Path Handling:**
+            - [x] No fixed-size path buffers (use dynamic allocation).
+            - [x] Hygienic path joining (handle trailing slashes).
+            - [x] Detect and reject self-copy attempts.
+            - [x] Handle paths with special characters.
+            - [x] Handle paths at `PATH_MAX` limit.
+        - [x] **Permission & Ownership Handling:**
+            - [x] Create destination with source mode (masked by umask initially).
+            - [x] After copy complete, chmod to exact source mode.
+            - [x] If root, chown to source owner:group.
+            - [x] If not root, preserve group if possible.
+            - [x] Warn if ownership cannot be preserved.
+            - [x] Handle setuid/setgid bits correctly.
+        - [x] **Timestamp Preservation:**
+            - [x] Read source atime and mtime.
+            - [x] Use `utimensat()` for nanosecond precision.
+            - [x] Fallback to `utimes()` if needed.
+            - [x] Preserve timestamps after all data written.
+        - [x] **Tests:**
+            - [x] **Unit Tests:**
+                - [x] Test atomic replace helper.
+                - [x] Test sparse file detection.
+                - [x] Test hardlink map operations.
+                - [x] Test path joining logic.
+                - [x] Test metadata preservation helpers.
+                - [x] Test buffer allocation.
+            - [x] **Integration Tests:**
+                - [x] Copy single file to new file.
+                - [x] Copy single file to existing file.
+                - [x] Copy multiple files to directory.
+                - [x] Copy directory recursively.
+                - [x] Copy with `-p` (permissions preserved).
+                - [x] Copy with `-a` (archive mode).
+                - [x] Copy hardlinked files (links preserved).
+                - [x] Copy sparse files (holes preserved).
+                - [x] Copy symlinks with `-d` and `-L`.
+                - [x] Copy special files (devices, FIFOs).
+                - [x] Copy files with xattrs.
+                - [x] Copy across filesystems.
+                - [x] Handle permission denied.
+                - [x] Handle disk full.
+                - [x] Handle self-copy attempt.
+            - [x] **Property Tests:**
+                - [x] Random file content survives copy.
+                - [x] Random metadata preserved correctly.
+                - [x] Random directory structures copy correctly.
+            - [x] **Fuzz Tests:**
+                - [x] Fuzz path handling with binary filenames.
+                - [x] Fuzz metadata parsing.
+                - [x] Fuzz option parsing.
+            - [x] **Acceptance Tests:**
+                - [x] `cp file1 file2` -> file2 identical to file1.
+                - [x] `cp -r dir1 dir2` -> dir2 contains copy of dir1.
+                - [x] `cp -a` -> timestamps, permissions, links preserved.
+                - [x] `cp -i existing` -> prompts user.
+                - [x] `cp -n existing` -> skips overwrite.
+                - [x] `cp -l` -> creates hard links.
+                - [x] `cp -s` -> creates symlinks.
+                - [x] Atomic replace verified (no partial files on interrupt).
+        - [x] **Documentation:**
+            - [x] Write `cp(1)` man page covering all options.
+            - [x] Document preservation behavior in detail.
+            - [x] Document sparse file handling.
+            - [x] Document atomic replace mechanism.
+            - [x] Write developer design doc for data flow.
+            - [x] Document hardlink preservation algorithm.
+            - [x] Document cross-device handling.
+        - [x] **Acceptance Criteria:**
+            - [x] All CLI options implemented and tested.
+            - [x] Atomic replace demonstrated (no partial files).
+            - [x] Hardlink preservation works for multi-file inputs.
+            - [x] Sparse files copied efficiently.
+            - [x] No memory leaks (valgrind clean).
+            - [x] Correct behavior across all flag combinations.
+            - [x] Exit codes match documented behavior.
+            - [x] Man page complete and accurate.
+            - [x] All tests pass in CI.
+    - [ ] **`mv` - Move (rename) files (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/mv/mv.c` for TODO comments, fragile code, incomplete features.
+            - [ ] Document all functionality gaps and bugs.
+            - [ ] Create refactoring plan: modular architecture.
+            - [ ] Extract option parsing into `mv_opts.c` and `mv_opts.h`.
+            - [ ] Extract rename/copy logic into `mv_core.c` and `mv_core.h`.
+            - [ ] Integrate with `cp` atomic replace logic (shared library or code reuse).
+            - [ ] Write unit tests for each extracted module.
+        - [ ] **CLI Options:**
+            - [ ] `-f`, `--force`: Do not prompt before overwriting.
+            - [ ] `-i`, `--interactive`: Prompt before overwrite.
+            - [ ] `-n`, `--no-clobber`: Do not overwrite existing file.
+            - [ ] `-v`, `--verbose`: Explain what is being done.
+            - [ ] `-u`, `--update`: Move only when source is newer or dest missing.
+            - [ ] `--strip-trailing-slashes`: Remove trailing slashes from source args.
+            - [ ] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Move all sources into target dir.
+            - [ ] `-T`, `--no-target-directory`: Treat destination as normal file.
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Backup Options:**
+            - [ ] `-b`, `--backup`: Make backup of each existing destination file.
+            - [ ] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never).
+            - [ ] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`).
+        - [ ] **Rename Semantics (Same Filesystem):**
+            - [ ] Use `rename(2)` syscall for atomic move.
+            - [ ] Handle `rename()` success: done, no further action.
+            - [ ] Handle `rename()` failure with `EXDEV`: trigger copy+unlink fallback.
+            - [ ] Handle `rename()` failure with `ENOENT`: source doesn't exist, error.
+            - [ ] Handle `rename()` failure with `EACCES`/`EPERM`: permission error.
+            - [ ] Handle `rename()` failure with `ENOTDIR`: path component not directory.
+            - [ ] Handle `rename()` failure with `EISDIR`: dest is dir, source is not.
+            - [ ] Handle `rename()` failure with `ENOTEMPTY`: dest dir not empty (dir move).
+        - [ ] **Cross-Filesystem Fallback:**
+            - [ ] Detect `EXDEV` from `rename()`.
+            - [ ] Invoke copy operation (reuse `cp` logic).
+            - [ ] Preserve all metadata during copy (timestamps, ownership, mode).
+            - [ ] Preserve extended attributes during copy.
+            - [ ] Preserve ACLs during copy if supported.
+            - [ ] Preserve hardlink graph during recursive move.
+            - [ ] After successful copy, unlink source.
+            - [ ] For directories: recursively copy, then recursively remove source.
+            - [ ] Handle partial failure: source partially moved.
+            - [ ] Clean up destination on copy failure before unlinking source.
+        - [ ] **Overwrite Policies:**
+            - [ ] Default: prompt if destination exists and stdout is TTY.
+            - [ ] `-f`: Never prompt, silently overwrite.
+            - [ ] `-i`: Always prompt before overwrite.
+            - [ ] `-n`: Never overwrite, silently skip.
+            - [ ] Precedence: last option wins among `-f`, `-i`, `-n`.
+            - [ ] Non-TTY behavior: `-i` still prompts (use /dev/tty or skip).
+            - [ ] Prompt format: "overwrite 'file'? " with y/n response.
+        - [ ] **Directory Moves:**
+            - [ ] Move directory to new name (rename within fs).
+            - [ ] Move directory into existing directory.
+            - [ ] Detect move-into-self error (moving dir into its own subtree).
+            - [ ] Error message for move-into-self: clear explanation.
+            - [ ] Handle non-empty destination directory (error).
+            - [ ] Recursive directory move for cross-fs.
+        - [ ] **Special File Handling:**
+            - [ ] **Symlinks:** Move symlink itself (not target) by default.
+            - [ ] `-L`: Follow symlinks (move target, not link).
+            - [ ] `-P`: Never follow symlinks (default).
+            - [ ] **Block/Character Devices:** Rename or recreate on cross-fs.
+            - [ ] **FIFOs:** Rename or recreate on cross-fs.
+            - [ ] **Sockets:** Rename only (cannot copy).
+        - [ ] **Hardlinks & Metadata:**
+            - [ ] Preserve hardlink relationships during cross-fs copy.
+            - [ ] Reuse hardlink map from `cp` implementation.
+            - [ ] Preserve file mode (chmod after copy).
+            - [ ] Preserve owner/group (chown after copy, if root).
+            - [ ] Preserve timestamps (utimensat after copy).
+        - [ ] **Race Condition Avoidance:**
+            - [ ] Minimize TOCTOU window between check and operation.
+            - [ ] Use `renameat2()` with `RENAME_NOREPLACE` where available.
+            - [ ] Fallback to traditional rename with accept-the-race semantics.
+            - [ ] For `-n`: open with O_EXCL to avoid overwrite races.
+            - [ ] Document known race conditions that cannot be avoided.
+        - [ ] **Error Handling:**
+            - [ ] Per-file errors: warn and continue with next source.
+            - [ ] Exit code 0: all moves successful.
+            - [ ] Exit code 1: at least one move failed.
+            - [ ] Never crash on any input.
+            - [ ] Handle EINTR during operations.
+            - [ ] Signal handling: catch SIGINT, cleanup partial operations.
+        - [ ] **Path Handling:**
+            - [ ] No fixed-size path buffers (use dynamic allocation).
+            - [ ] `--strip-trailing-slashes` implementation.
+            - [ ] Handle paths with special characters.
+            - [ ] Handle paths at `PATH_MAX` limit.
+            - [ ] Detect and reject source == destination.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test rename semantics helper.
+                - [ ] Test cross-fs detection.
+                - [ ] Test overwrite policy logic.
+                - [ ] Test path manipulation (strip slashes).
+                - [ ] Test move-into-self detection.
+            - [ ] **Integration Tests:**
+                - [ ] Move single file to new name.
+                - [ ] Move single file to existing file (overwrite).
+                - [ ] Move file to directory.
+                - [ ] Move multiple files to directory.
+                - [ ] Move directory to new name.
+                - [ ] Move directory into existing directory.
+                - [ ] Move across filesystems.
+                - [ ] Move with `-i` (interactive prompt).
+                - [ ] Move with `-n` (no clobber).
+                - [ ] Move with `-u` (update).
+                - [ ] Move special files (symlinks, devices).
+                - [ ] Move-into-self detection.
+                - [ ] Hardlink preservation on cross-fs.
+            - [ ] **Property Tests:**
+                - [ ] File content preserved after move.
+                - [ ] Metadata preserved after cross-fs move.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz path handling with binary/special characters.
+                - [ ] Fuzz option parsing.
+            - [ ] **Non-TTY Interactive Tests:**
+                - [ ] `-i` behavior when stdin is not TTY.
+                - [ ] Input redirection for prompts.
+            - [ ] **Acceptance Tests:**
+                - [ ] `mv file1 file2` -> file1 gone, file2 exists.
+                - [ ] `mv file dir/` -> dir/file exists.
+                - [ ] `mv` across filesystems -> content identical.
+                - [ ] `mv -i existing` -> prompts user.
+                - [ ] `mv -n existing` -> skips, source untouched.
+                - [ ] `mv dir1 dir2` -> dir1 renamed if same fs.
+        - [ ] **Documentation:**
+            - [ ] Write `mv(1)` man page covering all options.
+            - [ ] Document rename(2) atomicity guarantees.
+            - [ ] Document cross-filesystem behavior.
+            - [ ] Document backup options.
+            - [ ] Write developer notes on atomicity.
+            - [ ] Document race condition considerations.
+        - [ ] **Acceptance Criteria:**
+            - [ ] `rename(2)` used when possible.
+            - [ ] Correct fallback to copy+unlink for cross-fs.
+            - [ ] Hardlink preservation on fallback.
+            - [ ] Metadata preservation on fallback.
+            - [ ] Robust error handling.
+            - [ ] No memory leaks.
+            - [ ] Exit codes match documented behavior.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`rm` - Remove files or directories (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/rm/rm.c` for TODO comments, fragile code, incomplete features.
+            - [ ] Document all functionality gaps and security concerns.
+            - [ ] Create refactoring plan: modular architecture.
+            - [ ] Extract option parsing into `rm_opts.c` and `rm_opts.h`.
+            - [ ] Extract recursive walker into `rm_walk.c` and `rm_walk.h`.
+            - [ ] Extract safety checks into `rm_safety.c` and `rm_safety.h`.
+            - [ ] Write unit tests for each extracted module.
+        - [ ] **CLI Options:**
+            - [ ] `-f`, `--force`: Ignore nonexistent files, never prompt.
+            - [ ] `-i`: Prompt before every removal.
+            - [ ] `-I`: Prompt once before removing more than 3 files or recursing.
+            - [ ] `-r`, `-R`, `--recursive`: Remove directories and their contents recursively.
+            - [ ] `-d`, `--dir`: Remove empty directories.
+            - [ ] `-v`, `--verbose`: Explain what is being done.
+            - [ ] `--one-file-system`: Do not cross filesystem boundaries.
+            - [ ] `--preserve-root`: Do not remove `/` (default).
+            - [ ] `--no-preserve-root`: Allow removing `/` (dangerous).
+            - [ ] `--interactive=WHEN`: Prompt according to WHEN (never, once, always).
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Root Protection (`--preserve-root`):**
+            - [ ] Default: refuse to remove `/` with `-r`.
+            - [ ] Detect `/` as argument (canonicalize paths first).
+            - [ ] Detect attempts to remove filesystem root.
+            - [ ] Error message: "it is dangerous to operate recursively on '/'".
+            - [ ] `--no-preserve-root`: explicit opt-in to dangerous behavior.
+            - [ ] Acceptance: never accidentally remove `/` in any test.
+        - [ ] **Dangerous Pattern Detection:**
+            - [ ] Refuse `rm -rf /` unless `--no-preserve-root`.
+            - [ ] Warn on `rm -rf /*` (but allow if forced).
+            - [ ] Warn on `rm -rf ~` or `rm -rf $HOME`.
+            - [ ] Document dangerous patterns in man page.
+        - [ ] **Symlink Handling (Recursive Mode):**
+            - [ ] Do NOT follow symlinks during directory traversal.
+            - [ ] Remove the symlink itself, not the target.
+            - [ ] Never descend into symlinked directories.
+            - [ ] Handle broken symlinks (remove them).
+            - [ ] Tests: symlink removal tests, symlink-to-directory tests.
+        - [ ] **TOCTOU Hardening (FD-Based Traversal):**
+            - [ ] Use `openat()` to open directories relative to parent fd.
+            - [ ] Use `unlinkat()` to remove files relative to directory fd.
+            - [ ] Use `fstatat()` to stat files relative to directory fd.
+            - [ ] Never use path-based operations during traversal.
+            - [ ] Keep directory fd open during traversal of its contents.
+            - [ ] Handle directory fd invalidation gracefully.
+            - [ ] Files: `rm_walk.c` uses fd-based traversal throughout.
+            - [ ] Tests: TOCTOU tests with mock concurrent modifications.
+        - [ ] **Recursive Removal Algorithm:**
+            - [ ] Depth-first traversal: remove contents before directory.
+            - [ ] Open directory via `openat(parent_fd, name, O_DIRECTORY)`.
+            - [ ] Iterate directory with `getdents()` or `fdopendir()`.
+            - [ ] Skip `.` and `..` entries.
+            - [ ] Recursively remove subdirectories.
+            - [ ] Use `unlinkat(dir_fd, name, 0)` for files.
+            - [ ] Use `unlinkat(dir_fd, name, AT_REMOVEDIR)` for directories.
+            - [ ] Close directory fd after contents removed.
+        - [ ] **One-File-System Option:**
+            - [ ] Detect filesystem boundary during traversal.
+            - [ ] Compare `st_dev` of child to parent.
+            - [ ] Skip (do not descend) if `st_dev` differs.
+            - [ ] Warn when skipping due to filesystem boundary.
+            - [ ] Tests: cross-filesystem skip tests (with mock or loopback).
+        - [ ] **Interactive Prompting:**
+            - [ ] `-i`: Prompt before every removal.
+            - [ ] `-I`: Prompt once if more than 3 files or if `-r`.
+            - [ ] Prompt format: "rm: remove <type> '<path>'?".
+            - [ ] Accept y/Y for yes, n/N or other for no.
+            - [ ] Non-TTY behavior: `-i` reads from /dev/tty or skips.
+            - [ ] `-f` overrides `-i` (last option wins).
+        - [ ] **Permission & Ownership Handling:**
+            - [ ] Check write permission on parent directory (for unlink).
+            - [ ] Handle unwritable files with prompt (unless `-f`).
+            - [ ] Prompt: "rm: remove write-protected <type> '<path>'?".
+            - [ ] Sticky bit handling: only owner can delete in sticky dir.
+            - [ ] POSIX semantics: check effective UID vs file owner.
+        - [ ] **Special File Handling:**
+            - [ ] Regular files: `unlinkat(dir_fd, name, 0)`.
+            - [ ] Directories: `unlinkat(dir_fd, name, AT_REMOVEDIR)`.
+            - [ ] Symlinks: unlink the link, not target.
+            - [ ] Devices/FIFOs: unlink normally.
+            - [ ] Sockets: unlink normally.
+        - [ ] **Immutable Files & Extended Attributes:**
+            - [ ] Handle `EPERM` from unlink on immutable files.
+            - [ ] Document immutable flag behavior in man page.
+            - [ ] Privileged mode: can remove if root and chattr -i first (not auto).
+            - [ ] Report clear error for immutable files.
+        - [ ] **Error Handling:**
+            - [ ] Continue on per-file errors (unless fatal).
+            - [ ] Accumulate errors and return nonzero on any failure.
+            - [ ] `-f` suppresses error messages but still sets exit code.
+            - [ ] Exit code 0: all files removed successfully.
+            - [ ] Exit code 1: at least one file could not be removed.
+            - [ ] Handle `ENOENT` gracefully with `-f`.
+            - [ ] Handle `EACCES`, `EPERM`, `EBUSY`, `EROFS` appropriately.
+            - [ ] Handle `ENOTEMPTY` (race: dir filled during removal).
+        - [ ] **Path Handling:**
+            - [ ] No fixed-size path buffers (dynamic allocation).
+            - [ ] Handle paths with special characters.
+            - [ ] Handle paths at `PATH_MAX` limit.
+            - [ ] Canonicalize paths for root protection check.
+            - [ ] Reject paths ending in `/` for non-directories.
+        - [ ] **Signal Handling:**
+            - [ ] Catch SIGINT/SIGTERM for cleanup.
+            - [ ] Exit cleanly on signal (don't leave partial state).
+            - [ ] Document interruptibility in man page.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test recursive walker with mock filesystem.
+                - [ ] Test symlink detection logic.
+                - [ ] Test preserve-root detection.
+                - [ ] Test option parsing.
+                - [ ] Test fd-based traversal helpers.
+            - [ ] **Integration Tests:**
+                - [ ] Remove single file.
+                - [ ] Remove multiple files.
+                - [ ] Remove empty directory with `-d`.
+                - [ ] Remove non-empty directory with `-r`.
+                - [ ] Remove deep directory tree.
+                - [ ] Remove with `-f` (nonexistent file).
+                - [ ] Remove with `-i` (interactive prompt).
+                - [ ] Remove with `-I` (prompt once).
+                - [ ] Remove with `-v` (verbose output).
+                - [ ] Preserve-root protection test.
+                - [ ] Symlink removal (file and directory links).
+                - [ ] One-file-system boundary test.
+                - [ ] Write-protected file prompt test.
+                - [ ] Sticky bit handling test.
+            - [ ] **TOCTOU Tests:**
+                - [ ] Concurrent file creation during removal.
+                - [ ] Concurrent symlink replacement during removal.
+                - [ ] Concurrent directory creation during removal.
+                - [ ] Mock harness for race condition injection.
+            - [ ] **Property Tests:**
+                - [ ] Random directory trees removed completely.
+                - [ ] Symlinks never followed during recursion.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz path handling with binary filenames.
+                - [ ] Fuzz option parsing.
+                - [ ] Fuzz directory tree structures.
+            - [ ] **Acceptance Tests:**
+                - [ ] `rm file` -> file removed.
+                - [ ] `rm -r dir` -> dir and contents removed.
+                - [ ] `rm -f nonexist` -> no error.
+                - [ ] `rm -rf /` -> refused (preserve-root).
+                - [ ] `rm -rf --no-preserve-root /tmp/test` -> allowed.
+                - [ ] No accidental deletion in any test.
+        - [ ] **Documentation:**
+            - [ ] Write `rm(1)` man page covering all options.
+            - [ ] Document `--preserve-root` behavior prominently.
+            - [ ] Document risks of `rm -rf`.
+            - [ ] Document symlink behavior during recursion.
+            - [ ] Document sticky bit and permission handling.
+            - [ ] Write developer notes on fd-based traversal.
+            - [ ] Document TOCTOU mitigations.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] `--preserve-root` default prevents accidental root removal.
+            - [ ] FD-based traversal prevents TOCTOU races.
+            - [ ] Symlinks never followed during recursive removal.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Correct exit codes for all scenarios.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`mkdir` - Make directories (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/mkdir/mkdir.c` for TODO comments, fragile code.
+            - [ ] Document all functionality gaps and bugs.
+            - [ ] Create refactoring plan: modular architecture.
+            - [ ] Extract option parsing into `mkdir_opts.c` and `mkdir_opts.h`.
+            - [ ] Extract mode parsing into shared `lib/modeparse.c` (reusable by chmod).
+            - [ ] Extract parent creation logic into `mkdir_parents.c`.
+            - [ ] Write unit tests for each extracted module.
+        - [ ] **CLI Options:**
+            - [ ] `-p`, `--parents`: No error if existing, make parent directories as needed.
+            - [ ] `-m MODE`, `--mode=MODE`: Set file mode (as in chmod).
+            - [ ] `-v`, `--verbose`: Print a message for each created directory.
+            - [ ] `-Z`, `--context=CTX`: Set SELinux context (stub or implement if needed).
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Mode Parsing:**
+            - [ ] **Octal Modes:**
+                - [ ] Parse octal strings (e.g., `0755`, `755`).
+                - [ ] Validate octal range (0-7 per digit).
+                - [ ] Support leading zero or no leading zero.
+            - [ ] **Symbolic Modes:**
+                - [ ] Parse symbolic modes (e.g., `u+rwx`, `a+rx`, `go-w`).
+                - [ ] Support WHO: `u` (user), `g` (group), `o` (other), `a` (all).
+                - [ ] Support PERM: `r` (read), `w` (write), `x` (execute).
+                - [ ] Support OP: `+` (add), `-` (remove), `=` (set exactly).
+                - [ ] Support multiple clauses (e.g., `u+rw,go+r`).
+                - [ ] Apply symbolic mode relative to initial mode (0777 for dirs).
+            - [ ] **Umask Interaction:**
+                - [ ] Without `-m`: apply umask to default mode (0777).
+                - [ ] With `-m`: use specified mode exactly (ignore umask for final).
+                - [ ] For `-p` intermediate dirs: use default mode with umask.
+                - [ ] Document umask interaction in man page.
+            - [ ] **Mode Library:**
+                - [ ] Create reusable `parse_mode()` function.
+                - [ ] Return parsed mode or error indicator.
+                - [ ] Unit tests for all mode formats.
+        - [ ] **Basic Directory Creation:**
+            - [ ] Create single directory with `mkdir()` syscall.
+            - [ ] Apply specified mode with `chmod()` after creation.
+            - [ ] Handle `EEXIST` error (fail unless `-p`).
+            - [ ] Report error on `EACCES`, `ENOENT`, `ENOTDIR`.
+            - [ ] Verbose output: "mkdir: created directory '<path>'".
+        - [ ] **Parent Directory Creation (`-p`):**
+            - [ ] Parse path into components.
+            - [ ] Create each missing intermediate directory.
+            - [ ] Intermediate directories get default mode (0777 & ~umask).
+            - [ ] Final directory gets specified mode (or default).
+            - [ ] Do not error if directory already exists.
+            - [ ] Error if path component exists but is not a directory.
+            - [ ] Handle paths starting with `/` (absolute).
+            - [ ] Handle paths starting with `./` or `../` (relative).
+            - [ ] Handle trailing slashes correctly.
+        - [ ] **Race-Safe Creation:**
+            - [ ] Use `mkdirat()` for relative creation within parent fd.
+            - [ ] Handle `EEXIST` gracefully during `-p` (concurrent mkdir).
+            - [ ] After `EEXIST`, verify it's a directory (not a file).
+            - [ ] Use `fstatat()` to check type after race.
+            - [ ] Idempotent behavior: concurrent `mkdir -p` on same path succeeds.
+            - [ ] Files: use fd-based operations where possible.
+        - [ ] **Permissions & Ownership:**
+            - [ ] Created directories owned by effective UID/GID.
+            - [ ] When running as root: document that ownership is root.
+            - [ ] Setgid inheritance: if parent has setgid, child inherits.
+            - [ ] Document ownership behavior in man page.
+        - [ ] **Path Handling:**
+            - [ ] No fixed-size path buffers (dynamic allocation).
+            - [ ] Handle paths with special characters.
+            - [ ] Handle paths at `PATH_MAX` limit.
+            - [ ] Handle empty path component (double slash).
+            - [ ] Handle `.` and `..` components correctly.
+        - [ ] **Error Handling:**
+            - [ ] Continue to next operand on per-directory error.
+            - [ ] Accumulate errors and return nonzero on any failure.
+            - [ ] Exit code 0: all directories created successfully.
+            - [ ] Exit code 1: at least one directory could not be created.
+            - [ ] Clear error messages with path and errno description.
+            - [ ] Handle `ENOSPC`, `EDQUOT`, `EROFS`.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test octal mode parsing.
+                - [ ] Test symbolic mode parsing.
+                - [ ] Test mode with umask application.
+                - [ ] Test path component splitting.
+                - [ ] Test option parsing.
+            - [ ] **Integration Tests:**
+                - [ ] Create single directory.
+                - [ ] Create directory with `-m` octal mode.
+                - [ ] Create directory with `-m` symbolic mode.
+                - [ ] Create directory with `-v` verbose.
+                - [ ] Create parent directories with `-p`.
+                - [ ] Create already existing directory (error without `-p`).
+                - [ ] Create already existing directory (success with `-p`).
+                - [ ] Path component is file (error).
+                - [ ] Deep path creation.
+                - [ ] Trailing slash handling.
+            - [ ] **Race/Concurrency Tests:**
+                - [ ] Concurrent `mkdir -p` on same path.
+                - [ ] Verify idempotent behavior.
+                - [ ] Concurrent mkdir where one creates file (error case).
+            - [ ] **Property Tests:**
+                - [ ] Random paths created correctly with `-p`.
+                - [ ] Mode applied correctly after creation.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz path handling with binary filenames.
+                - [ ] Fuzz mode parsing with random strings.
+                - [ ] Fuzz option parsing.
+            - [ ] **Acceptance Tests:**
+                - [ ] `mkdir dir` -> dir exists.
+                - [ ] `mkdir -p a/b/c` -> creates deep path.
+                - [ ] `mkdir exists` -> fails (unless -p).
+                - [ ] `mkdir -m 700 dir` -> dir has mode 700.
+                - [ ] `mkdir -pv a/b` -> prints created directories.
+        - [ ] **Documentation:**
+            - [ ] Write `mkdir(1)` man page covering all options.
+            - [ ] Document `-m` mode format (octal and symbolic).
+            - [ ] Document umask interaction.
+            - [ ] Document `-p` idempotent behavior.
+            - [ ] Document race conditions and safety.
+            - [ ] Write developer notes on atomic creation.
+            - [ ] Document ownership and setgid behavior.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] `-p` is idempotent (concurrent safe).
+            - [ ] Mode parsing supports octal and symbolic.
+            - [ ] Umask correctly applied.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Correct exit codes for all scenarios.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`rmdir` - Remove empty directories (Production Quality Rewrite):**
+        - [ ] **Audit & Refactor Existing Code:**
+            - [ ] Audit existing `bin/rmdir/rmdir.c` for TODO comments, fragile code.
+            - [ ] Document all functionality gaps and bugs.
+            - [ ] Create refactoring plan: modular architecture.
+            - [ ] Extract option parsing into `rmdir_opts.c` and `rmdir_opts.h`.
+            - [ ] Extract ancestor removal logic into `rmdir_parents.c`.
+            - [ ] Write unit tests for each extracted module.
+        - [ ] **CLI Options:**
+            - [ ] `-p`, `--parents`: Remove ancestors if they become empty after removal.
+            - [ ] `-v`, `--verbose`: Output a diagnostic for every directory processed.
+            - [ ] `--ignore-fail-on-non-empty`: Ignore failures due to non-empty.
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Basic Directory Removal:**
+            - [ ] Remove single directory with `rmdir()` syscall.
+            - [ ] Fail if directory is not empty (`ENOTEMPTY`).
+            - [ ] Fail if path is not a directory (`ENOTDIR`).
+            - [ ] Fail if path does not exist (`ENOENT`).
+            - [ ] Verbose output: "rmdir: removing directory, '<path>'".
+        - [ ] **Ancestor Removal (`-p`):**
+            - [ ] Parse path into ancestor components.
+            - [ ] After removing target, attempt to remove parent.
+            - [ ] Continue up the tree while directories are empty.
+            - [ ] Stop at first failure (non-empty, permission, etc.).
+            - [ ] Handle relative paths (./a/b/c).
+            - [ ] Handle absolute paths (/a/b/c).
+            - [ ] Do not attempt to remove root `/` or `.`.
+            - [ ] Verbose output for each ancestor removed.
+        - [ ] **Safety & Validation:**
+            - [ ] Do NOT follow symlinks.
+            - [ ] Refuse removal if path is a symlink to a directory.
+            - [ ] Verify path is a directory before removal.
+            - [ ] Refuse removal of `.` and `..`.
+            - [ ] Refuse removal of `/` (always).
+        - [ ] **Race-Safe Removal:**
+            - [ ] Use `openat()` to open parent directory.
+            - [ ] Use `fstatat()` to verify target is empty directory.
+            - [ ] Use `unlinkat(parent_fd, name, AT_REMOVEDIR)` for removal.
+            - [ ] Handle race where directory becomes non-empty.
+            - [ ] Handle race where directory is removed by another process.
+            - [ ] Files: fd-based validation before removal.
+        - [ ] **Error Handling:**
+            - [ ] Continue to next operand on per-directory error.
+            - [ ] Accumulate errors and return nonzero on any failure.
+            - [ ] Exit code 0: all directories removed successfully.
+            - [ ] Exit code 1: at least one directory could not be removed.
+            - [ ] Clear error messages with path and errno description.
+            - [ ] `--ignore-fail-on-non-empty`: suppress `ENOTEMPTY` errors.
+            - [ ] Handle `EACCES`, `EPERM`, `EBUSY`, `EROFS`.
+        - [ ] **Path Handling:**
+            - [ ] No fixed-size path buffers (dynamic allocation).
+            - [ ] Handle paths with special characters.
+            - [ ] Handle paths at `PATH_MAX` limit.
+            - [ ] Handle trailing slashes correctly.
+            - [ ] Handle empty path component (error).
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Test ancestor path parsing.
+                - [ ] Test option parsing.
+                - [ ] Test symlink detection.
+                - [ ] Test empty directory detection.
+            - [ ] **Integration Tests:**
+                - [ ] Remove single empty directory.
+                - [ ] Remove single non-empty directory (error).
+                - [ ] Remove with `-v` (verbose output).
+                - [ ] Remove with `-p` (ancestors).
+                - [ ] Ancestor stops at non-empty.
+                - [ ] Symlink to directory (error).
+                - [ ] Path is file not directory (error).
+                - [ ] Deep ancestor chain removal.
+                - [ ] `--ignore-fail-on-non-empty` behavior.
+            - [ ] **Race/Concurrency Tests:**
+                - [ ] Concurrent file creation during removal.
+                - [ ] Concurrent directory creation in target.
+                - [ ] Concurrent removal by another process.
+            - [ ] **Property Tests:**
+                - [ ] Random empty directory trees removed correctly.
+                - [ ] `-p` removes as many ancestors as possible.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz path handling with binary filenames.
+                - [ ] Fuzz option parsing.
+            - [ ] **Acceptance Tests:**
+                - [ ] `rmdir empty_dir` -> succeeds.
+                - [ ] `rmdir non_empty_dir` -> fails.
+                - [ ] `rmdir -p a/b/c` -> removes c, then b, then a.
+                - [ ] `rmdir -pv a/b` -> verbose output for each.
+                - [ ] Symlink to dir -> error, not followed.
+        - [ ] **Documentation:**
+            - [ ] Write `rmdir(1)` man page covering all options.
+            - [ ] Document `-p` ancestor removal behavior.
+            - [ ] Document symlink handling (not followed).
+            - [ ] Document race condition handling.
+            - [ ] Write developer notes on fd-based validation.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] `-p` removes ancestors correctly.
+            - [ ] Symlinks never followed.
+            - [ ] Race-safe with fd-based operations.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Correct exit codes for all scenarios.
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [ ] **`cal` - Display a calendar (Production Quality Implementation):**
+        - [ ] **Audit & Design:**
+            - [ ] Review BSD and GNU cal implementations for feature parity.
+            - [ ] Document supported year range (e.g., 1-9999 or wider).
+            - [ ] Document Gregorian/Julian transition handling strategy.
+            - [ ] Create design doc: `docs/cal-design.md`.
+        - [ ] **CLI Options:**
+            - [ ] `[month] [year]`: Display specific month/year.
+            - [ ] `[year]`: Display entire year calendar.
+            - [ ] `-1`: Display single month (default).
+            - [ ] `-3`: Display previous, current, and next month.
+            - [ ] `-y`: Display entire year calendar.
+            - [ ] `-m`: Start week on Monday (ISO 8601).
+            - [ ] `-s`: Start week on Sunday (default, traditional).
+            - [ ] `-j`, `--julian`: Display Julian day-of-year (1-366).
+            - [ ] `-w`: Display week numbers.
+            - [ ] `-n NUM`: Display NUM months starting from current.
+            - [ ] `-A NUM`: Display NUM months after current.
+            - [ ] `-B NUM`: Display NUM months before current.
+            - [ ] `-h`, `--no-highlight`: Do not highlight today.
+            - [ ] `--color=WHEN`: Colorize output (always, auto, never).
+            - [ ] `--help`: Display help and exit.
+            - [ ] `--version`: Display version and exit.
+        - [ ] **Calendar System Options:**
+            - [ ] `--gregorian`: Use Gregorian calendar exclusively.
+            - [ ] `--julian`: Use Julian calendar exclusively.
+            - [ ] `-p`, `--reform=DATE`: Set Gregorian reform date (default: 1752-09-14).
+            - [ ] Support common reform dates (1582, 1752, etc.).
+            - [ ] Document historical transitions in man page.
+        - [ ] **Date Calculations:**
+            - [ ] **Leap Year Rules:**
+                - [ ] Gregorian: divisible by 4, except centuries unless by 400.
+                - [ ] Julian: divisible by 4.
+                - [ ] Implement `is_leap_year(year, calendar_type)`.
+                - [ ] Unit tests for leap year edge cases.
+            - [ ] **Day of Week Calculation:**
+                - [ ] Implement Zeller's congruence or similar algorithm.
+                - [ ] Handle Gregorian/Julian calendar differences.
+                - [ ] Calculate first day of any month in range.
+                - [ ] Unit tests against known reference dates.
+            - [ ] **Days in Month:**
+                - [ ] Standard days per month.
+                - [ ] February adjustment for leap years.
+                - [ ] Handle Gregorian transition gaps.
+            - [ ] **Julian Day Number:**
+                - [ ] Calculate day-of-year (1-365/366).
+                - [ ] Display with `-j` flag.
+        - [ ] **Gregorian/Julian Transition:**
+            - [ ] Default transition: September 1752 (British/US).
+            - [ ] September 1752: skip Sep 3-13 (11 days).
+            - [ ] Configurable transition date with `--reform`.
+            - [ ] Correctly display months that span transition.
+            - [ ] Handle years before transition with Julian calendar.
+            - [ ] Handle years after transition with Gregorian calendar.
+            - [ ] Document behavior in man page.
+        - [ ] **Output Formatting:**
+            - [ ] **Single Month:**
+                - [ ] Header: month name and year, centered.
+                - [ ] Day names row (Su Mo Tu We Th Fr Sa or Mo Tu...).
+                - [ ] Weeks in rows, right-aligned day numbers.
+                - [ ] Spaces for days before/after month.
+                - [ ] 20 or 21 character width per month.
+            - [ ] **Year Calendar:**
+                - [ ] 3 months per row (or configurable).
+                - [ ] Centered year header.
+                - [ ] Proper spacing between month columns.
+            - [ ] **Three-Month Display (`-3`):**
+                - [ ] Previous, current, next month side by side.
+            - [ ] **Today Highlighting:**
+                - [ ] Default: highlight today with reverse video.
+                - [ ] `-h` to disable.
+                - [ ] ANSI escape codes for terminal.
+                - [ ] Detect if output is TTY.
+            - [ ] **Julian Day Format (`-j`):**
+                - [ ] 3-digit day-of-year instead of 2-digit date.
+                - [ ] Wider column layout (27 chars per month).
+            - [ ] **Week Numbers (`-w`):**
+                - [ ] ISO week numbers in left column.
+        - [ ] **Locale Support:**
+            - [ ] **Month Names:**
+                - [ ] Use locale-specific month names.
+                - [ ] Fallback to English if locale unavailable.
+            - [ ] **Day Names:**
+                - [ ] Use locale-specific abbreviated day names.
+                - [ ] Handle wide characters in names.
+            - [ ] **First Day of Week:**
+                - [ ] Respect LC_TIME first_weekday if available.
+                - [ ] Override with `-m` or `-s`.
+            - [ ] **Character Width:**
+                - [ ] Handle wide characters (CJK) in names.
+                - [ ] Calculate display width correctly.
+        - [ ] **Error Handling:**
+            - [ ] Invalid month (< 1 or > 12): error.
+            - [ ] Invalid year (out of range): error.
+            - [ ] Invalid option combinations: error.
+            - [ ] Exit code 0: success.
+            - [ ] Exit code 1: error.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Leap year calculation (multiple edge cases).
+                - [ ] Day of week calculation (known dates).
+                - [ ] Days in month (all months, leap/non-leap).
+                - [ ] Julian day-of-year calculation.
+                - [ ] Option parsing.
+            - [ ] **Reference Data Tests:**
+                - [ ] Compare output against ncal/cal reference.
+                - [ ] Test years: 1, 100, 1582, 1752, 2000, 2024, 9999.
+                - [ ] Test leap years: 1600, 1700, 1800, 1900, 2000, 2100.
+                - [ ] Test February in leap/non-leap years.
+            - [ ] **Gregorian/Julian Transition Tests:**
+                - [ ] September 1752 calendar (11-day gap).
+                - [ ] October 1582 calendar (10-day gap).
+                - [ ] Custom reform dates.
+            - [ ] **Locale Tests:**
+                - [ ] Different LC_TIME settings.
+                - [ ] First day of week variations.
+                - [ ] Non-ASCII month/day names.
+            - [ ] **Property Tests:**
+                - [ ] Any valid month/year produces valid output.
+                - [ ] February days correct for any year.
+                - [ ] Day count per month always correct.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz year values (extreme ranges).
+                - [ ] Fuzz option combinations.
+            - [ ] **Acceptance Tests:**
+                - [ ] `cal` -> displays current month.
+                - [ ] `cal 2024` -> displays 2024 year calendar.
+                - [ ] `cal 9 1752` -> shows September 1752 with gap.
+                - [ ] `cal -j` -> Julian day-of-year format.
+                - [ ] `cal -m` -> weeks start Monday.
+                - [ ] `cal -3` -> three months displayed.
+        - [ ] **Documentation:**
+            - [ ] Write `cal(1)` man page covering all options.
+            - [ ] Document supported year range.
+            - [ ] Document Gregorian/Julian transition behavior.
+            - [ ] Document `-j` Julian day format.
+            - [ ] Document locale support.
+            - [ ] Historical notes on calendar reforms.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented and tested.
+            - [ ] Output matches authoritative references.
+            - [ ] Leap years calculated correctly.
+            - [ ] Gregorian/Julian transition handled.
+            - [ ] Locale-aware formatting works.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Man page complete and accurate.
+            - [ ] All tests pass in CI.
+    - [x] **`cat` - Concatenate files and print on standard output (Production Quality Rewrite):**
+        - [x] **Audit & Refactor Existing Code:**
+            - [x] Audit existing `bin/cat/cat.c` for TODO comments, fragile code.
+            - [x] Document all functionality gaps and bugs.
+            - [x] Create refactoring plan: modular architecture.
+            - [x] Extract option parsing into separate function.
+            - [x] Extract I/O loop into reusable function.
+            - [x] Write unit tests for each module.
+        - [x] **CLI Options (POSIX + Extensions):**
+            - [x] `-u`: Write bytes unbuffered (POSIX).
+            - [x] `-` (dash): Read from stdin (POSIX).
+            - [x] `-n`, `--number`: Number all output lines.
+            - [x] `-b`, `--number-nonblank`: Number non-blank lines only.
+            - [x] `-s`, `--squeeze-blank`: Suppress repeated empty lines.
+            - [x] `-E`, `--show-ends`: Display `$` at end of each line.
+            - [x] `-T`, `--show-tabs`: Display TAB as `^I`.
+            - [x] `-v`, `--show-nonprinting`: Display control chars as `^X`, M-X.
+            - [x] `-A`, `--show-all`: Equivalent to `-vET`.
+            - [x] `-e`: Equivalent to `-vE`.
+            - [x] `-t`: Equivalent to `-vT`.
+            - [x] `--help`: Display help and exit.
+            - [x] `--version`: Display version and exit.
+        - [x] **Input Handling:**
+            - [x] Read from files specified as arguments.
+            - [x] Read from stdin if no files or `-` argument.
+            - [x] Handle multiple `-` arguments (read stdin multiple times).
+            - [x] Handle binary files (pass through unchanged).
+            - [x] Handle empty files (output nothing).
+            - [x] Handle very large files (streaming, no full buffering).
+            - [x] Handle files with no trailing newline.
+        - [x] **Output Handling:**
+            - [x] Write to stdout.
+            - [x] `-u` flag: unbuffered writes (one syscall per read).
+            - [x] Default: buffered I/O for performance.
+            - [x] Handle `EINTR` on write (retry).
+            - [x] Handle `EPIPE` gracefully (broken pipe).
+            - [x] Handle partial writes.
+        - [x] **Line Numbering (`-n`, `-b`):**
+            - [x] Right-justify line numbers in 6-character field.
+            - [x] Follow number with TAB separator.
+            - [x] `-n`: Number all lines including blank.
+            - [x] `-b`: Number only non-blank lines.
+            - [x] Line counter persists across files.
+            - [x] Handle lines without trailing newline.
+        - [x] **Blank Line Squeezing (`-s`):**
+            - [x] Replace multiple consecutive blank lines with one.
+            - [x] Track state across read boundaries.
+            - [x] Works correctly with `-n` (numbers squeezed output).
+        - [x] **End-of-Line Marker (`-E`):**
+            - [x] Display `$` before each newline.
+            - [x] Handle lines without trailing newline.
+        - [x] **Tab Display (`-T`):**
+            - [x] Display TAB characters as `^I`.
+        - [x] **Non-Printing Characters (`-v`):**
+            - [x] Display control chars (0x00-0x1F) as `^@` through `^_`.
+            - [x] Display DEL (0x7F) as `^?`.
+            - [x] Display high-bit chars (0x80-0x9F) as `M-^@` through `M-^_`.
+            - [x] Display high-bit chars (0xA0-0xFE) as `M- ` through `M-~`.
+            - [x] Display 0xFF as `M-^?`.
+            - [x] Exception: TAB, NL, FF handled separately.
+        - [x] **Error Handling:**
+            - [x] Continue to next file on per-file error.
+            - [x] Print error message to stderr for each failure.
+            - [x] Return nonzero exit code if any file failed.
+            - [x] Exit code 0: all files processed successfully.
+            - [x] Exit code 1: at least one file could not be read.
+            - [x] Handle `ENOENT`, `EACCES`, `EISDIR`.
+        - [x] **Special Cases:**
+            - [x] Handle directories (error: is a directory).
+            - [x] Handle device files (read normally).
+            - [x] Handle FIFOs/pipes.
+            - [x] Handle socket files (error or read).
+            - [x] Symlinks: follow to target.
+        - [x] **Performance:**
+            - [x] Use efficient buffer size (e.g., 64KB).
+            - [x] Minimize syscalls in default mode.
+            - [x] Streaming: never buffer entire file.
+            - [x] Consider `sendfile()` for file-to-stdout (optional).
+        - [x] **Build & Installation:**
+            - [x] Update `bin/cat/Makefile`.
+            - [x] Install to `/bin/cat`.
+            - [x] Add to root filesystem `dist/`.
+        - [x] **Tests:**
+            - [x] **Unit Tests:**
+                - [x] Option parsing.
+                - [x] Line numbering logic.
+                - [x] Blank squeezing state machine.
+                - [x] Non-printing character encoding.
+            - [x] **Integration Tests:**
+                - [x] Basic: `cat file` -> prints contents.
+                - [x] Multiple files: `cat file1 file2` -> concatenated.
+                - [x] Stdin: `echo test | cat` -> "test".
+                - [x] Dash: `cat - file` -> stdin then file.
+                - [x] Line numbers: `cat -n file` -> numbered lines.
+                - [x] Non-blank numbers: `cat -b file`.
+                - [x] Squeeze blank: `cat -s file`.
+                - [x] Show ends: `cat -E file` -> `$` at EOL.
+                - [x] Show tabs: `cat -T file` -> `^I`.
+                - [x] Show non-printing: `cat -v file`.
+                - [x] Show all: `cat -A file`.
+                - [x] Unbuffered: `cat -u file`.
+                - [x] Binary file passthrough.
+                - [x] Empty file.
+                - [x] Very large file.
+                - [x] File without trailing newline.
+                - [x] Directory argument (error).
+            - [x] **Error Handling Tests:**
+                - [x] Nonexistent file.
+                - [x] Permission denied.
+                - [x] Continue after error.
+            - [x] **Property Tests:**
+                - [x] Output byte count equals input byte count (without options).
+                - [x] Line count matches with `-n`.
+            - [x] **Fuzz Tests:**
+                - [x] Fuzz binary files.
+                - [x] Fuzz option combinations.
+            - [x] **Acceptance Tests:**
+                - [x] `cat file` -> prints contents.
+                - [x] `cat file1 file2` -> prints concatenated.
+                - [x] `cat -n file` -> lines numbered.
+                - [x] `cat -` -> reads stdin.
+        - [x] **Documentation:**
+            - [x] Write `cat(1)` man page covering all options.
+            - [x] Document POSIX `-u` behavior.
+            - [x] Document `-v` encoding scheme.
+            - [x] Document error continuation behavior.
+        - [x] **Acceptance Criteria:**
+            - [x] All POSIX options implemented (`-u`).
+            - [x] All common extensions implemented (`-n`, `-b`, `-s`, `-E`, `-T`, `-v`).
+            - [x] Binary files handled correctly.
+            - [x] No memory leaks (valgrind clean).
+            - [x] Correct exit codes.
+            - [x] Man page complete.
+            - [x] All tests pass in CI.
+    - [ ] **`echo` - Display a line of text (Standalone `/bin/echo`):**
+        - [ ] **Design & Rationale:**
+            - [ ] Create standalone `/bin/echo` executable separate from shell builtin.
+            - [ ] Document differences from shell builtin echo.
+            - [ ] Shell builtin takes precedence; `/bin/echo` invoked via explicit path.
+            - [ ] Design doc: behavior parity with BSD/GNU echo.
+        - [ ] **CLI Options:**
+            - [ ] `-n`: Do not output the trailing newline.
+            - [ ] `-e`: Enable interpretation of backslash escapes.
+            - [ ] `-E`: Disable interpretation of backslash escapes (default).
+            - [ ] `--help`: Display help and exit (GNU extension).
+            - [ ] `--version`: Display version and exit (GNU extension).
+            - [ ] POSIX mode: only `-n` supported when POSIXLY_CORRECT set.
+        - [ ] **Backslash Escape Sequences (`-e`):**
+            - [ ] `\\`: Backslash.
+            - [ ] `\a`: Alert (bell).
+            - [ ] `\b`: Backspace.
+            - [ ] `\c`: Suppress further output (stop processing).
+            - [ ] `\e`, `\E`: Escape character (0x1B).
+            - [ ] `\f`: Form feed.
+            - [ ] `\n`: Newline.
+            - [ ] `\r`: Carriage return.
+            - [ ] `\t`: Horizontal tab.
+            - [ ] `\v`: Vertical tab.
+            - [ ] `\0nnn`: Octal byte value (0-3 digits).
+            - [ ] `\xHH`: Hexadecimal byte value (1-2 digits).
+            - [ ] `\uHHHH`: Unicode code point (4 hex digits).
+            - [ ] `\UHHHHHHHH`: Unicode code point (8 hex digits).
+        - [ ] **Argument Handling:**
+            - [ ] Print all arguments separated by single space.
+            - [ ] Handle empty arguments correctly.
+            - [ ] Handle arguments with embedded whitespace.
+            - [ ] Handle arguments with special characters.
+            - [ ] Append newline unless `-n` specified.
+        - [ ] **Option Parsing:**
+            - [ ] Stop option parsing at first non-option argument.
+            - [ ] Treat `-` as literal argument.
+            - [ ] Treat `--` as end of options.
+            - [ ] Handle combined options (e.g., `-ne`).
+            - [ ] Invalid options treated as arguments (POSIX behavior).
+        - [ ] **Output:**
+            - [ ] Write to stdout using `write()` syscall.
+            - [ ] Handle `EINTR` (retry on interrupt).
+            - [ ] Handle partial writes.
+            - [ ] Exit code 0 on success.
+            - [ ] Exit code 1 on write error.
+        - [ ] **Build & Installation:**
+            - [ ] Create `bin/echo/` directory structure.
+            - [ ] Create `bin/echo/Makefile`.
+            - [ ] Install to `/bin/echo`.
+            - [ ] Add to root filesystem `dist/`.
+        - [ ] **Tests:**
+            - [ ] **Unit Tests:**
+                - [ ] Escape sequence parsing.
+                - [ ] Option parsing.
+                - [ ] Octal/hex/unicode parsing.
+            - [ ] **Integration Tests:**
+                - [ ] Basic: `echo hello` -> "hello\n".
+                - [ ] No newline: `echo -n hello` -> "hello".
+                - [ ] Tab: `echo -e 'a\tb'` -> "a\tb".
+                - [ ] Newline: `echo -e 'a\nb'` -> "a\nb".
+                - [ ] Backslash: `echo -e '\\'` -> "\\".
+                - [ ] Octal: `echo -e '\101'` -> "A".
+                - [ ] Hex: `echo -e '\x41'` -> "A".
+                - [ ] Stop output: `echo -e 'a\cb'` -> "a".
+                - [ ] Multiple args: `echo a b c` -> "a b c\n".
+                - [ ] Empty args: `echo "" x` -> " x\n".
+                - [ ] Dash literal: `echo -` -> "-\n".
+                - [ ] Combined options: `echo -ne 'a\n'` -> "a\n".
+                - [ ] No escape: `echo -E 'a\tb'` -> "a\\tb\n".
+            - [ ] **Edge Case Tests:**
+                - [ ] Very long arguments.
+                - [ ] Binary data in arguments.
+                - [ ] Unicode characters.
+                - [ ] Null bytes in escape sequences.
+            - [ ] **Property Tests:**
+                - [ ] Output length matches expected.
+                - [ ] Escape sequences produce valid output.
+            - [ ] **Fuzz Tests:**
+                - [ ] Fuzz argument parsing.
+                - [ ] Fuzz escape sequence parsing.
+            - [ ] **Acceptance Tests:**
+                - [ ] Explicit `/bin/echo` works.
+                - [ ] Compatible with common scripts.
+        - [ ] **Documentation:**
+            - [ ] Write `echo(1)` man page.
+            - [ ] Document all escape sequences.
+            - [ ] Document `-e`/`-E` behavior.
+            - [ ] Document differences from shell builtin.
+            - [ ] Document POSIX vs GNU extensions.
+        - [ ] **Acceptance Criteria:**
+            - [ ] All CLI options implemented.
+            - [ ] All escape sequences work correctly.
+            - [ ] Standalone binary at `/bin/echo`.
+            - [ ] No memory leaks (valgrind clean).
+            - [ ] Exit codes correct.
+            - [ ] Man page complete.
+            - [ ] All tests pass in CI.
+    - [ ] **`touch` - Change file timestamps:**
+        - [ ] **Purpose:** Update the access and modification times of each FILE to the current time.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-a`: Change only the access time.
+            - [ ] `-m`: Change only the modification time.
+            - [ ] `-c`, `--no-create`: Do not create any files.
+            - [ ] `-d`, `--date=STRING`: Parse STRING and use it instead of current time.
+            - [ ] `-r`, `--reference=FILE`: Use this file's times instead of current time.
+        - [ ] **Runtime:**
+            - [ ] Create empty file if not exists (unless `-c`).
+            - [ ] Update times using `utimensat`.
+        - [ ] **Library dependencies:**
+            - [ ] `open` (O_CREAT), `utimensat`, `parse_time`
+        - [ ] **Acceptance tests:**
+            - [ ] `touch newfile` -> file created
+            - [ ] `touch existing` -> mtime updated
+            - [ ] `touch -c nonexist` -> file not created
+    - [/] **`chmod` - Change file mode bits:**
+        - [x] **Purpose:** Change the mode of each FILE to MODE.
+        - [x] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [x] `-R`, `--recursive`: Change files and directories recursively.
+            - [ ] `-v`, `--verbose`: Diagnostic for every file processed.
+            - [x] Symbolic mode support (e.g., `u+x,g-w`).
+            - [x] Octal mode support (e.g., `755`).
+        - [x] **Runtime:**
+            - [x] Recursive traversal logic for `-R`.
+            - [x] Parsing complex symbolic mode strings.
+        - [x] **Library dependencies:**
+            - [x] `chmod`, `fchmodat`, `parse_mode_string`
+        - [ ] **Acceptance tests:**
+            - [ ] `chmod 755 file` -> mode is 755
+            - [ ] `chmod +x file` -> executable bit set
+            - [ ] `chmod -R a-w dir` -> dir and contents read-only
+    - [ ] **`chown` - Change file owner and group:**
+        - [ ] **Purpose:** Change the owner and/or group of each FILE to OWNER and/or GROUP.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-R`, `--recursive`: Operate on files and directories recursively.
+            - [ ] `-h`, `--no-dereference`: Affect symbolic links instead of referenced file.
+            - [ ] `[OWNER][:[GROUP]]`: Owner/Group specifier.
+        - [ ] **Runtime:**
+            - [ ] Name-to-ID resolution (`getpwnam`, `getgrnam`).
+            - [ ] Handling numeric IDs.
+        - [ ] **Library dependencies:**
+            - [ ] `chown`, `lchown`, `fchownat`, `id_resolve`
+        - [ ] **Acceptance tests:**
+            - [ ] `chown user file` -> owner changed
+            - [ ] `chown :group file` -> group changed
+            - [ ] `chown -R user:group dir` -> recurse change
+    - [ ] **`ln` - Make links between files:**
+        - [ ] **Purpose:** Make links between files.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-s`, `--symbolic`: Make symbolic links instead of hard links.
+            - [ ] `-f`, `--force`: Remove existing destination files.
+            - [ ] `-n`, `--no-dereference`: Treat LINK_NAME as a normal file if it is a directory link.
+        - [ ] **Runtime:**
+            - [ ] Hard link creation (`link`).
+            - [ ] Symlink creation (`symlink`).
+            - [ ] Overwrite logic for `-f`.
+        - [ ] **Library dependencies:**
+            - [ ] `link`, `symlink`, `unlink`
+        - [ ] **Acceptance tests:**
+            - [ ] `ln target link` -> hard link created
+            - [ ] `ln -s target link` -> symlink created
+            - [ ] `ln -sf new old` -> overwrites old with new symlink
+    - [ ] **`wc` - Print newline, word, and byte counts:**
+        - [ ] **Purpose:** Print newline, word, and byte counts for each FILE.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-c`, `--bytes`: Print the byte counts.
+            - [ ] `-l`, `--lines`: Print the newline counts.
+            - [ ] `-w`, `--words`: Print the word counts.
+            - [ ] `-m`, `--chars`: Print the character counts.
+        - [ ] **Runtime:**
+            - [ ] Buffered read loop.
+            - [ ] State machine for word counting (whitespace transition).
+        - [ ] **Library dependencies:**
+            - [ ] `safe_read`, `isspace`
+        - [ ] **Acceptance tests:**
+            - [ ] `wc file` -> prints lines, words, bytes
+            - [ ] `echo "a b" | wc -w` -> prints 2
+            - [ ] `wc -c` -> prints byte count
+    - [ ] **`head` - Output the first part of files:**
+        - [ ] **Purpose:** Print the first 10 lines of each FILE to standard output.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-n`, `--lines=[-]K`: Print the first K lines; or all but the last K lines.
+            - [ ] `-c`, `--bytes=[-]K`: Print the first K bytes; or all but the last K bytes.
+            - [ ] `-q`, `--quiet`: Never print headers giving file names.
+            - [ ] `-v`, `--verbose`: Always print headers.
+        - [ ] **Runtime:**
+            - [ ] Line counting loop.
+            - [ ] Byte counting loop.
+        - [ ] **Library dependencies:**
+            - [ ] `safe_read`, `parse_num_suffix`
+        - [ ] **Acceptance tests:**
+            - [ ] `head -n 5 file` -> prints first 5 lines
+            - [ ] `head -c 10 file` -> prints first 10 bytes
+            - [ ] `head file1 file2` -> prints headers and content
+    - [ ] **`tail` - Output the last part of files:**
+        - [ ] **Purpose:** Print the last 10 lines of each FILE to standard output.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-n`, `--lines=[+]K`: Output the last K lines; or start from line K.
+            - [ ] `-c`, `--bytes=[+]K`: Output the last K bytes; or start from byte K.
+            - [ ] `-f`, `--follow`: Output appended data as the file grows.
+        - [ ] **Runtime:**
+            - [ ] Circular buffer or seek-to-end logic for last K lines/bytes.
+            - [ ] `inotify` or polling loop for `-f`.
+        - [ ] **Library dependencies:**
+            - [ ] `lseek`, `safe_read`, `poll`/`inotify`
+        - [ ] **Acceptance tests:**
+            - [ ] `tail -n 5 file` -> last 5 lines
+            - [ ] `tail -f log` -> prints new data appended
+            - [ ] `tail -c 10 file` -> last 10 bytes
+    - [ ] **`dd` - Convert and copy a file:**
+        - [ ] **Purpose:** Low-level file copying and conversion.
+        - [ ] **Standards:** POSIX.1-2017, BSD Extensions.
+        - [ ] **Operands:**
+            - [ ] `if=file`: Input file (default stdin).
+            - [ ] `of=file`: Output file (default stdout).
+            - [ ] `ibs=n`: Input block size (default 512).
+            - [ ] `obs=n`: Output block size (default 512).
+            - [ ] `bs=n`: Set both ibs and obs.
+            - [ ] `cbs=n`: Conversion buffer size.
+            - [ ] `skip=n`: Skip n blocks from input start.
+            - [ ] `seek=n`: Skip n blocks from output start.
+            - [ ] `count=n`: Copy only n input blocks.
+            - [ ] `status=level`: `noxfer`, `none`, `progress`.
+            - [ ] `conv=value[,value...]`:
+                - [ ] `ascii`, `ebcdic`: Encoding conversion.
+                - [ ] `block`, `unblock`: Fixed-length record conversion.
+                - [ ] `lcase`, `ucase`: Case folding.
+                - [ ] `swab`: Swap byte pairs.
+                - [ ] `noerror`: Continue after read error.
+                - [ ] `notrunc`: Do not truncate output file.
+                - [ ] `sync`: Pad blocks with NULs (or spaces if `block`/`unblock`).
+                - [ ] `fdatasync`, `fsync`: Sync before exit (extension).
+        - [ ] **Runtime:**
+            - [ ] `SIGINFO`/`SIGUSR1` handler for progress stats.
+            - [ ] Summary output (records in/out, bytes, speed) to stderr.
+    - [ ] **`df` - Report file system disk space usage:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Options:**
+            - [ ] `-a`: Include all file systems (including size 0, pseudo-FS).
+            - [ ] `-h`: Human-readable output (base 2: K, M, G).
+            - [ ] `-H`: Human-readable output (base 10: KB, MB, GB).
+            - [ ] `-k`: 1024-byte blocks (default is often 512 in legacy).
+            - [ ] `-P`: Portable output format (strict single line).
+            - [ ] `-i`: Include inode usage info (Used, Free, %IUsed).
+            - [ ] `-l`: Local file systems only (no network mounts).
+            - [ ] `-t type`: Filter by file system type (e.g., `ext2`, `procfs`).
+        - [ ] **Implementation:**
+            - [ ] `getmntinfo()` or `setfsent()` loop.
+            - [ ] `statvfs()`/`getfsstat()` calls for block/inode data.
+            - [ ] Dynamic width calculation for aligned columns (Filesystem, Blocks, Used, Avail, Capacity, Mounted on).
+            - [ ] Handle Access Denied gracefully.
+    - [ ] **`pwd` - Return working directory name:**
+        - [ ] **Purpose:** Print the value of the current working directory.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-L`: Logical path (from environment PWD).
+            - [ ] `-P`: Physical path (resolve symlinks).
+        - [ ] **Runtime:**
+            - [ ] `getcwd()` usage.
+            - [ ] Fallback to `..` traversal if `getcwd` fails/absent.
+        - [ ] **Library dependencies:**
+            - [ ] `getcwd`, `getenv`
+        - [ ] **Acceptance tests:**
+            - [ ] `pwd` -> prints valid path
+            - [ ] `cd /tmp; pwd` -> prints /tmp
+            - [ ] `pwd -P` vs `pwd -L` inside symlinked dir
+    - [ ] **`sync` - Synchronize cached writes:**
+        - [ ] **Purpose:** Write any data buffered in memory out to disk.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:** None.
+        - [ ] **Runtime:**
+            - [ ] Invoke `sync()` syscall.
+        - [ ] **Library dependencies:**
+            - [ ] `sync`
+        - [ ] **Acceptance tests:**
+            - [ ] `sync` -> returns 0
+            - [ ] `sync --help` -> usage (optional)
+    - [ ] **`mknod` - Make block or character special files:**
+        - [ ] **Purpose:** Create a device special file.
+        - [ ] **Standards:** XSI (Legacy/Extension).
+        - [ ] **Operands:**
+            - [ ] `name`: File to create.
+            - [ ] `type`: `b` (block), `c` or `u` (char), `p` (fifo).
+            - [ ] `major`: Device major number (for b/c).
+            - [ ] `minor`: Device minor number (for b/c).
+        - [ ] **Runtime:**
+            - [ ] Use `mknod()` syscall (or `mkfifo()`).
+            - [ ] Validate permissions/ownership creation.
+        - [ ] **Library dependencies:**
+            - [ ] `mknod`, `mkfifo`, `strtol`
+        - [ ] **Acceptance tests:**
+            - [ ] `mknod pipe p` -> FIFO created
+            - [ ] `mknod dev c 1 3` -> char device created (requires root)
+    - [ ] **`mktemp` - Make temporary file or directory:**
+        - [ ] **Purpose:** Create a temporary file or directory.
+        - [ ] **Standards:** BSD/GNU Extension.
+        - [ ] **Operands:**
+            - [ ] `-d`, `--directory`: Create directory.
+            - [ ] `-u`, `--dry-run`: Do not create, just print name (unsafe).
+            - [ ] `-q`, `--quiet`: Fail silently.
+            - [ ] `-t prefix`: Use template in `TMPDIR`.
+            - [ ] `[TEMPLATE]`: Template string (ending in XXXXXX).
+        - [ ] **Runtime:**
+            - [ ] `mkstemp()` / `mkdtemp()` usage.
+        - [ ] **Library dependencies:**
+            - [ ] `mkstemp`, `mkdtemp`
+        - [ ] **Acceptance tests:**
+            - [ ] `mktemp` -> creates file in tmp
+            - [ ] `mktemp -d` -> creates dir
+            - [ ] `mktemp t.XXXXXX` -> replaces Xs
+    - [ ] **`readlink` - Print value of a symbolic link:**
+        - [ ] **Purpose:** Display information about a symbolic link.
+        - [ ] **Standards:** BSD/GNU Extension.
+        - [ ] **Operands:**
+            - [ ] `-f`: Canonicalize by following every symlink in every component.
+            - [ ] `-n`: Do not output trailing newline.
+        - [ ] **Runtime:**
+            - [ ] call `readlink()` syscall.
+            - [ ] logic for `-f` (realpath iteration).
+        - [ ] **Library dependencies:**
+            - [ ] `readlink`, `realpath` (for -f)
+        - [ ] **Acceptance tests:**
+            - [ ] `readlink symlink` -> prints target
+            - [ ] `readlink -f symlink` -> prints absolute path
+            - [ ] `readlink regularfile` -> fails (unless -f)
+    - [ ] **`realpath` - Print resolved path:**
+        - [ ] **Purpose:** Print the resolved path.
+        - [ ] **Standards:** POSIX.1-2024 (New), GNU/BSD compatible.
+        - [ ] **Operands:**
+            - [ ] `-e`: Require all components to exist.
+            - [ ] `-m`: No components required to exist.
+            - [ ] `-L`: Resolve logical (PWD).
+            - [ ] `-P`: Resolve physical (Symlinks).
+        - [ ] **Runtime:**
+            - [ ] `realpath()` function.
+        - [ ] **Library dependencies:**
+            - [ ] `realpath`
+        - [ ] **Acceptance tests:**
+            - [ ] `realpath .` -> absolute path
+            - [ ] `realpath symlink` -> resolved path
+            - [ ] `realpath -m missing/path` -> prints resolved path
+    - [ ] **`tee` - Duplicate standard input:**
+        - [ ] **Purpose:** Read from standard input and write to standard output and files.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-a`, `--append`: Append to files instead of overwriting.
+            - [ ] `-i`, `--ignore-interrupts`: Ignore SIGINT.
+        - [ ] **Runtime:**
+            - [ ] Open all files (O_CREAT | O_WRONLY | [O_TRUNC|O_APPEND]).
+            - [ ] Read stdin -> Write to stdout + all files.
+            - [ ] Handle write errors gracefully (continue other files).
+        - [ ] **Library dependencies:**
+            - [ ] `xopen`, `safe_read`, `safe_write`, `signal`
+        - [ ] **Acceptance tests:**
+            - [ ] `echo hi | tee file` -> file has "hi", stdout has "hi"
+            - [ ] `tee -a file` -> appends
+            - [ ] `tee -i` -> ignores interrupt
+    - [ ] **`date` - Write the date and time:**
+        - [ ] **Purpose:** Print or set the system date and time.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-u`: Display/Set UTC time.
+            - [ ] `-r file`: Display modification time of file.
+            - [ ] `-d date` / `--date=str`: Display string description of time (GNU Extension).
+            - [ ] `+format`: Format string (strftime compatible).
+        - [ ] **Runtime:**
+            - [ ] `clock_gettime()` / `gettimeofday()`.
+            - [ ] `settimeofday()` for setting time (superuser).
+            - [ ] `strftime()` for formatting.
+        - [ ] **Library dependencies:**
+            - [ ] `clock_gettime`, `localtime`, `gmtime`, `strftime`, `parse_date`
+        - [ ] **Acceptance tests:**
+            - [ ] `date` -> prints date
+            - [ ] `date +%Y` -> prints year
+            - [ ] `date -u` -> prints UTC
+    - [ ] **`hostname` - Show or set the system's host name:**
+        - [ ] **Purpose:** Show or set the system's host name.
+        - [ ] **Standards:** Legacy / LSB.
+        - [ ] **Operands:**
+            - [ ] `-f`: Long host name (FQDN).
+            - [ ] `-s`: Short host name.
+            - [ ] `-i`: IP address.
+            - [ ] `-y`: YP/NIS domain name.
+            - [ ] `[name]`: Set hostname (superuser).
+        - [ ] **Runtime:**
+            - [ ] `gethostname()` / `sethostname()`.
+            - [ ] `getaddrinfo()` for FQDN resolution.
+        - [ ] **Library dependencies:**
+            - [ ] `gethostname`, `sethostname`, `getaddrinfo`
+        - [ ] **Acceptance tests:**
+            - [ ] `hostname` -> prints name
+            - [ ] `hostname newname` -> sets name (if root)
+            - [ ] `hostname -f` -> prints FQDN
+    - [ ] **`uname` - Print system information:**
+        - [ ] **Purpose:** Print system info.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-a`: Print all info.
+            - [ ] `-s`: Kernel name.
+            - [ ] `-n`: Node name.
+            - [ ] `-r`: Kernel release.
+            - [ ] `-v`: Kernel version.
+            - [ ] `-m`: Machine hardware name.
+            - [ ] `-p`: Processor type (GNU extension).
+            - [ ] `-i`: Hardware platform (GNU extension).
+            - [ ] `-o`: Operating system (GNU extension).
+        - [ ] **Runtime:**
+            - [ ] `uname()` syscall.
+        - [ ] **Library dependencies:**
+            - [ ] `uname`
+        - [ ] **Acceptance tests:**
+            - [ ] `uname` -> prints kernel name
+            - [ ] `uname -a` -> prints all fields
+            - [ ] `uname -m` -> prints arch
+    - [ ] **`kill` - Terminate or signal processes:**
+        - [ ] **Purpose:** Send a signal to a process.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `-s signal`, `-signal`: Specify signal name/number.
+            - [ ] `-l [status]`: List signals or translate exit status.
+            - [ ] `pid...`: Target processes.
+        - [ ] **Runtime:**
+            - [ ] `kill()` syscall.
+            - [ ] `strtol()` for PID parsing.
+            - [ ] Signal name resolution (`SIGTERM`, etc).
+        - [ ] **Library dependencies:**
+            - [ ] `kill`, `strtol`, `strsignal`
+        - [ ] **Acceptance tests:**
+            - [ ] `kill pid` -> sends SIGTERM
+            - [ ] `kill -9 pid` -> sends SIGKILL
+            - [ ] `kill -l` -> lists signals
+    - [ ] **`sleep` - Suspend execution for an interval:**
+        - [ ] **Purpose:** Pause execution.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:**
+            - [ ] `time`: Non-negative integer.
+            - [ ] Extension: Floating point support.
+            - [ ] Extension: Suffixes (s, m, h, d).
+        - [ ] **Runtime:**
+            - [ ] `nanosleep()` usage.
+        - [ ] **Library dependencies:**
+            - [ ] `nanosleep`, `strtod`
+        - [ ] **Acceptance tests:**
+            - [ ] `sleep 1` -> pauses 1s
+            - [ ] `sleep 0.1` -> pauses 100ms
+            - [ ] `sleep invalid` -> reports error
+    - [ ] **`true` - Return true value:**
+        - [ ] **Purpose:** Do nothing, successfully.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:** Ignored.
+        - [ ] **Runtime:** Exit code 0.
+        - [ ] **Library dependencies:** None.
+        - [ ] **Acceptance tests:**
+            - [ ] `true` -> exit status 0
+            - [ ] `true args` -> exit status 0
+    - [ ] **`false` - Return false value:**
+        - [ ] **Purpose:** Do nothing, unsuccessfully.
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Operands:** Ignored.
+        - [ ] **Runtime:** Exit code 1.
+        - [ ] **Library dependencies:** None.
+        - [ ] **Acceptance tests:**
+            - [ ] `false` -> exit status 1
+            - [ ] `false args` -> exit status 1
+    - [ ] **`test` / `[` - Evaluate expression:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **File Type Operators:**
+            - [ ] `-b file`: True if block special file.
+            - [ ] `-c file`: True if character special file.
+            - [ ] `-d file`: True if directory.
+            - [ ] `-e file`: True if file exists.
+            - [ ] `-f file`: True if regular file.
+            - [ ] `-g file`: True if set-group-ID flag is set.
+            - [ ] `-h` / `-L file`: True if symbolic link.
+            - [ ] `-k file`: True if sticky bit is set.
+            - [ ] `-p file`: True if FIFO (named pipe).
+            - [ ] `-r file`: True if readable.
+            - [ ] `-S file`: True if socket.
+            - [ ] `-s file`: True if size is greater than 0.
+            - [ ] `-u file`: True if set-user-ID flag is set.
+            - [ ] `-w file`: True if writable.
+            - [ ] `-x file`: True if executable.
+        - [ ] **String Operators:**
+            - [ ] `-z string`: True if string length is 0.
+            - [ ] `-n string`: True if string length is not 0.
+            - [ ] `s1 = s2`: True if strings are identical.
+            - [ ] `s1 != s2`: True if strings are not identical.
+        - [ ] **Integer Operators:**
+            - [ ] `n1 -eq n2`: Equal.
+            - [ ] `n1 -ne n2`: Not equal.
+            - [ ] `n1 -gt n2`: Greater than.
+            - [ ] `n1 -ge n2`: Greater than or equal.
+            - [ ] `n1 -lt n2`: Less than.
+            - [ ] `n1 -le n2`: Less than or equal.
+        - [ ] **Logic & Control:**
+            - [ ] `! expr`: Negate expression.
+            - [ ] `( expr )`: Grouping precedence.
+            - [ ] `expr1 -a expr2`: Logical AND (Binary).
+            - [ ] `expr1 -o expr2`: Logical OR (Binary).
+        - [ ] **Parsing & Runtime:**
+            - [ ] Recursive descent parser implementation.
+            - [ ] Handle 3-argument vs 4-argument ambiguity (POSIX rules).
+            - [ ] Detect `[` invocation name and require matching `]`.
+            - [ ] Use `lstat` for `-L`/`-h`, `stat` for others.
+            - [ ] Handle numeric parsing errors gracefully.
+    - [ ] **`expr` - Evaluate arguments as an expression:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Arithmetic Operators:**
+            - [ ] `+`: Addition (Integer).
+            - [ ] `-`: Subtraction (Integer).
+            - [ ] `*`: Multiplication (Integer).
+            - [ ] `/`: Integer division.
+            - [ ] `%`: Integer modulus.
+        - [ ] **Relational Operators (String & Integer support):**
+            - [ ] `=`: Equal.
+            - [ ] `!=`: Not equal.
+            - [ ] `>`: Greater than.
+            - [ ] `>=`: Greater than or equal.
+            - [ ] `<`: Less than.
+            - [ ] `<=`: Less than or equal.
+        - [ ] **Boolean Operators:**
+            - [ ] `|`: Logical OR (returns first non-null/non-zero arg, else 0).
+            - [ ] `&`: Logical AND (returns first arg if both non-null/non-zero, else 0).
+        - [ ] **String Matching:**
+            - [ ] `:`: Pattern matching (Anchored Regex).
+        - [ ] **Parsing:**
+            - [ ] Argument shifting logic.
+            - [ ] `regex.h` integration for `:` operator.
+            - [ ] Precedence handling: `( ... )` (if supported extension) or standard operator precedence.
+            - [ ] Robust detection of operators vs operands (e.g., `expr 1 + 1` vs `expr + 1`).
+    - [ ] **`printf` - Write formatted output:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Escape Sequences (Format String):**
+            - [ ] `\\`: Backslash.
+            - [ ] `\a`: Alert (bell).
+            - [ ] `\b`: Backspace.
+            - [ ] `\f`: Form feed.
+            - [ ] `\n`: Newline.
+            - [ ] `\r`: Carriage return.
+            - [ ] `\t`: Tab.
+            - [ ] `\v`: Vertical tab.
+            - [ ] `\0ooo`: Octal value (1-3 digits).
+        - [ ] **Format Specifiers:**
+            - [ ] `d`, `i`: Signed decimal.
+            - [ ] `o`: Unsigned octal.
+            - [ ] `u`: Unsigned decimal.
+            - [ ] `x`, `X`: Unsigned hexadecimal (lower/upper).
+            - [ ] `f`, `F`: Decimal floating point.
+            - [ ] `e`, `E`: Exponential floating point.
+            - [ ] `g`, `G`: General floating point (shortest).
+            - [ ] `a`, `A`: Hexadecimal floating point.
+            - [ ] `c`: Character.
+            - [ ] `s`: String.
+            - [ ] `p`: Pointer address (impl defined).
+            - [ ] `%`: Literal percent.
+        - [ ] **Special Specifiers:**
+            - [ ] `%b`: Expand escape sequences in the corresponding argument string.
+        - [ ] **Flags & Precision:**
+            - [ ] Width (e.g., `%5d`).
+            - [ ] Precision (e.g., `%.2f`, `%.5s`).
+            - [ ] `-`: Left-justify.
+            - [ ] `+`: Force sign.
+            - [ ] ` ` (space): Space if no sign.
+            - [ ] `#`: Alternate form (0x prefix, etc).
+            - [ ] `0`: Zero padding.
+        - [ ] **Behavior:**
+            - [ ] Argument recycling: Reuse format string if arguments remain.
+            - [ ] Default values: treat missing args as 0 (int) or "" (string).
+    - [ ] **`stty` - Set options for a terminal:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Options:**
+            - [ ] `-a`: All settings.
+            - [ ] `-g`: Saveable string.
+        - [ ] **Settings:**
+            - [ ] **Control Modes (`c_cflag`):**
+                - [ ] `parenb`, `parodd`, `-parenb`: Parity generation.
+                - [ ] `cs5`, `cs6`, `cs7`, `cs8`: Character size bits.
+                - [ ] `hupcl`: Hangup on last close.
+                - [ ] `cstopb`: Two stop bits.
+                - [ ] `cread`: Enable receiver.
+                - [ ] `clocal`: Ignore modem control lines.
+            - [ ] **Input Modes (`c_iflag`):**
+                - [ ] `ignbrk`, `brkint`: Break condition handling.
+                - [ ] `ignpar`, `parmrk`, `inpck`: Parity checking.
+                - [ ] `istrip`: Strip 8th bit.
+                - [ ] `inlcr`, `igncr`, `icrnl`: CR/NL mapping.
+                - [ ] `ixon`, `ixoff`: XON/XOFF flow control.
+            - [ ] **Output Modes (`c_oflag`):**
+                - [ ] `opost`: Post-process output.
+                - [ ] `onlcr`: Map NL to CR-NL.
+                - [ ] `ocrnl`: Map CR to NL.
+            - [ ] **Local Modes (`c_lflag`):**
+                - [ ] `isig`: Enable signals (INTR, QUIT, SUSP).
+                - [ ] `icanon`: Canonical mode (line buffering).
+                - [ ] `echo`, `echoe` (erase), `echok` (kill), `echonl`.
+                - [ ] `noflsh`: Disable flushing on signal.
+                - [ ] `tostop`: Stop background jobs on write.
+            - [ ] **Special Characters (`c_cc`):**
+                - [ ] `erase` (DEL/BS).
+                - [ ] `kill` (^U).
+                - [ ] `intr` (^C).
+                - [ ] `quit` (^\).
+                - [ ] `eof` (^D).
+                - [ ] `susp` (^Z).
+                - [ ] `start`/`stop` (^Q/^S).
+                - [ ] `min`/`time` (Non-canonical read control).
+            - [ ] **Combination Settings:**
+                - [ ] `sane`: Reset all to reasonable defaults.
+                - [ ] `raw`: Disable all processing (pass-through).
+                - [ ] `cooked`: Re-enable processing.
+                - [ ] `size`: Print terminal rows and columns.
+                - [ ] `rows N`, `cols N`: Set window size manually.
+    - [ ] **`tty` - Return user's terminal name:**
+        - [ ] **Standards:** POSIX.1-2017.
+        - [ ] **Options:**
+            - [ ] `-s`: Silent mode.
+        - [ ] **Implementation:**
+            - [ ] `ttyname(STDIN_FILENO)`.
+- [x] Fix `pmap_dump` memory access logic (use `sys/proc.h` correctly) <!-- id: 4 -->
+- [x] Fix `init=` command line parsing <!-- id: 5 -->
+- [x] Fix `run_kernel_tests` linker error in EFI build <!-- id: 6 -->
+- [x] Add `syscall_log` kernel parameter for debugging <!-- id: 7 -->
+- [x] Investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 -->
+- [x] Investigate Page Fault at `0x08065d2b` (accessing `0x08124000`) <!-- id: 9 -->
+    - [ ] **Editors:**
+        - [ ] **`vi` Clone (Tiny/Busybox-like):**
+            - [ ] **Buffer Management:**
+                - [ ] Gap buffer or Line-based linked list structure.
+                - [ ] File loading/saving (`:w`, `:e`).
+            - [ ] **Modes:**
+                - [ ] Normal Mode (Command processing).
+                - [ ] Insert Mode (Text input).
+                - [ ] Command-Line Mode (`:` prompts).
+            - [ ] **Navigation (Normal Mode):**
+                - [ ] `h`, `j`, `k`, `l`: Character cursor movement.
+                - [ ] `w`, `b`, `e`: Word movement.
+                - [ ] `0`, `^`, `$`: Line start/end.
+                - [ ] `G`, `gg`: Go to line.
+                - [ ] `Ctrl+F`, `Ctrl+B`: Page scrolling.
+            - [ ] **Editing Operations:**
+                - [ ] `i`, `a`, `o`, `O`: Enter insert mode.
+                - [ ] `x`, `X`: Delete character.
+                - [ ] `dd`, `dw`: Delete line/word.
+                - [ ] `yy`, `yw`: Yank (copy) line/word.
+                - [ ] `p`, `P`: Paste.
+                - [ ] `u`: Undo (Simplex implementation).
+            - [ ] **Search:**
+                - [ ] `/pattern`: Forward search.
+                - [ ] `n`, `N`: Next/Previous match.
+            - [ ] **Ex Commands:**
+                - [ ] `:q`, `:q!`: Quit.
+                - [ ] `:w`, `:wq`: Write/Save.
+                - [ ] `:set nu` / `:set nonu`: Line numbering.
+        - [ ] **TUI Editor (Nano-like):**
+            - [ ] **UI Rendering:**
+                - [ ] Top status bar (Version, File status).
+                - [ ] Bottom help bar (Key shortcuts ^G, ^X, etc).
+                - [ ] Main text area with scrolling.
+            - [ ] **Input Handling:**
+                - [ ] Modeless text entry (always insert).
+                - [ ] Control key handling (`^X` Exit, `^O` Save).
+                - [ ] Home/End/PageUp/PageDown navigation.
+            - [ ] **Features:**
+                - [ ] Search (`^W`) and Replace (`^\`).
+                - [ ] Cut (`^K`) and Uncut (`^U`) lines.
+                - [ ] Goto Line (`^_`).
+        - [ ] **GUI Editor (Notepad-like):**
+            - [ ] **Core Components:**
+                - [ ] `GWindow`: Main application window.
+                - [ ] `GTextArea`: Multi-line text widget with scrollbar.
+                - [ ] `GMenuBar`: Top menu (File, Edit, Format).
+            - [ ] **File Operations:**
+                - [ ] New: Clear buffer.
+                - [ ] Open: Launch `GFileChooser` dialog.
+                - [ ] Save / Save As: Launch `GFileChooser` (Save mode).
+            - [ ] **Edit Operations:**
+                - [ ] Cut/Copy/Paste via Clipboard API.
+                - [ ] Select All.
+                - [ ] Undo/Redo stack.
+            - [ ] **Preferences:**
+                - [ ] Font selection dialog.
+                - [ ] Word wrap toggle.
+- [ ] **System Utils:**
+    - [ ] **`init` (PID 1):**
+        - [ ] **Stage 1 (Boot):**
+            - [ ] Mask all signals except `SIGCHLD`.
+            - [ ] Mount `/proc`, `/sys`, `/dev` if not mounted by kernel.
+            - [ ] Parse `/etc/rc` shell script.
+            - [ ] Check `/etc/system.conf` for `GRAPHICAL_LOGIN=yes`.
+        - [ ] **Stage 2 (Run Loop):**
+            - [ ] Spawn `getty` on TTYs (`tty1`...`tty6`) or start `login.gui`.
+            - [ ] Handle `SIGCHLD`: `waitpid(-1, ...)` to reap orphans.
+            - [ ] Respawn died critical services (like `getty`).
+            - [ ] Handle `SIGINT`/`SIGPWR` for shutdown/reboot.
+    - [ ] **Graphical Login (`login.gui`):**
+        - [ ] **UI:**
+            - [ ] Simple window with User/Pass fields.
+            - [ ] Shutdown/Restart buttons.
+        - [ ] **Auth:**
+            - [ ] Reads username/password.
+            - [ ] Authenticates using `libauth` (no direct file access).
+        - [ ] **Session:**
+            - [ ] Starts the default Desktop Environment shell on success.
+            - [ ] Hand off control using `execve` inside a `fork`ed child.
+    - [ ] **`login` (CLI Auth):**
+        - [ ] **Phase 1: Classic Unix Auth (`libauth`):**
+            - [ ] Display generic "login:" prompt.
+            - [ ] Disable TTY echo for password input.
+            - [ ] Use `libauth` to validate credentials (validates against `/etc/passwd`).
+            - [ ] Handle generic authentication failures (delay 3s).
+        - [ ] **Phase 2: Session Setup:**
+            - [ ] Initialize Environment (`HOME`, `SHELL`, `USER`, `LOGNAME`, `PATH`, `TERM`).
+            - [ ] Set Process Group / Session ID (`setsid`).
+            - [ ] Apply Group IDs (`setgid`, `initgroups` for supplementary).
+            - [ ] Apply User ID (`setuid`).
+            - [ ] Change to user's home directory (`chdir`).
+            - [ ] Display `/etc/motd` (Message of the Day).
+            - [ ] Execute Shell (`execve` of `pw_shell`).
+        - [ ] **Phase 3: Security & Logging:**
+            - [ ] Implement account expiration checking.
+            - [ ] Record login in `/var/run/utmp` and `/var/log/wtmp`.
+            - [ ] Handle login failures (syslog LOG_AUTH).
+    - [ ] **`ps` (Process Status):**
+        - [ ] **Data Gathering (via `libsys`):**
+            - [ ] Call `sys_proc_count()` to get process count.
+            - [ ] Call `sys_proc_list()` to enumerate all PIDs.
+            - [ ] Call `sys_proc_info()` for each PID to get state, ppid, pgid, sid, tty, perso_id.
+            - [ ] Call `sys_proc_cmdline()` for full command line arguments.
+            - [ ] Call `sys_proc_pers_name()` to resolve personality ID to display string.
+        - [ ] **Formatting & Output:**
+            - [ ] Resolve TTY device number to name (from `sys_procinfo_t.tty`).
+            - [ ] Calculate %CPU (user_time+sys_time / uptime delta).
+            - [ ] Calculate %MEM (rss * pagesize / total_ram from `sys_vm_stats()`).
+            - [ ] Format columns: PID, TTY, STAT, TIME, COMMAND, PERS (personality).
+            - [ ] Support BSD syntax (`aux`) vs SysV syntax (`-ef`).
+    - [ ] **`top` (Real-time Monitor):**
+        - [ ] **Backend (via `libsys`):**
+            - [ ] Efficiently call `sys_proc_list()` and `sys_proc_info()` (snapshotting).
+            - [ ] Calculate CPU delta usage via `sys_cpu_times()` between samples.
+            - [ ] Read global stats via `sys_vm_stats()` and `sys_cpu_loadavg()`.
+        - [ ] **UI / Display:**
+            - [ ] Initialize terminal (raw mode, no echo).
+            - [ ] Handle VT100 control sequences (clear screen, cursor positioning).
+            - [ ] Display Header: Uptime (`sys_uptime()`), Load (`sys_cpu_loadavg()`), Mem/Swap.
+            - [ ] Display Process List (sortable by CPU/Mem, show personality, clamp to screen).
+            - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update).
+    - [ ] **Documentation Utils:**
+        - [ ] **`roff` / `nroff` (Typesetting Engine):**
+            - [ ] **Core Engine & Parsing:**
+                - [ ] Implement input stream buffering (pushback support).
+                - [ ] Implement tokenizer (requests vs text vs escapes).
+                - [ ] Implement escape sequence parser (`\e`, `\(xx`, `\*`, `\n`).
+                - [ ] Implement numeric register parser with scaling units (`n`, `v`, `p`, `m`).
+                - [ ] Implement string register expansion (`\*[string]`).
+                - [ ] Implement conditional parsing (`.if`, `.ie`, `.el`).
+                - [ ] Implement loop/while parsing (`.while`).
+                - [ ] Implement macro definition parser (`.de`, `.am`, `..`).
+                - [ ] Implement diversion support (`.di`, `.da`, boxes).
+                - [ ] Implement environment switching (`.ev`).
+                - [ ] Implement `.so` (source file) handling.
+                - [ ] Implement error handling and line number tracking.
+            - [ ] **Formatting & Layout:**
+                - [ ] Implement current state tracking (font, size, fill mode).
+                - [ ] Implement line filling and adjustment logic.
+                - [ ] Implement hyphenation hooks (knuth-plass or simple pattern).
+                - [ ] Implement page control (`.pl`, `.po`, `.tl`).
+                - [ ] Implement traps (page location, input line).
+                - [ ] Implement tab stop calculations.
+            - [ ] **Macro Packages:**
+                - [ ] **`-man` (Manpages):**
+                    - [ ] Implement `.TH`, `.SH`, `.SS` structure.
+                    - [ ] Implement `.TP`, `.IP`, `.HP` indentation/lists.
+                    - [ ] Implement font macros (`.B`, `.I`, `.BI`, etc.).
+                - [ ] **`-mdoc` (Semantic Manpages):**
+                    - [ ] Implement structural macros (`.Dd`, `.Dt`, `.Os`).
+                    - [ ] Implement block macros (`.Bl`, `.It`, `.El`).
+                    - [ ] Implement in-line semantic macros (`.Op`, `.Fl`, `.Ar`).
+                - [ ] **`-ms` (Manuscripts - Minimal):**
+                    - [ ] Implement paragraph macros (`.PP`, `.LP`).
+                    - [ ] Implement heading macros (`.NH`, `.SH`).
+            - [ ] **Output Backends:**
+                - [ ] **ASCII / TTY:**
+                    - [ ] Implement basic character output.
+                    - [ ] Implement overstriking for bold/underline (backspace hacking).
+                    - [ ] Handle TTY control codes (if opts enabled).
+                - [ ] **Future/Stub:**
+                    - [ ] Define device-independent output interface (GROFF-like troff).
+            - [ ] **Compatibility:**
+                - [ ] Align behavior with Heirloom Troff / Mandoc where possible.
+                - [ ] Document deviations from GNU Groff.
+                - [ ] Test against traditional V7 manual sources.
+        - [ ] **`man` (Manual Pager):**
+            - [ ] **Page Discovery:**
+                - [ ] Implement `MANPATH` environment parsing.
+                - [ ] Implement default system path (`/usr/man`).
+                - [ ] Implement section search order (1, n, p, 8, 2, 3...).
+                - [ ] Implement locale-specific subdirectories handling.
+                - [ ] Support compressed sources (`.gz`, `.bz2`, `.xz`) via decompressors.
+            - [ ] **Preprocessing Pipeline:**
+                - [ ] Detect macro format (`-man` vs `-mdoc`) via first-line scan.
+                - [ ] Construct `roff` pipeline command.
+                - [ ] Handle preprocessors if flagged (`tbl`, `eqn`, `pic` - stubs).
+            - [ ] **User Interface:**
+                - [ ] Implement CLI flags (`-a`, `-f`, `-k`, `-w`, `-s`).
+                - [ ] Implement pager integration (`$PAGER` or `less`).
+                - [ ] Handle exit codes (0 found, 1 missing, >1 error).
+            - [ ] **Caching & Performance:**
+                - [ ] Implement `catman` style preformatted cache directory support.
+                - [ ] Implement cache invalidation (timestamp check vs source).
+                - [ ] Implement security checks (don't write to cache as user).
+            - [ ] **Diagnostics:**
+                - [ ] Report "No manual entry for..." clearly.
+                - [ ] Report ambiguous matches properly.
+        - [ ] **Testing & Quality (Roff/Man):**
+            - [ ] **Unit Tests:**
+                - [ ] Test register arithmetic logic.
+                - [ ] Test macro argument expansion (`$1`, `$*`).
+                - [ ] Test conditional nesting.
+            - [ ] **Property Tests:**
+                - [ ] Fuzz macro parser with random line noise.
+                - [ ] Randomize nested environment creation.
+            - [ ] **Integration Tests:**
+                - [ ] Render all system manpages and check for crashes.
+                - [ ] Compare output against reference implementation (groff/mandoc) for diffs.
+        - [ ] **Documentation:**
+            - [ ] Write `roff(7)` language reference.
+            - [ ] Write `man(1)` user manual.
+            - [ ] Write `mandoc_impl.md` developer design doc.
+        - [ ] **`roff` / `nroff` / `man` (Production-Quality Task Expansion):**
+            - [ ] **Compatibility Baseline & Scope Control:**
+                - [ ] Define normative baseline: POSIX where defined, BSD `mandoc` semantics preferred where unspecified.
+                - [ ] Produce behavior matrix for V7/BSD roff, BSD mandoc, and GNU groff.
+                - [ ] Record compatibility priorities for `man` output correctness over full troff feature coverage.
+                - [ ] Enumerate explicitly supported macro packages and minimum versions.
+                - [ ] Enumerate explicitly unsupported GNU groff-only extensions as non-goals.
+                - [ ] Add task gate requiring incompatibility entries for every intentional divergence.
+                - [ ] Define per-feature status tags: implemented, compatible-subset, stubbed, deferred.
+            - [ ] **`roff` / `nroff` CLI Frontend:**
+                - [ ] Add `bin/roff/` program skeleton with argument parser and usage output.
+                - [ ] Add `bin/nroff/` frontend aliasing roff engine with terminal defaults.
+                - [ ] Implement `-man`, `-mdoc`, and `-ms` package selection flags.
+                - [ ] Implement `-Tascii` device selection and default device logic for `nroff`.
+                - [ ] Implement `-m` package loading path semantics compatible with BSD tooling.
+                - [ ] Implement register preset flags (`-rX=N`) and string preset flags (`-dX=VALUE`).
+                - [ ] Implement warning/diagnostic control flags and quiet mode.
+                - [ ] Implement stdin and file-list processing order exactly as specified by CLI.
+                - [ ] Implement deterministic exit codes for parse, include, and runtime formatting failures.
+                - [ ] Add `roff(1)` and `nroff(1)` option tables synchronized with implementation.
+            - [ ] **Core Engine: Input Stream, Tokenization, and Lexical Rules:**
+                - [ ] Implement unified input source stack for files, `.so` includes, and diversions.
+                - [ ] Track source coordinates (file, line, column, include depth) for diagnostics.
+                - [ ] Implement line reader with newline preservation and escaped-newline handling.
+                - [ ] Implement request line detection for both `.` and `'` control prefixes.
+                - [ ] Implement comment line and empty control line semantics.
+                - [ ] Implement argument lexer preserving escaped spaces and quoted segments.
+                - [ ] Implement token categories: text, request, macro call, escape, and transparent-through tokens.
+                - [ ] Implement pushback/unread token support for lookahead-sensitive parsing.
+                - [ ] Implement tokenizer behavior for copy mode vs interpretation mode.
+                - [ ] Add hard limits for token length, argument count, and input recursion depth.
+            - [ ] **Core Engine: Escape Sequence Parsing and Expansion:**
+                - [ ] Implement escape dispatcher for one-char, two-char, bracketed, and long-name forms.
+                - [ ] Implement literal escape handling (`\\`, `\e`) and escaped control chars.
+                - [ ] Implement special character escapes (`\(xx`, `\[name]`) with lookup table.
+                - [ ] Implement string register interpolation (`\*x`, `\*(xx`, `\*[name]`).
+                - [ ] Implement numeric register interpolation (`\nx`, `\n(xx`, `\n[name]`) with formatting options.
+                - [ ] Implement number-format escape modifiers (`\n+`, `\n-`) semantics.
+                - [ ] Implement font/style escapes used by terminal backend.
+                - [ ] Implement width-measurement escapes with backend callback hooks.
+                - [ ] Implement conditional-inline escapes used by macro packages.
+                - [ ] Implement copy-mode suppression rules for escapes inside macro definitions.
+                - [ ] Implement unknown escape fallback policy with warning classing.
+                - [ ] Implement truncation-safe UTF-8/byte handling for escape parser in nroff mode.
+            - [ ] **Core Engine: Requests, Macros, and Macro Invocation:**
+                - [ ] Implement request dispatch table with fast lookup by canonical request name.
+                - [ ] Implement user macro definition (`.de`) with proper terminator handling.
+                - [ ] Implement append-to-macro (`.am`) preserving previous body.
+                - [ ] Implement remove/rename behavior for user-defined macros.
+                - [ ] Implement macro invocation with positional arguments (`$1`..`$9`, `$*`, `$@` behavior decision task).
+                - [ ] Implement argument quoting/spacing rules for macro expansion.
+                - [ ] Implement nested macro expansion depth limits and overflow diagnostics.
+                - [ ] Implement recursion detection and deterministic failure behavior.
+                - [ ] Implement request-vs-macro name precedence and conflict resolution.
+                - [ ] Implement copy-mode capture for macro bodies with delayed expansion.
+            - [ ] **Core Engine: Registers and String Storage:**
+                - [ ] Implement numeric register table with signed integer storage.
+                - [ ] Implement auto-increment/decrement register operations.
+                - [ ] Implement numeric register default-value semantics for undefined names.
+                - [ ] Implement string register table with mutable replacement and append operations.
+                - [ ] Implement register namespaces and name normalization rules.
+                - [ ] Implement register deletion APIs and lifecycle handling.
+                - [ ] Implement per-environment register visibility policy decision and documentation.
+                - [ ] Implement register serialization helpers for diagnostics/testing.
+            - [ ] **Core Engine: Conditionals and Control Flow:**
+                - [ ] Implement `.if` expression parser for numeric, string, and definedness tests.
+                - [ ] Implement `.ie` and `.el` chain handling with proper else binding.
+                - [ ] Implement block conditionals (`\{` / `\}`) and nested block depth tracking.
+                - [ ] Implement `.while` loop execution with loop guard limits.
+                - [ ] Implement `.break`-style loop interruption request (if supported) and fallback behavior.
+                - [ ] Implement short-circuit parsing for false branches without side effects.
+                - [ ] Emit diagnostics for unterminated conditional blocks and malformed predicates.
+            - [ ] **Core Engine: Diversions, Traps, and Deferred Material:**
+                - [ ] Implement diversion start/stop (`.di`) and append diversion (`.da`).
+                - [ ] Implement named diversion storage and retrieval lifecycle.
+                - [ ] Implement diversion nesting semantics and stack management.
+                - [ ] Implement diversion line numbering and diagnostics preservation.
+                - [ ] Implement top-of-page and page-location trap registration.
+                - [ ] Implement trap invocation ordering and re-entrancy safety.
+                - [ ] Implement diversion replay into normal input stream with source attribution.
+            - [ ] **Core Engine: Environments and State Stacking:**
+                - [ ] Implement environment switch request (`.ev`) with stack-aware push/pop behavior.
+                - [ ] Track fill mode, adjust mode, indentation, temporary indent, and line length per environment.
+                - [ ] Track font/style state and spacing parameters per environment.
+                - [ ] Track tab stops and leaders per environment.
+                - [ ] Track numbering/format state per environment when compatibility requires it.
+                - [ ] Implement environment copy/clone behavior for macro package needs.
+                - [ ] Implement hard limits and diagnostics for environment depth exhaustion.
+            - [ ] **Core Engine: Line Breaking, Filling, and Adjustment:**
+                - [ ] Implement no-fill and fill modes (`.nf`/`.fi`) with state transitions.
+                - [ ] Implement adjustable line assembly with word buffering.
+                - [ ] Implement left/right adjustment and centering behaviors required by man macros.
+                - [ ] Implement sentence-space handling policy and compatibility toggle.
+                - [ ] Implement indentation requests (`.in`, `.ti`) and restoration semantics.
+                - [ ] Implement line length changes (`.ll`) and pending line flush behavior.
+                - [ ] Implement vertical spacing (`.sp`, `.br`) interactions with filled output.
+                - [ ] Implement keep-together behavior required by tagged paragraphs.
+                - [ ] Implement blank-line propagation rules for literal displays.
+                - [ ] Add deterministic wrapping rules for overlong tokens and unbreakable strings.
+            - [ ] **Core Engine: Hyphenation Hooks (Initial Stub + Interfaces):**
+                - [ ] Define hyphenation interface between formatter and language-specific engine.
+                - [ ] Add default disabled behavior matching conservative nroff expectations.
+                - [ ] Add request-level toggles for enabling/disabling hyphenation.
+                - [ ] Implement soft-hyphen insertion points plumbing without enabling algorithms yet.
+                - [ ] Add metrics hooks so future hyphenation can influence line breaker decisions.
+            - [ ] **Core Engine: Number Formatting and Scaling Units:**
+                - [ ] Implement parser for roff numeric expressions with optional sign and defaults.
+                - [ ] Implement scaling units (`u`, `i`, `c`, `P`, `p`, `m`, `n`, `v`) with nroff-specific conversions.
+                - [ ] Implement absolute vs relative assignments for numeric requests.
+                - [ ] Implement format request for registers (decimal, roman, alphabetic formats).
+                - [ ] Implement unit conversion overflow checks and saturation diagnostics.
+                - [ ] Implement deterministic rounding policy for fractional internal units.
+            - [ ] **Core Engine: Input Sourcing and `.so` Semantics:**
+                - [ ] Implement `.so` path resolution using current file directory first.
+                - [ ] Implement include search path list for macro directories and man tree includes.
+                - [ ] Implement include recursion detection and cycle diagnostics.
+                - [ ] Implement include depth limits with actionable error messages.
+                - [ ] Implement include failure behavior compatibility option (fatal vs warning) and default choice.
+                - [ ] Preserve source locations across include boundaries for error reporting.
+            - [ ] **Core Engine: Error Handling and Diagnostics:**
+                - [ ] Define diagnostic classes: parse error, compatibility warning, runtime warning, internal bug.
+                - [ ] Emit source-rich diagnostics with file:line and macro/include backtrace.
+                - [ ] Add warning categories for unsupported requests and ignored escapes.
+                - [ ] Add strict mode that upgrades selected warnings to errors for test gating.
+                - [ ] Add recoverable parse paths so malformed lines do not crash formatter.
+                - [ ] Add deterministic memory/OOM error propagation from engine to CLI exit codes.
+            - [ ] **Macro Packages: `-man` Required Coverage:**
+                - [ ] Implement document prologue macros: `.TH`, `.DT`, `.UC` with BSD-compatible defaults.
+                - [ ] Implement sectioning macros: `.SH`, `.SS`.
+                - [ ] Implement paragraph macros: `.PP`, `.P`, `.LP`.
+                - [ ] Implement tagged/indented paragraph macros: `.TP`, `.IP`, `.HP`, `.TQ`.
+                - [ ] Implement font-switching macros: `.B`, `.I`, `.BR`, `.RB`, `.BI`, `.IB`, `.IR`, `.RI`.
+                - [ ] Implement spacing control macros: `.sp`, `.br`, `.nf`, `.fi` wrappers as expected by pages.
+                - [ ] Implement display-like helpers used in common man sources.
+                - [ ] Implement `.RS`/`.RE` relative indent stack behavior.
+                - [ ] Implement synopsis helpers preserving argument spacing.
+                - [ ] Implement literal block behavior used by code examples.
+                - [ ] Implement macro argument defaulting and empty-argument behavior matching BSD man.
+                - [ ] Implement macro redefinition safety policy for local overrides in pages.
+            - [ ] **Macro Packages: `-mdoc` Required Coverage:**
+                - [ ] Implement prologue validation for `.Dd`, `.Dt`, `.Os`.
+                - [ ] Implement section/block macros: `.Sh`, `.Ss`, `.Pp`.
+                - [ ] Implement list macros: `.Bl`, `.It`, `.El` with key list types (`-bullet`, `-enum`, `-tag`, `-diag`, `-hang`, `-ohang`, `-inset`).
+                - [ ] Implement display macros: `.Bd`, `.Ed`.
+                - [ ] Implement enclosure macros: `.Oo`/`.Oc`, `.Op`, `.Aq`, `.Bq`, `.Dq`, `.Pq`, `.Brq`.
+                - [ ] Implement argument/flag/name macros: `.Nm`, `.Fl`, `.Ar`, `.Cm`, `.Ic`.
+                - [ ] Implement cross-reference macros: `.Xr`, `.Sx`.
+                - [ ] Implement library/function macros: `.Lb`, `.In`, `.Fn`, `.Fa`, `.Ft`, `.Fo`, `.Fc`.
+                - [ ] Implement standards/history metadata macros: `.St`, `.At`, `.Bx`, `.Fx`, `.Nx`, `.Ox`, `.Dx`.
+                - [ ] Implement punctuation handling and spacing suppression rules required by mdoc grammar.
+                - [ ] Implement callable semantic node model so macros can influence formatting context.
+                - [ ] Add compatibility tasks for commonly used but non-standard mdoc idioms.
+            - [ ] **Macro Packages: Minimal `-ms` Compatibility:**
+                - [ ] Implement paragraph macros `.PP`, `.LP`, `.IP`.
+                - [ ] Implement heading macros `.NH`, `.SH`.
+                - [ ] Implement quote/display basics needed for legacy docs in tree.
+                - [ ] Implement title/date author subset required for simple manuscripts.
+                - [ ] Document unsupported advanced `-ms` requests as explicit non-goals.
+            - [ ] **Macro Expansion Semantics, Scoping, and Redefinition:**
+                - [ ] Define argument interpolation rules for quoted vs unquoted macro arguments.
+                - [ ] Define late-expansion vs early-expansion behavior for nested macros.
+                - [ ] Implement local temporary strings/registers for package internals when required.
+                - [ ] Implement macro shadowing and unshadowing rules across include boundaries.
+                - [ ] Implement safe redefinition guards for core package macros in strict mode.
+                - [ ] Implement `.als`-style aliasing decision (support or explicit incompatibility task).
+                - [ ] Add diagnostics when pages rely on unsupported macro-argument edge behaviors.
+            - [ ] **Output Backend: ASCII Terminal (`nroff`-Style):**
+                - [ ] Implement backend abstraction separating layout tree from device rendering.
+                - [ ] Implement plain terminal text renderer with deterministic whitespace policy.
+                - [ ] Implement indentation output logic with tab/space balancing.
+                - [ ] Implement page header/footer emission for macros that require it.
+                - [ ] Implement literal-mode rendering without fill/adjust transformations.
+                - [ ] Implement fallback glyph mapping for unsupported special characters.
+                - [ ] Implement configurable line width default (80) with CLI/environment overrides.
+                - [ ] Implement optional margin clipping diagnostics for overflowed lines.
+            - [ ] **Output Backend: Overstrike, Bold, and Underline:**
+                - [ ] Implement backspace overstrike sequences for bold rendering.
+                - [ ] Implement underline rendering using underscore-backspace conventions.
+                - [ ] Implement conflict resolution when nested font changes overlap.
+                - [ ] Implement backend switch to disable overstrike for plain-output consumers.
+                - [ ] Add tests verifying historical terminal output byte-for-byte for styled tokens.
+            - [ ] **Output Backend: Width, Tabs, and Indentation Calculations:**
+                - [ ] Implement tab stop table with default and custom stops.
+                - [ ] Implement tab expansion in both fill and no-fill contexts.
+                - [ ] Implement escape-aware display width calculation for style and zero-width escapes.
+                - [ ] Implement wide-character policy decision and ASCII fallback in `nroff`.
+                - [ ] Implement tagged paragraph width balancing for `.TP` and `.It -tag`.
+                - [ ] Implement hanging-indent behavior for continuation lines.
+                - [ ] Implement indentation stack overflow checks with diagnostics.
+            - [ ] **Output Backend: Future Device Hooks (Tasks Only):**
+                - [ ] Define stable intermediate representation for block/inline/layout nodes.
+                - [ ] Define backend vtable for HTML/PDF/PostScript future renderers.
+                - [ ] Add no-op HTML backend stub behind compile-time flag.
+                - [ ] Add no-op PDF backend stub behind compile-time flag.
+                - [ ] Document backend API contracts and invariants in developer design doc.
+            - [ ] **Compatibility Targets and Explicit Non-Goals:**
+                - [ ] Create per-request compatibility notes vs BSD mandoc and groff.
+                - [ ] Add decision task for each known BSD/GNU behavioral conflict.
+                - [ ] Prefer BSD output when conflicts are user-visible in manpages.
+                - [ ] Mark GNU-only extensions (`.als`, `.do`, `.nop`, `.while` edge cases, GNU long names, device controls) as unsupported unless explicitly accepted.
+                - [ ] Add diagnostics for ignored GNU-specific requests when encountered.
+                - [ ] Add compatibility mode switch task only if real-world pages require it.
+                - [ ] Add regression corpus of historical manpages from BSD and Unix variants.
+            - [ ] **`man` Command: CLI, Modes, and Exit Behavior:**
+                - [ ] Implement `man` argument parser supporting section-prefix and name forms.
+                - [ ] Implement `man <section> <name>` and `man <name> <section>` disambiguation.
+                - [ ] Implement options `-a`, `-f`, `-k`, `-w`, `-M`, `-m`, `-s`, `-S`, `-l`, `-P`, `-C`.
+                - [ ] Implement `-f` whatis mode behavior and output formatting.
+                - [ ] Implement `-k` apropos mode behavior and keyword matching.
+                - [ ] Implement `-w` path-only mode without invoking formatter.
+                - [ ] Implement `-a` all-matches traversal with pager/session behavior.
+                - [ ] Implement consistent exit codes: success, no entry, usage, runtime failure.
+                - [ ] Implement option conflict resolution and precedence rules.
+                - [ ] Document BSD-vs-GNU option behavior decisions explicitly.
+            - [ ] **`man` Command: Page Discovery and Search Path Resolution:**
+                - [ ] Implement section canonicalization and alias mapping (for `3`, `3p`, `n`, local sections).
+                - [ ] Implement default search order with configurable section list.
+                - [ ] Implement `MANPATH` parser including empty-field inheritance semantics.
+                - [ ] Implement system path defaults and user path overlay semantics.
+                - [ ] Implement `-M` temporary MANPATH override semantics.
+                - [ ] Implement architecture/OS-specific suffix directory search when configured.
+                - [ ] Implement locale-aware subdirectory fallback chain.
+                - [ ] Implement exact-name match before partial/alias match policy.
+                - [ ] Implement support for source suffixes (`.1`, `.1.gz`, `.1.bz2`, `.1.xz`, etc.).
+                - [ ] Implement deterministic tie-breaking for duplicate page names across paths.
+                - [ ] Emit ambiguity diagnostics listing candidate pages and sections.
+            - [ ] **`man` Command: Preprocessing Pipeline and Roff Invocation:**
+                - [ ] Implement page format detection (`man` vs `mdoc`) by content heuristics and safe fallbacks.
+                - [ ] Implement explicit macro package override via CLI.
+                - [ ] Build internal roff invocation pipeline without unsafe shell string concatenation.
+                - [ ] Implement decompression pipeline for `.gz`, `.bz2`, and `.xz` sources.
+                - [ ] Implement optional preprocessor stage hooks (`tbl`, `eqn`, `pic`) as stubs with diagnostics.
+                - [ ] Implement charset detection and conversion path for legacy encodings.
+                - [ ] Implement pass-through of selected formatter warnings in verbose mode.
+                - [ ] Ensure temporary file/pipe lifecycle is leak-free and signal-safe.
+            - [ ] **`man` Command: Pager and Terminal Integration:**
+                - [ ] Implement pager resolution precedence: `-P`, `MANPAGER`, `PAGER`, fallback pager.
+                - [ ] Implement fallback pager when `less` is unavailable.
+                - [ ] Implement `LESS` environment integration and sane defaults.
+                - [ ] Implement non-interactive output mode when stdout is not a tty.
+                - [ ] Implement SIGPIPE-safe behavior when pager exits early.
+                - [ ] Preserve formatter backspace sequences expected by pager (`less -R`/plain mode decision task).
+                - [ ] Implement terminal width detection and pass width to formatter.
+            - [ ] **`man` Command: Caching, Catpages, and Performance:**
+                - [ ] Implement catpage directory layout keyed by path, section, and locale.
+                - [ ] Implement cache key metadata including source mtime, size, and formatter version.
+                - [ ] Implement cache reuse on valid metadata match.
+                - [ ] Implement cache invalidation on source/formatter/config change.
+                - [ ] Implement atomic cache writes using temp file + rename.
+                - [ ] Implement file permission and ownership policy for shared cache directories.
+                - [ ] Implement per-user cache fallback when system cache is not writable.
+                - [ ] Add lock strategy preventing cache corruption under concurrent `man` processes.
+                - [ ] Add performance benchmarks for cold-cache and warm-cache runs.
+            - [ ] **`man` Command: Diagnostics and UX:**
+                - [ ] Implement missing page error with searched paths and sections.
+                - [ ] Implement ambiguous match message with ranked candidates.
+                - [ ] Implement section-conflict guidance when same name exists in multiple sections.
+                - [ ] Implement concise hints (`Try 'man 2 foo'`) for common ambiguity cases.
+                - [ ] Implement user-friendly `-k`/`-f` no-result messages.
+                - [ ] Implement localized error output boundaries and UTF-8 safety.
+                - [ ] Ensure all diagnostics are testable and stable for golden tests.
+            - [ ] **Security and Robustness (`roff` + `man`):**
+                - [ ] Forbid path traversal outside allowed roots for `.so` and `man -l` unless explicitly requested.
+                - [ ] Ensure decompressor invocation uses execve argv arrays, never shell expansion.
+                - [ ] Add input size limits for decompressed streams to mitigate zip-bomb style abuse.
+                - [ ] Add recursion and macro expansion limits to prevent CPU/memory exhaustion.
+                - [ ] Harden temporary file creation (`mkstemp`) and directory permissions.
+                - [ ] Validate environment variables (`MANPATH`, `PAGER`, `LESS`) before use.
+                - [ ] Add privilege boundary policy for setuid/setgid contexts (disable unsafe features).
+            - [ ] **Testing: Unit Coverage (Roff/Man):**
+                - [ ] Add lexer unit tests for request/text/escape tokenization boundaries.
+                - [ ] Add parser unit tests for request argument splitting and quoting.
+                - [ ] Add unit tests for register arithmetic, formatting, and default values.
+                - [ ] Add unit tests for string register interpolation across nested macro calls.
+                - [ ] Add unit tests for `.if`/`.ie`/`.el` precedence and nesting.
+                - [ ] Add unit tests for `.while` loop termination and guard limits.
+                - [ ] Add unit tests for diversion capture and replay ordering.
+                - [ ] Add unit tests for environment push/pop state isolation.
+                - [ ] Add unit tests for fill/no-fill transitions and line-break decisions.
+                - [ ] Add unit tests for scaling unit conversions and rounding behavior.
+                - [ ] Add unit tests for `.so` include path resolution and failure modes.
+                - [ ] Add unit tests for `man` section parsing, option precedence, and path selection.
+                - [ ] Add unit tests for compressed source detection and decompressor dispatch.
+                - [ ] Add unit tests for cache key generation and invalidation decisions.
+                - [ ] Add unit tests for user-facing diagnostic message selection.
+            - [ ] **Testing: Property-Based Coverage:**
+                - [ ] Add property tests for random nested macro definitions and expansions.
+                - [ ] Add property tests for random conditional trees with deterministic evaluation.
+                - [ ] Add property tests for random environment stack operations preserving invariants.
+                - [ ] Add property tests for random indentation/tab configurations with width invariants.
+                - [ ] Add property tests for include graph generation with cycle detection invariants.
+                - [ ] Add property tests for `man` search path permutations yielding stable ranking.
+                - [ ] Add property tests for cache metadata monotonicity across file timestamp changes.
+            - [ ] **Testing: Fuzzer Targets:**
+                - [ ] Add fuzz target for escape sequence parser.
+                - [ ] Add fuzz target for request/macro argument parser.
+                - [ ] Add fuzz target for macro expansion engine with recursion guards.
+                - [ ] Add fuzz target for conditional expression parser.
+                - [ ] Add fuzz target for diversion/environment stack state machine.
+                - [ ] Add fuzz target for scaling-unit numeric parser.
+                - [ ] Add fuzz target for malformed `.so` include directives and path normalization.
+                - [ ] Add fuzz target for mdoc inline punctuation and delimiter parsing.
+                - [ ] Add fuzz target for `man` CLI option parser and mixed positional arguments.
+                - [ ] Add fuzz target for `MANPATH` parser and separator edge cases.
+                - [ ] Add fuzz target for compressed input decoding wrappers with truncated/corrupt streams.
+                - [ ] Integrate all fuzzers into CI with corpus minimization and crash triage workflow.
+            - [ ] **Testing: Integration, Golden Output, and Performance:**
+                - [ ] Build golden corpus from project manpages across `man` and `mdoc` styles.
+                - [ ] Add integration test rendering corpus with internal `nroff` and comparing stable fixtures.
+                - [ ] Add differential tests against BSD mandoc for selected canonical pages.
+                - [ ] Add differential tests against groff for overlapping supported feature subset.
+                - [ ] Add end-to-end tests for `man` discovery (`section`, `MANPATH`, compressed pages, pager bypass).
+                - [ ] Add end-to-end tests for `man -k` and `man -f` with prepared whatis database fixtures.
+                - [ ] Add stress test for large manpage sets and repeated invocations.
+                - [ ] Add performance budget checks for startup latency and throughput.
+            - [ ] **Documentation Deliverables:**
+                - [ ] Write `man/man7/roff.7` language and request reference for supported subset.
+                - [ ] Write `man/man1/roff.1` command manual.
+                - [ ] Write `man/man1/nroff.1` command manual with terminal-specific behavior.
+                - [ ] Write `man/man1/man.1` command manual including all implemented options.
+                - [ ] Write `man/man7/man.7` macro package reference for supported macros.
+                - [ ] Write `man/man7/mdoc.7` supported semantic macro reference and limitations.
+                - [ ] Write `man/man7/ms.7` minimal compatibility reference and explicit non-goals.
+                - [ ] Document implementation-defined behavior for escapes, spacing, and diagnostics.
+                - [ ] Document BSD-vs-GNU compatibility choices and rationale.
+                - [ ] Document security model for includes, decompression, and pager invocation.
+                - [ ] Write developer design document for roff engine architecture, data flow, and extension points.
+                - [ ] Add maintainer guide for adding new requests/macros/backends safely.
+            - [ ] **Release Gating and Completion Criteria:**
+                - [ ] Define required pass criteria for unit/property/fuzz/integration suites.
+                - [ ] Define compatibility acceptance thresholds against BSD mandoc corpus.
+                - [ ] Define performance acceptance thresholds for `man` warm and cold paths.
+                - [ ] Define documentation completeness checklist before marking feature complete.
+                - [ ] Add final audit task verifying no unchecked intentional incompatibilities remain undocumented.
+
+### 8. LibC & Build System (User Requests & Audit)
+- [ ] **LibC Core Compliance (Audit Findings):**
+    - [ ] **Critical Headers (Missing Files):**
+        - [ ] Create `string.h` (functions exist in `string.c` but header is missing).
+        - [ ] Create `limits.h`, `setjmp.h`, `locale.h`.
+        - [ ] Create `err.h` (BSD error reporting helpers).
+        - [ ] Create `stddef.h`, `stdint.h`, `stdarg.h` (wrapping GCC builtins).
+    - [ ] **String Manipulation (`<string.h>`):**
+        - [ ] `strndup()`: Bounded string duplication.
+        - [ ] `stpcpy()` / `stpncpy()`: Copy returning end pointer.
+        - [ ] `strpbrk()`: Search for any of a set of chars.
+        - [ ] `strcoll()` / `strxfrm()`: Locale-aware comparison stubs.
+    - [ ] **Standard Library (`<stdlib.h>`):**
+        - [ ] `strtol()` / `strtoul()` / `strtoll()` / `strtoull()`: Robust string-to-integer conversion.
+        - [ ] `strtod()` / `strtof()`: String to float implementation (currently `atof` is a stub).
+        - [ ] `div()` / `ldiv()` / `lldiv()`: Combined quotient/remainder.
+        - [ ] `atexit()`: Exit handlers (currently `at_quick_exit` is a stub).
+        - [ ] `mbstowcs()` / `wcstombs()`: Multibyte conversion stubs.
+    - [ ] **Standard I/O (`<stdio.h>`):**
+        - [ ] **CRITICAL:** `sscanf()` / `scanf()` / `fscanf()`: Input parsing implementation.
+        - [ ] `snprintf()`: Add wrapper around `vsnprintf`.
+        - [ ] `freopen()`: Reopen stream with new mode.
+        - [ ] `setvbuf()` / `setbuf()`: Buffering mode control.
+        - [ ] `tmpfile()` / `tmpnam()`: Temporary file support.
+        - [ ] `fileno()`: Get fd from `FILE*`.
+    - [ ] **POSIX System Interface (`<unistd.h>`):**
+        - [ ] `dup()`: Duplicate fd (wrapper around `SYS_DUP` or `fcntl`).
+        - [ ] `getppid()`: Get parent PID.
+        - [ ] `setsid()` / `getsid()`: Session ID management.
+        - [ ] `getpgrp()` / `setpgid()`: Process group management.
+        - [ ] `symlink()`: Create symbolic link.
+        - [ ] `ftruncate()` / `truncate()`: Truncate file size.
+        - [ ] `fsync()` / `fdatasync()`: Flush file changes.
+    - [ ] **Time & Date (`<time.h>`):**
+        - [ ] `gmtime()` / `localtime()`: Timestamp to struct tm.
+        - [ ] `mktime()`: Struct tm to timestamp.
+        - [ ] `strftime()` / `strptime()`: Time formatting/parsing.
+        - [ ] `difftime()`: Time difference.
+        - [ ] `ctime()` / `asctime()`: Time to string.
+- [ ] **LibC Features (User Requests):**
+    - [ ] **Implement `getopt_long` (GNU Compatible):**
+        - [ ] Define `struct option` (name, has_arg, flag, val).
+        - [ ] Implement `getopt_long()` function signature.
+        - [ ] Implement `getopt_long_only()` variant.
+        - [ ] Handle argument parsing (`--arg`, `--arg=val`).
+        - [ ] Handle `no_argument`, `required_argument`, `optional_argument`.
+        - [ ] Internal state management (`optind`, `opterr`, `optopt`, `optarg`).
+        - [ ] Error reporting and `?` / `:` return codes.
+        - [ ] Support for non-option argument reordering (swapping argv elements).
+        - [ ] Test against GNU `getopt_long` behavior.
+- [ ] **Low-Level Helpers (LibC Extension):**
+    - [ ] `xmalloc(size)`: Safe memory allocation.
+        - [ ] **Prototype:** `void *xmalloc(size_t size)`
+        - [ ] **Purpose:** Allocate memory, aborting on failure.
+        - [ ] **Standards:** Common extension (Busybox/GNU coreutils style).
+        - [ ] **Syscalls / Kernel interfaces:** `malloc` -> `brk`/`mmap`.
+        - [ ] **Signal-safety / async-signal-safe:** no — calls `malloc`.
+        - [ ] **Reentrancy / thread-safety:** Thread-safe (if `malloc` is).
+        - [ ] **Error semantics:** Returns valid pointer or exits program (never returns NULL).
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xmalloc(1024)` -> returns pointer
+            - [ ] `xmalloc(huge)` -> prints error and exits (mock/limit env)
+        - [ ] **Implementation notes:** Wrapper around `malloc`.
+        - [ ] **Priority:** high
+    - [ ] `xopen(path, flags, mode)`: Safe file open.
+        - [ ] **Prototype:** `int xopen(const char *path, int flags, mode_t mode)`
+        - [ ] **Purpose:** Open file, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Syscalls / Kernel interfaces:** `open` / `openat`.
+        - [ ] **Signal-safety / async-signal-safe:** yes (if error handler is simple).
+        - [ ] **Reentrancy / thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns valid fd or exits program.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xopen("exist", O_RDONLY)` -> returns fd
+            - [ ] `xopen("noexist", O_RDONLY)` -> prints error and exits
+        - [ ] **Priority:** high
+    - [ ] `xrealloc(ptr, size)`: Safe memory reallocation.
+        - [ ] **Prototype:** `void *xrealloc(void *ptr, size_t size)`
+        - [ ] **Purpose:** Reallocate memory, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `malloc` / `free` -> `brk`/`mmap`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe (if Underlying allocator is).
+        - [ ] **Error semantics:** Exits program on failure.
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xrealloc(NULL, 10)` -> equivalent to xmalloc
+            - [ ] `xrealloc(ptr, 20)` -> preserves data, returns new ptr
+        - [ ] **Implementation notes:** `realloc(ptr, 0)` behavior check.
+        - [ ] **Priority:** high
+    - [ ] `xcalloc(nmemb, size)`: Safe zero-initialized allocation.
+        - [ ] **Prototype:** `void *xcalloc(size_t nmemb, size_t size)`
+        - [ ] **Purpose:** Allocate zeroed memory, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `calloc`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits program on failure, check overflow.
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xcalloc(10, 10)` -> returns zeroed buffer
+            - [ ] `xcalloc(MAX, MAX)` -> overflow check and exit
+        - [ ] **Implementation notes:** Check for multiplication overflow.
+        - [ ] **Priority:** high
+    - [ ] `xstrdup(s)`: Safe string duplication.
+        - [ ] **Prototype:** `char *xstrdup(const char *s)`
+        - [ ] **Purpose:** Duplicate string, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `malloc`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits program on failure.
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xstrdup("foo")` -> returns copy
+        - [ ] **Implementation notes:** Wrapper around `strdup`.
+        - [ ] **Priority:** high
+    - [ ] `xread(fd, buf, count)`: Read exact amount or fail.
+        - [ ] **Prototype:** `size_t xread(int fd, void *buf, size_t count)`
+        - [ ] **Purpose:** Read requested bytes, looping on partials/EINTR, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `read`.
+        - [ ] **Signal-safety:** yes (if error handler is simple).
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns count read (may be < requested if EOF), exits on IO error.
+        - [ ] **Memory ownership:** generic buffer.
+        - [ ] **Acceptance tests:**
+            - [ ] `xread` full buffer -> returns count
+            - [ ] `xread` partial -> loops or returns short on EOF
+        - [ ] **Implementation notes:** Distinguish short read (EOF) vs error.
+        - [ ] **Priority:** high
+    - [ ] `xwrite(fd, buf, count)`: Write exact amount or fail.
+        - [ ] **Prototype:** `void xwrite(int fd, const void *buf, size_t count)`
+        - [ ] **Purpose:** Write all bytes, looping on partials/EINTR, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `write`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits if write fails or incomplete.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xwrite` full buffer -> succeeds
+            - [ ] `xwrite` to full disk -> exits
+        - [ ] **Implementation notes:** Loop until all written.
+        - [ ] **Priority:** high
+    - [ ] `xstat(path, buf)`: Safe file status.
+        - [ ] **Prototype:** `void xstat(const char *path, struct stat *buf)`
+        - [ ] **Purpose:** Get file status, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `stat`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits on error.
+        - [ ] **Memory ownership:** caller provides struct.
+        - [ ] **Acceptance tests:**
+            - [ ] `xstat("exist", &sb)` -> success
+            - [ ] `xstat("noexist", &sb)` -> exits
+        - [ ] **Implementation notes:** Used when file is expected to exist.
+        - [ ] **Priority:** medium
+    - [ ] `xaccess(path, mode)`: Safe access check.
+        - [ ] **Prototype:** `void xaccess(const char *path, int mode)`
+        - [ ] **Purpose:** Check file access, exit on error (permission denied is error).
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `access`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits if check fails.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xaccess` readable -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+    - [ ] `xopendir(path)`: Safe directory open.
+        - [ ] **Prototype:** `DIR *xopendir(const char *path)`
+        - [ ] **Purpose:** Open directory, exit on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `open`, `fstat`, `mmap` (via `opendir`).
+        - [ ] **Signal-safety:** no (allocates).
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns valid DIR* or exits.
+        - [ ] **Memory ownership:** Caller calls closedir.
+        - [ ] **Acceptance tests:**
+            - [ ] `xopendir(".")` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** high
+    - [ ] `xclosedir(dirp)`: Safe directory close.
+        - [ ] **Prototype:** `void xclosedir(DIR *dirp)`
+        - [ ] **Purpose:** Close directory, warn/exit on failure? usually just wrapper.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `close`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits on error (unlikely).
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xclosedir` -> success
+        - [ ] **Implementation notes:** Check return code.
+        - [ ] **Priority:** medium
+    - [ ] `xfork()`: Safe process creation.
+        - [ ] **Prototype:** `pid_t xfork(void)`
+        - [ ] **Purpose:** Fork process, exit on failure (EAGAIN usually).
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `fork`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns pid or exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xfork()` -> parent gets pid, child gets 0
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** high
+    - [ ] `xwaitpid(pid, status, options)`: Safe wait.
+        - [ ] **Prototype:** `pid_t xwaitpid(pid_t pid, int *status, int options)`
+        - [ ] **Purpose:** Wait for process, loop on EINTR, exit on other error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `waitpid`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns pid.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xwaitpid` -> reaps zombie
+        - [ ] **Implementation notes:** Handle EINTR internally.
+        - [ ] **Priority:** high
+    - [ ] `xexecvp(file, argv)`: Safe execute.
+        - [ ] **Prototype:** `void xexecvp(const char *file, char *const argv[])`
+        - [ ] **Purpose:** Execute program, exit on failure (print error).
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `execvp`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Does not return on success; exits on fail.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xexecvp("true", ...)` -> runs true
+            - [ ] `xexecvp("noexist", ...)` -> prints error, exits
+        - [ ] **Implementation notes:** Should print "cannot execute <file>: <strerror>".
+        - [ ] **Priority:** high
+    - [ ] `xsignal(signum, handler)`: Safe signal handler install.
+        - [ ] **Prototype:** `sighandler_t xsignal(int signum, sighandler_t handler)`
+        - [ ] **Purpose:** Set signal handler using `sigaction` (SA_RESTART), exit on error.
+        - [ ] **Standards:** BSD/Common.
+        - [ ] **Underlying syscalls:** `sigaction`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns old handler or exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xsignal` -> handler set
+        - [ ] **Implementation notes:** Ensure portable sigaction usage.
+        - [ ] **Priority:** medium
+    - [ ] `humanize_number(buf, len, number, suffix, scale, flags)`: Format number.
+        - [ ] **Prototype:** `int humanize_number(char *buf, size_t len, int64_t number, const char *suffix, int scale, int flags)`
+        - [ ] **Purpose:** Format number with SI prefixes (k, M, G).
+        - [ ] **Standards:** NetBSD / BSD.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns length or -1.
+        - [ ] **Memory ownership:** writes to buf.
+        - [ ] **Acceptance tests:**
+            - [ ] 1024 -> "1K"
+        - [ ] **Implementation notes:** Port from NetBSD/OpenBSD.
+        - [ ] **Priority:** medium
+    - [ ] `parse_mode(mode_str, old_mode)`: Parse mode string.
+        - [ ] **Prototype:** `mode_t parse_mode(const char *str, mode_t old)`
+        - [ ] **Purpose:** Parse chmod-style symbolic mode (u+x).
+        - [ ] **Standards:** Custom / BSD-like.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns new mode or -1/exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] "u+x" -> adds executable bit
+        - [ ] **Implementation notes:** State machine for symbolic parsing.
+        - [ ] **Priority:** medium
+    - [ ] `strlcpy(dst, src, size)`: Safe string copy.
+        - [ ] **Prototype:** `size_t strlcpy(char *dst, const char *src, size_t size)`
+        - [ ] **Purpose:** Copy string with NUL termination guarantee.
+        - [ ] **Standards:** OpenBSD / Common.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns total length of src.
+        - [ ] **Memory ownership:** writes dst.
+        - [ ] **Acceptance tests:**
+            - [ ] Truncation check.
+        - [ ] **Implementation notes:** Standard BSD behavior.
+        - [ ] **Priority:** high
+    - [ ] `strlcat(dst, src, size)`: Safe string cat.
+        - [ ] **Prototype:** `size_t strlcat(char *dst, const char *src, size_t size)`
+        - [ ] **Purpose:** Concatenate string with NUL termination guarantee.
+        - [ ] **Standards:** OpenBSD / Common.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns total length.
+        - [ ] **Memory ownership:** writes dst.
+        - [ ] **Acceptance tests:**
+            - [ ] Truncation check.
+        - [ ] **Implementation notes:** Standard BSD behavior.
+        - [ ] **Priority:** high
+    - [ ] `warn(fmt, ...)`: Print warning.
+        - [ ] **Prototype:** `void warn(const char *fmt, ...)`
+        - [ ] **Purpose:** Print "progname: fmt: strerror(errno)\n" to stderr.
+        - [ ] **Standards:** BSD.
+        - [ ] **Underlying syscalls:** `write` / `fprintf`.
+        - [ ] **Signal-safety:** no (stdio).
+        - [ ] **Thread-safety:** locked (stdio).
+        - [ ] **Error semantics:** None.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `warn("fail")` -> prints message + errno
+        - [ ] **Implementation notes:** Use `vfprintf`.
+        - [ ] **Priority:** high
+    - [ ] `err(eval, fmt, ...)`: Print error and exit.
+        - [ ] **Prototype:** `void err(int eval, const char *fmt, ...)`
+        - [ ] **Purpose:** Print warning and exit with `eval`.
+        - [ ] **Standards:** BSD.
+        - [ ] **Underlying syscalls:** `write`, `exit`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** N/A (exits).
+        - [ ] **Error semantics:** Exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `err(1, "fail")` -> exits 1, prints msg
+        - [ ] **Implementation notes:** Calls `warn` then `exit`.
+        - [ ] **Priority:** high
+    - [ ] `setprogname(name)` / `getprogname()`: Program name.
+        - [ ] **Prototype:** `void setprogname(const char *name)`, `const char *getprogname(void)`
+        - [ ] **Purpose:** Store/retrieve program name for diagnostics.
+        - [ ] **Standards:** BSD.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes (atomic ptr read/write).
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** N/A.
+        - [ ] **Memory ownership:** static/copy.
+        - [ ] **Acceptance tests:**
+            - [ ] set/get match
+        - [ ] **Implementation notes:** `basename` of argv[0].
+        - [ ] **Priority:** high
+    - [ ] `basename(path)`: Thread-safe path component extraction.
+        - [ ] **Prototype:** `char *basename(char *path)`
+        - [ ] **Purpose:** Return last component of path.
+        - [ ] **Standards:** POSIX.1-2008.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** yes (modifies path or returns static constant).
+        - [ ] **Error semantics:** Returns "." or "/".
+        - [ ] **Memory ownership:** May modify input (POSIX).
+        - [ ] **Acceptance tests:**
+            - [ ] `basename("/usr/bin/ls")` -> "ls"
+            - [ ] `basename("/")` -> "/"
+        - [ ] **Implementation notes:** Handle trailing slashes.
+        - [ ] **Priority:** medium
+    - [ ] `dirname(path)`: Thread-safe directory component extraction.
+        - [ ] **Prototype:** `char *dirname(char *path)`
+        - [ ] **Purpose:** Return parent directory of path.
+        - [ ] **Standards:** POSIX.1-2008.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** yes (modifies path).
+        - [ ] **Error semantics:** Returns "." or "/".
+        - [ ] **Memory ownership:** May modify input.
+        - [ ] **Acceptance tests:**
+            - [ ] `dirname("/usr/bin/ls")` -> "/usr/bin"
+        - [ ] **Implementation notes:** Handle trailing slashes.
+        - [ ] **Priority:** medium
+    - [ ] `xchmod(path, mode)`: Safe chmod.
+        - [ ] **Prototype:** `void xchmod(const char *path, mode_t mode)`
+        - [ ] **Purpose:** Change mode, exit on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `chmod`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Exits on error.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xchmod` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+    - [ ] `xchown(path, owner, group)`: Safe chown.
+        - [ ] **Prototype:** `void xchown(const char *path, uid_t owner, gid_t group)`
+        - [ ] **Purpose:** Change ownership, exit on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `chown`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Exits on error.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xchown` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+    - [ ] `strtonum(numstr, minval, maxval, errstrp)`: Safe number parsing.
+        - [ ] **Prototype:** `long long strtonum(const char *nptr, long long minval, long long maxval, const char **errstr)`
+        - [ ] **Purpose:** Parse number with bounds checking and strict validation.
+        - [ ] **Standards:** OpenBSD / BSD.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns 0 on error and sets errstr.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `strtonum("10", 0, 100, &err)` -> 10, err=NULL
+            - [ ] `strtonum("101", 0, 100, &err)` -> 0, err="too large"
+        - [ ] **Implementation notes:** Strict parsing (no trailing garbage).
+        - [ ] **Priority:** high
+    - [ ] `xgetenv(name)`: Safe environment get.
+        - [ ] **Prototype:** `char *xgetenv(const char *name)`
+        - [ ] **Purpose:** Get environment variable, maybe exit if missing? Or just standard `getenv` wrapper? Usually just `getenv` is fine, but maybe `safe_getenv` for setuid?
+        - [ ] **Standards:** Internal.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe (usually).
+        - [ ] **Error semantics:** Returns value or NULL.
+        - [ ] **Memory ownership:** environment owned.
+        - [ ] **Acceptance tests:**
+            - [ ] Get existing var.
+        - [ ] **Implementation notes:** Maybe strict version `xgetenv_required`?
+        - [ ] **Priority:** low
+    - [ ] `xopenat(dirfd, path, flags, mode)`: Safe relative open.
+        - [ ] **Prototype:** `int xopenat(int dirfd, const char *path, int flags, mode_t mode)`
+        - [ ] **Purpose:** Open file relative to dir, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `openat`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns fd or exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xopenat` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** medium
+    - [ ] `xisatty(fd)`: Safe tty check.
+        - [ ] **Prototype:** `int xisatty(int fd)`
+        - [ ] **Purpose:** Check if fd is a tty, handle errno? Just `isatty` wrapper?
+        - [ ] **Standards:** POSIX.
+        - [ ] **Underlying syscalls:** `ioctl`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns 1/0.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xisatty(0)` -> 1 (if tty)
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+- [ ] **Build System:**
+    - [ ] Implement `native_dist` target to build usermode tools for the host OS (skipping libc/libm etc).
+
+
+### 7. Core Utilities (`bin/`)
+- [ ] **Process Tools:**
+    - [x] **`ps`:**
+        - [x] **Bitness Support:** Update to receive bitness via `sys_proc_info` and format output (`-b`).
+        - [ ] **Testing:** Integration tests for output verification.
+- [ ] **LDT Tools:**
+    - [ ] **`setldt` / `ldtctl`:** CLI tool to inspect/manipulate LDT entries.
+- [ ] **Calculator Tools:**
+    - [x] **`bc`:** Standalone Interpreter with GNU Extensions (variables, control flow, libbc).
+    - [x] **`dc`:** RPN Interpreter with GNU Extensions (`#` comments, `n` command, libbc).
+    - [x] **`libbc`:** Shared Bignum Library (add, sub, mul, div, mod, pow).
+- [ ] **Filesystem Tools (`sbin/`):**
+    - [x] **`mkfs`:** Implement `ext2` creation (Native Filesystem).
+    - [ ] **`fsck`:** Implement `ext2` consistency check.
+- [ ] **Compression Tools:**
+    - [x] **`compress`:** Implement `compress`, `uncompress`, `zcat` (LZW).
+    - [ ] **`cpio`:** Implement POSIX-compatible archive utility (`usr.bin/cpio`).
+
+### 8. Security and Identity
+- [ ] **User & Group Management:**
+    - [ ] **Database:**
+        - [ ] Implement `/etc/passwd` parser.
+        - [ ] Implement `/etc/group` parser.
+        - [ ] Implement `/etc/shadow` parser for login.
+    - [ ] **Kernel Credentials:**
+        - [ ] Add `uid, gid, euid, egid, suid, sgid` to Process structure.
+        - [ ] Add supplementary group list to Process structure.
+    - [ ] **System Calls:**
+        - [ ] `getuid`
+        - [ ] `getgid`
+        - [ ] `geteuid`
+        - [ ] `getegid`
+        - [ ] `setuid`
+        - [ ] `setgid`
+        - [ ] `seteuid`
+        - [ ] `setegid`
+        - [ ] `setreuid`
+        - [ ] `setregid`
+        - [ ] `getgroups`
+        - [ ] `setgroups`
+- [ ] **Userland Identity Tools:**
+    - [ ] **`id`:**
+        - [ ] Implement `-u` (UID) flag.
+        - [ ] Implement `-g` (GID) flag.
+        - [ ] Implement `-G` (Groups) flag.
+        - [ ] Implement `-n` (Name) flag.
+        - [ ] Ensure POSIX-compliant output format.
+    - [ ] **`su`:** Enhance with user/group switching.
+    - [ ] **`login`:** Integrate with user database.
+
+### 9. Networking (Future)
+- [ ] **Layer 0: Driver Framework (Hardware Abstraction):**
+    - [ ] **Interface Structure (`struct ifnet`):**
+        - [ ] Common fields: Name (`eth0`), MTU, Flags (UP, BROADCAST, PROMISC), Hardware Address.
+        - [ ] **Methods:** `init`, `start` (tx), `stop`, `ioctl` (config), `watchdog`.
+    - [ ] **Buffer Management (`mbuf` / `sk_buff`):**
+        - [ ] Chainable buffer structures for zero-copy handling.
+        - [ ] Header/Data split for localized protocol processing.
+    - [ ] **Device Registry:** Central list of attached network devices.
+        - [ ] **DevFS Exposure:** Publish interfaces as `/dev/network/ifname` (e.g., `ne0`, `bge0`).
+- [ ] **Layer 1: Network Interface Drivers (Kernel):**
+    - [ ] **Driver Compliance:** All drivers must implement `struct ifnet` methods.
+    - [ ] **Loopback:** Virtual interface implementation.
+    - [ ] **NE2000:**
+        - [ ] ISA/PCI attachment.
+        - [ ] 8390 NIC core logic (Ring buffer management).
+        - [ ] PIO data transfer (ports 0x10, 0x300).
+        - [ ] IRQ handling (ISR/IMR).
+    - [ ] **RTL8139:**
+        - [ ] PCI Bus Mastering.
+        - [ ] C+ Mode (Descriptor-based) optimized support.
+        - [ ] Rx/Tx DMA integration.
+    - [ ] **E1000 (Intel Pro/1000):**
+        - [ ] PCI/PCI-X/PCIe support.
+        - [ ] Advanced Descriptor rings.
+        - [ ] Interrupt Throttling.
+    - [ ] **VirtIO Net:**
+        - [ ] Virtqueue setup (Rx/Tx/Control).
+        - [ ] Feature negotiation (CSUM, TSO, etc.).
+- [ ] **Layer 2: Packet Interface Layer**
+    - [ ] Define abstract packet structure (`mbuf`).
+    - [ ] Implement packet queuing (`if_snd`, `if_fastq`) and dispatching.
+    - [ ] Implement `ifconfig` style interface management (up/down/flags/mtu).
+- [ ] **Layer 3: Protocol Drivers (Kernel Stack)**
+    - [ ] **Ethernet (L2):**
+        - [ ] Frame parsing (EtherType dispatch).
+        - [ ] ARP/RARP encapsulation.
+    - [ ] **ARP (L2.5):**
+        - [ ] Resolution (IP -> MAC).
+        - [ ] Caching (Hash table with timeout).
+        - [ ] Gratuitous ARP on up.
+    - [ ] **IPv4 (L3):**
+        - [ ] Packet validation (Checksum, Version, HL).
+        - [ ] Routing table lookup (LPM - Longest Prefix Match).
+        - [ ] Fragmentation/Reassembly logic.
+    - [ ] **IPv6 (L3):**
+        - [ ] Packet parsing and extension headers.
+        - [ ] NDP (Neighbor Discovery) state machine.
+        - [ ] SLAAC autoconfiguration.
+    - [ ] **ICMPv4/v6 (L3):**
+        - [ ] Echo Request/Reply (Ping).
+        - [ ] Destination Unreachable / Time Exceeded.
+    - [ ] **UDP (L4):**
+        - [ ] PCB list (Port binding).
+        - [ ] Datagram sending/receiving.
+    - [ ] **TCP (L4):**
+        - [ ] **State Machine:** LISTEN, SYN_SENT, SYN_RCVD, ESTABLISHED, FIN_WAIT...
+        - [ ] **Window Management:** Sliding window, Flow control.
+        - [ ] **Congestion Control:** Slow Start, Congestion Avoidance.
+        - [ ] **Timers:** Retransmission, Keepalive, TIME_WAIT.
+- [ ] **Layer 4: Socket API**
+    - [ ] **VFS Integration:** Map sockets to file descriptors.
+    - [ ] **Syscalls:** `socket`, `bind`, `connect`, `listen`, `accept`, `setsockopt`.
+    - [ ] **I/O:** `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg`.
+    - [ ] **Multiplexing:** `select`/`poll`/`epoll`.
+- [ ] **Supplemental: Userspace & Extensibility**
+    - [ ] **NetUSE API:** Interface for running NIC drivers in userspace.
+    - [ ] **Userspace Stacks:** TUN/TAP style interface.
+- [ ] **Userland Tools**
+    - [ ] **Diagnostic:**
+        - [ ] `ping`
+        - [ ] `ping6`
+        - [ ] `traceroute`
+        - [ ] `tracepath`
+    - [ ] **Configuration:**
+        - [ ] `ifconfig`
+        - [ ] `ip` (Netlink-style)
+        - [ ] `route`
+    - [ ] **Clients:**
+        - [ ] `dhcp` (custom DHCP client)
+        - [ ] basic `netcat`
+    - [ ] **Analysis:** `tcpdump` (requires BPF or raw socket support).
+
+### 10. Hardware Support & Peripherals
+- [ ] **USB Subsystem:**
+    - [ ] **Host Controllers:**
+        - [ ] **UHCI (Universal Host Controller Interface):**
+            - [ ] Implement UHCI register access.
+                - Files: `sys/drivers/usb/uhci.c` (new), `sys/drivers/usb/uhci.h` (new)
+                - Registers: USBCMD, USBSTS, USBINTR, FRNUM, FLBASEADD, SOFMOD, PORTSC
+                - Tests: integration (register read/write from QEMU UHCI)
+                - Docs: `uhci.4`
+                - Acceptance: Controller detected and accessible
+            - [ ] Implement Frame List allocation and setup.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Logic: 1024-entry frame list (4KB aligned), each entry points to QH/TD
+                - Tests: unit (frame list allocation, alignment)
+                - Docs: `uhci.4`
+                - Acceptance: Frame list in FLBASEADD, HC processing
+            - [ ] Implement Queue Head (QH) management.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Structure: `uhci_qh_t` with horizontal/vertical pointers
+                - Logic: Skeleton QHs for interrupt, control, bulk
+                - Tests: unit (QH linking, traversal)
+                - Docs: `uhci.4`
+                - Acceptance: QH hierarchy operational
+            - [ ] Implement Transfer Descriptor (TD) management.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Structure: `uhci_td_t` with link, status, token, buffer
+                - Tests: unit (TD allocation, status parsing)
+                - Docs: `uhci.4`
+                - Acceptance: TDs processed by HC
+            - [ ] Implement interrupt handling.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Events: USBINT (completion), USBERRINT (error), Resume, Host System Error
+                - Tests: integration (IRQ fires on transfer completion)
+                - Docs: `uhci.4`
+                - Acceptance: Interrupts handled, URBs completed
+        - [ ] **OHCI (Open Host Controller Interface):**
+            - [ ] Implement OHCI register access.
+                - Files: `sys/drivers/usb/ohci.c` (new), `sys/drivers/usb/ohci.h` (new)
+                - Registers: HcRevision, HcControl, HcCommandStatus, HcInterruptStatus, HcHCCA
+                - Tests: integration (MMIO register access)
+                - Docs: `ohci.4`
+                - Acceptance: Controller detected
+            - [ ] Implement HCCA (Host Controller Communications Area).
+                - Files: `sys/drivers/usb/ohci.c`
+                - Structure: 256-byte aligned, interrupt table, frame number, done head
+                - Tests: unit (HCCA allocation, alignment, done head updates)
+                - Docs: `ohci.4`
+                - Acceptance: HCCA operational
+            - [ ] Implement Endpoint Descriptor (ED) management.
+                - Files: `sys/drivers/usb/ohci.c`
+                - Structure: `ohci_ed_t` with FA, EN, D, S, K, F, MPS, TailP, HeadP, NextED
+                - Logic: Control, bulk, interrupt, isochronous ED lists
+                - Tests: unit (ED creation, list insertion)
+                - Docs: `ohci.4`
+                - Acceptance: EDs processed by HC
+            - [ ] Implement Transfer Descriptor (TD) management.
+                - Files: `sys/drivers/usb/ohci.c`
+                - Structure: `ohci_td_t` with flags, CBP, NextTD, BE
+                - Tests: unit (TD allocation, completion status)
+                - Docs: `ohci.4`
+                - Acceptance: TDs processed correctly
+            - [ ] Implement interrupt and done queue handling.
+                - Files: `sys/drivers/usb/ohci.c`
+                - Logic: Process HccaDoneHead, complete URBs
+                - Tests: integration (URB completion via done queue)
+                - Docs: `ohci.4`
+                - Acceptance: Transfer completion signaled
+        - [ ] **EHCI (Enhanced Host Controller Interface):**
+            - [ ] Implement EHCI capability and operational register access.
+                - Files: `sys/drivers/usb/ehci.c` (new), `sys/drivers/usb/ehci.h` (new)
+                - Capability: CAPLENGTH, HCSPARAMS, HCCPARAMS
+                - Operational: USBCMD, USBSTS, USBINTR, FRINDEX, PERIODICLISTBASE, ASYNCLISTADDR
+                - Tests: integration (capability parsing, operational access)
+                - Docs: `ehci.4`
+                - Acceptance: Controller initialized
+            - [ ] Implement Asynchronous Schedule (Control/Bulk).
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: Queue Head (QH) linked list, ASYNCLISTADDR
+                - Logic: Async schedule enable, reclamation
+                - Tests: integration (async schedule active, control transfers work)
+                - Docs: `ehci.4`
+                - Acceptance: Async schedule operational
+            - [ ] Implement Queue Head (QH) management.
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: `ehci_qh_t` with horizontal link, endpoint chars, overlay
+                - Tests: unit (QH allocation, overlay handling)
+                - Docs: `ehci.4`
+                - Acceptance: QHs processed by HC
+            - [ ] Implement Queue Transfer Descriptor (qTD) management.
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: `ehci_qtd_t` with next, alt_next, token, buffer pointers
+                - Tests: unit (qTD linking, token status parsing)
+                - Docs: `ehci.4`
+                - Acceptance: qTDs executed correctly
+            - [ ] Implement Periodic Schedule (Interrupt/Isochronous).
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: 1024-entry frame list, interrupt QHs, iTDs/siTDs
+                - Tests: integration (periodic schedule, interrupt transfers)
+                - Docs: `ehci.4`
+                - Acceptance: Periodic transfers work
+            - [ ] Implement interrupt handling.
+                - Files: `sys/drivers/usb/ehci.c`
+                - Events: USB Interrupt, USB Error, Port Change, Frame List Rollover, Host System Error
+                - Tests: integration (transfer completion IRQ)
+                - Docs: `ehci.4`
+                - Acceptance: Interrupts handled correctly
+        - [ ] **xHCI (eXtensible Host Controller Interface):**
+            - [ ] Implement xHCI capability structure parsing.
+                - Files: `sys/drivers/usb/xhci.c` (new), `sys/drivers/usb/xhci.h` (new)
+                - Capability: CAPLENGTH, HCSPARAMS1/2/3, HCCPARAMS1/2, DBOFF, RTSOFF
+                - Extended: Supported Protocol, Legacy Support, Capability IDs
+                - Tests: integration (parse all capabilities from QEMU xHCI)
+                - Docs: `xhci.4`
+                - Acceptance: Capabilities detected correctly
+            - [ ] Implement Command Ring setup and processing.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: TRB ring with Link TRBs, CRCR register
+                - Commands: Enable Slot, Address Device, Configure Endpoint, Evaluate Context
+                - Tests: unit (ring wrap, command completion)
+                - Docs: `xhci.4`
+                - Acceptance: Commands processed by xHC
+            - [ ] Implement Event Ring setup and handling.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: Event Ring Segment Table, ERDP, interrupter registers
+                - Events: Transfer, Command Completion, Port Status Change
+                - Tests: integration (events received on completion)
+                - Docs: `xhci.4`
+                - Acceptance: Events processed correctly
+            - [ ] Implement Transfer Ring management.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: Per-endpoint transfer rings with TRBs
+                - TRB types: Normal, Setup, Data, Status, Isoch, Link
+                - Tests: unit (TRB enqueue, ring wrap)
+                - Docs: `xhci.4`
+                - Acceptance: Transfer TRBs executed
+            - [ ] Implement Doorbell mechanism.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Logic: Ring doorbell to notify xHC of new work
+                - Tests: unit (doorbell write triggers processing)
+                - Docs: `xhci.4`
+                - Acceptance: xHC processes TRBs after doorbell
+            - [ ] Implement Device Context management.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: DCBAA, Device Context, Slot Context, Endpoint Contexts
+                - Logic: Allocate on Enable Slot, configure on Set Address
+                - Tests: integration (device addressed, endpoints configured)
+                - Docs: `xhci.4`
+                - Acceptance: Device contexts properly managed
+            - [ ] Implement Scratchpad Buffer allocation.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Logic: Parse HCSPARAMS2 for scratchpad count, allocate buffers
+                - Tests: unit (scratchpad pages allocated)
+                - Docs: `xhci.4`
+                - Acceptance: xHC has required scratchpad
+    - [ ] **Core Stack:**
+        - [ ] **USB Device Abstraction:**
+            - [ ] Define `struct usb_device`.
+                - Files: `sys/kern/usb/usb.h` (new)
+                - Fields: address, speed, state, config, parent, driver, ep0_pipe, descriptors
+                - Tests: unit (struct layout)
+                - Docs: `usb_device.9`
+                - Acceptance: Device structure defined
+            - [ ] Define `struct usb_endpoint`.
+                - Files: `sys/kern/usb/usb.h`
+                - Fields: address, type, direction, maxpacket, interval, toggle
+                - Tests: unit (endpoint descriptor parsing)
+                - Docs: `usb_endpoint.9`
+                - Acceptance: Endpoint structure defined
+            - [ ] Define `struct usb_interface`.
+                - Files: `sys/kern/usb/usb.h`
+                - Fields: number, altsetting, class, subclass, protocol, endpoints, driver
+                - Tests: unit (interface descriptor parsing)
+                - Docs: `usb_interface.9`
+                - Acceptance: Interface structure defined
+        - [ ] **Device Enumeration:**
+            - [ ] Implement USB device state machine.
+                - Files: `sys/kern/usb/usb_core.c` (new)
+                - States: DEFAULT, ADDRESS, CONFIGURED, SUSPENDED
+                - Logic: State transitions on SET_ADDRESS, SET_CONFIGURATION
+                - Tests: integration (device reaches CONFIGURED)
+                - Docs: `usb_state_machine.9`
+                - Acceptance: Proper state transitions
+            - [ ] Implement SET_ADDRESS control transfer.
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Assign address, update HCD data structures
+                - Tests: integration (device responds at new address)
+                - Docs: `usb_set_address.9`
+                - Acceptance: Address assigned successfully
+            - [ ] Implement GET_DESCRIPTOR (Device).
+                - Files: `sys/kern/usb/usb_core.c`
+                - Fields: bcdUSB, bDeviceClass, idVendor, idProduct, bNumConfigurations
+                - Tests: unit (descriptor parsing)
+                - Docs: `usb_get_descriptor.9`
+                - Acceptance: Device descriptor parsed
+            - [ ] Implement GET_DESCRIPTOR (Configuration).
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Read wTotalLength, then full config+interface+endpoint tree
+                - Tests: unit (nested descriptor parsing)
+                - Docs: `usb_get_descriptor.9`
+                - Acceptance: Full configuration tree available
+            - [ ] Implement GET_DESCRIPTOR (String).
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Language ID query, string index query, UTF-16 to UTF-8
+                - Tests: unit (string descriptor decoding)
+                - Docs: `usb_get_descriptor.9`
+                - Acceptance: Manufacturer/product strings available
+            - [ ] Implement SET_CONFIGURATION.
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Select configuration, enable endpoints
+                - Tests: integration (device ready for class-specific commands)
+                - Docs: `usb_set_configuration.9`
+                - Acceptance: Device configured
+        - [ ] **Hub Driver:**
+            - [ ] Implement hub descriptor parsing.
+                - Files: `sys/drivers/usb/hub.c` (new)
+                - Fields: bNbrPorts, wHubCharacteristics, bPwrOn2PwrGood
+                - Tests: unit (hub descriptor fields)
+                - Docs: `usb_hub.4`
+                - Acceptance: Hub ports detected
+            - [ ] Implement port status change interrupt handling.
+                - Files: `sys/drivers/usb/hub.c`
+                - Logic: Interrupt endpoint polling, status change bitmap parsing
+                - Tests: integration (device connect detected via interrupt)
+                - Docs: `usb_hub.4`
+                - Acceptance: Port changes signaled
+            - [ ] Implement GET_PORT_STATUS.
+                - Files: `sys/drivers/usb/hub.c`
+                - Fields: wPortStatus, wPortChange (connection, enable, suspend, reset)
+                - Tests: unit (status bits parsed)
+                - Docs: `usb_hub.4`
+                - Acceptance: Port status queried
+            - [ ] Implement SET_PORT_FEATURE (power, reset, enable).
+                - Files: `sys/drivers/usb/hub.c`
+                - Features: PORT_POWER, PORT_RESET, PORT_ENABLE, PORT_SUSPEND
+                - Tests: integration (port reset triggers enumeration)
+                - Docs: `usb_hub.4`
+                - Acceptance: Port features controlled
+            - [ ] Implement CLEAR_PORT_FEATURE (change acknowledgment).
+                - Files: `sys/drivers/usb/hub.c`
+                - Features: C_PORT_CONNECTION, C_PORT_ENABLE, C_PORT_RESET
+                - Tests: unit (change bits cleared)
+                - Docs: `usb_hub.4`
+                - Acceptance: Change conditions cleared
+            - [ ] Implement root hub emulation for HCDs.
+                - Files: `sys/kern/usb/usb_roothub.c` (new)
+                - Logic: Translate hub requests to HCD port operations
+                - Tests: integration (root hub appears as normal hub)
+                - Docs: `usb_roothub.9`
+                - Acceptance: Root hub enumerable
+        - [ ] **URB (USB Request Block) Lifecycle:**
+            - [ ] Define `struct urb`.
+                - Files: `sys/kern/usb/urb.h` (new)
+                - Fields: dev, pipe, transfer_buffer, transfer_buffer_length, actual_length, status, complete, context, interval, setup_packet
+                - Tests: unit (struct layout)
+                - Docs: `urb.9`
+                - Acceptance: URB structure defined
+            - [ ] Implement `usb_alloc_urb()`.
+                - Files: `sys/kern/usb/urb.c` (new)
+                - API: Allocate URB from pool/kmalloc
+                - Tests: unit (allocation, free)
+                - Docs: `usb_alloc_urb.9`
+                - Acceptance: URB allocated
+            - [ ] Implement `usb_submit_urb()`.
+                - Files: `sys/kern/usb/urb.c`
+                - API: Submit URB to HCD for processing
+                - Logic: Build pipe info, call HCD urb_enqueue
+                - Tests: integration (URB submitted and completed)
+                - Docs: `usb_submit_urb.9`
+                - Acceptance: URB reaches device
+            - [ ] Implement `usb_unlink_urb()`.
+                - Files: `sys/kern/usb/urb.c`
+                - API: Cancel pending URB
+                - Logic: Call HCD urb_dequeue, complete with -ECONNRESET
+                - Tests: unit (unlink pending URB)
+                - Docs: `usb_unlink_urb.9`
+                - Acceptance: URB cancelled
+            - [ ] Implement URB completion callback mechanism.
+                - Files: `sys/kern/usb/urb.c`
+                - Logic: Call urb->complete from HCD interrupt context or thread
+                - Tests: integration (completion callback invoked)
+                - Docs: `urb_completion.9`
+                - Acceptance: Callback called with correct status
+    - [ ] **Class Drivers:**
+        - [ ] **HID (Human Interface Device):**
+            - [ ] Implement HID report descriptor parsing.
+                - Files: `sys/drivers/usb/hid.c` (new), `sys/drivers/usb/hid.h` (new)
+                - Logic: Parse Usage Page, Usage, Collection, Input/Output/Feature items
+                - Tests: unit (keyboard descriptor, mouse descriptor), fuzzer (malformed descriptors)
+                - Docs: `usb_hid.4`
+                - Acceptance: Report fields extracted
+            - [ ] Implement keyboard scancode translation.
+                - Files: `sys/drivers/usb/hid_keyboard.c` (new)
+                - Logic: USB HID Usage to PS/2 scancode mapping
+                - Modifier handling: Shift, Ctrl, Alt, GUI keys
+                - Tests: unit (key press/release events)
+                - Docs: `hid_keyboard.4`
+                - Acceptance: Keyboard input works
+            - [ ] Implement mouse relative motion reporting.
+                - Files: `sys/drivers/usb/hid_mouse.c` (new)
+                - Logic: Parse X/Y relative, button state, wheel
+                - Tests: unit (motion events, button events)
+                - Docs: `hid_mouse.4`
+                - Acceptance: Mouse input works
+            - [ ] Implement HID interrupt IN polling.
+                - Files: `sys/drivers/usb/hid.c`
+                - Logic: Submit interrupt URB, re-submit on completion
+                - Tests: integration (continuous input polling)
+                - Docs: `usb_hid.4`
+                - Acceptance: Events received continuously
+        - [ ] **Mass Storage (MSC):**
+            - [ ] Implement Bulk-Only Transport (BOT) state machine.
+                - Files: `sys/drivers/usb/usb_storage.c` (new), `sys/drivers/usb/usb_storage.h` (new)
+                - States: COMMAND, DATA, STATUS, RESET
+                - Tests: integration (full command sequence)
+                - Docs: `usb_storage.4`
+                - Acceptance: BOT protocol works
+            - [ ] Implement Command Block Wrapper (CBW) construction.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Fields: dCBWSignature, dCBWTag, dCBWDataTransferLength, bmCBWFlags, bCBWLUN, bCBWCBLength, CBWCB
+                - Tests: unit (CBW format correct)
+                - Docs: `usb_storage.4`
+                - Acceptance: CBW accepted by device
+            - [ ] Implement Command Status Wrapper (CSW) parsing.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Fields: dCSWSignature, dCSWTag, dCSWDataResidue, bCSWStatus
+                - Status: PASSED, FAILED, PHASE_ERROR
+                - Tests: unit (CSW parsing, error handling)
+                - Docs: `usb_storage.4`
+                - Acceptance: CSW correctly interpreted
+            - [ ] Implement bulk data transfer (IN/OUT).
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Logic: Submit bulk URBs for data phase
+                - Tests: integration (read/write data)
+                - Docs: `usb_storage.4`
+                - Acceptance: Data transferred correctly
+            - [ ] Implement BOT reset recovery.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Logic: Bulk-Only Mass Storage Reset, Clear Feature HALT
+                - Tests: integration (recovery from stall)
+                - Docs: `usb_storage.4`
+                - Acceptance: Device recovers after error
+            - [ ] Integrate with SCSI mid-layer.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - API: Implement scsi_link_t execute callback
+                - Logic: Wrap SCSI CDBs in CBW, parse CSW status
+                - Tests: integration (SCSI INQUIRY via USB)
+                - Docs: `usb_storage.4`
+                - Acceptance: USB storage appears as SCSI device
+        - [ ] **CDC-ACM (Communications Device Class - Abstract Control Model):**
+            - [ ] Implement CDC functional descriptor parsing.
+                - Files: `sys/drivers/usb/cdc_acm.c` (new)
+                - Descriptors: Header, Call Management, ACM, Union
+                - Tests: unit (descriptor parsing)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Functional descriptors understood
+            - [ ] Implement SET_LINE_CODING.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Fields: dwDTERate, bCharFormat, bParityType, bDataBits
+                - Tests: unit (baud rate setting)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Line coding sent
+            - [ ] Implement GET_LINE_CODING.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Tests: unit (retrieve current settings)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Settings retrieved
+            - [ ] Implement SET_CONTROL_LINE_STATE.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Signals: DTR, RTS
+                - Tests: unit (control signals set)
+                - Docs: `cdc_acm.4`
+                - Acceptance: DTR/RTS toggled
+            - [ ] Implement serial notification handling.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Notifications: SERIAL_STATE (DCD, DSR, RI, break, framing error)
+                - Tests: integration (notifications received)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Modem signals reported
+            - [ ] Integrate with TTY subsystem.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Logic: Register as /dev/ttyUSBN, implement tty_ldisc operations
+                - Tests: integration (cat /dev/ttyUSB0 works)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Serial device usable
+- [ ] **Audio Subsystem:**
+    - [ ] **Native API (Sun/NetBSD AudioIO):**
+        - [ ] **Device Nodes:**
+            - [ ] Create `/dev/audio` character device.
+                - Files: `sys/drivers/audio/audio.c` (new), `sys/drivers/audio/audio.h` (new)
+                - Mode: Read/write, supports playback and recording
+                - Tests: integration (open /dev/audio for playback)
+                - Docs: `audio.4`
+                - Acceptance: Device node accessible
+            - [ ] Create `/dev/audioctl` control-only device.
+                - Files: `sys/drivers/audio/audio.c`
+                - Mode: ioctl only, no read/write data
+                - Tests: unit (ioctl works, read/write fails)
+                - Docs: `audio.4`
+                - Acceptance: Control-only access
+            - [ ] Create `/dev/mixer` mixer device.
+                - Files: `sys/drivers/audio/mixer.c` (new)
+                - Mode: ioctl for volume/source control
+                - Tests: integration (mixer ioctls work)
+                - Docs: `mixer.4`
+                - Acceptance: Mixer accessible
+        - [ ] **`audio_info_t` Structure:**
+            - [ ] Define `audio_info_t` encapsulating audio parameters.
+                - Files: `sys/drivers/audio/audio.h`
+                - Fields: `play` (audio_prinfo_t), `record` (audio_prinfo_t), `monitor_gain`, `blocksize`
+                - Subfields: sample_rate, channels, precision, encoding, gain, port, buffer_size
+                - Tests: unit (struct layout, initialization)
+                - Docs: `audio_info.9`
+                - Acceptance: Structure defined per NetBSD/Sun spec
+            - [ ] Define `AUDIO_ENCODING_*` constants.
+                - Files: `sys/drivers/audio/audio.h`
+                - Values: ULAW, ALAW, PCM8, PCM16, PCM24, PCM32
+                - Tests: unit (encoding constants defined)
+                - Docs: `audio_encoding.9`
+                - Acceptance: Encoding types enumerated
+        - [ ] **Audio Ioctls:**
+            - [ ] Implement `AUDIO_GETINFO` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Return current audio_info_t settings
+                - Tests: unit (getinfo returns valid data)
+                - Docs: `audio.4`
+                - Acceptance: Current settings retrieved
+            - [ ] Implement `AUDIO_SETINFO` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Set audio parameters (sample rate, channels, encoding)
+                - Logic: Validate parameters, reconfigure hardware
+                - Tests: unit (setinfo success, invalid params rejected)
+                - Docs: `audio.4`
+                - Acceptance: Parameters applied to hardware
+            - [ ] Implement `AUDIO_DRAIN` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Block until playback buffer empty
+                - Tests: integration (drain waits for playback)
+                - Docs: `audio.4`
+                - Acceptance: Returns after buffers drained
+            - [ ] Implement `AUDIO_FLUSH` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Discard buffered data, reset pointers
+                - Tests: unit (flush clears buffers)
+                - Docs: `audio.4`
+                - Acceptance: Buffers emptied immediately
+            - [ ] Implement `AUDIO_GETDEV` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Return audio device name/version
+                - Tests: unit (device info returned)
+                - Docs: `audio.4`
+                - Acceptance: Correct device info
+    - [ ] **Driver Implementation:**
+        - [ ] **Circular DMA Buffers:**
+            - [ ] Implement ring buffer management.
+                - Files: `sys/drivers/audio/audio_ring.c` (new)
+                - Structure: Read/write pointers, buffer size, highwater/lowwater marks
+                - Tests: unit (wrap-around, overflow detection, underrun detection)
+                - Docs: `audio_ring.9`
+                - Acceptance: Ring buffer operational
+            - [ ] Implement DMA descriptor chain setup.
+                - Files: `sys/drivers/audio/audio_dma.c` (new)
+                - Logic: Scatter-gather DMA for continuous playback
+                - Tests: integration (continuous audio without gaps)
+                - Docs: `audio_dma.9`
+                - Acceptance: Gapless playback
+            - [ ] Implement buffer interrupt handling.
+                - Files: `sys/drivers/audio/audio_dma.c`
+                - Logic: Refill/drain buffers on DMA completion interrupt
+                - Tests: integration (interrupts keep stream running)
+                - Docs: `audio_dma.9`
+                - Acceptance: Stable interrupt-driven I/O
+        - [ ] **Mixer:**
+            - [ ] Implement `MIXER_READ` ioctl.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Channels: VOLUME, BASS, TREBLE, SYNTH, PCM, SPEAKER, LINE, MIC, CD
+                - Tests: unit (read each channel)
+                - Docs: `mixer.4`
+                - Acceptance: Channel levels retrieved
+            - [ ] Implement `MIXER_WRITE` ioctl.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Logic: Set left/right channel levels (0-100 scale)
+                - Tests: unit (write each channel)
+                - Docs: `mixer.4`
+                - Acceptance: Channel levels set
+            - [ ] Implement mute control.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Logic: Toggle mute per channel
+                - Tests: unit (mute on/off)
+                - Docs: `mixer.4`
+                - Acceptance: Mute works
+            - [ ] Implement source selection.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Sources: Mic, Line In, CD, Aux
+                - Tests: unit (source switch)
+                - Docs: `mixer.4`
+                - Acceptance: Recording source selectable
+        - [ ] **AC97 Codec:**
+            - [ ] Implement AC97 register read/write.
+                - Files: `sys/drivers/audio/ac97.c` (new), `sys/drivers/audio/ac97.h` (new)
+                - Registers: Master Volume, PCM Out Volume, Record Select, Reset, etc.
+                - Tests: unit (register access)
+                - Docs: `ac97.4`
+                - Acceptance: Codec registers accessible
+            - [ ] Implement AC97 codec detection.
+                - Files: `sys/drivers/audio/ac97.c`
+                - Logic: Read Vendor ID registers, detect codec type
+                - Tests: integration (codec detected in QEMU)
+                - Docs: `ac97.4`
+                - Acceptance: Codec identified
+            - [ ] Implement AC97 mixer integration.
+                - Files: `sys/drivers/audio/ac97.c`
+                - Logic: Map mixer ioctls to AC97 registers
+                - Tests: integration (mixer controls AC97 volumes)
+                - Docs: `ac97.4`
+                - Acceptance: Mixer controls codec
+            - [ ] Implement AC97 link controller interface.
+                - Files: `sys/drivers/audio/ac97.c`
+                - Logic: Timing for codec register access via link
+                - Tests: unit (link timing correct)
+                - Docs: `ac97.4`
+                - Acceptance: Stable codec communication
+        - [ ] **Intel High Definition Audio (HDA):**
+            - [ ] Implement HDA controller register access.
+                - Files: `sys/drivers/audio/hda.c` (new), `sys/drivers/audio/hda.h` (new)
+                - Registers: GCAP, VMIN, VMAJ, GCTL, WAKEEN, STATESTS, CORB*, RIRB*, Stream Descriptors
+                - Tests: integration (controller detected)
+                - Docs: `hda.4`
+                - Acceptance: HDA controller accessible
+            - [ ] Implement CORB (Command Output Ring Buffer) setup.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Allocate CORB memory, set CORBLBASE/CORBUBASE, enable
+                - Tests: unit (CORB operational)
+                - Docs: `hda.4`
+                - Acceptance: Commands can be sent
+            - [ ] Implement RIRB (Response Input Ring Buffer) setup.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Allocate RIRB memory, set RIRBLBASE/RIRBUBASE, enable
+                - Tests: unit (RIRB receives responses)
+                - Docs: `hda.4`
+                - Acceptance: Responses received
+            - [ ] Implement codec enumeration.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Read STATESTS, probe codec addresses 0-14
+                - Tests: integration (codec detected)
+                - Docs: `hda.4`
+                - Acceptance: Codec found
+            - [ ] Implement widget parsing.
+                - Files: `sys/drivers/audio/hda_codec.c` (new)
+                - Logic: Get Parameter verb to read widget types, connections
+                - Widgets: Audio Output, Audio Input, Audio Mixer, Audio Selector, Pin Complex
+                - Tests: unit (widget graph parsed)
+                - Docs: `hda.4`
+                - Acceptance: Audio path discovered
+            - [ ] Implement Stream Descriptor setup.
+                - Files: `sys/drivers/audio/hda.c`
+                - Registers: SDnCTL, SDnSTS, SDnLPIB, SDnCBL, SDnLVI, SDnFMT, SDnBDPL/U
+                - Logic: Configure stream format, buffer descriptor list
+                - Tests: integration (stream configured)
+                - Docs: `hda.4`
+                - Acceptance: Stream ready for data
+            - [ ] Implement Buffer Descriptor List (BDL) management.
+                - Files: `sys/drivers/audio/hda.c`
+                - Structure: Array of (address, length, IOC) entries
+                - Logic: Scatter-gather DMA for audio data
+                - Tests: unit (BDL wrap, IOC interrupts)
+                - Docs: `hda.4`
+                - Acceptance: Audio data transferred
+            - [ ] Implement stream interrupt handling.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Buffer completion, underrun/overrun detection
+                - Tests: integration (continuous playback via interrupts)
+                - Docs: `hda.4`
+                - Acceptance: Stable audio playback
+    
+- [ ] **Power Management (ACPI):**
+    - [ ] **ACPICA:** Port Intel ACPICA or write custom AML parser.
+    - [ ] **States:**
+        - [ ] System Shutdown (`S5`)
+        - [ ] Reboot
+
+### 11. Build System & Packaging
+- [ ] **Kernel Image Formats:**
+    - [ ] **zImage Support:**
+        - [ ] Standard Linux-compatible zImage header (magic, entry point, size).
+        - [ ] Flat binary generation (`objcopy -O binary`).
+        - [ ] Bootloader compatibility (QEMU `-kernel` or U-Boot `bootz`).
+        - [ ] Piggybacked initrd support (if applicable).
+
+### 12. Continuous Directives
+> [!IMPORTANT]
+> These are not one-off tasks but ongoing directives to be performed regularly.
+
+- [ ] **Documentation Maintenance:**
+    - [ ] **`ARCHITECTURE.md`:** Update whenever major structural changes or design decisions are made.
+    - [ ] **`AGENTS.md` / `GEMINI.md`:** Update to reflect current project status, context, and new capabilities.
+    - [x] **Temporary component tasklists policy:** For active deep work, keep temporary `TASKLIST_*.md` files inside the owning component directory (for example `usr.bin/as/`, `usr.bin/ld/`, `usr.lib/elf/`). Do not track these in `ARCHITECTURE.md`; remove each tasklist when completed.
+- [ ] **Testing & Quality:**
+    - [ ] **Regression Tests:** Ensure `make test` (or equivalent) passes before committing.
+    - [ ] **Code Style:** adhere to kernel coding standards (KNF/Linux-style).
+
+
+### 13. Bus Enumeration & Driver Model
+
+> [!NOTE]
+> Enterprise-grade device driver model and bus enumeration framework.
+> Each checklist item is implementable as a single commit (code + tests + docs).
+
+#### 13.1. Kernel Driver Model & Device Lifecycle
+
+- [x] **Core Data Structures (Headers):**
+    - [x] Define `struct device` in `sys/kern/device.h`.
+        - Note: Implemented struct device with hierarchical and resource fields.
+        - Files: `sys/kern/device.h` (new)
+        - Fields: `vendor_id`, `device_id`, `class`, `subclass`, `progif`, `serial[32]`, `guid[16]`, `parent`, `children`, `resources`, `power_state`, `ref_count`, `driver`, `bus`, `flags`
+        - Tests: unit (struct layout, alignment)
+        - Docs: `device.9` manpage
+        - Acceptance: Header compiles, struct size verified
+    - [x] Define `struct driver` in `sys/kern/driver.h`.
+        - Note: Implemented struct driver with full lifecycle callbacks and bus binding.
+        - Files: `sys/kern/driver.h` (new)
+        - Fields: `name`, `bus_type`, `id_table`, `probe`, `attach`, `detach`, `suspend`, `resume`, `shutdown`, `reset`, `match_func`, `priority`, `flags`
+        - Tests: unit (callback signature validation)
+        - Docs: `driver.9` manpage
+        - Acceptance: Header compiles, all callbacks defined
+    - [x] Define `struct bus_type` in `sys/kern/bus.h`.
+        - Note: Implemented struct bus_type with device/driver lists and spinlock protection.
+        - Files: `sys/kern/bus.h` (new)
+        - Fields: `name`, `match`, `probe`, `remove`, `devices_list`, `drivers_list`, `lock`
+        - Tests: unit (struct layout)
+        - Docs: `bus.9` manpage
+        - Acceptance: Header compiles with list/lock fields
+    - [x] Define `struct resource` in `sys/kern/resource.h`.
+        - Note: Implemented struct resource with types, hierarchy, and static inline overlap helpers.
+        - Files: `sys/kern/resource.h` (new)
+        - Types: `RES_IO`, `RES_MEM`, `RES_IRQ`, `RES_DMA`
+        - Fields: `type`, `start`, `end`, `flags`, `parent`, `children`, `owner`
+        - Tests: unit (range overlap detection helpers)
+        - Docs: `resource.9` manpage
+        - Acceptance: Resource types enumerated, range helpers compile
+
+- [ ] **Device Registration API:**
+    - [x] Implement `device_create()` allocator.
+        - Note: Implemented device_create with name storage, parent linking, and refcount initialization.
+        - Files: `sys/kern/device.c` (new)
+        - API: `device_t *device_create(const char *name, device_t *parent)`
+        - Tests: unit (allocation, parent linking, refcount init)
+        - Docs: `device_create.9`
+        - Acceptance: Returns valid device, parent->children updated
+    - [x] Implement `device_register()` into bus.
+        - Note: Implemented device_register with duplicate pointer/name detection and spinlock protection.
+        - Files: `sys/kern/device.c`
+        - API: `int device_register(device_t *dev, bus_type_t *bus)`
+        - Tests: unit (bus list insertion, duplicate detection)
+        - Docs: `device_register.9`
+        - Acceptance: Device appears in bus->devices_list
+    - [x] Implement `device_unregister()` removal.
+        - Note: Implemented device_unregister with safe bus detachment, parent list removal, and child orphaning.
+        - Files: `sys/kern/device.c`
+        - API: `int device_unregister(device_t *dev)`
+        - Tests: unit (list removal, children orphaning check)
+        - Docs: `device_unregister.9`
+        - Acceptance: Device removed, children handled
+    - [x] Implement `device_get()` / `device_put()` refcounting.
+        - Note: Implemented device_get/device_put with kfree on zero refcount.
+        - Files: `sys/kern/device.c`
+        - API: `void device_get(device_t *dev)`, `void device_put(device_t *dev)`
+        - Tests: unit (refcount increment/decrement, free on zero)
+        - Docs: `device_refcount.9`
+        - Acceptance: Refcount properly tracks, frees at zero
+    - [x] Implement `device_find_child()` lookup.
+        - Note: Implemented device_find_child by iterating parent's sibling list.
+        - Files: `sys/kern/device.c`
+        - API: `device_t *device_find_child(device_t *parent, const char *name)`
+        - Tests: unit (find existing, not found cases)
+        - Docs: `device_find_child.9`
+        - Acceptance: Returns correct child or NULL
+
+- [ ] **Driver Registration API:**
+    - [x] Implement `driver_register()`.
+        - Note: Implemented driver_register with duplicate detection and probe auto-trigger.
+        - Files: `sys/kern/driver.c` (new)
+        - API: `int driver_register(driver_t *drv, bus_type_t *bus)`
+        - Tests: unit (registration, probe auto-trigger on existing devices)
+        - Docs: `driver_register.9`
+        - Acceptance: Driver in bus->drivers_list, probes called
+    - [x] Implement `driver_unregister()`.
+        - Note: Implemented driver_unregister which detaches devices and removes driver from bus.
+        - Files: `sys/kern/driver.c`
+        - API: `int driver_unregister(driver_t *drv)`
+        - Tests: unit (detach all bound devices, list removal)
+        - Docs: `driver_unregister.9`
+        - Acceptance: All devices detached, driver removed
+    - [x] Implement `driver_attach()` binding.
+        - Files: `sys/kern/driver.c`
+        - API: `int driver_attach(driver_t *drv, device_t *dev)`
+        - Tests: unit (successful attach, already-bound rejection)
+        - Docs: `driver_attach.9`
+        - Acceptance: dev->driver set, attach() callback invoked
+    - [x] Implement `driver_detach()` unbinding.
+        - Files: `sys/kern/driver.c`
+        - API: `int driver_detach(device_t *dev)`
+        - Tests: unit (detach callback, driver pointer cleared)
+        - Docs: `driver_detach.9`
+        - Acceptance: detach() called, dev->driver = NULL
+
+- [ ] **Matching and Binding Logic:**
+    - [x] Implement `bus_match_device()` generic matcher.
+        - Files: `sys/kern/bus.c` (new)
+        - API: `driver_t *bus_match_device(bus_type_t *bus, device_t *dev)`
+        - Logic: Iterate drivers, call match() or compare id_table, return highest priority match
+        - Tests: unit (exact match, class match, priority ordering)
+        - Docs: `bus_match.9`
+        - Acceptance: Correct driver selected by priority
+    - [x] Implement ID table matching for vendor/device/class.
+        - Files: `sys/kern/bus.c`
+        - API: `int bus_id_match(const device_id_t *id, device_t *dev)`
+        - Wildcards: 0xFFFF for any vendor/device, class mask support
+        - Tests: unit (wildcard match, specific match, no match)
+        - Docs: `bus_id_match.9`
+        - Acceptance: Wildcard and specific IDs match correctly
+    - [x] Implement `compatible` string matching (DT/ACPI style).
+        - Files: `sys/kern/bus.c`
+        - API: `int bus_compatible_match(const char *compat, device_t *dev)`
+        - Tests: unit (exact string, multi-value compat)
+        - Docs: `bus_compatible_match.9`
+        - Acceptance: String list matching works
+    - [ ] Implement driver blacklist/override mechanism.
+        - Files: `sys/kern/driver.c`
+        - API: `void driver_blacklist_add(const char *name)`, `void driver_override(device_t *dev, const char *name)`
+        - Tests: unit (blacklisted driver skipped, override forces binding)
+        - Docs: `driver_override.9`
+        - Acceptance: Blacklist prevents probe, override forces it
+
+- [ ] **Device Lifecycle Callbacks:**
+    - [ ] Implement `device_probe()` wrapper with error handling.
+        - Files: `sys/kern/device.c`
+        - API: `int device_probe(device_t *dev)`
+        - Logic: Find matching driver, call probe(), handle deferred probe
+        - Tests: unit (success, failure, -EDEFER handling)
+        - Docs: `device_probe.9`
+        - Acceptance: Probe succeeds or defers correctly
+    - [ ] Implement deferred probe queue.
+        - Files: `sys/kern/device.c`
+        - API: `void device_defer_probe(device_t *dev)`, `void device_retry_deferred(void)`
+        - Tests: unit (defer adds to queue, retry re-probes)
+        - Docs: `deferred_probe.9`
+        - Acceptance: Deferred devices re-probed after dependencies ready
+    - [ ] Implement `device_suspend()` / `device_resume()`.
+        - Files: `sys/kern/device.c`
+        - API: `int device_suspend(device_t *dev, pm_state_t state)`, `int device_resume(device_t *dev)`
+        - Logic: Call driver callbacks, handle parent-child ordering
+        - Tests: unit (suspend children first, resume parents first)
+        - Docs: `device_pm.9`
+        - Acceptance: PM ordering correct, callbacks invoked
+    - [ ] Implement `device_shutdown()` callback.
+        - Files: `sys/kern/device.c`
+        - API: `void device_shutdown(device_t *dev)`
+        - Tests: unit (shutdown callback invoked)
+        - Docs: `device_shutdown.9`
+        - Acceptance: All devices shutdown on system halt
+    - [ ] Implement `device_reset()` callback.
+        - Files: `sys/kern/device.c`
+        - API: `int device_reset(device_t *dev)`
+        - Tests: unit (reset callback, device state cleared)
+        - Docs: `device_reset.9`
+        - Acceptance: Device reset to initial state
+
+- [ ] **Refactor Existing Drivers:**
+    - [ ] Refactor `ide.c` to use new driver model.
+        - Files: `sys/drivers/storage/ide/ide.c`
+        - Changes: Register as PCI driver, use device_t for state.
+        - Note: Ensure ISA-based IDE (e.g., SB16 PnP secondary channels) allows for non-PCI attachment.
+        - Tests: integration (IDE still works after refactor)
+        - Docs: Update ide.4 manpage
+        - Acceptance: IDE enumerated via PCI bus, same functionality
+    - [ ] Refactor `virtio_blk.c` to use new driver model.
+        - Files: `sys/drivers/virtio/virtio_blk.c`
+        - Changes: Register as PCI driver with VirtIO vendor/device IDs
+        - Tests: integration (VirtIO block still works)
+        - Docs: Update virtio.4 manpage
+        - Acceptance: VirtIO devices bound via driver model
+
+---
+
+#### 13.2. PCI / PCIe Enumerator
+
+- [ ] **PCI Config Space Access:**
+    - [ ] Implement `pci_read_config8/16/32()` primitives.
+        - Files: `sys/arch/i386/pci.c`, `sys/kern/pci.h`
+        - API: `uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset)`
+        - Tests: unit (known device read, boundary checks)
+        - Docs: `pci_config.9`
+        - Acceptance: Reads correct values from QEMU PCI devices
+    - [ ] Implement `pci_write_config8/16/32()` primitives.
+        - Files: `sys/arch/i386/pci.c`
+        - API: `void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val)`
+        - Tests: unit (write and readback verification)
+        - Docs: `pci_config.9`
+        - Acceptance: Written values persist
+    - [ ] Implement MMIO config access for PCIe (ECAM).
+        - Files: `sys/arch/i386/pci.c`
+        - API: `void *pci_ecam_map(uint16_t segment, uint8_t bus, uint8_t slot, uint8_t func)`
+        - Tests: integration (PCIe extended config access)
+        - Docs: `pci_ecam.9`
+        - Acceptance: Extended config space accessible
+
+- [ ] **Bus Enumeration:**
+    - [ ] Implement `pci_scan_bus()` recursive scanner.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_scan_bus(uint8_t bus)`
+        - Logic: Iterate slots 0-31, functions 0-7, detect multifunction
+        - Tests: unit (empty bus, populated bus, multifunction device)
+        - Docs: `pci_scan.9`
+        - Acceptance: All QEMU PCI devices discovered
+    - [ ] Implement bridge detection and subordinate bus scan.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_scan_bridge(pci_device_t *bridge)`
+        - Tests: integration (PCI-to-PCI bridge hierarchy)
+        - Docs: `pci_bridge.9`
+        - Acceptance: Devices behind bridges discovered
+    - [ ] Implement `pci_device_t` creation and registration.
+        - Files: `sys/kern/pci.c`
+        - API: `pci_device_t *pci_device_create(uint8_t bus, uint8_t slot, uint8_t func)`
+        - Tests: unit (device struct populated correctly)
+        - Docs: `pci_device.9`
+        - Acceptance: Device registered with driver model
+
+- [ ] **BAR Parsing and Resource Allocation:**
+    - [ ] Implement BAR type detection (I/O vs MMIO, 32/64-bit).
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_bar_type(pci_device_t *dev, int bar)`
+        - Tests: unit (I/O BAR, 32-bit MMIO, 64-bit MMIO)
+        - Docs: `pci_bar.9`
+        - Acceptance: Correctly identifies BAR types
+    - [ ] Implement BAR size probing.
+        - Files: `sys/kern/pci.c`
+        - API: `size_t pci_bar_size(pci_device_t *dev, int bar)`
+        - Tests: unit (known device BAR sizes)
+        - Docs: `pci_bar.9`
+        - Acceptance: Correct sizes reported
+    - [ ] Implement `pci_request_region()` resource reservation.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_request_region(pci_device_t *dev, int bar, const char *name)`
+        - Tests: unit (reservation, conflict detection)
+        - Docs: `pci_request_region.9`
+        - Acceptance: Region reserved, conflict returns error
+    - [ ] Implement `pci_iomap()` MMIO mapping.
+        - Files: `sys/kern/pci.c`
+        - API: `void *pci_iomap(pci_device_t *dev, int bar, size_t max_len)`
+        - Tests: unit (map and read test pattern)
+        - Docs: `pci_iomap.9`
+        - Acceptance: Returns valid mapped pointer
+
+- [ ] **Capability List Parsing:**
+    - [ ] Implement capability list walker.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_find_capability(pci_device_t *dev, uint8_t cap_id)`
+        - Tests: unit (find MSI, find PM, not found)
+        - Docs: `pci_find_capability.9`
+        - Acceptance: Returns offset of capability
+    - [ ] Implement extended capability walker (PCIe).
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_find_ext_capability(pci_device_t *dev, uint16_t cap_id)`
+        - Tests: unit (find AER, find SR-IOV)
+        - Docs: `pci_find_ext_capability.9`
+        - Acceptance: Extended capabilities found
+
+- [ ] **Interrupt Support:**
+    - [ ] Implement legacy PCI interrupt routing.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_get_irq(pci_device_t *dev)`
+        - Tests: integration (IRQ matches expected)
+        - Docs: `pci_irq.9`
+        - Acceptance: Correct IRQ returned
+    - [ ] Implement MSI capability setup.
+        - Files: `sys/kern/pci_msi.c` (new)
+        - API: `int pci_enable_msi(pci_device_t *dev)`, `int pci_disable_msi(pci_device_t *dev)`
+        - Tests: integration (MSI interrupt fires)
+        - Docs: `pci_msi.9`
+        - Acceptance: MSI interrupts work
+    - [ ] Implement MSI-X capability setup.
+        - Files: `sys/kern/pci_msi.c`
+        - API: `int pci_enable_msix(pci_device_t *dev, int nvec)`
+        - Tests: integration (MSI-X with multiple vectors)
+        - Docs: `pci_msix.9`
+        - Acceptance: Multiple MSI-X vectors work
+
+- [ ] **Hotplug Support:**
+    - [ ] Implement PCI hotplug event detection.
+        - Files: `sys/kern/pci_hotplug.c` (new)
+        - API: `void pci_hotplug_poll(void)`
+        - Tests: integration (QEMU hotplug simulation)
+        - Docs: `pci_hotplug.9`
+        - Acceptance: Hotplug events detected
+    - [ ] Implement device add on hotplug.
+        - Files: `sys/kern/pci_hotplug.c`
+        - API: `int pci_hotplug_add(uint8_t bus, uint8_t slot)`
+        - Tests: integration (device added, driver bound)
+        - Docs: `pci_hotplug.9`
+        - Acceptance: Device usable after hotplug
+    - [ ] Implement device remove on hotplug.
+        - Files: `sys/kern/pci_hotplug.c`
+        - API: `int pci_hotplug_remove(pci_device_t *dev)`
+        - Tests: integration (device removed cleanly)
+        - Docs: `pci_hotplug.9`
+        - Acceptance: Resources freed, no crashes
+
+---
+
+#### 13.3. ISA Plug-and-Play Enumerator
+
+- [ ] **ISA-PnP Protocol:**
+    - [ ] Implement ISA-PnP isolation protocol.
+        - Files: `sys/kern/isapnp.c` (new), `sys/kern/isapnp.h` (new)
+        - API: `int isapnp_isolate(void)`
+        - Tests: unit (protocol state machine)
+        - Docs: `isapnp.9`
+        - Acceptance: Cards isolated and CSN assigned
+    - [ ] Implement resource descriptor parsing.
+        - Files: `sys/kern/isapnp.c`
+        - API: `int isapnp_read_resources(uint8_t csn, isapnp_device_t *dev)`
+        - Tests: unit (parse IO, IRQ, DMA, MEM descriptors)
+        - Docs: `isapnp_resources.9`
+        - Acceptance: All resource types parsed
+    - [ ] Implement resource assignment/activation.
+        - Files: `sys/kern/isapnp.c`
+        - API: `int isapnp_activate(isapnp_device_t *dev)`
+        - Tests: integration (card activated)
+        - Docs: `isapnp_activate.9`
+        - Acceptance: Card responds at assigned resources
+
+- [ ] **Legacy ISA Probing:**
+    - [ ] Implement legacy ISA device table.
+        - Files: `sys/kern/isa.c` (new)
+        - API: `void isa_probe_legacy(void)`
+        - Tests: unit (probe returns present devices)
+        - Docs: `isa_legacy.9`
+        - Acceptance: Standard ports probed
+    - [ ] Implement port liveness detection.
+        - Files: `sys/kern/isa.c`
+        - API: `int isa_port_alive(uint16_t port)`
+        - Tests: unit (present vs absent ports)
+        - Docs: `isa_port_alive.9`
+        - Acceptance: Distinguishes active from dead ports
+
+---
+
+#### 13.4. USB Host-Side Enumerator
+
+- [ ] **Host Controller Abstraction:**
+    - [ ] Define `struct usb_hcd` HCD abstraction.
+        - Files: `sys/kern/usb/usb_hcd.h` (new)
+        - Tests: unit (struct layout)
+        - Docs: `usb_hcd.9`
+        - Acceptance: Abstraction compiles
+    - [ ] Define `struct urb` USB Request Block.
+        - Files: `sys/kern/usb/urb.h` (new)
+        - Tests: unit (field access)
+        - Docs: `urb.9`
+        - Acceptance: URB struct defined
+
+- [ ] **UHCI Driver:**
+    - [ ] Implement UHCI register access.
+        - Files: `sys/drivers/usb/uhci.c` (new)
+        - Tests: integration (register read from QEMU UHCI)
+        - Docs: `uhci.4`
+        - Acceptance: Controller detected
+    - [ ] Implement UHCI frame list setup.
+        - Files: `sys/drivers/usb/uhci.c`
+        - Tests: integration (frame list operational)
+        - Docs: `uhci.4`
+        - Acceptance: HC starts processing
+    - [ ] Implement UHCI transfer descriptor handling.
+        - Files: `sys/drivers/usb/uhci.c`
+        - Tests: integration (control transfer completes)
+        - Docs: `uhci.4`
+        - Acceptance: GET_DESCRIPTOR works
+
+- [ ] **OHCI Driver:**
+    - [ ] Implement OHCI register access.
+        - Files: `sys/drivers/usb/ohci.c` (new)
+        - Tests: integration (register read)
+        - Docs: `ohci.4`
+        - Acceptance: Controller detected
+    - [ ] Implement OHCI HCCA and ED/TD setup.
+        - Files: `sys/drivers/usb/ohci.c`
+        - Tests: integration (lists operational)
+        - Docs: `ohci.4`
+        - Acceptance: HC starts
+    - [ ] Implement OHCI transfer handling.
+        - Files: `sys/drivers/usb/ohci.c`
+        - Tests: integration (control transfer)
+        - Docs: `ohci.4`
+        - Acceptance: Transfers complete
+
+- [ ] **EHCI Driver:**
+    - [ ] Implement EHCI capability and operational register access.
+        - Files: `sys/drivers/usb/ehci.c` (new)
+        - Tests: integration (register read)
+        - Docs: `ehci.4`
+        - Acceptance: Controller detected
+    - [ ] Implement EHCI async schedule (QH/qTD).
+        - Files: `sys/drivers/usb/ehci.c`
+        - Tests: integration (async schedule active)
+        - Docs: `ehci.4`
+        - Acceptance: Async active bit set
+    - [ ] Implement EHCI periodic schedule.
+        - Files: `sys/drivers/usb/ehci.c`
+        - Tests: integration (periodic schedule)
+        - Docs: `ehci.4`
+        - Acceptance: Periodic transfers work
+    - [ ] Implement EHCI transfer handling.
+        - Files: `sys/drivers/usb/ehci.c`
+        - Tests: integration (bulk/control/interrupt)
+        - Docs: `ehci.4`
+        - Acceptance: All transfer types work
+
+- [ ] **xHCI Driver:**
+    - [ ] Implement xHCI capability structure parsing.
+        - Files: `sys/drivers/usb/xhci.c` (new)
+        - Tests: integration (register read)
+        - Docs: `xhci.4`
+        - Acceptance: Controller caps parsed
+    - [ ] Implement xHCI ring management.
+        - Files: `sys/drivers/usb/xhci.c`
+        - Tests: unit (ring wrap, link handling)
+        - Docs: `xhci.4`
+        - Acceptance: Rings operational
+    - [ ] Implement xHCI device context management.
+        - Files: `sys/drivers/usb/xhci.c`
+        - Tests: integration (device addressed)
+        - Docs: `xhci.4`
+        - Acceptance: Device slot allocated
+    - [ ] Implement xHCI transfer handling.
+        - Files: `sys/drivers/usb/xhci.c`
+        - Tests: integration (all transfer types)
+        - Docs: `xhci.4`
+        - Acceptance: Transfers complete
+
+- [ ] **USB Core Enumeration:**
+    - [ ] Implement USB device state machine.
+        - Files: `sys/kern/usb/usb_core.c` (new)
+        - Tests: integration (device enumerated)
+        - Docs: `usb_core.9`
+        - Acceptance: Device reaches CONFIGURED
+    - [ ] Implement SET_ADDRESS control transfer.
+        - Files: `sys/kern/usb/usb_core.c`
+        - Tests: integration (address assigned)
+        - Docs: `usb_set_address.9`
+        - Acceptance: Device responds at new address
+    - [ ] Implement descriptor parsing.
+        - Files: `sys/kern/usb/usb_desc.c` (new)
+        - Tests: unit (parse valid), fuzzer (malformed)
+        - Docs: `usb_descriptor.9`
+        - Acceptance: Descriptors parsed correctly
+    - [ ] Implement configuration selection.
+        - Files: `sys/kern/usb/usb_core.c`
+        - Tests: integration (configuration set)
+        - Docs: `usb_set_configuration.9`
+        - Acceptance: Device active
+
+- [ ] **USB Hub Driver:**
+    - [ ] Implement hub descriptor parsing.
+        - Files: `sys/drivers/usb/hub.c` (new)
+        - Tests: unit (hub descriptor fields)
+        - Docs: `usb_hub.4`
+        - Acceptance: Hub type/ports detected
+    - [ ] Implement port status change handling.
+        - Files: `sys/drivers/usb/hub.c`
+        - Tests: integration (device plug detected)
+        - Docs: `usb_hub.4`
+        - Acceptance: Port changes handled
+    - [ ] Implement port reset and device attachment.
+        - Files: `sys/drivers/usb/hub.c`
+        - Tests: integration (device enumerated after reset)
+        - Docs: `usb_hub.4`
+        - Acceptance: New device usable
+
+- [ ] **USB Mass Storage (SCSI Transport):**
+    - [ ] Implement Bulk-Only Transport (BOT) protocol.
+        - Files: `sys/drivers/usb/usb_storage.c` (new)
+        - Tests: integration (SCSI commands work)
+        - Docs: `usb_storage.4`
+        - Acceptance: Block device accessible
+    - [ ] Implement Command Block Wrapper (CBW) building.
+        - Files: `sys/drivers/usb/usb_storage.c`
+        - Tests: unit (CBW structure correct)
+        - Docs: `usb_storage.4`
+        - Acceptance: CBW sent successfully
+    - [ ] Implement Command Status Wrapper (CSW) parsing.
+        - Files: `sys/drivers/usb/usb_storage.c`
+        - Tests: unit (CSW parsing, error detection)
+        - Docs: `usb_storage.4`
+        - Acceptance: CSW parsed, errors detected
+    - [ ] Integrate with SCSI mid-layer.
+        - Files: `sys/drivers/usb/usb_storage.c`
+        - Tests: integration (SCSI enumeration via USB)
+        - Docs: `usb_storage.4`
+        - Acceptance: USB storage appears as SCSI device
+
+---
+
+#### 13.5. Resource Conflict Resolution & Arbitration
+
+- [ ] **Resource Manager Core:**
+    - [ ] Implement global resource tree.
+        - Files: `sys/kern/resource.c` (new)
+        - Tests: unit (root initialization)
+        - Docs: `resource.9`
+        - Acceptance: Root resources created
+    - [ ] Implement `request_region()` for I/O ports.
+        - Files: `sys/kern/resource.c`
+        - Tests: unit (allocation, conflict detection)
+        - Docs: `request_region.9`
+        - Acceptance: Region reserved or conflict reported
+    - [ ] Implement `release_region()`.
+        - Files: `sys/kern/resource.c`
+        - Tests: unit (release, reallocation)
+        - Docs: `release_region.9`
+        - Acceptance: Region freed
+    - [ ] Implement `request_mem_region()` for MMIO.
+        - Files: `sys/kern/resource.c`
+        - Tests: unit (MMIO allocation)
+        - Docs: `request_mem_region.9`
+        - Acceptance: MMIO regions tracked
+    - [ ] Implement `ioremap()` / `iounmap()`.
+        - Files: `sys/kern/ioremap.c` (new)
+        - Tests: unit (map/unmap, cached flags)
+        - Docs: `ioremap.9`
+        - Acceptance: MMIO accessible
+
+- [ ] **IRQ Allocation:**
+    - [ ] Implement `request_irq()`.
+        - Files: `sys/kern/irq.c` (new)
+        - Tests: unit (register, shared IRQ)
+        - Docs: `request_irq.9`
+        - Acceptance: Handler invoked on interrupt
+    - [ ] Implement `free_irq()`.
+        - Files: `sys/kern/irq.c`
+        - Tests: unit (free, shared unregister)
+        - Docs: `free_irq.9`
+        - Acceptance: Handler removed
+    - [ ] Implement shared interrupt handling.
+        - Files: `sys/kern/irq.c`
+        - Tests: integration (two drivers share IRQ)
+        - Docs: `irq_shared.9`
+        - Acceptance: Both handlers called
+
+- [ ] **DMA Mapping:**
+    - [ ] Implement `dma_map_single()`.
+        - Files: `sys/kern/dma.c` (new)
+        - Tests: unit (map returns valid address)
+        - Docs: `dma_map.9`
+        - Acceptance: DMA address returned
+    - [ ] Implement `dma_unmap_single()`.
+        - Files: `sys/kern/dma.c`
+        - Tests: unit (unmap)
+        - Docs: `dma_map.9`
+        - Acceptance: No leaks
+    - [ ] Implement `dma_alloc_coherent()`.
+        - Files: `sys/kern/dma.c`
+        - Tests: unit (allocation, alignment)
+        - Docs: `dma_alloc_coherent.9`
+        - Acceptance: Usable DMA buffer returned
+
+---
+
+#### 13.6. Hotplug, DevFS Integration & Power Management
+
+- [ ] **Device Notification System:**
+    - [ ] Implement kernel device event queue.
+        - Files: `sys/kern/kobject.c`
+        - Tests: unit (event generation)
+        - Docs: `kobject_uevent.9`
+        - Acceptance: Events queued
+    - [ ] Implement uevent socket for userspace.
+        - Files: `sys/kern/netlink_kobject_uevent.c` (new)
+        - Tests: integration (userspace receives events)
+        - Docs: `uevent.9`
+        - Acceptance: udev-compatible events
+
+- [ ] **DevFS Auto-Population:**
+    - [ ] Implement automatic device node creation on ADD.
+        - Files: `sys/fs/devfs.c`
+        - Tests: integration (device appears in /dev)
+        - Docs: `devfs_hotplug.9`
+        - Acceptance: Node created on device add
+    - [ ] Implement automatic device node removal on REMOVE.
+        - Files: `sys/fs/devfs.c`
+        - Tests: integration (device disappears from /dev)
+        - Docs: `devfs_hotplug.9`
+        - Acceptance: Node removed on device remove
+    - [ ] Implement persistent naming via device serial/GUID.
+        - Files: `sys/fs/devfs.c`
+        - Tests: integration (symlinks stable)
+        - Docs: `devfs_naming.9`
+        - Acceptance: Symlinks correct
+
+- [ ] **Power Management:**
+    - [ ] Implement system suspend orchestration.
+        - Files: `sys/kern/pm/suspend.c` (new)
+        - Tests: integration (suspend/resume cycle)
+        - Docs: `pm_suspend.9`
+        - Acceptance: System suspends and resumes
+    - [ ] Implement runtime PM hooks.
+        - Files: `sys/kern/device.c`
+        - Tests: unit (idle timeout)
+        - Docs: `pm_runtime.9`
+        - Acceptance: Device auto-suspends
+
+---
+
+#### 13.7. Diagnostics & Tools
+
+- [ ] **Device Listing Tools:**
+    - [ ] Implement `lspci` command.
+        - Files: `bin/lspci.c` (new)
+        - Tests: integration (output matches QEMU)
+        - Docs: `lspci.1`
+        - Acceptance: All PCI devices listed
+    - [ ] Implement `lsusb` command.
+        - Files: `bin/lsusb.c` (new)
+        - Tests: integration (output matches QEMU USB)
+        - Docs: `lsusb.1`
+        - Acceptance: All USB devices listed
+    - [ ] Implement kernel device tree dump.
+        - Files: `bin/devtree.c` (new)
+        - Tests: integration (shows device hierarchy)
+        - Docs: `devtree.1`
+        - Acceptance: Device tree displayed
+
+- [ ] **Debug Interfaces:**
+    - [ ] Implement `/proc/ioports`.
+        - Files: `sys/fs/procfs.c`
+        - Tests: integration (shows allocated regions)
+        - Docs: `proc.5`
+        - Acceptance: Accurate I/O port map
+    - [ ] Implement `/proc/iomem`.
+        - Files: `sys/fs/procfs.c`
+        - Tests: integration (shows MMIO regions)
+        - Docs: `proc.5`
+        - Acceptance: Accurate MMIO map
+    - [ ] Implement driver probe failure logging.
+        - Files: `sys/kern/driver.c`
+        - Tests: integration (failure reason in dmesg)
+        - Docs: `driver_debug.9`
+        - Acceptance: Probe failures explained
+
+---
+
+#### 13.8. Security & Migration
+
+- [ ] **Privilege Enforcement:**
+    - [ ] Restrict raw I/O access to privileged processes.
+        - Files: `sys/kern/resource.c`
+        - Tests: unit (unprivileged failure)
+        - Docs: `capabilities.7`
+        - Acceptance: Unprivileged access denied
+    - [ ] Implement device permission model for devfs.
+        - Files: `sys/fs/devfs.c`
+        - Tests: integration (permissions correct)
+        - Docs: `devfs_permissions.9`
+        - Acceptance: Correct permissions
+
+- [ ] **Migrate Existing Drivers:**
+    - [ ] Audit `pci.c` and migrate to new bus model.
+        - Files: `sys/arch/i386/pci.c`
+        - Tests: integration (PCI devices still work)
+        - Docs: Update developer guide
+        - Acceptance: Same devices discovered
+    - [ ] Audit VirtIO drivers and use pci_driver registration.
+        - Files: `sys/drivers/virtio/*.c`
+        - Tests: integration (VirtIO still works)
+        - Docs: Update virtio.4
+        - Acceptance: VirtIO bound via driver model
+    - [ ] Remove legacy detection code after migration.
+        - Files: Various drivers
+        - Tests: regression (no functionality lost)
+        - Docs: Migration notes
+        - Acceptance: Codebase cleaner, tests pass
+
+### 14. Native 64-bit Stat ABI Enforcement
+Reference: User Request (Step 30668)
+
+- [ ] **ABI Definition & Documentation:**
+    - [x] Define and document the canonical 64-bit `struct stat` and kernel syscall ABI.
+        - Files: `sys/include/sys/stat.h`, `sys/doc/abi.md`
+        - Tests: property (offsets/sizes verification)
+        - Docs: Developer guide, `stat.2`
+        - Acceptance: Single 64-bit definition in public header, ABI fully documented
+    - [ ] Create manpages for `stat(2)` explaining single-ABI policy.
+        - Files: `usr/man/man2/stat.2`
+        - Tests: doc validation
+        - Docs: `stat.2`
+        - Acceptance: Manpage documents 64-bit nature and usage
+
+- [ ] **LibC Updates:**
+    - [x] Update LibC `stat` wrappers to use canonical 64-bit ABI (all architectures).
+        - Files: `lib/c/src/sys.c`, `lib/c/include/sys/stat.h`
+        - Tests: unit (struct size validation on i386 and amd64)
+        - Docs: LibC internal docs
+        - Acceptance: Userspace calls map directly to 64-bit kernel structure
+    - [ ] Update `fstat`, `lstat`, `fstatat` to use 64-bit ABI.
+        - Files: `lib/c/src/sys.c`
+        - Tests: property (fd/path consistency)
+        - Docs: `fstat.2`, `lstat.2`
+        - Acceptance: All stat-family functions use new ABI
+
+- [ ] **Kernel Implementation:**
+    - [ ] Expose ONLY canonical 64-bit stat syscalls for native personality.
+        - Files: `sys/exec/perso/perso_native.c`, `sys/arch/i386/syscall.c`
+        - Tests: integration (strace confirms correct syscall usage)
+        - Docs: `native_abi.md`
+        - Acceptance: Native table has no legacy 32-bit stat entries
+    - [ ] Audit and remove "stub-like" stat implementations.
+        - Files: `sys/kern/vfs_syscalls.c` (or equivalent)
+        - Tests: unit (error handling, edge cases)
+        - Docs: Source comments
+        - Acceptance: Full implementation with robust error paths
+    - [ ] Add compatibility shims for non-native personalities (Linux/FreeBSD) only where needed.
+        - Files: `sys/exec/perso/perso_linux.c`, `sys/exec/perso/perso_freebsd.c`
+        - Tests: integration (compat shim translates correctly)
+        - Docs: Personality internal docs
+        - Acceptance: Foreign binaries work, native binaries use clean 64-bit path
+
+- [ ] **Testing & Verification:**
+    - [ ] Create ABI regression tools to assert field offsets and sizes.
+        - Files: `tests/abi/stat_test.c`
+        - Tests: property (offset assert)
+        - Docs: Test README
+        - Acceptance: Tool compiled and running on CI
+    - [ ] Property tests for large files, sparse files, and odd timestamps.
+        - Files: `tests/fs/stat_properties.c`
+        - Tests: property (fuzz inputs)
+        - Docs: Test plan
+        - Acceptance: Tests pass consistently
+    - [ ] Audit and listing of userland tools using `stat`.
+        - Files: `bin/*`
+        - Tests: N/A
+        - Docs: `audit_stat_users.md`
+        - Acceptance: all call sites identified
+    - [ ] Update userland tools to 64-bit stat.
+        - Files: `bin/ls.c`, `bin/tar.c`, etc.
+        - Tests: integration (ls -l correct output)
+        - Docs: N/A
+        - Acceptance: Tools built against new LibC
+
+- [ ] **CI & Tooling:**
+    - [ ] Update CI to build and test both 32-bit and 64-bit targets.
+        - Files: `Makefile`, `.github/workflows/ci.yml`
+        - Tests: CI pipeline
+        - Docs: CI Reference
+        - Acceptance: Both targets green, confirming 64-bit ABI works on 32-bit arch
+
+- [ ] **Extended 64-bit Sycall ABI (Beyond Stat):**
+    - [ ] Standardize `lseek` / `lseek64` to single 64-bit offset ABI.
+        - Files: `sys/arch/i386/syscall.c`
+        - Tests: property (seek beyond 2GB)
+        - Acceptance: `lseek` handles 64-bit offsets natively.
+    - [ ] Standardize `truncate` / `ftruncate` to 64-bit ABI.
+        - Files: `sys/kern/vfs_syscalls.c`
+        - Tests: property (truncate large file)
+        - Acceptance: `truncate` / `ftruncate` are natively 64-bit; no `truncate64` syscall needed.
+    - [ ] Standardize `mmap` to handle 64-bit offsets (pgoff).
+        - Files: `sys/arch/i386/syscall.c`
+        - Tests: integration (map large offset)
+        - Acceptance: `mmap` accepts 64-bit offset (or sufficient page count).
+    - [ ] Review `getdents` / `getdents64` dirent structures.
+        - Files: `sys/fs/fs.c`
+        - Tests: integration (read directory with many/large inodes)
+        - Acceptance: Single 64-bit friendly dirent format (`getdents` implies 64-bit inodes/offsets).
+    - [ ] Standardize `statfs` / `statvfs` to 64-bit block counts.
+        - Files: `sys/vfs/vfs.c`
+        - Tests: integration (df on large volume)
+        - Acceptance: Report correct size for >2TB volumes.
+
+### 15. Personality Driver Audit & Refactor
+Reference: User Request (Step 30690)
+
+- [ ] **Audit & Inventory:**
+    - [ ] Scan all personality drivers for syscall wrappers, legacy ABI usage, and hacks.
+        - Files: `sys/exec/perso/*.c`
+        - Tests: N/A
+        - Docs: `docs/personality_audit.md` (Inventory Report)
+        - Acceptance: Complete list of functions needing refactor.
+
+- [ ] **Linux Personality Refactor:**
+    - [ ] Update Linux syscall shims to translate personality types to Native 64-bit ABI.
+        - Files: `sys/exec/perso/perso_linux.c`
+        - Tests: integration (stat/lstat/fstat on Linux binaries)
+        - Docs: `linux_compat.md`
+        - Acceptance: Linux stat64 structs correctly mapped to native 64-bit stat.
+    - [ ] Refactor Linux drivers to remove legacy stat usage.
+        - Files: `sys/exec/perso/perso_linux.c`
+        - Tests: unit (driver functions)
+        - Acceptance: No dependency on 32-bit native types.
+    - [ ] Add explicit validation tests for file metadata and permission semantics.
+        - Files: `tests/perso/linux_test.c`
+        - Tests: integration (chown/chmod/utimes simulation)
+        - Acceptance: Semantics match Linux 5.x expectations.
+
+- [ ] **FreeBSD Personality Refactor:**
+    - [ ] Update FreeBSD syscall shims to translate personality types to Native 64-bit ABI.
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: integration (FreeBSD 14.x binary compatibility)
+        - Docs: `freebsd_compat.md`
+        - Acceptance: FreeBSD stat structure correctly populated.
+    - [ ] Refactor FreeBSD drivers to remove legacy dependencies.
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: unit
+        - Acceptance: Clean separation from legacy native types.
+    - [ ] Add explicit validation tests for FreeBSD semantics.
+        - Files: `tests/perso/freebsd_test.c`
+        - Tests: integration
+        - Acceptance: Pass canonical FreeBSD compliance checks (mini-suite).
+
+- [ ] **SVR4 / SVR3 Personality Refactor:**
+    - [ ] Update SVR4/SVR3 syscall shims for Native 64-bit ABI translation.
+        - Files: `sys/exec/perso/perso_svr4.c`, `sys/exec/perso/perso_svr3.c`
+        - Tests: integration (legacy binary support)
+        - Acceptance: Correct metadata reporting for legacy formats.
+    - [ ] Implement SVR3/SVR4 segment register validation for 286/386 protected mode binaries.
+        - Files: `sys/exec/perso/perso_svr3.c`, `sys/exec/perso/perso_svr4.c`
+        - Tests: unit (segment descriptor validation)
+        - Acceptance: Reject invalid segment configurations; log warnings for suspicious setups.
+    - [ ] Add SVR3 x.out (Xenix) binary format recognition and loader hooks.
+        - Files: `sys/fs/exec/xout.c`, `sys/exec/perso/perso_svr3.c`
+        - Tests: integration (load sample Xenix binary)
+        - Docs: `svr3_xout.md`
+        - Acceptance: Correctly identify x.out magic and dispatch to SVR3 personality.
+    - [ ] Implement SVR4 /dev/zero and /dev/null personality expectations.
+        - Files: `sys/exec/perso/perso_svr4.c`, `sys/drivers/char/mem.c`
+        - Tests: integration (mmap /dev/zero)
+        - Acceptance: SVR4 binaries can use /dev/zero for anonymous mappings.
+    - [ ] Add SVR3 signal number translation (SVR3 uses different signal numbers).
+        - Files: `sys/exec/perso/perso_svr3.c`
+        - Tests: unit (signal mapping table)
+        - Acceptance: SIGTERM/SIGKILL/SIGCHLD correctly translated between ABIs.
+    - [ ] Validation tests for SVR compat layers.
+        - Files: `tests/perso/svr_test.c`
+        - Tests: integration
+        - Acceptance: Basic file operations work correctly.
+
+- [ ] **FreeBSD Personality Enhancements:**
+    - [ ] Implement FreeBSD-specific sysctl namespace for personality queries.
+        - Files: `sys/exec/perso/perso_freebsd.c`, `sys/kern/sysctl.c`
+        - Tests: integration (sysctl kern.ostype)
+        - Acceptance: FreeBSD binaries see "FreeBSD" as ostype.
+    - [ ] Add FreeBSD capsicum(4) syscall stubs (return ENOSYS with log).
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: unit (verify ENOSYS)
+        - Docs: Add capsicum notes to `freebsd_compat.md`
+        - Acceptance: Capsicum calls fail gracefully without crashing.
+    - [ ] Implement FreeBSD jail(2) detection stub (return ENOSYS).
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: unit
+        - Acceptance: jail(2) returns ENOSYS, does not panic.
+
+- [ ] **Infrastructural Reconciliation:**
+    - [ ] Reconcile personality-specific `/proc` and `/dev` expectations.
+        - Files: `sys/fs/procfs.c`, `sys/fs/devfs.c`
+        - Tests: integration (cat /proc/cpuinfo, ls -l /dev)
+        - Docs: `compat_fs_layer.md`
+        - Acceptance: Pseudo-filesystems return expected format per-personality OR robust adaptation layer exists.
+
+- [ ] **Quality & Regression:**
+    - [ ] Regression tests for third-party modules / sample drivers.
+        - Files: `tests/modules/*.c`
+        - Tests: regression
+        - Acceptance: Personality changes do not break external native modules.
+    - [ ] Refactor "minimal" shims to production quality (error handling, locking).
+        - Files: All `perso_*.c` files
+        - Tests: stress/edge-case
+        - Acceptance: Robust error propagation, no race conditions in translation layers.
+    - [ ] Audit perso_svr3.c for unchecked pointer dereferences and add null guards.
+        - Files: `sys/exec/perso/perso_svr3.c`
+        - Tests: fuzz (malformed syscall args)
+        - Acceptance: No kernel panics on invalid arguments.
+    - [ ] Audit perso_svr4.c for unchecked pointer dereferences and add null guards.
+        - Files: `sys/exec/perso/perso_svr4.c`
+        - Tests: fuzz (malformed syscall args)
+        - Acceptance: No kernel panics on invalid arguments.
+    - [ ] Audit perso_freebsd.c for unchecked pointer dereferences and add null guards.
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: fuzz (malformed syscall args)
+        - Acceptance: No kernel panics on invalid arguments.
+
+### 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+Reference: User Request (Step 31552)
+
+> [!NOTE]
+> ELKS (Embeddable Linux Kernel Subset) is a 16-bit Linux-like OS for 8086/80286. This personality enables running ELKS binaries on Substrate using LDT-based 16-bit protected mode segments.
+
+- [ ] **Design & Specification:**
+    - [ ] Produce ELKS personality specification document.
+        - Files: `docs/personality/elks_spec.md`
+        - Tests: N/A (design doc)
+        - Docs: `elks_spec.md`
+        - Acceptance: Document covers binary format recognition, ABI semantics (syscalls, signal model), data models (near/far pointers), and expected process environment.
+    - [ ] Define ELKS syscall table mapping to Substrate equivalents.
+        - Files: `docs/personality/elks_syscalls.md`, `sys/exec/perso/elks_syscall_table.h`
+        - Tests: N/A (design doc)
+        - Docs: `elks_syscalls.md`
+        - Acceptance: Complete mapping table with supported/unsupported syscalls documented.
+    - [ ] Define ELKS signal model and mapping to POSIX signals.
+        - Files: `docs/personality/elks_spec.md`
+        - Tests: N/A (design doc)
+        - Acceptance: Signal numbers and semantics documented.
+    - [ ] Define ELKS memory model (tiny/small/medium/compact/large).
+        - Files: `docs/personality/elks_spec.md`
+        - Tests: N/A (design doc)
+        - Acceptance: Each memory model's segment layout documented.
+
+- [ ] **Binary Format Recognition:**
+    - [ ] Implement ELKS a.out binary format detection.
+        - Files: `sys/fs/exec/elks_aout.c`, `sys/fs/exec/elks_aout.h`
+        - Tests: unit (magic number detection)
+        - Docs: `elks_aout.4` manpage
+        - Acceptance: Correctly identify ELKS a.out magic (0x0301 for 8086, 0x0302 for 80286).
+    - [ ] Register ELKS loader with exec subsystem.
+        - Files: `sys/fs/exec/exec.c`, `sys/fs/exec/elks_aout.c`
+        - Tests: integration (exec ELKS binary triggers loader)
+        - Acceptance: ELKS binaries dispatched to elks_load() function.
+
+- [ ] **ELKS Exec Loader:**
+    - [ ] Implement `elks_load()` function for ELKS binary loading.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (load sample ELKS binary into memory)
+        - Acceptance: Binary text/data/bss segments loaded correctly.
+    - [ ] Allocate 16-bit LDT segments via LDT API for code/data/stack.
+        - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/ldt.c`
+        - Tests: unit (verify LDT entries created)
+        - Acceptance: Separate LDT entries for CS (code), DS (data), SS (stack), ES (extra).
+    - [ ] Set up ELKS stack segment with correct base and limit.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (stack segment bounds)
+        - Acceptance: Stack limit enforced by hardware; overflow triggers #SS exception.
+    - [ ] Set up ELKS data segment with correct base and limit.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (data segment bounds)
+        - Acceptance: Data accesses beyond limit trigger #GP exception.
+    - [ ] Install syscall gateway trampoline for 16-bit to 32-bit transition.
+        - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/elks_gate.S`
+        - Tests: integration (syscall from 16-bit code reaches kernel)
+        - Acceptance: INT 0x80 from 16-bit context transitions to 32-bit kernel handler.
+    - [ ] Handle ELKS environment variables and argv setup.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: integration (argc/argv accessible from ELKS binary)
+        - Acceptance: ELKS main() receives correct argc, argv.
+    - [ ] Set process bitness to BITNESS_16 on ELKS exec.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (verify bitness field after exec)
+        - Acceptance: `current_process->bitness == BITNESS_16` after ELKS load.
+
+- [ ] **Runtime Support & Syscall Translation:**
+    - [ ] Implement ELKS syscall dispatcher.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (dispatch to correct handler)
+        - Acceptance: ELKS syscall numbers correctly mapped to handlers.
+    - [ ] Implement ELKS sys_exit translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (ELKS exit terminates process)
+        - Acceptance: Process exits cleanly with correct exit code.
+    - [ ] Implement ELKS sys_read/sys_write translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (hello world prints to stdout)
+        - Acceptance: Console I/O works correctly.
+    - [ ] Implement ELKS sys_open/sys_close translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (open/read/close file)
+        - Acceptance: File operations work with VFS.
+    - [ ] Implement ELKS sys_brk translation (16-bit heap).
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (heap expansion within segment)
+        - Acceptance: brk works within data segment limit.
+    - [ ] Implement ELKS sys_fork translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (fork returns in both parent and child)
+        - Acceptance: Child inherits LDT segments correctly.
+    - [ ] Implement ELKS sys_execve translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (exec another ELKS binary)
+        - Acceptance: LDT segments properly replaced on exec.
+    - [ ] Implement ELKS sys_waitpid translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (wait for child)
+        - Acceptance: Parent receives child exit status.
+    - [ ] Implement ELKS signal syscalls (sys_signal, sys_kill).
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (signal delivery)
+        - Acceptance: Signals delivered and handlers invoked.
+    - [ ] Return ENOSYS for unsupported ELKS syscalls with kernel log.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (verify ENOSYS return)
+        - Acceptance: Unsupported syscalls return -ENOSYS without crashing.
+    - [ ] Implement 16:16 far pointer to linear address conversion.
+        - Files: `sys/exec/perso/perso_elks.c`, `sys/arch/i386/ldt.c`
+        - Tests: unit (segment:offset to linear)
+        - Acceptance: `LDT[seg].base + offset` computed correctly.
+
+- [ ] **Resource Isolation & Signal Handling:**
+    - [ ] Ensure ELKS processes have isolated LDT (not shared with other processes).
+        - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
+        - Tests: unit (verify LDT per-process)
+        - Acceptance: Each ELKS process gets private LDT.
+    - [ ] Implement signal delivery for 16-bit context.
+        - Files: `sys/arch/i386/signal.c`, `sys/exec/perso/perso_elks.c`
+        - Tests: integration (SIGINT delivery to ELKS process)
+        - Acceptance: Signal handler invoked in 16-bit mode with correct context.
+    - [ ] Implement signal return (sigreturn) for 16-bit context.
+        - Files: `sys/arch/i386/signal.c`
+        - Tests: integration (return from signal handler)
+        - Acceptance: Execution resumes at interrupted point.
+    - [ ] Implement core dump generation for ELKS processes.
+        - Files: `sys/kern/core.c`, `sys/exec/perso/perso_elks.c`
+        - Tests: integration (SIGSEGV generates core)
+        - Docs: `core.5` manpage update
+        - Acceptance: Core dump includes 16-bit register state and segment info.
+
+- [ ] **Safety & Cleanup (LDT Lifecycle):**
+    - [ ] Implement LDT cleanup on process exit.
+        - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
+        - Tests: unit (no leaked LDT entries after exit)
+        - Acceptance: All LDT entries freed when ELKS process exits.
+    - [ ] Implement LDT duplication on fork.
+        - Files: `sys/arch/i386/ldt.c`, `sys/pm/fork.c`
+        - Tests: unit (child gets copy of LDT)
+        - Acceptance: Child LDT is independent copy of parent LDT.
+    - [ ] Implement LDT replacement on exec.
+        - Files: `sys/arch/i386/ldt.c`, `sys/fs/exec/exec.c`
+        - Tests: unit (old LDT freed, new LDT installed)
+        - Acceptance: exec clears old LDT and installs new one.
+    - [ ] Add LDT entry validation to prevent privilege escalation.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: fuzz (malformed LDT entries)
+        - Acceptance: DPL must be 3; conforming code segments rejected; call gates rejected.
+    - [ ] Implement LDT limit enforcement during context switch.
+        - Files: `sys/arch/i386/switch.S`, `sys/kern/sched.c`
+        - Tests: unit (LLDT loaded correctly)
+        - Acceptance: LDTR loaded with correct selector on context switch.
+    - [ ] Add kernel log warnings for suspicious LDT usage patterns.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: unit (warning logged)
+        - Acceptance: Unusual patterns (many allocations, odd limits) logged.
+
+- [ ] **Testing & Validation:**
+    - [ ] Create ELKS hello world test binary.
+        - Files: `tests/elks/hello.S`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU, verify output)
+        - Acceptance: "Hello, ELKS!" printed to console.
+    - [ ] Create ELKS sleep test binary.
+        - Files: `tests/elks/sleep.c`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU, verify delay)
+        - Acceptance: Process sleeps for specified duration.
+    - [ ] Create ELKS file I/O test binary.
+        - Files: `tests/elks/fileio.c`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU, verify file created)
+        - Acceptance: File created, written, read, and deleted correctly.
+    - [ ] Create ELKS fork test binary.
+        - Files: `tests/elks/fork.c`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU)
+        - Acceptance: Parent and child both print distinct messages.
+    - [ ] Create automated test harness for ELKS binaries.
+        - Files: `tests/elks/run_tests.sh`, `tests/elks/harness.c`
+        - Tests: CI integration
+        - Acceptance: All ELKS tests pass in automated pipeline.
+    - [ ] Add ELKS syscall fuzzing tests.
+        - Files: `tests/elks/fuzz_syscalls.c`
+        - Tests: fuzz (random syscall args)
+        - Acceptance: No kernel panics; all invalid calls return errors.
+    - [ ] Add LDT bounds violation tests.
+        - Files: `tests/elks/bounds_test.S`
+        - Tests: unit (access beyond segment limit)
+        - Acceptance: #GP exception raised and handled correctly.
+
+- [ ] **Sample ELKS Userland & Build Scripts:**
+    - [ ] Add ELKS cross-compiler toolchain setup script.
+        - Files: `tools/elks/setup_toolchain.sh`
+        - Tests: N/A (build script)
+        - Docs: `tools/elks/README.md`
+        - Acceptance: Script downloads/builds ia16-elf-gcc toolchain.
+    - [ ] Add sample ELKS shell (minimal).
+        - Files: `tests/elks/minish.c`, `tests/elks/Makefile`
+        - Tests: emulation (run commands in QEMU)
+        - Acceptance: Basic command execution works.
+    - [ ] Add sample ELKS cat utility.
+        - Files: `tests/elks/cat.c`, `tests/elks/Makefile`
+        - Tests: emulation
+        - Acceptance: File contents displayed correctly.
+    - [ ] Add sample ELKS ls utility.
+        - Files: `tests/elks/ls.c`, `tests/elks/Makefile`
+        - Tests: emulation
+        - Acceptance: Directory listing displayed.
+    - [ ] Add ELKS binary build Makefile.
+        - Files: `tests/elks/Makefile`
+        - Tests: N/A (build script)
+        - Acceptance: `make -C tests/elks` builds all ELKS test binaries.
+
+- [ ] **Documentation:**
+    - [ ] Create personality-elks(7) developer guide.
+        - Files: `docs/man/man7/personality-elks.7`
+        - Tests: N/A (documentation)
+        - Docs: `personality-elks.7`
+        - Acceptance: Covers architecture, limitations, and usage.
+    - [ ] Create ELKS-compat(4) compatibility notes.
+        - Files: `docs/man/man4/ELKS-compat.4`
+        - Tests: N/A (documentation)
+        - Docs: `ELKS-compat.4`
+        - Acceptance: Documents known limitations and unsupported features.
+    - [ ] Add ELKS personality to ARCHITECTURE.md.
+        - Files: `ARCHITECTURE.md`
+        - Tests: N/A (documentation)
+        - Acceptance: ELKS personality architecture documented.
+    - [ ] Add ELKS syscall reference table.
+        - Files: `docs/personality/elks_syscall_ref.md`
+        - Tests: N/A (documentation)
+        - Acceptance: All syscalls listed with support status.
+    - [ ] Document LDT API usage for personality developers.
+        - Files: `docs/kernel/ldt_api.md`
+        - Tests: N/A (documentation)
+        - Acceptance: API documented with examples.
+
+- [ ] **Quality Audit & Refactoring:**
+        - Acceptance: All allocated resources freed on error.
+    - [ ] Audit elks_aout.c for unchecked file read errors.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: fuzz (truncated binary files)
+        - Acceptance: Truncated binaries rejected with ENOEXEC.
+    - [ ] Audit ldt.c for race conditions in multi-threaded allocation.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: stress (concurrent LDT alloc/free)
+        - Acceptance: No corrupted LDT state under contention.
+    - [ ] Refactor LDT allocation to use UMA zone for efficiency.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: unit (allocation performance)
+        - Acceptance: LDT allocation O(1) via UMA zone.
+    - [ ] Add static analysis annotations to ELKS personality code.
+        - Files: `sys/exec/perso/perso_elks.c`, `sys/fs/exec/elks_aout.c`
+        - Tests: static analysis (sparse/coverity)
+    - [x] **Refactor Console and UART Subsystems**
+        - Note: Migrated files, updated Makefiles, fixed include paths, added missing VGA colors. Build verified.
+        - Files: `sys/kern/ansi_handler.c`, `sys/kern/console.c`, `sys/kern/tty.c`, `sys/drivers/serial/*`
+        - Goal: Migrate console/tty code to `sys/drivers/console/` and UART to `sys/drivers/console/uart/`.
+        - Acceptance: Build passes, files moved, functionality preserved.
+        - Acceptance: No warnings from static analysis tools.
+
+
+### 6. Userspace/Tools (`usr.bin/yacc`)
+- [ ] **Yacc Implementation (POSIX-Compliant):**
+    - [x] **1. Infrastructure & Symbol Table:**
+        - [x] Create `usr.bin/yacc` directory and Makefile.
+        - [x] Implement `main.c` argument parsing (POSIX options `-d`, `-l`, `-t`, `-v`, `-b`, `-p`).
+        - [x] Implement Symbol Table (buckets, hashing) for tokens and non-terminals.
+    - [x] **2. Grammar Reader (`reader.c`):**
+        - [x] Implement Lexical Analyzer for Yacc input (C code vs Declarations vs Rules).
+        - [x] Parse Declarations (`%token`, `%type`, `%union`, `%start`, precedence).
+        - [x] Parse Grammar Rules and Actions (handling `{}` blocks).
+    - [x] **3. LR(0) Construction (`lr0.c`, `closure.c`):**
+        - [x] Implement Item Set computation.
+        - [x] Implement Closure algorithm.
+        - [x] Implement GOTO graph construction.
+    - [x] **4. LALR(1) Lookahead (`lalr.c`):**
+        - [x] Compute DR (Direct Read) and READ (Relation) sets.
+        - [x] Compute Lookaheads for each kernel item (Digraph algorithm).
+    - [x] **5. Tables & Conflicts (`mkpar.c`):**
+        - [x] Generate ACTION and GOTO tables.
+        - [x] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
+        - [x] Generate Default Reductions.
+    - [ ] **6. Code Generation (`output.c`):**
+        - [x] generate `y.tab.c` (parser skeleton + user actions).
+        - [ ] generate `y.tab.h` (token defines, `YYSTYPE`).
+        - [ ] generate `y.output` (verbose state descriptions).
+    - [ ] **7. Validation & Tests:**
+        - [ ] Basic Calculator Test (Precedence/Associativity).
+        - [ ] Conflict Reporting Test.
+        - [ ] Error Recovery Test (`error` token).
