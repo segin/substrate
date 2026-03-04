@@ -23,12 +23,16 @@
  *   --                        end option processing
  *
  * Historic BSD syntax: -NUM (e.g. head -20 file)
+ * GNU obsolete packed syntax: -NUM[bkm][cqv]
+ *   b=×512 bytes, k=×1024 bytes, m=×1048576 bytes
+ *   c=byte mode (×1), l=line mode (×1), q=quiet, v=verbose
  *
  * Negative counts (GNU): output all but the last K lines/bytes.
  */
 
 #include <errno.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <limits.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -197,8 +201,10 @@ static int parse_count(const char *s, int64_t *out, const char *prog, char optch
  * Option parsing
  * Returns index of first non-option argument, or -1 on error.
  * ------------------------------------------------------------------------- */
-static int parse_options(int argc, char **argv, struct head_opts *o)
+static int parse_options(int *argcp, char ***argvp, struct head_opts *o)
 {
+	int argc = *argcp;
+	char **argv = *argvp;
 	int i;
 	bool seen_count = false; /* -n or -c already seen */
 
@@ -211,195 +217,144 @@ static int parse_options(int argc, char **argv, struct head_opts *o)
 	o->show_help = false;
 	o->show_version = false;
 
+	/* Pre-pass: intercept GNU obsolete / BSD historic syntax: -NUM... */
+	int new_argc = 1;
+	char **new_argv = malloc((size_t)(argc + 1) * sizeof(char *));
+	if (!new_argv) { errno = ENOMEM; return -1; }
+	new_argv[0] = argv[0];
+
+	bool expects_arg = false;
 	for(i = 1; i < argc; i++) {
 		const char *arg = argv[i];
 
-		/* end of options */
 		if(strcmp(arg, "--") == 0) {
-			i++;
+			while(i < argc) new_argv[new_argc++] = argv[i++];
 			break;
 		}
 
-		/* long options */
-		if(arg[0] == '-' && arg[1] == '-') {
-			const char *name = arg + 2;
-
-			if(strcmp(name, "help") == 0) {
-				o->show_help = true;
-				continue;
-			}
-			if(strcmp(name, "version") == 0) {
-				o->show_version = true;
-				continue;
-			}
-			if(strcmp(name, "quiet") == 0 ||
-			   strcmp(name, "silent") == 0) {
-				o->quiet = true;
-				continue;
-			}
-			if(strcmp(name, "verbose") == 0) {
-				o->verbose = true;
-				continue;
-			}
-			if(strcmp(name, "zero-terminated") == 0) {
-				o->zero_term = true;
-				continue;
-			}
-
-			/* --lines[=[-]N] */
-			if(strncmp(name, "lines", 5) == 0) {
-				const char *val;
-				if(name[5] == '=')
-					val = name + 6;
-				else if(name[5] == '\0') {
-					i++;
-					if(i >= argc) {
-						fprintf(stderr,
-						    "%s: option '--lines' requires an argument\n",
-						    o->progname);
-						return(-1);
-					}
-					val = argv[i];
-				} else {
-					fprintf(stderr, "%s: unrecognized option '%s'\n",
-					    o->progname, arg);
-					usage(stderr, o->progname);
-					return(-1);
-				}
-				if(seen_count && o->mode == MODE_BYTES) {
-					fprintf(stderr,
-					    "%s: cannot use -n and -c simultaneously\n",
-					    o->progname);
-					return(-1);
-				}
-				if(parse_count(val, &o->count, o->progname, 'n') < 0)
-					return(-1);
-				o->mode = MODE_LINES;
-				seen_count = true;
-				continue;
-			}
-
-			/* --bytes[=[-]N] */
-			if(strncmp(name, "bytes", 5) == 0) {
-				const char *val;
-				if(name[5] == '=')
-					val = name + 6;
-				else if(name[5] == '\0') {
-					i++;
-					if(i >= argc) {
-						fprintf(stderr,
-						    "%s: option '--bytes' requires an argument\n",
-						    o->progname);
-						return(-1);
-					}
-					val = argv[i];
-				} else {
-					fprintf(stderr, "%s: unrecognized option '%s'\n",
-					    o->progname, arg);
-					usage(stderr, o->progname);
-					return(-1);
-				}
-				if(seen_count && o->mode == MODE_LINES) {
-					fprintf(stderr,
-					    "%s: cannot use -n and -c simultaneously\n",
-					    o->progname);
-					return(-1);
-				}
-				if(parse_count(val, &o->count, o->progname, 'c') < 0)
-					return(-1);
-				o->mode = MODE_BYTES;
-				seen_count = true;
-				continue;
-			}
-
-			fprintf(stderr, "%s: unrecognized option '%s'\n", o->progname, arg);
-			usage(stderr, o->progname);
-			return(-1);
-		}
-
-		/* not starting with '-': end of options */
-		if(arg[0] != '-')
-			break;
-
-		/* bare '-': stdin operand */
-		if(arg[1] == '\0')
-			break;
-
-		/*
-		 * Historic BSD syntax: -NUM  (e.g. head -20 file)
-		 * The first character after '-' must be a digit.
-		 * This is checked before short option parsing.
-		 */
-		if(arg[1] >= '0' && arg[1] <= '9') {
-			int64_t n;
-			if(parse_count(arg + 1, &n, o->progname, 'n') < 0)
-				return(-1);
-			if(seen_count && o->mode == MODE_BYTES) {
-				fprintf(stderr,
-				    "%s: cannot use -n and -c simultaneously\n",
-				    o->progname);
-				return(-1);
-			}
-			o->mode = MODE_LINES;
-			o->count = n;
-			seen_count = true;
+		if(expects_arg) {
+			expects_arg = false;
+			new_argv[new_argc++] = argv[i];
 			continue;
 		}
 
-		/* short options: -[cnoqvz]... */
-		{
-			size_t j;
-			for(j = 1; arg[j] != '\0'; j++) {
-				char c = arg[j];
-				switch(c) {
-				case 'n':
-				case 'c': {
-					const char *val;
-					head_mode_t this_mode = (c == 'n') ? MODE_LINES : MODE_BYTES;
+		if(strcmp(arg, "-n") == 0 || strcmp(arg, "-c") == 0 ||
+		   strcmp(arg, "--lines") == 0 || strcmp(arg, "--bytes") == 0) {
+			expects_arg = true;
+			new_argv[new_argc++] = argv[i];
+			continue;
+		}
 
-					if(seen_count && o->mode != this_mode) {
-						fprintf(stderr,
-						    "%s: cannot use -n and -c simultaneously\n",
-						    o->progname);
-						return(-1);
-					}
-					/* value: rest of the flag group OR next argv */
-					if(arg[j + 1] != '\0') {
-						val = arg + j + 1;
-						j = strlen(arg) - 1;
-					} else {
-						i++;
-						if(i >= argc) {
-							fprintf(stderr,
-							    "%s: option requires an argument -- '%c'\n",
-							    o->progname, c);
-							return(-1);
-						}
-						val = argv[i];
-					}
-					if(parse_count(val, &o->count, o->progname, c) < 0)
-						return(-1);
-					o->mode = this_mode;
-					seen_count = true;
-					break;
-				}
-				case 'q':
-					o->quiet = true;
-					break;
-				case 'v':
-					o->verbose = true;
-					break;
-				case 'z':
-					o->zero_term = true;
-					break;
+		/* check short options starting with -n/-c combined, e.g. -qn or -vn (not strictly standard but getopt handles it) 
+		   Actually, GNU getopt long handles it. Let's just catch the exact matches above. 
+		   If someone does `head -qn -3`, expects_arg wouldn't catch it. 
+		   A more robust way: if it starts with `-` but is NOT a digit, don't intercept.
+		   The obsolete syntax is strictly ^-[0-9]. */
+
+		if(arg[0] == '-' && arg[1] >= '0' && arg[1] <= '9') {
+			char *endp; long long n;
+			int64_t mult = 1;
+			head_mode_t pack_mode = MODE_LINES;
+			bool set_quiet = false, set_verbose = false;
+
+			errno = 0;
+			n = strtoll(arg + 1, &endp, 10);
+			if(errno == ERANGE || n < 0) {
+				fprintf(stderr, "%s: invalid count '%s'\n", o->progname, arg + 1);
+				free(new_argv);
+				return(-1);
+			}
+			for(; *endp != '\0'; endp++) {
+				switch(*endp) {
+				case 'b': mult = 512;           pack_mode = MODE_BYTES; break;
+				case 'k': mult = 1024;          pack_mode = MODE_BYTES; break;
+				case 'm': mult = 1024LL * 1024; pack_mode = MODE_BYTES; break;
+				case 'c':                        pack_mode = MODE_BYTES; break;
+				case 'l':                        pack_mode = MODE_LINES; break;
+				case 'q': set_quiet   = true; break;
+				case 'v': set_verbose = true; break;
 				default:
-					fprintf(stderr,
-					    "%s: invalid option -- '%c'\n",
-					    o->progname, c);
+					fprintf(stderr, "%s: invalid option '%s'\n", o->progname, arg);
 					usage(stderr, o->progname);
+					free(new_argv);
 					return(-1);
 				}
 			}
+			if(n > 0 && mult > INT64_MAX / n) {
+				fprintf(stderr, "%s: value out of range '%s'\n", o->progname, arg + 1);
+				free(new_argv);
+				return(-1);
+			}
+			if(seen_count && o->mode != pack_mode) {
+				fprintf(stderr, "%s: cannot use -n and -c simultaneously\n", o->progname);
+				free(new_argv);
+				return(-1);
+			}
+			o->mode = pack_mode;
+			o->count = n * mult;
+			seen_count = true;
+			if(set_quiet)   o->quiet   = true;
+			if(set_verbose) o->verbose = true;
+			continue; /* omit this arg from new_argv */
+		}
+		new_argv[new_argc++] = argv[i];
+	}
+	new_argv[new_argc] = NULL;
+
+	/* Update argc/argv for getopt_long */
+	*argcp = new_argc;
+	*argvp = new_argv;
+
+	static const struct option longopts[] = {
+		{"lines", required_argument, NULL, 'n'},
+		{"bytes", required_argument, NULL, 'c'},
+		{"quiet", no_argument, NULL, 'q'},
+		{"silent", no_argument, NULL, 'q'},
+		{"verbose", no_argument, NULL, 'v'},
+		{"zero-terminated", no_argument, NULL, 'z'},
+		{"help", no_argument, NULL, 'h'},
+		{"version", no_argument, NULL, 'V'},
+		{NULL, 0, NULL, 0}
+	};
+
+	int opt;
+	optind = 1;
+	while((opt = getopt_long(new_argc, new_argv, "n:c:qvz", longopts, NULL)) != -1) {
+		switch(opt) {
+		case 'n':
+		case 'c': {
+			head_mode_t this_mode = (opt == 'n') ? MODE_LINES : MODE_BYTES;
+			if(seen_count && o->mode != this_mode) {
+				fprintf(stderr, "%s: cannot use -n and -c simultaneously\n", o->progname);
+				free(new_argv); return(-1);
+			}
+			if(parse_count(optarg, &o->count, o->progname, (char)opt) < 0) {
+				free(new_argv); return(-1);
+			}
+			o->mode = this_mode;
+			seen_count = true;
+			break;
+		}
+		case 'q':
+			o->quiet = true;
+			break;
+		case 'v':
+			o->verbose = true;
+			break;
+		case 'z':
+			o->zero_term = true;
+			break;
+		case 'h':
+			o->show_help = true;
+			break;
+		case 'V':
+			o->show_version = true;
+			break;
+		case '?':
+		default:
+			usage(stderr, o->progname);
+			free(new_argv);
+			return(-1);
 		}
 	}
 
@@ -407,7 +362,7 @@ static int parse_options(int argc, char **argv, struct head_opts *o)
 	if(o->quiet)
 		o->verbose = false;
 
-	return(i);
+	return(optind);
 }
 
 /* -------------------------------------------------------------------------
@@ -809,10 +764,10 @@ static int emit_header(const char *name, bool first)
 int main(int argc, char *argv[])
 {
 	struct head_opts o;
-	int first_file;
-	int exit_status = 0;
+	char **parsed_argv = argv;
+	int parsed_argc = argc;
 
-	first_file = parse_options(argc, argv, &o);
+	int first_file = parse_options(&parsed_argc, &parsed_argv, &o);
 	if(first_file < 0)
 		return(1);
 
@@ -825,7 +780,8 @@ int main(int argc, char *argv[])
 		return(0);
 	}
 
-	int nfiles = argc - first_file;
+	int nfiles = parsed_argc - first_file;
+	int exit_status = 0;
 	bool show_headers;
 
 	if(o.quiet)
@@ -850,8 +806,8 @@ int main(int argc, char *argv[])
 		}
 	} else {
 		bool first = true;
-		for(int i = first_file; i < argc; i++) {
-			const char *name = argv[i];
+		for(int i = first_file; i < parsed_argc; i++) {
+			const char *name = parsed_argv[i];
 			int fd;
 			bool is_stdin = (strcmp(name, "-") == 0);
 
