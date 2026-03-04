@@ -213,6 +213,13 @@ static int parse_size_arg(const char *expr, const char *sym_name, unsigned long 
 }
 
 static int symbol_set_definition(as_symbol_t *sym, const char *file, unsigned line) {
+    if (sym->defined) {
+        if ((sym->def_file != NULL && file != NULL && strcmp(sym->def_file, file) == 0 && sym->def_line == line) ||
+            (sym->def_file == NULL && file == NULL && sym->def_line == line)) {
+            return 0;
+        }
+        return 1;
+    }
     if (!sym->defined) {
         sym->def_file = xstrdup(file);
         if (sym->def_file == NULL) {
@@ -530,7 +537,17 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
         for (j = 0; j < st->label_count; ++j) {
             const as_label_def_t *l = &st->labels[j];
             as_symbol_t *sym = get_or_create_symbol(&ctx, l->name);
-            if (sym == NULL || symbol_set_definition(sym, l->file, l->line) != 0) {
+            int rc;
+            if (sym == NULL) {
+                set_err(&ctx, "%s:%u: out of memory", st->file, st->line);
+                return -1;
+            }
+            rc = symbol_set_definition(sym, l->file, l->line);
+            if (rc == 1) {
+                set_err(&ctx, "%s:%u: redefinition of symbol %s", l->file, l->line, l->name);
+                return -1;
+            }
+            if (rc != 0) {
                 set_err(&ctx, "%s:%u: out of memory", st->file, st->line);
                 return -1;
             }

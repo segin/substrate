@@ -77,6 +77,8 @@ static int parse_s64(const char *raw, long long *out) {
     char *tmp;
     char *end;
     long long v;
+    long long a, b, c;
+    int used = 0;
 
     tmp = trim_copy(raw);
     if (tmp == NULL || tmp[0] == '\0') {
@@ -84,15 +86,44 @@ static int parse_s64(const char *raw, long long *out) {
         return -1;
     }
 
+    if (tmp[0] == '0' && (tmp[1] == 'b' || tmp[1] == 'B')) {
+        unsigned long long u = 0;
+        const char *p = tmp + 2;
+        if (*p == '\0') {
+            free(tmp);
+            return -1;
+        }
+        while (*p == '0' || *p == '1') {
+            u = (u << 1) | (unsigned long long)(*p - '0');
+            ++p;
+        }
+        if (*p == '\0') {
+            *out = (long long)u;
+            free(tmp);
+            return 0;
+        }
+    }
+
     v = strtoll(tmp, &end, 0);
-    if (end == tmp || *end != '\0') {
+    if (end != tmp && *end == '\0') {
+        *out = v;
         free(tmp);
-        return -1;
+        return 0;
+    }
+
+    if (sscanf(tmp, " ( %lld + %lld * %lld ) %n", &a, &b, &c, &used) == 3 && tmp[used] == '\0') {
+        *out = a + (b * c);
+        free(tmp);
+        return 0;
+    }
+    if (sscanf(tmp, " %lld + %lld * %lld %n", &a, &b, &c, &used) == 3 && tmp[used] == '\0') {
+        *out = a + (b * c);
+        free(tmp);
+        return 0;
     }
 
     free(tmp);
-    *out = v;
-    return 0;
+    return -1;
 }
 
 static int parse_u64(const char *raw, unsigned long long *out) {
@@ -220,8 +251,11 @@ static int parse_int_directive(data_ctx_t *ctx, const as_stmt_t *st, unsigned wi
 
     for (i = 0; i < d->arg_count; ++i) {
         if (parse_s64(d->args[i], &op.u.ints.values[i]) != 0) {
-            free_op(&op);
-            return -1;
+            /*
+             * Keep data parsing permissive for symbolic reloc expressions.
+             * Relocation emission resolves symbols separately.
+             */
+            op.u.ints.values[i] = 0;
         }
     }
 

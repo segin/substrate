@@ -1,5 +1,6 @@
 #include "as_elf_emit.h"
 #include "as_x86_encode.h"
+#include "as_x86_avx2.h"
 
 #include "elfobj.h"
 
@@ -312,7 +313,8 @@ static int is_rel_mnemonic(const char *mn) {
 static int is_size_suffixable_base(const char *mn) {
     static const char *const names[] = {
         "add", "sub", "and", "or", "xor", "cmp", "mov", "lea", "imul", "shl",
-        "shr", "sar", "ror", "bt", "bts", "movsx", "movzx", "test",
+        "shr", "sar", "ror", "bt", "bts", "movsx", "movzx", "test", "push",
+        "pop", "ret", "leave",
     };
     size_t i;
 
@@ -413,6 +415,34 @@ static int parse_xmm_reg(const char *name, unsigned *out) {
     return 0;
 }
 
+static int parse_ymm_reg(const char *name, unsigned *out) {
+    const char *p = name;
+    unsigned v = 0;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (!(p[0] == 'y' || p[0] == 'Y') || !(p[1] == 'm' || p[1] == 'M') || !(p[2] == 'm' || p[2] == 'M')) {
+        return -1;
+    }
+    p += 3;
+    if (!isdigit((unsigned char)*p)) {
+        return -1;
+    }
+    while (isdigit((unsigned char)*p)) {
+        v = (v * 10u) + (unsigned)(*p - '0');
+        ++p;
+    }
+    if (*p != '\0' || v > 15u) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
 static int parse_st_index(const char *s, unsigned *out) {
     const char *p;
     unsigned v = 0;
@@ -440,6 +470,20 @@ static int parse_st_index(const char *s, unsigned *out) {
     }
     *out = v;
     return 0;
+}
+
+static int is_x86_low8_reg(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    return streq_ci(name, "al") || streq_ci(name, "%al") || streq_ci(name, "bl") || streq_ci(name, "%bl") ||
+           streq_ci(name, "cl") || streq_ci(name, "%cl") || streq_ci(name, "dl") || streq_ci(name, "%dl") ||
+           streq_ci(name, "sil") || streq_ci(name, "%sil") || streq_ci(name, "dil") || streq_ci(name, "%dil") ||
+           streq_ci(name, "spl") || streq_ci(name, "%spl") || streq_ci(name, "bpl") || streq_ci(name, "%bpl") ||
+           streq_ci(name, "r8b") || streq_ci(name, "%r8b") || streq_ci(name, "r9b") || streq_ci(name, "%r9b") ||
+           streq_ci(name, "r10b") || streq_ci(name, "%r10b") || streq_ci(name, "r11b") || streq_ci(name, "%r11b") ||
+           streq_ci(name, "r12b") || streq_ci(name, "%r12b") || streq_ci(name, "r13b") || streq_ci(name, "%r13b") ||
+           streq_ci(name, "r14b") || streq_ci(name, "%r14b") || streq_ci(name, "r15b") || streq_ci(name, "%r15b");
 }
 
 static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
@@ -523,6 +567,136 @@ static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
         out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (gr & 7u));
         if (out_len != NULL) {
             *out_len = 4;
+        }
+        return 0;
+    }
+
+    return -1;
+}
+
+static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, unsigned isa_level,
+                               unsigned char *out, size_t out_cap, size_t *out_len) {
+    const as_operand_t *a;
+    const as_operand_t *b;
+    const as_operand_t *src;
+    const as_operand_t *dst;
+    char mnbuf[32];
+    unsigned xr;
+    unsigned xm;
+    as_x86_reg_t gr;
+    long long imm64;
+    unsigned char rex;
+
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    if (insn == NULL || out == NULL || out_cap < 12) {
+        return -1;
+    }
+    if (normalize_x86_mnemonic(insn->mnemonic, mnbuf, sizeof(mnbuf), NULL) != 0) {
+        return -1;
+    }
+    if (insn->prefixes != 0 || insn->segment_override != NULL) {
+        return -1;
+    }
+
+    a = insn->operand_count > 0 ? &insn->operands[0] : NULL;
+    b = insn->operand_count > 1 ? &insn->operands[1] : NULL;
+    src = intel_syntax ? b : a;
+    dst = intel_syntax ? a : b;
+
+    if (strcmp(mnbuf, "movabs") == 0) {
+        size_t i;
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            (src->kind != AS_OPERAND_IMMEDIATE && src->kind != AS_OPERAND_LABEL_REF) ||
+            dst->kind != AS_OPERAND_REGISTER ||
+            parse_x86_reg(dst->u.reg, &gr) != 0) {
+            return -1;
+        }
+        if (eval_expr_const(src->u.expr, &imm64) != 0) {
+            if (expr_has_symbol(src->u.expr)) {
+                imm64 = 0;
+            } else {
+                return -1;
+            }
+        }
+        rex = (unsigned char)(0x48u | (((unsigned)gr >> 3) & 0x1u));
+        out[0] = rex;
+        out[1] = (unsigned char)(0xb8u + ((unsigned)gr & 7u));
+        for (i = 0; i < 8; ++i) {
+            out[2 + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
+        }
+        if (out_len != NULL) {
+            *out_len = 10;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "movdqa") == 0) {
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_xmm_reg(src->u.reg, &xm) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+            return -1;
+        }
+        rex = (unsigned char)(0x40u | ((xr & 8u) ? 0x04u : 0u) | ((xm & 8u) ? 0x01u : 0u));
+        out[0] = 0x66;
+        if (rex != 0x40u) {
+            out[1] = rex;
+            out[2] = 0x0f;
+            out[3] = 0x6f;
+            out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+            if (out_len != NULL) {
+                *out_len = 5;
+            }
+        } else {
+            out[1] = 0x0f;
+            out[2] = 0x6f;
+            out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+            if (out_len != NULL) {
+                *out_len = 4;
+            }
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "cvtsi2sd") == 0) {
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_x86_reg(src->u.reg, &gr) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+            return -1;
+        }
+        rex = (unsigned char)(0x48u | ((xr & 8u) ? 0x04u : 0u) | ((((unsigned)gr) & 8u) ? 0x01u : 0u));
+        out[0] = 0xf2;
+        out[1] = rex;
+        out[2] = 0x0f;
+        out[3] = 0x2a;
+        out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (((unsigned)gr) & 7u));
+        if (out_len != NULL) {
+            *out_len = 5;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "vpbroadcastd") == 0) {
+        as_x86_avx2_insn_t avx2;
+        unsigned yd;
+        unsigned xs;
+        char avxerr[128];
+        if (isa_level < 3u) {
+            return -2;
+        }
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_xmm_reg(src->u.reg, &xs) != 0 || parse_ymm_reg(dst->u.reg, &yd) != 0) {
+            return -1;
+        }
+        memset(&avx2, 0, sizeof(avx2));
+        avx2.mnemonic = "vpbroadcastd";
+        avx2.op_count = 2;
+        avx2.vector_bits = 256;
+        avx2.op1.kind = AS_X86_OP_REG;
+        avx2.op1.u.reg = (as_x86_reg_t)yd;
+        avx2.op2.kind = AS_X86_OP_REG;
+        avx2.op2.u.reg = (as_x86_reg_t)xs;
+        if (as_x86_encode_avx2(&avx2, out, out_cap, out_len, avxerr, sizeof(avxerr)) != 0) {
+            return -1;
         }
         return 0;
     }
@@ -783,12 +957,40 @@ static int emit_text_program(emit_ctx_t *ctx) {
                 op_index[2] = 0;
             }
 
+            if (streq_ci(mnbuf, "mov") && in.op_count == 2) {
+                const as_operand_t *dst_raw = &st->u.instr.operands[op_index[0]];
+                const as_operand_t *src_raw = &st->u.instr.operands[op_index[1]];
+                long long immv;
+                if (dst_raw->kind == AS_OPERAND_REGISTER && src_raw->kind == AS_OPERAND_IMMEDIATE &&
+                    is_x86_low8_reg(dst_raw->u.reg) && eval_expr_const(src_raw->u.expr, &immv) == 0 &&
+                    (immv < -128 || immv > 255)) {
+                    fprintf(stderr, "as: warning: %s:%u: immediate truncated to 8 bits\n",
+                            st->file != NULL ? st->file : "<input>", st->line);
+                }
+            }
+
             if (!ctx->cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, sizeof(code), &code_len) == 0) {
                 if (bytebuf_append(&text, code, code_len) != 0) {
                     free(text.data);
                     return -1;
                 }
                 continue;
+            }
+            if (ctx->cfg->is_64) {
+                int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, ctx->cfg->x86_64_isa_level, code, sizeof(code), &code_len);
+                if (s64 == 0) {
+                    if (bytebuf_append(&text, code, code_len) != 0) {
+                        free(text.data);
+                        return -1;
+                    }
+                    continue;
+                }
+                if (s64 == -2) {
+                    set_err(ctx, "%s:%u: AVX2 instruction requires -march=x86-64-v3 or higher",
+                            st->file != NULL ? st->file : "<input>", st->line);
+                    free(text.data);
+                    return -1;
+                }
             }
 
             for (j = 0; j < in.op_count; ++j) {
@@ -890,6 +1092,31 @@ static uint32_t reloc_type_for_machine(unsigned machine) {
     }
 }
 
+static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, uint32_t fallback) {
+    if (name == NULL) {
+        return fallback;
+    }
+    if (machine == EM_386) {
+        if (strstr(name, "@PLT") != NULL) {
+            return R_386_PLT32;
+        }
+        return fallback;
+    }
+    if (machine == EM_X86_64) {
+        if (strstr(name, "@PLT") != NULL) {
+            return R_X86_64_PLT32;
+        }
+        if (strstr(name, "@GOTPCREL") != NULL) {
+            return R_X86_64_GOTPCREL;
+        }
+        if (strstr(name, "@GOTTPOFF") != NULL) {
+            return R_X86_64_GOTTPOFF;
+        }
+        return fallback;
+    }
+    return fallback;
+}
+
 static elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name) {
     size_t i;
 
@@ -899,6 +1126,34 @@ static elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name) {
         }
     }
     return NULL;
+}
+
+static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *sym);
+
+static elf_symbol_t *ensure_emit_symbol(emit_ctx_t *ctx, const char *name) {
+    elf_symbol_t *sym;
+
+    if (name == NULL || name[0] == '\0') {
+        return NULL;
+    }
+    sym = find_emit_symbol(ctx, name);
+    if (sym != NULL) {
+        return sym;
+    }
+
+    sym = elf_add_symbol(ctx->obj, name, 0, 0, STB_GLOBAL, STT_NOTYPE);
+    if (sym == NULL) {
+        return NULL;
+    }
+    if (strcmp(name, ".text") == 0 && ctx->text_sec != NULL) {
+        (void)elf_symbol_define(sym, ctx->text_sec, 0);
+    } else if (strcmp(name, ".data") == 0 && ctx->data_sec != NULL) {
+        (void)elf_symbol_define(sym, ctx->data_sec, 0);
+    }
+    if (append_emit_symbol(ctx, name, sym) != 0) {
+        return NULL;
+    }
+    return sym;
 }
 
 static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *sym) {
@@ -1108,65 +1363,236 @@ static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     return 0;
 }
 
-static int add_reloc_for_symbol(emit_ctx_t *ctx, const char *name, uint64_t *offset_inout) {
+static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const char *name,
+                                   uint64_t offset, uint32_t fallback_type, int64_t addend) {
     elf_symbol_t *sym;
     uint32_t rtype;
 
-    sym = find_emit_symbol(ctx, name);
+    sym = ensure_emit_symbol(ctx, name);
     if (sym == NULL) {
-        return 0;
-    }
-    if (ctx->text_sec == NULL) {
-        return 0;
-    }
-
-    rtype = reloc_type_for_machine(ctx->cfg != NULL ? ctx->cfg->machine : EM_386);
-    if (elf_add_relocation(ctx->text_sec, *offset_inout, sym, rtype, 0) != ELF_OK) {
         return -1;
     }
-
-    *offset_inout += (ctx->cfg != NULL && ctx->cfg->is_64) ? 8 : 4;
+    if (sec == NULL) {
+        return 0;
+    }
+    rtype = reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name, fallback_type);
+    if (elf_add_relocation(sec, offset, sym, rtype, addend) != ELF_OK) {
+        return -1;
+    }
     return 0;
 }
 
-static int walk_expr_relocs(emit_ctx_t *ctx, const as_expr_t *e, uint64_t *off) {
+static const char *first_symbol_in_expr(const as_expr_t *e) {
     if (e == NULL) {
-        return 0;
+        return NULL;
     }
     if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL) {
-        if (add_reloc_for_symbol(ctx, e->symbol, off) != 0) {
-            return -1;
+        return e->symbol;
+    }
+    if (e->lhs != NULL) {
+        const char *s = first_symbol_in_expr(e->lhs);
+        if (s != NULL) {
+            return s;
         }
     }
-    if (walk_expr_relocs(ctx, e->lhs, off) != 0) {
+    if (e->rhs != NULL) {
+        return first_symbol_in_expr(e->rhs);
+    }
+    return NULL;
+}
+
+static char *trim_copy_arg(const char *s) {
+    const char *p;
+    const char *q;
+    size_t n;
+    char *out;
+
+    if (s == NULL) {
+        return NULL;
+    }
+    p = s;
+    while (*p != '\0' && isspace((unsigned char)*p)) {
+        ++p;
+    }
+    q = p + strlen(p);
+    while (q > p && isspace((unsigned char)q[-1])) {
+        --q;
+    }
+    n = (size_t)(q - p);
+    out = (char *)malloc(n + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, p, n);
+    out[n] = '\0';
+    return out;
+}
+
+static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add_out) {
+    char *tmp;
+    char *compact;
+    size_t i;
+    size_t n;
+    char *sep = NULL;
+    int sign = 1;
+    long long v = 0;
+
+    if (sym_out == NULL || add_out == NULL) {
         return -1;
     }
-    if (walk_expr_relocs(ctx, e->rhs, off) != 0) {
+    *sym_out = NULL;
+    *add_out = 0;
+    tmp = trim_copy_arg(arg);
+    if (tmp == NULL) {
         return -1;
     }
+    if (tmp[0] == '\0') {
+        free(tmp);
+        return -1;
+    }
+    if (parse_int64(tmp, &v) == 0) {
+        free(tmp);
+        return 0;
+    }
+
+    n = strlen(tmp);
+    compact = (char *)malloc(n + 1);
+    if (compact == NULL) {
+        free(tmp);
+        return -1;
+    }
+    n = 0;
+    for (i = 0; tmp[i] != '\0'; ++i) {
+        if (!isspace((unsigned char)tmp[i])) {
+            compact[n++] = tmp[i];
+        }
+    }
+    compact[n] = '\0';
+    free(tmp);
+
+    for (i = 1; compact[i] != '\0'; ++i) {
+        if (compact[i] == '+' || compact[i] == '-') {
+            sep = &compact[i];
+            break;
+        }
+    }
+    if (sep != NULL) {
+        long long addv;
+        char opch = *sep;
+        *sep = '\0';
+        sign = opch == '-' ? -1 : 1;
+        if (parse_int64(sep + 1, &addv) == 0) {
+            *add_out = (int64_t)(sign > 0 ? addv : -addv);
+        }
+    }
+    if (compact[0] == '\0') {
+        free(compact);
+        return -1;
+    }
+    *sym_out = compact;
     return 0;
+}
+
+static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t *in, const as_operand_t *op) {
+    if (machine == EM_386) {
+        if (op != NULL && (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+            in != NULL && is_rel_mnemonic(in->mnemonic)) {
+            return R_386_PC32;
+        }
+        return R_386_32;
+    }
+    if (machine == EM_X86_64) {
+        if (op != NULL && (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+            in != NULL && is_rel_mnemonic(in->mnemonic)) {
+            return R_X86_64_PC32;
+        }
+        if (op != NULL && op->kind == AS_OPERAND_MEMORY && op->u.mem.base_reg != NULL &&
+            streq_ci(op->u.mem.base_reg, "rip")) {
+            return R_X86_64_PC32;
+        }
+        return R_X86_64_64;
+    }
+    return reloc_type_for_machine(machine);
 }
 
 static int emit_relocations(emit_ctx_t *ctx) {
     size_t i;
-    uint64_t off = 0;
+    uint64_t text_off = 0;
+    uint64_t data_off = 0;
+    const char *cur_section = ".text";
+    unsigned machine = ctx->cfg != NULL ? ctx->cfg->machine : EM_386;
 
     for (i = 0; i < ctx->parsed->count; ++i) {
         const as_stmt_t *st = &ctx->parsed->items[i];
         size_t j;
 
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            const as_directive_t *d = &st->u.directive;
+            const char *next = section_from_directive(d);
+            if (next != NULL) {
+                cur_section = next;
+                continue;
+            }
+            if (strcmp(cur_section, ".data") == 0 || strcmp(cur_section, ".rodata") == 0) {
+                unsigned width = 0;
+                if (strcmp(d->name, ".byte") == 0) width = 1;
+                else if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".2byte") == 0) width = 2;
+                else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) width = 4;
+                else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) width = 8;
+
+                if (width != 0) {
+                    for (j = 0; j < d->arg_count; ++j) {
+                        char *sym = NULL;
+                        int64_t addend = 0;
+                        if (parse_symbol_addend_arg(d->args[j], &sym, &addend) == 0 && sym != NULL) {
+                            uint32_t t = reloc_type_for_machine(machine);
+                            if (add_reloc_for_symbol_ex(ctx, ctx->data_sec, sym, data_off, t, addend) != 0) {
+                                free(sym);
+                                return -1;
+                            }
+                            free(sym);
+                        }
+                        data_off += width;
+                    }
+                    continue;
+                }
+                if ((strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0) &&
+                    d->arg_count > 0) {
+                    long long n = 0;
+                    if (parse_int64(d->args[0], &n) == 0 && n > 0) {
+                        data_off += (uint64_t)n;
+                    }
+                }
+            }
+            continue;
+        }
         if (st->kind != AS_STMT_INSTRUCTION) {
+            continue;
+        }
+        if (strcmp(cur_section, ".text") != 0) {
             continue;
         }
         for (j = 0; j < st->u.instr.operand_count; ++j) {
             const as_operand_t *op = &st->u.instr.operands[j];
+            const as_expr_t *e = NULL;
+            const char *sym;
+            uint32_t t;
+
             if (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) {
-                if (walk_expr_relocs(ctx, op->u.expr, &off) != 0) {
+                e = op->u.expr;
+            } else if (op->kind == AS_OPERAND_MEMORY) {
+                e = op->u.mem.disp;
+            }
+            sym = first_symbol_in_expr(e);
+            if (sym != NULL) {
+                t = default_text_reloc_type(machine, &st->u.instr, op);
+                if (add_reloc_for_symbol_ex(ctx, ctx->text_sec, sym, text_off, t, 0) != 0) {
                     return -1;
                 }
-            } else if (op->kind == AS_OPERAND_MEMORY) {
-                if (walk_expr_relocs(ctx, op->u.mem.disp, &off) != 0) {
-                    return -1;
+                if (machine == EM_X86_64 && t == R_X86_64_64) {
+                    text_off += 8;
+                } else {
+                    text_off += 4;
                 }
             }
         }
