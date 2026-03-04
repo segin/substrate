@@ -2809,22 +2809,32 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
         return -1;
     }
     if (!seen_type) {
-        char near_tok[40];
-        size_t n = 0;
-        near_tok[0] = '\0';
-        if (p->tok.start != NULL && p->tok.len > 0) {
-            n = p->tok.len < sizeof(near_tok) - 1 ? p->tok.len : sizeof(near_tok) - 1;
-            memcpy(near_tok, p->tok.start, n);
-            near_tok[n] = '\0';
-        }
-        if (near_tok[0] != '\0') {
-            char msg[128];
-            snprintf(msg, sizeof(msg), "expected type specifier in declaration near '%s'", near_tok);
-            set_diag(p->diag, p->tok.line, p->tok.col, msg);
+        if (g_parser_allow_oldstyle_funcdecl && seen) {
+            /*
+             * GNU toolchains accept implicit int in declaration-specifier
+             * lists such as `extern foo();`. Keep this enabled in legacy/GNU
+             * modes so autoconf probes compile.
+             */
+            seen_int = 1;
+            seen_type = 1;
         } else {
-            set_diag(p->diag, p->tok.line, p->tok.col, "expected type specifier in declaration");
+            char near_tok[40];
+            size_t n = 0;
+            near_tok[0] = '\0';
+            if (p->tok.start != NULL && p->tok.len > 0) {
+                n = p->tok.len < sizeof(near_tok) - 1 ? p->tok.len : sizeof(near_tok) - 1;
+                memcpy(near_tok, p->tok.start, n);
+                near_tok[n] = '\0';
+            }
+            if (near_tok[0] != '\0') {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "expected type specifier in declaration near '%s'", near_tok);
+                set_diag(p->diag, p->tok.line, p->tok.col, msg);
+            } else {
+                set_diag(p->diag, p->tok.line, p->tok.col, "expected type specifier in declaration");
+            }
+            return -1;
         }
-        return -1;
     }
 
     if (seen_alias) {
@@ -9310,14 +9320,28 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     decl_attrs_reset(&suffix_attrs);
     decl_attrs_reset(&merged_attrs);
 
-    if (parse_declspec(p, &ftype, &ftype_sid, NULL, NULL, NULL, 1, "expected function return type", &is_typedef,
-                       NULL, &spec_attrs) != 0) {
-        return -1;
-    }
-    fn_storage = p->last_storage;
-    if (is_typedef) {
-        set_diag(p->diag, p->tok.line, p->tok.col, "typedef is not valid in function definition");
-        decl_attrs_clear(&spec_attrs);
+    if (is_declspec_start(p)) {
+        if (parse_declspec(p, &ftype, &ftype_sid, NULL, NULL, NULL, 1, "expected function return type", &is_typedef,
+                           NULL, &spec_attrs) != 0) {
+            return -1;
+        }
+        fn_storage = p->last_storage;
+        if (is_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef is not valid in function definition");
+            decl_attrs_clear(&spec_attrs);
+            return -1;
+        }
+    } else if (g_parser_allow_oldstyle_funcdecl) {
+        /*
+         * Legacy/GNU compatibility: allow omitted return type in function
+         * definitions/declarations (`main() { ... }` => `int main() { ... }`).
+         */
+        ftype = CC_TYPE_INT;
+        ftype_sid = -1;
+        fn_storage = 0;
+        is_typedef = 0;
+    } else {
+        set_diag(p->diag, p->tok.line, p->tok.col, "expected function return type");
         return -1;
     }
     if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
