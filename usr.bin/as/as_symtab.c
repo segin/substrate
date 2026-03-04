@@ -163,6 +163,55 @@ static int parse_u64_arg(const char *s, unsigned long long *out) {
     return 0;
 }
 
+static int parse_size_arg(const char *expr, const char *sym_name, unsigned long long *out) {
+    char *tmp;
+    char *dash;
+
+    if (expr == NULL || out == NULL) {
+        return -1;
+    }
+    if (parse_u64_arg(expr, out) == 0) {
+        return 0;
+    }
+
+    tmp = trim_copy(expr);
+    if (tmp == NULL) {
+        return -1;
+    }
+
+    /*
+     * Accept common symbolic forms emitted by C compilers:
+     *   .size foo, .-foo
+     *   .size foo, .Lend-foo
+     * We record size as 0 here when symbolic.
+     */
+    if (sym_name != NULL) {
+        if (strncmp(tmp, ".-", 2) == 0 && strcmp(tmp + 2, sym_name) == 0) {
+            free(tmp);
+            *out = 0;
+            return 0;
+        }
+        dash = strrchr(tmp, '-');
+        if (dash != NULL) {
+            char *rhs = trim_copy(dash + 1);
+            if (rhs == NULL) {
+                free(tmp);
+                return -1;
+            }
+            if (strcmp(rhs, sym_name) == 0) {
+                free(rhs);
+                free(tmp);
+                *out = 0;
+                return 0;
+            }
+            free(rhs);
+        }
+    }
+
+    free(tmp);
+    return -1;
+}
+
 static int symbol_set_definition(as_symbol_t *sym, const char *file, unsigned line) {
     if (!sym->defined) {
         sym->def_file = xstrdup(file);
@@ -346,13 +395,15 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             return -1;
         }
         sym = get_or_create_symbol(ctx, name);
-        free(name);
         if (sym == NULL) {
+            free(name);
             return -1;
         }
-        if (parse_u64_arg(d->args[1], &nsize) != 0) {
+        if (parse_size_arg(d->args[1], name, &nsize) != 0) {
+            free(name);
             return -1;
         }
+        free(name);
         sym->size = nsize;
         return 0;
     }

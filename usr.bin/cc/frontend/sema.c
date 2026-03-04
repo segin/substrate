@@ -1593,6 +1593,7 @@ typedef enum {
     BUILTIN_UNPREDICTABLE,
     BUILTIN_CLZ,
     BUILTIN_CTZ,
+    BUILTIN_FFS,
     BUILTIN_POPCOUNT,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
@@ -1670,6 +1671,10 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
         strcmp(name, "__builtin_ctzll") == 0) {
         return BUILTIN_CTZ;
+    }
+    if (strcmp(name, "__builtin_ffs") == 0 || strcmp(name, "__builtin_ffsl") == 0 ||
+        strcmp(name, "__builtin_ffsll") == 0) {
+        return BUILTIN_FFS;
     }
     if (strcmp(name, "__builtin_popcount") == 0 || strcmp(name, "__builtin_popcountl") == 0 ||
         strcmp(name, "__builtin_popcountll") == 0) {
@@ -2614,18 +2619,26 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = e->args[0]->struct_id;
             return 0;
         }
-        if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ) {
+        if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ || bk == BUILTIN_FFS) {
+            const char *builtin_name = "__builtin_clz";
+            if (bk == BUILTIN_CTZ) {
+                builtin_name = "__builtin_ctz";
+            } else if (bk == BUILTIN_FFS) {
+                builtin_name = "__builtin_ffs";
+            }
             if (e->arg_count != 1) {
-                set_diag(diag, bk == BUILTIN_CLZ ? "__builtin_clz expects exactly 1 argument"
-                                                 : "__builtin_ctz expects exactly 1 argument");
+                char msg[96];
+                snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", builtin_name);
+                set_diag(diag, msg);
                 return -1;
             }
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
             if (!is_integral_type(e->args[0]->value_type)) {
-                set_diag(diag, bk == BUILTIN_CLZ ? "__builtin_clz argument must be integral"
-                                                 : "__builtin_ctz argument must be integral");
+                char msg[96];
+                snprintf(msg, sizeof(msg), "%s argument must be integral", builtin_name);
+                set_diag(diag, msg);
                 return -1;
             }
             e->value_type = CC_TYPE_INT;
@@ -4538,8 +4551,10 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     return -1;
                 }
                 if (s->expr->value_type != CC_TYPE_VOID) {
-                    set_diag(diag, "void function cannot return a value");
-                    return -1;
+                    if (emit_required_warning(diag, s->line, s->col,
+                                              "void function returning a value is a GNU extension; value is ignored") != 0) {
+                        return -1;
+                    }
                 }
             }
         } else {
@@ -5176,7 +5191,7 @@ fail_global_item:
             }
             goto fail_decl;
         }
-        if (g_std_c17 && f->has_body && !f->has_prototype) {
+        if (g_std_c17 && !g_std_c23 && f->has_body && !f->has_prototype) {
             char msg[256];
             snprintf(msg, sizeof(msg), "old-style function definition is obsolescent in C17: %s", f->name);
             if (emit_warning(diag, f->line, f->col, msg, 0) != 0) {

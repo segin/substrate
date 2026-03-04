@@ -457,6 +457,7 @@ static void free_expr(cc_expr_t *e);
 static void free_stmt(cc_stmt_t *s);
 static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *out);
 static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n);
+static int parse_params(parser_t *p, cc_function_t *f);
 static int parse_function(parser_t *p, cc_function_t *f);
 static int function_param_index_by_name(const cc_function_t *f, const char *name);
 static cc_type_t adjust_oldstyle_param_type(cc_type_t ty, int array_ndim);
@@ -762,6 +763,22 @@ static void var_pop_to_depth(parser_t *p, int depth) {
     while (p->var_count > 0 && p->vars[p->var_count - 1].depth > depth) {
         free(p->vars[p->var_count - 1].name);
         p->var_count--;
+    }
+}
+
+static void struct_hide_to_depth(parser_t *p, int depth) {
+    size_t i;
+    if (p == NULL) {
+        return;
+    }
+    for (i = 0; i < p->struct_count; ++i) {
+        if (p->structs[i].depth > depth) {
+            /*
+             * Preserve parsed type records for semantic/lowering consumers,
+             * but hide out-of-scope tags from future parser lookups.
+             */
+            p->structs[i].depth = INT_MAX;
+        }
     }
 }
 
@@ -4069,10 +4086,6 @@ static int parse_asm_label_list(parser_t *p, char ***items, size_t *count) {
 }
 
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s) {
-    if (!parser_is_gnu_mode()) {
-        set_diag(p->diag, p->tok.line, p->tok.col, "inline asm requires GNU mode");
-        return -1;
-    }
     s->kind = CC_STMT_ASM;
     if (next_tok(p) != 0) {
         return -1;
@@ -5564,7 +5577,7 @@ static int parse_static_assert_decl(parser_t *p, int require_semi) {
     if (!is_static_assert_tok(p)) {
         return -1;
     }
-    if (!parser_is_c11_or_newer()) {
+    if (!parser_is_c11_or_newer() && !parser_relax_static_asserts()) {
         set_diag(p->diag, p->tok.line, p->tok.col, "_Static_assert requires C11 or newer");
         return -1;
     }
@@ -8002,6 +8015,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         int is_fn_decl = 0;
         int track_var = 0;
         int prefixed_fn_ptr = 0;
+        int fn_decl_hoisted = 0;
         long inner_array_len = -1;
         int inner_array_ndim = 0;
         long inner_array_dims[CC_MAX_ARRAY_DIMS];
@@ -8262,17 +8276,54 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         decl_attrs_clear(&suffix_attrs);
         decl_attrs_clear(&merged_attrs);
         if (!is_typedef && !complex_fn_ptr_decl && !prefixed_fn_ptr && p->tok.kind == TOK_LPAREN) {
-            if (skip_balanced_parens(p) != 0) {
+            cc_function_t fn_decl;
+
+            memset(&fn_decl, 0, sizeof(fn_decl));
+            fn_decl.line = s.line;
+            fn_decl.col = s.col;
+            fn_decl.ret_type = s.type;
+            fn_decl.ret_struct_id = s.type_struct_id;
+            fn_decl.storage = s.storage;
+            fn_decl.attr_flags = s.attr_flags;
+            fn_decl.attr_align = s.attr_align;
+            fn_decl.has_body = 0;
+            if (next_tok(p) != 0) {
                 free_stmt(&s);
                 return -1;
+            }
+            if (p->tok.kind != TOK_RPAREN) {
+                if (parse_params(p, &fn_decl) != 0) {
+                    free_func(&fn_decl);
+                    free_stmt(&s);
+                    return -1;
+                }
+            }
+            if (expect(p, TOK_RPAREN, "expected ')' after parameter list") != 0) {
+                free_func(&fn_decl);
+                free_stmt(&s);
+                return -1;
+            }
+            if (parser_is_c23_or_newer() && fn_decl.param_count == 0 && !fn_decl.is_variadic && !fn_decl.has_prototype) {
+                fn_decl.has_prototype = 1;
             }
             is_fn_decl = 1;
-            s.type = CC_TYPE_VOID;
-            s.type_struct_id = -1;
+            fn_decl.name = s.decl_name;
+            s.decl_name = NULL;
+            fn_decl.attr_section = s.attr_section;
+            s.attr_section = NULL;
+            fn_decl.attr_alias = s.attr_alias;
+            s.attr_alias = NULL;
             if (skip_decl_gnu_suffix(p, NULL) != 0) {
+                free_func(&fn_decl);
                 free_stmt(&s);
                 return -1;
             }
+            if (parser_push_hoisted_func(p, &fn_decl) != 0) {
+                free_func(&fn_decl);
+                free_stmt(&s);
+                return -1;
+            }
+            fn_decl_hoisted = 1;
         }
         if (is_typedef && !complex_fn_ptr_decl && p->tok.kind == TOK_LPAREN) {
             int depth = 1;
@@ -8391,6 +8442,11 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 }
                 free_stmt(&s);
             } else if (is_fn_decl) {
+                if (!fn_decl_hoisted) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "internal error: failed to record function declaration");
+                    free_stmt(&s);
+                    return -1;
+                }
                 free_stmt(&s);
             } else {
                 if (push_stmt_arr(arr, count, s) != 0) {
@@ -9255,10 +9311,6 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     }
     f->ret_struct_id = ftype_sid;
     f->storage = fn_storage;
-    if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & CC_STORAGE_EXTERN) == 0 && !g_parser_gnu89_inline) {
-        /* C99-style fallback: emit an internal body unless explicitly extern. */
-        f->storage |= CC_STORAGE_STATIC;
-    }
 
     if (expect(p, TOK_LPAREN, "expected '(' after function name") != 0) {
         decl_attrs_clear(&spec_attrs);
@@ -9273,6 +9325,13 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     if (expect(p, TOK_RPAREN, "expected ')' after parameter list") != 0) {
         decl_attrs_clear(&spec_attrs);
         return -1;
+    }
+    if (parser_is_c23_or_newer() && f->param_count == 0 && !f->is_variadic && !f->has_prototype) {
+        /*
+         * In C23 mode, an empty parameter list is a prototype for a
+         * parameterless function, not an old-style declaration.
+         */
+        f->has_prototype = 1;
     }
     if (wrapped_fn_ptr_decl) {
         if (expect(p, TOK_RPAREN, "expected ')' in function declarator") != 0) {
@@ -9476,6 +9535,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     }
     typedef_pop_to_depth(p, saved_depth);
     var_pop_to_depth(p, saved_depth);
+    struct_hide_to_depth(p, saved_depth);
     p->scope_depth = saved_depth;
     return 0;
 }

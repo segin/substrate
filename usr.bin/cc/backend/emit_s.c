@@ -1683,20 +1683,45 @@ static int reg_name_in_set(const char *reg, const char *const *set, size_t count
     return 0;
 }
 
-static const char *pick_nonconflict_generic_reg(int is_64bit, size_t *idx, const char *const *forbid, size_t forbid_count) {
-    size_t start = *idx;
-    size_t probe = 0;
-    size_t max_try = is_64bit ? 6 : 6;
+static const char *pick_nonconflict_constraint_reg(int is_64bit, const char *constraint, int op_size, size_t *idx,
+                                                    const char *const *forbid, size_t forbid_count) {
+    static const char *regs64_q[] = {"%rax", "%rbx", "%rcx", "%rdx"};
+    static const char *regs64_g[] = {"%r10", "%r11", "%r8", "%r9", "%rcx", "%rdx"};
+    static const char *regs32_q[] = {"%eax", "%ebx", "%ecx", "%edx"};
+    static const char *regs32_g[] = {"%eax", "%ebx", "%ecx", "%edx", "%esi", "%edi"};
+    const char *const *set = NULL;
+    size_t set_n = 0;
+    size_t start;
+    size_t probe;
 
-    for (probe = 0; probe < max_try; ++probe) {
-        const char *reg = is_64bit ? pick_generic_reg64(start + probe) : pick_generic_reg32(start + probe);
+    if (is_64bit) {
+        if (asm_constraint_has(constraint, 'q')) {
+            set = regs64_q;
+            set_n = sizeof(regs64_q) / sizeof(regs64_q[0]);
+        } else {
+            set = regs64_g;
+            set_n = sizeof(regs64_g) / sizeof(regs64_g[0]);
+        }
+    } else {
+        if (asm_constraint_has(constraint, 'q') || op_size == 1) {
+            set = regs32_q;
+            set_n = sizeof(regs32_q) / sizeof(regs32_q[0]);
+        } else {
+            set = regs32_g;
+            set_n = sizeof(regs32_g) / sizeof(regs32_g[0]);
+        }
+    }
+
+    start = *idx;
+    for (probe = 0; probe < set_n; ++probe) {
+        const char *reg = set[(start + probe) % set_n];
         if (!reg_name_in_set(reg, forbid, forbid_count)) {
             *idx = start + probe + 1;
             return reg;
         }
     }
     *idx = start + 1;
-    return is_64bit ? pick_generic_reg64(start) : pick_generic_reg32(start);
+    return set[start % set_n];
 }
 
 static const char *const emit_regs64[] = {"%rax", "%rcx", "%rdx", "%rsi", "%rdi", "%r8", "%r9", "%r10", "%r11"};
@@ -1743,6 +1768,7 @@ static const char *reg64_to32(const char *r) {
 
 static const char *reg32_to8(const char *r) {
     if (strcmp(r, "%eax") == 0) return "%al";
+    if (strcmp(r, "%ebx") == 0) return "%bl";
     if (strcmp(r, "%ecx") == 0) return "%cl";
     if (strcmp(r, "%edx") == 0) return "%dl";
     return "%al";
@@ -1750,9 +1776,57 @@ static const char *reg32_to8(const char *r) {
 
 static const char *reg32_to16(const char *r) {
     if (strcmp(r, "%eax") == 0) return "%ax";
+    if (strcmp(r, "%ebx") == 0) return "%bx";
     if (strcmp(r, "%ecx") == 0) return "%cx";
     if (strcmp(r, "%edx") == 0) return "%dx";
+    if (strcmp(r, "%esi") == 0) return "%si";
+    if (strcmp(r, "%edi") == 0) return "%di";
     return "%ax";
+}
+
+static int asm_operand_size(const unsigned char *sizes, size_t count, size_t idx, int default_size) {
+    if (sizes != NULL && idx < count && sizes[idx] > 0) {
+        return (int)sizes[idx];
+    }
+    return default_size;
+}
+
+static const char *reg_alias_for_size(const char *reg, int is_64bit, int op_size) {
+    if (reg == NULL) {
+        return NULL;
+    }
+    if (op_size <= 1) {
+        return is_64bit ? reg64_to8(reg) : reg32_to8(reg);
+    }
+    if (op_size == 2) {
+        return is_64bit ? reg64_to16(reg) : reg32_to16(reg);
+    }
+    if (op_size == 4 && is_64bit) {
+        return reg64_to32(reg);
+    }
+    return reg;
+}
+
+static void emit_zero_extend_reg(FILE *fp, const char *reg, int is_64bit, int op_size) {
+    if (reg == NULL) {
+        return;
+    }
+    if (is_64bit) {
+        if (op_size <= 1) {
+            fprintf(fp, "\tmovzbq %s, %s\n", reg64_to8(reg), reg);
+        } else if (op_size == 2) {
+            fprintf(fp, "\tmovzwq %s, %s\n", reg64_to16(reg), reg);
+        } else if (op_size == 4) {
+            const char *r32 = reg64_to32(reg);
+            fprintf(fp, "\tmovl %s, %s\n", r32, r32);
+        }
+    } else {
+        if (op_size <= 1) {
+            fprintf(fp, "\tmovzbl %s, %s\n", reg32_to8(reg), reg);
+        } else if (op_size == 2) {
+            fprintf(fp, "\tmovzwl %s, %s\n", reg32_to16(reg), reg);
+        }
+    }
 }
 
 static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, const cc_ssa_instr_t *in,
@@ -1802,6 +1876,7 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
         int vraw = in->asm_out_values != NULL ? in->asm_out_values[i] : -1;
         int is_indirect = CC_SSA_ASM_MEM_INDIRECT_P(vraw);
         int v = is_indirect ? CC_SSA_ASM_MEM_INDIRECT_DECODE(vraw) : vraw;
+        int osz = asm_operand_size(in->asm_out_sizes, out_n, i, is_64bit ? 8 : 4);
         long off = slot_off(lay, v);
         const char *fixed = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
         if (in->asm_out_names != NULL && in->asm_out_names[i] != NULL) {
@@ -1821,13 +1896,16 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
                 goto oom;
             }
         } else {
-            const char *reg = fixed != NULL ? fixed : pick_nonconflict_generic_reg(is_64bit, &reg_pick, NULL, 0);
+            const char *reg = fixed != NULL
+                                  ? fixed
+                                  : pick_nonconflict_constraint_reg(is_64bit, c, osz, &reg_pick, NULL, 0);
+            const char *render_reg = reg_alias_for_size(reg, is_64bit, osz);
             out_regs[i] = reg;
             out_write_back[i] = 1;
             if (c != NULL && strchr(c, '&') != NULL) {
                 forbid_regs[forbid_count++] = reg;
             }
-            op_text[i] = dup_cstr(reg);
+            op_text[i] = dup_cstr(render_reg);
             if (op_text[i] == NULL) {
                 goto oom;
             }
@@ -1922,6 +2000,8 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
         {
             const char *fixed = is_64bit ? asm_constraint_fixed_reg64(c) : asm_constraint_fixed_reg32(c);
             const char *reg = NULL;
+            int isz = asm_operand_size(in->asm_in_sizes, in_n, i, is_64bit ? 8 : 4);
+            const char *render_reg = NULL;
             if (fixed != NULL) {
                 if (reg_name_in_set(fixed, forbid_regs, forbid_count)) {
                     set_diag(diag, "asm input constraint conflicts with early-clobber output register");
@@ -1929,10 +2009,11 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
                 }
                 reg = fixed;
             } else {
-                reg = pick_nonconflict_generic_reg(is_64bit, &reg_pick, forbid_regs, forbid_count);
+                reg = pick_nonconflict_constraint_reg(is_64bit, c, isz, &reg_pick, forbid_regs, forbid_count);
             }
+            render_reg = reg_alias_for_size(reg, is_64bit, isz);
             long off = slot_off(lay, v);
-            op_text[slot] = dup_cstr(reg);
+            op_text[slot] = dup_cstr(render_reg);
             if (op_text[slot] == NULL) {
                 goto oom;
             }
@@ -1966,7 +2047,9 @@ static int emit_inline_asm(FILE *fp, const cc_ssa_function_t *f, const slot_layo
 
     for (i = 0; i < out_n; ++i) {
         if (out_write_back[i] && out_regs[i] != NULL && in->asm_out_values != NULL) {
+            int osz = asm_operand_size(in->asm_out_sizes, out_n, i, is_64bit ? 8 : 4);
             long off = slot_off(lay, in->asm_out_values[i]);
+            emit_zero_extend_reg(fp, out_regs[i], is_64bit, osz);
             emit_frame_store_reg(fp, is_64bit, out_regs[i], off);
         }
     }

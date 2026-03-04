@@ -105,6 +105,7 @@ test_icf_safe.sh|LD-O-004 LD-U-007
 test_icf_all_data.sh|LD-O-004 LD-R-003
 test_layout_page_congruence.sh|LD-U-009 LD-S-004
 test_layout_base_defaults.sh|LD-U-001 LD-U-009
+test_substrate_ld_note.sh|LD-U-009
 test_phdr_generation.sh|LD-U-009 LD-U-010
 test_gnu_stack_flags.sh|LD-U-009 LD-W-003
 test_z_text_notext.sh|LD-U-009 LD-W-003

@@ -3460,6 +3460,7 @@ static int validate_relocatable_input(const elfobj_t *obj, const char *display_n
 
     for (i = 0; i < elf_section_count(obj); ++i) {
         const elf_section_t *sec = elf_section_get(obj, i);
+        uint64_t flags = sec != NULL ? elf_section_flags(sec) : 0;
         size_t rc;
         size_t sec_sz = 0;
         const void *sec_data;
@@ -3478,6 +3479,9 @@ static int validate_relocatable_input(const elfobj_t *obj, const char *display_n
             fprintf(stderr, "ld: input %s section %s has invalid zero alignment\n",
                     display_name, elf_section_name(sec) != NULL ? elf_section_name(sec) : "<unnamed>");
             return -1;
+        }
+        if ((flags & SHF_ALLOC) == 0) {
+            continue;
         }
         rc = elf_section_reloc_count(sec);
         for (ri = 0; ri < rc; ++ri) {
@@ -4699,6 +4703,38 @@ static int register_dso_provider(ld_ctx_t *ctx, const char *path, symstate_t *st
         fprintf(stderr, "ld: trace: dso %s\n", path);
     }
     elf_close(obj);
+    return 0;
+}
+
+static int unresolved_symbol_has_dso_provider(ld_ctx_t *ctx, const char *name, int *out_has_provider) {
+    symstate_t probe;
+    size_t i;
+
+    if (out_has_provider == NULL) {
+        return -1;
+    }
+    *out_has_provider = 0;
+    if (ctx == NULL || name == NULL || name[0] == '\0' || ctx->dso_inputs.count == 0) {
+        return 0;
+    }
+    memset(&probe, 0, sizeof(probe));
+    if (symset_add(&probe.unresolved, name) != 0) {
+        symstate_free(&probe);
+        return -1;
+    }
+    for (i = 0; i < ctx->dso_inputs.count; ++i) {
+        int matched = 0;
+
+        if (shared_object_matches_unresolved(ctx->dso_inputs.items[i], ctx, &probe, &matched) != 0) {
+            symstate_free(&probe);
+            return -1;
+        }
+        if (matched) {
+            *out_has_provider = 1;
+            break;
+        }
+    }
+    symstate_free(&probe);
     return 0;
 }
 
@@ -6259,7 +6295,7 @@ static int finalize_dynamic_imports_i386(elfobj_t *out, const dyn_import_vec_t *
 static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     elf_section_t *dynstr;
     elf_section_t *dynsym;
-    elf_section_t *versym_sec;
+    elf_section_t *versym_sec = NULL;
     elf_section_t *dynamic;
     elf_section_t *hash_sec = NULL;
     elf_section_t *gnu_hash_sec = NULL;
@@ -6281,6 +6317,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
     size_t gnu_hash_sz = 0;
     size_t verdef_count = 0;
     size_t verneed_count = 0;
+    int emit_versym = 0;
     size_t i;
     size_t entsz;
     int need_dyn;
@@ -6316,16 +6353,6 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         }
     }
     if (elf_section_set_align(dynsym, elf_class(out) == ELFOBJ_CLASS_64 ? 8 : 4) != ELF_OK) {
-        return -1;
-    }
-    versym_sec = elf_find_section(out, ".gnu.version");
-    if (versym_sec == NULL) {
-        versym_sec = elf_add_section(out, ".gnu.version", SHT_GNU_versym, SHF_ALLOC);
-        if (versym_sec == NULL) {
-            return -1;
-        }
-    }
-    if (elf_section_set_align(versym_sec, 2) != ELF_OK) {
         return -1;
     }
     if (ctx->hash_style == LD_HASH_SYSV || ctx->hash_style == LD_HASH_BOTH) {
@@ -6529,6 +6556,31 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(gnu_hash_buf);
         return -1;
     }
+    emit_versym = verdef_count != 0 || verneed_count != 0;
+    if (emit_versym) {
+        versym_sec = elf_find_section(out, ".gnu.version");
+        if (versym_sec == NULL) {
+            versym_sec = elf_add_section(out, ".gnu.version", SHT_GNU_versym, SHF_ALLOC);
+            if (versym_sec == NULL) {
+                free(dynstr_buf);
+                free(dynsym_buf);
+                free(dynamic_buf);
+                free(versym_buf);
+                free(hash_buf);
+                free(gnu_hash_buf);
+                return -1;
+            }
+        }
+        if (elf_section_set_align(versym_sec, 2) != ELF_OK) {
+            free(dynstr_buf);
+            free(dynsym_buf);
+            free(dynamic_buf);
+            free(versym_buf);
+            free(hash_buf);
+            free(gnu_hash_buf);
+            return -1;
+        }
+    }
 
     if (hash_sec != NULL) {
         hash_buf = build_sysv_hash_section(dynsym_buf, dynsym_len, dynstr_buf, dynstr_len,
@@ -6571,15 +6623,17 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
         free(gnu_hash_buf);
         return -1;
     }
-    if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
-                             elf_class(out), elf_endian(out), DT_VERSYM, 0) != 0) {
-        free(dynstr_buf);
-        free(dynsym_buf);
-        free(dynamic_buf);
-        free(versym_buf);
-        free(hash_buf);
-        free(gnu_hash_buf);
-        return -1;
+    if (emit_versym) {
+        if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
+                                 elf_class(out), elf_endian(out), DT_VERSYM, 0) != 0) {
+            free(dynstr_buf);
+            free(dynsym_buf);
+            free(dynamic_buf);
+            free(versym_buf);
+            free(hash_buf);
+            free(gnu_hash_buf);
+            return -1;
+        }
     }
     if (verdef_count != 0) {
         if (dynamic_append_entry(&dynamic_buf, &dynamic_len, &dynamic_cap,
@@ -6687,7 +6741,7 @@ static int plan_dynamic_needed(ld_ctx_t *ctx, elfobj_t *out) {
 
     if (elf_section_set_data(dynstr, dynstr_buf, dynstr_len) != ELF_OK ||
         elf_section_set_data(dynsym, dynsym_buf, dynsym_len) != ELF_OK ||
-        elf_section_set_data(versym_sec, versym_buf, versym_len) != ELF_OK ||
+        (emit_versym && elf_section_set_data(versym_sec, versym_buf, versym_len) != ELF_OK) ||
         elf_section_set_data(dynamic, dynamic_buf, dynamic_len) != ELF_OK ||
         (hash_sec != NULL && elf_section_set_data(hash_sec, hash_buf, hash_sz) != ELF_OK) ||
         (gnu_hash_sec != NULL && elf_section_set_data(gnu_hash_sec, gnu_hash_buf, gnu_hash_sz) != ELF_OK)) {
@@ -8118,12 +8172,27 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
     return resolve_symbol_addr(obj, sym, allow_undef, out_addr, undef_name);
 }
 
+static int alloc_section_class(uint64_t flags) {
+    if ((flags & SHF_ALLOC) == 0) {
+        return -1;
+    }
+    if ((flags & SHF_EXECINSTR) != 0) {
+        return 0; /* RX */
+    }
+    if ((flags & SHF_WRITE) != 0) {
+        return 2; /* RW */
+    }
+    return 1; /* RO */
+}
+
 static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
     uint64_t off;
     uint64_t mem_end;
     uint64_t ehsize;
     uint64_t phentsz;
     uint64_t phnum;
+    const uint64_t page_align = 0x1000u;
+    int last_alloc_class = -1;
     size_t i;
 
     ehsize = elf_class(obj) == ELFOBJ_CLASS_64 ? 64u : 52u;
@@ -8185,6 +8254,17 @@ static int assign_section_addresses(elfobj_t *obj, uint64_t base_vaddr) {
         size = elf_section_size(sec);
         flags = elf_section_flags(sec);
 
+        if ((flags & SHF_ALLOC) != 0) {
+            int curr_alloc_class = alloc_section_class(flags);
+            if (last_alloc_class != -1 && curr_alloc_class != last_alloc_class) {
+                if (!align_up_u64_checked(off, page_align, &off) ||
+                    !align_up_u64_checked(mem_end, page_align, &mem_end)) {
+                    return -1;
+                }
+            }
+            last_alloc_class = curr_alloc_class;
+        }
+
         if (elf_section_type(sec) != SHT_NOBITS) {
             if (!align_up_u64_checked(off, align, &off)) {
                 return -1;
@@ -8244,7 +8324,28 @@ static int section_order_rank(const elf_section_t *sec) {
         (strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 || strcmp(name, ".shstrtab") == 0)) {
         return 200;
     }
+    if (name != NULL) {
+        if (strcmp(name, ".tm_clone_table") == 0) {
+            return 31;
+        }
+        if (strcmp(name, ".fini_array") == 0 || strcmp(name, ".init_array") == 0 ||
+            strcmp(name, ".preinit_array") == 0) {
+            return 32;
+        }
+        if (strcmp(name, ".got") == 0) {
+            return 33;
+        }
+        if (strcmp(name, ".dynamic") == 0) {
+            return 34;
+        }
+        if (strcmp(name, ".got.plt") == 0) {
+            return 35;
+        }
+    }
     if (type == SHT_REL || type == SHT_RELA) {
+        if ((flags & SHF_ALLOC) != 0) {
+            return 25;
+        }
         return 190;
     }
     if ((flags & SHF_ALLOC) != 0) {
@@ -8633,6 +8734,9 @@ static int is_relro_candidate_name(const char *name) {
     if (name == NULL) {
         return 0;
     }
+    if (strncmp(name, ".got.plt", 8) == 0) {
+        return 0;
+    }
     if (strncmp(name, ".got", 4) == 0 ||
         strncmp(name, ".data.rel.ro", 12) == 0 ||
         strcmp(name, ".dynamic") == 0 ||
@@ -9007,7 +9111,7 @@ static int set_entry_symbol(elfobj_t *obj, const char *entry_symbol, int require
     return 0;
 }
 
-static int check_undefined_symbols(elfobj_t *obj, int allow_undefined, const symref_map_t *refs) {
+static int check_undefined_symbols(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefined, const symref_map_t *refs) {
     size_t i;
     if (allow_undefined) {
         return 0;
@@ -9029,6 +9133,16 @@ static int check_undefined_symbols(elfobj_t *obj, int allow_undefined, const sym
                 if (strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0) {
                     continue;
                 }
+                if (find_planned_import(ctx, name) != NULL) {
+                    int has_provider = 0;
+                    if (unresolved_symbol_has_dso_provider((ld_ctx_t *)ctx, name, &has_provider) != 0) {
+                        fprintf(stderr, "ld: failed while validating unresolved symbol providers\n");
+                        return -1;
+                    }
+                    if (has_provider) {
+                        continue;
+                    }
+                }
                 const char *src = refs != NULL ? symref_map_get(refs, name) : NULL;
                 if (src != NULL) {
                     fprintf(stderr, "ld: undefined reference to `%s` (referenced by %s)\n", name, src);
@@ -9046,11 +9160,18 @@ static int check_undefined_symbols(elfobj_t *obj, int allow_undefined, const sym
 
 static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_undefined) {
     size_t i;
+    static int trace_reloc_env = -1;
+
+    if (trace_reloc_env < 0) {
+        const char *v = getenv("LD_DEBUG_RELOC_TRACE");
+        trace_reloc_env = (v != NULL && v[0] != '\0') ? 1 : 0;
+    }
     elfobj_endian_t endian = elf_endian(obj);
     uint16_t machine = elf_machine(obj);
 
     for (i = 0; i < elf_section_count(obj); ++i) {
         elf_section_t *sec = elf_section_get(obj, i);
+        uint64_t flags = sec != NULL ? elf_section_flags(sec) : 0;
         uint8_t *buf;
         const void *src;
         size_t sec_sz;
@@ -9058,6 +9179,9 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
         size_t ri;
 
         if (sec == NULL) {
+            continue;
+        }
+        if ((flags & SHF_ALLOC) == 0) {
             continue;
         }
         rc = elf_section_reloc_count(sec);
@@ -9153,6 +9277,18 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
                 /* Relax MOV r64, [rip+disp32] GOT load into LEA r64, [rip+disp32]. */
                 buf[off - 2] = 0x8d;
             }
+            if (trace_reloc_env) {
+                fprintf(stderr,
+                        "ld: reloc-trace: section=%s off=0x%llx type=%u sym=%s P=0x%llx S=0x%llx A=%lld out=0x%llx\n",
+                        sec_name != NULL ? sec_name : "<unnamed>",
+                        (unsigned long long)off,
+                        (unsigned)type,
+                        sym_name != NULL ? sym_name : "<null>",
+                        (unsigned long long)P,
+                        (unsigned long long)S,
+                        (long long)addend,
+                        (unsigned long long)outv);
+            }
             write_uint_bytes(buf + off, width, endian, outv);
         }
 
@@ -9191,6 +9327,56 @@ static int validate_output(const ld_ctx_t *ctx) {
         }
     }
     elf_close(obj);
+    return 0;
+}
+
+static int ensure_substrate_ld_note(elfobj_t *out) {
+    static const char note_name[] = "Substrate";
+    static const char note_desc[] = "Substrate Linker v0.1";
+    static const uint32_t note_type = 0x5355424cU; /* "SUBL" */
+    elf_section_t *sec;
+    elfobj_endian_t endian;
+    uint8_t *buf;
+    size_t namesz;
+    size_t descsz;
+    size_t name_pad;
+    size_t desc_pad;
+    size_t total;
+
+    if (out == NULL) {
+        return -1;
+    }
+    sec = elf_find_section(out, ".note.substrate_ld");
+    if (sec == NULL) {
+        sec = elf_add_section(out, ".note.substrate_ld", SHT_NOTE, SHF_ALLOC);
+        if (sec == NULL) {
+            return -1;
+        }
+    }
+
+    namesz = sizeof(note_name);
+    descsz = sizeof(note_desc);
+    name_pad = (namesz + 3u) & ~(size_t)3u;
+    desc_pad = (descsz + 3u) & ~(size_t)3u;
+    total = 12u + name_pad + desc_pad;
+
+    buf = (uint8_t *)calloc(1, total);
+    if (buf == NULL) {
+        return -1;
+    }
+
+    endian = elf_endian(out);
+    write_u32_endian(buf + 0, endian, (uint32_t)namesz);
+    write_u32_endian(buf + 4, endian, (uint32_t)descsz);
+    write_u32_endian(buf + 8, endian, note_type);
+    memcpy(buf + 12, note_name, namesz);
+    memcpy(buf + 12 + name_pad, note_desc, descsz);
+
+    if (elf_section_set_align(sec, 4) != ELF_OK || elf_section_set_data(sec, buf, total) != ELF_OK) {
+        free(buf);
+        return -1;
+    }
+    free(buf);
     return 0;
 }
 
@@ -9250,7 +9436,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     out_type = ctx->expect_type == 0 ? ET_EXEC : ctx->expect_type;
     allow_undef_runtime = ctx->allow_undefined;
-    if ((out_type == ET_DYN || ctx->dso_inputs.count != 0) && !ctx->explicit_unresolved_policy) {
+    if (out_type == ET_DYN && !ctx->explicit_unresolved_policy) {
         allow_undef_runtime = 1;
     }
     if (elf_set_type(out, out_type) != ELF_OK) {
@@ -9333,6 +9519,14 @@ static int run_internal_link(ld_ctx_t *ctx) {
         return 0;
     }
 
+    if (out_type == ET_EXEC && ensure_substrate_ld_note(out) != 0) {
+        fprintf(stderr, "ld: failed to emit .note.substrate_ld metadata\n");
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+
     if (strip_group_sections_for_final(out) != 0) {
         fprintf(stderr, "ld: failed to strip SHT_GROUP sections for final output\n");
         symref_map_free(&undef_refs);
@@ -9366,6 +9560,13 @@ static int run_internal_link(ld_ctx_t *ctx) {
 
     if (add_default_segments(out, ctx) != 0) {
         fprintf(stderr, "ld: failed to add output program segments\n");
+        symref_map_free(&undef_refs);
+        objvec_free(&inputs);
+        elf_close(out);
+        return -1;
+    }
+    if (reorder_sections_default_policy(out) != 0) {
+        fprintf(stderr, "ld: failed to reorder sections after segment planning\n");
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);
@@ -9435,7 +9636,7 @@ static int run_internal_link(ld_ctx_t *ctx) {
         }
     }
 
-    if (check_undefined_symbols(out, allow_undef_runtime, &undef_refs) != 0) {
+    if (check_undefined_symbols(out, ctx, allow_undef_runtime, &undef_refs) != 0) {
         symref_map_free(&undef_refs);
         objvec_free(&inputs);
         elf_close(out);

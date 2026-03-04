@@ -42,7 +42,9 @@ void cc_ssa_module_free(cc_ssa_module_t *m) {
             free(m->funcs[i].instrs[j].sym);
             free(m->funcs[i].instrs[j].args);
             free(m->funcs[i].instrs[j].asm_out_values);
+            free(m->funcs[i].instrs[j].asm_out_sizes);
             free(m->funcs[i].instrs[j].asm_in_values);
+            free(m->funcs[i].instrs[j].asm_in_sizes);
             if (m->funcs[i].instrs[j].asm_out_constraints != NULL) {
                 for (k = 0; k < m->funcs[i].instrs[j].asm_out_count; ++k) {
                     free(m->funcs[i].instrs[j].asm_out_constraints[k]);

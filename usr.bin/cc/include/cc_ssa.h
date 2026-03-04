@@ -78,10 +78,12 @@ typedef struct {
     int asm_volatile;
     int asm_is_goto;
     int *asm_out_values;
+    unsigned char *asm_out_sizes;
     char **asm_out_constraints;
     char **asm_out_names;
     size_t asm_out_count;
     int *asm_in_values;
+    unsigned char *asm_in_sizes;
     char **asm_in_constraints;
     char **asm_in_names;
     size_t asm_in_count;

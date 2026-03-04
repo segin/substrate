@@ -788,8 +788,9 @@ clean:
 	      /tmp/cc_native_c23_keywords /tmp/cc_native_c23_nullptr /tmp/cc_native_c23_typeof \
 	      /tmp/cc_native_c23_bitint /tmp/cc_native_c23_bitint_size /tmp/cc_native_c23_binary_sep /tmp/cc_native_c23_empty_init \
 	      /tmp/cc_native_c23_enum_underlying /tmp/cc_native_c23_label_decl /tmp/cc_native_c23_constexpr_auto_decimal /tmp/cc_native_c23_decimal_sizes \
+	      /tmp/cc_native_c23_empty_param /tmp/cc_native_c23_asm_extension \
 	      /tmp/cc_native_bad_c23_auto_no_init.o /tmp/cc_native_bad_c23_bitint_zero.o \
-	      /tmp/cc_native_bad_c23_static_assert_single_fail.o /tmp/cc_native_c23_pp_version.i \
+	      /tmp/cc_native_bad_c23_static_assert_single_fail.o /tmp/cc_native_bad_c23_empty_param_call.o /tmp/cc_native_c23_pp_version.i \
 	      /tmp/cc_native_c23_attr_std /tmp/cc_native_c23_attr_std.log /tmp/cc_native_c23_attr_std_werror \
 	      /tmp/cc_native_c23_attr_std_werror.log /tmp/cc_native_bad_c23_attr_fallthrough_outside.o \
 	      /tmp/cc_native_c23_attr_has.i \

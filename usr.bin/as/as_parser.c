@@ -295,6 +295,7 @@ static int is_x86_register_text(const char *s) {
         streq_ci(s, "esi") || streq_ci(s, "edi") || streq_ci(s, "esp") || streq_ci(s, "ebp") ||
         streq_ci(s, "ax") || streq_ci(s, "bx") || streq_ci(s, "cx") || streq_ci(s, "dx") ||
         streq_ci(s, "al") || streq_ci(s, "bl") || streq_ci(s, "cl") || streq_ci(s, "dl") ||
+        streq_ci(s, "sil") || streq_ci(s, "dil") || streq_ci(s, "spl") || streq_ci(s, "bpl") ||
         streq_ci(s, "cs") || streq_ci(s, "ds") || streq_ci(s, "es") || streq_ci(s, "fs") || streq_ci(s, "gs") ||
         streq_ci(s, "ss") || streq_ci(s, "rip") || streq_ci(s, "eip")) {
         return 1;

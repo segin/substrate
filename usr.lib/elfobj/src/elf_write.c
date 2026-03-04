@@ -24,6 +24,23 @@ static uint64_t align_up(uint64_t v, uint64_t a) {
     return (v + (a - 1)) & ~(a - 1);
 }
 
+static uint64_t align_with_page_mod(uint64_t off, uint64_t align, uint64_t addr) {
+    uint64_t want = addr & 0xfffu;
+    uint64_t cur;
+    uint64_t steps;
+
+    off = align_up(off, align ? align : 1);
+    cur = off & 0xfffu;
+    if (cur == want) {
+        return off;
+    }
+    if (cur < want) {
+        return off + (want - cur);
+    }
+    steps = 0x1000u - (cur - want);
+    return off + steps;
+}
+
 static int u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
     return elf__u64_add(a, b, out);
 }
@@ -713,7 +730,11 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             secs[i].offset = 0;
             continue;
         }
-        off = align_up(off, secs[i].addralign ? secs[i].addralign : 1);
+        if ((secs[i].flags & SHF_ALLOC) != 0 && secs[i].addr != 0) {
+            off = align_with_page_mod(off, secs[i].addralign ? secs[i].addralign : 1, secs[i].addr);
+        } else {
+            off = align_up(off, secs[i].addralign ? secs[i].addralign : 1);
+        }
         secs[i].offset = off;
         if (!u64_add_checked(off, secs[i].size, &off)) {
             err = ELF_ERR_BOUNDS;
@@ -876,13 +897,13 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 out_vaddr = lo_addr;
                 out_filesz = hi_off >= lo_off ? (hi_off - lo_off) : 0;
                 out_memsz = hi_addr >= lo_addr ? (hi_addr - lo_addr) : 0;
-                if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && phoff < out_off) {
-                    uint64_t delta = out_off - phoff;
+                if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && out_off != 0) {
+                    uint64_t delta = out_off;
                     if (out_vaddr < delta) {
                         err = ELF_ERR_BOUNDS;
                         goto done;
                     }
-                    out_off = phoff;
+                    out_off = 0;
                     out_vaddr -= delta;
                     if (!u64_add_checked(out_filesz, delta, &out_filesz) ||
                         !u64_add_checked(out_memsz, delta, &out_memsz)) {
