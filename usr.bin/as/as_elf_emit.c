@@ -696,12 +696,28 @@ static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
     return 0;
 }
 
+static const char *section_from_directive(const as_directive_t *d) {
+    if (d == NULL || d->name == NULL) {
+        return NULL;
+    }
+    if (strcmp(d->name, ".text") == 0) return ".text";
+    if (strcmp(d->name, ".data") == 0) return ".data";
+    if (strcmp(d->name, ".rodata") == 0) return ".rodata";
+    if (strcmp(d->name, ".bss") == 0) return ".bss";
+    if ((strcmp(d->name, ".section") == 0 || strcmp(d->name, ".pushsection") == 0) &&
+        d->arg_count > 0 && d->args[0] != NULL && d->args[0][0] != '\0') {
+        return d->args[0];
+    }
+    return NULL;
+}
+
 static int emit_text_program(emit_ctx_t *ctx) {
     bytebuf_t text;
     size_t i;
     unsigned char code[32];
     size_t code_len;
     char encerr[256];
+    const char *cur_section = ".text";
 
     memset(&text, 0, sizeof(text));
 
@@ -710,6 +726,14 @@ static int emit_text_program(emit_ctx_t *ctx) {
         int drc;
 
         if (st->kind == AS_STMT_DIRECTIVE) {
+            const char *next_section = section_from_directive(&st->u.directive);
+            if (next_section != NULL) {
+                cur_section = next_section;
+                continue;
+            }
+            if (strcmp(cur_section, ".text") != 0) {
+                continue;
+            }
             drc = append_directive_data(&text, &st->u.directive);
             if (drc < 0) {
                 free(text.data);
