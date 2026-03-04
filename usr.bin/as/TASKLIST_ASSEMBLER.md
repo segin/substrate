@@ -26,7 +26,7 @@ Goal: finish standalone assembler behavior without external syntax/tool handoff,
 ### 1.3 Diagnostics and UX
 - [ ] Report Intel syntax parse errors with file:line and clear token context.
 - [ ] Distinguish unsupported Intel construct vs malformed syntax.
-- [ ] Add `--target-help` notes documenting Intel syntax coverage and known gaps.
+- [x] Add `--target-help` notes documenting Intel syntax coverage and known gaps.
 
 ### 1.4 Tests
 - [ ] Add dual-syntax golden tests: AT&T source and Intel source produce identical `.text` bytes.
@@ -39,24 +39,24 @@ Goal: finish standalone assembler behavior without external syntax/tool handoff,
 ## 2. `-O binary` Output Mode
 
 ### 2.1 CLI and Driver Behavior
-- [ ] Add `-O <format>` option handling in `as` CLI.
-- [ ] Default `-O elf` behavior remains unchanged.
-- [ ] Implement `-O binary` output mode.
+- [x] Add `-O <format>` option handling in `as` CLI.
+- [x] Default `-O elf` behavior remains unchanged.
+- [x] Implement `-O binary` output mode.
 
 ### 2.2 Binary Emission Semantics
-- [ ] Emit raw bytes (no ELF headers/sections) for selected output image.
-- [ ] Define section/layout policy for binary mode:
-  - [ ] Section ordering.
-  - [ ] Gap/padding behavior.
-  - [ ] `.org` behavior.
-- [ ] Reject unresolved relocations in binary mode with explicit diagnostics.
-- [ ] Reject ELF-only metadata directives in binary mode where required.
+- [x] Emit raw bytes (no ELF headers/sections) for selected output image.
+- [x] Define section/layout policy for binary mode:
+  - [x] Section ordering.
+  - [x] Gap/padding behavior.
+  - [x] `.org` behavior.
+- [x] Reject unresolved relocations in binary mode with explicit diagnostics.
+- [x] Reject ELF-only metadata directives in binary mode where required.
 
 ### 2.3 Validation and Toolchain Integration
-- [ ] Add tests that verify binary output byte-for-byte against expected fixtures.
-- [ ] Add tests for `.org`/alignment impact on binary layout.
-- [ ] Add tests that ensure relocation-bearing input fails under `-O binary`.
-- [ ] Add integration test for boot-style image assembly using binary mode.
+- [x] Add tests that verify binary output byte-for-byte against expected fixtures.
+- [x] Add tests for `.org`/alignment impact on binary layout.
+- [x] Add tests that ensure relocation-bearing input fails under `-O binary`.
+- [x] Add integration test for boot-style image assembly using binary mode.
 
 ---
 
@@ -66,4 +66,3 @@ Goal: finish standalone assembler behavior without external syntax/tool handoff,
 - [ ] New Intel and binary-mode test suites pass.
 - [ ] `docs/specs/as_spec.md` and `usr.man/man1/as.1` updated to reflect final behavior.
 - [ ] Remove this tasklist when all boxes are complete.
-

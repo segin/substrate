@@ -276,6 +276,12 @@ If unresolved symbols/relocations remain while `-O binary` is active, then the a
 **REQ-AS-114** *(Ubiquitous)*
 While `-O binary` is active, the assembler shall not emit ELF metadata sections (`.symtab`, `.strtab`, `.shstrtab`, relocation sections, DWARF sections).
 
+**REQ-AS-115** *(Ubiquitous)*
+While `-O binary` is active, the assembler shall lay out sections in deterministic order: `.text`, `.rodata`, `.data`, remaining non-`.bss` sections, then `.bss`; inter-section alignment gaps shall be zero-filled.
+
+**REQ-AS-116** *(Event-driven)*
+When `.org` is used while `-O binary` is active, the assembler shall advance the current section offset with zero-fill and reject backward `.org` movement.
+
 ### 4.11 Diagnostics
 
 **REQ-AS-120** *(Ubiquitous)*

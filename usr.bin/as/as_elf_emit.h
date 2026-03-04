@@ -28,6 +28,13 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
                      char *errbuf,
                      size_t errbuf_sz);
 
+int as_elf_emit_binary_file(const as_parse_result_t *parsed,
+                            const as_section_state_t *sections,
+                            const as_elf_cfg_t *cfg,
+                            const char *out_path,
+                            char *errbuf,
+                            size_t errbuf_sz);
+
 #ifdef __cplusplus
 }
 #endif

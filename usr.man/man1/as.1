@@ -13,6 +13,7 @@
 .Op Fl D Ar macro Ns Op = Ns Ar value
 .Op Fl march Ar cpu
 .Op Fl mtune Ar cpu
+.Op Fl O Ar elf|binary
 .Op Fl msyntax Ns = Ns Ar att|intel
 .Op Fl W | Fl -warn | Fl -no-warn | Fl -fatal-warnings
 .Op Fl al Ns Op = Ns Ar file
@@ -31,17 +32,13 @@
 .Nm
 is the Substrate assembler command-line frontend.
 It provides GNU-compatible assembler option handling, source preflight limits,
-and ELF post-validation through
+native in-tree parsing/encoding, and ELF post-validation through
 Li elfobj(3) .
 .Pp
-Current release behavior is a hybrid pipeline:
+Current behavior is standalone:
 .Nm
-forwards final assembly to a backend assembler toolchain
-.Pq usually via Li gcc(1)
-and then validates output object invariants
-.Pq ET_REL, class, and machine .
-In-tree native parser/encoder/relocation modules are staged and continuously
-validated by the assembler test suite.
+lexes, parses, encodes, relaxes, and emits output directly in-tree.
+No external assembler handoff is performed.
 .Pp
 Alias binaries
 .Nm as.x86
@@ -57,7 +54,7 @@ Select 64-bit mode (x86-64 output contract).
 .It Fl c
 Accepted for compatibility; output remains an object file.
 .It Fl g
-Request debug-capable assembly output from backend.
+Enable debug-oriented handling for compatible directives.
 .It Fl I Ar dir
 Add include search path.
 .It Fl D Ar macro Ns Op = Ns Ar value
@@ -66,6 +63,14 @@ Define preprocessor symbol.
 Select target machine/ISA level string.
 .It Fl mtune Ar cpu
 Select tuning target string.
+.It Fl O Ar elf|binary
+Select output format.
+.Cm elf
+is the default and emits ET_REL objects.
+.Cm binary
+emits flat raw bytes with section-layout policy
+.Pq .text , .rodata , .data , then .bss .
+Binary mode rejects unresolved relocations and ELF-only metadata directives.
 .It Fl msyntax Ns = Ns Ar att|intel
 Select x86 syntax mode.
 .It Fl W , Fl -warn
@@ -90,7 +95,10 @@ Print wall-clock/resource usage statistics.
 .It Fl -target-help
 Print target summary and exit.
 .It Fl Wa Ar opts
-Pass comma-separated options to backend assembler.
+Accept GNU-compatible assembler option payloads.
+Unsupported backend-only flags are ignored unless they conflict with explicit
+.Nm
+behavior.
 .It Fl -max-input-bytes Ar n
 Reject source larger than
 .Ar n
@@ -176,14 +184,10 @@ When the selected/used ISA level is v2+,
 marks the highest required level via cumulative needed bits.
 .Sh ENVIRONMENT
 .Bl -tag -width AS_BACKEND
-.It Ev AS_BACKEND
-Backend compiler/assembler driver path.
-If unset,
-.Nm
-uses
-.Ev CC
-or falls back to
-.Dq gcc .
+.It Ev AS_CPP
+Override preprocessor executable for
+.Pa .S
+inputs.
 .It Ev AS_ERROR_CODES
 If non-empty,
 .Nm

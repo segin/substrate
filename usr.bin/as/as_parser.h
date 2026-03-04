@@ -122,6 +122,7 @@ typedef struct {
 typedef struct {
     char *mnemonic;
     char *arm_condition;
+    unsigned syntax_intel;
     unsigned prefixes;
     char *segment_override;
     as_operand_t *operands;

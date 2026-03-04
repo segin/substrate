@@ -42,9 +42,15 @@ typedef struct {
     size_t cap;
 } strvec_t;
 
+typedef enum {
+    AS_OUTPUT_ELF = 0,
+    AS_OUTPUT_BINARY,
+} as_output_t;
+
 typedef struct {
     int mode;
     int syntax_intel;
+    as_output_t output;
     int emit_listing;
     int statistics;
     int target_help;
@@ -175,6 +181,7 @@ static void as_diag(as_error_code_t code, const char *fmt, ...) {
 static void usage(const char *prog) {
     fprintf(stderr,
             "usage: %s [-32|-64] [-c] [-g] [-I dir] [-D name[=value]] [-march cpu] [-mtune cpu] "
+            "[-O elf|binary] "
             "[-msyntax=att|intel] [-W|--warn|--no-warn|--fatal-warnings] "
             "[-al[=file]] [--defsym sym=val] [--statistics] [--target-help] "
             "[-Wa opts] [--max-input-bytes N] [--max-line-bytes N] [--max-token-length N] "
@@ -771,9 +778,16 @@ static int run_native_backend(const as_ctx_t *ctx) {
         as_diag(AS_E_BACKEND, "%s", errbuf);
         goto out;
     }
-    if (as_elf_emit_file(&parsed, &secs, &syms, &data, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
-        as_diag(AS_E_BACKEND, "%s", errbuf);
-        goto out;
+    if (ctx->output == AS_OUTPUT_BINARY) {
+        if (as_elf_emit_binary_file(&parsed, &secs, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
+    } else {
+        if (as_elf_emit_file(&parsed, &secs, &syms, &data, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
     }
 
     rc = 0;
@@ -796,6 +810,10 @@ out:
 static int validate_output_file(const as_ctx_t *ctx) {
     elfobj_t *check = NULL;
     elf_err_t err;
+
+    if (ctx->output == AS_OUTPUT_BINARY) {
+        return 0;
+    }
 
     err = elf_open(ctx->out_path, &check);
     if (err != ELF_OK) {
@@ -842,10 +860,14 @@ static void print_target_help(const as_ctx_t *ctx) {
     puts("  x86/i386:");
     puts("    core integer ops, jumps/calls/returns, basic x87/MMX/SSE names");
     puts("    prefixes: lock, rep/repe/repne, segment overrides, rex");
+    puts("    syntax: -msyntax=att|intel, .intel_syntax/.att_syntax");
+    puts("    current gap: Intel size-qualifier parsing (byte ptr/word ptr/...) is partial");
     puts("  x86-64:");
     puts("    baseline x86-64 plus ISA levels x86-64-v2/v3/v4");
     puts("  ARMv7 / AArch64:");
     puts("    baseline branch/arithmetic syntax, register lists, condition codes");
+    puts("  output:");
+    puts("    -O elf (default) or -O binary (flat image: .text/.rodata/.data/.bss)");
 }
 
 static char *default_listing_path(const as_ctx_t *ctx) {
@@ -949,6 +971,7 @@ int main(int argc, char **argv) {
     memset(&ctx, 0, sizeof(ctx));
     ctx.mode = AS_MODE_AUTO;
     ctx.out_path = "a.out.o";
+    ctx.output = AS_OUTPUT_ELF;
     ctx.self_path = argv[0];
     ctx.warn_enabled = 1;
     ctx.max_input_bytes = limit_from_env("AS_MAX_INPUT_BYTES");
@@ -981,6 +1004,53 @@ int main(int argc, char **argv) {
             continue;
         }
         if (strcmp(arg, "-c") == 0) {
+            continue;
+        }
+        if (strcmp(arg, "-O") == 0) {
+            const char *value;
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
+            value = argv[++i];
+            if (strcmp(value, "elf") == 0) {
+                ctx.output = AS_OUTPUT_ELF;
+            } else if (strcmp(value, "binary") == 0 || strcmp(value, "bin") == 0) {
+                ctx.output = AS_OUTPUT_BINARY;
+            } else if (isdigit((unsigned char)value[0])) {
+                if (push_opt_with_value(&ctx.as_opts, "-O", value) != 0) {
+                    strvec_free(&ctx.gcc_opts);
+                    strvec_free(&ctx.as_opts);
+                    return 1;
+                }
+            } else {
+                as_diag(AS_E_USAGE, "unsupported output format '%s' for -O (expected elf|binary)", value);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
+            continue;
+        }
+        if (strncmp(arg, "-O", 2) == 0 && arg[2] != '\0') {
+            const char *value = arg + 2;
+            if (strcmp(value, "elf") == 0) {
+                ctx.output = AS_OUTPUT_ELF;
+            } else if (strcmp(value, "binary") == 0 || strcmp(value, "bin") == 0) {
+                ctx.output = AS_OUTPUT_BINARY;
+            } else if (isdigit((unsigned char)value[0])) {
+                if (strvec_push(&ctx.as_opts, arg) != 0) {
+                    strvec_free(&ctx.gcc_opts);
+                    strvec_free(&ctx.as_opts);
+                    return 1;
+                }
+            } else {
+                as_diag(AS_E_USAGE, "unsupported output format '%s' for -O (expected elf|binary)", value);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
             continue;
         }
         if (strcmp(arg, "-W") == 0 || strcmp(arg, "--warn") == 0) {

@@ -40,8 +40,7 @@ cat > "$TMP/roundtrip.s" <<'SRC'
 .globl roundtrip
 .type roundtrip,@function
 roundtrip:
-    mov $1, %eax
-    add $2, %eax
+    xor %eax, %eax
     xor %edx, %edx
     ret
 .size roundtrip, .-roundtrip
@@ -67,6 +66,7 @@ cmp "$TMP/roundtrip_a.text" "$TMP/roundtrip_b.text"
 
 # 8b.5: GNU ld <-> Substrate as compatibility in both directions.
 "$ROOT/tests/usr.bin/as/test_gnu_compat_surface.sh"
+"$ROOT/tests/usr.bin/as/test_output_binary.sh"
 gcc -c -x assembler -m64 -o "$TMP/gnu_obj.o" "$TMP/roundtrip.s"
 "$SUB_LD" -m64 -r -o "$TMP/sub_ld_on_gnu.o" "$TMP/gnu_obj.o"
 ld -r -o "$TMP/gnu_ld_on_sub.o" "$TMP/roundtrip_a.o"

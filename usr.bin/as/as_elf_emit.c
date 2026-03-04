@@ -49,6 +49,8 @@ typedef struct {
     size_t cap;
 } bytebuf_t;
 
+static const char *first_symbol_in_expr(const as_expr_t *e);
+
 static void set_err(emit_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
 
@@ -885,6 +887,129 @@ static const char *section_from_directive(const as_directive_t *d) {
     return NULL;
 }
 
+static int instruction_has_symbolic_reloc(const as_instruction_t *in) {
+    size_t i;
+
+    if (in == NULL) {
+        return 0;
+    }
+    for (i = 0; i < in->operand_count; ++i) {
+        const as_operand_t *op = &in->operands[i];
+        const as_expr_t *e = NULL;
+        if (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) {
+            e = op->u.expr;
+        } else if (op->kind == AS_OPERAND_MEMORY) {
+            e = op->u.mem.disp;
+        } else {
+            continue;
+        }
+        if (first_symbol_in_expr(e) != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
+                           size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_x86_insn_t in;
+    size_t j;
+    size_t op_index[3] = {0, 1, 2};
+    char mnbuf[32];
+    char suffix = '\0';
+    int intel_syntax;
+
+    if (cfg == NULL || st == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0) {
+        return -1;
+    }
+    if (st->kind != AS_STMT_INSTRUCTION) {
+        return -1;
+    }
+
+    intel_syntax = (st->u.instr.syntax_intel != 0) ? 1 : (cfg->intel_syntax != 0);
+    memset(&in, 0, sizeof(in));
+    if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
+        snprintf(encerr, encerr_sz, "unsupported mnemonic length");
+        return -1;
+    }
+    in.mnemonic = mnbuf;
+    in.seg_override = map_seg(st->u.instr.segment_override);
+    in.lock_prefix = (st->u.instr.prefixes & AS_PREFIX_LOCK) != 0;
+    if ((st->u.instr.prefixes & AS_PREFIX_REPNE) != 0) {
+        in.rep_prefix = 2;
+    } else if ((st->u.instr.prefixes & (AS_PREFIX_REP | AS_PREFIX_REPE)) != 0) {
+        in.rep_prefix = 1;
+    }
+    in.op_count = st->u.instr.operand_count > 3 ? 3 : st->u.instr.operand_count;
+    if (suffix == 'w') {
+        in.operand_size_override = 1;
+    } else if (suffix == 'q') {
+        in.rex_w = 1;
+    }
+
+    if (!intel_syntax && in.op_count == 2) {
+        op_index[0] = 1;
+        op_index[1] = 0;
+    } else if (!intel_syntax && in.op_count == 3 && streq_ci(mnbuf, "imul")) {
+        op_index[0] = 2;
+        op_index[1] = 1;
+        op_index[2] = 0;
+    }
+
+    if (streq_ci(mnbuf, "mov") && in.op_count == 2) {
+        const as_operand_t *dst_raw = &st->u.instr.operands[op_index[0]];
+        const as_operand_t *src_raw = &st->u.instr.operands[op_index[1]];
+        long long immv;
+        if (dst_raw->kind == AS_OPERAND_REGISTER && src_raw->kind == AS_OPERAND_IMMEDIATE &&
+            is_x86_low8_reg(dst_raw->u.reg) && eval_expr_const(src_raw->u.expr, &immv) == 0 &&
+            (immv < -128 || immv > 255)) {
+            fprintf(stderr, "as: warning: %s:%u: immediate truncated to 8 bits\n",
+                    st->file != NULL ? st->file : "<input>", st->line);
+        }
+    }
+
+    if (!cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, code_cap, code_len) == 0) {
+        return 0;
+    }
+    if (cfg->is_64) {
+        int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, cfg->x86_64_isa_level, code, code_cap, code_len);
+        if (s64 == 0) {
+            return 0;
+        }
+        if (s64 == -2) {
+            snprintf(encerr, encerr_sz, "AVX2 instruction requires -march=x86-64-v3 or higher");
+            return -1;
+        }
+    }
+
+    for (j = 0; j < in.op_count; ++j) {
+        if (convert_operand_x86(&st->u.instr.operands[op_index[j]], in.mnemonic, &in.ops[j], cfg->is_64, encerr,
+                                encerr_sz) != 0) {
+            return -1;
+        }
+    }
+    if (in.seg_override == AS_X86_SEG_NONE) {
+        for (j = 0; j < in.op_count; ++j) {
+            const as_operand_t *op = &st->u.instr.operands[op_index[j]];
+            if (op->kind == AS_OPERAND_MEMORY && op->u.mem.segment_reg != NULL) {
+                in.seg_override = map_seg(op->u.mem.segment_reg);
+                break;
+            }
+        }
+    }
+
+    if (cfg->is_64) {
+        if (as_x86_encode_x86_64(&in, code, code_cap, code_len, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else {
+        if (as_x86_encode_i386(&in, code, code_cap, code_len, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
 static int emit_text_program(emit_ctx_t *ctx) {
     bytebuf_t text;
     size_t i;
@@ -920,109 +1045,10 @@ static int emit_text_program(emit_ctx_t *ctx) {
         }
 
         {
-            as_x86_insn_t in;
-            size_t j;
-            size_t op_index[3] = {0, 1, 2};
-            char mnbuf[32];
-            char suffix = '\0';
-            int intel_syntax = (ctx->cfg->intel_syntax != 0);
-
-            memset(&in, 0, sizeof(in));
-            if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
-                set_err(ctx, "%s:%u: unsupported mnemonic length", st->file != NULL ? st->file : "<input>", st->line);
+            if (encode_x86_stmt(ctx->cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+                set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
                 free(text.data);
                 return -1;
-            }
-            in.mnemonic = mnbuf;
-            in.seg_override = map_seg(st->u.instr.segment_override);
-            in.lock_prefix = (st->u.instr.prefixes & AS_PREFIX_LOCK) != 0;
-            if ((st->u.instr.prefixes & AS_PREFIX_REPNE) != 0) {
-                in.rep_prefix = 2;
-            } else if ((st->u.instr.prefixes & (AS_PREFIX_REP | AS_PREFIX_REPE)) != 0) {
-                in.rep_prefix = 1;
-            }
-            in.op_count = st->u.instr.operand_count > 3 ? 3 : st->u.instr.operand_count;
-            if (suffix == 'w') {
-                in.operand_size_override = 1;
-            } else if (suffix == 'q') {
-                in.rex_w = 1;
-            }
-
-            if (!intel_syntax && in.op_count == 2) {
-                op_index[0] = 1;
-                op_index[1] = 0;
-            } else if (!intel_syntax && in.op_count == 3 && streq_ci(mnbuf, "imul")) {
-                op_index[0] = 2;
-                op_index[1] = 1;
-                op_index[2] = 0;
-            }
-
-            if (streq_ci(mnbuf, "mov") && in.op_count == 2) {
-                const as_operand_t *dst_raw = &st->u.instr.operands[op_index[0]];
-                const as_operand_t *src_raw = &st->u.instr.operands[op_index[1]];
-                long long immv;
-                if (dst_raw->kind == AS_OPERAND_REGISTER && src_raw->kind == AS_OPERAND_IMMEDIATE &&
-                    is_x86_low8_reg(dst_raw->u.reg) && eval_expr_const(src_raw->u.expr, &immv) == 0 &&
-                    (immv < -128 || immv > 255)) {
-                    fprintf(stderr, "as: warning: %s:%u: immediate truncated to 8 bits\n",
-                            st->file != NULL ? st->file : "<input>", st->line);
-                }
-            }
-
-            if (!ctx->cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, sizeof(code), &code_len) == 0) {
-                if (bytebuf_append(&text, code, code_len) != 0) {
-                    free(text.data);
-                    return -1;
-                }
-                continue;
-            }
-            if (ctx->cfg->is_64) {
-                int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, ctx->cfg->x86_64_isa_level, code, sizeof(code), &code_len);
-                if (s64 == 0) {
-                    if (bytebuf_append(&text, code, code_len) != 0) {
-                        free(text.data);
-                        return -1;
-                    }
-                    continue;
-                }
-                if (s64 == -2) {
-                    set_err(ctx, "%s:%u: AVX2 instruction requires -march=x86-64-v3 or higher",
-                            st->file != NULL ? st->file : "<input>", st->line);
-                    free(text.data);
-                    return -1;
-                }
-            }
-
-            for (j = 0; j < in.op_count; ++j) {
-                if (convert_operand_x86(&st->u.instr.operands[op_index[j]], in.mnemonic, &in.ops[j], ctx->cfg->is_64, encerr,
-                                        sizeof(encerr)) != 0) {
-                    set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
-                    free(text.data);
-                    return -1;
-                }
-            }
-            if (in.seg_override == AS_X86_SEG_NONE) {
-                for (j = 0; j < in.op_count; ++j) {
-                    const as_operand_t *op = &st->u.instr.operands[op_index[j]];
-                    if (op->kind == AS_OPERAND_MEMORY && op->u.mem.segment_reg != NULL) {
-                        in.seg_override = map_seg(op->u.mem.segment_reg);
-                        break;
-                    }
-                }
-            }
-
-            if (ctx->cfg->is_64) {
-                if (as_x86_encode_x86_64(&in, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
-                    set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
-                    free(text.data);
-                    return -1;
-                }
-            } else {
-                if (as_x86_encode_i386(&in, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
-                    set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
-                    free(text.data);
-                    return -1;
-                }
             }
             if (bytebuf_append(&text, code, code_len) != 0) {
                 free(text.data);
@@ -1491,6 +1517,745 @@ static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add
     }
     *sym_out = compact;
     return 0;
+}
+
+typedef struct {
+    char *name;
+    unsigned type;
+    unsigned flags;
+    unsigned align;
+    int touched;
+    bytebuf_t buf;
+} bin_section_t;
+
+typedef struct {
+    bin_section_t *items;
+    size_t count;
+    size_t cap;
+} bin_section_vec_t;
+
+static void bin_section_vec_free(bin_section_vec_t *v) {
+    size_t i;
+
+    if (v == NULL) {
+        return;
+    }
+    for (i = 0; i < v->count; ++i) {
+        free(v->items[i].name);
+        free(v->items[i].buf.data);
+    }
+    free(v->items);
+    memset(v, 0, sizeof(*v));
+}
+
+static int bin_section_vec_push(bin_section_vec_t *v, const char *name, unsigned type, unsigned flags, unsigned align) {
+    bin_section_t *next;
+
+    if (v == NULL || name == NULL || name[0] == '\0') {
+        return -1;
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
+        next = (bin_section_t *)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        v->items = next;
+        v->cap = ncap;
+    }
+    memset(&v->items[v->count], 0, sizeof(v->items[v->count]));
+    v->items[v->count].name = xstrdup(name);
+    if (v->items[v->count].name == NULL) {
+        return -1;
+    }
+    v->items[v->count].type = type;
+    v->items[v->count].flags = flags;
+    v->items[v->count].align = align > 0 ? align : 1;
+    v->count++;
+    return 0;
+}
+
+static bin_section_t *bin_section_find(bin_section_vec_t *v, const char *name) {
+    size_t i;
+
+    if (v == NULL || name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->items[i].name, name) == 0) {
+            return &v->items[i];
+        }
+    }
+    return NULL;
+}
+
+static int bin_sections_init(bin_section_vec_t *v, const as_section_state_t *sections) {
+    size_t i;
+
+    if (v == NULL) {
+        return -1;
+    }
+    memset(v, 0, sizeof(*v));
+    if (sections == NULL) {
+        return 0;
+    }
+    for (i = 0; i < sections->count; ++i) {
+        const as_section_t *s = &sections->items[i];
+        bin_section_t *cur = bin_section_find(v, s->name);
+        if (cur == NULL) {
+            if (bin_section_vec_push(v, s->name, s->type, s->flags, s->align) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (s->align > cur->align) {
+            cur->align = s->align;
+        }
+        cur->flags |= s->flags;
+        if (s->type == SHT_NOBITS) {
+            cur->type = SHT_NOBITS;
+        }
+    }
+    return 0;
+}
+
+static bin_section_t *bin_section_get_or_add(bin_section_vec_t *v, const char *name) {
+    bin_section_t *sec;
+    unsigned type = SHT_PROGBITS;
+    unsigned flags = 0;
+    unsigned align = 1;
+
+    sec = bin_section_find(v, name);
+    if (sec != NULL) {
+        return sec;
+    }
+    if (strcmp(name, ".text") == 0) {
+        type = SHT_PROGBITS;
+        flags = SHF_ALLOC | SHF_EXECINSTR;
+        align = 16;
+    } else if (strcmp(name, ".rodata") == 0) {
+        type = SHT_PROGBITS;
+        flags = SHF_ALLOC;
+        align = 4;
+    } else if (strcmp(name, ".data") == 0) {
+        type = SHT_PROGBITS;
+        flags = SHF_ALLOC | SHF_WRITE;
+        align = 4;
+    } else if (strcmp(name, ".bss") == 0) {
+        type = SHT_NOBITS;
+        flags = SHF_ALLOC | SHF_WRITE;
+        align = 4;
+    }
+    if (bin_section_vec_push(v, name, type, flags, align) != 0) {
+        return NULL;
+    }
+    return &v->items[v->count - 1];
+}
+
+static int parse_nonneg_u64_or_reloc(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg,
+                                     const char *what, unsigned long long *out) {
+    long long v;
+    char *sym = NULL;
+    int64_t add = 0;
+
+    if (parse_int64(arg, &v) == 0) {
+        if (v < 0) {
+            set_err(ctx, "%s:%u: %s must be non-negative", st->file != NULL ? st->file : "<input>", st->line, what);
+            return -1;
+        }
+        *out = (unsigned long long)v;
+        return 0;
+    }
+    if (parse_symbol_addend_arg(arg, &sym, &add) == 0 && sym != NULL) {
+        set_err(ctx, "%s:%u: unresolved relocation to '%s' not allowed with -O binary",
+                st->file != NULL ? st->file : "<input>", st->line, sym);
+        free(sym);
+        return -1;
+    }
+    set_err(ctx, "%s:%u: invalid %s argument: %s", st->file != NULL ? st->file : "<input>", st->line, what, arg);
+    free(sym);
+    return -1;
+}
+
+static char *dirname_dup2(const char *path) {
+    const char *slash;
+    size_t n;
+    char *out;
+
+    if (path == NULL) {
+        return NULL;
+    }
+    slash = strrchr(path, '/');
+    if (slash == NULL) {
+        return xstrdup(".");
+    }
+    if (slash == path) {
+        return xstrdup("/");
+    }
+    n = (size_t)(slash - path);
+    out = (char *)malloc(n + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, path, n);
+    out[n] = '\0';
+    return out;
+}
+
+static char *join_path2(const char *a, const char *b) {
+    size_t an;
+    size_t bn;
+    char *out;
+
+    if (a == NULL || b == NULL) {
+        return NULL;
+    }
+    an = strlen(a);
+    bn = strlen(b);
+    out = (char *)malloc(an + 1 + bn + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, a, an);
+    out[an] = '/';
+    memcpy(out + an + 1, b, bn);
+    out[an + 1 + bn] = '\0';
+    return out;
+}
+
+static int append_incbin_bytes(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, const as_directive_t *d) {
+    const char *path_arg;
+    char *resolved = NULL;
+    unsigned long long skip = 0;
+    unsigned long long count = 0;
+    int has_count = 0;
+    FILE *fp = NULL;
+    unsigned char tmp[1024];
+
+    if (d->arg_count < 1) {
+        set_err(ctx, "%s:%u: .incbin requires path argument", st->file != NULL ? st->file : "<input>", st->line);
+        return -1;
+    }
+    path_arg = d->args[0];
+    if (path_arg == NULL || path_arg[0] == '\0') {
+        set_err(ctx, "%s:%u: malformed .incbin path", st->file != NULL ? st->file : "<input>", st->line);
+        return -1;
+    }
+    if (path_arg[0] == '/') {
+        resolved = xstrdup(path_arg);
+    } else {
+        char *dir = dirname_dup2(st->file);
+        if (dir != NULL) {
+            resolved = join_path2(dir, path_arg);
+        }
+        free(dir);
+    }
+    if (resolved == NULL) {
+        set_err(ctx, "%s:%u: failed to resolve .incbin path", st->file != NULL ? st->file : "<input>", st->line);
+        return -1;
+    }
+    if (d->arg_count >= 2 && parse_nonneg_u64_or_reloc(ctx, st, d->args[1], ".incbin skip", &skip) != 0) {
+        free(resolved);
+        return -1;
+    }
+    if (d->arg_count >= 3 && parse_nonneg_u64_or_reloc(ctx, st, d->args[2], ".incbin count", &count) != 0) {
+        free(resolved);
+        return -1;
+    }
+    has_count = (d->arg_count >= 3) ? 1 : 0;
+
+    fp = fopen(resolved, "rb");
+    if (fp == NULL) {
+        set_err(ctx, "%s:%u: failed to open .incbin file %s", st->file != NULL ? st->file : "<input>", st->line, resolved);
+        free(resolved);
+        return -1;
+    }
+    free(resolved);
+
+    while (skip > 0) {
+        size_t want = skip > sizeof(tmp) ? sizeof(tmp) : (size_t)skip;
+        size_t nread = fread(tmp, 1, want, fp);
+        if (nread == 0) {
+            break;
+        }
+        skip -= nread;
+    }
+    while (!has_count || count > 0) {
+        size_t want = sizeof(tmp);
+        size_t nread;
+        if (has_count && count < want) {
+            want = (size_t)count;
+        }
+        nread = fread(tmp, 1, want, fp);
+        if (nread == 0) {
+            break;
+        }
+        if (bytebuf_append(&sec->buf, tmp, nread) != 0) {
+            fclose(fp);
+            set_err(ctx, "%s:%u: out of memory while appending .incbin", st->file != NULL ? st->file : "<input>",
+                    st->line);
+            return -1;
+        }
+        if (has_count) {
+            count -= nread;
+        }
+    }
+    fclose(fp);
+    sec->touched = 1;
+    return 0;
+}
+
+static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, int *handled) {
+    const as_directive_t *d;
+    size_t i;
+
+    if (ctx == NULL || st == NULL || sec == NULL || handled == NULL || st->kind != AS_STMT_DIRECTIVE) {
+        return -1;
+    }
+    d = &st->u.directive;
+    *handled = 0;
+
+    if (strcmp(d->name, ".incbin") == 0) {
+        *handled = 1;
+        return append_incbin_bytes(ctx, st, sec, d);
+    }
+    if (strcmp(d->name, ".ascii") == 0 || strcmp(d->name, ".asciz") == 0 || strcmp(d->name, ".string") == 0) {
+        int nul = (strcmp(d->name, ".ascii") == 0) ? 0 : 1;
+        *handled = 1;
+        for (i = 0; i < d->arg_count; ++i) {
+            const char *s = d->args[i] != NULL ? d->args[i] : "";
+            if (bytebuf_append(&sec->buf, s, strlen(s)) != 0) {
+                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+            if (nul && bytebuf_append_zeros(&sec->buf, 1) != 0) {
+                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".float") == 0 || strcmp(d->name, ".double") == 0) {
+        int is_double = strcmp(d->name, ".double") == 0;
+        *handled = 1;
+        for (i = 0; i < d->arg_count; ++i) {
+            char *tmp = trim_copy_arg(d->args[i]);
+            char *end;
+            double dv;
+            if (tmp == NULL || tmp[0] == '\0') {
+                free(tmp);
+                set_err(ctx, "%s:%u: malformed %s argument", st->file != NULL ? st->file : "<input>", st->line, d->name);
+                return -1;
+            }
+            dv = strtod(tmp, &end);
+            if (end == tmp || *end != '\0') {
+                char *sym = NULL;
+                int64_t add = 0;
+                if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
+                    set_err(ctx, "%s:%u: unresolved relocation to '%s' not allowed with -O binary",
+                            st->file != NULL ? st->file : "<input>", st->line, sym);
+                    free(sym);
+                } else {
+                    set_err(ctx, "%s:%u: malformed %s argument", st->file != NULL ? st->file : "<input>", st->line,
+                            d->name);
+                }
+                free(tmp);
+                return -1;
+            }
+            free(tmp);
+            if (is_double) {
+                if (bytebuf_append(&sec->buf, &dv, sizeof(dv)) != 0) {
+                    set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                    return -1;
+                }
+            } else {
+                float fv = (float)dv;
+                if (bytebuf_append(&sec->buf, &fv, sizeof(fv)) != 0) {
+                    set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                    return -1;
+                }
+            }
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
+        unsigned long long raw;
+        size_t align;
+        size_t need;
+        *handled = 1;
+        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], d->name, &raw) != 0) {
+            return -1;
+        }
+        if (strcmp(d->name, ".p2align") == 0) {
+            if (raw >= (unsigned long long)(sizeof(size_t) * CHAR_BIT - 1)) {
+                set_err(ctx, "%s:%u: .p2align exponent too large", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+            align = (size_t)1u << (unsigned)raw;
+        } else {
+            align = (size_t)raw;
+        }
+        if (align == 0 || (align & (align - 1)) != 0) {
+            set_err(ctx, "%s:%u: alignment must be a power of two", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        need = (align - (sec->buf.len & (align - 1))) & (align - 1);
+        if (need > 0 && bytebuf_append_zeros(&sec->buf, need) != 0) {
+            set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".org") == 0) {
+        unsigned long long off;
+        *handled = 1;
+        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], ".org offset", &off) != 0) {
+            return -1;
+        }
+        if ((size_t)off < sec->buf.len) {
+            set_err(ctx, "%s:%u: backward .org is not supported in binary mode",
+                    st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        if ((size_t)off > sec->buf.len && bytebuf_append_zeros(&sec->buf, (size_t)off - sec->buf.len) != 0) {
+            set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) {
+        unsigned long long n;
+        *handled = 1;
+        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], d->name, &n) != 0) {
+            return -1;
+        }
+        if (n > 0 && bytebuf_append_zeros(&sec->buf, (size_t)n) != 0) {
+            set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".fill") == 0) {
+        unsigned long long repeat = 0;
+        unsigned long long size = 1;
+        unsigned long long value = 0;
+        *handled = 1;
+        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], ".fill repeat", &repeat) != 0) {
+            return -1;
+        }
+        if (d->arg_count >= 2 && parse_nonneg_u64_or_reloc(ctx, st, d->args[1], ".fill size", &size) != 0) {
+            return -1;
+        }
+        if (d->arg_count >= 3 && parse_nonneg_u64_or_reloc(ctx, st, d->args[2], ".fill value", &value) != 0) {
+            return -1;
+        }
+        if (size == 0 || size > 8) {
+            set_err(ctx, "%s:%u: .fill size must be in [1,8]", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        for (i = 0; i < (size_t)repeat; ++i) {
+            if (bytebuf_append_u64_le(&sec->buf, value, (unsigned)size) != 0) {
+                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".byte") == 0 || strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
+        strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0 || strcmp(d->name, ".long") == 0 ||
+        strcmp(d->name, ".int") == 0 || strcmp(d->name, ".4byte") == 0 || strcmp(d->name, ".quad") == 0 ||
+        strcmp(d->name, ".8byte") == 0) {
+        unsigned width = 1;
+        *handled = 1;
+        if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 || strcmp(d->name, ".hword") == 0 ||
+            strcmp(d->name, ".2byte") == 0) {
+            width = 2;
+        } else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".int") == 0 || strcmp(d->name, ".4byte") == 0) {
+            width = 4;
+        } else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) {
+            width = 8;
+        }
+        for (i = 0; i < d->arg_count; ++i) {
+            long long v;
+            if (parse_int64(d->args[i], &v) != 0) {
+                char *sym = NULL;
+                int64_t add = 0;
+                if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
+                    set_err(ctx, "%s:%u: unresolved relocation to '%s' not allowed with -O binary",
+                            st->file != NULL ? st->file : "<input>", st->line, sym);
+                    free(sym);
+                } else {
+                    set_err(ctx, "%s:%u: malformed %s argument", st->file != NULL ? st->file : "<input>", st->line,
+                            d->name);
+                }
+                return -1;
+            }
+            if (bytebuf_append_u64_le(&sec->buf, (uint64_t)v, width) != 0) {
+                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+        }
+        sec->touched = 1;
+        return 0;
+    }
+
+    return 0;
+}
+
+static int is_binary_metadata_directive(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (strcmp(name, ".globl") == 0 || strcmp(name, ".global") == 0 || strcmp(name, ".local") == 0 ||
+        strcmp(name, ".weak") == 0 || strcmp(name, ".type") == 0 || strcmp(name, ".size") == 0 ||
+        strcmp(name, ".hidden") == 0 || strcmp(name, ".protected") == 0 || strcmp(name, ".internal") == 0 ||
+        strcmp(name, ".symver") == 0 || strcmp(name, ".comm") == 0 || strcmp(name, ".lcomm") == 0 ||
+        strcmp(name, ".file") == 0 || strcmp(name, ".loc") == 0 || strcmp(name, ".ident") == 0) {
+        return 1;
+    }
+    if (strncmp(name, ".cfi_", 5) == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const char *out_path) {
+    static const char *const first_order[] = {".text", ".rodata", ".data"};
+    bytebuf_t out;
+    size_t i;
+    unsigned char *used;
+    FILE *fp;
+
+    memset(&out, 0, sizeof(out));
+    used = (unsigned char *)calloc(v->count, 1);
+    if (used == NULL) {
+        return -1;
+    }
+
+    for (i = 0; i < sizeof(first_order) / sizeof(first_order[0]); ++i) {
+        size_t j;
+        for (j = 0; j < v->count; ++j) {
+            const bin_section_t *s = &v->items[j];
+            size_t align;
+            size_t need;
+            if (used[j] || strcmp(s->name, first_order[i]) != 0) {
+                continue;
+            }
+            if (s->buf.len == 0 && !s->touched) {
+                used[j] = 1;
+                continue;
+            }
+            align = s->align > 0 ? s->align : 1;
+            if ((align & (align - 1)) != 0) {
+                align = 1;
+            }
+            need = (align - (out.len & (align - 1))) & (align - 1);
+            if (need > 0 && bytebuf_append_zeros(&out, need) != 0) {
+                free(used);
+                free(out.data);
+                return -1;
+            }
+            if (s->type == SHT_NOBITS) {
+                if (s->buf.len > 0 && bytebuf_append_zeros(&out, s->buf.len) != 0) {
+                    free(used);
+                    free(out.data);
+                    return -1;
+                }
+            } else if (s->buf.len > 0 && bytebuf_append(&out, s->buf.data, s->buf.len) != 0) {
+                free(used);
+                free(out.data);
+                return -1;
+            }
+            used[j] = 1;
+        }
+    }
+
+    for (i = 0; i < v->count; ++i) {
+        const bin_section_t *s = &v->items[i];
+        size_t align;
+        size_t need;
+        if (used[i] || strcmp(s->name, ".bss") == 0) {
+            continue;
+        }
+        if (s->buf.len == 0 && !s->touched) {
+            used[i] = 1;
+            continue;
+        }
+        align = s->align > 0 ? s->align : 1;
+        if ((align & (align - 1)) != 0) {
+            align = 1;
+        }
+        need = (align - (out.len & (align - 1))) & (align - 1);
+        if (need > 0 && bytebuf_append_zeros(&out, need) != 0) {
+            free(used);
+            free(out.data);
+            return -1;
+        }
+        if (s->type == SHT_NOBITS) {
+            if (s->buf.len > 0 && bytebuf_append_zeros(&out, s->buf.len) != 0) {
+                free(used);
+                free(out.data);
+                return -1;
+            }
+        } else if (s->buf.len > 0 && bytebuf_append(&out, s->buf.data, s->buf.len) != 0) {
+            free(used);
+            free(out.data);
+            return -1;
+        }
+        used[i] = 1;
+    }
+
+    for (i = 0; i < v->count; ++i) {
+        const bin_section_t *s = &v->items[i];
+        size_t align;
+        size_t need;
+        if (used[i] || strcmp(s->name, ".bss") != 0) {
+            continue;
+        }
+        if (s->buf.len == 0 && !s->touched) {
+            used[i] = 1;
+            continue;
+        }
+        align = s->align > 0 ? s->align : 1;
+        if ((align & (align - 1)) != 0) {
+            align = 1;
+        }
+        need = (align - (out.len & (align - 1))) & (align - 1);
+        if (need > 0 && bytebuf_append_zeros(&out, need) != 0) {
+            free(used);
+            free(out.data);
+            return -1;
+        }
+        if (s->buf.len > 0 && bytebuf_append_zeros(&out, s->buf.len) != 0) {
+            free(used);
+            free(out.data);
+            return -1;
+        }
+        used[i] = 1;
+    }
+
+    free(used);
+    fp = fopen(out_path, "wb");
+    if (fp == NULL) {
+        free(out.data);
+        set_err(ctx, "failed to open output file: %s", out_path);
+        return -1;
+    }
+    if (out.len > 0 && fwrite(out.data, 1, out.len, fp) != out.len) {
+        fclose(fp);
+        free(out.data);
+        set_err(ctx, "failed to write output file: %s", out_path);
+        return -1;
+    }
+    fclose(fp);
+    free(out.data);
+    return 0;
+}
+
+int as_elf_emit_binary_file(const as_parse_result_t *parsed,
+                            const as_section_state_t *sections,
+                            const as_elf_cfg_t *cfg,
+                            const char *out_path,
+                            char *errbuf,
+                            size_t errbuf_sz) {
+    emit_ctx_t ctx;
+    bin_section_vec_t sv;
+    const char *cur_section = ".text";
+    size_t i;
+
+    if (parsed == NULL || cfg == NULL || out_path == NULL) {
+        return -1;
+    }
+    if (!(cfg->machine == EM_386 || cfg->machine == EM_X86_64)) {
+        if (errbuf != NULL && errbuf_sz > 0) {
+            snprintf(errbuf, errbuf_sz, "binary output currently supports x86/i386 targets only");
+        }
+        return -1;
+    }
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.cfg = cfg;
+    ctx.parsed = parsed;
+    ctx.errbuf = errbuf;
+    ctx.errbuf_sz = errbuf_sz;
+    if (errbuf != NULL && errbuf_sz > 0) {
+        errbuf[0] = '\0';
+    }
+    if (bin_sections_init(&sv, sections) != 0) {
+        set_err(&ctx, "failed to initialize section layout");
+        return -1;
+    }
+
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+        bin_section_t *sec = bin_section_get_or_add(&sv, cur_section);
+        if (sec == NULL) {
+            set_err(&ctx, "out of memory");
+            goto fail;
+        }
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            const as_directive_t *d = &st->u.directive;
+            const char *next = section_from_directive(d);
+            int handled = 0;
+
+            if (next != NULL) {
+                cur_section = next;
+                continue;
+            }
+            if (is_binary_metadata_directive(d->name)) {
+                set_err(&ctx, "%s:%u: ELF metadata directive %s is not supported with -O binary",
+                        st->file != NULL ? st->file : "<input>", st->line, d->name);
+                goto fail;
+            }
+            if (append_data_directive_binary(&ctx, st, sec, &handled) != 0) {
+                goto fail;
+            }
+            (void)handled;
+            continue;
+        }
+        if (st->kind == AS_STMT_INSTRUCTION) {
+            unsigned char code[32];
+            size_t code_len = 0;
+            char encerr[256];
+
+            if (sec->type == SHT_NOBITS) {
+                set_err(&ctx, "%s:%u: instructions are not allowed in SHT_NOBITS section %s",
+                        st->file != NULL ? st->file : "<input>", st->line, sec->name);
+                goto fail;
+            }
+            if (instruction_has_symbolic_reloc(&st->u.instr)) {
+                set_err(&ctx, "%s:%u: unresolved relocation in instruction is not allowed with -O binary",
+                        st->file != NULL ? st->file : "<input>", st->line);
+                goto fail;
+            }
+            if (encode_x86_stmt(cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+                set_err(&ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
+                goto fail;
+            }
+            if (bytebuf_append(&sec->buf, code, code_len) != 0) {
+                set_err(&ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                goto fail;
+            }
+            sec->touched = 1;
+        }
+    }
+
+    if (write_binary_file(&ctx, &sv, out_path) != 0) {
+        goto fail;
+    }
+    bin_section_vec_free(&sv);
+    return 0;
+
+fail:
+    bin_section_vec_free(&sv);
+    return -1;
 }
 
 static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t *in, const as_operand_t *op) {

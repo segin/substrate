@@ -20,6 +20,7 @@ typedef struct {
 
 typedef struct {
     const as_parser_cfg_t *cfg;
+    int syntax_intel;
     as_parse_result_t *out;
     char *errbuf;
     size_t errbuf_sz;
@@ -1317,6 +1318,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     int depth = 0;
 
     memset(&in, 0, sizeof(in));
+    in.syntax_intel = (unsigned)(ctx != NULL && ctx->syntax_intel ? 1 : 0);
 
     i = 0;
     while (i < n) {
@@ -1436,6 +1438,13 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
         if (parse_directive(tokv + i, n - i, st) != 0) {
             return -1;
         }
+        if (st->u.directive.name != NULL) {
+            if (streq_ci(st->u.directive.name, ".intel_syntax")) {
+                ctx->syntax_intel = 1;
+            } else if (streq_ci(st->u.directive.name, ".att_syntax")) {
+                ctx->syntax_intel = 0;
+            }
+        }
         return 0;
     }
 
@@ -1522,6 +1531,7 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.cfg = cfg;
+    ctx.syntax_intel = (cfg != NULL && cfg->intel_syntax) ? 1 : 0;
     ctx.out = out;
     ctx.errbuf = errbuf;
     ctx.errbuf_sz = errbuf_sz;
