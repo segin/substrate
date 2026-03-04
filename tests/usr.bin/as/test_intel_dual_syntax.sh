@@ -13,7 +13,7 @@ cat > "$TMP/dual_att.s" <<'SRC'
 .type dual,@function
 dual:
     mov 8(%rax), %ecx
-    mov 8(%rbx), %edx
+    mov 8(%rax,%rbx,4), %edx
     add $5, %edx
     ret
 .size dual, .-dual
@@ -26,7 +26,7 @@ cat > "$TMP/dual_intel.s" <<'SRC'
 .type dual,@function
 dual:
     mov ecx, [rax + 8]
-    mov edx, [rbx + 8]
+    mov edx, [rax + rbx*4 + 8]
     add edx, 5
     ret
 .size dual, .-dual
@@ -46,7 +46,7 @@ cat > "$TMP/mem_perm_att.s" <<'SRC'
 mem_perm:
     lea (%ebx), %eax
     lea 16(%ebx), %ecx
-    lea 32(%esi), %edx
+    lea 32(%ebx,%esi,4), %edx
     ret
 .size mem_perm, .-mem_perm
 SRC
@@ -59,7 +59,7 @@ cat > "$TMP/mem_perm_intel.s" <<'SRC'
 mem_perm:
     lea eax, [ebx]
     lea ecx, [ebx + 16]
-    lea edx, [esi + 32]
+    lea edx, [ebx + esi*4 + 32]
     ret
 .size mem_perm, .-mem_perm
 .att_syntax prefix
@@ -89,4 +89,4 @@ if "$AS" -64 -o "$TMP/ambig_intel.o" "$TMP/ambig_intel.s" >"$TMP/ambig.out" 2>"$
 fi
 grep -Eqi "unsupported|malformed|error" "$TMP/ambig.err"
 
-echo "ok: intel dual-syntax and basic Intel memory-addressing compatibility"
+echo "ok: intel dual-syntax and memory-addressing compatibility"

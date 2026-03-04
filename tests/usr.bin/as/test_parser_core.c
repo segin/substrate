@@ -110,6 +110,26 @@ static void verify_x86(const char *path) {
         fail("symbol-in-expression parse failed");
     }
 
+    st = find_instr(&parsed, 10, "mov");
+    if (st == NULL || st->u.instr.syntax_intel == 0 || st->u.instr.operand_count != 2 ||
+        st->u.instr.operands[0].kind != AS_OPERAND_REGISTER || st->u.instr.operands[1].kind != AS_OPERAND_MEMORY ||
+        st->u.instr.operands[1].u.mem.base_reg == NULL || strcmp(st->u.instr.operands[1].u.mem.base_reg, "ebx") != 0 ||
+        st->u.instr.operands[1].u.mem.disp == NULL || st->u.instr.operands[1].u.mem.disp->kind != AS_EXPR_CONST ||
+        st->u.instr.operands[1].u.mem.disp->value != 8) {
+        fail("intel size-qualifier memory parse failed");
+    }
+
+    st = find_instr(&parsed, 11, "mov");
+    if (st == NULL || st->u.instr.syntax_intel == 0 || st->u.instr.operand_count != 2 ||
+        st->u.instr.operands[1].kind != AS_OPERAND_MEMORY ||
+        st->u.instr.operands[1].u.mem.base_reg == NULL || strcmp(st->u.instr.operands[1].u.mem.base_reg, "ebx") != 0 ||
+        st->u.instr.operands[1].u.mem.index_reg == NULL || strcmp(st->u.instr.operands[1].u.mem.index_reg, "esi") != 0 ||
+        st->u.instr.operands[1].u.mem.scale != 4 || st->u.instr.operands[1].u.mem.disp == NULL ||
+        st->u.instr.operands[1].u.mem.disp->kind != AS_EXPR_CONST ||
+        st->u.instr.operands[1].u.mem.disp->value != 32) {
+        fail("intel base/index/scale/disp parse failed");
+    }
+
     as_parse_result_free(&parsed);
     as_token_vec_free(&toks);
 }

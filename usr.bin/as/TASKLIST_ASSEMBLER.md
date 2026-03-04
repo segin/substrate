@@ -30,7 +30,7 @@ Goal: finish standalone assembler behavior without external syntax/tool handoff,
 
 ### 1.4 Tests
 - [x] Add dual-syntax golden tests: AT&T source and Intel source produce identical `.text` bytes.
-- [ ] Add Intel memory-addressing conformance tests (base/index/scale/disp permutations).
+- [x] Add Intel memory-addressing conformance tests (base/index/scale/disp permutations).
 - [ ] Add Intel size-qualifier tests that validate selected opcode width/prefix.
 - [x] Add negative tests for ambiguous Intel forms with expected diagnostics.
 

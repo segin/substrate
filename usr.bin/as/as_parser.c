@@ -892,6 +892,60 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
     return 0;
 }
 
+static int parse_intel_index_scale_token(parse_ctx_t *ctx, const as_token_t *tok, char **index_reg_out, int *scale_out) {
+    const char *s;
+    const char *star;
+    size_t left_n;
+    char *left;
+    as_token_t fake;
+    as_expr_t *sc;
+
+    if (ctx == NULL || tok == NULL || tok->text == NULL || index_reg_out == NULL || scale_out == NULL) {
+        return -1;
+    }
+    s = tok->text;
+    star = strchr(s, '*');
+    if (star == NULL || star == s || star[1] == '\0' || strchr(star + 1, '*') != NULL) {
+        return -1;
+    }
+
+    left_n = (size_t)(star - s);
+    left = (char *)malloc(left_n + 1);
+    if (left == NULL) {
+        return -1;
+    }
+    memcpy(left, s, left_n);
+    left[left_n] = '\0';
+    if (!is_x86_register_text(left) && !is_arm_register_text(left)) {
+        free(left);
+        return -1;
+    }
+
+    memset(&fake, 0, sizeof(fake));
+    fake.kind = AS_TOK_IDENTIFIER;
+    fake.text = (char *)(star + 1);
+    fake.file = tok->file;
+    fake.line = tok->line;
+    fake.col = tok->col;
+    sc = parse_expression_from_tokens(ctx, &fake, 1);
+    if (sc == NULL || sc->kind != AS_EXPR_CONST) {
+        free_expr(sc);
+        free(left);
+        return -1;
+    }
+    if (sc->value != 1 && sc->value != 2 && sc->value != 4 && sc->value != 8) {
+        free_expr(sc);
+        free(left);
+        return -1;
+    }
+
+    *index_reg_out = strip_register_prefix(left);
+    *scale_out = (int)sc->value;
+    free_expr(sc);
+    free(left);
+    return *index_reg_out != NULL ? 0 : -1;
+}
+
 static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *out_op) {
     int lbr;
     int rbr;
@@ -925,6 +979,10 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     }
 
     for (i = (size_t)lbr + 1; i < (size_t)rbr; ++i) {
+        if (mem.index_reg == NULL && tokv[i].kind != AS_TOK_PUNCT &&
+            parse_intel_index_scale_token(ctx, &tokv[i], &mem.index_reg, &mem.scale) == 0) {
+            continue;
+        }
         if ((tokv[i].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[i].text) || is_arm_register_text(tokv[i].text)) &&
             i + 2 < (size_t)rbr && tokv[i + 1].kind == AS_TOK_OPERATOR && strcmp(tokv[i + 1].text, "*") == 0) {
             if (mem.index_reg == NULL) {
@@ -978,7 +1036,6 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     out_op->u.mem = mem;
     return 0;
 }
-
 static int parse_register_list(const as_token_t *tokv, size_t n, as_operand_t *op) {
     size_t i;
 
