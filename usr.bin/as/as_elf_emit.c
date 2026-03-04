@@ -313,7 +313,7 @@ static int is_rel_mnemonic(const char *mn) {
 static int is_size_suffixable_base(const char *mn) {
     static const char *const names[] = {
         "add", "sub", "and", "or", "xor", "cmp", "mov", "lea", "imul", "shl",
-        "shr", "sar", "ror", "bt", "bts", "movsx", "movzx", "test", "push",
+        "shr", "sar", "ror", "rol", "bt", "bts", "movsx", "movzx", "test", "push",
         "pop", "ret", "leave",
     };
     size_t i;

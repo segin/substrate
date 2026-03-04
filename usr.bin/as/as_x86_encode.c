@@ -565,9 +565,11 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
             return -1;
         }
     } else if (streq_ci(insn->mnemonic, "shl") || streq_ci(insn->mnemonic, "shr") || streq_ci(insn->mnemonic, "sar") ||
-               streq_ci(insn->mnemonic, "ror")) {
+               streq_ci(insn->mnemonic, "ror") || streq_ci(insn->mnemonic, "rol")) {
         uint8_t ext;
-        if (streq_ci(insn->mnemonic, "shl")) {
+        if (streq_ci(insn->mnemonic, "rol")) {
+            ext = 0;
+        } else if (streq_ci(insn->mnemonic, "shl")) {
             ext = 4;
         } else if (streq_ci(insn->mnemonic, "shr")) {
             ext = 5;
@@ -579,6 +581,11 @@ int as_x86_encode_i386(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap,
 
         if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_IMM) {
             if (emit8(&ctx, 0xc1) != 0 || modrm_sib_disp(&ctx, ext, a) != 0 || emit8(&ctx, (uint8_t)b->u.imm) != 0) {
+                return -1;
+            }
+        } else if (insn->op_count == 2 && is_reg_or_mem(a) && b->kind == AS_X86_OP_REG &&
+                   ((b->u.reg & 7) == AS_X86_REG_ECX)) {
+            if (emit8(&ctx, 0xd3) != 0 || modrm_sib_disp(&ctx, ext, a) != 0) {
                 return -1;
             }
         } else {
@@ -925,10 +932,15 @@ int as_x86_encode_x86_64(const as_x86_insn_t *insn, uint8_t *out, size_t out_cap
             set_err(&ctx, "unsupported x86_64 test form");
             return -1;
         }
-    } else if (streq_ci(insn->mnemonic, "shl") || streq_ci(insn->mnemonic, "shr") || streq_ci(insn->mnemonic, "sar")) {
+    } else if (streq_ci(insn->mnemonic, "shl") || streq_ci(insn->mnemonic, "shr") || streq_ci(insn->mnemonic, "sar") ||
+               streq_ci(insn->mnemonic, "rol") || streq_ci(insn->mnemonic, "ror")) {
         uint8_t ext;
         rex_w = 1;
-        if (streq_ci(insn->mnemonic, "shl")) {
+        if (streq_ci(insn->mnemonic, "rol")) {
+            ext = 0;
+        } else if (streq_ci(insn->mnemonic, "ror")) {
+            ext = 1;
+        } else if (streq_ci(insn->mnemonic, "shl")) {
             ext = 4;
         } else if (streq_ci(insn->mnemonic, "shr")) {
             ext = 5;
