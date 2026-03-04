@@ -334,3 +334,15 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 
+#include <vm/vm_page.h>
+vm_page_t vm_phys_alloc_page(int type) {
+    (void)type;
+    vm_page_t m;
+    memset(&m, 0, sizeof(m));
+    return m;
+}
+void vm_phys_free_page(vm_page_t m) {
+    (void)m;
+}
+void swapper_request_work(void) {
+}

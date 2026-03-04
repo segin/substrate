@@ -1,3 +1,4 @@
+#include <string.h>
 #include <vm/vm_page.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -7,7 +8,7 @@
  */
 
 bool test_vm_page_queue_ops(void) {
-    vm_page_t p1, p2;
+    vm_page_t p1, p2; memset(&p1, 0, sizeof(p1)); memset(&p2, 0, sizeof(p2));
     p1.phys_addr = 0x1000;
     p2.phys_addr = 0x2000;
     p1.magic_head = p1.magic_tail = VM_PAGE_MAGIC;
@@ -27,7 +28,7 @@ bool test_vm_page_queue_ops(void) {
 }
 
 bool test_vm_page_flags(void) {
-    vm_page_t p;
+    vm_page_t p; memset(&p, 0, sizeof(p));
     p.magic_head = p.magic_tail = VM_PAGE_MAGIC;
     p.flags = 0;
     
