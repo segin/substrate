@@ -135,3 +135,29 @@ int test_unicode_toupper(void) {
 #endif
     return 0;
 }
+
+int test_util_unicode_case(void) {
+    TEST_ASSERT(regex_unicode_tolower('A') == 'a');
+    TEST_ASSERT(regex_unicode_tolower('Z') == 'z');
+    TEST_ASSERT(regex_unicode_tolower('a') == 'a');
+    TEST_ASSERT(regex_unicode_tolower('z') == 'z');
+    TEST_ASSERT(regex_unicode_tolower('1') == '1');
+#ifdef REGEX_USE_ICU
+    TEST_ASSERT(regex_unicode_tolower(0x00C9) == 0x00E9);
+#else
+    TEST_ASSERT(regex_unicode_tolower(0x00C9) == 0x00C9);
+#endif
+
+    TEST_ASSERT(regex_unicode_toupper('a') == 'A');
+    TEST_ASSERT(regex_unicode_toupper('z') == 'Z');
+    TEST_ASSERT(regex_unicode_toupper('A') == 'A');
+    TEST_ASSERT(regex_unicode_toupper('Z') == 'Z');
+    TEST_ASSERT(regex_unicode_toupper('1') == '1');
+#ifdef REGEX_USE_ICU
+    TEST_ASSERT(regex_unicode_toupper(0x00E9) == 0x00C9);
+#else
+    TEST_ASSERT(regex_unicode_toupper(0x00E9) == 0x00E9);
+#endif
+
+    return 0;
+}
