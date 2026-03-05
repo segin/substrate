@@ -167,6 +167,17 @@ void test_llabs(void) {
     printf("test_llabs passed\n");
 }
 
+void test_realloc_zero_size(void) {
+    void *ptr = tested_malloc(10);
+    assert(ptr != NULL);
+
+    // According to C standard, realloc(ptr, 0) should free the memory and return NULL
+    void *new_ptr = tested_realloc(ptr, 0);
+    assert(new_ptr == NULL);
+
+    printf("test_realloc_zero_size passed\n");
+}
+
 extern char *optarg;
 extern int optind, opterr, optopt;
 
@@ -268,6 +279,7 @@ int main(void) {
     test_abs();
     test_labs();
     test_llabs();
+    test_realloc_zero_size();
     test_getopt_basic();
     test_getopt_with_args();
     test_getopt_errors();
