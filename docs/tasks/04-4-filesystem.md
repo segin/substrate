@@ -1,0 +1,1861 @@
+# 4. Filesystem (`sys/fs`, `sys/vfs`)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 2400-2803.
+
+## Reimplemented Checklist (All Open)
+
+### 4. Filesystem (`sys/fs`, `sys/vfs`)
+- [ ] **VFS Subsystem Refactor (BSD-style):**
+
+    > **Files:** `sys/vfs/vfs.h`, `vfs.c`, `vnode.h`, `vnode_ops.c`,
+    > `namecache.c`, `bio.c`, `buf.h`, `vnode_lock.c`, `vfs_mount.c`.
+    >
+    > **Architecture:** BSD-style VFS with vnodes, mount points, namei
+    > lookup, buffer cache, and per-filesystem operations vectors.
+
+    - [ ] **Core Structures & Life Cycle:**
+        - [ ] **`struct vnode`:**
+            - [ ] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD.
+            - [ ] `v_tag`: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.
+            - [ ] `v_op` (operations vector), `v_data` (private fs data).
+            - [ ] `v_mount` (pointer to mount point).
+            - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
+            - [ ] `v_writecount` (writers count).
+            - [ ] `v_flag`: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc.
+            - [ ] `v_lock` (exclusive/shared lockmgr lock).
+            - [ ] `v_numoutput` (pending async writes for fsync).
+            - [ ] `v_hash` (hash chain for vnode cache lookup).
+            - [ ] **Life Cycle:**
+                - [ ] `getnewvnode(tag, mp, ops, vpp)`: allocate from zone, recycle LRU if pool full.
+                - [ ] `vref(vp)`: increment use count.
+                - [ ] `vrele(vp)`: decrement use count, trigger inactive/reclaim if zero.
+                - [ ] `vput(vp)`: unlock and vrele.
+                - [ ] `vget(vp, flags)`: lock and vref (with LK_NOWAIT support).
+                - [ ] `vgone(vp)`: mark for doom/destruction.
+                - [ ] `vclean(vp, flags)`: disassociate from filesystem data.
+                - [ ] `vinvalbuf(vp, flags)`: invalidate all buffers for vnode.
+                - [ ] `vflush(mp, skipvp, flags)`: flush all vnodes for mount point.
+        - [ ] **`struct mount`:**
+            - [ ] `mnt_vnodecovered` (vnode mounted on).
+            - [ ] `mnt_op` (VFS ops vector).
+            - [ ] `mnt_data` (private fs data).
+            - [ ] `mnt_flag`: MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS, MNT_ASYNC, MNT_UNION, MNT_LOCAL.
+            - [ ] `mnt_nvnodelist` (list of active vnodes).
+            - [ ] `mnt_stat` (cached `struct statfs`).
+            - [ ] `mnt_maxsymlinklen`: max symlink target stored inline.
+            - [ ] `mnt_lock`: mount-level reader/writer lock.
+        - [ ] **`struct file`:**
+            - [ ] `f_type`: DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE.
+            - [ ] `f_data` (pointer to vnode/socket/pipe).
+            - [ ] `f_flag`: FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT, O_CLOEXEC.
+            - [ ] `f_ops` (file operations vector: read, write, ioctl, poll, close, stat).
+            - [ ] `f_offset` (current file offset, atomic for concurrent access).
+            - [ ] `f_count` (reference count).
+            - [ ] `f_cred` (credentials at open time).
+
+    - [ ] **Pathname Lookup (`namei`):**
+        - [ ] **`struct nameidata`:** lookup state, path string, purpose (LOOKUP/CREATE/DELETE/RENAME).
+        - [ ] **`struct componentname`:** current component, `cn_flags`, `cn_nameptr`, `cn_namelen`.
+        - [ ] **Lookup Logic:**
+            - [ ] Parse `/` delimiters, handle multiple consecutive slashes.
+            - [ ] Handle `.` (current directory) and `..` (parent directory).
+            - [ ] Cross mount points via `mnt_vnodecovered`/`v_mountedhere`.
+            - [ ] Symbolic link resolution with recursion limit (MAXSYMLINKS = 32).
+            - [ ] Handle trailing slash on non-directory (ENOTDIR).
+            - [ ] Handle `AT_FDCWD` and `*at()` syscall relative lookups.
+        - [ ] **Name Cache (`nchash`):**
+            - [ ] Global hash table: `(directory vnode, name)` → target vnode.
+            - [ ] Negative entries: cache "does not exist" results.
+            - [ ] `cache_lookup(dvp, vpp, cnp)`: check cache.
+            - [ ] `cache_enter(dvp, vp, cnp)`: add to cache.
+            - [ ] `cache_purge(vp)`: remove all entries for vnode.
+            - [ ] `cache_purgevfs(mp)`: remove all entries for mount point.
+            - [ ] LRU eviction of cache entries under memory pressure.
+            - [ ] Reader/writer lock for SMP scalability.
+
+    - [ ] **Operations Vectors:**
+        - [ ] **`vfs_ops` (Filesystem-level):**
+            - [ ] `vfs_mount(mp, path, data, ndp, p)`: mount filesystem at path.
+            - [ ] `vfs_start(mp, flags, p)`: post-mount initialization.
+            - [ ] `vfs_unmount(mp, mntflags, p)`: unmount, flush, free.
+                - [ ] `MNT_FORCE`: forced unmount (kill active references).
+            - [ ] `vfs_root(mp, vpp)`: return root vnode.
+            - [ ] `vfs_statfs(mp, sbp, p)`: fill `struct statfs` (f_blocks, f_bfree, f_bavail, f_files, f_ffree).
+            - [ ] `vfs_sync(mp, waitfor, cred, p)`: sync dirty buffers.
+                - [ ] `MNT_WAIT` (synchronous) / `MNT_NOWAIT` (asynchronous).
+            - [ ] `vfs_vget(mp, ino, vpp)`: get vnode by inode number.
+            - [ ] `vfs_fhtovp(mp, fhp, vpp)`: NFS file handle → vnode.
+            - [ ] `vfs_init(vfsp)`: filesystem type initialization (register).
+            - [ ] `vfs_uninit(vfsp)`: filesystem type teardown (unregister).
+        - [ ] **`vnode_ops` (File-level):**
+            - [ ] **Name Resolution:**
+                - [ ] `vop_lookup(dvp, vpp, cnp)`: look up component in directory.
+                - [ ] `vop_cachedlookup(dvp, vpp, cnp)`: cache-first wrapper.
+            - [ ] **Creation/Deletion:**
+                - [ ] `vop_create(dvp, vpp, cnp, vap)`: create regular file.
+                - [ ] `vop_mknod(dvp, vpp, cnp, vap)`: create device node (block/char/FIFO).
+                - [ ] `vop_mkdir(dvp, vpp, cnp, vap)`: create directory (with `.` and `..`).
+                - [ ] `vop_whiteout(dvp, cnp, flags)`: UnionFS whiteout entry.
+                - [ ] `vop_remove(dvp, vp, cnp)`: unlink directory entry.
+                - [ ] `vop_rmdir(dvp, vp, cnp)`: remove empty directory.
+            - [ ] **Access/Attributes:**
+                - [ ] `vop_access(vp, mode, cred, p)`: check r/w/x permissions (POSIX semantics).
+                - [ ] `vop_getattr(vp, vap, cred, p)`: stat (mode, nlink, uid, gid, size, times).
+                - [ ] `vop_setattr(vp, vap, cred, p)`: chmod/chown/truncate/utimes.
+                - [ ] `vop_pathconf(vp, name, retval)`: POSIX pathconf (`_PC_LINK_MAX`, `_PC_NAME_MAX`, etc.).
+            - [ ] **I/O Operations:**
+                - [ ] `vop_open(vp, mode, cred, p)`: open callback (access check, device init).
+                - [ ] `vop_close(vp, fflag, cred, p)`: close callback (sync on last close).
+                - [ ] `vop_read(vp, uio, ioflag, cred)`: read via buffer cache, update atime.
+                - [ ] `vop_write(vp, uio, ioflag, cred)`: write, extend file, update mtime.
+                    - [ ] Flags: `IO_APPEND`, `IO_SYNC`, `IO_UNIT`.
+                - [ ] `vop_ioctl(vp, cmd, data, fflag, cred, p)`: device control.
+                - [ ] `vop_poll(vp, events, cred, p)`: select/poll (POLLIN/POLLOUT/POLLHUP/POLLERR).
+                - [ ] `vop_fsync(vp, cred, waitfor, p)`: flush dirty data.
+                - [ ] `vop_bmap(vp, bn, vpp, bnp, runp)`: logical→physical block mapping.
+                - [ ] `vop_strategy(vp, bp)`: submit buffer to block device.
+            - [ ] **Directories:**
+                - [ ] `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`: read `struct dirent` entries.
+            - [ ] **Links:**
+                - [ ] `vop_link(dvp, vp, cnp)`: create hard link (increment nlink).
+                - [ ] `vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp)`: rename/move (atomic within FS).
+                    - [ ] Same-directory rename, cross-directory rename, overwrite existing.
+                    - [ ] Directory rename: update `..` entry, detect cycles.
+                - [ ] `vop_symlink(dvp, vpp, cnp, vap, target)`: create symbolic link.
+                - [ ] `vop_readlink(vp, uio, cred)`: read symlink target.
+            - [ ] **VM/Memory Integration:**
+                - [ ] `vop_inactive(vp, p)`: last FD closed — truncate if nlink=0, sync dirty.
+                - [ ] `vop_reclaim(vp, p)`: vnode recycled — free fs-private data.
+                - [ ] `vop_lock(vp, flags, p)`: lockmgr lock (LK_SHARED/EXCLUSIVE/NOWAIT/UPGRADE).
+                - [ ] `vop_unlock(vp, flags, p)`: lockmgr unlock.
+                - [ ] `vop_islocked(vp, p)`: query lock status.
+                - [ ] `vop_print(vp)`: debug dump (type, flags, refcount, fs info).
+                - [ ] `vop_advlock(vp, id, op, fl, flags)`: POSIX advisory locking (F_GETLK/F_SETLK/F_SETLKW).
+
+    - [ ] **Native Build Integration (`native_dist`):**
+        - [ ] Update `native_dist` target to build userspace with `HOSTCC`.
+        - [ ] Sanitize `Makefile.inc` for non-cross builds.
+        - [ ] Verify `bin/` and `sbin/` builds on host.
+        - [ ] Host output directory: `host_dist`.
+
+    - [ ] **Compiler Construction Tools:**
+        - [ ] **`yacc` (LALR(1) Parser Generator):**
+            - [ ] Initial skeleton (`usr.bin/yacc`).
+            - [ ] Grammar file parsing (rules, precedence, %token/%type).
+            - [ ] LALR(1) parse table generation (states, actions, gotos).
+            - [ ] Conflict resolution (shift/reduce, reduce/reduce).
+            - [ ] Output `y.tab.c` and `y.tab.h`.
+            - [ ] `-d` flag for header generation.
+            - [ ] `-v` flag for verbose state output (`y.output`).
+        - [ ] **`lex` (Lexical Analyzer Generator):**
+            - [ ] Regular expression to NFA conversion (Thompson's construction).
+            - [ ] NFA to DFA conversion (subset construction).
+            - [ ] DFA minimization (Hopcroft's algorithm).
+            - [ ] Output `lex.yy.c`.
+            - [ ] Character class support (`[a-zA-Z]`, POSIX classes).
+            - [ ] Start conditions (exclusive/inclusive).
+            - [ ] `yywrap()` and `yylex()` interface.
+
+    - [ ] **Buffer Cache Integration (`bio`):**
+
+        > **Files:** `sys/vfs/buf.h`, `sys/vfs/bio.c`.
+        >
+        > **Architecture:** Traditional BSD buffer cache with delayed write,
+        > LRU eviction, and VM page integration.
+
+        - [ ] **`struct buf` Definition:**
+            - [ ] Fields: `b_flags`, `b_data`, `b_bcount`, `b_blkno`, `b_lblkno`, `b_vp`, `b_rcred`, `b_wcred`, `b_resid`, `b_iodone`, `b_error`.
+            - [ ] Flags: `B_BUSY`, `B_DONE`, `B_ERROR`, `B_DELWRI`, `B_PHYS`, `B_READ`, `B_WRITE`, `B_ASYNC`, `B_INVAL`, `B_NOCACHE`, `B_CACHE`.
+            - [ ] Hash chain linkage for lookup by `(vp, blkno)`.
+        - [ ] **Buffer Queues:**
+            - [ ] `BQ_LOCKED`: buffers currently in use.
+            - [ ] `BQ_CLEAN`: clean LRU (eligible for reuse).
+            - [ ] `BQ_DIRTY`: delayed write queue.
+            - [ ] `BQ_EMPTY`: free buffer headers without data.
+        - [ ] **Buffer Cache Functions:**
+            - [ ] `getblk(vp, blkno, size, slpflag, slptimeo)`: get from cache or allocate.
+            - [ ] `bread(vp, blkno, size, cred, bpp)`: synchronous read (getblk + I/O + biowait).
+            - [ ] `breada(vp, blkno, size, rablkno, rabsize, cred, bpp)`: read-ahead variant.
+            - [ ] `bwrite(bp)`: synchronous write.
+            - [ ] `bawrite(bp)`: asynchronous write (initiate, return immediately).
+            - [ ] `bdwrite(bp)`: delayed write (mark B_DELWRI, release).
+            - [ ] `brelse(bp)`: release buffer to appropriate queue.
+            - [ ] `incore(vp, blkno)`: check if block is in cache.
+        - [ ] **Synchronization:**
+            - [ ] `biowait(bp)`: sleep until B_DONE.
+            - [ ] `biodone(bp)`: mark complete, call `b_iodone`, wakeup.
+        - [ ] **Flushing:**
+            - [ ] `bufsync(freq)`: periodic daemon to write dirty buffers.
+            - [ ] `sync()` syscall: flush all dirty buffers.
+            - [ ] `update` daemon (`syncer` kthread): periodic sync every 30 seconds.
+
+    - [ ] **VM Integration (Unified Buffer Cache):**
+        - [ ] **VNode Pager:**
+            - [ ] `vnode_pager_getpages()`: read pages from vnode into `vm_page` array.
+            - [ ] `vnode_pager_putpages()`: write dirty pages to vnode.
+            - [ ] Integrate with buffer cache (shared backing pages).
+        - [ ] **Page Cache Integration:**
+            - [ ] Buffer data backed by `vm_page_t` (not `kmalloc`).
+            - [ ] Unified memory accounting for file cache and buffer cache.
+            - [ ] Zero-copy I/O: mmap shares pages with buffer cache.
+
+    - [ ] **Concurrency & Locking:**
+        - [ ] **VNode Locks (`lockmgr`):**
+            - [ ] `lockmgr(lkp, flags, interlock, p)`: unified lock manager.
+            - [ ] Modes: `LK_SHARED`, `LK_EXCLUSIVE`, `LK_UPGRADE`, `LK_DOWNGRADE`, `LK_DRAIN`.
+            - [ ] `LK_NOWAIT`: non-blocking (return EBUSY).
+            - [ ] Priority inheritance for blocked threads.
+            - [ ] Multiple concurrent readers, single exclusive writer.
+        - [ ] **Interlock:** `v_interlock` mutex for vnode fields (v_usecount, v_flag, v_numoutput).
+        - [ ] **Mount Lock:** `mnt_lock` prevents unmount during vnode operations.
+        - [ ] **Namecache Lock:** reader/writer lock on `nchash` for concurrent lookups.
+        - [ ] **Buffer Lock:** per-buffer `B_BUSY` flag with sleep/wakeup.
+
+    - [ ] **Testing:**
+        - [ ] Unit: vnode lifecycle — `getnewvnode`, `vref`, `vrele`, `vput`, `vget`, `vgone`.
+        - [ ] Unit: name cache — `cache_lookup` hit/miss, `cache_enter`, `cache_purge`, negative entries.
+        - [ ] Unit: namei — simple path, `.`/`..`, mount crossing, symlink resolution, MAXSYMLINKS.
+        - [ ] Unit: vop_create/remove/mkdir/rmdir on ext2.
+        - [ ] Unit: vop_rename same-dir and cross-dir.
+        - [ ] Unit: vop_read/write/fsync round-trip.
+        - [ ] Unit: buffer cache — getblk/bread/bwrite/brelse lifecycle.
+        - [ ] Unit: buffer cache — bdwrite delayed write, then sync flushes.
+        - [ ] Unit: lockmgr — shared/exclusive/upgrade/downgrade/nowait.
+        - [ ] Property: vnode refcount never goes negative.
+        - [ ] Property: no buffer leaks after mount/unmount cycle.
+        - [ ] Integration: mount ext2 → create file → write → read → unlink → unmount.
+        - [ ] Integration: mount FAT32 → readdir → LFN resolution.
+    - [ ] **Documentation:**
+        - [ ] Man pages: `vnode(9)`, `namei(9)`, `VOP_LOOKUP(9)`, `VOP_READ(9)`, `VOP_WRITE(9)`.
+        - [ ] Man pages: `bread(9)`, `bwrite(9)`, `getblk(9)`, `brelse(9)`, `biodone(9)`.
+        - [ ] Man pages: `lockmgr(9)`, `VFS_MOUNT(9)`, `VFS_UNMOUNT(9)`.
+        - [ ] Internal doc: VFS architecture (vnode→mount→vfs_ops→vnode_ops).
+        - [ ] Internal doc: buffer cache lifecycle (getblk→bread→bdwrite→sync).
+
+- [ ] **Legacy/Feature Gaps:**
+    - [ ] Ensure all FS drivers implement complete write paths.
+    - [ ] **`fsck`:** port e2fsprogs or implement native consistency checker.
+    - [ ] **Quotas:** per-user/group disk quotas (UFS/ext2).
+
+- [ ] **EXT2 (Native Filesystem):**
+
+    > **Files:** `sys/fs/ext2/ext2.c`, `ext2.h`, `ext2_vfsops.c`, `ext2_vnops.c`.
+
+    - [ ] Inode allocation/freeing (bitmap-based).
+    - [ ] Block allocation/freeing (bitmap-based, block groups).
+    - [ ] Directory entry creation/deletion.
+    - [ ] **Extended Features:**
+        - [ ] ext2 revision 1: variable inode size, file type in dir entry.
+        - [ ] Sparse superblock: superblock copies only in select block groups.
+        - [ ] Large file support (>2 GB via triple-indirect blocks).
+    - [ ] **VFS Integration:**
+        - [ ] Implement `ext2_mount` / `ext2_unmount` / `ext2_root` / `ext2_statfs`.
+        - [ ] Implement `ext2_lookup` / `ext2_create` / `ext2_remove` / `ext2_rename`.
+        - [ ] Implement `ext2_read` / `ext2_write` / `ext2_fsync`.
+        - [ ] Implement `ext2_readdir` / `ext2_mkdir` / `ext2_rmdir`.
+        - [ ] Implement `ext2_link` / `ext2_symlink` / `ext2_readlink`.
+    - [ ] **Testing:**
+        - [ ] Unit: inode/block alloc/free round-trip.
+        - [ ] Unit: directory entry CRUD.
+        - [ ] Integration: create ext2 image, mount, file ops, unmount, fsck verify.
+        - [ ] Fuzz: mount corrupted ext2 images (malformed superblock, bitmap, inodes).
+
+- [ ] **FAT16/32:**
+
+    > **Files:** `sys/fs/fat/fat.c`, `fat.h`.
+
+    - [ ] FAT parsing and cluster chain following.
+    - [ ] Long File Name (LFN) support (VFAT entries).
+    - [ ] **FAT12 Support:** for floppy disk images.
+    - [ ] **VFS Integration:**
+        - [ ] Implement `fat_mount` / `fat_unmount` / `fat_root` / `fat_statfs`.
+        - [ ] Implement `fat_lookup` / `fat_create` / `fat_remove` / `fat_rename`.
+        - [ ] Implement `fat_read` / `fat_write`.
+        - [ ] Implement `fat_readdir` (8.3 + LFN merging).
+        - [ ] Implement `fat_mkdir` / `fat_rmdir`.
+    - [ ] **Write Support:**
+        - [ ] FAT table update (both copies).
+        - [ ] Cluster allocation/freeing.
+        - [ ] Directory entry creation with LFN slots.
+        - [ ] File truncation (free cluster chain).
+    - [ ] **Testing:**
+        - [ ] Unit: FAT chain parsing (FAT12, FAT16, FAT32).
+        - [ ] Unit: LFN slot reassembly.
+        - [ ] Integration: create FAT image, mount, file ops, unmount, verify with `dosfsck`.
+        - [ ] Fuzz: mount corrupted FAT images.
+
+- [ ] **UDF (Universal Disk Format):**
+
+    > **Files:** `sys/fs/udf/udf.h`, `udf.c`, `udf_write.c`.
+
+    - [ ] **On-Disk Structures (`udf.h`):**
+        - [ ] `udf_tag` (Descriptor Tag — 16 bytes, CRC).
+        - [ ] `udf_avdp` (Anchor Volume Descriptor Pointer).
+        - [ ] `udf_pvd` (Primary Volume Descriptor).
+        - [ ] `udf_pd` (Partition Descriptor).
+        - [ ] `udf_lvd` (Logical Volume Descriptor).
+        - [ ] `udf_fsd` (File Set Descriptor).
+        - [ ] `udf_fe` / `udf_efe` (File Entry / Extended File Entry).
+        - [ ] `udf_fid` (File Identifier Descriptor).
+        - [ ] `udf_short_ad` / `udf_long_ad` (Allocation Descriptors).
+    - [ ] **Read-Only Support (`udf.c`):**
+        - [ ] `udf_read_tag()`: tag CRC verification.
+        - [ ] `udf_find_avdp()`: locate Anchor at sector 256.
+        - [ ] `udf_read_vds()`: parse Volume Descriptor Sequence.
+        - [ ] `udf_read_partition()` / `udf_read_lvd()` / `udf_read_fsd()`.
+        - [ ] `udf_read_fe()`: read File Entry (inode equivalent).
+        - [ ] `udf_read_file()`: read file data via allocation descriptors.
+        - [ ] `udf_readdir()`: iterate directory FIDs.
+        - [ ] `udf_finddir()`: lookup by name.
+        - [ ] `udf_mount()`: VFS mount integration.
+    - [ ] **Write Support (`udf_write.c`):**
+        - [ ] `udf_read_space_bitmap()`: parse unallocated space.
+        - [ ] `udf_alloc_block()` / `udf_free_block()`: space bitmap management.
+        - [ ] `udf_create_fe()`: create new File Entry.
+        - [ ] `udf_write_file()`: write file data.
+        - [ ] `udf_add_fid()` / `udf_remove_fid()`: directory entry management.
+        - [ ] `udf_truncate()`: truncate/extend file.
+    - [ ] **Testing:**
+        - [ ] Unit: tag CRC verification.
+        - [ ] Unit: allocation/deallocation round-trip.
+        - [ ] Property: alloc→free→alloc returns same block.
+        - [ ] Fuzz: mount corrupted UDF images (bad descriptors, invalid CRCs).
+    - [ ] **Documentation:**
+        - [ ] Man pages: `udf(5)` (filesystem description), `udf(4)` (kernel driver).
+
+- [ ] **ISO 9660 / CD-ROM (future):**
+    - [ ] Primary Volume Descriptor parsing.
+    - [ ] Rock Ridge extensions (POSIX metadata).
+    - [ ] Joliet extensions (Unicode filenames).
+    - [ ] Multi-session support.
+    - [ ] El Torito boot catalog parsing (informational).
+
+- [ ] **DevFS (`/dev`):**
+    - [ ] Device Registry: drivers register character/block devices.
+    - [ ] VFS glue: auto-generate vnode nodes on device registration.
+    - [ ] **Device Nodes:**
+        - [ ] `null`, `zero`, `full` (data sink/source/full-error).
+        - [ ] `random` / `urandom` (CSPRNG).
+        - [ ] `tty` (proxy to current process controlling terminal).
+        - [ ] `mem` / `kmem` (physical/kernel memory access).
+        - [ ] `port` (I/O port access).
+        - [ ] `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/0,1,2`).
+        - [ ] `console` (system console).
+        - [ ] `ptmx` (pseudo-terminal master multiplexer).
+    - [ ] **Dynamic Updates:**
+        - [ ] Hot-plug: add/remove nodes on device attach/detach.
+        - [ ] Permissions: default mode from driver, overridable via `devfs.rules`.
+    - [ ] **Testing:**
+        - [ ] Unit: register/unregister device nodes.
+        - [ ] Unit: read from `/dev/zero`, write to `/dev/null`, read from `/dev/random`.
+        - [ ] Unit: `/dev/full` returns ENOSPC on write.
+
+- [ ] **ProcFS (`/proc`):**
+    - [ ] **Per-Process:**
+        - [ ] `/proc/[pid]/stat`: process state (Linux-compatible format).
+        - [ ] `/proc/[pid]/status`: human-readable status.
+        - [ ] `/proc/[pid]/maps`: memory map regions.
+        - [ ] `/proc/[pid]/cmdline`: NUL-separated command line.
+        - [ ] `/proc/[pid]/environ`: NUL-separated environment.
+        - [ ] `/proc/[pid]/fd/`: open FD symlinks.
+        - [ ] `/proc/[pid]/cwd`, `/proc/[pid]/exe`, `/proc/[pid]/root`: symlinks.
+        - [ ] `/proc/[pid]/task/`: per-thread subdirectories.
+    - [ ] **System-wide:**
+        - [ ] `/proc/cpuinfo`, `/proc/meminfo`, `/proc/uptime`, `/proc/loadavg`.
+        - [ ] `/proc/vmstat`: VM statistics counters.
+        - [ ] `/proc/filesystems`: registered filesystem types.
+        - [ ] `/proc/mounts`: mounted filesystems.
+        - [ ] `/proc/partitions`: block device partitions.
+    - [ ] `/proc/self`: symlink to calling process PID.
+    - [ ] Dynamic content generation: virtual files populated on `read()`.
+    - [ ] Personality awareness: detect caller (Linux/FreeBSD) and adjust format.
+    - [ ] **Testing:**
+        - [ ] Unit: each `/proc` file returns valid parseable content.
+        - [ ] Unit: `/proc/self` resolves to calling PID.
+        - [ ] Integration: `ps` and `top` read from procfs correctly.
+
+- [ ] **SysFS (`/sys`):**
+    - [ ] KObject hierarchy: represent kernel objects (drivers, buses, devices).
+    - [ ] Attributes: map kernel variables to readable/writable files.
+    - [ ] `/sys/class/net/`: network interface properties.
+    - [ ] `/sys/block/`: block device attributes.
+    - [ ] `/sys/devices/system/cpu/`: CPU topology.
+    - [ ] `/sys/kernel/`: misc kernel tunables.
+    - [ ] **Testing:**
+        - [ ] Unit: kobj create/register/unregister.
+        - [ ] Unit: attribute read/write.
+
+- [ ] **9P Filesystem (Plan 9):**
+
+    > **Files:** `sys/fs/9p/`.
+
+    - [ ] **Protocol:**
+        - [ ] Tversion/Rversion (protocol negotiation).
+        - [ ] Tattach/Rattach (mount).
+        - [ ] Twalk/Rwalk (path traversal).
+        - [ ] Topen/Ropen (file open).
+        - [ ] Tread/Rread / Twrite/Rwrite (data transfer).
+        - [ ] Tclunk/Rclunk (close FID).
+        - [ ] Tstat/Rstat / Twstat/Rwstat (metadata).
+        - [ ] Tcreate/Rcreate (create file/directory).
+        - [ ] Tremove/Rremove (remove file/directory).
+    - [ ] **VFS Integration:**
+        - [ ] `p9fs_mount` / `p9fs_unmount`.
+        - [ ] `p9fs_lookup` / `p9fs_readdir`.
+        - [ ] `p9fs_read` / `p9fs_write`.
+    - [ ] **Transport:**
+        - [ ] VirtIO-9P transport (via `virtio_9p` driver).
+        - [ ] TCP transport (for networked 9P).
+    - [ ] **Testing:**
+        - [ ] Integration: mount 9P share from QEMU host, read/write files.
+
+## User Stories
+
+- **US-04-0001**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vFS Subsystem Refactor (BSD-style): so that this capability is implemented with clear verification evidence.
+- **US-04-0002**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to core Structures & Life Cycle: so that this capability is implemented with clear verification evidence.
+- **US-04-0003**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to struct vnode: so that this capability is implemented with clear verification evidence.
+- **US-04-0004**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_type: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD so that this capability is implemented with clear verification evidence.
+- **US-04-0005**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_tag: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc so that this capability is implemented with clear verification evidence.
+- **US-04-0006**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_op (operations vector), v_data (private fs data) so that this capability is implemented with clear verification evidence.
+- **US-04-0007**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_mount (pointer to mount point) so that this capability is implemented with clear verification evidence.
+- **US-04-0008**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_usecount (active references), v_holdcount (weak refs for cache) so that this capability is implemented with clear verification evidence.
+- **US-04-0009**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_writecount (writers count) so that this capability is implemented with clear verification evidence.
+- **US-04-0010**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_flag: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc so that this capability is implemented with clear verification evidence.
+- **US-04-0011**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_lock (exclusive/shared lockmgr lock) so that this capability is implemented with clear verification evidence.
+- **US-04-0012**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_numoutput (pending async writes for fsync) so that this capability is implemented with clear verification evidence.
+- **US-04-0013**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to v_hash (hash chain for vnode cache lookup) so that this capability is implemented with clear verification evidence.
+- **US-04-0014**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to life Cycle: so that this capability is implemented with clear verification evidence.
+- **US-04-0015**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to getnewvnode(tag, mp, ops, vpp): allocate from zone, recycle LRU if pool full so that this capability is implemented with clear verification evidence.
+- **US-04-0016**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vref(vp): increment use count so that this capability is implemented with clear verification evidence.
+- **US-04-0017**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vrele(vp): decrement use count, trigger inactive/reclaim if zero so that this capability is implemented with clear verification evidence.
+- **US-04-0018**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vput(vp): unlock and vrele so that this capability is implemented with clear verification evidence.
+- **US-04-0019**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vget(vp, flags): lock and vref (with LK_NOWAIT support) so that this capability is implemented with clear verification evidence.
+- **US-04-0020**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vgone(vp): mark for doom/destruction so that this capability is implemented with clear verification evidence.
+- **US-04-0021**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vclean(vp, flags): disassociate from filesystem data so that this capability is implemented with clear verification evidence.
+- **US-04-0022**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vinvalbuf(vp, flags): invalidate all buffers for vnode so that this capability is implemented with clear verification evidence.
+- **US-04-0023**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vflush(mp, skipvp, flags): flush all vnodes for mount point so that this capability is implemented with clear verification evidence.
+- **US-04-0024**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to struct mount: so that this capability is implemented with clear verification evidence.
+- **US-04-0025**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mnt_vnodecovered (vnode mounted on) so that this capability is implemented with clear verification evidence.
+- **US-04-0026**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mnt_op (VFS ops vector) so that this capability is implemented with clear verification evidence.
+- **US-04-0027**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mnt_data (private fs data) so that this capability is implemented with clear verification evidence.
+- **US-04-0028**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mnt_flag: MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS, MNT_ASYNC, MNT_UNION, MNT_LOCAL so that this capability is implemented with clear verification evidence.
+- **US-04-0029**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mnt_nvnodelist (list of active vnodes) so that this capability is implemented with clear verification evidence.
+- **US-04-0030**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mnt_stat (cached struct statfs) so that this capability is implemented with clear verification evidence.
+- **US-04-0031**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mnt_maxsymlinklen: max symlink target stored inline so that this capability is implemented with clear verification evidence.
+- **US-04-0032**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mnt_lock: mount-level reader/writer lock so that this capability is implemented with clear verification evidence.
+- **US-04-0033**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to struct file: so that this capability is implemented with clear verification evidence.
+- **US-04-0034**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to f_type: DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE so that this capability is implemented with clear verification evidence.
+- **US-04-0035**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to f_data (pointer to vnode/socket/pipe) so that this capability is implemented with clear verification evidence.
+- **US-04-0036**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to f_flag: FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT, O_CLOEXEC so that this capability is implemented with clear verification evidence.
+- **US-04-0037**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to f_ops (file operations vector: read, write, ioctl, poll, close, stat) so that this capability is implemented with clear verification evidence.
+- **US-04-0038**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to f_offset (current file offset, atomic for concurrent access) so that this capability is implemented with clear verification evidence.
+- **US-04-0039**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to f_count (reference count) so that this capability is implemented with clear verification evidence.
+- **US-04-0040**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to f_cred (credentials at open time) so that this capability is implemented with clear verification evidence.
+- **US-04-0041**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to pathname Lookup (namei): so that this capability is implemented with clear verification evidence.
+- **US-04-0042**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to struct nameidata: lookup state, path string, purpose (LOOKUP/CREATE/DELETE/RENAME) so that this capability is implemented with clear verification evidence.
+- **US-04-0043**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to struct componentname: current component, cn_flags, cn_nameptr, cn_namelen so that this capability is implemented with clear verification evidence.
+- **US-04-0044**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to lookup Logic: so that this capability is implemented with clear verification evidence.
+- **US-04-0045**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to parse / delimiters, handle multiple consecutive slashes so that this capability is implemented with clear verification evidence.
+- **US-04-0046**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to handle . (current directory) and .. (parent directory) so that this capability is implemented with clear verification evidence.
+- **US-04-0047**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to cross mount points via mnt_vnodecovered/v_mountedhere so that this capability is implemented with clear verification evidence.
+- **US-04-0048**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to symbolic link resolution with recursion limit (MAXSYMLINKS = 32) so that this capability is implemented with clear verification evidence.
+- **US-04-0049**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to handle trailing slash on non-directory (ENOTDIR) so that this capability is implemented with clear verification evidence.
+- **US-04-0050**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to handle AT_FDCWD and *at() syscall relative lookups so that this capability is implemented with clear verification evidence.
+- **US-04-0051**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to name Cache (nchash): so that this capability is implemented with clear verification evidence.
+- **US-04-0052**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to global hash table: (directory vnode, name) → target vnode so that this capability is implemented with clear verification evidence.
+- **US-04-0053**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to negative entries: cache "does not exist" results so that this capability is implemented with clear verification evidence.
+- **US-04-0054**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to cache_lookup(dvp, vpp, cnp): check cache so that this capability is implemented with clear verification evidence.
+- **US-04-0055**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to cache_enter(dvp, vp, cnp): add to cache so that this capability is implemented with clear verification evidence.
+- **US-04-0056**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to cache_purge(vp): remove all entries for vnode so that this capability is implemented with clear verification evidence.
+- **US-04-0057**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to cache_purgevfs(mp): remove all entries for mount point so that this capability is implemented with clear verification evidence.
+- **US-04-0058**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to lRU eviction of cache entries under memory pressure so that this capability is implemented with clear verification evidence.
+- **US-04-0059**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to reader/writer lock for SMP scalability so that this capability is implemented with clear verification evidence.
+- **US-04-0060**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to operations Vectors: so that this capability is implemented with clear verification evidence.
+- **US-04-0061**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_ops (Filesystem-level): so that this capability is implemented with clear verification evidence.
+- **US-04-0062**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_mount(mp, path, data, ndp, p): mount filesystem at path so that this capability is implemented with clear verification evidence.
+- **US-04-0063**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_start(mp, flags, p): post-mount initialization so that this capability is implemented with clear verification evidence.
+- **US-04-0064**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_unmount(mp, mntflags, p): unmount, flush, free so that this capability is implemented with clear verification evidence.
+- **US-04-0065**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mNT_FORCE: forced unmount (kill active references) so that this capability is implemented with clear verification evidence.
+- **US-04-0066**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_root(mp, vpp): return root vnode so that this capability is implemented with clear verification evidence.
+- **US-04-0067**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_statfs(mp, sbp, p): fill struct statfs (f_blocks, f_bfree, f_bavail, f_files, f_ffree) so that this capability is implemented with clear verification evidence.
+- **US-04-0068**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_sync(mp, waitfor, cred, p): sync dirty buffers so that this capability is implemented with clear verification evidence.
+- **US-04-0069**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mNT_WAIT (synchronous) / MNT_NOWAIT (asynchronous) so that this capability is implemented with clear verification evidence.
+- **US-04-0070**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_vget(mp, ino, vpp): get vnode by inode number so that this capability is implemented with clear verification evidence.
+- **US-04-0071**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_fhtovp(mp, fhp, vpp): NFS file handle → vnode so that this capability is implemented with clear verification evidence.
+- **US-04-0072**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_init(vfsp): filesystem type initialization (register) so that this capability is implemented with clear verification evidence.
+- **US-04-0073**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vfs_uninit(vfsp): filesystem type teardown (unregister) so that this capability is implemented with clear verification evidence.
+- **US-04-0074**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vnode_ops (File-level): so that this capability is implemented with clear verification evidence.
+- **US-04-0075**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to name Resolution: so that this capability is implemented with clear verification evidence.
+- **US-04-0076**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_lookup(dvp, vpp, cnp): look up component in directory so that this capability is implemented with clear verification evidence.
+- **US-04-0077**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_cachedlookup(dvp, vpp, cnp): cache-first wrapper so that this capability is implemented with clear verification evidence.
+- **US-04-0078**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to creation/Deletion: so that this capability is implemented with clear verification evidence.
+- **US-04-0079**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_create(dvp, vpp, cnp, vap): create regular file so that this capability is implemented with clear verification evidence.
+- **US-04-0080**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_mknod(dvp, vpp, cnp, vap): create device node (block/char/FIFO) so that this capability is implemented with clear verification evidence.
+- **US-04-0081**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_mkdir(dvp, vpp, cnp, vap): create directory (with . and ..) so that this capability is implemented with clear verification evidence.
+- **US-04-0082**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_whiteout(dvp, cnp, flags): UnionFS whiteout entry so that this capability is implemented with clear verification evidence.
+- **US-04-0083**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_remove(dvp, vp, cnp): unlink directory entry so that this capability is implemented with clear verification evidence.
+- **US-04-0084**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_rmdir(dvp, vp, cnp): remove empty directory so that this capability is implemented with clear verification evidence.
+- **US-04-0085**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to access/Attributes: so that this capability is implemented with clear verification evidence.
+- **US-04-0086**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_access(vp, mode, cred, p): check r/w/x permissions (POSIX semantics) so that this capability is implemented with clear verification evidence.
+- **US-04-0087**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_getattr(vp, vap, cred, p): stat (mode, nlink, uid, gid, size, times) so that this capability is implemented with clear verification evidence.
+- **US-04-0088**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_setattr(vp, vap, cred, p): chmod/chown/truncate/utimes so that this capability is implemented with clear verification evidence.
+- **US-04-0089**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_pathconf(vp, name, retval): POSIX pathconf (_PC_LINK_MAX, _PC_NAME_MAX, etc.) so that this capability is implemented with clear verification evidence.
+- **US-04-0090**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to i/O Operations: so that this capability is implemented with clear verification evidence.
+- **US-04-0091**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_open(vp, mode, cred, p): open callback (access check, device init) so that this capability is implemented with clear verification evidence.
+- **US-04-0092**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_close(vp, fflag, cred, p): close callback (sync on last close) so that this capability is implemented with clear verification evidence.
+- **US-04-0093**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_read(vp, uio, ioflag, cred): read via buffer cache, update atime so that this capability is implemented with clear verification evidence.
+- **US-04-0094**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_write(vp, uio, ioflag, cred): write, extend file, update mtime so that this capability is implemented with clear verification evidence.
+- **US-04-0095**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to flags: IO_APPEND, IO_SYNC, IO_UNIT so that this capability is implemented with clear verification evidence.
+- **US-04-0096**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_ioctl(vp, cmd, data, fflag, cred, p): device control so that this capability is implemented with clear verification evidence.
+- **US-04-0097**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_poll(vp, events, cred, p): select/poll (POLLIN/POLLOUT/POLLHUP/POLLERR) so that this capability is implemented with clear verification evidence.
+- **US-04-0098**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_fsync(vp, cred, waitfor, p): flush dirty data so that this capability is implemented with clear verification evidence.
+- **US-04-0099**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_bmap(vp, bn, vpp, bnp, runp): logical→physical block mapping so that this capability is implemented with clear verification evidence.
+- **US-04-0100**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_strategy(vp, bp): submit buffer to block device so that this capability is implemented with clear verification evidence.
+- **US-04-0101**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to directories: so that this capability is implemented with clear verification evidence.
+- **US-04-0102**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_readdir(vp, uio, cred, eofflag, ncookies, cookies): read struct dirent entries so that this capability is implemented with clear verification evidence.
+- **US-04-0103**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to links: so that this capability is implemented with clear verification evidence.
+- **US-04-0104**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_link(dvp, vp, cnp): create hard link (increment nlink) so that this capability is implemented with clear verification evidence.
+- **US-04-0105**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp): rename/move (atomic within FS) so that this capability is implemented with clear verification evidence.
+- **US-04-0106**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to same-directory rename, cross-directory rename, overwrite existing so that this capability is implemented with clear verification evidence.
+- **US-04-0107**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to directory rename: update .. entry, detect cycles so that this capability is implemented with clear verification evidence.
+- **US-04-0108**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_symlink(dvp, vpp, cnp, vap, target): create symbolic link so that this capability is implemented with clear verification evidence.
+- **US-04-0109**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_readlink(vp, uio, cred): read symlink target so that this capability is implemented with clear verification evidence.
+- **US-04-0110**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vM/Memory Integration: so that this capability is implemented with clear verification evidence.
+- **US-04-0111**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_inactive(vp, p): last FD closed - truncate if nlink=0, sync dirty so that this capability is implemented with clear verification evidence.
+- **US-04-0112**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_reclaim(vp, p): vnode recycled - free fs-private data so that this capability is implemented with clear verification evidence.
+- **US-04-0113**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_lock(vp, flags, p): lockmgr lock (LK_SHARED/EXCLUSIVE/NOWAIT/UPGRADE) so that this capability is implemented with clear verification evidence.
+- **US-04-0114**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_unlock(vp, flags, p): lockmgr unlock so that this capability is implemented with clear verification evidence.
+- **US-04-0115**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_islocked(vp, p): query lock status so that this capability is implemented with clear verification evidence.
+- **US-04-0116**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_print(vp): debug dump (type, flags, refcount, fs info) so that this capability is implemented with clear verification evidence.
+- **US-04-0117**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vop_advlock(vp, id, op, fl, flags): POSIX advisory locking (F_GETLK/F_SETLK/F_SETLKW) so that this capability is implemented with clear verification evidence.
+- **US-04-0118**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to native Build Integration (native_dist): so that this capability is implemented with clear verification evidence.
+- **US-04-0119**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to update native_dist target to build userspace with HOSTCC so that this capability is implemented with clear verification evidence.
+- **US-04-0120**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to sanitize Makefile.inc for non-cross builds so that this capability is implemented with clear verification evidence.
+- **US-04-0121**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to verify bin/ and sbin/ builds on host so that this capability is implemented with clear verification evidence.
+- **US-04-0122**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to host output directory: host_dist so that this capability is implemented with clear verification evidence.
+- **US-04-0123**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to compiler Construction Tools: so that this capability is implemented with clear verification evidence.
+- **US-04-0124**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to yacc (LALR(1) Parser Generator): so that this capability is implemented with clear verification evidence.
+- **US-04-0125**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to initial skeleton (usr.bin/yacc) so that this capability is implemented with clear verification evidence.
+- **US-04-0126**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to grammar file parsing (rules, precedence, %token/%type) so that this capability is implemented with clear verification evidence.
+- **US-04-0127**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to lALR(1) parse table generation (states, actions, gotos) so that this capability is implemented with clear verification evidence.
+- **US-04-0128**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to conflict resolution (shift/reduce, reduce/reduce) so that this capability is implemented with clear verification evidence.
+- **US-04-0129**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to output y.tab.c and y.tab.h so that this capability is implemented with clear verification evidence.
+- **US-04-0130**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to -d flag for header generation so that this capability is implemented with clear verification evidence.
+- **US-04-0131**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to -v flag for verbose state output (y.output) so that this capability is implemented with clear verification evidence.
+- **US-04-0132**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to lex (Lexical Analyzer Generator): so that this capability is implemented with clear verification evidence.
+- **US-04-0133**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to regular expression to NFA conversion (Thompson's construction) so that this capability is implemented with clear verification evidence.
+- **US-04-0134**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to nFA to DFA conversion (subset construction) so that this capability is implemented with clear verification evidence.
+- **US-04-0135**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to dFA minimization (Hopcroft's algorithm) so that this capability is implemented with clear verification evidence.
+- **US-04-0136**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to output lex.yy.c so that this capability is implemented with clear verification evidence.
+- **US-04-0137**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to character class support ([a-zA-Z], POSIX classes) so that this capability is implemented with clear verification evidence.
+- **US-04-0138**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to start conditions (exclusive/inclusive) so that this capability is implemented with clear verification evidence.
+- **US-04-0139**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to yywrap() and yylex() interface so that this capability is implemented with clear verification evidence.
+- **US-04-0140**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to buffer Cache Integration (bio): so that this capability is implemented with clear verification evidence.
+- **US-04-0141**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to struct buf Definition: so that this capability is implemented with clear verification evidence.
+- **US-04-0142**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to fields: b_flags, b_data, b_bcount, b_blkno, b_lblkno, b_vp, b_rcred, b_wcred, b_resid, b_iodone, b_error so that this capability is implemented with clear verification evidence.
+- **US-04-0143**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to flags: B_BUSY, B_DONE, B_ERROR, B_DELWRI, B_PHYS, B_READ, B_WRITE, B_ASYNC, B_INVAL, B_NOCACHE, B_CACHE so that this capability is implemented with clear verification evidence.
+- **US-04-0144**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to hash chain linkage for lookup by (vp, blkno) so that this capability is implemented with clear verification evidence.
+- **US-04-0145**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to buffer Queues: so that this capability is implemented with clear verification evidence.
+- **US-04-0146**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to bQ_LOCKED: buffers currently in use so that this capability is implemented with clear verification evidence.
+- **US-04-0147**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to bQ_CLEAN: clean LRU (eligible for reuse) so that this capability is implemented with clear verification evidence.
+- **US-04-0148**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to bQ_DIRTY: delayed write queue so that this capability is implemented with clear verification evidence.
+- **US-04-0149**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to bQ_EMPTY: free buffer headers without data so that this capability is implemented with clear verification evidence.
+- **US-04-0150**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to buffer Cache Functions: so that this capability is implemented with clear verification evidence.
+- **US-04-0151**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to getblk(vp, blkno, size, slpflag, slptimeo): get from cache or allocate so that this capability is implemented with clear verification evidence.
+- **US-04-0152**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to bread(vp, blkno, size, cred, bpp): synchronous read (getblk + I/O + biowait) so that this capability is implemented with clear verification evidence.
+- **US-04-0153**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to breada(vp, blkno, size, rablkno, rabsize, cred, bpp): read-ahead variant so that this capability is implemented with clear verification evidence.
+- **US-04-0154**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to bwrite(bp): synchronous write so that this capability is implemented with clear verification evidence.
+- **US-04-0155**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to bawrite(bp): asynchronous write (initiate, return immediately) so that this capability is implemented with clear verification evidence.
+- **US-04-0156**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to bdwrite(bp): delayed write (mark B_DELWRI, release) so that this capability is implemented with clear verification evidence.
+- **US-04-0157**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to brelse(bp): release buffer to appropriate queue so that this capability is implemented with clear verification evidence.
+- **US-04-0158**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to incore(vp, blkno): check if block is in cache so that this capability is implemented with clear verification evidence.
+- **US-04-0159**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to synchronization: so that this capability is implemented with clear verification evidence.
+- **US-04-0160**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to biowait(bp): sleep until B_DONE so that this capability is implemented with clear verification evidence.
+- **US-04-0161**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to biodone(bp): mark complete, call b_iodone, wakeup so that this capability is implemented with clear verification evidence.
+- **US-04-0162**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to flushing: so that this capability is implemented with clear verification evidence.
+- **US-04-0163**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to bufsync(freq): periodic daemon to write dirty buffers so that this capability is implemented with clear verification evidence.
+- **US-04-0164**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to sync() syscall: flush all dirty buffers so that this capability is implemented with clear verification evidence.
+- **US-04-0165**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to update daemon (syncer kthread): periodic sync every 30 seconds so that this capability is implemented with clear verification evidence.
+- **US-04-0166**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vM Integration (Unified Buffer Cache): so that this capability is implemented with clear verification evidence.
+- **US-04-0167**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vNode Pager: so that this capability is implemented with clear verification evidence.
+- **US-04-0168**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vnode_pager_getpages(): read pages from vnode into vm_page array so that this capability is implemented with clear verification evidence.
+- **US-04-0169**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vnode_pager_putpages(): write dirty pages to vnode so that this capability is implemented with clear verification evidence.
+- **US-04-0170**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to integrate with buffer cache (shared backing pages) so that this capability is implemented with clear verification evidence.
+- **US-04-0171**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to page Cache Integration: so that this capability is implemented with clear verification evidence.
+- **US-04-0172**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to buffer data backed by vm_page_t (not kmalloc) so that this capability is implemented with clear verification evidence.
+- **US-04-0173**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unified memory accounting for file cache and buffer cache so that this capability is implemented with clear verification evidence.
+- **US-04-0174**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to zero-copy I/O: mmap shares pages with buffer cache so that this capability is implemented with clear verification evidence.
+- **US-04-0175**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to concurrency & Locking: so that this capability is implemented with clear verification evidence.
+- **US-04-0176**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vNode Locks (lockmgr): so that this capability is implemented with clear verification evidence.
+- **US-04-0177**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to lockmgr(lkp, flags, interlock, p): unified lock manager so that this capability is implemented with clear verification evidence.
+- **US-04-0178**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to modes: LK_SHARED, LK_EXCLUSIVE, LK_UPGRADE, LK_DOWNGRADE, LK_DRAIN so that this capability is implemented with clear verification evidence.
+- **US-04-0179**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to lK_NOWAIT: non-blocking (return EBUSY) so that this capability is implemented with clear verification evidence.
+- **US-04-0180**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to priority inheritance for blocked threads so that this capability is implemented with clear verification evidence.
+- **US-04-0181**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to multiple concurrent readers, single exclusive writer so that this capability is implemented with clear verification evidence.
+- **US-04-0182**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to interlock: v_interlock mutex for vnode fields (v_usecount, v_flag, v_numoutput) so that this capability is implemented with clear verification evidence.
+- **US-04-0183**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mount Lock: mnt_lock prevents unmount during vnode operations so that this capability is implemented with clear verification evidence.
+- **US-04-0184**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to namecache Lock: reader/writer lock on nchash for concurrent lookups so that this capability is implemented with clear verification evidence.
+- **US-04-0185**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to buffer Lock: per-buffer B_BUSY flag with sleep/wakeup so that this capability is implemented with clear verification evidence.
+- **US-04-0186**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-04-0187**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: vnode lifecycle - getnewvnode, vref, vrele, vput, vget, vgone so that this capability is implemented with clear verification evidence.
+- **US-04-0188**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: name cache - cache_lookup hit/miss, cache_enter, cache_purge, negative entries so that this capability is implemented with clear verification evidence.
+- **US-04-0189**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: namei - simple path, ./.., mount crossing, symlink resolution, MAXSYMLINKS so that this capability is implemented with clear verification evidence.
+- **US-04-0190**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: vop_create/remove/mkdir/rmdir on ext2 so that this capability is implemented with clear verification evidence.
+- **US-04-0191**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: vop_rename same-dir and cross-dir so that this capability is implemented with clear verification evidence.
+- **US-04-0192**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: vop_read/write/fsync round-trip so that this capability is implemented with clear verification evidence.
+- **US-04-0193**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: buffer cache - getblk/bread/bwrite/brelse lifecycle so that this capability is implemented with clear verification evidence.
+- **US-04-0194**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: buffer cache - bdwrite delayed write, then sync flushes so that this capability is implemented with clear verification evidence.
+- **US-04-0195**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: lockmgr - shared/exclusive/upgrade/downgrade/nowait so that this capability is implemented with clear verification evidence.
+- **US-04-0196**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to property: vnode refcount never goes negative so that this capability is implemented with clear verification evidence.
+- **US-04-0197**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to property: no buffer leaks after mount/unmount cycle so that this capability is implemented with clear verification evidence.
+- **US-04-0198**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to integration: mount ext2 → create file → write → read → unlink → unmount so that this capability is implemented with clear verification evidence.
+- **US-04-0199**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to integration: mount FAT32 → readdir → LFN resolution so that this capability is implemented with clear verification evidence.
+- **US-04-0200**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-04-0201**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to man pages: vnode(9), namei(9), VOP_LOOKUP(9), VOP_READ(9), VOP_WRITE(9) so that this capability is implemented with clear verification evidence.
+- **US-04-0202**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to man pages: bread(9), bwrite(9), getblk(9), brelse(9), biodone(9) so that this capability is implemented with clear verification evidence.
+- **US-04-0203**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to man pages: lockmgr(9), VFS_MOUNT(9), VFS_UNMOUNT(9) so that this capability is implemented with clear verification evidence.
+- **US-04-0204**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to internal doc: VFS architecture (vnode→mount→vfs_ops→vnode_ops) so that this capability is implemented with clear verification evidence.
+- **US-04-0205**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to internal doc: buffer cache lifecycle (getblk→bread→bdwrite→sync) so that this capability is implemented with clear verification evidence.
+- **US-04-0206**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to legacy/Feature Gaps: so that this capability is implemented with clear verification evidence.
+- **US-04-0207**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to ensure all FS drivers implement complete write paths so that this capability is implemented with clear verification evidence.
+- **US-04-0208**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to fsck: port e2fsprogs or implement native consistency checker so that this capability is implemented with clear verification evidence.
+- **US-04-0209**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to quotas: per-user/group disk quotas (UFS/ext2) so that this capability is implemented with clear verification evidence.
+- **US-04-0210**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to eXT2 (Native Filesystem): so that this capability is implemented with clear verification evidence.
+- **US-04-0211**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to inode allocation/freeing (bitmap-based) so that this capability is implemented with clear verification evidence.
+- **US-04-0212**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to block allocation/freeing (bitmap-based, block groups) so that this capability is implemented with clear verification evidence.
+- **US-04-0213**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to directory entry creation/deletion so that this capability is implemented with clear verification evidence.
+- **US-04-0214**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to extended Features: so that this capability is implemented with clear verification evidence.
+- **US-04-0215**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to ext2 revision 1: variable inode size, file type in dir entry so that this capability is implemented with clear verification evidence.
+- **US-04-0216**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to sparse superblock: superblock copies only in select block groups so that this capability is implemented with clear verification evidence.
+- **US-04-0217**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to large file support (>2 GB via triple-indirect blocks) so that this capability is implemented with clear verification evidence.
+- **US-04-0218**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vFS Integration: so that this capability is implemented with clear verification evidence.
+- **US-04-0219**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement ext2_mount / ext2_unmount / ext2_root / ext2_statfs so that this capability is implemented with clear verification evidence.
+- **US-04-0220**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement ext2_lookup / ext2_create / ext2_remove / ext2_rename so that this capability is implemented with clear verification evidence.
+- **US-04-0221**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement ext2_read / ext2_write / ext2_fsync so that this capability is implemented with clear verification evidence.
+- **US-04-0222**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement ext2_readdir / ext2_mkdir / ext2_rmdir so that this capability is implemented with clear verification evidence.
+- **US-04-0223**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement ext2_link / ext2_symlink / ext2_readlink so that this capability is implemented with clear verification evidence.
+- **US-04-0224**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-04-0225**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: inode/block alloc/free round-trip so that this capability is implemented with clear verification evidence.
+- **US-04-0226**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: directory entry CRUD so that this capability is implemented with clear verification evidence.
+- **US-04-0227**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to integration: create ext2 image, mount, file ops, unmount, fsck verify so that this capability is implemented with clear verification evidence.
+- **US-04-0228**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to fuzz: mount corrupted ext2 images (malformed superblock, bitmap, inodes) so that this capability is implemented with clear verification evidence.
+- **US-04-0229**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to fAT16/32: so that this capability is implemented with clear verification evidence.
+- **US-04-0230**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to fAT parsing and cluster chain following so that this capability is implemented with clear verification evidence.
+- **US-04-0231**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to long File Name (LFN) support (VFAT entries) so that this capability is implemented with clear verification evidence.
+- **US-04-0232**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to fAT12 Support: for floppy disk images so that this capability is implemented with clear verification evidence.
+- **US-04-0233**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vFS Integration: so that this capability is implemented with clear verification evidence.
+- **US-04-0234**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement fat_mount / fat_unmount / fat_root / fat_statfs so that this capability is implemented with clear verification evidence.
+- **US-04-0235**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement fat_lookup / fat_create / fat_remove / fat_rename so that this capability is implemented with clear verification evidence.
+- **US-04-0236**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement fat_read / fat_write so that this capability is implemented with clear verification evidence.
+- **US-04-0237**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement fat_readdir (8.3 + LFN merging) so that this capability is implemented with clear verification evidence.
+- **US-04-0238**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to implement fat_mkdir / fat_rmdir so that this capability is implemented with clear verification evidence.
+- **US-04-0239**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to write Support: so that this capability is implemented with clear verification evidence.
+- **US-04-0240**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to fAT table update (both copies) so that this capability is implemented with clear verification evidence.
+- **US-04-0241**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to cluster allocation/freeing so that this capability is implemented with clear verification evidence.
+- **US-04-0242**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to directory entry creation with LFN slots so that this capability is implemented with clear verification evidence.
+- **US-04-0243**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to file truncation (free cluster chain) so that this capability is implemented with clear verification evidence.
+- **US-04-0244**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-04-0245**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: FAT chain parsing (FAT12, FAT16, FAT32) so that this capability is implemented with clear verification evidence.
+- **US-04-0246**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: LFN slot reassembly so that this capability is implemented with clear verification evidence.
+- **US-04-0247**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to integration: create FAT image, mount, file ops, unmount, verify with dosfsck so that this capability is implemented with clear verification evidence.
+- **US-04-0248**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to fuzz: mount corrupted FAT images so that this capability is implemented with clear verification evidence.
+- **US-04-0249**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to uDF (Universal Disk Format): so that this capability is implemented with clear verification evidence.
+- **US-04-0250**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to on-Disk Structures (udf.h): so that this capability is implemented with clear verification evidence.
+- **US-04-0251**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_tag (Descriptor Tag - 16 bytes, CRC) so that this capability is implemented with clear verification evidence.
+- **US-04-0252**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_avdp (Anchor Volume Descriptor Pointer) so that this capability is implemented with clear verification evidence.
+- **US-04-0253**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_pvd (Primary Volume Descriptor) so that this capability is implemented with clear verification evidence.
+- **US-04-0254**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_pd (Partition Descriptor) so that this capability is implemented with clear verification evidence.
+- **US-04-0255**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_lvd (Logical Volume Descriptor) so that this capability is implemented with clear verification evidence.
+- **US-04-0256**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_fsd (File Set Descriptor) so that this capability is implemented with clear verification evidence.
+- **US-04-0257**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_fe / udf_efe (File Entry / Extended File Entry) so that this capability is implemented with clear verification evidence.
+- **US-04-0258**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_fid (File Identifier Descriptor) so that this capability is implemented with clear verification evidence.
+- **US-04-0259**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_short_ad / udf_long_ad (Allocation Descriptors) so that this capability is implemented with clear verification evidence.
+- **US-04-0260**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to read-Only Support (udf.c): so that this capability is implemented with clear verification evidence.
+- **US-04-0261**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_read_tag(): tag CRC verification so that this capability is implemented with clear verification evidence.
+- **US-04-0262**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_find_avdp(): locate Anchor at sector 256 so that this capability is implemented with clear verification evidence.
+- **US-04-0263**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_read_vds(): parse Volume Descriptor Sequence so that this capability is implemented with clear verification evidence.
+- **US-04-0264**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_read_partition() / udf_read_lvd() / udf_read_fsd() so that this capability is implemented with clear verification evidence.
+- **US-04-0265**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_read_fe(): read File Entry (inode equivalent) so that this capability is implemented with clear verification evidence.
+- **US-04-0266**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_read_file(): read file data via allocation descriptors so that this capability is implemented with clear verification evidence.
+- **US-04-0267**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_readdir(): iterate directory FIDs so that this capability is implemented with clear verification evidence.
+- **US-04-0268**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_finddir(): lookup by name so that this capability is implemented with clear verification evidence.
+- **US-04-0269**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_mount(): VFS mount integration so that this capability is implemented with clear verification evidence.
+- **US-04-0270**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to write Support (udf_write.c): so that this capability is implemented with clear verification evidence.
+- **US-04-0271**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_read_space_bitmap(): parse unallocated space so that this capability is implemented with clear verification evidence.
+- **US-04-0272**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_alloc_block() / udf_free_block(): space bitmap management so that this capability is implemented with clear verification evidence.
+- **US-04-0273**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_create_fe(): create new File Entry so that this capability is implemented with clear verification evidence.
+- **US-04-0274**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_write_file(): write file data so that this capability is implemented with clear verification evidence.
+- **US-04-0275**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_add_fid() / udf_remove_fid(): directory entry management so that this capability is implemented with clear verification evidence.
+- **US-04-0276**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to udf_truncate(): truncate/extend file so that this capability is implemented with clear verification evidence.
+- **US-04-0277**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-04-0278**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: tag CRC verification so that this capability is implemented with clear verification evidence.
+- **US-04-0279**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: allocation/deallocation round-trip so that this capability is implemented with clear verification evidence.
+- **US-04-0280**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to property: alloc→free→alloc returns same block so that this capability is implemented with clear verification evidence.
+- **US-04-0281**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to fuzz: mount corrupted UDF images (bad descriptors, invalid CRCs) so that this capability is implemented with clear verification evidence.
+- **US-04-0282**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-04-0283**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to man pages: udf(5) (filesystem description), udf(4) (kernel driver) so that this capability is implemented with clear verification evidence.
+- **US-04-0284**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to iSO 9660 / CD-ROM (future): so that this capability is implemented with clear verification evidence.
+- **US-04-0285**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to primary Volume Descriptor parsing so that this capability is implemented with clear verification evidence.
+- **US-04-0286**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to rock Ridge extensions (POSIX metadata) so that this capability is implemented with clear verification evidence.
+- **US-04-0287**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to joliet extensions (Unicode filenames) so that this capability is implemented with clear verification evidence.
+- **US-04-0288**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to multi-session support so that this capability is implemented with clear verification evidence.
+- **US-04-0289**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to el Torito boot catalog parsing (informational) so that this capability is implemented with clear verification evidence.
+- **US-04-0290**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to devFS (/dev): so that this capability is implemented with clear verification evidence.
+- **US-04-0291**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to device Registry: drivers register character/block devices so that this capability is implemented with clear verification evidence.
+- **US-04-0292**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vFS glue: auto-generate vnode nodes on device registration so that this capability is implemented with clear verification evidence.
+- **US-04-0293**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to device Nodes: so that this capability is implemented with clear verification evidence.
+- **US-04-0294**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to null, zero, full (data sink/source/full-error) so that this capability is implemented with clear verification evidence.
+- **US-04-0295**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to random / urandom (CSPRNG) so that this capability is implemented with clear verification evidence.
+- **US-04-0296**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to tty (proxy to current process controlling terminal) so that this capability is implemented with clear verification evidence.
+- **US-04-0297**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to mem / kmem (physical/kernel memory access) so that this capability is implemented with clear verification evidence.
+- **US-04-0298**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to port (I/O port access) so that this capability is implemented with clear verification evidence.
+- **US-04-0299**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to stdin, stdout, stderr symlinks (/proc/self/fd/0,1,2) so that this capability is implemented with clear verification evidence.
+- **US-04-0300**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to console (system console) so that this capability is implemented with clear verification evidence.
+- **US-04-0301**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to ptmx (pseudo-terminal master multiplexer) so that this capability is implemented with clear verification evidence.
+- **US-04-0302**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to dynamic Updates: so that this capability is implemented with clear verification evidence.
+- **US-04-0303**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to hot-plug: add/remove nodes on device attach/detach so that this capability is implemented with clear verification evidence.
+- **US-04-0304**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to permissions: default mode from driver, overridable via devfs.rules so that this capability is implemented with clear verification evidence.
+- **US-04-0305**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-04-0306**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: register/unregister device nodes so that this capability is implemented with clear verification evidence.
+- **US-04-0307**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: read from /dev/zero, write to /dev/null, read from /dev/random so that this capability is implemented with clear verification evidence.
+- **US-04-0308**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: /dev/full returns ENOSPC on write so that this capability is implemented with clear verification evidence.
+- **US-04-0309**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to procFS (/proc): so that this capability is implemented with clear verification evidence.
+- **US-04-0310**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to per-Process: so that this capability is implemented with clear verification evidence.
+- **US-04-0311**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/[pid]/stat: process state (Linux-compatible format) so that this capability is implemented with clear verification evidence.
+- **US-04-0312**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/[pid]/status: human-readable status so that this capability is implemented with clear verification evidence.
+- **US-04-0313**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/[pid]/maps: memory map regions so that this capability is implemented with clear verification evidence.
+- **US-04-0314**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/[pid]/cmdline: NUL-separated command line so that this capability is implemented with clear verification evidence.
+- **US-04-0315**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/[pid]/environ: NUL-separated environment so that this capability is implemented with clear verification evidence.
+- **US-04-0316**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/[pid]/fd/: open FD symlinks so that this capability is implemented with clear verification evidence.
+- **US-04-0317**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/[pid]/cwd, /proc/[pid]/exe, /proc/[pid]/root: symlinks so that this capability is implemented with clear verification evidence.
+- **US-04-0318**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/[pid]/task/: per-thread subdirectories so that this capability is implemented with clear verification evidence.
+- **US-04-0319**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to system-wide: so that this capability is implemented with clear verification evidence.
+- **US-04-0320**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/cpuinfo, /proc/meminfo, /proc/uptime, /proc/loadavg so that this capability is implemented with clear verification evidence.
+- **US-04-0321**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/vmstat: VM statistics counters so that this capability is implemented with clear verification evidence.
+- **US-04-0322**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/filesystems: registered filesystem types so that this capability is implemented with clear verification evidence.
+- **US-04-0323**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/mounts: mounted filesystems so that this capability is implemented with clear verification evidence.
+- **US-04-0324**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/partitions: block device partitions so that this capability is implemented with clear verification evidence.
+- **US-04-0325**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /proc/self: symlink to calling process PID so that this capability is implemented with clear verification evidence.
+- **US-04-0326**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to dynamic content generation: virtual files populated on read() so that this capability is implemented with clear verification evidence.
+- **US-04-0327**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to personality awareness: detect caller (Linux/FreeBSD) and adjust format so that this capability is implemented with clear verification evidence.
+- **US-04-0328**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-04-0329**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: each /proc file returns valid parseable content so that this capability is implemented with clear verification evidence.
+- **US-04-0330**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: /proc/self resolves to calling PID so that this capability is implemented with clear verification evidence.
+- **US-04-0331**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to integration: ps and top read from procfs correctly so that this capability is implemented with clear verification evidence.
+- **US-04-0332**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to sysFS (/sys): so that this capability is implemented with clear verification evidence.
+- **US-04-0333**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to kObject hierarchy: represent kernel objects (drivers, buses, devices) so that this capability is implemented with clear verification evidence.
+- **US-04-0334**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to attributes: map kernel variables to readable/writable files so that this capability is implemented with clear verification evidence.
+- **US-04-0335**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /sys/class/net/: network interface properties so that this capability is implemented with clear verification evidence.
+- **US-04-0336**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /sys/block/: block device attributes so that this capability is implemented with clear verification evidence.
+- **US-04-0337**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /sys/devices/system/cpu/: CPU topology so that this capability is implemented with clear verification evidence.
+- **US-04-0338**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to /sys/kernel/: misc kernel tunables so that this capability is implemented with clear verification evidence.
+- **US-04-0339**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-04-0340**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: kobj create/register/unregister so that this capability is implemented with clear verification evidence.
+- **US-04-0341**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to unit: attribute read/write so that this capability is implemented with clear verification evidence.
+- **US-04-0342**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to 9P Filesystem (Plan 9): so that this capability is implemented with clear verification evidence.
+- **US-04-0343**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to protocol: so that this capability is implemented with clear verification evidence.
+- **US-04-0344**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to tversion/Rversion (protocol negotiation) so that this capability is implemented with clear verification evidence.
+- **US-04-0345**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to tattach/Rattach (mount) so that this capability is implemented with clear verification evidence.
+- **US-04-0346**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to twalk/Rwalk (path traversal) so that this capability is implemented with clear verification evidence.
+- **US-04-0347**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to topen/Ropen (file open) so that this capability is implemented with clear verification evidence.
+- **US-04-0348**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to tread/Rread / Twrite/Rwrite (data transfer) so that this capability is implemented with clear verification evidence.
+- **US-04-0349**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to tclunk/Rclunk (close FID) so that this capability is implemented with clear verification evidence.
+- **US-04-0350**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to tstat/Rstat / Twstat/Rwstat (metadata) so that this capability is implemented with clear verification evidence.
+- **US-04-0351**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to tcreate/Rcreate (create file/directory) so that this capability is implemented with clear verification evidence.
+- **US-04-0352**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to tremove/Rremove (remove file/directory) so that this capability is implemented with clear verification evidence.
+- **US-04-0353**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to vFS Integration: so that this capability is implemented with clear verification evidence.
+- **US-04-0354**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to p9fs_mount / p9fs_unmount so that this capability is implemented with clear verification evidence.
+- **US-04-0355**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to p9fs_lookup / p9fs_readdir so that this capability is implemented with clear verification evidence.
+- **US-04-0356**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to p9fs_read / p9fs_write so that this capability is implemented with clear verification evidence.
+- **US-04-0357**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to transport: so that this capability is implemented with clear verification evidence.
+- **US-04-0358**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to virtIO-9P transport (via virtio_9p driver) so that this capability is implemented with clear verification evidence.
+- **US-04-0359**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to tCP transport (for networked 9P) so that this capability is implemented with clear verification evidence.
+- **US-04-0360**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-04-0361**: As a Substrate contributor working on 4. Filesystem (`sys/fs`, `sys/vfs`), I want to integration: mount 9P share from QEMU host, read/write files so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-04-0001** (EARS/Ubiquitous): The Substrate system shall vFS Subsystem Refactor (BSD-style):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0002** (EARS/Ubiquitous): The Substrate system shall core Structures & Life Cycle:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0003** (EARS/Ubiquitous): The Substrate system shall struct vnode:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0004** (EARS/Ubiquitous): The Substrate system shall v_type: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0005** (EARS/Ubiquitous): The Substrate system shall v_tag: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0006** (EARS/Ubiquitous): The Substrate system shall v_op (operations vector), v_data (private fs data).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0007** (EARS/Ubiquitous): The Substrate system shall v_mount (pointer to mount point).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0008** (EARS/Ubiquitous): The Substrate system shall v_usecount (active references), v_holdcount (weak refs for cache).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0009** (EARS/Ubiquitous): The Substrate system shall v_writecount (writers count).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0010** (EARS/Ubiquitous): The Substrate system shall v_flag: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0011** (EARS/Ubiquitous): The Substrate system shall v_lock (exclusive/shared lockmgr lock).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0012** (EARS/Ubiquitous): The Substrate system shall v_numoutput (pending async writes for fsync).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0013** (EARS/Ubiquitous): The Substrate system shall v_hash (hash chain for vnode cache lookup).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0014** (EARS/Ubiquitous): The Substrate system shall life Cycle:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0015** (EARS/Ubiquitous): The Substrate system shall getnewvnode(tag, mp, ops, vpp): allocate from zone, recycle LRU if pool full.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0016** (EARS/Ubiquitous): The Substrate system shall vref(vp): increment use count.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0017** (EARS/Ubiquitous): The Substrate system shall vrele(vp): decrement use count, trigger inactive/reclaim if zero.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0018** (EARS/Ubiquitous): The Substrate system shall vput(vp): unlock and vrele.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0019** (EARS/Ubiquitous): The Substrate system shall vget(vp, flags): lock and vref (with LK_NOWAIT support).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0020** (EARS/Ubiquitous): The Substrate system shall vgone(vp): mark for doom/destruction.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0021** (EARS/Ubiquitous): The Substrate system shall vclean(vp, flags): disassociate from filesystem data.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0022** (EARS/Ubiquitous): The Substrate system shall vinvalbuf(vp, flags): invalidate all buffers for vnode.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0023** (EARS/Ubiquitous): The Substrate system shall vflush(mp, skipvp, flags): flush all vnodes for mount point.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0024** (EARS/Ubiquitous): The Substrate system shall struct mount:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0025** (EARS/Ubiquitous): The Substrate system shall mnt_vnodecovered (vnode mounted on).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0026** (EARS/Ubiquitous): The Substrate system shall mnt_op (VFS ops vector).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0027** (EARS/Ubiquitous): The Substrate system shall mnt_data (private fs data).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0028** (EARS/Ubiquitous): The Substrate system shall mnt_flag: MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS, MNT_ASYNC, MNT_UNION, MNT_LOCAL.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0029** (EARS/Ubiquitous): The Substrate system shall mnt_nvnodelist (list of active vnodes).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0030** (EARS/Ubiquitous): The Substrate system shall mnt_stat (cached struct statfs).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0031** (EARS/Ubiquitous): The Substrate system shall mnt_maxsymlinklen: max symlink target stored inline.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0032** (EARS/Ubiquitous): The Substrate system shall mnt_lock: mount-level reader/writer lock.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0033** (EARS/Ubiquitous): The Substrate system shall struct file:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0034** (EARS/Ubiquitous): The Substrate system shall f_type: DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0035** (EARS/Ubiquitous): The Substrate system shall f_data (pointer to vnode/socket/pipe).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0036** (EARS/Ubiquitous): The Substrate system shall f_flag: FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT, O_CLOEXEC.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0037** (EARS/Ubiquitous): The Substrate system shall f_ops (file operations vector: read, write, ioctl, poll, close, stat).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0038** (EARS/Ubiquitous): The Substrate system shall f_offset (current file offset, atomic for concurrent access).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0039** (EARS/Ubiquitous): The Substrate system shall f_count (reference count).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0040** (EARS/Ubiquitous): The Substrate system shall f_cred (credentials at open time).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0041** (EARS/Ubiquitous): The Substrate system shall pathname Lookup (namei):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0042** (EARS/Ubiquitous): The Substrate system shall struct nameidata: lookup state, path string, purpose (LOOKUP/CREATE/DELETE/RENAME).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0043** (EARS/Ubiquitous): The Substrate system shall struct componentname: current component, cn_flags, cn_nameptr, cn_namelen.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0044** (EARS/Ubiquitous): The Substrate system shall lookup Logic:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0045** (EARS/Ubiquitous): The Substrate system shall parse / delimiters, handle multiple consecutive slashes.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0046** (EARS/Ubiquitous): The Substrate system shall handle . (current directory) and .. (parent directory).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0047** (EARS/Ubiquitous): The Substrate system shall cross mount points via mnt_vnodecovered/v_mountedhere.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0048** (EARS/Ubiquitous): The Substrate system shall symbolic link resolution with recursion limit (MAXSYMLINKS = 32).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0049** (EARS/Ubiquitous): The Substrate system shall handle trailing slash on non-directory (ENOTDIR).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0050** (EARS/Ubiquitous): The Substrate system shall handle AT_FDCWD and *at() syscall relative lookups.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0051** (EARS/Ubiquitous): The Substrate system shall name Cache (nchash):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0052** (EARS/Ubiquitous): The Substrate system shall global hash table: (directory vnode, name) → target vnode.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0053** (EARS/Ubiquitous): The Substrate system shall negative entries: cache "does not exist" results.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0054** (EARS/Ubiquitous): The Substrate system shall cache_lookup(dvp, vpp, cnp): check cache.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0055** (EARS/Ubiquitous): The Substrate system shall cache_enter(dvp, vp, cnp): add to cache.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0056** (EARS/Ubiquitous): The Substrate system shall cache_purge(vp): remove all entries for vnode.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0057** (EARS/Ubiquitous): The Substrate system shall cache_purgevfs(mp): remove all entries for mount point.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0058** (EARS/Ubiquitous): The Substrate system shall lRU eviction of cache entries under memory pressure.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0059** (EARS/Ubiquitous): The Substrate system shall reader/writer lock for SMP scalability.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0060** (EARS/Ubiquitous): The Substrate system shall operations Vectors:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0061** (EARS/Ubiquitous): The Substrate system shall vfs_ops (Filesystem-level):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0062** (EARS/Ubiquitous): The Substrate system shall vfs_mount(mp, path, data, ndp, p): mount filesystem at path.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0063** (EARS/Ubiquitous): The Substrate system shall vfs_start(mp, flags, p): post-mount initialization.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0064** (EARS/Ubiquitous): The Substrate system shall vfs_unmount(mp, mntflags, p): unmount, flush, free.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0065** (EARS/Ubiquitous): The Substrate system shall mNT_FORCE: forced unmount (kill active references).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0066** (EARS/Ubiquitous): The Substrate system shall vfs_root(mp, vpp): return root vnode.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0067** (EARS/Ubiquitous): The Substrate system shall vfs_statfs(mp, sbp, p): fill struct statfs (f_blocks, f_bfree, f_bavail, f_files, f_ffree).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0068** (EARS/Ubiquitous): The Substrate system shall vfs_sync(mp, waitfor, cred, p): sync dirty buffers.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0069** (EARS/Ubiquitous): The Substrate system shall mNT_WAIT (synchronous) / MNT_NOWAIT (asynchronous).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0070** (EARS/Ubiquitous): The Substrate system shall vfs_vget(mp, ino, vpp): get vnode by inode number.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0071** (EARS/Ubiquitous): The Substrate system shall vfs_fhtovp(mp, fhp, vpp): NFS file handle → vnode.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0072** (EARS/Ubiquitous): The Substrate system shall vfs_init(vfsp): filesystem type initialization (register).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0073** (EARS/Ubiquitous): The Substrate system shall vfs_uninit(vfsp): filesystem type teardown (unregister).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0074** (EARS/Ubiquitous): The Substrate system shall vnode_ops (File-level):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0075** (EARS/Ubiquitous): The Substrate system shall name Resolution:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0076** (EARS/Ubiquitous): The Substrate system shall vop_lookup(dvp, vpp, cnp): look up component in directory.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0077** (EARS/Ubiquitous): The Substrate system shall vop_cachedlookup(dvp, vpp, cnp): cache-first wrapper.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0078** (EARS/Ubiquitous): The Substrate system shall creation/Deletion:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0079** (EARS/Ubiquitous): The Substrate system shall vop_create(dvp, vpp, cnp, vap): create regular file.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0080** (EARS/Ubiquitous): The Substrate system shall vop_mknod(dvp, vpp, cnp, vap): create device node (block/char/FIFO).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0081** (EARS/Ubiquitous): The Substrate system shall vop_mkdir(dvp, vpp, cnp, vap): create directory (with . and ..).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0082** (EARS/Ubiquitous): The Substrate system shall vop_whiteout(dvp, cnp, flags): UnionFS whiteout entry.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0083** (EARS/Ubiquitous): The Substrate system shall vop_remove(dvp, vp, cnp): unlink directory entry.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0084** (EARS/Ubiquitous): The Substrate system shall vop_rmdir(dvp, vp, cnp): remove empty directory.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0085** (EARS/Ubiquitous): The Substrate system shall access/Attributes:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0086** (EARS/Ubiquitous): The Substrate system shall vop_access(vp, mode, cred, p): check r/w/x permissions (POSIX semantics).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0087** (EARS/Ubiquitous): The Substrate system shall vop_getattr(vp, vap, cred, p): stat (mode, nlink, uid, gid, size, times).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0088** (EARS/Ubiquitous): The Substrate system shall vop_setattr(vp, vap, cred, p): chmod/chown/truncate/utimes.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0089** (EARS/Ubiquitous): The Substrate system shall vop_pathconf(vp, name, retval): POSIX pathconf (_PC_LINK_MAX, _PC_NAME_MAX, etc.).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0090** (EARS/Ubiquitous): The Substrate system shall i/O Operations:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0091** (EARS/Ubiquitous): The Substrate system shall vop_open(vp, mode, cred, p): open callback (access check, device init).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0092** (EARS/Ubiquitous): The Substrate system shall vop_close(vp, fflag, cred, p): close callback (sync on last close).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0093** (EARS/Ubiquitous): The Substrate system shall vop_read(vp, uio, ioflag, cred): read via buffer cache, update atime.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0094** (EARS/Ubiquitous): The Substrate system shall vop_write(vp, uio, ioflag, cred): write, extend file, update mtime.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0095** (EARS/Ubiquitous): The Substrate system shall flags: IO_APPEND, IO_SYNC, IO_UNIT.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0096** (EARS/Ubiquitous): The Substrate system shall vop_ioctl(vp, cmd, data, fflag, cred, p): device control.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0097** (EARS/Ubiquitous): The Substrate system shall vop_poll(vp, events, cred, p): select/poll (POLLIN/POLLOUT/POLLHUP/POLLERR).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0098** (EARS/Ubiquitous): The Substrate system shall vop_fsync(vp, cred, waitfor, p): flush dirty data.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0099** (EARS/Ubiquitous): The Substrate system shall vop_bmap(vp, bn, vpp, bnp, runp): logical→physical block mapping.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0100** (EARS/Ubiquitous): The Substrate system shall vop_strategy(vp, bp): submit buffer to block device.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0101** (EARS/Ubiquitous): The Substrate system shall directories:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0102** (EARS/Ubiquitous): The Substrate system shall vop_readdir(vp, uio, cred, eofflag, ncookies, cookies): read struct dirent entries.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0103** (EARS/Ubiquitous): The Substrate system shall links:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0104** (EARS/Ubiquitous): The Substrate system shall vop_link(dvp, vp, cnp): create hard link (increment nlink).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0105** (EARS/Ubiquitous): The Substrate system shall vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp): rename/move (atomic within FS).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0106** (EARS/Ubiquitous): The Substrate system shall same-directory rename, cross-directory rename, overwrite existing.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0107** (EARS/Ubiquitous): The Substrate system shall directory rename: update .. entry, detect cycles.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0108** (EARS/Ubiquitous): The Substrate system shall vop_symlink(dvp, vpp, cnp, vap, target): create symbolic link.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0109** (EARS/Ubiquitous): The Substrate system shall vop_readlink(vp, uio, cred): read symlink target.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0110** (EARS/Ubiquitous): The Substrate system shall vM/Memory Integration:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0111** (EARS/Ubiquitous): The Substrate system shall vop_inactive(vp, p): last FD closed - truncate if nlink=0, sync dirty.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0112** (EARS/Ubiquitous): The Substrate system shall vop_reclaim(vp, p): vnode recycled - free fs-private data.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0113** (EARS/Ubiquitous): The Substrate system shall vop_lock(vp, flags, p): lockmgr lock (LK_SHARED/EXCLUSIVE/NOWAIT/UPGRADE).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0114** (EARS/Ubiquitous): The Substrate system shall vop_unlock(vp, flags, p): lockmgr unlock.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0115** (EARS/Ubiquitous): The Substrate system shall vop_islocked(vp, p): query lock status.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0116** (EARS/Ubiquitous): The Substrate system shall vop_print(vp): debug dump (type, flags, refcount, fs info).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0117** (EARS/Ubiquitous): The Substrate system shall vop_advlock(vp, id, op, fl, flags): POSIX advisory locking (F_GETLK/F_SETLK/F_SETLKW).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0118** (EARS/Ubiquitous): The Substrate system shall native Build Integration (native_dist):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0119** (EARS/Ubiquitous): The Substrate system shall update native_dist target to build userspace with HOSTCC.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0120** (EARS/Ubiquitous): The Substrate system shall sanitize Makefile.inc for non-cross builds.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0121** (EARS/Ubiquitous): The Substrate system shall verify bin/ and sbin/ builds on host.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0122** (EARS/Ubiquitous): The Substrate system shall host output directory: host_dist.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0123** (EARS/Ubiquitous): The Substrate system shall compiler Construction Tools:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0124** (EARS/Ubiquitous): The Substrate system shall yacc (LALR(1) Parser Generator):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0125** (EARS/Ubiquitous): The Substrate system shall initial skeleton (usr.bin/yacc).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0126** (EARS/Ubiquitous): The Substrate system shall grammar file parsing (rules, precedence, %token/%type).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0127** (EARS/Ubiquitous): The Substrate system shall lALR(1) parse table generation (states, actions, gotos).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0128** (EARS/Ubiquitous): The Substrate system shall conflict resolution (shift/reduce, reduce/reduce).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0129** (EARS/Ubiquitous): The Substrate system shall output y.tab.c and y.tab.h.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0130** (EARS/Ubiquitous): The Substrate system shall -d flag for header generation.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0131** (EARS/Ubiquitous): The Substrate system shall -v flag for verbose state output (y.output).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0132** (EARS/Ubiquitous): The Substrate system shall lex (Lexical Analyzer Generator):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0133** (EARS/Ubiquitous): The Substrate system shall regular expression to NFA conversion (Thompson's construction).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0134** (EARS/Ubiquitous): The Substrate system shall nFA to DFA conversion (subset construction).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0135** (EARS/Ubiquitous): The Substrate system shall dFA minimization (Hopcroft's algorithm).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0136** (EARS/Ubiquitous): The Substrate system shall output lex.yy.c.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0137** (EARS/Ubiquitous): The Substrate system shall character class support ([a-zA-Z], POSIX classes).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0138** (EARS/Ubiquitous): The Substrate system shall start conditions (exclusive/inclusive).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0139** (EARS/Ubiquitous): The Substrate system shall yywrap() and yylex() interface.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0140** (EARS/Ubiquitous): The Substrate system shall buffer Cache Integration (bio):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0141** (EARS/Ubiquitous): The Substrate system shall struct buf Definition:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0142** (EARS/Ubiquitous): The Substrate system shall fields: b_flags, b_data, b_bcount, b_blkno, b_lblkno, b_vp, b_rcred, b_wcred, b_resid, b_iodone, b_error.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0143** (EARS/Ubiquitous): The Substrate system shall flags: B_BUSY, B_DONE, B_ERROR, B_DELWRI, B_PHYS, B_READ, B_WRITE, B_ASYNC, B_INVAL, B_NOCACHE, B_CACHE.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0144** (EARS/Ubiquitous): The Substrate system shall hash chain linkage for lookup by (vp, blkno).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0145** (EARS/Ubiquitous): The Substrate system shall buffer Queues:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0146** (EARS/Ubiquitous): The Substrate system shall bQ_LOCKED: buffers currently in use.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0147** (EARS/Ubiquitous): The Substrate system shall bQ_CLEAN: clean LRU (eligible for reuse).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0148** (EARS/Ubiquitous): The Substrate system shall bQ_DIRTY: delayed write queue.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0149** (EARS/Ubiquitous): The Substrate system shall bQ_EMPTY: free buffer headers without data.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0150** (EARS/Ubiquitous): The Substrate system shall buffer Cache Functions:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0151** (EARS/Ubiquitous): The Substrate system shall getblk(vp, blkno, size, slpflag, slptimeo): get from cache or allocate.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0152** (EARS/Ubiquitous): The Substrate system shall bread(vp, blkno, size, cred, bpp): synchronous read (getblk + I/O + biowait).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0153** (EARS/Ubiquitous): The Substrate system shall breada(vp, blkno, size, rablkno, rabsize, cred, bpp): read-ahead variant.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0154** (EARS/Ubiquitous): The Substrate system shall bwrite(bp): synchronous write.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0155** (EARS/Ubiquitous): The Substrate system shall bawrite(bp): asynchronous write (initiate, return immediately).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0156** (EARS/Ubiquitous): The Substrate system shall bdwrite(bp): delayed write (mark B_DELWRI, release).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0157** (EARS/Ubiquitous): The Substrate system shall brelse(bp): release buffer to appropriate queue.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0158** (EARS/Ubiquitous): The Substrate system shall incore(vp, blkno): check if block is in cache.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0159** (EARS/Ubiquitous): The Substrate system shall synchronization:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0160** (EARS/Ubiquitous): The Substrate system shall biowait(bp): sleep until B_DONE.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0161** (EARS/Ubiquitous): The Substrate system shall biodone(bp): mark complete, call b_iodone, wakeup.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0162** (EARS/Ubiquitous): The Substrate system shall flushing:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0163** (EARS/Ubiquitous): The Substrate system shall bufsync(freq): periodic daemon to write dirty buffers.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0164** (EARS/Ubiquitous): The Substrate system shall sync() syscall: flush all dirty buffers.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0165** (EARS/Ubiquitous): The Substrate system shall update daemon (syncer kthread): periodic sync every 30 seconds.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0166** (EARS/Ubiquitous): The Substrate system shall vM Integration (Unified Buffer Cache):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0167** (EARS/Ubiquitous): The Substrate system shall vNode Pager:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0168** (EARS/Ubiquitous): The Substrate system shall vnode_pager_getpages(): read pages from vnode into vm_page array.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0169** (EARS/Ubiquitous): The Substrate system shall vnode_pager_putpages(): write dirty pages to vnode.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0170** (EARS/Ubiquitous): The Substrate system shall integrate with buffer cache (shared backing pages).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0171** (EARS/Ubiquitous): The Substrate system shall page Cache Integration:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0172** (EARS/Ubiquitous): The Substrate system shall buffer data backed by vm_page_t (not kmalloc).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0173** (EARS/Ubiquitous): The Substrate system shall unified memory accounting for file cache and buffer cache.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0174** (EARS/Ubiquitous): The Substrate system shall zero-copy I/O: mmap shares pages with buffer cache.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0175** (EARS/Ubiquitous): The Substrate system shall concurrency & Locking:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0176** (EARS/Ubiquitous): The Substrate system shall vNode Locks (lockmgr):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0177** (EARS/Ubiquitous): The Substrate system shall lockmgr(lkp, flags, interlock, p): unified lock manager.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0178** (EARS/Ubiquitous): The Substrate system shall modes: LK_SHARED, LK_EXCLUSIVE, LK_UPGRADE, LK_DOWNGRADE, LK_DRAIN.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0179** (EARS/Ubiquitous): The Substrate system shall lK_NOWAIT: non-blocking (return EBUSY).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0180** (EARS/Ubiquitous): The Substrate system shall priority inheritance for blocked threads.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0181** (EARS/Ubiquitous): The Substrate system shall multiple concurrent readers, single exclusive writer.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0182** (EARS/Ubiquitous): The Substrate system shall interlock: v_interlock mutex for vnode fields (v_usecount, v_flag, v_numoutput).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0183** (EARS/Ubiquitous): The Substrate system shall mount Lock: mnt_lock prevents unmount during vnode operations.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0184** (EARS/Ubiquitous): The Substrate system shall namecache Lock: reader/writer lock on nchash for concurrent lookups.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0185** (EARS/Ubiquitous): The Substrate system shall buffer Lock: per-buffer B_BUSY flag with sleep/wakeup.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0186** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0187** (EARS/Ubiquitous): The Substrate system shall unit: vnode lifecycle - getnewvnode, vref, vrele, vput, vget, vgone.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0188** (EARS/Ubiquitous): The Substrate system shall unit: name cache - cache_lookup hit/miss, cache_enter, cache_purge, negative entries.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0189** (EARS/Ubiquitous): The Substrate system shall unit: namei - simple path, ./.., mount crossing, symlink resolution, MAXSYMLINKS.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0190** (EARS/Ubiquitous): The Substrate system shall unit: vop_create/remove/mkdir/rmdir on ext2.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0191** (EARS/Ubiquitous): The Substrate system shall unit: vop_rename same-dir and cross-dir.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0192** (EARS/Ubiquitous): The Substrate system shall unit: vop_read/write/fsync round-trip.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0193** (EARS/Ubiquitous): The Substrate system shall unit: buffer cache - getblk/bread/bwrite/brelse lifecycle.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0194** (EARS/Ubiquitous): The Substrate system shall unit: buffer cache - bdwrite delayed write, then sync flushes.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0195** (EARS/Ubiquitous): The Substrate system shall unit: lockmgr - shared/exclusive/upgrade/downgrade/nowait.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0196** (EARS/Ubiquitous): The Substrate system shall property: vnode refcount never goes negative.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0197** (EARS/Ubiquitous): The Substrate system shall property: no buffer leaks after mount/unmount cycle.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0198** (EARS/Ubiquitous): The Substrate system shall integration: mount ext2 → create file → write → read → unlink → unmount.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0199** (EARS/Ubiquitous): The Substrate system shall integration: mount FAT32 → readdir → LFN resolution.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0200** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0201** (EARS/Ubiquitous): The Substrate system shall man pages: vnode(9), namei(9), VOP_LOOKUP(9), VOP_READ(9), VOP_WRITE(9).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0202** (EARS/Ubiquitous): The Substrate system shall man pages: bread(9), bwrite(9), getblk(9), brelse(9), biodone(9).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0203** (EARS/Ubiquitous): The Substrate system shall man pages: lockmgr(9), VFS_MOUNT(9), VFS_UNMOUNT(9).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0204** (EARS/Ubiquitous): The Substrate system shall internal doc: VFS architecture (vnode→mount→vfs_ops→vnode_ops).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0205** (EARS/Ubiquitous): The Substrate system shall internal doc: buffer cache lifecycle (getblk→bread→bdwrite→sync).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0206** (EARS/Ubiquitous): The Substrate system shall legacy/Feature Gaps:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0207** (EARS/Ubiquitous): The Substrate system shall ensure all FS drivers implement complete write paths.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0208** (EARS/Ubiquitous): The Substrate system shall fsck: port e2fsprogs or implement native consistency checker.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0209** (EARS/Ubiquitous): The Substrate system shall quotas: per-user/group disk quotas (UFS/ext2).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0210** (EARS/Ubiquitous): The Substrate system shall eXT2 (Native Filesystem):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0211** (EARS/Ubiquitous): The Substrate system shall inode allocation/freeing (bitmap-based).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0212** (EARS/Ubiquitous): The Substrate system shall block allocation/freeing (bitmap-based, block groups).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0213** (EARS/Ubiquitous): The Substrate system shall directory entry creation/deletion.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0214** (EARS/Ubiquitous): The Substrate system shall extended Features:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0215** (EARS/Ubiquitous): The Substrate system shall ext2 revision 1: variable inode size, file type in dir entry.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0216** (EARS/Ubiquitous): The Substrate system shall sparse superblock: superblock copies only in select block groups.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0217** (EARS/Ubiquitous): The Substrate system shall large file support (>2 GB via triple-indirect blocks).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0218** (EARS/Ubiquitous): The Substrate system shall vFS Integration:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0219** (EARS/Ubiquitous): The Substrate system shall implement ext2_mount / ext2_unmount / ext2_root / ext2_statfs.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0220** (EARS/Ubiquitous): The Substrate system shall implement ext2_lookup / ext2_create / ext2_remove / ext2_rename.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0221** (EARS/Ubiquitous): The Substrate system shall implement ext2_read / ext2_write / ext2_fsync.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0222** (EARS/Ubiquitous): The Substrate system shall implement ext2_readdir / ext2_mkdir / ext2_rmdir.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0223** (EARS/Ubiquitous): The Substrate system shall implement ext2_link / ext2_symlink / ext2_readlink.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0224** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0225** (EARS/Ubiquitous): The Substrate system shall unit: inode/block alloc/free round-trip.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0226** (EARS/Ubiquitous): The Substrate system shall unit: directory entry CRUD.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0227** (EARS/Ubiquitous): The Substrate system shall integration: create ext2 image, mount, file ops, unmount, fsck verify.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0228** (EARS/Ubiquitous): The Substrate system shall fuzz: mount corrupted ext2 images (malformed superblock, bitmap, inodes).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0229** (EARS/Ubiquitous): The Substrate system shall fAT16/32:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0230** (EARS/Ubiquitous): The Substrate system shall fAT parsing and cluster chain following.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0231** (EARS/Ubiquitous): The Substrate system shall long File Name (LFN) support (VFAT entries).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0232** (EARS/Ubiquitous): The Substrate system shall fAT12 Support: for floppy disk images.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0233** (EARS/Ubiquitous): The Substrate system shall vFS Integration:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0234** (EARS/Ubiquitous): The Substrate system shall implement fat_mount / fat_unmount / fat_root / fat_statfs.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0235** (EARS/Ubiquitous): The Substrate system shall implement fat_lookup / fat_create / fat_remove / fat_rename.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0236** (EARS/Ubiquitous): The Substrate system shall implement fat_read / fat_write.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0237** (EARS/Ubiquitous): The Substrate system shall implement fat_readdir (8.3 + LFN merging).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0238** (EARS/Ubiquitous): The Substrate system shall implement fat_mkdir / fat_rmdir.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0239** (EARS/Ubiquitous): The Substrate system shall write Support:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0240** (EARS/Ubiquitous): The Substrate system shall fAT table update (both copies).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0241** (EARS/Ubiquitous): The Substrate system shall cluster allocation/freeing.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0242** (EARS/Ubiquitous): The Substrate system shall directory entry creation with LFN slots.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0243** (EARS/Ubiquitous): The Substrate system shall file truncation (free cluster chain).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0244** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0245** (EARS/Ubiquitous): The Substrate system shall unit: FAT chain parsing (FAT12, FAT16, FAT32).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0246** (EARS/Ubiquitous): The Substrate system shall unit: LFN slot reassembly.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0247** (EARS/Ubiquitous): The Substrate system shall integration: create FAT image, mount, file ops, unmount, verify with dosfsck.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0248** (EARS/Ubiquitous): The Substrate system shall fuzz: mount corrupted FAT images.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0249** (EARS/Ubiquitous): The Substrate system shall uDF (Universal Disk Format):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0250** (EARS/Ubiquitous): The Substrate system shall on-Disk Structures (udf.h):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0251** (EARS/Ubiquitous): The Substrate system shall udf_tag (Descriptor Tag - 16 bytes, CRC).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0252** (EARS/Ubiquitous): The Substrate system shall udf_avdp (Anchor Volume Descriptor Pointer).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0253** (EARS/Ubiquitous): The Substrate system shall udf_pvd (Primary Volume Descriptor).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0254** (EARS/Ubiquitous): The Substrate system shall udf_pd (Partition Descriptor).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0255** (EARS/Ubiquitous): The Substrate system shall udf_lvd (Logical Volume Descriptor).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0256** (EARS/Ubiquitous): The Substrate system shall udf_fsd (File Set Descriptor).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0257** (EARS/Ubiquitous): The Substrate system shall udf_fe / udf_efe (File Entry / Extended File Entry).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0258** (EARS/Ubiquitous): The Substrate system shall udf_fid (File Identifier Descriptor).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0259** (EARS/Ubiquitous): The Substrate system shall udf_short_ad / udf_long_ad (Allocation Descriptors).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0260** (EARS/Ubiquitous): The Substrate system shall read-Only Support (udf.c):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0261** (EARS/Ubiquitous): The Substrate system shall udf_read_tag(): tag CRC verification.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0262** (EARS/Ubiquitous): The Substrate system shall udf_find_avdp(): locate Anchor at sector 256.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0263** (EARS/Ubiquitous): The Substrate system shall udf_read_vds(): parse Volume Descriptor Sequence.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0264** (EARS/Ubiquitous): The Substrate system shall udf_read_partition() / udf_read_lvd() / udf_read_fsd().
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0265** (EARS/Ubiquitous): The Substrate system shall udf_read_fe(): read File Entry (inode equivalent).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0266** (EARS/Ubiquitous): The Substrate system shall udf_read_file(): read file data via allocation descriptors.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0267** (EARS/Ubiquitous): The Substrate system shall udf_readdir(): iterate directory FIDs.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0268** (EARS/Ubiquitous): The Substrate system shall udf_finddir(): lookup by name.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0269** (EARS/Ubiquitous): The Substrate system shall udf_mount(): VFS mount integration.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0270** (EARS/Ubiquitous): The Substrate system shall write Support (udf_write.c):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0271** (EARS/Ubiquitous): The Substrate system shall udf_read_space_bitmap(): parse unallocated space.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0272** (EARS/Ubiquitous): The Substrate system shall udf_alloc_block() / udf_free_block(): space bitmap management.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0273** (EARS/Ubiquitous): The Substrate system shall udf_create_fe(): create new File Entry.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0274** (EARS/Ubiquitous): The Substrate system shall udf_write_file(): write file data.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0275** (EARS/Ubiquitous): The Substrate system shall udf_add_fid() / udf_remove_fid(): directory entry management.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0276** (EARS/Ubiquitous): The Substrate system shall udf_truncate(): truncate/extend file.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0277** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0278** (EARS/Ubiquitous): The Substrate system shall unit: tag CRC verification.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0279** (EARS/Ubiquitous): The Substrate system shall unit: allocation/deallocation round-trip.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0280** (EARS/Ubiquitous): The Substrate system shall property: alloc→free→alloc returns same block.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0281** (EARS/Ubiquitous): The Substrate system shall fuzz: mount corrupted UDF images (bad descriptors, invalid CRCs).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0282** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0283** (EARS/Ubiquitous): The Substrate system shall man pages: udf(5) (filesystem description), udf(4) (kernel driver).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0284** (EARS/Ubiquitous): The Substrate system shall iSO 9660 / CD-ROM (future):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0285** (EARS/Ubiquitous): The Substrate system shall primary Volume Descriptor parsing.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0286** (EARS/Ubiquitous): The Substrate system shall rock Ridge extensions (POSIX metadata).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0287** (EARS/Ubiquitous): The Substrate system shall joliet extensions (Unicode filenames).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0288** (EARS/Ubiquitous): The Substrate system shall multi-session support.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0289** (EARS/Ubiquitous): The Substrate system shall el Torito boot catalog parsing (informational).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0290** (EARS/Ubiquitous): The Substrate system shall devFS (/dev):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0291** (EARS/Ubiquitous): The Substrate system shall device Registry: drivers register character/block devices.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0292** (EARS/Ubiquitous): The Substrate system shall vFS glue: auto-generate vnode nodes on device registration.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0293** (EARS/Ubiquitous): The Substrate system shall device Nodes:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0294** (EARS/Ubiquitous): The Substrate system shall null, zero, full (data sink/source/full-error).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0295** (EARS/Ubiquitous): The Substrate system shall random / urandom (CSPRNG).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0296** (EARS/Ubiquitous): The Substrate system shall tty (proxy to current process controlling terminal).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0297** (EARS/Ubiquitous): The Substrate system shall mem / kmem (physical/kernel memory access).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0298** (EARS/Ubiquitous): The Substrate system shall port (I/O port access).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0299** (EARS/Ubiquitous): The Substrate system shall stdin, stdout, stderr symlinks (/proc/self/fd/0,1,2).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0300** (EARS/Ubiquitous): The Substrate system shall console (system console).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0301** (EARS/Ubiquitous): The Substrate system shall ptmx (pseudo-terminal master multiplexer).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0302** (EARS/Ubiquitous): The Substrate system shall dynamic Updates:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0303** (EARS/Ubiquitous): The Substrate system shall hot-plug: add/remove nodes on device attach/detach.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0304** (EARS/Ubiquitous): The Substrate system shall permissions: default mode from driver, overridable via devfs.rules.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0305** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0306** (EARS/Ubiquitous): The Substrate system shall unit: register/unregister device nodes.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0307** (EARS/Ubiquitous): The Substrate system shall unit: read from /dev/zero, write to /dev/null, read from /dev/random.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0308** (EARS/Ubiquitous): The Substrate system shall unit: /dev/full returns ENOSPC on write.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0309** (EARS/Ubiquitous): The Substrate system shall procFS (/proc):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0310** (EARS/Ubiquitous): The Substrate system shall per-Process:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0311** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/stat: process state (Linux-compatible format).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0312** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/status: human-readable status.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0313** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/maps: memory map regions.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0314** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/cmdline: NUL-separated command line.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0315** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/environ: NUL-separated environment.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0316** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/fd/: open FD symlinks.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0317** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/cwd, /proc/[pid]/exe, /proc/[pid]/root: symlinks.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0318** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/task/: per-thread subdirectories.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0319** (EARS/Ubiquitous): The Substrate system shall system-wide:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0320** (EARS/Ubiquitous): The Substrate system shall /proc/cpuinfo, /proc/meminfo, /proc/uptime, /proc/loadavg.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0321** (EARS/Ubiquitous): The Substrate system shall /proc/vmstat: VM statistics counters.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0322** (EARS/Ubiquitous): The Substrate system shall /proc/filesystems: registered filesystem types.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0323** (EARS/Ubiquitous): The Substrate system shall /proc/mounts: mounted filesystems.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0324** (EARS/Ubiquitous): The Substrate system shall /proc/partitions: block device partitions.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0325** (EARS/Ubiquitous): The Substrate system shall /proc/self: symlink to calling process PID.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0326** (EARS/Ubiquitous): The Substrate system shall dynamic content generation: virtual files populated on read().
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0327** (EARS/Ubiquitous): The Substrate system shall personality awareness: detect caller (Linux/FreeBSD) and adjust format.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0328** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0329** (EARS/Ubiquitous): The Substrate system shall unit: each /proc file returns valid parseable content.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0330** (EARS/Ubiquitous): The Substrate system shall unit: /proc/self resolves to calling PID.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0331** (EARS/Ubiquitous): The Substrate system shall integration: ps and top read from procfs correctly.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0332** (EARS/Ubiquitous): The Substrate system shall sysFS (/sys):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0333** (EARS/Ubiquitous): The Substrate system shall kObject hierarchy: represent kernel objects (drivers, buses, devices).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0334** (EARS/Ubiquitous): The Substrate system shall attributes: map kernel variables to readable/writable files.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0335** (EARS/Ubiquitous): The Substrate system shall /sys/class/net/: network interface properties.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0336** (EARS/Ubiquitous): The Substrate system shall /sys/block/: block device attributes.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0337** (EARS/Ubiquitous): The Substrate system shall /sys/devices/system/cpu/: CPU topology.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0338** (EARS/Ubiquitous): The Substrate system shall /sys/kernel/: misc kernel tunables.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0339** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0340** (EARS/Ubiquitous): The Substrate system shall unit: kobj create/register/unregister.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0341** (EARS/Ubiquitous): The Substrate system shall unit: attribute read/write.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0342** (EARS/Ubiquitous): The Substrate system shall 9P Filesystem (Plan 9):.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0343** (EARS/Ubiquitous): The Substrate system shall protocol:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0344** (EARS/Ubiquitous): The Substrate system shall tversion/Rversion (protocol negotiation).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0345** (EARS/Ubiquitous): The Substrate system shall tattach/Rattach (mount).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0346** (EARS/Ubiquitous): The Substrate system shall twalk/Rwalk (path traversal).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0347** (EARS/Ubiquitous): The Substrate system shall topen/Ropen (file open).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0348** (EARS/Ubiquitous): The Substrate system shall tread/Rread / Twrite/Rwrite (data transfer).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0349** (EARS/Ubiquitous): The Substrate system shall tclunk/Rclunk (close FID).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0350** (EARS/Ubiquitous): The Substrate system shall tstat/Rstat / Twstat/Rwstat (metadata).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0351** (EARS/Ubiquitous): The Substrate system shall tcreate/Rcreate (create file/directory).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0352** (EARS/Ubiquitous): The Substrate system shall tremove/Rremove (remove file/directory).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0353** (EARS/Ubiquitous): The Substrate system shall vFS Integration:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0354** (EARS/Ubiquitous): The Substrate system shall p9fs_mount / p9fs_unmount.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0355** (EARS/Ubiquitous): The Substrate system shall p9fs_lookup / p9fs_readdir.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0356** (EARS/Ubiquitous): The Substrate system shall p9fs_read / p9fs_write.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0357** (EARS/Ubiquitous): The Substrate system shall transport:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0358** (EARS/Ubiquitous): The Substrate system shall virtIO-9P transport (via virtio_9p driver).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0359** (EARS/Ubiquitous): The Substrate system shall tCP transport (for networked 9P).
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0360** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-04-0361** (EARS/Ubiquitous): The Substrate system shall integration: mount 9P share from QEMU host, read/write files.
+  - Context: 4. Filesystem (`sys/fs`, `sys/vfs`)
+  - Verification: design review + implementation evidence + test/doc update.

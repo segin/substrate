@@ -127,12 +127,18 @@ extern bool test_svr4_personality_table(void);
 // LibC Tests
 extern bool test_libc_memcpy(void);
 extern bool test_libc_strlen(void);
+extern bool test_libc_strspn(void);
 extern bool test_gmtime_negative_years(void);
 extern bool test_libc_time(void);
 extern bool test_libc_memmove(void);
 extern bool test_libc_strcat(void);
 extern bool test_libc_strtok(void);
+extern bool test_libc_memset(void);
 extern bool test_libc_memcmp(void);
+extern bool test_libc_strstr(void);
+extern bool test_libc_strrchr(void);
+extern bool test_libc_strcmp(void);
+extern bool test_libc_strpbrk(void);
 
 // Div64 Tests
 extern bool run_div64_tests(void);
@@ -144,6 +150,7 @@ bool run_pipe_race(void) {
 }
 
 extern bool test_mmap_batch_run(void);
+extern bool test_proc_status_injection(void);
 
 typedef struct {
     const char *name;
@@ -229,15 +236,22 @@ test_case_t tests[] = {
     {"svr4_perso", test_svr4_personality_table},
     {"libc_memcpy", test_libc_memcpy},
     {"libc_strlen", test_libc_strlen},
+    {"libc_strspn", test_libc_strspn},
     {"libc_time_neg", test_gmtime_negative_years},
     {"libc_time", test_libc_time},
     {"libc_memmove", test_libc_memmove},
     {"libc_strcat", test_libc_strcat},
     {"libc_strtok", test_libc_strtok},
+    {"libc_memset", test_libc_memset},
     {"libc_memcmp", test_libc_memcmp},
+    {"libc_strstr", test_libc_strstr},
+    {"libc_strrchr", test_libc_strrchr},
+    {"libc_strcmp", test_libc_strcmp},
+    {"libc_strpbrk", test_libc_strpbrk},
     {"div64", run_div64_tests},
     {"pipe_race", run_pipe_race},
     {"mmap_batch", test_mmap_batch_run},
+    {"proc_status_injection", test_proc_status_injection},
     {NULL, NULL}
 };
 
