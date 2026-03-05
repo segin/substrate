@@ -29,9 +29,10 @@ void full_init() {}
 void fuse_init() {}
 void fuse_fs_init() {}
 void p9_init() {}
-void devfs_init() {}
+void devfs_init(void) {}
 void vfs_init_mock_root(void);
 // nchinit and fs_root removed (linked from vfs)
+void namei_init(void) {}
 
 // Driver init mocks
 void scsi_init() {}
@@ -343,9 +344,6 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 
-struct vm_page *vm_phys_alloc_page(void) { return NULL; }
-void vm_phys_free_page(struct vm_page *m) { (void)m; }
-void swapper_request_work(void) {}
 
 uint32_t pmm_get_total_memory(void) { return 0; }
 uint32_t pmm_get_free_memory(void) { return 0; }
