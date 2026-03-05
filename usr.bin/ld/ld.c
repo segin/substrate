@@ -3296,7 +3296,7 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
     char cmd[4096];
     FILE *fp;
     char *nl;
-    size_t i;
+    size_t i, cmd_len;
     int n;
 
     if (out_path == NULL || out_path_sz == 0) {
@@ -3310,11 +3310,14 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
     if (n < 0 || (size_t)n >= sizeof(cmd)) {
         return -1;
     }
+    cmd_len = (size_t)n;
+
     for (i = 0; i < ctx->plugin_opt_count; ++i) {
-        n = snprintf(cmd + strlen(cmd), sizeof(cmd) - strlen(cmd), " --plugin-opt=\"%s\"", ctx->plugin_opts[i]);
-        if (n < 0 || (size_t)n >= sizeof(cmd) - strlen(cmd)) {
+        n = snprintf(cmd + cmd_len, sizeof(cmd) - cmd_len, " --plugin-opt=\"%s\"", ctx->plugin_opts[i]);
+        if (n < 0 || (size_t)n >= sizeof(cmd) - cmd_len) {
             return -1;
         }
+        cmd_len += (size_t)n;
     }
     fp = popen(cmd, "r");
     if (fp == NULL) {

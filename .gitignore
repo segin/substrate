@@ -156,7 +156,10 @@ udf_test
 stat_verify
 host_test_*
 tests/sys/host_test_*
+!tests/sys/host_test_*.c
+!tests/sys/host_test_perso_netbsd_rusage.c
 *.img
+test_pthread_join
 
 # Keep source trees under usr.bin/tests tracked even with *.bin rules.
 !usr.bin/
@@ -209,3 +212,9 @@ sys/gdb_script.txt
 usr.bin/as/aarch64-as
 usr.bin/as/arm-as
 usr.man/mandoc.db
+/tests/test_libpthread_mutex
+tests/lib/c/test_stdlib
+tests/test_readline
+sys/ksyms_table.c
+sys/ksyms_efi_table.c
+bench_objects/
