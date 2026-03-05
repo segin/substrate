@@ -314,6 +314,7 @@ void execute_program() {
 }
 
 void execute_immediate(const char *text) {
+    (void)text;
     /* Compile immediate text to temporary space end? 
        Or separate buffer? 
        For now, stub.
