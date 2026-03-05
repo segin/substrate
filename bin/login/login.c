@@ -3,6 +3,23 @@
 #include <string.h>
 #include <termios.h>
 
+static int read_password_no_echo(int fd, char *buffer, size_t size) {
+    struct termios oldt, newt;
+    int n;
+
+    tcgetattr(fd, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~ECHO;
+    tcsetattr(fd, TCSANOW, &newt);
+
+    n = read(fd, buffer, size);
+
+    tcsetattr(fd, TCSANOW, &oldt);
+    printf("\n");
+
+    return n;
+}
+
 int main() {
     char user[64];
     char pass[64];
@@ -18,16 +35,7 @@ int main() {
     printf("Password: ");
     fflush(stdout);
 
-    struct termios oldt, newt;
-    tcgetattr(0, &oldt);
-    newt = oldt;
-    newt.c_lflag &= ~ECHO;
-    tcsetattr(0, TCSANOW, &newt);
-
-    n = read(0, pass, 63);
-
-    tcsetattr(0, TCSANOW, &oldt);
-    printf("\n");
+    n = read_password_no_echo(0, pass, 63);
 
     if(n>0) pass[n-1] = 0;
     
