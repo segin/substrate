@@ -157,6 +157,7 @@ stat_verify
 host_test_*
 tests/sys/host_test_*
 *.img
+test_pthread_join
 
 # Keep source trees under usr.bin/tests tracked even with *.bin rules.
 !usr.bin/
