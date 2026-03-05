@@ -1,0 +1,93 @@
+.TH WC 1 "March 2026" "Substrate" "User Commands"
+.SH NAME
+wc \- word, line, and byte or character count
+.SH SYNOPSIS
+.B wc
+.RB [ \-c | \-m ]
+.RB [ \-l ]
+.RB [ \-w ]
+.RB [ \-L ]
+.RB [ \-h ]
+.RI [ file\ ... ]
+.br
+.B wc
+.RB [ \-\-lines ]
+.RB [ \-\-words ]
+.RB [ \-\-bytes ]
+.RB [ \-\-chars ]
+.RB [ \-\-max\-line\-length ]
+.RB [ \-\-total=\fIWHEN\fP ]
+.RI [ file\ ... ]
+.br
+.B wc
+.RB [ OPTIONS ]
+.B \-\-files0\-from=\fIF\fP
+.SH DESCRIPTION
+Print newline, word, and byte counts for each
+.IR file ,
+and a total line if more than one
+.I file
+is specified. A word is a non-zero-length sequence of characters
+delimited by white space.
+.PP
+If no
+.I file
+is given, or if
+.I file
+is '\-', read standard input.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-bytes
+Print the byte counts. This option is mutually exclusive with
+.BR \-m ;
+if both are specified, the last one specified takes precedence.
+.TP
+.BR \-m ", " \-\-chars
+Print the character counts.
+.TP
+.BR \-l ", " \-\-lines
+Print the newline counts.
+.TP
+.BR \-w ", " \-\-words
+Print the word counts.
+.TP
+.BR \-L ", " \-\-max\-line\-length
+Print the length of the longest line.
+.TP
+.B \-h
+Use unit suffixes: Byte, Kilobyte, Megabyte, Gigabyte, Terabyte and
+Petabyte in order to reduce the number of digits to three or less
+using base 2 for sizes.
+.TP
+.BI \-\-files0\-from= F
+Read input from the files specified by NUL-terminated names in file
+.IR F ;
+If
+.I F
+is '\-', then read names from standard input.
+.TP
+.BI \-\-total= WHEN
+When to print a line with total counts;
+.I WHEN
+can be: auto, always, only, never.
+.TP
+.B \-\-libxo
+Generate output via libxo in a selection of different human and
+machine readable formats.
+.TP
+.B \-\-help
+Display help and exit.
+.TP
+.B \-\-version
+Output version information and exit.
+.SH CONFORMING TO
+The
+.B wc
+utility is compliant with the POSIX.1-2024 Shell and Utilities specification,
+with extensions derived from GNU coreutils and BSD systems. Where GNU and
+BSD extensions conflict (such as the precedence of \-c over \-m), BSD
+semantics are strictly preferred.
+.SH EXIT STATUS
+The
+.B wc
+utility exits 0 on success, and >0 if an error occurs.

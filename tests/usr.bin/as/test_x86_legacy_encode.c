@@ -242,6 +242,27 @@ int main(void) {
         check_encode(&insn, exp, sizeof(exp));
     }
 
+    insn.mnemonic = "jmp";
+    insn.ops[0] = reg_op(AS_X86_REG_EAX);
+    {
+        const uint8_t exp[] = {0xff, 0xe0};
+        check_encode(&insn, exp, sizeof(exp));
+    }
+
+    insn.mnemonic = "call";
+    insn.ops[0] = reg_op(AS_X86_REG_EAX);
+    {
+        const uint8_t exp[] = {0xff, 0xd0};
+        check_encode(&insn, exp, sizeof(exp));
+    }
+
+    insn.mnemonic = "call";
+    insn.ops[0] = mem_disp32(0x12345678);
+    {
+        const uint8_t exp[] = {0xff, 0x15, 0x78, 0x56, 0x34, 0x12};
+        check_encode(&insn, exp, sizeof(exp));
+    }
+
     memset(&insn, 0, sizeof(insn));
     insn.mnemonic = "ret";
     {

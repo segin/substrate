@@ -61,8 +61,42 @@ static void bios_putc(char c) {
     vm86_bios_call(0x10, &regs);
 }
 
+/* Buffer at 0x3000 used for batched string output via BIOS INT 10h, AH=13h */
+#define BIOS_STRING_BUF_ADDR 0x3000
+#define BIOS_STRING_BUF_MAX  4000
+
 static void bios_puts(const char *s) {
-    while (*s) bios_putc(*s++);
+    char *buf = (char *)(uintptr_t)BIOS_STRING_BUF_ADDR;
+    int len = 0;
+
+    while (*s && len < BIOS_STRING_BUF_MAX) {
+        if (*s == '\n' && len < BIOS_STRING_BUF_MAX - 1) {
+            buf[len++] = '\r';
+        }
+        buf[len++] = *s++;
+    }
+
+    if (len == 0) return;
+
+    struct vm86_regs regs;
+
+    /* 1. Get current cursor position (INT 10h, AH=03h) */
+    memset(&regs, 0, sizeof(regs));
+    regs.eax = 0x0300;
+    regs.ebx = 0x0000; /* Page 0 */
+    vm86_bios_call(0x10, &regs);
+
+    uint16_t dx = regs.edx & 0xFFFF; /* DH = row, DL = col */
+
+    /* 2. Write string and update cursor (INT 10h, AH=13h, AL=01h) */
+    memset(&regs, 0, sizeof(regs));
+    regs.eax = 0x1301;
+    regs.ebx = 0x0007; /* Page 0, Attribute 7 (Light Grey) */
+    regs.ecx = len;
+    regs.edx = dx;
+    regs.es  = BIOS_STRING_BUF_ADDR >> 4;
+    regs.ebp = BIOS_STRING_BUF_ADDR & 0xF;
+    vm86_bios_call(0x10, &regs);
 }
 
 static int bios_getc(void) {
