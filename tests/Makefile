@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_readline test_history
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_readline test_history test_bc
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -48,6 +48,9 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 
 test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
 	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
+
+test_bc:
+	$(MAKE) -C bin/bc test
 
 # Duplicate rule removed
 
