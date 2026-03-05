@@ -85,6 +85,7 @@ typedef struct {
     char *index_reg;
     int scale;
     char *segment_reg;
+    int size_bits;
     as_expr_t *disp;
 } as_mem_operand_t;
 
@@ -122,6 +123,7 @@ typedef struct {
 typedef struct {
     char *mnemonic;
     char *arm_condition;
+    unsigned syntax_intel;
     unsigned prefixes;
     char *segment_override;
     as_operand_t *operands;

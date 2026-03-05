@@ -119,6 +119,7 @@ typedef enum {
 #endif
 
 #ifndef SHT_GNU_verdef
+#define SHT_GNU_HASH 0x6ffffff6
 #define SHT_GNU_verdef 0x6ffffffd
 #define SHT_GNU_verneed 0x6ffffffe
 #define SHT_GNU_versym 0x6fffffff
@@ -156,12 +157,49 @@ typedef enum {
 #define PT_PHDR 6
 #define PT_TLS 7
 #endif
+#ifndef PT_GNU_EH_FRAME
+#define PT_GNU_EH_FRAME 0x6474e550
+#endif
+#ifndef PT_GNU_STACK
+#define PT_GNU_STACK 0x6474e551
+#endif
+#ifndef PT_GNU_RELRO
+#define PT_GNU_RELRO 0x6474e552
+#endif
+#ifndef PT_GNU_PROPERTY
+#define PT_GNU_PROPERTY 0x6474e553
+#endif
 
 #ifndef DT_NULL
 #define DT_NULL 0
 #define DT_NEEDED 1
+#define DT_PLTRELSZ 2
+#define DT_PLTGOT 3
+#define DT_HASH 4
 #define DT_STRTAB 5
 #define DT_SYMTAB 6
+#define DT_RELA 7
+#define DT_RELASZ 8
+#define DT_RELAENT 9
+#define DT_STRSZ 10
+#define DT_SYMENT 11
+#define DT_INIT 12
+#define DT_FINI 13
+#define DT_SONAME 14
+#define DT_RPATH 15
+#define DT_SYMBOLIC 16
+#define DT_REL 17
+#define DT_RELSZ 18
+#define DT_RELENT 19
+#define DT_PLTREL 20
+#define DT_DEBUG 21
+#define DT_TEXTREL 22
+#define DT_JMPREL 23
+#define DT_VERSYM 0x6ffffff0
+#define DT_VERDEF 0x6ffffffc
+#define DT_VERDEFNUM 0x6ffffffd
+#define DT_VERNEED 0x6ffffffe
+#define DT_VERNEEDNUM 0x6fffffff
 #endif
 
 #ifndef STB_LOCAL

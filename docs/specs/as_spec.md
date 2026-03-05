@@ -11,7 +11,7 @@ The Substrate assembler (`as`) is a standalone, multi-architecture assembler tha
 | Binary name      | `as`                                                     |
 | Install path     | `/usr/bin/as`                                            |
 | Input            | Assembly source (`.s`, `.S`), AT&T or Intel syntax       |
-| Output           | ELF relocatable objects (`.o`), ET_REL                   |
+| Output           | ELF relocatable objects (`.o`, default) and flat binary (`-O binary`) |
 | Architectures    | i386, x86-64 (v1–v4), ARMv7 (AArch32), AArch64 (v8.0–8.1) |
 | Library deps     | `libelfobj` (ELF generation)                             |
 | Host build       | `NATIVE_BUILD=1` for development/test on Linux/BSD host  |
@@ -90,6 +90,12 @@ When `-msyntax=intel` is specified for an x86 target, the assembler shall parse 
 
 **REQ-AS-036** *(Ubiquitous)*
 The assembler shall, by default, parse x86 instructions in AT&T syntax (source-first, `%` register prefix, `$` immediate prefix).
+
+**REQ-AS-037** *(Ubiquitous)*
+The assembler shall implement Intel syntax parsing and lowering in-tree and shall not delegate Intel syntax handling to external tools (`nasm`, `yasm`, GNU `as`, or compiler wrappers).
+
+**REQ-AS-038** *(Ubiquitous)*
+When parsing x86 Intel memory operands, the assembler shall recognize `byte ptr`, `word ptr`, `dword ptr`, `qword ptr`, `xmmword ptr`, `ymmword ptr`, and `zmmword ptr` qualifiers.
 
 ### 4.4 Directives
 
@@ -264,6 +270,21 @@ While targeting ARMv7, the assembler shall emit ARM mapping symbols (`$a`, `$t`,
 **REQ-AS-111** *(State-driven)*
 While targeting AArch64, the assembler shall emit mapping symbols (`$x`, `$d`) at code/data transitions.
 
+**REQ-AS-112** *(Event-driven)*
+When `-O binary` is specified, the assembler shall emit a flat raw binary image instead of an ELF object.
+
+**REQ-AS-113** *(Unwanted behavior)*
+If unresolved symbols/relocations remain while `-O binary` is active, then the assembler shall emit a diagnostic error and fail output generation.
+
+**REQ-AS-114** *(Ubiquitous)*
+While `-O binary` is active, the assembler shall not emit ELF metadata sections (`.symtab`, `.strtab`, `.shstrtab`, relocation sections, DWARF sections).
+
+**REQ-AS-115** *(Ubiquitous)*
+While `-O binary` is active, the assembler shall lay out sections in deterministic order: `.text`, `.rodata`, `.data`, remaining non-`.bss` sections, then `.bss`; inter-section alignment gaps shall be zero-filled.
+
+**REQ-AS-116** *(Event-driven)*
+When `.org` is used while `-O binary` is active, the assembler shall advance the current section offset with zero-fill and reject backward `.org` movement.
+
 ### 4.11 Diagnostics
 
 **REQ-AS-120** *(Ubiquitous)*
@@ -318,6 +339,9 @@ The assembler shall accept `-v`/`--version` to print the assembler version and e
 
 **REQ-AS-139** *(Ubiquitous)*
 The assembler shall accept `--help` and `--target-help` to print usage and per-architecture help respectively.
+
+**REQ-AS-140** *(Ubiquitous)*
+The assembler shall accept `-O FORMAT` where `FORMAT` is `elf` (default) or `binary`.
 
 ---
 
@@ -382,6 +406,16 @@ When `-march=x86-64-v3` is specified, the assembler shall additionally accept al
 
 **REQ-US-02-C** *(Unwanted behavior)*
 If the user writes an AVX-512 instruction while `-march=x86-64-v3` is active, then the assembler shall emit an error stating that the instruction requires x86-64-v4.
+
+### US-03: Boot/Loader Developer Building Flat Images
+
+> As a **boot/loader developer**, I want `as -O binary` to emit a flat binary image so that I can produce ROM/boot payloads without a separate object-conversion step.
+
+**REQ-US-03-A** *(Event-driven)*
+When the user invokes `as -O binary -o image.bin input.s`, the assembler shall write raw encoded bytes to `image.bin`.
+
+**REQ-US-03-B** *(Unwanted behavior)*
+If the input requires relocations or unresolved symbol references, then `as -O binary` shall fail with a diagnostic that relocation-bearing input is unsupported in flat output mode.
 
 ### US-03: Embedded Developer Targeting ARMv7
 
