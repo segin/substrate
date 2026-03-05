@@ -94,6 +94,17 @@ static void test_strpbrk(void) {
     ASSERT_EQ(res, long_str + 50, "strpbrk long string");
 }
 
+static void test_strcspn(void) {
+    ASSERT_EQ(strcspn("hello", "l"), 2, "strcspn basic");
+    ASSERT_EQ(strcspn("hello", "ol"), 2, "strcspn first of multiple");
+    ASSERT_EQ(strcspn("hello", "z"), 5, "strcspn not found");
+    ASSERT_EQ(strcspn("hello", ""), 5, "strcspn empty reject");
+    ASSERT_EQ(strcspn("", "z"), 0, "strcspn empty string");
+    ASSERT_EQ(strcspn("", ""), 0, "strcspn both empty");
+    ASSERT_EQ(strcspn("hello", "h"), 0, "strcspn found at start");
+    ASSERT_EQ(strcspn("hello", "o"), 4, "strcspn found at end");
+}
+
 static void test_strcmp(void) {
     // Basic equality
     ASSERT_EQ(strcmp("", ""), 0, "strcmp empty");
@@ -253,6 +264,7 @@ void run_string_tests(void) {
     failed_tests = 0;
 
     test_strpbrk();
+    test_strcspn();
     test_strchr_basic();
     test_strchr_empty();
     test_strchr_comprehensive();
