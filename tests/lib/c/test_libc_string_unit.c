@@ -511,6 +511,41 @@ bool test_libc_strlen(void) {
     return true;
 }
 
+void run_strncpy_tests(void) {
+    printf("Running strncpy tests...\n");
+    char dest[20];
+
+    // Test basic copy (src < n)
+    libc_memset(dest, 'x', sizeof(dest));
+    char *res = libc_strncpy(dest, "hello", 10);
+    ASSERT_EQ((uintptr_t)res, (uintptr_t)dest, "strncpy return value");
+    ASSERT_STREQ(dest, "hello", "strncpy content");
+    ASSERT_EQ(dest[5], '\0', "strncpy null padding");
+    ASSERT_EQ(dest[6], '\0', "strncpy null padding");
+    ASSERT_EQ(dest[9], '\0', "strncpy null padding");
+    ASSERT_EQ(dest[10], 'x', "strncpy unchanged past n");
+
+    // Test exact copy (src == n)
+    libc_memset(dest, 'x', sizeof(dest));
+    libc_strncpy(dest, "hello", 5);
+    ASSERT_MEM_EQ(dest, "helloxxxxx", 10, "strncpy exact copy");
+
+    // Test truncating copy (src > n)
+    libc_memset(dest, 'x', sizeof(dest));
+    libc_strncpy(dest, "hello world", 5);
+    ASSERT_MEM_EQ(dest, "helloxxxxx", 10, "strncpy truncating copy");
+
+    // Test zero n
+    libc_memset(dest, 'x', sizeof(dest));
+    libc_strncpy(dest, "hello", 0);
+    ASSERT_MEM_EQ(dest, "xxxxxxxxxx", 10, "strncpy zero n");
+}
+
+bool test_libc_strncpy(void) {
+    run_strncpy_tests();
+    return true;
+}
+
 bool test_libc_strncasecmp(void) {
     run_strncasecmp_tests();
     return true;
@@ -715,6 +750,7 @@ int main(void) {
     run_strtok_tests();
     run_memset_tests();
     run_memcmp_tests();
+    run_strncpy_tests();
     run_strncasecmp_tests();
     run_strchr_tests();
     run_strstr_tests();
