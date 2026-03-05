@@ -1,3 +1,4 @@
+#include <string.h>
 #include <vm/vm_object.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -28,7 +29,7 @@ bool test_vm_object_page_mgmt(void) {
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 8192);
     if (!obj) return false;
     
-    vm_page_t p1, p2;
+    vm_page_t p1, p2; memset(&p1, 0, sizeof(p1)); memset(&p2, 0, sizeof(p2)); p1.magic_head = VM_PAGE_MAGIC; p1.magic_tail = VM_PAGE_MAGIC; p2.magic_head = VM_PAGE_MAGIC; p2.magic_tail = VM_PAGE_MAGIC;
     p1.pindex = 0;
     p2.pindex = 1;
     

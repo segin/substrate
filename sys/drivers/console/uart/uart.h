@@ -5,8 +5,12 @@
 #include <stddef.h>
 
 #define UART_COM1 0x3F8
+#define UART_COM2 0x2F8
+#define UART_COM3 0x3E8
+#define UART_COM4 0x2E8
 
 void uart_init(void);
+int uart_select_port(uint32_t serial_index);
 struct console_backend; // Forward declaration
 struct console_backend *uart_get_console(void);
 void uart_putc(char c);

@@ -1,6 +1,7 @@
 #include "pthread.h"
 #include <stdlib.h>
 #include <unistd.h>
+#include <errno.h>
 #include <sys/syscall.h>
 #include <sys/futex.h>
 #include <sys/thr.h>
@@ -88,7 +89,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     param.parent_tid = NULL;
     param.flags = 0;
     
-    int ret = (int)syscall(SYS_THR_NEW, (int)&param, sizeof(param));
+    int ret = (int)syscall(SYS_THR_NEW, (intptr_t)&param, sizeof(param));
     
     if (ret != 0) {
         free(ta);
@@ -110,9 +111,6 @@ void pthread_exit(void *retval) {
 }
 
 int pthread_join(pthread_t thread, void **retval) {
-    int ret = (int)syscall(SYS_THR_JOIN, thread, (int)(uintptr_t)retval);
-    if (ret != 0) return ret;
-
     /* Find the thread table entry to cleanup resources */
     int slot = -1;
     /* Optimistic search without lock - TID shouldn't be reused while we hold a reference/join it */
@@ -122,6 +120,13 @@ int pthread_join(pthread_t thread, void **retval) {
             break;
         }
     }
+
+    if (slot == -1) {
+        return ESRCH;
+    }
+
+    int ret = (int)syscall(SYS_THR_JOIN, thread, (int)(uintptr_t)retval);
+    if (ret != 0) return ret;
 
     if (slot != -1) {
         struct pthread_info *ti = &thread_table[slot];

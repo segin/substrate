@@ -67,6 +67,7 @@ static size_t gnu_name_table_size = 0;
 struct ar_memb {
     struct ar_hdr hdr;
     char *name;
+    size_t name_len;
     void *data;
     char *thin_path;
     size_t size;
@@ -84,6 +85,7 @@ static bool archive_is_thin = false;
 /* Symbol table entry */
 struct sym_entry {
     char *name;
+    size_t name_len; /* Cached length of the symbol name */
     uint64_t offset; /* File offset of member header */
     struct ar_memb *member; /* Pointer to member */
     struct sym_entry *next;
@@ -805,6 +807,7 @@ static void read_archive(const char *path) {
                 name_len--;
             }
             m->name[name_len] = 0;
+            m->name_len = name_len;
             size_t payload_size = size - raw_name_len;
             if (archive_is_thin &&
                 strcmp(m->name, RANLIBMAG) != 0 &&
@@ -847,6 +850,7 @@ static void read_archive(const char *path) {
             if (m->name == NULL) {
                 errx(1, "out of memory while parsing member name");
             }
+            m->name_len = strlen(m->name);
             if (archive_is_thin &&
                 strcmp(m->name, RANLIBMAG) != 0 &&
                 strcmp(m->name, RANLIBSORT) != 0 &&
@@ -1013,6 +1017,7 @@ static void append_files(char **files, int count) {
         m->data = thin_mode ? NULL : data;
         m->size = (size_t)st.st_size;
         m->name = strdup(base);
+        m->name_len = strlen(m->name);
         m->thin_ref = thin_mode;
         m->thin_path = thin_mode ? strdup(fname) : NULL;
         if (thin_mode && m->thin_path == NULL) {
@@ -1401,6 +1406,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
             free(s);
             continue;
         }
+        s->name_len = strlen(name);
 
         s->offset = 0;
         s->member = m;
@@ -1512,7 +1518,7 @@ static void ranlib(void) {
     qsort(arr, count, sizeof(struct sym_entry*), compare_syms);
 
     int strsize = 0;
-    for (int i = 0; i < count; i++) strsize += strlen(arr[i]->name) + 1;
+    for (int i = 0; i < count; i++) strsize += arr[i]->name_len + 1;
 
     size_t total_size;
     if (archive_format == ARFMT_GNU) {
@@ -1529,6 +1535,7 @@ static void ranlib(void) {
 
     struct ar_memb *m = malloc(sizeof(struct ar_memb));
     m->name = strdup(archive_format == ARFMT_GNU ? "/" : RANLIBSORT);
+    m->name_len = strlen(m->name);
     m->data = data;
     m->size = total_size;
     m->thin_path = NULL;
@@ -1666,7 +1673,7 @@ static void write_archive(const char *path) {
                     s_head = next;
                 }
 
-                int name_len = strlen(m->name);
+                int name_len = m->name_len;
                 size_t payload_size = m->thin_ref && m->thin_path != NULL ? strlen(m->thin_path) : m->size;
                 bool extended = (name_len > 15 || strchr(m->name, ' '));
                 long m_size = (long)payload_size;
@@ -1690,7 +1697,7 @@ static void write_archive(const char *path) {
 
             /* Fill symdef data */
             int strsize = 0;
-            for (int i = 0; i < count; i++) strsize += strlen(arr[i]->name) + 1;
+            for (int i = 0; i < count; i++) strsize += arr[i]->name_len + 1;
             if (archive_format == ARFMT_GNU) {
                 uint64_t max_off = 0;
                 for (int i = 0; i < count; i++) {
@@ -1711,6 +1718,7 @@ static void write_archive(const char *path) {
                     symdef->size = total;
                     free(symdef->name);
                     symdef->name = strdup("/SYM64/");
+                    symdef->name_len = strlen("/SYM64/");
                     p = (unsigned char *)symdef->data;
                     store_be64(p, (uint64_t)count);
                     p += sizeof(uint64_t);
@@ -1720,8 +1728,8 @@ static void write_archive(const char *path) {
                     }
                     strp = p;
                     for (int i = 0; i < count; i++) {
-                        strcpy((char *)strp + stroff, arr[i]->name);
-                        stroff += strlen(arr[i]->name) + 1;
+                        memcpy((char *)strp + stroff, arr[i]->name, arr[i]->name_len + 1);
+                        stroff += arr[i]->name_len + 1;
                     }
                 } else {
                     size_t total = sizeof(uint32_t) + (size_t)count * sizeof(uint32_t) + strsize;
@@ -1736,6 +1744,7 @@ static void write_archive(const char *path) {
                     symdef->size = total;
                     free(symdef->name);
                     symdef->name = strdup("/");
+                    symdef->name_len = strlen("/");
                     p = (unsigned char *)symdef->data;
                     store_be32(p, (uint32_t)count);
                     p += sizeof(uint32_t);
@@ -1745,8 +1754,8 @@ static void write_archive(const char *path) {
                     }
                     strp = p;
                     for (int i = 0; i < count; i++) {
-                        strcpy((char *)strp + stroff, arr[i]->name);
-                        stroff += strlen(arr[i]->name) + 1;
+                        memcpy((char *)strp + stroff, arr[i]->name, arr[i]->name_len + 1);
+                        stroff += arr[i]->name_len + 1;
                     }
                 }
             } else {
@@ -1764,8 +1773,8 @@ static void write_archive(const char *path) {
                 for (int i = 0; i < count; i++) {
                     ra[i].ran_un.ran_strx = stroff;
                     ra[i].ran_off = (uint32_t)arr[i]->offset;
-                    strcpy(strp + stroff, arr[i]->name);
-                    stroff += strlen(arr[i]->name) + 1;
+                    memcpy(strp + stroff, arr[i]->name, arr[i]->name_len + 1);
+                    stroff += arr[i]->name_len + 1;
                 }
             }
             free(arr);
@@ -1841,7 +1850,7 @@ static void write_archive(const char *path) {
             wrote_gnu_table = true;
         }
 
-        int name_len = strlen(cur->name);
+        int name_len = cur->name_len;
         size_t payload_size = cur->thin_ref && cur->thin_path != NULL ? strlen(cur->thin_path) : cur->size;
         bool extended = (name_len > 15 || strchr(cur->name, ' '));
         bool gnu_special = strcmp(cur->name, "/") == 0 || strcmp(cur->name, "/SYM64/") == 0;
