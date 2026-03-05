@@ -18,20 +18,22 @@ int main() {
     printf("Password: ");
     fflush(stdout);
 
-    struct termios term, orig_term;
-    int is_tty = (tcgetattr(0, &term) == 0);
-    if (is_tty) {
-        orig_term = term;
+    struct termios term, term_orig;
+    int term_ok = tcgetattr(0, &term_orig) == 0;
+    if (term_ok) {
+        term = term_orig;
         term.c_lflag &= ~ECHO;
         tcsetattr(0, TCSANOW, &term);
     }
+
     n = read(0, pass, 63);
-    if (is_tty) {
-        tcsetattr(0, TCSANOW, &orig_term);
-    }
-    printf("\n");
     if(n>0) pass[n-1] = 0;
     
+    if (term_ok) {
+        tcsetattr(0, TCSANOW, &term_orig);
+    }
+    printf("\n");
+
     if (strcmp(user, "root") == 0 && strcmp(pass, "root") == 0) {
         printf("Login successful.\n");
         // exec shell

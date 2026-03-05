@@ -131,10 +131,9 @@ static void parse_expr() {
 
 
 int compile_line(int lineno, const char *text, int *out_offset) {
+    (void)lineno; /* Unused but kept for signature */
     cursor = text;
     skip_white();
-    
-    int start = *out_offset;
     
     /* Parse statements */
     while (*cursor) {

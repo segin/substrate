@@ -142,7 +142,6 @@ extern int union_defined;   /* Set if %union was used */
 /* Classic Yacc structures */
 extern short plhs[MAXPROD];
 extern short ritem[MAXPROD * 4]; /* Conservative estimate */
-extern short rlhs[MAXPROD];
 extern short rrhs[MAXPROD]; /* Index into ritem */
 
 /* LR(0) state construction globals (defined in lr0.c) */

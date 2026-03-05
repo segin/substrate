@@ -60,7 +60,7 @@ static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_si
             
             /* Create partition name: ide0p5, ide0p6, etc. */
             char part_name[32];
-            sprintf("%sp%d", base_name, *part_num);
+            snprintf(part_name, sizeof(part_name), "%sp%d", base_name, *part_num);
             (*part_num)++;
             
             /* Determine if this is a container type */

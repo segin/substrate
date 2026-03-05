@@ -56,6 +56,7 @@ void vfs_init(void) {
     p9_init();
     
     kprint("VFS: Ready.\n");
+    namei_init();
     nchinit();
     TAILQ_INIT(&mountlist);
 }

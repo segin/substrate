@@ -1,0 +1,120 @@
+.TH TIME 1 "March 2026" "Substrate" "User Commands"
+.SH NAME
+time \- time a simple command or give resource usage
+.SH SYNOPSIS
+.B time
+.RB [ \-p ]
+.RB [ \-h ]
+.RB [ \-l ]
+.RB [ \-o
+.IR file ]
+.RB [ \-a ]
+.RB [ \-c | \-t ]
+.RB [ \-f
+.IR fmt ]
+.RI [ utility\ [argument\ ...] ]
+.br
+.B time
+.RB [ \-\-portability ]
+.RB [ \-\-output=\fIfile\fP ]
+.RB [ \-\-append ]
+.RB [ \-\-format=\fIfmt\fP ]
+.RB [ \-\-json ]
+.RB [ \-\-monotonic ]
+.RB [ \-\-realtime ]
+.RB [ \-\-compat=\fIsys\fP ]
+.br
+.SH DESCRIPTION
+The
+.B time
+utility runs the specified program
+.I utility
+with the given arguments. When
+.I utility
+finishes,
+.B time
+writes a message to standard error giving timing statistics about this program run.
+.PP
+These statistics consist of (i) the elapsed real time between invocation and
+termination, (ii) the user CPU time, and (iii) the system CPU time.
+.PP
+If no utility is specified,
+.B time
+prints a usage message and exits.
+.SH OPTIONS
+.TP
+.BR \-p ", " \-\-portability
+Print the timing results in the POSIX-specified multi-line format.
+.TP
+.B \-h
+Print times in a human-readable format (e.g. 1m2.34s or hours/minutes). This is a BSD extension.
+.TP
+.B \-l
+Print the contents of the rusage structure as well. This is a BSD extension.
+.TP
+.BR \-o " " \fIfile\fP ", " \-\-output=\fIfile\fP
+Write the resource use statistics to
+.I file
+instead of to the standard error stream. By default, this overwrites the file.
+.TP
+.BR \-a ", " \-\-append
+Append the resource use information to the output file instead of overwriting it.
+This option is only useful with the
+.B \-o
+or
+.B \-\-output
+option.
+.TP
+.B \-c
+Use the csh-style default output format.
+.TP
+.B \-t
+Use the tcsh-style default output format.
+.TP
+.BR \-f " " \fIfmt\fP ", " \-\-format=\fIfmt\fP
+Use the specified format string to control the output.
+.TP
+.B \-\-json
+Output the gathered statistics as a structured JSON object.
+.TP
+.B \-\-monotonic
+Explicitly select the monotonic clock for accurate duration tracking (the default).
+.TP
+.B \-\-realtime
+Explicitly select the realtime (wall-clock) source for duration tracking.
+.TP
+.B \-\-compat=\fIsys\fP
+Enable bug-for-bug compatibility with explicit legacy behaviors (e.g., \fIfreebsd\fP, \fIgnu\fP).
+.SH ENVIRONMENT
+.TP
+.B TIME
+If this variable is set, its value is used as the format string providing no
+other format override was specified using
+.B \-f
+or
+.B \-\-format
+.SH NOTES
+Where BSD and GNU extensions conflict (for instance, the meaning of the \-h flag),
+the BSD semantics take precedence. The \-h flag provides human readable output,
+not help information. Use \-\-help for usage info.
+.SH EXIT STATUS
+If
+.I utility
+could be invoked, the exit status is the exit status of
+.I utility .
+Otherwise, the following exit values are returned:
+.TP
+.B 126
+.I utility
+was found, but could not be invoked.
+.TP
+.B 127
+.I utility
+could not be found.
+.TP
+.B 1\-125
+An error occurred in the
+.B time
+utility itself.
+.SH CONFORMING TO
+POSIX.1-2024 Shell and Utilities specification, with BSD and GNU extensions.

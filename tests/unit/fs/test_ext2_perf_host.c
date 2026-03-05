@@ -154,6 +154,10 @@ void run_ext2_perf_test_host(void) {
     // Initialize allocator cache (fix for missing init in host test)
     ext2_block_cache = uma_zcreate("ext2-block", 4096, NULL, NULL, NULL, NULL, 0, 0);
 
+    // Initialize active block bitmap cache
+    fs.active_bg_group = (uint32_t)-1;
+    fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+
     // --- Benchmark Loop ---
     uint64_t start_tsc, end_tsc;
     uint32_t allocated_count = 0;
