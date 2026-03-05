@@ -1,0 +1,275 @@
+# 6a. System Call Wrapper Library (`lib/sys`)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 5366-5419.
+
+## Reimplemented Checklist (All Open)
+
+### 6a. System Call Wrapper Library (`lib/sys`)
+- [ ] **Foundation:**
+    - [ ] Create `lib/sys/` directory structure.
+    - [ ] Implement `syscall.S`: Raw i386 `int $0x80` entry (6 args via ebx-ebp).
+    - [ ] Create `include/sys/syscall.h`: `SYS_*` constants and `syscall()` prototype.
+    - [ ] Add to `lib/Makefile` SUBDIRS.
+- [ ] **VM Information Syscalls:**
+    - [ ] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
+        - [ ] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
+        - [ ] `lib/sys/sysinfo.c`: Wrapper function.
+        - [ ] Man page: `sysinfo(2)`.
+    - [ ] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
+        - [ ] `lib/sys/getpagesize.c`: Wrapper function.
+        - [ ] Man page: `getpagesize(2)`.
+    - [ ] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
+        - [ ] `lib/sys/mlock.c`: Wrapper functions.
+        - [ ] Man pages: `mlock(2)`, `munlock(2)`.
+- [ ] **Process Information Syscalls:**
+    - [ ] `getpid()`/`getppid()` wrappers.
+        - [ ] `lib/sys/getpid.c`: Wrapper functions.
+        - [ ] Man pages: `getpid(2)`, `getppid(2)`.
+    - [ ] `getuid()`/`getgid()`/`geteuid()`/`getegid()` wrappers.
+        - [ ] `lib/sys/getuid.c`: Wrapper functions.
+        - [ ] Man pages: `getuid(2)`, `getgid(2)`, `geteuid(2)`, `getegid(2)`.
+    - [ ] `getpgid()`/`setpgid()`/`getpgrp()` wrappers.
+        - [ ] `lib/sys/pgrp.c`: Wrapper functions.
+        - [ ] Man pages: `getpgid(2)`, `setpgid(2)`, `getpgrp(2)`.
+    - [ ] `getsid()`/`setsid()` wrappers.
+        - [ ] `lib/sys/pgrp.c`: Wrapper functions.
+        - [ ] Man pages: `getsid(2)`, `setsid(2)`.
+    - [ ] `getrusage()` wrapper: Resource usage (user/sys time, memory).
+        - [ ] Kernel: Hooked up `sys_getrusage()`.
+        - [ ] `lib/sys/getrusage.c`: Wrapper function.
+        - [ ] Man page: `getrusage(2)`.
+    - [ ] `times()` wrapper: Process times (user, sys, children).
+        - [ ] Kernel: Hooked up `sys_times()`.
+        - [ ] `lib/sys/times.c`: Wrapper function.
+        - [ ] Man page: `times(2)`.
+- [ ] **Special-Purpose Syscalls:**
+    - [ ] `vm86()` wrapper (SYS_vm86): Enter VM86 mode.
+        - [ ] `lib/sys/vm86.c`: Typed wrapper.
+        - [ ] Man page: `vm86(2)`.
+    - [ ] `ptrace()` wrapper: Process tracing.
+        - [ ] `lib/sys/ptrace.c`: Wrapper function.
+        - [ ] Man page: `ptrace(2)`.
+    - [ ] `reboot()` wrapper: System reboot/power off.
+        - [ ] `lib/sys/reboot.c`: Wrapper function.
+        - [ ] Man page: `reboot(2)`.
+- [ ] **Sysctl Interface:**
+    - [ ] `sysctl()` wrapper: Kernel tunable access.
+        - [ ] Kernel: Hooked up `sys_sysctl()` MIB tree.
+        - [ ] `lib/sys/sysctl.c`: Wrapper function.
+        - [ ] Man page: `sysctl(2)`.
+
+
+## User Stories
+
+- **US-07-0001**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to foundation: so that this capability is implemented with clear verification evidence.
+- **US-07-0002**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to create lib/sys/ directory structure so that this capability is implemented with clear verification evidence.
+- **US-07-0003**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to implement syscall.S: Raw i386 int $0x80 entry (6 args via ebx-ebp) so that this capability is implemented with clear verification evidence.
+- **US-07-0004**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to create include/sys/syscall.h: SYS_* constants and syscall() prototype so that this capability is implemented with clear verification evidence.
+- **US-07-0005**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to add to lib/Makefile SUBDIRS so that this capability is implemented with clear verification evidence.
+- **US-07-0006**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to vM Information Syscalls: so that this capability is implemented with clear verification evidence.
+- **US-07-0007**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to sysinfo() wrapper (SYS_sysinfo): Total/free RAM, uptime, load averages so that this capability is implemented with clear verification evidence.
+- **US-07-0008**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to kernel: Implement sys_sysinfo() returning struct sysinfo so that this capability is implemented with clear verification evidence.
+- **US-07-0009**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/sysinfo.c: Wrapper function so that this capability is implemented with clear verification evidence.
+- **US-07-0010**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man page: sysinfo(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0011**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to getpagesize() wrapper: Return PAGE_SIZE (4096 on i386) so that this capability is implemented with clear verification evidence.
+- **US-07-0012**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/getpagesize.c: Wrapper function so that this capability is implemented with clear verification evidence.
+- **US-07-0013**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man page: getpagesize(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0014**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to mlock()/munlock() wrappers: Lock/unlock pages in RAM so that this capability is implemented with clear verification evidence.
+- **US-07-0015**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/mlock.c: Wrapper functions so that this capability is implemented with clear verification evidence.
+- **US-07-0016**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man pages: mlock(2), munlock(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0017**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to process Information Syscalls: so that this capability is implemented with clear verification evidence.
+- **US-07-0018**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to getpid()/getppid() wrappers so that this capability is implemented with clear verification evidence.
+- **US-07-0019**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/getpid.c: Wrapper functions so that this capability is implemented with clear verification evidence.
+- **US-07-0020**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man pages: getpid(2), getppid(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0021**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to getuid()/getgid()/geteuid()/getegid() wrappers so that this capability is implemented with clear verification evidence.
+- **US-07-0022**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/getuid.c: Wrapper functions so that this capability is implemented with clear verification evidence.
+- **US-07-0023**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man pages: getuid(2), getgid(2), geteuid(2), getegid(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0024**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to getpgid()/setpgid()/getpgrp() wrappers so that this capability is implemented with clear verification evidence.
+- **US-07-0025**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/pgrp.c: Wrapper functions so that this capability is implemented with clear verification evidence.
+- **US-07-0026**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man pages: getpgid(2), setpgid(2), getpgrp(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0027**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to getsid()/setsid() wrappers so that this capability is implemented with clear verification evidence.
+- **US-07-0028**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/pgrp.c: Wrapper functions so that this capability is implemented with clear verification evidence.
+- **US-07-0029**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man pages: getsid(2), setsid(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0030**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to getrusage() wrapper: Resource usage (user/sys time, memory) so that this capability is implemented with clear verification evidence.
+- **US-07-0031**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to kernel: Hooked up sys_getrusage() so that this capability is implemented with clear verification evidence.
+- **US-07-0032**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/getrusage.c: Wrapper function so that this capability is implemented with clear verification evidence.
+- **US-07-0033**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man page: getrusage(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0034**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to times() wrapper: Process times (user, sys, children) so that this capability is implemented with clear verification evidence.
+- **US-07-0035**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to kernel: Hooked up sys_times() so that this capability is implemented with clear verification evidence.
+- **US-07-0036**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/times.c: Wrapper function so that this capability is implemented with clear verification evidence.
+- **US-07-0037**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man page: times(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0038**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to special-Purpose Syscalls: so that this capability is implemented with clear verification evidence.
+- **US-07-0039**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to vm86() wrapper (SYS_vm86): Enter VM86 mode so that this capability is implemented with clear verification evidence.
+- **US-07-0040**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/vm86.c: Typed wrapper so that this capability is implemented with clear verification evidence.
+- **US-07-0041**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man page: vm86(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0042**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to ptrace() wrapper: Process tracing so that this capability is implemented with clear verification evidence.
+- **US-07-0043**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/ptrace.c: Wrapper function so that this capability is implemented with clear verification evidence.
+- **US-07-0044**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man page: ptrace(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0045**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to reboot() wrapper: System reboot/power off so that this capability is implemented with clear verification evidence.
+- **US-07-0046**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/reboot.c: Wrapper function so that this capability is implemented with clear verification evidence.
+- **US-07-0047**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man page: reboot(2) so that this capability is implemented with clear verification evidence.
+- **US-07-0048**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to sysctl Interface: so that this capability is implemented with clear verification evidence.
+- **US-07-0049**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to sysctl() wrapper: Kernel tunable access so that this capability is implemented with clear verification evidence.
+- **US-07-0050**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to kernel: Hooked up sys_sysctl() MIB tree so that this capability is implemented with clear verification evidence.
+- **US-07-0051**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to lib/sys/sysctl.c: Wrapper function so that this capability is implemented with clear verification evidence.
+- **US-07-0052**: As a Substrate contributor working on 6a. System Call Wrapper Library (`lib/sys`), I want to man page: sysctl(2) so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-07-0001** (EARS/Ubiquitous): The Substrate system shall foundation:.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0002** (EARS/Ubiquitous): The Substrate system shall create lib/sys/ directory structure.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0003** (EARS/Ubiquitous): The Substrate system shall implement syscall.S: Raw i386 int $0x80 entry (6 args via ebx-ebp).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0004** (EARS/Ubiquitous): The Substrate system shall create include/sys/syscall.h: SYS_* constants and syscall() prototype.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0005** (EARS/Ubiquitous): The Substrate system shall add to lib/Makefile SUBDIRS.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0006** (EARS/Ubiquitous): The Substrate system shall vM Information Syscalls:.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0007** (EARS/Ubiquitous): The Substrate system shall sysinfo() wrapper (SYS_sysinfo): Total/free RAM, uptime, load averages.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0008** (EARS/Ubiquitous): The Substrate system shall kernel: Implement sys_sysinfo() returning struct sysinfo.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0009** (EARS/Ubiquitous): The Substrate system shall lib/sys/sysinfo.c: Wrapper function.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0010** (EARS/Ubiquitous): The Substrate system shall man page: sysinfo(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0011** (EARS/Ubiquitous): The Substrate system shall getpagesize() wrapper: Return PAGE_SIZE (4096 on i386).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0012** (EARS/Ubiquitous): The Substrate system shall lib/sys/getpagesize.c: Wrapper function.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0013** (EARS/Ubiquitous): The Substrate system shall man page: getpagesize(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0014** (EARS/Ubiquitous): The Substrate system shall mlock()/munlock() wrappers: Lock/unlock pages in RAM.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0015** (EARS/Ubiquitous): The Substrate system shall lib/sys/mlock.c: Wrapper functions.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0016** (EARS/Ubiquitous): The Substrate system shall man pages: mlock(2), munlock(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0017** (EARS/Ubiquitous): The Substrate system shall process Information Syscalls:.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0018** (EARS/Ubiquitous): The Substrate system shall getpid()/getppid() wrappers.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0019** (EARS/Ubiquitous): The Substrate system shall lib/sys/getpid.c: Wrapper functions.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0020** (EARS/Ubiquitous): The Substrate system shall man pages: getpid(2), getppid(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0021** (EARS/Ubiquitous): The Substrate system shall getuid()/getgid()/geteuid()/getegid() wrappers.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0022** (EARS/Ubiquitous): The Substrate system shall lib/sys/getuid.c: Wrapper functions.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0023** (EARS/Ubiquitous): The Substrate system shall man pages: getuid(2), getgid(2), geteuid(2), getegid(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0024** (EARS/Ubiquitous): The Substrate system shall getpgid()/setpgid()/getpgrp() wrappers.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0025** (EARS/Ubiquitous): The Substrate system shall lib/sys/pgrp.c: Wrapper functions.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0026** (EARS/Ubiquitous): The Substrate system shall man pages: getpgid(2), setpgid(2), getpgrp(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0027** (EARS/Ubiquitous): The Substrate system shall getsid()/setsid() wrappers.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0028** (EARS/Ubiquitous): The Substrate system shall lib/sys/pgrp.c: Wrapper functions.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0029** (EARS/Ubiquitous): The Substrate system shall man pages: getsid(2), setsid(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0030** (EARS/Ubiquitous): The Substrate system shall getrusage() wrapper: Resource usage (user/sys time, memory).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0031** (EARS/Ubiquitous): The Substrate system shall kernel: Hooked up sys_getrusage().
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0032** (EARS/Ubiquitous): The Substrate system shall lib/sys/getrusage.c: Wrapper function.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0033** (EARS/Ubiquitous): The Substrate system shall man page: getrusage(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0034** (EARS/Ubiquitous): The Substrate system shall times() wrapper: Process times (user, sys, children).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0035** (EARS/Ubiquitous): The Substrate system shall kernel: Hooked up sys_times().
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0036** (EARS/Ubiquitous): The Substrate system shall lib/sys/times.c: Wrapper function.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0037** (EARS/Ubiquitous): The Substrate system shall man page: times(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0038** (EARS/Ubiquitous): The Substrate system shall special-Purpose Syscalls:.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0039** (EARS/Ubiquitous): The Substrate system shall vm86() wrapper (SYS_vm86): Enter VM86 mode.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0040** (EARS/Ubiquitous): The Substrate system shall lib/sys/vm86.c: Typed wrapper.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0041** (EARS/Ubiquitous): The Substrate system shall man page: vm86(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0042** (EARS/Ubiquitous): The Substrate system shall ptrace() wrapper: Process tracing.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0043** (EARS/Ubiquitous): The Substrate system shall lib/sys/ptrace.c: Wrapper function.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0044** (EARS/Ubiquitous): The Substrate system shall man page: ptrace(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0045** (EARS/Ubiquitous): The Substrate system shall reboot() wrapper: System reboot/power off.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0046** (EARS/Ubiquitous): The Substrate system shall lib/sys/reboot.c: Wrapper function.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0047** (EARS/Ubiquitous): The Substrate system shall man page: reboot(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0048** (EARS/Ubiquitous): The Substrate system shall sysctl Interface:.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0049** (EARS/Ubiquitous): The Substrate system shall sysctl() wrapper: Kernel tunable access.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0050** (EARS/Ubiquitous): The Substrate system shall kernel: Hooked up sys_sysctl() MIB tree.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0051** (EARS/Ubiquitous): The Substrate system shall lib/sys/sysctl.c: Wrapper function.
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-07-0052** (EARS/Ubiquitous): The Substrate system shall man page: sysctl(2).
+  - Context: 6a. System Call Wrapper Library (`lib/sys`)
+  - Verification: design review + implementation evidence + test/doc update.

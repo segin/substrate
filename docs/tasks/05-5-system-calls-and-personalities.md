@@ -1,0 +1,3649 @@
+# 5. System Calls & Personalities
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 2804-3751.
+
+## Reimplemented Checklist (All Open)
+
+### 5. System Calls & Personalities
+- [ ] **System Call ABI (64-bit Clean):**
+    - [ ] **Type Definitions:**
+        - [ ] Define `off_t`, `time_t`, `ino_t`, `blkcnt_t` as 64-bit types in `sys/types.h`.
+        - [ ] Verify alignment requirements (8-byte alignment for 64-bit types on i386 stack).
+    - [ ] **System Call Audit:**
+        - [ ] Audit all existing syscalls for argument types (int vs long vs long long).
+        - [ ] Identify syscalls needing 64-bit arguments pair splitting on 32-bit (e.g. `lseek`, `truncate`, `mmap`).
+    - [ ] **Kernel Refactoring:**
+        - [ ] Native `sys_lseek` takes 64-bit offset (split hi/lo on 32-bit stack).
+        - [ ] Native `sys_ftruncate` takes 64-bit length (split hi/lo on 32-bit stack).
+        - [ ] `sys_mmap` offset is 64-bit (using split words on i386).
+        - [ ] `struct stat` uses 64-bit `ino_t`, `off_t`, `blkcnt_t`, `time_t`.
+    - [ ] **LibC Wrappers:**
+        - [ ] Update `lseek` wrapper to pass high/low words on 32-bit.
+        - [ ] Update `ftruncate` wrapper.
+        - [ ] Update `stat`/`fstat` wrappers.
+    - [ ] **Personality Compatibility:**
+        - [ ] Ensure 32-bit Linux personality handles register splitting for 64-bit args correctly.
+        - [ ] Ensure native personality mandates 64-bit types.
+    - [ ] **Testing:**
+        - [ ] **Large File Support (LFS):** Test creating/seeking > 2GB files.
+        - [ ] **Y2038:** Test time_t overflow handling.
+- [ ] **Mechanisms:**
+        - [ ] **PTY Subsystem (Unix98/System V) - Massive Expansion:**
+            - [ ] **Core PTY Driver (`/dev/pts/` + `/dev/ptmx`):**
+                - [ ] **DevPTS Filesystem (`pts_fs`):**
+                    - [ ] `pts_mount()`: Mount logic.
+                    - [ ] `pts_lookup()`: Resolve PTY indices to vnodes.
+                    - [ ] `pts_getattr()`: Synthesize attributes (uid/gid/mode).
+                    - [ ] `pts_readdir()`: List active PTYs.
+                - [ ] **Multiplexer (`/dev/ptmx`):**
+                    - [ ] `ptmx_open()`: Allocate next free `pts` index (0..255+).
+                    - [ ] Create master/slave `tty` structures.
+                    - [ ] Initialize queues and termios defaults.
+                - [ ] **Data Path:**
+                    - [ ] **Master Write:** Input to Slave Read queue.
+                    - [ ] **Slave Write:** Input to Master Read queue.
+                    - [ ] **Ring Buffers:** Lockless (or locked) circular buffers.
+            - [ ] **IOCTL API (`libc` support):**
+                - [ ] `TIOCGPTN` (Get PTY Number): Return index for `ptsname()`.
+                - [ ] `TIOCSPTLCK` (Lock/Unlock): Handle `unlockpt()` (prevent race conditions).
+                - [ ] `TIOCGPKT` (Packet Mode): Control byte for master (flush/stop/start/ioctl).
+                - [ ] `TIOCSIG` (Signal): Send specific signal to slave process group.
+            - [ ] **Line Discipline (`N_TTY`):**
+                - [ ] **Input Processing (`c_iflag`):**
+                    - [ ] `IGNBRK`, `BRKINT` (Break handling).
+                    - [ ] `IGNPAR`, `PARMRK`, `INPCK` (Parity).
+                    - [ ] `ISTRIP` (Strip 8th bit).
+                    - [ ] `INLCR`, `IGNCR`, `ICRNL` (CR/LF mapping).
+                    - [ ] `IXON`, `IXOFF` (Software flow control XON/XOFF).
+                - [ ] **Output Processing (`c_oflag`):**
+                    - [ ] `OPOST` (Enable processing).
+                    - [ ] `ONLCR` (NL -> CR/NL translation).
+                - [ ] **Local Processing (`c_lflag`):**
+                    - [ ] `ISIG` (Signal generation: VINTR, VQUIT, VSUSP).
+                    - [ ] `ICANON` (Canonical mode / Line editing).
+                    - [ ] `ECHO`, `ECHOE` (Erase), `ECHOK` (Kill), `ECHONL`.
+                    - [ ] `IEXTEN` (Extended processing).
+                    - [ ] `TOSTOP` (Background write SIGTTOU).
+                - [ ] **Control Characters (`c_cc`):**
+                    - [ ] `VEOF`, `VEOL` (End of file/line).
+                    - [ ] `VERASE`, `VKILL` (Editing).
+                    - [ ] `VMIN`, `VTIME` (Non-canonical read timing).
+    
+        - [ ] **`sys_statvfs`:** Filesystem statistics.
+            - [ ] Implement `sys_statvfs`/`sys_fstatvfs`.
+            - [ ] Integrate with `vfs_statfs`.
+
+        - [ ] **BSD-style Sys_mount Interface & Mount Framework:**
+            - [ ] **ABI Application Interface:**
+                - [ ] Define `sys_mount` syscall signature (type, source, target, flags, data/len).
+                - [ ] Create `sys/sys/mount.h` with syscall definitions.
+                - [ ] Define `struct mount_args` equivalent for versioned arguments.
+                - [ ] Document calling conventions and flag semantics in comments.
+                - [ ] Add build-time assertions for structure size and alignment.
+            - [ ] **Filesystem Type Registration:**
+                - [ ] Define `struct vfsconf` or equivalent for filesystem metadata.
+                - [ ] Create `vfs_register()` / `vfs_unregister()` API.
+                - [ ] Implement internal hashtable/list for filesystem types.
+                - [ ] Add capability reporting per filesystem type.
+                - [ ] Ensure filesystem names are validated and namespaced.
+            - [ ] **Mount Lifecycle & VFS Integration:**
+                - [ ] Define `struct mount` (kernel generic mount structure).
+                - [ ] Implement `vfs_mount_alloc()` and `vfs_mount_free()`.
+                - [ ] Implement mount binding to VFS namespace (vnode attachment).
+                - [ ] Implement reference counting and busy checks.
+                - [ ] Ensure mounts can be stacked or nested safely.
+            - [ ] **Generic Option Parsing:**
+                - [ ] Design generic mount option parser (key=value string/blob).
+                - [ ] Create API for filesystems to retrieve options.
+                - [ ] Implement type-safe option getters (int, string, bool).
+                - [ ] Validate standard options (ro, nosuid, nodev, noexec) generically.
+                - [ ] Ensure strict validation and copying of userspace data.
+            - [ ] **Virtual Filesystem Support (`/dev`, `/proc`):**
+                - [ ] Define mount handler for `devfs` (mounting `/dev`).
+                - [ ] Define mount handler for `procfs` (mounting `/proc`).
+                - [ ] Implement userspace-driven mounting of virtual filesystems via `sys_mount`.
+                - [ ] Ensure root vnodes are correctly tied to mount points.
+            - [ ] **Privilege & Security Model:**
+                - [ ] Add `suser()` / `cap_check()` for mount syscall.
+                - [ ] Implement `sys_mount` flag validation (detect conflicting flags).
+                - [ ] Ensure mount points are valid directories.
+                - [ ] Prevent mounting over critical system paths without override.
+                - [ ] Audit for mount-related vulnerabilities (symlinks, race conditions).
+            - [ ] **Error Handling & Diagnostics:**
+                - [ ] Define `EUNKNOWNFS` and other specific error codes.
+                - [ ] Propagate errors from filesystem-specific init back to syscall.
+                - [ ] Add kernel logging for failed mount attempts.
+            - [ ] **Unmount Semantics:**
+                - [ ] Define `sys_unmount` syscall signature and flags (FORCE, DETACH).
+                - [ ] Implement VFS layer unmount logic (busy checks).
+                - [ ] Add filesystem-specific `unmount` callback.
+                - [ ] Safe teardown of virtual and real filesystems.
+            - [ ] **Userland Interfaces & Tooling:**
+                - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc.
+                - [ ] Create/Update `mount(8)` utility in `bin/` capable of mounting `/dev`.
+                - [ ] Support `mount -t type dev dir` syntax.
+                - [ ] Update early boot (init) to mount `/dev` and `/proc` explicitly.
+            - [ ] **Testing & Verification:**
+                - [ ] Unit tests for mount argument parsing and validation.
+                - [ ] Integration tests mounting and unmounting `/dev` and `/proc` from userspace.
+                - [ ] Tests for error conditions (invalid FS type, bad options, permission failure).
+                - [ ] Property and fuzz tests targeting mount option parsing.
+            - [ ] **Audit & Refactor:**
+                - [ ] Audit existing VFS code for assumptions preventing userspace mounting.
+                - [ ] Remove hardcoded kernel mounts once userspace tools work.
+                - [ ] Clean up temporary hacks in `vfs_init`.
+            - [ ] **Documentation:**
+                - [ ] Create `man/man2/mount.2` describing syscall ABI and flags.
+                - [ ] Create `man/man2/unmount.2`.
+                - [ ] Write Filesystem Developer Guide describing how to implement a mount handler.
+        - [ ] Implement `sys_ioctl` framework.
+        - [ ] Implement `sys_pipe` and `sys_dup2`.
+        - [ ] **Compatibility Syscalls (Deep Dive):**
+            - [ ] **BSD-style `sys_mount` Framework:**
+                - [ ] **Group 1: `sys_mount` ABI Definition**
+                    - [ ] Define canonical `mount(2)` signature with options blob support. <!-- sys/include/sys/syscall.h, sys/kern/syscall.c -->
+                        - Affected: `sys/include/sys/syscall.h`.
+                        - Signature: `int sys_mount(const char *type, const char *path, int flags, void *data, size_t datalen)`.
+                        - Acceptance: Syscall table updated.
+                    - [ ] Implement versioned `struct mount_args` for ABI stability. <!-- include/sys/mount.h -->
+                        - Affected: `include/sys/mount.h`.
+                        - Logic: Include struct size/version field.
+                        - Acceptance: Kernel validates struct boundaries from userspace.
+                    - [ ] Document MNT_* flags and error code semantics (EFAULT, EINVAL, EPERM). <!-- docs/abi/mount.md -->
+                        - Affected: Documentation/ABI guide.
+                        - Acceptance: Developer documentation exists.
+                    - [ ] Add runtime validation for userspace structure alignment and size. <!-- sys/kern/vfs_mount.c -->
+                        - Affected: `sys/kern/vfs_mount.c`.
+                        - Acceptance: Improperly aligned pointers from userland trigger EFAULT.
+                - [ ] **Group 2: Filesystem Type Registration**
+                    - [ ] Implement central `vfs_register` string-to-vfsops registry. <!-- sys/vfs/vfs_conf.c -->
+                        - Affected: `sys/vfs/vfs_conf.c`, `struct vfsconf`.
+                        - Acceptance: `get_vfs_by_name()` returns correct ops vector.
+                    - [ ] Implement `vfs_unregister` for safe filesystem module removal. <!-- sys/vfs/vfs_conf.c -->
+                        - Affected: `sys/vfs/vfs_conf.c`.
+                        - Logic: Prevent unregistering if mounts still exist.
+                        - Acceptance: `rmmod` equivalent is safe.
+                    - [ ] Add capability reporting to `struct vfsops` (e.g. read-only only). <!-- sys/vfs/vfs.h -->
+                        - Affected: `sys/include/vfs/vfs.h`.
+                        - Acceptance: VFS layer rejects writable mount requests for RO-only filesystems.
+                    - [ ] Implement FS name validation and namespacing logic. <!-- sys/vfs/vfs_conf.c -->
+                        - Affected: `sys/vfs/vfs_conf.c`.
+                        - Acceptance: FS names are alphanumeric and unique.
+                - [ ] **Group 3: Mount Lifecycle & VFS Integration**
+                    - [ ] Implement `vfs_mount_alloc()` to initialize `struct mount` instances. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `sys/vfs/vfs_mount.c`, `struct mount`.
+                        - Acceptance: Mount structure initialized with default refcounts and flags.
+                    - [ ] Implement binding logic to attach root vnode to namespace. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `namei`, `v_mountedhere`.
+                        - Acceptance: `namei` correctly crosses into new mount points.
+                    - [ ] Implement mount reference-counting for safety during unmount. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `struct mount: mnt_ref`.
+                        - Acceptance: Mount structure is not freed while vnodes are active.
+                    - [ ] Implement nested mount support and loop detection. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `sys_mount` lookup logic.
+                        - Acceptance: Mounting on a directory within another mount works.
+                - [ ] **Group 4: Userspace Mount Option Handling**
+                    - [ ] Implement generic mount option parser for key-value strings. <!-- sys/vfs/vfs_options.c -->
+                        - Affected: `sys/vfs/vfs_options.c`.
+                        - Logic: Safe parsing of `key=val,key2=val2`.
+                        - Acceptance: Option blob correctly converted to internal dict/struct.
+                    - [ ] Implement safe copying and validation of userspace option blobs. <!-- sys/vfs/vfs_options.c -->
+                        - Affected: `copyin()` in `sys_mount`.
+                        - Acceptance: No direct kernel dereference of user-provided option strings.
+                    - [ ] Support filesystem-specific options passed via the parser. <!-- sys/vfs/vfs_options.c -->
+                        - Affected: `vfsops: mount` callback receives parsed options.
+                        - Acceptance: FS-specific flags (e.g., `uid=1000`) reach the driver.
+                    - [ ] Define and document option precedence and fallback behaviors. <!-- man/man2/mount.2 -->
+                        - Affected: `man/man2/mount.2`.
+                        - Acceptance: Clear rules for conflicting flags vs. options.
+                - [ ] **Group 5: Virtual Filesystem Mounting (`/dev`, `/proc`)**
+                    - [ ] Define DevFS mount handler with root vnode generation. <!-- sys/fs/devfs/devfs_vfsops.c -->
+                        - Affected: `sys/fs/devfs/`.
+                        - Acceptance: `/dev` can be mounted via `sys_mount`.
+                    - [ ] Define ProcFS mount handler with dynamic PID-based population. <!-- sys/fs/procfs/procfs_vfsops.c -->
+                        - Affected: `sys/fs/procfs/`.
+                        - Acceptance: `/proc` can be mounted via `sys_mount`.
+                    - [ ] Implement userspace-driven mounting of `/dev` and `/proc` entirely from `init`. <!-- bin/init/main.c -->
+                        - Affected: `init` source, startup sequence.
+                        - Acceptance: `/dev` and `/proc` are established by userspace, not kernel core.
+                    - [ ] Define mandatory mount options for virtual filesystems. <!-- sys/fs/virtual_fs.h -->
+                        - Affected: `devfs`, `procfs` drivers.
+                        - Acceptance: Attempts to mount virtual FS with invalid options are rejected.
+                - [ ] **Group 6: Permission & Security Model**
+                    - [ ] Implement capability-checks (CAP_SYS_ADMIN) for `sys_mount`. <!-- sys/kern/vfs_mount.c -->
+                        - Affected: `sys/kern/vfs_mount.c`, `cap_check()`.
+                        - Acceptance: Non-privileged users cannot execute `mount`.
+                    - [ ] Implement `MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV` enforcement. <!-- sys/vfs/vfs_vnode.c -->
+                        - Affected: VFS permission checks.
+                        - Acceptance: Vnode operations honor mount-level security flags.
+                    - [ ] Audit and harden against mount-point escape attacks. <!-- sys/vfs/vfs_lookup.c -->
+                        - Affected: `namei`, `..` handling across mounts.
+                        - Acceptance: `..` from a mount root stays within the covering directory.
+                    - [ ] Implement mount-point target validation (must be directory, must be owned). <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `sys_mount` preamble.
+                        - Acceptance: Mounting on files or inaccessible directories fails with ENOTDIR/EPERM.
+                - [ ] **Group 7: Error Handling & Diagnostics**
+                    - [ ] Define granular E* error codes for mount failures (ENODEV, EINVAL, ENOTDIR, EBUSY). <!-- sys/include/sys/errno.h -->
+                        - Affected: `sys/include/sys/errno.h`.
+                        - Acceptance: Errors distinguish between "FS not found" vs "Invalid options".
+                    - [ ] Implement structured kernel logging for mount/unmount operations. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `klog`, `printf`.
+                        - Acceptance: Mount attempts (success/fail) are recorded in dmesg.
+                    - [ ] Ensure clean error propagation from FS driver to userspace. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `vfsops` return values.
+                        - Acceptance: Driver-specific errors reach the syscall return value.
+                - [ ] **Group 8: Unmount Support**
+                    - [ ] Define `sys_unmount(path, flags)` syscall interface. <!-- sys/include/sys/syscall.h -->
+                        - Affected: `sys/kern/vfs_mount.c`.
+                        - Acceptance: Unmount capability exposed to userspace.
+                    - [ ] Implement `vfs_unmount()` core with resource reclamation. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `struct mount`, `vfsops: unmount`.
+                        - Acceptance: Unmounting frees all related kernel memory.
+                    - [ ] Implement `MNT_FORCE` and `MNT_DEFERRED` unmount logic. <!-- sys/vfs/vfs_mount.c -->
+                        - Affected: `vfs_unmount()`.
+                        - Logic: Force unmount even if busy; Deferred unmount when last ref drops.
+                        - Acceptance: Busy filesystems can be forcefully detached.
+                - [ ] **Group 9: Userland Interfaces & Tooling**
+                    - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc. <!-- lib/libc/sys/mount.S -->
+                        - Affected: `lib/libc/include/sys/mount.h`, wrappers.
+                        - Acceptance: Standard C programs can call `mount()`.
+                    - [ ] Implement basic `mount(8)` utility for shell usage. <!-- bin/mount/mount.c -->
+                        - Affected: `bin/mount/`.
+                        - Acceptance: `mount -t proc proc /proc` works from the shell.
+                    - [ ] Document required invocation patterns for early boot mounting in `/sbin/init`. <!-- docs/boot.md -->
+                        - Affected: Boot documentation.
+                        - Acceptance: Clear guide on establishing `/dev` and `/proc`.
+                - [ ] **Group 10: Testing & Verification**
+                    - [ ] Unit tests for `mount_args` parsing and alignment validation. <!-- sys/tests/test_vfs_mount.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: Fuzzed ABI structures are handled safely.
+                    - [ ] Integration test: Mount/unmount sequence for DevFS and ProcFS. <!-- sys/tests/test_vfs_integration.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: Real-world virtual FS lifecycle works.
+                    - [ ] Negative tests for error conditions (unknown FS, bad options, permission failure). <!-- sys/tests/test_vfs_errors.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: All edge cases return correct errno.
+                    - [ ] Property and fuzz tests targeting mount option parsing. <!-- sys/tests/test_vfs_fuzz.c -->
+                        - Affected: `sys/tests/`.
+                        - Acceptance: Parser handles arbitrarily corrupted strings without crashing kernel.
+                - [ ] **Group 11: Audit & Refactor**
+                    - [ ] Audit existing VFS code for assumptions precluding userspace mounting. <!-- sys/vfs/ -->
+                        - Affected: `vfs` core.
+                        - Acceptance: Refactor any hardcoded kernel-private mount logic.
+                    - [ ] Eliminate existing TODOs in `vfs_mount.c` and `syscall.c`. <!-- sys/kern/syscall.c -->
+                        - Affected: `sys_mount` implementation.
+                        - Acceptance: No placeholder mount paths remain.
+                - [ ] **Group 12: Documentation**
+                    - [ ] Create `mount(2)` manpage describing ABI, flags, and options. <!-- man/man2/mount.2 -->
+                        - Affected: `man/`.
+                        - Acceptance: Complete reference for system programmers.
+                    - [ ] Create Filesystem Developer Guide for `vfsops` implementations. <!-- docs/vfs_dev.md -->
+                        - Affected: `docs/`.
+                        - Acceptance: Guide exists for new FS type authors.
+                    - [ ] Document virtual filesystem mount semantics and expected behaviors. <!-- docs/virtual_fs.md -->
+                        - Affected: `docs/`.
+                        - Acceptance: Behavior of `/dev` and `/proc` is well-defined.
+                - [ ] **Commit-Atomic Expansion (`sys_mount`/mount framework)**
+                    - [ ] **Execution Rule:** Enforce "one checklist item = one commit" for all items in this expansion.
+                        - Affected: `TASKS.md`, PR/commit policy for `sys_mount` series.
+                        - Required tests: N/A (process/policy task; verify by commit history review).
+                        - Acceptance: Every item below lands as an isolated commit with matching scope and message.
+                    - [ ] **1. `sys_mount` ABI Definition**
+                        - [ ] Reserve and wire canonical syscall numbers for `SYS_mount` and `SYS_unmount` in native/Linux/FreeBSD personality dispatch tables.
+                            - Affected: `sys/include/sys/syscall.h`, `sys/kern/syscall.c`, `sys/exec/perso/perso_native.c`, `sys/exec/perso/perso_linux.c`, `sys/exec/perso/perso_freebsd.c`.
+                            - Required tests: syscall table regression (`sys/tests/test_syscall_dispatch.c`), personality dispatch smoke tests.
+                            - Acceptance: `mount`/`unmount` numbers are stable and routed correctly across supported personalities.
+                        - [ ] Define canonical kernel entry signature for `sys_mount` with filesystem type, source, target, flags, and options blob pointer/length.
+                            - Affected: `sys/include/sys/syscall.h`, `sys/kern/vfs_mount.c`.
+                            - Required tests: compile-time prototype checks, syscall invocation smoke test from `libsys`.
+                            - Acceptance: Kernel exposes one extensible ABI surface for all filesystem types.
+                        - [ ] Introduce versioned userspace ABI container (`struct mount_args`/`mount_args_v1`) with size/version fields and explicit reserved bytes.
+                            - Affected: `include/sys/mount.h`, `sys/include/sys/mount.h`, `lib/sys/include/sys/mount.h`.
+                            - Required tests: ABI layout test (`tests/include/test_mount_args_layout.c`), cross-header consistency test.
+                            - Acceptance: ABI structure is forward-compatible and identical between kernel/userspace headers.
+                        - [ ] Add compile-time `_Static_assert` checks for `struct mount_args` size/alignment/field offsets in both kernel and userspace headers.
+                            - Affected: `include/sys/mount.h`, `sys/include/sys/mount.h`.
+                            - Required tests: build-time assertion pass in `make -C sys`, `make -C lib/c`, `make -C bin`.
+                            - Acceptance: Builds fail immediately if ABI layout drifts.
+                        - [ ] Add runtime ABI validation in `sys_mount` for userspace struct size/version/alignment and reserved-field zeroing.
+                            - Affected: `sys/kern/vfs_mount.c`.
+                            - Required tests: negative ABI tests (`sys/tests/test_mount_abi_validation.c`) for short/oversized/misaligned payloads.
+                            - Acceptance: Invalid ABI payloads return deterministic `EINVAL`/`EFAULT` without kernel memory exposure.
+                        - [ ] Document calling convention, flag semantics, and baseline errno contract for `sys_mount` ABI.
+                            - Affected: `docs/abi/mount.md`.
+                            - Required tests: docs review + manpage cross-check task linkage.
+                            - Acceptance: ABI doc explicitly describes arguments, ownership rules, and error mapping.
+                    - [ ] **2. Filesystem Type Registration**
+                        - [ ] Define `vfsconf`/filesystem-type descriptor with name, mount callbacks, and capability vector.
+                            - Affected: `sys/vfs/vfs.h`, `sys/vfs/vfs_conf.h`.
+                            - Required tests: unit tests for descriptor initialization (`sys/tests/test_vfsconf.c`).
+                            - Acceptance: Every filesystem registers through one shared descriptor contract.
+                        - [ ] Implement central filesystem registry (name to mount-handler map) with lookup, duplicate detection, and lifecycle hooks.
+                            - Affected: `sys/vfs/vfs_conf.c`.
+                            - Required tests: registry tests (`sys/tests/test_vfs_registry.c`) for add/find/duplicate handling.
+                            - Acceptance: Registry supports deterministic lookup and rejects conflicting registrations.
+                        - [ ] Add built-in filesystem registration path during VFS init with explicit ordering and failure handling.
+                            - Affected: `sys/vfs/vfs_init.c`, `sys/vfs/vfs_conf.c`, built-in FS init files.
+                            - Required tests: boot-time VFS init test, kernel smoke boot with registry dump.
+                            - Acceptance: Built-in filesystems are visible in registry before first mount request.
+                        - [ ] Add loadable-module registration API (`vfs_register_module`/`vfs_unregister_module`) with busy-mount rejection on unload.
+                            - Affected: `sys/vfs/vfs_conf.c`, module interface headers.
+                            - Required tests: module lifecycle tests (`tests/sys/test_vfs_module_registry.c`) including unload-while-mounted rejection.
+                            - Acceptance: Module-backed filesystems can register/unregister safely without dangling handlers.
+                        - [ ] Require each filesystem to publish mount capability bits (virtual, device-backed, supports_force_unmount, supports_ro, etc.).
+                            - Affected: `sys/vfs/vfs.h`, per-filesystem `*_vfsops.c`.
+                            - Required tests: capability contract tests (`sys/tests/test_vfs_capabilities.c`).
+                            - Acceptance: VFS can enforce behavior based on advertised filesystem capabilities.
+                        - [ ] Enforce filesystem name validation and namespacing policy (e.g., `virt.procfs`, `virt.devfs`, `disk.ext2`) at registration.
+                            - Affected: `sys/vfs/vfs_conf.c`, `sys/vfs/vfs_conf.h`.
+                            - Required tests: invalid-name/namespace collision tests in `sys/tests/test_vfs_registry.c`.
+                            - Acceptance: Non-conforming filesystem names are rejected with `EINVAL`.
+                    - [ ] **3. Mount Lifecycle and VFS Integration**
+                        - [ ] Define mount object lifecycle states (`NEW`, `ALLOCATED`, `BOUND`, `ROOT_ATTACHED`, `ACTIVE`, `DYING`, `DEAD`) and legal transitions.
+                            - Affected: `sys/vfs/mount.h`, `sys/vfs/vfs_mount.c`.
+                            - Required tests: lifecycle state machine tests (`sys/tests/test_mount_state_machine.c`).
+                            - Acceptance: Mount state transitions are explicit and invalid transitions are rejected/asserted.
+                        - [ ] Implement `vfs_mount_alloc()`/`vfs_mount_free()` with refcount initialization, lock setup, and failure rollback.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/mount.h`.
+                            - Required tests: allocation/rollback tests (`sys/tests/test_vfs_mount_alloc.c`).
+                            - Acceptance: No leaks or partial objects remain after failed allocation/mount setup.
+                        - [ ] Implement namespace bind step that attaches mount instance to target vnode (`v_mountedhere`) and records covering vnode.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vnode.h`, `sys/vfs/namei.c`.
+                            - Required tests: integration traversal tests (`sys/tests/test_mount_namespace_bind.c`).
+                            - Acceptance: Path resolution crosses into mounted root vnode correctly.
+                        - [ ] Implement root-vnode attach/activate flow so filesystem mount handler returns root vnode before mount activation.
+                            - Affected: `sys/vfs/vfs_mount.c`, per-filesystem mount handlers.
+                            - Required tests: mount activation tests (`sys/tests/test_mount_activation.c`) for success/failure paths.
+                            - Acceptance: Mount is only visible as active after root vnode is valid and pinned.
+                        - [ ] Define unmount reference-counting and busy rules (active vnode refs, cwd/root refs, open fds) with deterministic `EBUSY` behavior.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vnode.c`.
+                            - Required tests: busy-reference integration tests (`sys/tests/test_unmount_busy_refs.c`).
+                            - Acceptance: Busy filesystems cannot unmount unless allowed by force policy.
+                        - [ ] Implement safe nested/stacked mount handling and mount-loop detection for recursive or cyclic bind attempts.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/namei.c`.
+                            - Required tests: nested mount tests and loop rejection tests (`sys/tests/test_mount_nested.c`).
+                            - Acceptance: Legitimate nested mounts work; loop/cycle attempts fail with defined errno.
+                        - [ ] Define mount propagation behavior (private/shared/slave) and implement either support or explicit `ENOTSUP` for non-private modes.
+                            - Affected: `sys/vfs/mount.h`, `sys/kern/vfs_mount.c`, `docs/abi/mount.md`.
+                            - Required tests: propagation flag tests (`sys/tests/test_mount_propagation_flags.c`).
+                            - Acceptance: Semantics are explicit; unsupported propagation flags are rejected predictably.
+                    - [ ] **4. Userspace Mount Option Handling**
+                        - [ ] Define generic kernel mount-option format and parser API for userspace-provided option strings/blobs.
+                            - Affected: `sys/vfs/vfs_options.h`, `sys/vfs/vfs_options.c`, `include/sys/mount.h`.
+                            - Required tests: parser unit tests (`sys/tests/test_mount_options_parser.c`).
+                            - Acceptance: Generic parser produces typed option map without filesystem coupling.
+                        - [ ] Implement `copyin`-first option ingestion with strict length limits, NUL termination rules, and integer overflow checks.
+                            - Affected: `sys/kern/vfs_mount.c`, `sys/vfs/vfs_options.c`.
+                            - Required tests: boundary/overflow negative tests (`sys/tests/test_mount_options_copyin.c`).
+                            - Acceptance: Kernel never dereferences userspace option pointers directly.
+                        - [ ] Add typed getters/validators for standard options (`ro`, `rw`, `nosuid`, `nodev`, `noexec`) in generic layer.
+                            - Affected: `sys/vfs/vfs_options.c`, `sys/vfs/mount.h`.
+                            - Required tests: standard-option validation tests (`sys/tests/test_mount_options_standard.c`).
+                            - Acceptance: Standard options are parsed and validated consistently across filesystems.
+                        - [ ] Add pass-through mechanism for filesystem-specific options with per-filesystem schema validation callback.
+                            - Affected: `sys/vfs/vfs_options.c`, `sys/vfs/vfs.h`, per-filesystem mount handlers.
+                            - Required tests: FS-specific option tests (`sys/tests/test_mount_options_fs_specific.c`) for ext2/devfs/procfs.
+                            - Acceptance: Filesystem-specific options flow through generic framework and fail cleanly on schema mismatch.
+                        - [ ] Define option precedence and defaulting rules (syscall flags vs generic options vs filesystem defaults).
+                            - Affected: `sys/kern/vfs_mount.c`, `docs/abi/mount.md`, `man/man2/mount.2`.
+                            - Required tests: precedence matrix tests (`sys/tests/test_mount_option_precedence.c`).
+                            - Acceptance: Conflicting inputs resolve deterministically and are documented.
+                    - [ ] **5. Virtual Filesystem Mounting (`/dev`, `/proc`)**
+                        - [ ] Register `devfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, `nodev-safe` behavior).
+                            - Affected: `sys/fs/devfs/devfs_vfsops.c`, `sys/vfs/vfs_conf.c`.
+                            - Required tests: devfs registration tests (`sys/tests/test_devfs_registry.c`).
+                            - Acceptance: `devfs` is mountable only via generic `sys_mount` path.
+                        - [ ] Register `procfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, dynamic entries).
+                            - Affected: `sys/fs/procfs/procfs_vfsops.c`, `sys/vfs/vfs_conf.c`.
+                            - Required tests: procfs registration tests (`sys/tests/test_procfs_registry.c`).
+                            - Acceptance: `procfs` is mountable only via generic `sys_mount` path.
+                        - [ ] Implement userspace-driven mount flow in early init to mount `/dev` and `/proc` through `sys_mount` (no kernel-only implicit mount path).
+                            - Affected: `sbin/init/*`, boot init scripts, `docs/boot.md`.
+                            - Required tests: boot integration test (`tests/integration/test_boot_mount_virtual_fs.sh`).
+                            - Acceptance: System boots with `/dev` and `/proc` established by userspace `mount` calls.
+                        - [ ] Ensure virtual filesystem handlers always provide a root vnode and support required dynamic population semantics.
+                            - Affected: `sys/fs/devfs/*`, `sys/fs/procfs/*`, `sys/vfs/vfs_mount.c`.
+                            - Required tests: runtime vnode population tests (`sys/tests/test_virtualfs_root_vnode.c`).
+                            - Acceptance: Root vnode is valid immediately after mount; dynamic nodes appear correctly.
+                        - [ ] Define and enforce allowed mount options for `devfs`/`procfs` (including explicit "no options" policy where applicable).
+                            - Affected: `sys/fs/devfs/devfs_vfsops.c`, `sys/fs/procfs/procfs_vfsops.c`, `man/man5/procfs.5`, `man/man5/devfs.5`.
+                            - Required tests: virtual-fs option validation tests (`sys/tests/test_virtualfs_mount_options.c`).
+                            - Acceptance: Unsupported options return `EINVAL` and accepted options are applied.
+                    - [ ] **6. Permission and Security Model**
+                        - [ ] Define mount authorization policy (`superuser` and/or `CAP_SYS_ADMIN` equivalent) and enforce it in syscall entry path.
+                            - Affected: `sys/kern/vfs_mount.c`, capability framework headers.
+                            - Required tests: permission tests (`sys/tests/test_mount_permissions.c`) for privileged/unprivileged callers.
+                            - Acceptance: Unauthorized mount/unmount attempts fail with `EPERM`.
+                        - [ ] Implement and enforce mount security flags (`MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV`) in VFS operation paths.
+                            - Affected: `sys/vfs/vnode_ops.c`, `sys/vfs/exec.c`, device open paths.
+                            - Required tests: security-flag behavior tests (`sys/tests/test_mount_security_flags.c`).
+                            - Acceptance: Runtime behavior matches each security flag's contract.
+                        - [ ] Harden target path resolution against symlink races and traversal escapes during mount.
+                            - Affected: `sys/vfs/namei.c`, `sys/kern/vfs_mount.c`.
+                            - Required tests: race/symlink attack tests (`sys/tests/test_mount_path_race.c`).
+                            - Acceptance: Mount operation resolves target atomically and cannot be redirected post-validation.
+                        - [ ] Enforce namespace isolation constraints so mount operations cannot escape caller namespace/chroot boundaries.
+                            - Affected: `sys/vfs/vfs_mount.c`, process namespace/chroot handling.
+                            - Required tests: namespace isolation tests (`sys/tests/test_mount_namespace_isolation.c`).
+                            - Acceptance: Mount scope stays confined to caller-visible namespace.
+                        - [ ] Perform mount-security audit pass and land hardening fixes for common vulnerabilities (`..` escape, TOCTOU, malformed options, refcount abuse).
+                            - Affected: `sys/vfs/*`, `sys/kern/vfs_mount.c`, audit notes in `docs/security/mount_audit.md`.
+                            - Required tests: regression suite (`sys/tests/test_mount_security_regression.c`).
+                            - Acceptance: Audit findings are tracked and all identified high-risk issues are closed or explicitly deferred with rationale.
+                    - [ ] **7. Error Handling and Diagnostics**
+                        - [ ] Define canonical errno mapping table for mount/unmount failures (unknown fs, invalid options, permission, busy target, invalid target).
+                            - Affected: `sys/kern/vfs_mount.c`, `docs/abi/mount.md`.
+                            - Required tests: errno mapping tests (`sys/tests/test_mount_errno_map.c`).
+                            - Acceptance: Each failure class returns stable, documented errno.
+                        - [ ] Ensure filesystem-specific mount errors propagate unchanged through VFS core and syscall boundary when safe.
+                            - Affected: `sys/vfs/vfs_mount.c`, per-filesystem `*_vfsops.c`.
+                            - Required tests: per-filesystem error propagation tests (`sys/tests/test_mount_error_passthrough.c`).
+                            - Acceptance: Userspace receives actionable FS-specific failure codes.
+                        - [ ] Add structured kernel logging for mount/unmount attempts (caller, fs type, source, target, flags, result).
+                            - Affected: `sys/kern/vfs_mount.c`, kernel logging subsystem.
+                            - Required tests: log-format tests (`sys/tests/test_mount_logging.c`) and integration checks from boot logs.
+                            - Acceptance: Successful and failed operations emit consistent diagnostic records.
+                        - [ ] Add diagnostic counters for mount/unmount successes/failures by errno and filesystem type.
+                            - Affected: `sys/vfs/vfs_stats.c`, `/proc` or sysctl exposure.
+                            - Required tests: stats counter tests (`sys/tests/test_mount_stats.c`).
+                            - Acceptance: Counters are queryable and match observed operation totals.
+                    - [ ] **8. Unmount Support**
+                        - [ ] Define `sys_unmount` ABI (`target`, `flags`) including supported lazy/force semantics and unsupported-flag behavior.
+                            - Affected: `include/sys/mount.h`, `sys/include/sys/syscall.h`, `docs/abi/mount.md`.
+                            - Required tests: ABI/flag validation tests (`sys/tests/test_unmount_abi.c`).
+                            - Acceptance: `sys_unmount` contract is explicit and version-stable.
+                        - [ ] Implement core unmount teardown pipeline (deactivate mount, detach namespace, flush/release resources, final free).
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/mount.h`.
+                            - Required tests: teardown integration tests (`sys/tests/test_unmount_teardown.c`).
+                            - Acceptance: Unmount reclaims resources without leaks or dangling mount links.
+                        - [ ] Enforce busy unmount rejection by default and force-unmount override only for filesystems that advertise support.
+                            - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vfs.h`, per-filesystem capability declarations.
+                            - Required tests: busy/force policy tests (`sys/tests/test_unmount_force_policy.c`).
+                            - Acceptance: Busy mounts return `EBUSY` unless force is both requested and supported.
+                        - [ ] Validate safe teardown parity for both virtual and device-backed filesystems.
+                            - Affected: `sys/fs/devfs/*`, `sys/fs/procfs/*`, `sys/fs/ext2/*`, `sys/vfs/vfs_mount.c`.
+                            - Required tests: mixed filesystem teardown integration tests (`sys/tests/test_unmount_virtual_real.c`).
+                            - Acceptance: Unmount sequence is correct for `/dev`, `/proc`, and real filesystems.
+                    - [ ] **9. Userland Interfaces and Tooling**
+                        - [ ] Add `mount(2)` and `unmount(2)` wrappers in `libsys` and exported libc headers using the canonical ABI.
+                            - Affected: `lib/sys/`, `include/sys/mount.h`, libc syscall wrapper wiring.
+                            - Required tests: wrapper syscall tests (`tests/libsys/test_mount_wrappers.c`).
+                            - Acceptance: Userland C programs can call wrappers without raw syscall usage.
+                        - [ ] Implement/extend `mount(8)` utility to issue generic `sys_mount` requests and support both real and virtual filesystem targets.
+                            - Affected: `bin/mount/*`, build files under `bin/`.
+                            - Required tests: utility integration tests (`tests/bin/mount/test_mount_cli.sh`).
+                            - Acceptance: `mount` utility can mount `/dev`, `/proc`, and at least one real filesystem type.
+                        - [ ] Align `mount(8)` invocation semantics with Substrate conventions (`mount <device> <mount_point> <filesystem_type>`) while retaining option support.
+                            - Affected: `bin/mount/*`, `man/man8/mount.8`.
+                            - Required tests: CLI argument parsing tests (`tests/bin/mount/test_mount_args.c`).
+                            - Acceptance: Utility accepts documented Substrate command form and rejects ambiguous input.
+                        - [ ] Update early initialization flow to mount mandatory virtual filesystems (`/dev`, `/proc`) from userspace before dependent services start.
+                            - Affected: `sbin/init/*`, `etc/init.sh`, boot docs.
+                            - Required tests: boot-sequence integration test (`tests/integration/test_init_mount_order.sh`).
+                            - Acceptance: Services relying on `/dev` and `/proc` start only after successful userspace mounts.
+                    - [ ] **10. Testing and Verification**
+                        - [ ] Add kernel unit tests for `mount_args` ABI parsing, size/version/alignment validation, and userspace copy safety.
+                            - Affected: `sys/tests/test_mount_abi_validation.c`.
+                            - Required tests: `make -C sys/tests test_mount_abi_validation`.
+                            - Acceptance: ABI parser handles valid/invalid inputs deterministically without faults.
+                        - [ ] Add kernel unit tests for filesystem registry behavior (register/lookup/duplicate/unregister busy path).
+                            - Affected: `sys/tests/test_vfs_registry.c`.
+                            - Required tests: `make -C sys/tests test_vfs_registry`.
+                            - Acceptance: Registry invariants hold under normal and error paths.
+                        - [ ] Add integration tests for mounting and unmounting `/dev` and `/proc` fully from userspace.
+                            - Affected: `tests/integration/test_mount_virtual_fs.sh`.
+                            - Required tests: full-system boot/integration run including init path.
+                            - Acceptance: Virtual filesystems can be mounted/unmounted repeatedly without reboot or leaks.
+                        - [ ] Add negative integration tests for unknown filesystem names, malformed options, invalid targets, permission failures, and busy unmounts.
+                            - Affected: `tests/integration/test_mount_errors.sh`.
+                            - Required tests: integration error suite execution in CI.
+                            - Acceptance: Each failure mode returns expected errno and leaves namespace unchanged.
+                        - [ ] Add property and fuzz targets for option parser and syscall boundary handling (size fuzzing, pointer fuzzing, option grammar fuzzing).
+                            - Affected: `tests/property/test_mount_options_prop.c`, `tests/fuzz/fuzz_mount_syscall.c`.
+                            - Required tests: property runner + fuzz runner with crash-free threshold.
+                            - Acceptance: No crashes, memory corruption, or unbounded parse behavior under fuzzed inputs.
+                    - [ ] **11. Audit and Refactor**
+                        - [ ] Audit VFS core, filesystem drivers, and init path for assumptions that mounts are kernel-internal only.
+                            - Affected: `sys/vfs/*`, `sys/fs/*`, `sys/core/main.c`, init sources.
+                            - Required tests: audit checklist review + regression boot tests.
+                            - Acceptance: All blockers to userspace-driven mounting are identified and tracked.
+                        - [ ] Refactor minimal/placeholder mount logic to require filesystem-specific mount handlers through shared VFS contracts.
+                            - Affected: `sys/vfs/vfs_mount.c`, filesystem `*_vfsops.c`.
+                            - Required tests: filesystem mount-path integration tests.
+                            - Acceptance: No filesystem bypasses generic mount framework.
+                        - [ ] Remove hardcoded or implicit virtual filesystem mount paths from kernel bootstrap once userspace flow is in place.
+                            - Affected: `sys/core/*`, `sys/kern/*` boot mount code.
+                            - Required tests: boot integration tests with userspace-only `/dev`/`/proc` mounting.
+                            - Acceptance: Kernel no longer auto-mounts `/dev` or `/proc` outside explicit compatibility mode.
+                        - [ ] Resolve or remove TODO/FIXME placeholders in mount/syscall/VFS paths with complete implementation tasks.
+                            - Affected: `sys/kern/vfs_mount.c`, `sys/vfs/*`, related headers/docs.
+                            - Required tests: full mount test matrix + static grep check for stale mount TODO markers.
+                            - Acceptance: Mount path has no placeholder logic in active code paths.
+                    - [ ] **12. Documentation**
+                        - [ ] Write `mount(2)` man page documenting syscall ABI, argument ownership, flags, and errno behavior.
+                            - Affected: `man/man2/mount.2`.
+                            - Required tests: manpage lint + ABI cross-check against `include/sys/mount.h`.
+                            - Acceptance: `mount(2)` man page is complete and matches implemented ABI.
+                        - [ ] Write `unmount(2)` man page documenting teardown semantics, busy/force behavior, and error codes.
+                            - Affected: `man/man2/unmount.2`.
+                            - Required tests: manpage lint + integration behavior cross-check.
+                            - Acceptance: `unmount(2)` man page covers supported flags and edge cases.
+                        - [ ] Write filesystem developer guide for mount handler implementation, registration, and capability reporting.
+                            - Affected: `docs/filesystems/mount-handler-guide.md`.
+                            - Required tests: doc review checklist with at least one existing filesystem validated against guide.
+                            - Acceptance: Guide is sufficient for adding a new filesystem mount handler without tribal knowledge.
+                        - [ ] Document virtual filesystem mount semantics for `/dev` and `/proc`, including expected behavior during early boot.
+                            - Affected: `docs/vfs/virtual-mounts.md`, `man/man5/devfs.5`, `man/man5/procfs.5`, `docs/boot.md`.
+                            - Required tests: documentation consistency review with init scripts and integration tests.
+                            - Acceptance: `/dev` and `/proc` behavior and required boot invocation patterns are explicitly specified.
+            - [ ] **`sys_clone` (Process/Thread Creation):**
+                - [ ] **Context Duplication:**
+                    - [ ] `CLONE_VM`: Share address space (refcount pmap).
+                    - [ ] `CLONE_FS`: Share cwd/root (refcount nodes).
+                    - [ ] `CLONE_FILES`: Share FD table (refcount table).
+                    - [ ] `CLONE_SIGHAND`: Share signal handlers.
+                - [ ] **Stack & TLS:**
+                    - [ ] Switch to user-provided stack (`child_stack`).
+                    - [ ] Implement `CLONE_SETTLS`: Set GDT entries (GS base).
+                - [ ] **Thread Grouping:**
+                    - [ ] `CLONE_THREAD`: Join thread group (`pgrp`/`tgid`).
+                    - [ ] `CLONE_PARENT`: Share parent process.
+            - [ ] **Event Notification:**
+                - [ ] **`sys_select` / `sys_poll`:**
+                    - [ ] `select_wait` queueing logic.
+                        - [ ] Define `struct poll_table` (wait queue list).
+                        - [ ] Implement `poll_initwait()` / `poll_freewait()`.
+                        - [ ] Per-FD `poll` method calls `poll_wait(wait_queue, poll_table)`.
+                    - [ ] Timeout handling (sleep with timeout).
+                        - [ ] Convert `struct timeval` / `int timeout_ms` to kernel ticks.
+                        - [ ] Use `sched_sleep_timeout(chan, ticks)` or similar.
+                        - [ ] Handle `EINTR` on signal during sleep.
+                    - [ ] Bitmask/Revents populating.
+                        - [ ] `select`: Populate `readfds`, `writefds`, `exceptfds` bitmasks.
+                        - [ ] `poll`: Populate `revents` field in each `struct pollfd`.
+                        - [ ] Return count of ready FDs.
+                    - [ ] **Wait Queue Infrastructure:**
+                        - [ ] Define `struct wait_queue_head` (spinlock + list head).
+                        - [ ] Define `struct wait_queue_entry` (thread ref + callback).
+                        - [ ] Implement `init_waitqueue_head()`.
+                        - [ ] Implement `add_wait_queue()` / `remove_wait_queue()`.
+                        - [ ] Implement `wake_up()` / `wake_up_interruptible()`.
+                    - [ ] **Driver Integration:**
+                        - [ ] Add `poll` method to `fs_node_t` (already done).
+                        - [ ] TTY: Wake readers on `tty_flip_buffer_push`.
+                        - [ ] Pipe: Wake readers/writers on data availability.
+                        - [ ] Socket: Wake on connection/data events.
+                - [ ] **`sys_epoll`:**
+                    - [ ] `epoll_create`: Allocate event context.
+                        - [ ] Define `struct eventpoll` (rb-tree of interests, ready list).
+                        - [ ] Allocate anonymous FD pointing to `eventpoll`.
+                        - [ ] Initialize spinlock and wait queue.
+                    - [ ] `epoll_ctl`: Add/Modify/Remove file descriptors (O(1) logic).
+                        - [ ] `EPOLL_CTL_ADD`: Insert into rb-tree, register callback with target FD.
+                        - [ ] `EPOLL_CTL_MOD`: Update event mask in existing entry.
+                        - [ ] `EPOLL_CTL_DEL`: Remove from rb-tree, unregister callback.
+                        - [ ] Handle `EEXIST`/`ENOENT` error cases.
+                    - [ ] `epoll_wait`: Block on event list.
+                        - [ ] Check ready list (events already triggered).
+                        - [ ] If empty, sleep on eventpoll wait queue.
+                        - [ ] Copy ready events to userspace `struct epoll_event` array.
+                        - [ ] Handle `maxevents` limit and timeout.
+                        - [ ] Edge-triggered (`EPOLLET`): Remove from ready list after report.
+                        - [ ] Level-triggered: Keep in ready list if still active.
+            - [ ] **`sys_execve` (Loader Dispatch):**
+                - [ ] Path lookup and permission check.
+                - [ ] Read first 128 bytes (Shebang/Magic detection).
+                - [ ] Dispatch to correct loader (ELF, Script, COFF, PE).
+                - [ ] Argument/Environment copying to new userspace stack.
+                - [ ] **Bitness Integration:** Update loaders (ELF/PE/AOUT) to set process bitness based on binary format.
+            - [ ] **IPC Subsystem:**
+                - [ ] **SysV Shared Memory:**
+                    - [ ] `shmid_ds` structure and key lookup.
+                    - [ ] `shmget`: Create/Find segment.
+                    - [ ] `shmat`: Map segment into `vm_map`.
+                    - [ ] `shmdt`: Unmap.
+                - [ ] **SysV Semaphores:**
+                    - [ ] `semid_ds` and semaphore arrays.
+                    - [ ] `semop`: Atomic increment/decrement/wait.
+                    - [ ] SEM_UNDO logic.
+                - [ ] **SysV Message Queues:**
+                    - [ ] `msqid_ds` and message linked list.
+                    - [ ] `msgsnd`/`msgrcv`: Blocking and non-blocking delivery.
+                - [ ] **POSIX Shared Memory:**
+                    - [ ] `/dev/shm` TmpFS integration.
+                    - [ ] `shm_open`: File descriptor based access.
+                - [ ] **POSIX Semaphores:**
+                    - [ ] Named (`sem_open`) vs Unnamed (`sem_init`).
+                    - [ ] `sem_t` structure.
+
+    - [ ] Implement `sys_time` and RTC reading.
+    - [ ] **Emulation Path Lookup:** Check `/perso/<perso>/` before root for foreign personalities.
+    - [ ] **Debugging & Tracing:**
+        - [ ] **KDB:** Built-in kernel debugger (peek/poke memory, register dump, stack trace).
+        - [ ] **Serial Console:** Interactive GDB stub over UART.
+        - [ ] **DTrace:** (As planned in ideas) Dynamic tracing framework.
+- [ ] **64-bit System Call ABI Enforcement:**
+    - [ ] **Type Definitions & Alignment:**
+        - [ ] Define `off_t`, `time_t`, `ino_t`, `dev_t` as 64-bit integers in all architectures (i386/x86_64).
+        - [ ] Verify `size_t` and `ssize_t` match register width but critical structures use explicit width types (e.g., `uint64_t`).
+        - [ ] Audit `stat`, `statfs` structures for 64-bit alignment and padding.
+        - [ ] Ensure `struct timespec` and `struct timeval` use 64-bit seconds types.
+    - [ ] **System Call Audit:**
+        - [ ] Audit all file system calls (`open`, `seek`, `truncate`, `mmap`) for 64-bit offset support.
+        - [ ] Audit time-related syscalls (`clock_gettime`, `nanosleep`, `utimensat`) for 64-bit timespecs.
+        - [ ] Audit resource limit syscalls (`getrlimit`, `setrlimit`) for 64-bit values.
+        - [ ] Audit `recvmsg`/`sendmsg` for `struct msghdr` compatibility.
+    - [ ] **Kernel Refactoring:**
+        - [ ] Refactor `sys_lseek` to take 64-bit offset (split high/low registers on 32-bit if needed, or use register pairs).
+        - [ ] Refactor `sys_truncate` / `sys_ftruncate` for 64-bit lengths.
+        - [ ] Ensure VFS layer uses 64-bit offsets exclusively.
+        - [ ] Implement `sys_pselect6` / `sys_ppoll` with 64-bit timeout support.
+    - [ ] **LibC Wrappers (`lib/c`):**
+        - [ ] Update `lseek` to pass 64-bit arguments correctly (EDX:EAX on i386).
+        - [ ] Ensure `_FILE_OFFSET_BITS=64` semantics are default.
+        - [ ] Implement `stat` wrapper mapping to 64-bit kernel structure.
+    - [ ] **Personality Compatibility:**
+        - [ ] Implement translation for legacy 32-bit syscalls (Linux `old_mmap`, `stat64` vs `stat`).
+        - [ ] FreeBSD 32-bit shim layer updates per ABI.
+    - [ ] **Testing & Verification:**
+        - [ ] Add regression tests for large file support (>2GB and >4GB).
+        - [ ] Verify time_t overflow behavior (Year 2038 compliance).
+        - [ ] Verify structure layout with `pahole` or offsets test.
+    - [ ] **Documentation:**
+        - [ ] Document the 64-bit ABI in `docs/kernel/syscall_abi.md`.
+        - [ ] Update `man2` pages for affected syscalls.
+- [ ] **Personalities:**
+    - [ ] **Xenix & SCO Compatibility (The 6 Flavors):**
+        - [ ] **Variants:**
+            - [ ] **Microsoft Xenix 8086 (`MS-X/86`):**
+                - [ ] **Loader:** Support Magic `0x140` (Old Microsoft 8086 `x.out`).
+                - [ ] **Execution:** Pure Real Mode / VM86 Container.
+                - [ ] **Memory:** Small/Middle Memory Models (Separate I/D segments).
+                - [ ] **Emulation:** Trap `int 10h`/`int 13h` BIOS calls if used.
+            - [ ] **SCO Xenix 8086 (`SCO-X/86`):**
+                - [ ] **Validation:** Verify syscall differences from MS variant.
+                - [ ] **Extensions:** Support early SCO-specific `ioctl`s or IPC.
+            - [ ] **Microsoft Xenix 286 (`MS-X/286`):** Protected mode (LDTs).
+            - [ ] **SCO Xenix 286 (`SCO-X/286`):** Enhanced 286 support.
+            - [ ] **Microsoft Xenix 386 (`MS-X/386`):** Early 32-bit (pre-1987).
+            - [ ] **SCO Xenix 386 (`SCO-X/386`):** The widespread 32-bit standard (v2.3).
+            - [ ] **SCO Unix 3.2v2 (`SCO-U/3.2v2`):** COFF based, SVR3.2 compat.
+            - [ ] **SCO Unix 3.2v4 (`SCO-U/ODT3`):** Enhanced System V ABI (ODT 3.0).
+            - [ ] **SCO OpenServer 5 (`SCO-OSR5`):** Advanced COFF/ELF hybrid features.
+        - [ ] **Binary Loaders:**
+            - [ ] **`x.out` (Microsoft / Xenix):**
+                - [ ] **Header:** Magic 0x206 (286 Small), 0x20C (N86), 0x140 (8086).
+                - [ ] **Segments:** TEXT (RX), DATA (RW), BSS (Zero).
+                - [ ] **Symbol Table:** Generic Xenix symbol format.
+            - [ ] **COFF (Common Object File Format) - SCO/SVR3:**
+                - [ ] **File Header (`filehdr`):**
+                    - [ ] Magic: 0x14C (i386).
+                    - [ ] Number of sections.
+                    - [ ] Time/Date stamp (ignored or used for link verification).
+                    - [ ] Pointer to symbol table / Number of symbols.
+                - [ ] **Optional Header (`aouthdr`):**
+                    - [ ] Magic: 0x10B (ZMAGIC - Demand Paged).
+                        - [ ] Define `AOUT_ZMAGIC` constant (0x10B).
+                        - [ ] Validate magic number, reject unsupported types (OMAGIC, NMAGIC).
+                    - [ ] `tsize` (Text size), `dsize` (Data size), `bsize` (BSS size).
+                        - [ ] Parse `tsize` from offset 4 (uint32_t).
+                        - [ ] Parse `dsize` from offset 8 (uint32_t).
+                        - [ ] Parse `bsize` from offset 12 (uint32_t).
+                        - [ ] Validate sizes are reasonable (< 2GB, page-aligned for ZMAGIC).
+                    - [ ] `entry` (Entry point virtual address).
+                        - [ ] Parse `entry` from offset 16 (uint32_t).
+                        - [ ] Validate entry is within `.text` segment bounds.
+                    - [ ] `text_start`, `data_start`.
+                        - [ ] Parse `text_start` from offset 20 (uint32_t).
+                        - [ ] Parse `data_start` from offset 24 (uint32_t).
+                        - [ ] Validate `text_start` < `data_start` or handle BSS-only cases.
+                - [ ] **Section Headers (`scnhdr`):**
+                    - [ ] Name (`.text`, `.data`, `.bss`, `.lib`).
+                        - [ ] Parse 8-byte section name (may be NUL-padded).
+                        - [ ] Handle long names (pointer to string table, `/offset` format).
+                        - [ ] Identify special sections (`.lib`, `.comment`, `.debug`).
+                    - [ ] `paddr` (Physical), `vaddr` (Virtual).
+                        - [ ] Parse `paddr` from offset 8 (uint32_t).
+                        - [ ] Parse `vaddr` from offset 12 (uint32_t).
+                        - [ ] Validate `vaddr` is user-space address (< 0xC0000000).
+                    - [ ] `size`, `scnptr` (File offset).
+                        - [ ] Parse `size` from offset 16 (uint32_t).
+                        - [ ] Parse `scnptr` from offset 20 (uint32_t).
+                        - [ ] Validate `scnptr + size` <= file size.
+                    - [ ] Flags (`STYP_TEXT`, `STYP_DATA`, `STYP_BSS`).
+                        - [ ] Define flag constants: `STYP_TEXT=0x20`, `STYP_DATA=0x40`, `STYP_BSS=0x80`.
+                        - [ ] Map flags to pmap protections (RX, RW, RW-zero).
+                        - [ ] Handle `STYP_LIB` (0x800) for shared library sections.
+                - [ ] **SCO Shared Libraries (`.lib` section):**
+                    - [ ] Parse `.lib` section header.
+                        - [ ] Locate section with name `.lib` or flag `STYP_LIB`.
+                        - [ ] Read section content from `scnptr` offset.
+                    - [ ] **Path entries:** Absolute path to shared library.
+                        - [ ] Parse path table offset from `.lib` header.
+                        - [ ] Iterate path entries (NUL-terminated strings).
+                        - [ ] Resolve library path (search `/shlib`, `/usr/shlib`).
+                        - [ ] Load and map referenced shared libraries recursively.
+                    - [ ] **Offset entries:** Import method (static jump table).
+                        - [ ] Parse import table offset and count.
+                        - [ ] Build jump table at fixed address (`0x08000000` typical).
+                        - [ ] Populate jump stubs (`jmp [addr]`) for each import.
+                        - [ ] Handle import ordinals vs. named imports.
+            - [ ] **OMF (Intel Object Module Format) - 286/386:**
+                - [ ] **Record Types:**
+                    - [ ] `0x80` (`THEADR`): Module Name.
+                    - [ ] `0x88` (`COMENT`): Compiler info / Memory model.
+                    - [ ] `0x98` (`SEGDEF`): Segment Definition (Attributes, Size).
+                    - [ ] `0x9A` (`GRPDEF`): Group Definition (DGROUP).
+                    - [ ] `0xA0` (`LEDATA`): Logical Enumerated Data (Content).
+                    - [ ] `0xB0` (`FIXUPP`): Relocation Records (Segment-relative, Self-relative).
+                    - [ ] `0x8A` (`MODEND`): Module End (Main entry point).
+                - [ ] **Loading Logic:** Multi-pass linker/loader to resolve inter-segment references.
+        - [ ] **System Call Interface:**
+            - [ ] **Mechanisms (ABI Differences):**
+                - [ ] **iBCS2 / SCO:**
+                    - [ ] `lcall 7,0` (Call Gate 0).
+                - [ ] **Linux:**
+                    - [ ] `int 0x80` (Interrupt Vector 128).
+                - [ ] **Legacy / Special:**
+                    - [ ] `int 0x21` (DOS emulation in VM86).
+                    - [ ] `int 0x7F` (Older Xenix).
+            - [ ] **ABI Translation:**
+            - [ ] **ABI Translation (iBCS2):**
+                - [ ] **Stack Frame Decoding:**
+                    - [ ] 16-bit client: arguments at `SS:SP+2` (2-byte words).
+                    - [ ] 32-bit client: arguments at `SS:ESP+4` (4-byte words).
+                - [ ] **CXENIX Dispatcher (Syscall 0x07):**
+                    - [ ] Sub-function handling (table driven) for Xenix extensions.
+                    - [ ] `rdchk` (check for data), `nap` (millisecond sleep).
+                    - [ ] `ftime` (System V time).
+                - [ ] **Shared Memory (Xenix):**
+                    - [ ] `sdget`, `sdfree` (Create/Destroy shared data).
+                    - [ ] `sdenter`, `sdleave` (Attach/Detach).
+                    - [ ] **Memory mapping:** Map high memory segments via LDT.
+                    - [ ] `xsbrk` (Extended break for huge data).
+                - [ ] **VM86 Support:**
+                    - [ ] `v86_init`: Initialize VM86 task state.
+                    - [ ] `v86_sleep`: Wait for interrupt/event.
+                    - [ ] Monitor BIOS calls trapped via GPF/Invalid Opcode.
+    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:**
+    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:**
+        - [ ] **16-Bit Execution Environment:**
+            - [ ] **LDT Setup:**
+                - [ ] Descriptor 0: NULL.
+                - [ ] Descriptor 1: CS (Code), 16-bit conforming/non-conforming.
+                - [ ] Descriptor 2: DS (Data), 16-bit expand-up/down.
+            - [ ] **Segmentation Logic:**
+                - [ ] **Small Model:** CS != DS/SS.
+                - [ ] **Tiny Model:** CS == DS == SS (COM file style).
+                - [ ] **Stack:** 16-bit Stack Pointer (`SP`) wraparound handling.
+        - [ ] **Loader (`a.out` Minix):**
+            - [ ] **Header:** 32-byte header (Magic, HeaderLen, Text/Data/Bss sizes).
+            - [ ] **Load:** Read segments into allocated low-memory pages.
+            - [ ] **Relocation:** Applying fixups if not position independent.
+        - [ ] **Syscall Interface (`int 0x80`):**
+            - [ ] **Trap:** IDT entry 0x80 handling 16-bit caller.
+            - [ ] **Argument Fetch:**
+                - [ ] Read `BX` (First arg), `CX` (Second), `DX` (Third), `SI`, `DI`.
+                - [ ] Or read stack arguments if used.
+            - [ ] **Pointer Thunking:**
+                - [ ] Convert `DS:BX` (16:16) -> Linear Address (`LDT[DS].Base + BX`).
+                - [ ] Bounds checking against segment limit.
+    - [ ] **Linux (Massive Expansion):**
+        - [ ] ELF Loader personality detection (brandelf support).
+        - [ ] **Signal Compatibility:**
+            - [ ] **Mapping:** Translate Linux signal numbers to native (e.g., SIGCHLD, SIGSTOP).
+            - [ ] **Sigaction:** Translate `linux_sigaction` structure (mask bits).
+            - [ ] **Trampoline:** Linux-compatible signal return trampoline.
+        - [ ] **Error Codes:**
+            - [ ] Map internal errno to Linux errno (arch-specific).
+        - [ ] **FS Path Translation:**
+            - [ ] `/proc` -> `/compat/linux/proc` redirection.
+            - [ ] `/sys` -> `/compat/linux/sys` redirection.
+            - [ ] `at()` syscalls family support.
+        - [ ] **Networking (`socketcall`):**
+            - [ ] Multiplexer syscall 102 (`sys_socketcall`).
+            - [ ] **Socket Creation & Binding:**
+                - [ ] `SYS_SOCKET`: Validate domain/type/proto, allocate socket.
+                - [ ] `SYS_BIND`: Copy address from user, call internal bind.
+                - [ ] `SYS_CONNECT`: Copy address, initiate connection.
+            - [ ] **Data Flow:**
+                - [ ] `SYS_SEND`/`SYS_RECV`: Simple IO wrappers.
+                - [ ] `SYS_SENDTO`/`SYS_RECVFROM`: UDP/Connectionless wrappers.
+                - [ ] `SYS_SENDMSG`/`SYS_RECVMSG`: Complex message structure scatter/gather.
+            - [ ] **State & Options:**
+                - [ ] `SYS_LISTEN`: Set backlog.
+                - [ ] `SYS_ACCEPT`: New socket file descriptor creation.
+                - [ ] `SYS_GETSOCKNAME`/`SYS_GETPEERNAME`: Address retrieval.
+                - [ ] `SYS_SETSOCKOPT`/`SYS_GETSOCKOPT`: Option translation (Linux <-> Native).
+                - [ ] `SYS_SHUTDOWN`: Connection termination.
+                - [ ] `SYS_SOCKETPAIR`: Connected pair creation.
+        - [ ] **IPC Multiplexer (`sys_ipc`):**
+            - [ ] Multiplexer syscall 117.
+            - [ ] **Semaphores (`sem*`):**
+                - [ ] `SEMOP`: Atomic array operations.
+                - [ ] `SEMGET`: Get/Create semaphore set.
+                - [ ] `SEMCTL`: Control operations (GETVAL, SETVAL, IPC_RMID).
+            - [ ] **Message Queues (`msg*`):**
+                - [ ] `MSGSND`: Send message with priority.
+                - [ ] `MSGRCV`: Receive message (blocking/non-blocking).
+                - [ ] `MSGGET`: Get/Create message queue.
+                - [ ] `MSGCTL`: Control operations.
+            - [ ] **Shared Memory (`shm*`):**
+                - [ ] `SHMAT`: Attach segment to address space.
+                - [ ] `SHMDT`: Detach segment.
+                - [ ] `SHMGET`: Get/Create shared memory segment.
+                - [ ] `SHMCTL`: Control operations (lock/unlock/remove).
+        - [ ] **Ioctls (`sys_ioctl`):**
+            - [ ] **Termios:**
+                - [ ] `TCGETS`: Translate native termios to Linux termios.
+                - [ ] `TCSETS`/`TCSETSW`/`TCSETSF`: Translate Linux termios to native.
+            - [ ] **Sockio:**
+                - [ ] `SIOCGIFNAME`: Get interface name by index.
+                - [ ] `SIOCGIFADDR`: Get interface IP address.
+                - [ ] `SIOCGIFBRDADDR`: Get broadcast address.
+                - [ ] `SIOCGIFNETMASK`: Get network mask.
+        - [ ] **Process Creation (`sys_clone` extended):**
+            - [ ] **Flags Handling:**
+                - [ ] `CLONE_PARENT_SETTID`: Store Child TID at `parent_tidptr`.
+                - [ ] `CLONE_CHILD_CLEARTID`: Store Child TID at `child_tidptr` and clear on exit.
+                - [ ] `CLONE_SETTLS`: Set GDT/FS/GS base for Thread Local Storage.
+                - [ ] `CLONE_FILES`: Share file descriptor table (refcounting).
+                - [ ] `CLONE_FS`: Share filesystem info (cwd, root).
+                - [ ] `CLONE_SIGHAND`: Share signal handlers.
+                - [ ] `CLONE_VM`: Share address space (threads).
+    - [ ] **Minix/386:**
+        - [ ] Implement `send`/`receive` message passing syscalls.
+        - [ ] Map Minix 3 kernel messages to native calls.
+    - [ ] **FreeBSD:**
+        - [ ] ELF Loader personality detection.
+        - [ ] Complete `thr_new` implementation.
+        - [ ] **FreeBSD 14.3 Compatibility (i386):**
+            - [ ] Implement `struct kinfo_proc` (FreeBSD 14.3 layout).
+            - [ ] **Binary Compatibility:**
+                - [ ] Investigate need for virtual `/dev/kmem` emulation for legacy binaries.
+            - [ ] **Native Porting:**
+                - [ ] Implement `libkvm` shim in `libsys` for porting BSD tools to native ABI.
+            - [ ] **Process Translation:** Logic to map native `process_t` to `kinfo_proc`.
+    - [ ] **BSD-Style `sysctl` Syscall Surface (Native + Compat):**
+        - [ ] **Native Syscall ABI Contract:**
+            - [ ] Define canonical native `sysctl` syscall argument contract with versioned request structure.
+            - [ ] Define strict userspace pointer/length validation rules for old/new buffers.
+            - [ ] Define canonical atomic read/write semantics when both old and new values are present.
+            - [ ] Define canonical size-discovery semantics when old buffer pointer is NULL.
+            - [ ] Define canonical subtree-enumeration request contract for user tooling.
+            - [ ] Define canonical metadata-query request contract (type, flags, description, ABI class).
+            - [ ] Add syscall table entries and personality dispatch wiring for native ABI.
+        - [ ] **MIB + Name Resolution Paths:**
+            - [ ] Implement MIB-based syscall path end-to-end (`int *name`, `u_int namelen`).
+            - [ ] Implement kernel name-to-MIB translation operation for userspace helpers.
+            - [ ] Implement kernel MIB-to-name translation operation for diagnostics/tooling.
+            - [ ] Define max name depth and token-length limits with explicit `EINVAL` behavior.
+            - [ ] Add strict rejection path for mixed name/MIB invocation modes.
+        - [ ] **Error and Compatibility Semantics:**
+            - [ ] Define BSD-consistent errno mapping (`ENOENT`, `ENOMEM`, `EINVAL`, `EFAULT`, `EPERM`, `EACCES`, `ENOTDIR`).
+            - [ ] Implement forward-compat handling for unknown request-structure extensions.
+            - [ ] Implement backward-compat handling for older request versions.
+            - [ ] Add compatibility tests for partial reads, retry loops, and concurrent value mutation.
+        - [ ] **Permission & Capability Enforcement:**
+            - [ ] Wire syscall path into unified `sysctl` access-control hooks.
+            - [ ] Enforce read/write separation at syscall boundary before handler invocation.
+            - [ ] Enforce capability-gated writes for privileged nodes.
+            - [ ] Add per-personality gate checks before exposing compatibility namespace nodes.
+        - [ ] **Personality Integration & Overlays:**
+            - [ ] Define personality overlay model (native base tree + personality-specific branches).
+            - [ ] Implement FreeBSD compatibility overlay for `__sysctl` expectations.
+            - [ ] Implement NetBSD/OpenBSD compatibility overlay scaffolding with explicit unsupported-node behavior.
+            - [ ] Implement per-personality node visibility filters in traversal and enumeration paths.
+            - [ ] Add compatibility shims translating personality-specific MIBs to native internal nodes where feasible.
+        - [ ] **Userspace ABI Tests (Syscall Layer):**
+            - [ ] Add integration tests for native MIB reads/writes, size probes, and metadata queries.
+            - [ ] Add integration tests for enumeration of children and deep subtree walks.
+            - [ ] Add negative tests for malformed pointers, truncated MIBs, and invalid type writes.
+            - [ ] Add race tests for concurrent read/write against lock-protected nodes.
+            - [ ] Add ABI snapshot tests ensuring stable syscall behavior across kernel revisions.
+    - [ ] **BSD Family (NetBSD/OpenBSD):**
+        - [ ] Implement `__sysctl` personality entrypoint backed by shared native `sysctl` core.
+        - [ ] Implement NetBSD/OpenBSD-specific compatibility mapping table for legacy MIB constants.
+        - [ ] Add personality tests validating expected `__sysctl` behavior and errno semantics.
+        - [ ] Support BSD-specific syscalls (`ktrace`, `pledge`/`unveil`).
+    - [ ] **Solaris (SVR4):**
+        - [ ] Implement SVR4 syscalls (`getdents64`, `stream` ioctls).
+        - [ ] Support Solaris door IPC emulation.
+    - [/] **Exec Implementation & Binary Loaders:**
+        - [ ] **ELF Loader Improvements:**
+            - [ ] **Stack Setup:** Properly terminate argv/envp vectors.
+            - [ ] **Default Environment:** Populate PATH and TERM.
+            - [ ] **Auxiliary Vector:** Populate AT_PHDR/PHENT/PHNUM/ENTRY for TLS support.
+            - [ ] **Interpreter:** Handle `PT_INTERP` (load ld.so).
+            - [ ] **Auxiliary Vector:**
+                - [ ] Populate `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`.
+                - [ ] Populate `AT_ENTRY`, `AT_BASE` (interpreter base).
+                - [ ] Populate `AT_EXECFN`, `AT_PLATFORM`.
+                - [ ] Populate `AT_RANDOM`, `AT_SECURE`.
+        - [ ] **Shebang Support (`exec_script`):**
+            - [ ] Parse `#!` line.
+            - [ ] Handle recursion depth limits (prevent loops).
+            - [ ] Argument parsing (`#! /bin/sh -x`).
+        - [ ] **COFF Loader (Legacy/Static):**
+            - [ ] Parse File Header and Optional Header.
+            - [ ] Map Sections (Text, Data, BSS) to fixed addresses.
+            - [ ] Basic relocation support (for Xenix 386).
+        - [ ] **PE Loader (EFI/Native):**
+            - [ ] Parse DOS Header -> PE Header.
+            - [ ] Parse Data Directories (Import/Export/Reloc).
+            - [ ] Map Image Base and Sections.
+            - [ ] **EFI Support:**
+                - [ ] Implement IAT (Import Address Table) patching.
+            - [ ] **Substrate Native PE:**
+                - [ ] Define Subsystem ID for Substrate (e.g., in `sys/pe.h`).
+                - [ ] **Native Syscalls:** Thunks for syscall instruction directly in PE text.
+                - [ ] **Relocations:** Full `.reloc` processing (Base Relocations) for ASLR/PIC.
+        - [ ] **a.out Loader (Legacy/Multi-OS):**
+             > See [docs/aout_loader_spec.md](docs/aout_loader_spec.md) for implementation specs.
+            - [ ] **Legacy a.out:** Implement `exec_aout` for OMAGIC/QMAGIC/ZMAGIC binaries.
+            - [ ] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic.
+            - [ ] **SunOS 4.0.x (Sun386i):** Support Sun386i `a.out` format and personality.
+        - [ ] **Personality / Migration:**
+            - [ ] **Syscall Translation:** Remap foreign syscall numbers to native.
+            - [ ] **Errno Translation:** Remap error codes.
+            - [ ] **Signal Translation:** Remap signal numbers.
+        - [ ] **fork() Completeness:**
+            - [ ] **Copy-on-Write:** Duplication of VM space (refcounts).
+            - [ ] **File Descriptors:** Increment refcounts on all FDs.
+            - [ ] `vfork`: Shared VM space, parent blocked until child exec/exit.
+
+
+## User Stories
+
+- **US-05-0001**: As a Substrate contributor working on 5. System Calls & Personalities, I want to system Call ABI (64-bit Clean): so that this capability is implemented with clear verification evidence.
+- **US-05-0002**: As a Substrate contributor working on 5. System Calls & Personalities, I want to type Definitions: so that this capability is implemented with clear verification evidence.
+- **US-05-0003**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define off_t, time_t, ino_t, blkcnt_t as 64-bit types in sys/types.h so that this capability is implemented with clear verification evidence.
+- **US-05-0004**: As a Substrate contributor working on 5. System Calls & Personalities, I want to verify alignment requirements (8-byte alignment for 64-bit types on i386 stack) so that this capability is implemented with clear verification evidence.
+- **US-05-0005**: As a Substrate contributor working on 5. System Calls & Personalities, I want to system Call Audit: so that this capability is implemented with clear verification evidence.
+- **US-05-0006**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit all existing syscalls for argument types (int vs long vs long long) so that this capability is implemented with clear verification evidence.
+- **US-05-0007**: As a Substrate contributor working on 5. System Calls & Personalities, I want to identify syscalls needing 64-bit arguments pair splitting on 32-bit (e.g. lseek, truncate, mmap) so that this capability is implemented with clear verification evidence.
+- **US-05-0008**: As a Substrate contributor working on 5. System Calls & Personalities, I want to kernel Refactoring: so that this capability is implemented with clear verification evidence.
+- **US-05-0009**: As a Substrate contributor working on 5. System Calls & Personalities, I want to native sys_lseek takes 64-bit offset (split hi/lo on 32-bit stack) so that this capability is implemented with clear verification evidence.
+- **US-05-0010**: As a Substrate contributor working on 5. System Calls & Personalities, I want to native sys_ftruncate takes 64-bit length (split hi/lo on 32-bit stack) so that this capability is implemented with clear verification evidence.
+- **US-05-0011**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sys_mmap offset is 64-bit (using split words on i386) so that this capability is implemented with clear verification evidence.
+- **US-05-0012**: As a Substrate contributor working on 5. System Calls & Personalities, I want to struct stat uses 64-bit ino_t, off_t, blkcnt_t, time_t so that this capability is implemented with clear verification evidence.
+- **US-05-0013**: As a Substrate contributor working on 5. System Calls & Personalities, I want to libC Wrappers: so that this capability is implemented with clear verification evidence.
+- **US-05-0014**: As a Substrate contributor working on 5. System Calls & Personalities, I want to update lseek wrapper to pass high/low words on 32-bit so that this capability is implemented with clear verification evidence.
+- **US-05-0015**: As a Substrate contributor working on 5. System Calls & Personalities, I want to update ftruncate wrapper so that this capability is implemented with clear verification evidence.
+- **US-05-0016**: As a Substrate contributor working on 5. System Calls & Personalities, I want to update stat/fstat wrappers so that this capability is implemented with clear verification evidence.
+- **US-05-0017**: As a Substrate contributor working on 5. System Calls & Personalities, I want to personality Compatibility: so that this capability is implemented with clear verification evidence.
+- **US-05-0018**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure 32-bit Linux personality handles register splitting for 64-bit args correctly so that this capability is implemented with clear verification evidence.
+- **US-05-0019**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure native personality mandates 64-bit types so that this capability is implemented with clear verification evidence.
+- **US-05-0020**: As a Substrate contributor working on 5. System Calls & Personalities, I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-05-0021**: As a Substrate contributor working on 5. System Calls & Personalities, I want to large File Support (LFS): Test creating/seeking > 2GB files so that this capability is implemented with clear verification evidence.
+- **US-05-0022**: As a Substrate contributor working on 5. System Calls & Personalities, I want to y2038: Test time_t overflow handling so that this capability is implemented with clear verification evidence.
+- **US-05-0023**: As a Substrate contributor working on 5. System Calls & Personalities, I want to mechanisms: so that this capability is implemented with clear verification evidence.
+- **US-05-0024**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pTY Subsystem (Unix98/System V) - Massive Expansion: so that this capability is implemented with clear verification evidence.
+- **US-05-0025**: As a Substrate contributor working on 5. System Calls & Personalities, I want to core PTY Driver (/dev/pts/ + /dev/ptmx): so that this capability is implemented with clear verification evidence.
+- **US-05-0026**: As a Substrate contributor working on 5. System Calls & Personalities, I want to devPTS Filesystem (pts_fs): so that this capability is implemented with clear verification evidence.
+- **US-05-0027**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pts_mount(): Mount logic so that this capability is implemented with clear verification evidence.
+- **US-05-0028**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pts_lookup(): Resolve PTY indices to vnodes so that this capability is implemented with clear verification evidence.
+- **US-05-0029**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pts_getattr(): Synthesize attributes (uid/gid/mode) so that this capability is implemented with clear verification evidence.
+- **US-05-0030**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pts_readdir(): List active PTYs so that this capability is implemented with clear verification evidence.
+- **US-05-0031**: As a Substrate contributor working on 5. System Calls & Personalities, I want to multiplexer (/dev/ptmx): so that this capability is implemented with clear verification evidence.
+- **US-05-0032**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ptmx_open(): Allocate next free pts index (0..255+) so that this capability is implemented with clear verification evidence.
+- **US-05-0033**: As a Substrate contributor working on 5. System Calls & Personalities, I want to create master/slave tty structures so that this capability is implemented with clear verification evidence.
+- **US-05-0034**: As a Substrate contributor working on 5. System Calls & Personalities, I want to initialize queues and termios defaults so that this capability is implemented with clear verification evidence.
+- **US-05-0035**: As a Substrate contributor working on 5. System Calls & Personalities, I want to data Path: so that this capability is implemented with clear verification evidence.
+- **US-05-0036**: As a Substrate contributor working on 5. System Calls & Personalities, I want to master Write: Input to Slave Read queue so that this capability is implemented with clear verification evidence.
+- **US-05-0037**: As a Substrate contributor working on 5. System Calls & Personalities, I want to slave Write: Input to Master Read queue so that this capability is implemented with clear verification evidence.
+- **US-05-0038**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ring Buffers: Lockless (or locked) circular buffers so that this capability is implemented with clear verification evidence.
+- **US-05-0039**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iOCTL API (libc support): so that this capability is implemented with clear verification evidence.
+- **US-05-0040**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tIOCGPTN (Get PTY Number): Return index for ptsname() so that this capability is implemented with clear verification evidence.
+- **US-05-0041**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tIOCSPTLCK (Lock/Unlock): Handle unlockpt() (prevent race conditions) so that this capability is implemented with clear verification evidence.
+- **US-05-0042**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tIOCGPKT (Packet Mode): Control byte for master (flush/stop/start/ioctl) so that this capability is implemented with clear verification evidence.
+- **US-05-0043**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tIOCSIG (Signal): Send specific signal to slave process group so that this capability is implemented with clear verification evidence.
+- **US-05-0044**: As a Substrate contributor working on 5. System Calls & Personalities, I want to line Discipline (N_TTY): so that this capability is implemented with clear verification evidence.
+- **US-05-0045**: As a Substrate contributor working on 5. System Calls & Personalities, I want to input Processing (c_iflag): so that this capability is implemented with clear verification evidence.
+- **US-05-0046**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iGNBRK, BRKINT (Break handling) so that this capability is implemented with clear verification evidence.
+- **US-05-0047**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iGNPAR, PARMRK, INPCK (Parity) so that this capability is implemented with clear verification evidence.
+- **US-05-0048**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iSTRIP (Strip 8th bit) so that this capability is implemented with clear verification evidence.
+- **US-05-0049**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iNLCR, IGNCR, ICRNL (CR/LF mapping) so that this capability is implemented with clear verification evidence.
+- **US-05-0050**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iXON, IXOFF (Software flow control XON/XOFF) so that this capability is implemented with clear verification evidence.
+- **US-05-0051**: As a Substrate contributor working on 5. System Calls & Personalities, I want to output Processing (c_oflag): so that this capability is implemented with clear verification evidence.
+- **US-05-0052**: As a Substrate contributor working on 5. System Calls & Personalities, I want to oPOST (Enable processing) so that this capability is implemented with clear verification evidence.
+- **US-05-0053**: As a Substrate contributor working on 5. System Calls & Personalities, I want to oNLCR (NL -> CR/NL translation) so that this capability is implemented with clear verification evidence.
+- **US-05-0054**: As a Substrate contributor working on 5. System Calls & Personalities, I want to local Processing (c_lflag): so that this capability is implemented with clear verification evidence.
+- **US-05-0055**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iSIG (Signal generation: VINTR, VQUIT, VSUSP) so that this capability is implemented with clear verification evidence.
+- **US-05-0056**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iCANON (Canonical mode / Line editing) so that this capability is implemented with clear verification evidence.
+- **US-05-0057**: As a Substrate contributor working on 5. System Calls & Personalities, I want to eCHO, ECHOE (Erase), ECHOK (Kill), ECHONL so that this capability is implemented with clear verification evidence.
+- **US-05-0058**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iEXTEN (Extended processing) so that this capability is implemented with clear verification evidence.
+- **US-05-0059**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tOSTOP (Background write SIGTTOU) so that this capability is implemented with clear verification evidence.
+- **US-05-0060**: As a Substrate contributor working on 5. System Calls & Personalities, I want to control Characters (c_cc): so that this capability is implemented with clear verification evidence.
+- **US-05-0061**: As a Substrate contributor working on 5. System Calls & Personalities, I want to vEOF, VEOL (End of file/line) so that this capability is implemented with clear verification evidence.
+- **US-05-0062**: As a Substrate contributor working on 5. System Calls & Personalities, I want to vERASE, VKILL (Editing) so that this capability is implemented with clear verification evidence.
+- **US-05-0063**: As a Substrate contributor working on 5. System Calls & Personalities, I want to vMIN, VTIME (Non-canonical read timing) so that this capability is implemented with clear verification evidence.
+- **US-05-0064**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sys_statvfs: Filesystem statistics so that this capability is implemented with clear verification evidence.
+- **US-05-0065**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement sys_statvfs/sys_fstatvfs so that this capability is implemented with clear verification evidence.
+- **US-05-0066**: As a Substrate contributor working on 5. System Calls & Personalities, I want to integrate with vfs_statfs so that this capability is implemented with clear verification evidence.
+- **US-05-0067**: As a Substrate contributor working on 5. System Calls & Personalities, I want to bSD-style Sys_mount Interface & Mount Framework: so that this capability is implemented with clear verification evidence.
+- **US-05-0068**: As a Substrate contributor working on 5. System Calls & Personalities, I want to aBI Application Interface: so that this capability is implemented with clear verification evidence.
+- **US-05-0069**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define sys_mount syscall signature (type, source, target, flags, data/len) so that this capability is implemented with clear verification evidence.
+- **US-05-0070**: As a Substrate contributor working on 5. System Calls & Personalities, I want to create sys/sys/mount.h with syscall definitions so that this capability is implemented with clear verification evidence.
+- **US-05-0071**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define struct mount_args equivalent for versioned arguments so that this capability is implemented with clear verification evidence.
+- **US-05-0072**: As a Substrate contributor working on 5. System Calls & Personalities, I want to document calling conventions and flag semantics in comments so that this capability is implemented with clear verification evidence.
+- **US-05-0073**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add build-time assertions for structure size and alignment so that this capability is implemented with clear verification evidence.
+- **US-05-0074**: As a Substrate contributor working on 5. System Calls & Personalities, I want to filesystem Type Registration: so that this capability is implemented with clear verification evidence.
+- **US-05-0075**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define struct vfsconf or equivalent for filesystem metadata so that this capability is implemented with clear verification evidence.
+- **US-05-0076**: As a Substrate contributor working on 5. System Calls & Personalities, I want to create vfs_register() / vfs_unregister() API so that this capability is implemented with clear verification evidence.
+- **US-05-0077**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement internal hashtable/list for filesystem types so that this capability is implemented with clear verification evidence.
+- **US-05-0078**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add capability reporting per filesystem type so that this capability is implemented with clear verification evidence.
+- **US-05-0079**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure filesystem names are validated and namespaced so that this capability is implemented with clear verification evidence.
+- **US-05-0080**: As a Substrate contributor working on 5. System Calls & Personalities, I want to mount Lifecycle & VFS Integration: so that this capability is implemented with clear verification evidence.
+- **US-05-0081**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define struct mount (kernel generic mount structure) so that this capability is implemented with clear verification evidence.
+- **US-05-0082**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement vfs_mount_alloc() and vfs_mount_free() so that this capability is implemented with clear verification evidence.
+- **US-05-0083**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement mount binding to VFS namespace (vnode attachment) so that this capability is implemented with clear verification evidence.
+- **US-05-0084**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement reference counting and busy checks so that this capability is implemented with clear verification evidence.
+- **US-05-0085**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure mounts can be stacked or nested safely so that this capability is implemented with clear verification evidence.
+- **US-05-0086**: As a Substrate contributor working on 5. System Calls & Personalities, I want to generic Option Parsing: so that this capability is implemented with clear verification evidence.
+- **US-05-0087**: As a Substrate contributor working on 5. System Calls & Personalities, I want to design generic mount option parser (key=value string/blob) so that this capability is implemented with clear verification evidence.
+- **US-05-0088**: As a Substrate contributor working on 5. System Calls & Personalities, I want to create API for filesystems to retrieve options so that this capability is implemented with clear verification evidence.
+- **US-05-0089**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement type-safe option getters (int, string, bool) so that this capability is implemented with clear verification evidence.
+- **US-05-0090**: As a Substrate contributor working on 5. System Calls & Personalities, I want to validate standard options (ro, nosuid, nodev, noexec) generically so that this capability is implemented with clear verification evidence.
+- **US-05-0091**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure strict validation and copying of userspace data so that this capability is implemented with clear verification evidence.
+- **US-05-0092**: As a Substrate contributor working on 5. System Calls & Personalities, I want to virtual Filesystem Support (/dev, /proc): so that this capability is implemented with clear verification evidence.
+- **US-05-0093**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define mount handler for devfs (mounting /dev) so that this capability is implemented with clear verification evidence.
+- **US-05-0094**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define mount handler for procfs (mounting /proc) so that this capability is implemented with clear verification evidence.
+- **US-05-0095**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement userspace-driven mounting of virtual filesystems via sys_mount so that this capability is implemented with clear verification evidence.
+- **US-05-0096**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure root vnodes are correctly tied to mount points so that this capability is implemented with clear verification evidence.
+- **US-05-0097**: As a Substrate contributor working on 5. System Calls & Personalities, I want to privilege & Security Model: so that this capability is implemented with clear verification evidence.
+- **US-05-0098**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add suser() / cap_check() for mount syscall so that this capability is implemented with clear verification evidence.
+- **US-05-0099**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement sys_mount flag validation (detect conflicting flags) so that this capability is implemented with clear verification evidence.
+- **US-05-0100**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure mount points are valid directories so that this capability is implemented with clear verification evidence.
+- **US-05-0101**: As a Substrate contributor working on 5. System Calls & Personalities, I want to prevent mounting over critical system paths without override so that this capability is implemented with clear verification evidence.
+- **US-05-0102**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit for mount-related vulnerabilities (symlinks, race conditions) so that this capability is implemented with clear verification evidence.
+- **US-05-0103**: As a Substrate contributor working on 5. System Calls & Personalities, I want to error Handling & Diagnostics: so that this capability is implemented with clear verification evidence.
+- **US-05-0104**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define EUNKNOWNFS and other specific error codes so that this capability is implemented with clear verification evidence.
+- **US-05-0105**: As a Substrate contributor working on 5. System Calls & Personalities, I want to propagate errors from filesystem-specific init back to syscall so that this capability is implemented with clear verification evidence.
+- **US-05-0106**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add kernel logging for failed mount attempts so that this capability is implemented with clear verification evidence.
+- **US-05-0107**: As a Substrate contributor working on 5. System Calls & Personalities, I want to unmount Semantics: so that this capability is implemented with clear verification evidence.
+- **US-05-0108**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define sys_unmount syscall signature and flags (FORCE, DETACH) so that this capability is implemented with clear verification evidence.
+- **US-05-0109**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement VFS layer unmount logic (busy checks) so that this capability is implemented with clear verification evidence.
+- **US-05-0110**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add filesystem-specific unmount callback so that this capability is implemented with clear verification evidence.
+- **US-05-0111**: As a Substrate contributor working on 5. System Calls & Personalities, I want to safe teardown of virtual and real filesystems so that this capability is implemented with clear verification evidence.
+- **US-05-0112**: As a Substrate contributor working on 5. System Calls & Personalities, I want to userland Interfaces & Tooling: so that this capability is implemented with clear verification evidence.
+- **US-05-0113**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add mount(2) and unmount(2) wrappers to libc so that this capability is implemented with clear verification evidence.
+- **US-05-0114**: As a Substrate contributor working on 5. System Calls & Personalities, I want to create/Update mount(8) utility in bin/ capable of mounting /dev so that this capability is implemented with clear verification evidence.
+- **US-05-0115**: As a Substrate contributor working on 5. System Calls & Personalities, I want to support mount -t type dev dir syntax so that this capability is implemented with clear verification evidence.
+- **US-05-0116**: As a Substrate contributor working on 5. System Calls & Personalities, I want to update early boot (init) to mount /dev and /proc explicitly so that this capability is implemented with clear verification evidence.
+- **US-05-0117**: As a Substrate contributor working on 5. System Calls & Personalities, I want to testing & Verification: so that this capability is implemented with clear verification evidence.
+- **US-05-0118**: As a Substrate contributor working on 5. System Calls & Personalities, I want to unit tests for mount argument parsing and validation so that this capability is implemented with clear verification evidence.
+- **US-05-0119**: As a Substrate contributor working on 5. System Calls & Personalities, I want to integration tests mounting and unmounting /dev and /proc from userspace so that this capability is implemented with clear verification evidence.
+- **US-05-0120**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tests for error conditions (invalid FS type, bad options, permission failure) so that this capability is implemented with clear verification evidence.
+- **US-05-0121**: As a Substrate contributor working on 5. System Calls & Personalities, I want to property and fuzz tests targeting mount option parsing so that this capability is implemented with clear verification evidence.
+- **US-05-0122**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit & Refactor: so that this capability is implemented with clear verification evidence.
+- **US-05-0123**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit existing VFS code for assumptions preventing userspace mounting so that this capability is implemented with clear verification evidence.
+- **US-05-0124**: As a Substrate contributor working on 5. System Calls & Personalities, I want to remove hardcoded kernel mounts once userspace tools work so that this capability is implemented with clear verification evidence.
+- **US-05-0125**: As a Substrate contributor working on 5. System Calls & Personalities, I want to clean up temporary hacks in vfs_init so that this capability is implemented with clear verification evidence.
+- **US-05-0126**: As a Substrate contributor working on 5. System Calls & Personalities, I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-05-0127**: As a Substrate contributor working on 5. System Calls & Personalities, I want to create man/man2/mount.2 describing syscall ABI and flags so that this capability is implemented with clear verification evidence.
+- **US-05-0128**: As a Substrate contributor working on 5. System Calls & Personalities, I want to create man/man2/unmount.2 so that this capability is implemented with clear verification evidence.
+- **US-05-0129**: As a Substrate contributor working on 5. System Calls & Personalities, I want to write Filesystem Developer Guide describing how to implement a mount handler so that this capability is implemented with clear verification evidence.
+- **US-05-0130**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement sys_ioctl framework so that this capability is implemented with clear verification evidence.
+- **US-05-0131**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement sys_pipe and sys_dup2 so that this capability is implemented with clear verification evidence.
+- **US-05-0132**: As a Substrate contributor working on 5. System Calls & Personalities, I want to compatibility Syscalls (Deep Dive): so that this capability is implemented with clear verification evidence.
+- **US-05-0133**: As a Substrate contributor working on 5. System Calls & Personalities, I want to bSD-style sys_mount Framework: so that this capability is implemented with clear verification evidence.
+- **US-05-0134**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 1: sys_mount ABI Definition so that this capability is implemented with clear verification evidence.
+- **US-05-0135**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define canonical mount(2) signature with options blob support. <!-- sys/include/sys/syscall.h, sys/kern/syscall.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0136**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement versioned struct mount_args for ABI stability. <!-- include/sys/mount.h --> so that this capability is implemented with clear verification evidence.
+- **US-05-0137**: As a Substrate contributor working on 5. System Calls & Personalities, I want to document MNT_* flags and error code semantics (EFAULT, EINVAL, EPERM). <!-- docs/abi/mount.md --> so that this capability is implemented with clear verification evidence.
+- **US-05-0138**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add runtime validation for userspace structure alignment and size. <!-- sys/kern/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0139**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 2: Filesystem Type Registration so that this capability is implemented with clear verification evidence.
+- **US-05-0140**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement central vfs_register string-to-vfsops registry. <!-- sys/vfs/vfs_conf.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0141**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement vfs_unregister for safe filesystem module removal. <!-- sys/vfs/vfs_conf.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0142**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add capability reporting to struct vfsops (e.g. read-only only). <!-- sys/vfs/vfs.h --> so that this capability is implemented with clear verification evidence.
+- **US-05-0143**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement FS name validation and namespacing logic. <!-- sys/vfs/vfs_conf.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0144**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 3: Mount Lifecycle & VFS Integration so that this capability is implemented with clear verification evidence.
+- **US-05-0145**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement vfs_mount_alloc() to initialize struct mount instances. <!-- sys/vfs/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0146**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement binding logic to attach root vnode to namespace. <!-- sys/vfs/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0147**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement mount reference-counting for safety during unmount. <!-- sys/vfs/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0148**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement nested mount support and loop detection. <!-- sys/vfs/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0149**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 4: Userspace Mount Option Handling so that this capability is implemented with clear verification evidence.
+- **US-05-0150**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement generic mount option parser for key-value strings. <!-- sys/vfs/vfs_options.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0151**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement safe copying and validation of userspace option blobs. <!-- sys/vfs/vfs_options.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0152**: As a Substrate contributor working on 5. System Calls & Personalities, I want to support filesystem-specific options passed via the parser. <!-- sys/vfs/vfs_options.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0153**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define and document option precedence and fallback behaviors. <!-- man/man2/mount.2 --> so that this capability is implemented with clear verification evidence.
+- **US-05-0154**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 5: Virtual Filesystem Mounting (/dev, /proc) so that this capability is implemented with clear verification evidence.
+- **US-05-0155**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define DevFS mount handler with root vnode generation. <!-- sys/fs/devfs/devfs_vfsops.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0156**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define ProcFS mount handler with dynamic PID-based population. <!-- sys/fs/procfs/procfs_vfsops.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0157**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement userspace-driven mounting of /dev and /proc entirely from init. <!-- bin/init/main.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0158**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define mandatory mount options for virtual filesystems. <!-- sys/fs/virtual_fs.h --> so that this capability is implemented with clear verification evidence.
+- **US-05-0159**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 6: Permission & Security Model so that this capability is implemented with clear verification evidence.
+- **US-05-0160**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement capability-checks (CAP_SYS_ADMIN) for sys_mount. <!-- sys/kern/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0161**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV enforcement. <!-- sys/vfs/vfs_vnode.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0162**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit and harden against mount-point escape attacks. <!-- sys/vfs/vfs_lookup.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0163**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement mount-point target validation (must be directory, must be owned). <!-- sys/vfs/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0164**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 7: Error Handling & Diagnostics so that this capability is implemented with clear verification evidence.
+- **US-05-0165**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define granular E* error codes for mount failures (ENODEV, EINVAL, ENOTDIR, EBUSY). <!-- sys/include/sys/errno.h --> so that this capability is implemented with clear verification evidence.
+- **US-05-0166**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement structured kernel logging for mount/unmount operations. <!-- sys/vfs/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0167**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure clean error propagation from FS driver to userspace. <!-- sys/vfs/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0168**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 8: Unmount Support so that this capability is implemented with clear verification evidence.
+- **US-05-0169**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define sys_unmount(path, flags) syscall interface. <!-- sys/include/sys/syscall.h --> so that this capability is implemented with clear verification evidence.
+- **US-05-0170**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement vfs_unmount() core with resource reclamation. <!-- sys/vfs/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0171**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement MNT_FORCE and MNT_DEFERRED unmount logic. <!-- sys/vfs/vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0172**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 9: Userland Interfaces & Tooling so that this capability is implemented with clear verification evidence.
+- **US-05-0173**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add mount(2) and unmount(2) wrappers to libc. <!-- lib/libc/sys/mount.S --> so that this capability is implemented with clear verification evidence.
+- **US-05-0174**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement basic mount(8) utility for shell usage. <!-- bin/mount/mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0175**: As a Substrate contributor working on 5. System Calls & Personalities, I want to document required invocation patterns for early boot mounting in /sbin/init. <!-- docs/boot.md --> so that this capability is implemented with clear verification evidence.
+- **US-05-0176**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 10: Testing & Verification so that this capability is implemented with clear verification evidence.
+- **US-05-0177**: As a Substrate contributor working on 5. System Calls & Personalities, I want to unit tests for mount_args parsing and alignment validation. <!-- sys/tests/test_vfs_mount.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0178**: As a Substrate contributor working on 5. System Calls & Personalities, I want to integration test: Mount/unmount sequence for DevFS and ProcFS. <!-- sys/tests/test_vfs_integration.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0179**: As a Substrate contributor working on 5. System Calls & Personalities, I want to negative tests for error conditions (unknown FS, bad options, permission failure). <!-- sys/tests/test_vfs_errors.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0180**: As a Substrate contributor working on 5. System Calls & Personalities, I want to property and fuzz tests targeting mount option parsing. <!-- sys/tests/test_vfs_fuzz.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0181**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 11: Audit & Refactor so that this capability is implemented with clear verification evidence.
+- **US-05-0182**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit existing VFS code for assumptions precluding userspace mounting. <!-- sys/vfs/ --> so that this capability is implemented with clear verification evidence.
+- **US-05-0183**: As a Substrate contributor working on 5. System Calls & Personalities, I want to eliminate existing TODOs in vfs_mount.c and syscall.c. <!-- sys/kern/syscall.c --> so that this capability is implemented with clear verification evidence.
+- **US-05-0184**: As a Substrate contributor working on 5. System Calls & Personalities, I want to group 12: Documentation so that this capability is implemented with clear verification evidence.
+- **US-05-0185**: As a Substrate contributor working on 5. System Calls & Personalities, I want to create mount(2) manpage describing ABI, flags, and options. <!-- man/man2/mount.2 --> so that this capability is implemented with clear verification evidence.
+- **US-05-0186**: As a Substrate contributor working on 5. System Calls & Personalities, I want to create Filesystem Developer Guide for vfsops implementations. <!-- docs/vfs_dev.md --> so that this capability is implemented with clear verification evidence.
+- **US-05-0187**: As a Substrate contributor working on 5. System Calls & Personalities, I want to document virtual filesystem mount semantics and expected behaviors. <!-- docs/virtual_fs.md --> so that this capability is implemented with clear verification evidence.
+- **US-05-0188**: As a Substrate contributor working on 5. System Calls & Personalities, I want to commit-Atomic Expansion (sys_mount/mount framework) so that this capability is implemented with clear verification evidence.
+- **US-05-0189**: As a Substrate contributor working on 5. System Calls & Personalities, I want to execution Rule: Enforce "one checklist item = one commit" for all items in this expansion so that this capability is implemented with clear verification evidence.
+- **US-05-0190**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 1. sys_mount ABI Definition so that this capability is implemented with clear verification evidence.
+- **US-05-0191**: As a Substrate contributor working on 5. System Calls & Personalities, I want to reserve and wire canonical syscall numbers for SYS_mount and SYS_unmount in native/Linux/FreeBSD personality dispatch tables so that this capability is implemented with clear verification evidence.
+- **US-05-0192**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define canonical kernel entry signature for sys_mount with filesystem type, source, target, flags, and options blob pointer/length so that this capability is implemented with clear verification evidence.
+- **US-05-0193**: As a Substrate contributor working on 5. System Calls & Personalities, I want to introduce versioned userspace ABI container (struct mount_args/mount_args_v1) with size/version fields and explicit reserved bytes so that this capability is implemented with clear verification evidence.
+- **US-05-0194**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add compile-time _Static_assert checks for struct mount_args size/alignment/field offsets in both kernel and userspace headers so that this capability is implemented with clear verification evidence.
+- **US-05-0195**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add runtime ABI validation in sys_mount for userspace struct size/version/alignment and reserved-field zeroing so that this capability is implemented with clear verification evidence.
+- **US-05-0196**: As a Substrate contributor working on 5. System Calls & Personalities, I want to document calling convention, flag semantics, and baseline errno contract for sys_mount ABI so that this capability is implemented with clear verification evidence.
+- **US-05-0197**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 2. Filesystem Type Registration so that this capability is implemented with clear verification evidence.
+- **US-05-0198**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define vfsconf/filesystem-type descriptor with name, mount callbacks, and capability vector so that this capability is implemented with clear verification evidence.
+- **US-05-0199**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement central filesystem registry (name to mount-handler map) with lookup, duplicate detection, and lifecycle hooks so that this capability is implemented with clear verification evidence.
+- **US-05-0200**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add built-in filesystem registration path during VFS init with explicit ordering and failure handling so that this capability is implemented with clear verification evidence.
+- **US-05-0201**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add loadable-module registration API (vfs_register_module/vfs_unregister_module) with busy-mount rejection on unload so that this capability is implemented with clear verification evidence.
+- **US-05-0202**: As a Substrate contributor working on 5. System Calls & Personalities, I want to require each filesystem to publish mount capability bits (virtual, device-backed, supports_force_unmount, supports_ro, etc.) so that this capability is implemented with clear verification evidence.
+- **US-05-0203**: As a Substrate contributor working on 5. System Calls & Personalities, I want to enforce filesystem name validation and namespacing policy (e.g., virt.procfs, virt.devfs, disk.ext2) at registration so that this capability is implemented with clear verification evidence.
+- **US-05-0204**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 3. Mount Lifecycle and VFS Integration so that this capability is implemented with clear verification evidence.
+- **US-05-0205**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define mount object lifecycle states (NEW, ALLOCATED, BOUND, ROOT_ATTACHED, ACTIVE, DYING, DEAD) and legal transitions so that this capability is implemented with clear verification evidence.
+- **US-05-0206**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement vfs_mount_alloc()/vfs_mount_free() with refcount initialization, lock setup, and failure rollback so that this capability is implemented with clear verification evidence.
+- **US-05-0207**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement namespace bind step that attaches mount instance to target vnode (v_mountedhere) and records covering vnode so that this capability is implemented with clear verification evidence.
+- **US-05-0208**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement root-vnode attach/activate flow so filesystem mount handler returns root vnode before mount activation so that this capability is implemented with clear verification evidence.
+- **US-05-0209**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define unmount reference-counting and busy rules (active vnode refs, cwd/root refs, open fds) with deterministic EBUSY behavior so that this capability is implemented with clear verification evidence.
+- **US-05-0210**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement safe nested/stacked mount handling and mount-loop detection for recursive or cyclic bind attempts so that this capability is implemented with clear verification evidence.
+- **US-05-0211**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define mount propagation behavior (private/shared/slave) and implement either support or explicit ENOTSUP for non-private modes so that this capability is implemented with clear verification evidence.
+- **US-05-0212**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 4. Userspace Mount Option Handling so that this capability is implemented with clear verification evidence.
+- **US-05-0213**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define generic kernel mount-option format and parser API for userspace-provided option strings/blobs so that this capability is implemented with clear verification evidence.
+- **US-05-0214**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement copyin-first option ingestion with strict length limits, NUL termination rules, and integer overflow checks so that this capability is implemented with clear verification evidence.
+- **US-05-0215**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add typed getters/validators for standard options (ro, rw, nosuid, nodev, noexec) in generic layer so that this capability is implemented with clear verification evidence.
+- **US-05-0216**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add pass-through mechanism for filesystem-specific options with per-filesystem schema validation callback so that this capability is implemented with clear verification evidence.
+- **US-05-0217**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define option precedence and defaulting rules (syscall flags vs generic options vs filesystem defaults) so that this capability is implemented with clear verification evidence.
+- **US-05-0218**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 5. Virtual Filesystem Mounting (/dev, /proc) so that this capability is implemented with clear verification evidence.
+- **US-05-0219**: As a Substrate contributor working on 5. System Calls & Personalities, I want to register devfs mount handler through the generic filesystem registry with explicit capability declaration (virtual, nodev-safe behavior) so that this capability is implemented with clear verification evidence.
+- **US-05-0220**: As a Substrate contributor working on 5. System Calls & Personalities, I want to register procfs mount handler through the generic filesystem registry with explicit capability declaration (virtual, dynamic entries) so that this capability is implemented with clear verification evidence.
+- **US-05-0221**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement userspace-driven mount flow in early init to mount /dev and /proc through sys_mount (no kernel-only implicit mount path) so that this capability is implemented with clear verification evidence.
+- **US-05-0222**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure virtual filesystem handlers always provide a root vnode and support required dynamic population semantics so that this capability is implemented with clear verification evidence.
+- **US-05-0223**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define and enforce allowed mount options for devfs/procfs (including explicit "no options" policy where applicable) so that this capability is implemented with clear verification evidence.
+- **US-05-0224**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 6. Permission and Security Model so that this capability is implemented with clear verification evidence.
+- **US-05-0225**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define mount authorization policy (superuser and/or CAP_SYS_ADMIN equivalent) and enforce it in syscall entry path so that this capability is implemented with clear verification evidence.
+- **US-05-0226**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement and enforce mount security flags (MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV) in VFS operation paths so that this capability is implemented with clear verification evidence.
+- **US-05-0227**: As a Substrate contributor working on 5. System Calls & Personalities, I want to harden target path resolution against symlink races and traversal escapes during mount so that this capability is implemented with clear verification evidence.
+- **US-05-0228**: As a Substrate contributor working on 5. System Calls & Personalities, I want to enforce namespace isolation constraints so mount operations cannot escape caller namespace/chroot boundaries so that this capability is implemented with clear verification evidence.
+- **US-05-0229**: As a Substrate contributor working on 5. System Calls & Personalities, I want to perform mount-security audit pass and land hardening fixes for common vulnerabilities (.. escape, TOCTOU, malformed options, refcount abuse) so that this capability is implemented with clear verification evidence.
+- **US-05-0230**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 7. Error Handling and Diagnostics so that this capability is implemented with clear verification evidence.
+- **US-05-0231**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define canonical errno mapping table for mount/unmount failures (unknown fs, invalid options, permission, busy target, invalid target) so that this capability is implemented with clear verification evidence.
+- **US-05-0232**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure filesystem-specific mount errors propagate unchanged through VFS core and syscall boundary when safe so that this capability is implemented with clear verification evidence.
+- **US-05-0233**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add structured kernel logging for mount/unmount attempts (caller, fs type, source, target, flags, result) so that this capability is implemented with clear verification evidence.
+- **US-05-0234**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add diagnostic counters for mount/unmount successes/failures by errno and filesystem type so that this capability is implemented with clear verification evidence.
+- **US-05-0235**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 8. Unmount Support so that this capability is implemented with clear verification evidence.
+- **US-05-0236**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define sys_unmount ABI (target, flags) including supported lazy/force semantics and unsupported-flag behavior so that this capability is implemented with clear verification evidence.
+- **US-05-0237**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement core unmount teardown pipeline (deactivate mount, detach namespace, flush/release resources, final free) so that this capability is implemented with clear verification evidence.
+- **US-05-0238**: As a Substrate contributor working on 5. System Calls & Personalities, I want to enforce busy unmount rejection by default and force-unmount override only for filesystems that advertise support so that this capability is implemented with clear verification evidence.
+- **US-05-0239**: As a Substrate contributor working on 5. System Calls & Personalities, I want to validate safe teardown parity for both virtual and device-backed filesystems so that this capability is implemented with clear verification evidence.
+- **US-05-0240**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 9. Userland Interfaces and Tooling so that this capability is implemented with clear verification evidence.
+- **US-05-0241**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add mount(2) and unmount(2) wrappers in libsys and exported libc headers using the canonical ABI so that this capability is implemented with clear verification evidence.
+- **US-05-0242**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement/extend mount(8) utility to issue generic sys_mount requests and support both real and virtual filesystem targets so that this capability is implemented with clear verification evidence.
+- **US-05-0243**: As a Substrate contributor working on 5. System Calls & Personalities, I want to align mount(8) invocation semantics with Substrate conventions (mount <device> <mount_point> <filesystem_type>) while retaining option support so that this capability is implemented with clear verification evidence.
+- **US-05-0244**: As a Substrate contributor working on 5. System Calls & Personalities, I want to update early initialization flow to mount mandatory virtual filesystems (/dev, /proc) from userspace before dependent services start so that this capability is implemented with clear verification evidence.
+- **US-05-0245**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 10. Testing and Verification so that this capability is implemented with clear verification evidence.
+- **US-05-0246**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add kernel unit tests for mount_args ABI parsing, size/version/alignment validation, and userspace copy safety so that this capability is implemented with clear verification evidence.
+- **US-05-0247**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add kernel unit tests for filesystem registry behavior (register/lookup/duplicate/unregister busy path) so that this capability is implemented with clear verification evidence.
+- **US-05-0248**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add integration tests for mounting and unmounting /dev and /proc fully from userspace so that this capability is implemented with clear verification evidence.
+- **US-05-0249**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add negative integration tests for unknown filesystem names, malformed options, invalid targets, permission failures, and busy unmounts so that this capability is implemented with clear verification evidence.
+- **US-05-0250**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add property and fuzz targets for option parser and syscall boundary handling (size fuzzing, pointer fuzzing, option grammar fuzzing) so that this capability is implemented with clear verification evidence.
+- **US-05-0251**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 11. Audit and Refactor so that this capability is implemented with clear verification evidence.
+- **US-05-0252**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit VFS core, filesystem drivers, and init path for assumptions that mounts are kernel-internal only so that this capability is implemented with clear verification evidence.
+- **US-05-0253**: As a Substrate contributor working on 5. System Calls & Personalities, I want to refactor minimal/placeholder mount logic to require filesystem-specific mount handlers through shared VFS contracts so that this capability is implemented with clear verification evidence.
+- **US-05-0254**: As a Substrate contributor working on 5. System Calls & Personalities, I want to remove hardcoded or implicit virtual filesystem mount paths from kernel bootstrap once userspace flow is in place so that this capability is implemented with clear verification evidence.
+- **US-05-0255**: As a Substrate contributor working on 5. System Calls & Personalities, I want to resolve or remove TODO/FIXME placeholders in mount/syscall/VFS paths with complete implementation tasks so that this capability is implemented with clear verification evidence.
+- **US-05-0256**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 12. Documentation so that this capability is implemented with clear verification evidence.
+- **US-05-0257**: As a Substrate contributor working on 5. System Calls & Personalities, I want to write mount(2) man page documenting syscall ABI, argument ownership, flags, and errno behavior so that this capability is implemented with clear verification evidence.
+- **US-05-0258**: As a Substrate contributor working on 5. System Calls & Personalities, I want to write unmount(2) man page documenting teardown semantics, busy/force behavior, and error codes so that this capability is implemented with clear verification evidence.
+- **US-05-0259**: As a Substrate contributor working on 5. System Calls & Personalities, I want to write filesystem developer guide for mount handler implementation, registration, and capability reporting so that this capability is implemented with clear verification evidence.
+- **US-05-0260**: As a Substrate contributor working on 5. System Calls & Personalities, I want to document virtual filesystem mount semantics for /dev and /proc, including expected behavior during early boot so that this capability is implemented with clear verification evidence.
+- **US-05-0261**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sys_clone (Process/Thread Creation): so that this capability is implemented with clear verification evidence.
+- **US-05-0262**: As a Substrate contributor working on 5. System Calls & Personalities, I want to context Duplication: so that this capability is implemented with clear verification evidence.
+- **US-05-0263**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_VM: Share address space (refcount pmap) so that this capability is implemented with clear verification evidence.
+- **US-05-0264**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_FS: Share cwd/root (refcount nodes) so that this capability is implemented with clear verification evidence.
+- **US-05-0265**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_FILES: Share FD table (refcount table) so that this capability is implemented with clear verification evidence.
+- **US-05-0266**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_SIGHAND: Share signal handlers so that this capability is implemented with clear verification evidence.
+- **US-05-0267**: As a Substrate contributor working on 5. System Calls & Personalities, I want to stack & TLS: so that this capability is implemented with clear verification evidence.
+- **US-05-0268**: As a Substrate contributor working on 5. System Calls & Personalities, I want to switch to user-provided stack (child_stack) so that this capability is implemented with clear verification evidence.
+- **US-05-0269**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement CLONE_SETTLS: Set GDT entries (GS base) so that this capability is implemented with clear verification evidence.
+- **US-05-0270**: As a Substrate contributor working on 5. System Calls & Personalities, I want to thread Grouping: so that this capability is implemented with clear verification evidence.
+- **US-05-0271**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_THREAD: Join thread group (pgrp/tgid) so that this capability is implemented with clear verification evidence.
+- **US-05-0272**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_PARENT: Share parent process so that this capability is implemented with clear verification evidence.
+- **US-05-0273**: As a Substrate contributor working on 5. System Calls & Personalities, I want to event Notification: so that this capability is implemented with clear verification evidence.
+- **US-05-0274**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sys_select / sys_poll: so that this capability is implemented with clear verification evidence.
+- **US-05-0275**: As a Substrate contributor working on 5. System Calls & Personalities, I want to select_wait queueing logic so that this capability is implemented with clear verification evidence.
+- **US-05-0276**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define struct poll_table (wait queue list) so that this capability is implemented with clear verification evidence.
+- **US-05-0277**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement poll_initwait() / poll_freewait() so that this capability is implemented with clear verification evidence.
+- **US-05-0278**: As a Substrate contributor working on 5. System Calls & Personalities, I want to per-FD poll method calls poll_wait(wait_queue, poll_table) so that this capability is implemented with clear verification evidence.
+- **US-05-0279**: As a Substrate contributor working on 5. System Calls & Personalities, I want to timeout handling (sleep with timeout) so that this capability is implemented with clear verification evidence.
+- **US-05-0280**: As a Substrate contributor working on 5. System Calls & Personalities, I want to convert struct timeval / int timeout_ms to kernel ticks so that this capability is implemented with clear verification evidence.
+- **US-05-0281**: As a Substrate contributor working on 5. System Calls & Personalities, I want to use sched_sleep_timeout(chan, ticks) or similar so that this capability is implemented with clear verification evidence.
+- **US-05-0282**: As a Substrate contributor working on 5. System Calls & Personalities, I want to handle EINTR on signal during sleep so that this capability is implemented with clear verification evidence.
+- **US-05-0283**: As a Substrate contributor working on 5. System Calls & Personalities, I want to bitmask/Revents populating so that this capability is implemented with clear verification evidence.
+- **US-05-0284**: As a Substrate contributor working on 5. System Calls & Personalities, I want to select: Populate readfds, writefds, exceptfds bitmasks so that this capability is implemented with clear verification evidence.
+- **US-05-0285**: As a Substrate contributor working on 5. System Calls & Personalities, I want to poll: Populate revents field in each struct pollfd so that this capability is implemented with clear verification evidence.
+- **US-05-0286**: As a Substrate contributor working on 5. System Calls & Personalities, I want to return count of ready FDs so that this capability is implemented with clear verification evidence.
+- **US-05-0287**: As a Substrate contributor working on 5. System Calls & Personalities, I want to wait Queue Infrastructure: so that this capability is implemented with clear verification evidence.
+- **US-05-0288**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define struct wait_queue_head (spinlock + list head) so that this capability is implemented with clear verification evidence.
+- **US-05-0289**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define struct wait_queue_entry (thread ref + callback) so that this capability is implemented with clear verification evidence.
+- **US-05-0290**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement init_waitqueue_head() so that this capability is implemented with clear verification evidence.
+- **US-05-0291**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement add_wait_queue() / remove_wait_queue() so that this capability is implemented with clear verification evidence.
+- **US-05-0292**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement wake_up() / wake_up_interruptible() so that this capability is implemented with clear verification evidence.
+- **US-05-0293**: As a Substrate contributor working on 5. System Calls & Personalities, I want to driver Integration: so that this capability is implemented with clear verification evidence.
+- **US-05-0294**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add poll method to fs_node_t (already done) so that this capability is implemented with clear verification evidence.
+- **US-05-0295**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tTY: Wake readers on tty_flip_buffer_push so that this capability is implemented with clear verification evidence.
+- **US-05-0296**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pipe: Wake readers/writers on data availability so that this capability is implemented with clear verification evidence.
+- **US-05-0297**: As a Substrate contributor working on 5. System Calls & Personalities, I want to socket: Wake on connection/data events so that this capability is implemented with clear verification evidence.
+- **US-05-0298**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sys_epoll: so that this capability is implemented with clear verification evidence.
+- **US-05-0299**: As a Substrate contributor working on 5. System Calls & Personalities, I want to epoll_create: Allocate event context so that this capability is implemented with clear verification evidence.
+- **US-05-0300**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define struct eventpoll (rb-tree of interests, ready list) so that this capability is implemented with clear verification evidence.
+- **US-05-0301**: As a Substrate contributor working on 5. System Calls & Personalities, I want to allocate anonymous FD pointing to eventpoll so that this capability is implemented with clear verification evidence.
+- **US-05-0302**: As a Substrate contributor working on 5. System Calls & Personalities, I want to initialize spinlock and wait queue so that this capability is implemented with clear verification evidence.
+- **US-05-0303**: As a Substrate contributor working on 5. System Calls & Personalities, I want to epoll_ctl: Add/Modify/Remove file descriptors (O(1) logic) so that this capability is implemented with clear verification evidence.
+- **US-05-0304**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ePOLL_CTL_ADD: Insert into rb-tree, register callback with target FD so that this capability is implemented with clear verification evidence.
+- **US-05-0305**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ePOLL_CTL_MOD: Update event mask in existing entry so that this capability is implemented with clear verification evidence.
+- **US-05-0306**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ePOLL_CTL_DEL: Remove from rb-tree, unregister callback so that this capability is implemented with clear verification evidence.
+- **US-05-0307**: As a Substrate contributor working on 5. System Calls & Personalities, I want to handle EEXIST/ENOENT error cases so that this capability is implemented with clear verification evidence.
+- **US-05-0308**: As a Substrate contributor working on 5. System Calls & Personalities, I want to epoll_wait: Block on event list so that this capability is implemented with clear verification evidence.
+- **US-05-0309**: As a Substrate contributor working on 5. System Calls & Personalities, I want to check ready list (events already triggered) so that this capability is implemented with clear verification evidence.
+- **US-05-0310**: As a Substrate contributor working on 5. System Calls & Personalities, I want to if empty, sleep on eventpoll wait queue so that this capability is implemented with clear verification evidence.
+- **US-05-0311**: As a Substrate contributor working on 5. System Calls & Personalities, I want to copy ready events to userspace struct epoll_event array so that this capability is implemented with clear verification evidence.
+- **US-05-0312**: As a Substrate contributor working on 5. System Calls & Personalities, I want to handle maxevents limit and timeout so that this capability is implemented with clear verification evidence.
+- **US-05-0313**: As a Substrate contributor working on 5. System Calls & Personalities, I want to edge-triggered (EPOLLET): Remove from ready list after report so that this capability is implemented with clear verification evidence.
+- **US-05-0314**: As a Substrate contributor working on 5. System Calls & Personalities, I want to level-triggered: Keep in ready list if still active so that this capability is implemented with clear verification evidence.
+- **US-05-0315**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sys_execve (Loader Dispatch): so that this capability is implemented with clear verification evidence.
+- **US-05-0316**: As a Substrate contributor working on 5. System Calls & Personalities, I want to path lookup and permission check so that this capability is implemented with clear verification evidence.
+- **US-05-0317**: As a Substrate contributor working on 5. System Calls & Personalities, I want to read first 128 bytes (Shebang/Magic detection) so that this capability is implemented with clear verification evidence.
+- **US-05-0318**: As a Substrate contributor working on 5. System Calls & Personalities, I want to dispatch to correct loader (ELF, Script, COFF, PE) so that this capability is implemented with clear verification evidence.
+- **US-05-0319**: As a Substrate contributor working on 5. System Calls & Personalities, I want to argument/Environment copying to new userspace stack so that this capability is implemented with clear verification evidence.
+- **US-05-0320**: As a Substrate contributor working on 5. System Calls & Personalities, I want to bitness Integration: Update loaders (ELF/PE/AOUT) to set process bitness based on binary format so that this capability is implemented with clear verification evidence.
+- **US-05-0321**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iPC Subsystem: so that this capability is implemented with clear verification evidence.
+- **US-05-0322**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sysV Shared Memory: so that this capability is implemented with clear verification evidence.
+- **US-05-0323**: As a Substrate contributor working on 5. System Calls & Personalities, I want to shmid_ds structure and key lookup so that this capability is implemented with clear verification evidence.
+- **US-05-0324**: As a Substrate contributor working on 5. System Calls & Personalities, I want to shmget: Create/Find segment so that this capability is implemented with clear verification evidence.
+- **US-05-0325**: As a Substrate contributor working on 5. System Calls & Personalities, I want to shmat: Map segment into vm_map so that this capability is implemented with clear verification evidence.
+- **US-05-0326**: As a Substrate contributor working on 5. System Calls & Personalities, I want to shmdt: Unmap so that this capability is implemented with clear verification evidence.
+- **US-05-0327**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sysV Semaphores: so that this capability is implemented with clear verification evidence.
+- **US-05-0328**: As a Substrate contributor working on 5. System Calls & Personalities, I want to semid_ds and semaphore arrays so that this capability is implemented with clear verification evidence.
+- **US-05-0329**: As a Substrate contributor working on 5. System Calls & Personalities, I want to semop: Atomic increment/decrement/wait so that this capability is implemented with clear verification evidence.
+- **US-05-0330**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sEM_UNDO logic so that this capability is implemented with clear verification evidence.
+- **US-05-0331**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sysV Message Queues: so that this capability is implemented with clear verification evidence.
+- **US-05-0332**: As a Substrate contributor working on 5. System Calls & Personalities, I want to msqid_ds and message linked list so that this capability is implemented with clear verification evidence.
+- **US-05-0333**: As a Substrate contributor working on 5. System Calls & Personalities, I want to msgsnd/msgrcv: Blocking and non-blocking delivery so that this capability is implemented with clear verification evidence.
+- **US-05-0334**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pOSIX Shared Memory: so that this capability is implemented with clear verification evidence.
+- **US-05-0335**: As a Substrate contributor working on 5. System Calls & Personalities, I want to /dev/shm TmpFS integration so that this capability is implemented with clear verification evidence.
+- **US-05-0336**: As a Substrate contributor working on 5. System Calls & Personalities, I want to shm_open: File descriptor based access so that this capability is implemented with clear verification evidence.
+- **US-05-0337**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pOSIX Semaphores: so that this capability is implemented with clear verification evidence.
+- **US-05-0338**: As a Substrate contributor working on 5. System Calls & Personalities, I want to named (sem_open) vs Unnamed (sem_init) so that this capability is implemented with clear verification evidence.
+- **US-05-0339**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sem_t structure so that this capability is implemented with clear verification evidence.
+- **US-05-0340**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement sys_time and RTC reading so that this capability is implemented with clear verification evidence.
+- **US-05-0341**: As a Substrate contributor working on 5. System Calls & Personalities, I want to emulation Path Lookup: Check /perso/<perso>/ before root for foreign personalities so that this capability is implemented with clear verification evidence.
+- **US-05-0342**: As a Substrate contributor working on 5. System Calls & Personalities, I want to debugging & Tracing: so that this capability is implemented with clear verification evidence.
+- **US-05-0343**: As a Substrate contributor working on 5. System Calls & Personalities, I want to kDB: Built-in kernel debugger (peek/poke memory, register dump, stack trace) so that this capability is implemented with clear verification evidence.
+- **US-05-0344**: As a Substrate contributor working on 5. System Calls & Personalities, I want to serial Console: Interactive GDB stub over UART so that this capability is implemented with clear verification evidence.
+- **US-05-0345**: As a Substrate contributor working on 5. System Calls & Personalities, I want to dTrace: (As planned in ideas) Dynamic tracing framework so that this capability is implemented with clear verification evidence.
+- **US-05-0346**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 64-bit System Call ABI Enforcement: so that this capability is implemented with clear verification evidence.
+- **US-05-0347**: As a Substrate contributor working on 5. System Calls & Personalities, I want to type Definitions & Alignment: so that this capability is implemented with clear verification evidence.
+- **US-05-0348**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define off_t, time_t, ino_t, dev_t as 64-bit integers in all architectures (i386/x86_64) so that this capability is implemented with clear verification evidence.
+- **US-05-0349**: As a Substrate contributor working on 5. System Calls & Personalities, I want to verify size_t and ssize_t match register width but critical structures use explicit width types (e.g., uint64_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0350**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit stat, statfs structures for 64-bit alignment and padding so that this capability is implemented with clear verification evidence.
+- **US-05-0351**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure struct timespec and struct timeval use 64-bit seconds types so that this capability is implemented with clear verification evidence.
+- **US-05-0352**: As a Substrate contributor working on 5. System Calls & Personalities, I want to system Call Audit: so that this capability is implemented with clear verification evidence.
+- **US-05-0353**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit all file system calls (open, seek, truncate, mmap) for 64-bit offset support so that this capability is implemented with clear verification evidence.
+- **US-05-0354**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit time-related syscalls (clock_gettime, nanosleep, utimensat) for 64-bit timespecs so that this capability is implemented with clear verification evidence.
+- **US-05-0355**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit resource limit syscalls (getrlimit, setrlimit) for 64-bit values so that this capability is implemented with clear verification evidence.
+- **US-05-0356**: As a Substrate contributor working on 5. System Calls & Personalities, I want to audit recvmsg/sendmsg for struct msghdr compatibility so that this capability is implemented with clear verification evidence.
+- **US-05-0357**: As a Substrate contributor working on 5. System Calls & Personalities, I want to kernel Refactoring: so that this capability is implemented with clear verification evidence.
+- **US-05-0358**: As a Substrate contributor working on 5. System Calls & Personalities, I want to refactor sys_lseek to take 64-bit offset (split high/low registers on 32-bit if needed, or use register pairs) so that this capability is implemented with clear verification evidence.
+- **US-05-0359**: As a Substrate contributor working on 5. System Calls & Personalities, I want to refactor sys_truncate / sys_ftruncate for 64-bit lengths so that this capability is implemented with clear verification evidence.
+- **US-05-0360**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure VFS layer uses 64-bit offsets exclusively so that this capability is implemented with clear verification evidence.
+- **US-05-0361**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement sys_pselect6 / sys_ppoll with 64-bit timeout support so that this capability is implemented with clear verification evidence.
+- **US-05-0362**: As a Substrate contributor working on 5. System Calls & Personalities, I want to libC Wrappers (lib/c): so that this capability is implemented with clear verification evidence.
+- **US-05-0363**: As a Substrate contributor working on 5. System Calls & Personalities, I want to update lseek to pass 64-bit arguments correctly (EDX:EAX on i386) so that this capability is implemented with clear verification evidence.
+- **US-05-0364**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ensure _FILE_OFFSET_BITS=64 semantics are default so that this capability is implemented with clear verification evidence.
+- **US-05-0365**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement stat wrapper mapping to 64-bit kernel structure so that this capability is implemented with clear verification evidence.
+- **US-05-0366**: As a Substrate contributor working on 5. System Calls & Personalities, I want to personality Compatibility: so that this capability is implemented with clear verification evidence.
+- **US-05-0367**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement translation for legacy 32-bit syscalls (Linux old_mmap, stat64 vs stat) so that this capability is implemented with clear verification evidence.
+- **US-05-0368**: As a Substrate contributor working on 5. System Calls & Personalities, I want to freeBSD 32-bit shim layer updates per ABI so that this capability is implemented with clear verification evidence.
+- **US-05-0369**: As a Substrate contributor working on 5. System Calls & Personalities, I want to testing & Verification: so that this capability is implemented with clear verification evidence.
+- **US-05-0370**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add regression tests for large file support (>2GB and >4GB) so that this capability is implemented with clear verification evidence.
+- **US-05-0371**: As a Substrate contributor working on 5. System Calls & Personalities, I want to verify time_t overflow behavior (Year 2038 compliance) so that this capability is implemented with clear verification evidence.
+- **US-05-0372**: As a Substrate contributor working on 5. System Calls & Personalities, I want to verify structure layout with pahole or offsets test so that this capability is implemented with clear verification evidence.
+- **US-05-0373**: As a Substrate contributor working on 5. System Calls & Personalities, I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-05-0374**: As a Substrate contributor working on 5. System Calls & Personalities, I want to document the 64-bit ABI in docs/kernel/syscall_abi.md so that this capability is implemented with clear verification evidence.
+- **US-05-0375**: As a Substrate contributor working on 5. System Calls & Personalities, I want to update man2 pages for affected syscalls so that this capability is implemented with clear verification evidence.
+- **US-05-0376**: As a Substrate contributor working on 5. System Calls & Personalities, I want to personalities: so that this capability is implemented with clear verification evidence.
+- **US-05-0377**: As a Substrate contributor working on 5. System Calls & Personalities, I want to xenix & SCO Compatibility (The 6 Flavors): so that this capability is implemented with clear verification evidence.
+- **US-05-0378**: As a Substrate contributor working on 5. System Calls & Personalities, I want to variants: so that this capability is implemented with clear verification evidence.
+- **US-05-0379**: As a Substrate contributor working on 5. System Calls & Personalities, I want to microsoft Xenix 8086 (MS-X/86): so that this capability is implemented with clear verification evidence.
+- **US-05-0380**: As a Substrate contributor working on 5. System Calls & Personalities, I want to loader: Support Magic 0x140 (Old Microsoft 8086 x.out) so that this capability is implemented with clear verification evidence.
+- **US-05-0381**: As a Substrate contributor working on 5. System Calls & Personalities, I want to execution: Pure Real Mode / VM86 Container so that this capability is implemented with clear verification evidence.
+- **US-05-0382**: As a Substrate contributor working on 5. System Calls & Personalities, I want to memory: Small/Middle Memory Models (Separate I/D segments) so that this capability is implemented with clear verification evidence.
+- **US-05-0383**: As a Substrate contributor working on 5. System Calls & Personalities, I want to emulation: Trap int 10h/int 13h BIOS calls if used so that this capability is implemented with clear verification evidence.
+- **US-05-0384**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sCO Xenix 8086 (SCO-X/86): so that this capability is implemented with clear verification evidence.
+- **US-05-0385**: As a Substrate contributor working on 5. System Calls & Personalities, I want to validation: Verify syscall differences from MS variant so that this capability is implemented with clear verification evidence.
+- **US-05-0386**: As a Substrate contributor working on 5. System Calls & Personalities, I want to extensions: Support early SCO-specific ioctls or IPC so that this capability is implemented with clear verification evidence.
+- **US-05-0387**: As a Substrate contributor working on 5. System Calls & Personalities, I want to microsoft Xenix 286 (MS-X/286): Protected mode (LDTs) so that this capability is implemented with clear verification evidence.
+- **US-05-0388**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sCO Xenix 286 (SCO-X/286): Enhanced 286 support so that this capability is implemented with clear verification evidence.
+- **US-05-0389**: As a Substrate contributor working on 5. System Calls & Personalities, I want to microsoft Xenix 386 (MS-X/386): Early 32-bit (pre-1987) so that this capability is implemented with clear verification evidence.
+- **US-05-0390**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sCO Xenix 386 (SCO-X/386): The widespread 32-bit standard (v2.3) so that this capability is implemented with clear verification evidence.
+- **US-05-0391**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sCO Unix 3.2v2 (SCO-U/3.2v2): COFF based, SVR3.2 compat so that this capability is implemented with clear verification evidence.
+- **US-05-0392**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sCO Unix 3.2v4 (SCO-U/ODT3): Enhanced System V ABI (ODT 3.0) so that this capability is implemented with clear verification evidence.
+- **US-05-0393**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sCO OpenServer 5 (SCO-OSR5): Advanced COFF/ELF hybrid features so that this capability is implemented with clear verification evidence.
+- **US-05-0394**: As a Substrate contributor working on 5. System Calls & Personalities, I want to binary Loaders: so that this capability is implemented with clear verification evidence.
+- **US-05-0395**: As a Substrate contributor working on 5. System Calls & Personalities, I want to x.out (Microsoft / Xenix): so that this capability is implemented with clear verification evidence.
+- **US-05-0396**: As a Substrate contributor working on 5. System Calls & Personalities, I want to header: Magic 0x206 (286 Small), 0x20C (N86), 0x140 (8086) so that this capability is implemented with clear verification evidence.
+- **US-05-0397**: As a Substrate contributor working on 5. System Calls & Personalities, I want to segments: TEXT (RX), DATA (RW), BSS (Zero) so that this capability is implemented with clear verification evidence.
+- **US-05-0398**: As a Substrate contributor working on 5. System Calls & Personalities, I want to symbol Table: Generic Xenix symbol format so that this capability is implemented with clear verification evidence.
+- **US-05-0399**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cOFF (Common Object File Format) - SCO/SVR3: so that this capability is implemented with clear verification evidence.
+- **US-05-0400**: As a Substrate contributor working on 5. System Calls & Personalities, I want to file Header (filehdr): so that this capability is implemented with clear verification evidence.
+- **US-05-0401**: As a Substrate contributor working on 5. System Calls & Personalities, I want to magic: 0x14C (i386) so that this capability is implemented with clear verification evidence.
+- **US-05-0402**: As a Substrate contributor working on 5. System Calls & Personalities, I want to number of sections so that this capability is implemented with clear verification evidence.
+- **US-05-0403**: As a Substrate contributor working on 5. System Calls & Personalities, I want to time/Date stamp (ignored or used for link verification) so that this capability is implemented with clear verification evidence.
+- **US-05-0404**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pointer to symbol table / Number of symbols so that this capability is implemented with clear verification evidence.
+- **US-05-0405**: As a Substrate contributor working on 5. System Calls & Personalities, I want to optional Header (aouthdr): so that this capability is implemented with clear verification evidence.
+- **US-05-0406**: As a Substrate contributor working on 5. System Calls & Personalities, I want to magic: 0x10B (ZMAGIC - Demand Paged) so that this capability is implemented with clear verification evidence.
+- **US-05-0407**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define AOUT_ZMAGIC constant (0x10B) so that this capability is implemented with clear verification evidence.
+- **US-05-0408**: As a Substrate contributor working on 5. System Calls & Personalities, I want to validate magic number, reject unsupported types (OMAGIC, NMAGIC) so that this capability is implemented with clear verification evidence.
+- **US-05-0409**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tsize (Text size), dsize (Data size), bsize (BSS size) so that this capability is implemented with clear verification evidence.
+- **US-05-0410**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse tsize from offset 4 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0411**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse dsize from offset 8 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0412**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse bsize from offset 12 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0413**: As a Substrate contributor working on 5. System Calls & Personalities, I want to validate sizes are reasonable (< 2GB, page-aligned for ZMAGIC) so that this capability is implemented with clear verification evidence.
+- **US-05-0414**: As a Substrate contributor working on 5. System Calls & Personalities, I want to entry (Entry point virtual address) so that this capability is implemented with clear verification evidence.
+- **US-05-0415**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse entry from offset 16 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0416**: As a Substrate contributor working on 5. System Calls & Personalities, I want to validate entry is within .text segment bounds so that this capability is implemented with clear verification evidence.
+- **US-05-0417**: As a Substrate contributor working on 5. System Calls & Personalities, I want to text_start, data_start so that this capability is implemented with clear verification evidence.
+- **US-05-0418**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse text_start from offset 20 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0419**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse data_start from offset 24 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0420**: As a Substrate contributor working on 5. System Calls & Personalities, I want to validate text_start < data_start or handle BSS-only cases so that this capability is implemented with clear verification evidence.
+- **US-05-0421**: As a Substrate contributor working on 5. System Calls & Personalities, I want to section Headers (scnhdr): so that this capability is implemented with clear verification evidence.
+- **US-05-0422**: As a Substrate contributor working on 5. System Calls & Personalities, I want to name (.text, .data, .bss, .lib) so that this capability is implemented with clear verification evidence.
+- **US-05-0423**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse 8-byte section name (may be NUL-padded) so that this capability is implemented with clear verification evidence.
+- **US-05-0424**: As a Substrate contributor working on 5. System Calls & Personalities, I want to handle long names (pointer to string table, /offset format) so that this capability is implemented with clear verification evidence.
+- **US-05-0425**: As a Substrate contributor working on 5. System Calls & Personalities, I want to identify special sections (.lib, .comment, .debug) so that this capability is implemented with clear verification evidence.
+- **US-05-0426**: As a Substrate contributor working on 5. System Calls & Personalities, I want to paddr (Physical), vaddr (Virtual) so that this capability is implemented with clear verification evidence.
+- **US-05-0427**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse paddr from offset 8 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0428**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse vaddr from offset 12 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0429**: As a Substrate contributor working on 5. System Calls & Personalities, I want to validate vaddr is user-space address (< 0xC0000000) so that this capability is implemented with clear verification evidence.
+- **US-05-0430**: As a Substrate contributor working on 5. System Calls & Personalities, I want to size, scnptr (File offset) so that this capability is implemented with clear verification evidence.
+- **US-05-0431**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse size from offset 16 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0432**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse scnptr from offset 20 (uint32_t) so that this capability is implemented with clear verification evidence.
+- **US-05-0433**: As a Substrate contributor working on 5. System Calls & Personalities, I want to validate scnptr + size <= file size so that this capability is implemented with clear verification evidence.
+- **US-05-0434**: As a Substrate contributor working on 5. System Calls & Personalities, I want to flags (STYP_TEXT, STYP_DATA, STYP_BSS) so that this capability is implemented with clear verification evidence.
+- **US-05-0435**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define flag constants: STYP_TEXT=0x20, STYP_DATA=0x40, STYP_BSS=0x80 so that this capability is implemented with clear verification evidence.
+- **US-05-0436**: As a Substrate contributor working on 5. System Calls & Personalities, I want to map flags to pmap protections (RX, RW, RW-zero) so that this capability is implemented with clear verification evidence.
+- **US-05-0437**: As a Substrate contributor working on 5. System Calls & Personalities, I want to handle STYP_LIB (0x800) for shared library sections so that this capability is implemented with clear verification evidence.
+- **US-05-0438**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sCO Shared Libraries (.lib section): so that this capability is implemented with clear verification evidence.
+- **US-05-0439**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse .lib section header so that this capability is implemented with clear verification evidence.
+- **US-05-0440**: As a Substrate contributor working on 5. System Calls & Personalities, I want to locate section with name .lib or flag STYP_LIB so that this capability is implemented with clear verification evidence.
+- **US-05-0441**: As a Substrate contributor working on 5. System Calls & Personalities, I want to read section content from scnptr offset so that this capability is implemented with clear verification evidence.
+- **US-05-0442**: As a Substrate contributor working on 5. System Calls & Personalities, I want to path entries: Absolute path to shared library so that this capability is implemented with clear verification evidence.
+- **US-05-0443**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse path table offset from .lib header so that this capability is implemented with clear verification evidence.
+- **US-05-0444**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iterate path entries (NUL-terminated strings) so that this capability is implemented with clear verification evidence.
+- **US-05-0445**: As a Substrate contributor working on 5. System Calls & Personalities, I want to resolve library path (search /shlib, /usr/shlib) so that this capability is implemented with clear verification evidence.
+- **US-05-0446**: As a Substrate contributor working on 5. System Calls & Personalities, I want to load and map referenced shared libraries recursively so that this capability is implemented with clear verification evidence.
+- **US-05-0447**: As a Substrate contributor working on 5. System Calls & Personalities, I want to offset entries: Import method (static jump table) so that this capability is implemented with clear verification evidence.
+- **US-05-0448**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse import table offset and count so that this capability is implemented with clear verification evidence.
+- **US-05-0449**: As a Substrate contributor working on 5. System Calls & Personalities, I want to build jump table at fixed address (0x08000000 typical) so that this capability is implemented with clear verification evidence.
+- **US-05-0450**: As a Substrate contributor working on 5. System Calls & Personalities, I want to populate jump stubs (jmp [addr]) for each import so that this capability is implemented with clear verification evidence.
+- **US-05-0451**: As a Substrate contributor working on 5. System Calls & Personalities, I want to handle import ordinals vs. named imports so that this capability is implemented with clear verification evidence.
+- **US-05-0452**: As a Substrate contributor working on 5. System Calls & Personalities, I want to oMF (Intel Object Module Format) - 286/386: so that this capability is implemented with clear verification evidence.
+- **US-05-0453**: As a Substrate contributor working on 5. System Calls & Personalities, I want to record Types: so that this capability is implemented with clear verification evidence.
+- **US-05-0454**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 0x80 (THEADR): Module Name so that this capability is implemented with clear verification evidence.
+- **US-05-0455**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 0x88 (COMENT): Compiler info / Memory model so that this capability is implemented with clear verification evidence.
+- **US-05-0456**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 0x98 (SEGDEF): Segment Definition (Attributes, Size) so that this capability is implemented with clear verification evidence.
+- **US-05-0457**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 0x9A (GRPDEF): Group Definition (DGROUP) so that this capability is implemented with clear verification evidence.
+- **US-05-0458**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 0xA0 (LEDATA): Logical Enumerated Data (Content) so that this capability is implemented with clear verification evidence.
+- **US-05-0459**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 0xB0 (FIXUPP): Relocation Records (Segment-relative, Self-relative) so that this capability is implemented with clear verification evidence.
+- **US-05-0460**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 0x8A (MODEND): Module End (Main entry point) so that this capability is implemented with clear verification evidence.
+- **US-05-0461**: As a Substrate contributor working on 5. System Calls & Personalities, I want to loading Logic: Multi-pass linker/loader to resolve inter-segment references so that this capability is implemented with clear verification evidence.
+- **US-05-0462**: As a Substrate contributor working on 5. System Calls & Personalities, I want to system Call Interface: so that this capability is implemented with clear verification evidence.
+- **US-05-0463**: As a Substrate contributor working on 5. System Calls & Personalities, I want to mechanisms (ABI Differences): so that this capability is implemented with clear verification evidence.
+- **US-05-0464**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iBCS2 / SCO: so that this capability is implemented with clear verification evidence.
+- **US-05-0465**: As a Substrate contributor working on 5. System Calls & Personalities, I want to lcall 7,0 (Call Gate 0) so that this capability is implemented with clear verification evidence.
+- **US-05-0466**: As a Substrate contributor working on 5. System Calls & Personalities, I want to linux: so that this capability is implemented with clear verification evidence.
+- **US-05-0467**: As a Substrate contributor working on 5. System Calls & Personalities, I want to int 0x80 (Interrupt Vector 128) so that this capability is implemented with clear verification evidence.
+- **US-05-0468**: As a Substrate contributor working on 5. System Calls & Personalities, I want to legacy / Special: so that this capability is implemented with clear verification evidence.
+- **US-05-0469**: As a Substrate contributor working on 5. System Calls & Personalities, I want to int 0x21 (DOS emulation in VM86) so that this capability is implemented with clear verification evidence.
+- **US-05-0470**: As a Substrate contributor working on 5. System Calls & Personalities, I want to int 0x7F (Older Xenix) so that this capability is implemented with clear verification evidence.
+- **US-05-0471**: As a Substrate contributor working on 5. System Calls & Personalities, I want to aBI Translation: so that this capability is implemented with clear verification evidence.
+- **US-05-0472**: As a Substrate contributor working on 5. System Calls & Personalities, I want to aBI Translation (iBCS2): so that this capability is implemented with clear verification evidence.
+- **US-05-0473**: As a Substrate contributor working on 5. System Calls & Personalities, I want to stack Frame Decoding: so that this capability is implemented with clear verification evidence.
+- **US-05-0474**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 16-bit client: arguments at SS:SP+2 (2-byte words) so that this capability is implemented with clear verification evidence.
+- **US-05-0475**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 32-bit client: arguments at SS:ESP+4 (4-byte words) so that this capability is implemented with clear verification evidence.
+- **US-05-0476**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cXENIX Dispatcher (Syscall 0x07): so that this capability is implemented with clear verification evidence.
+- **US-05-0477**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sub-function handling (table driven) for Xenix extensions so that this capability is implemented with clear verification evidence.
+- **US-05-0478**: As a Substrate contributor working on 5. System Calls & Personalities, I want to rdchk (check for data), nap (millisecond sleep) so that this capability is implemented with clear verification evidence.
+- **US-05-0479**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ftime (System V time) so that this capability is implemented with clear verification evidence.
+- **US-05-0480**: As a Substrate contributor working on 5. System Calls & Personalities, I want to shared Memory (Xenix): so that this capability is implemented with clear verification evidence.
+- **US-05-0481**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sdget, sdfree (Create/Destroy shared data) so that this capability is implemented with clear verification evidence.
+- **US-05-0482**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sdenter, sdleave (Attach/Detach) so that this capability is implemented with clear verification evidence.
+- **US-05-0483**: As a Substrate contributor working on 5. System Calls & Personalities, I want to memory mapping: Map high memory segments via LDT so that this capability is implemented with clear verification evidence.
+- **US-05-0484**: As a Substrate contributor working on 5. System Calls & Personalities, I want to xsbrk (Extended break for huge data) so that this capability is implemented with clear verification evidence.
+- **US-05-0485**: As a Substrate contributor working on 5. System Calls & Personalities, I want to vM86 Support: so that this capability is implemented with clear verification evidence.
+- **US-05-0486**: As a Substrate contributor working on 5. System Calls & Personalities, I want to v86_init: Initialize VM86 task state so that this capability is implemented with clear verification evidence.
+- **US-05-0487**: As a Substrate contributor working on 5. System Calls & Personalities, I want to v86_sleep: Wait for interrupt/event so that this capability is implemented with clear verification evidence.
+- **US-05-0488**: As a Substrate contributor working on 5. System Calls & Personalities, I want to monitor BIOS calls trapped via GPF/Invalid Opcode so that this capability is implemented with clear verification evidence.
+- **US-05-0489**: As a Substrate contributor working on 5. System Calls & Personalities, I want to eLKS (Embeddable Linux Kernel Subset) - 16-bit Mode: so that this capability is implemented with clear verification evidence.
+- **US-05-0490**: As a Substrate contributor working on 5. System Calls & Personalities, I want to eLKS (Embeddable Linux Kernel Subset) - 16-bit Mode: so that this capability is implemented with clear verification evidence.
+- **US-05-0491**: As a Substrate contributor working on 5. System Calls & Personalities, I want to 16-Bit Execution Environment: so that this capability is implemented with clear verification evidence.
+- **US-05-0492**: As a Substrate contributor working on 5. System Calls & Personalities, I want to lDT Setup: so that this capability is implemented with clear verification evidence.
+- **US-05-0493**: As a Substrate contributor working on 5. System Calls & Personalities, I want to descriptor 0: NULL so that this capability is implemented with clear verification evidence.
+- **US-05-0494**: As a Substrate contributor working on 5. System Calls & Personalities, I want to descriptor 1: CS (Code), 16-bit conforming/non-conforming so that this capability is implemented with clear verification evidence.
+- **US-05-0495**: As a Substrate contributor working on 5. System Calls & Personalities, I want to descriptor 2: DS (Data), 16-bit expand-up/down so that this capability is implemented with clear verification evidence.
+- **US-05-0496**: As a Substrate contributor working on 5. System Calls & Personalities, I want to segmentation Logic: so that this capability is implemented with clear verification evidence.
+- **US-05-0497**: As a Substrate contributor working on 5. System Calls & Personalities, I want to small Model: CS != DS/SS so that this capability is implemented with clear verification evidence.
+- **US-05-0498**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tiny Model: CS == DS == SS (COM file style) so that this capability is implemented with clear verification evidence.
+- **US-05-0499**: As a Substrate contributor working on 5. System Calls & Personalities, I want to stack: 16-bit Stack Pointer (SP) wraparound handling so that this capability is implemented with clear verification evidence.
+- **US-05-0500**: As a Substrate contributor working on 5. System Calls & Personalities, I want to loader (a.out Minix): so that this capability is implemented with clear verification evidence.
+- **US-05-0501**: As a Substrate contributor working on 5. System Calls & Personalities, I want to header: 32-byte header (Magic, HeaderLen, Text/Data/Bss sizes) so that this capability is implemented with clear verification evidence.
+- **US-05-0502**: As a Substrate contributor working on 5. System Calls & Personalities, I want to load: Read segments into allocated low-memory pages so that this capability is implemented with clear verification evidence.
+- **US-05-0503**: As a Substrate contributor working on 5. System Calls & Personalities, I want to relocation: Applying fixups if not position independent so that this capability is implemented with clear verification evidence.
+- **US-05-0504**: As a Substrate contributor working on 5. System Calls & Personalities, I want to syscall Interface (int 0x80): so that this capability is implemented with clear verification evidence.
+- **US-05-0505**: As a Substrate contributor working on 5. System Calls & Personalities, I want to trap: IDT entry 0x80 handling 16-bit caller so that this capability is implemented with clear verification evidence.
+- **US-05-0506**: As a Substrate contributor working on 5. System Calls & Personalities, I want to argument Fetch: so that this capability is implemented with clear verification evidence.
+- **US-05-0507**: As a Substrate contributor working on 5. System Calls & Personalities, I want to read BX (First arg), CX (Second), DX (Third), SI, DI so that this capability is implemented with clear verification evidence.
+- **US-05-0508**: As a Substrate contributor working on 5. System Calls & Personalities, I want to or read stack arguments if used so that this capability is implemented with clear verification evidence.
+- **US-05-0509**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pointer Thunking: so that this capability is implemented with clear verification evidence.
+- **US-05-0510**: As a Substrate contributor working on 5. System Calls & Personalities, I want to convert DS:BX (16:16) -> Linear Address (LDT[DS].Base + BX) so that this capability is implemented with clear verification evidence.
+- **US-05-0511**: As a Substrate contributor working on 5. System Calls & Personalities, I want to bounds checking against segment limit so that this capability is implemented with clear verification evidence.
+- **US-05-0512**: As a Substrate contributor working on 5. System Calls & Personalities, I want to linux (Massive Expansion): so that this capability is implemented with clear verification evidence.
+- **US-05-0513**: As a Substrate contributor working on 5. System Calls & Personalities, I want to eLF Loader personality detection (brandelf support) so that this capability is implemented with clear verification evidence.
+- **US-05-0514**: As a Substrate contributor working on 5. System Calls & Personalities, I want to signal Compatibility: so that this capability is implemented with clear verification evidence.
+- **US-05-0515**: As a Substrate contributor working on 5. System Calls & Personalities, I want to mapping: Translate Linux signal numbers to native (e.g., SIGCHLD, SIGSTOP) so that this capability is implemented with clear verification evidence.
+- **US-05-0516**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sigaction: Translate linux_sigaction structure (mask bits) so that this capability is implemented with clear verification evidence.
+- **US-05-0517**: As a Substrate contributor working on 5. System Calls & Personalities, I want to trampoline: Linux-compatible signal return trampoline so that this capability is implemented with clear verification evidence.
+- **US-05-0518**: As a Substrate contributor working on 5. System Calls & Personalities, I want to error Codes: so that this capability is implemented with clear verification evidence.
+- **US-05-0519**: As a Substrate contributor working on 5. System Calls & Personalities, I want to map internal errno to Linux errno (arch-specific) so that this capability is implemented with clear verification evidence.
+- **US-05-0520**: As a Substrate contributor working on 5. System Calls & Personalities, I want to fS Path Translation: so that this capability is implemented with clear verification evidence.
+- **US-05-0521**: As a Substrate contributor working on 5. System Calls & Personalities, I want to /proc -> /compat/linux/proc redirection so that this capability is implemented with clear verification evidence.
+- **US-05-0522**: As a Substrate contributor working on 5. System Calls & Personalities, I want to /sys -> /compat/linux/sys redirection so that this capability is implemented with clear verification evidence.
+- **US-05-0523**: As a Substrate contributor working on 5. System Calls & Personalities, I want to at() syscalls family support so that this capability is implemented with clear verification evidence.
+- **US-05-0524**: As a Substrate contributor working on 5. System Calls & Personalities, I want to networking (socketcall): so that this capability is implemented with clear verification evidence.
+- **US-05-0525**: As a Substrate contributor working on 5. System Calls & Personalities, I want to multiplexer syscall 102 (sys_socketcall) so that this capability is implemented with clear verification evidence.
+- **US-05-0526**: As a Substrate contributor working on 5. System Calls & Personalities, I want to socket Creation & Binding: so that this capability is implemented with clear verification evidence.
+- **US-05-0527**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_SOCKET: Validate domain/type/proto, allocate socket so that this capability is implemented with clear verification evidence.
+- **US-05-0528**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_BIND: Copy address from user, call internal bind so that this capability is implemented with clear verification evidence.
+- **US-05-0529**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_CONNECT: Copy address, initiate connection so that this capability is implemented with clear verification evidence.
+- **US-05-0530**: As a Substrate contributor working on 5. System Calls & Personalities, I want to data Flow: so that this capability is implemented with clear verification evidence.
+- **US-05-0531**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_SEND/SYS_RECV: Simple IO wrappers so that this capability is implemented with clear verification evidence.
+- **US-05-0532**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_SENDTO/SYS_RECVFROM: UDP/Connectionless wrappers so that this capability is implemented with clear verification evidence.
+- **US-05-0533**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_SENDMSG/SYS_RECVMSG: Complex message structure scatter/gather so that this capability is implemented with clear verification evidence.
+- **US-05-0534**: As a Substrate contributor working on 5. System Calls & Personalities, I want to state & Options: so that this capability is implemented with clear verification evidence.
+- **US-05-0535**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_LISTEN: Set backlog so that this capability is implemented with clear verification evidence.
+- **US-05-0536**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_ACCEPT: New socket file descriptor creation so that this capability is implemented with clear verification evidence.
+- **US-05-0537**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_GETSOCKNAME/SYS_GETPEERNAME: Address retrieval so that this capability is implemented with clear verification evidence.
+- **US-05-0538**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_SETSOCKOPT/SYS_GETSOCKOPT: Option translation (Linux <-> Native) so that this capability is implemented with clear verification evidence.
+- **US-05-0539**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_SHUTDOWN: Connection termination so that this capability is implemented with clear verification evidence.
+- **US-05-0540**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sYS_SOCKETPAIR: Connected pair creation so that this capability is implemented with clear verification evidence.
+- **US-05-0541**: As a Substrate contributor working on 5. System Calls & Personalities, I want to iPC Multiplexer (sys_ipc): so that this capability is implemented with clear verification evidence.
+- **US-05-0542**: As a Substrate contributor working on 5. System Calls & Personalities, I want to multiplexer syscall 117 so that this capability is implemented with clear verification evidence.
+- **US-05-0543**: As a Substrate contributor working on 5. System Calls & Personalities, I want to **Semaphores (sem*):** so that this capability is implemented with clear verification evidence.
+- **US-05-0544**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sEMOP: Atomic array operations so that this capability is implemented with clear verification evidence.
+- **US-05-0545**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sEMGET: Get/Create semaphore set so that this capability is implemented with clear verification evidence.
+- **US-05-0546**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sEMCTL: Control operations (GETVAL, SETVAL, IPC_RMID) so that this capability is implemented with clear verification evidence.
+- **US-05-0547**: As a Substrate contributor working on 5. System Calls & Personalities, I want to **Message Queues (msg*):** so that this capability is implemented with clear verification evidence.
+- **US-05-0548**: As a Substrate contributor working on 5. System Calls & Personalities, I want to mSGSND: Send message with priority so that this capability is implemented with clear verification evidence.
+- **US-05-0549**: As a Substrate contributor working on 5. System Calls & Personalities, I want to mSGRCV: Receive message (blocking/non-blocking) so that this capability is implemented with clear verification evidence.
+- **US-05-0550**: As a Substrate contributor working on 5. System Calls & Personalities, I want to mSGGET: Get/Create message queue so that this capability is implemented with clear verification evidence.
+- **US-05-0551**: As a Substrate contributor working on 5. System Calls & Personalities, I want to mSGCTL: Control operations so that this capability is implemented with clear verification evidence.
+- **US-05-0552**: As a Substrate contributor working on 5. System Calls & Personalities, I want to **Shared Memory (shm*):** so that this capability is implemented with clear verification evidence.
+- **US-05-0553**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sHMAT: Attach segment to address space so that this capability is implemented with clear verification evidence.
+- **US-05-0554**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sHMDT: Detach segment so that this capability is implemented with clear verification evidence.
+- **US-05-0555**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sHMGET: Get/Create shared memory segment so that this capability is implemented with clear verification evidence.
+- **US-05-0556**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sHMCTL: Control operations (lock/unlock/remove) so that this capability is implemented with clear verification evidence.
+- **US-05-0557**: As a Substrate contributor working on 5. System Calls & Personalities, I want to ioctls (sys_ioctl): so that this capability is implemented with clear verification evidence.
+- **US-05-0558**: As a Substrate contributor working on 5. System Calls & Personalities, I want to termios: so that this capability is implemented with clear verification evidence.
+- **US-05-0559**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tCGETS: Translate native termios to Linux termios so that this capability is implemented with clear verification evidence.
+- **US-05-0560**: As a Substrate contributor working on 5. System Calls & Personalities, I want to tCSETS/TCSETSW/TCSETSF: Translate Linux termios to native so that this capability is implemented with clear verification evidence.
+- **US-05-0561**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sockio: so that this capability is implemented with clear verification evidence.
+- **US-05-0562**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sIOCGIFNAME: Get interface name by index so that this capability is implemented with clear verification evidence.
+- **US-05-0563**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sIOCGIFADDR: Get interface IP address so that this capability is implemented with clear verification evidence.
+- **US-05-0564**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sIOCGIFBRDADDR: Get broadcast address so that this capability is implemented with clear verification evidence.
+- **US-05-0565**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sIOCGIFNETMASK: Get network mask so that this capability is implemented with clear verification evidence.
+- **US-05-0566**: As a Substrate contributor working on 5. System Calls & Personalities, I want to process Creation (sys_clone extended): so that this capability is implemented with clear verification evidence.
+- **US-05-0567**: As a Substrate contributor working on 5. System Calls & Personalities, I want to flags Handling: so that this capability is implemented with clear verification evidence.
+- **US-05-0568**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_PARENT_SETTID: Store Child TID at parent_tidptr so that this capability is implemented with clear verification evidence.
+- **US-05-0569**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_CHILD_CLEARTID: Store Child TID at child_tidptr and clear on exit so that this capability is implemented with clear verification evidence.
+- **US-05-0570**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_SETTLS: Set GDT/FS/GS base for Thread Local Storage so that this capability is implemented with clear verification evidence.
+- **US-05-0571**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_FILES: Share file descriptor table (refcounting) so that this capability is implemented with clear verification evidence.
+- **US-05-0572**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_FS: Share filesystem info (cwd, root) so that this capability is implemented with clear verification evidence.
+- **US-05-0573**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_SIGHAND: Share signal handlers so that this capability is implemented with clear verification evidence.
+- **US-05-0574**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cLONE_VM: Share address space (threads) so that this capability is implemented with clear verification evidence.
+- **US-05-0575**: As a Substrate contributor working on 5. System Calls & Personalities, I want to minix/386: so that this capability is implemented with clear verification evidence.
+- **US-05-0576**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement send/receive message passing syscalls so that this capability is implemented with clear verification evidence.
+- **US-05-0577**: As a Substrate contributor working on 5. System Calls & Personalities, I want to map Minix 3 kernel messages to native calls so that this capability is implemented with clear verification evidence.
+- **US-05-0578**: As a Substrate contributor working on 5. System Calls & Personalities, I want to freeBSD: so that this capability is implemented with clear verification evidence.
+- **US-05-0579**: As a Substrate contributor working on 5. System Calls & Personalities, I want to eLF Loader personality detection so that this capability is implemented with clear verification evidence.
+- **US-05-0580**: As a Substrate contributor working on 5. System Calls & Personalities, I want to complete thr_new implementation so that this capability is implemented with clear verification evidence.
+- **US-05-0581**: As a Substrate contributor working on 5. System Calls & Personalities, I want to freeBSD 14.3 Compatibility (i386): so that this capability is implemented with clear verification evidence.
+- **US-05-0582**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement struct kinfo_proc (FreeBSD 14.3 layout) so that this capability is implemented with clear verification evidence.
+- **US-05-0583**: As a Substrate contributor working on 5. System Calls & Personalities, I want to binary Compatibility: so that this capability is implemented with clear verification evidence.
+- **US-05-0584**: As a Substrate contributor working on 5. System Calls & Personalities, I want to investigate need for virtual /dev/kmem emulation for legacy binaries so that this capability is implemented with clear verification evidence.
+- **US-05-0585**: As a Substrate contributor working on 5. System Calls & Personalities, I want to native Porting: so that this capability is implemented with clear verification evidence.
+- **US-05-0586**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement libkvm shim in libsys for porting BSD tools to native ABI so that this capability is implemented with clear verification evidence.
+- **US-05-0587**: As a Substrate contributor working on 5. System Calls & Personalities, I want to process Translation: Logic to map native process_t to kinfo_proc so that this capability is implemented with clear verification evidence.
+- **US-05-0588**: As a Substrate contributor working on 5. System Calls & Personalities, I want to bSD-Style sysctl Syscall Surface (Native + Compat): so that this capability is implemented with clear verification evidence.
+- **US-05-0589**: As a Substrate contributor working on 5. System Calls & Personalities, I want to native Syscall ABI Contract: so that this capability is implemented with clear verification evidence.
+- **US-05-0590**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define canonical native sysctl syscall argument contract with versioned request structure so that this capability is implemented with clear verification evidence.
+- **US-05-0591**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define strict userspace pointer/length validation rules for old/new buffers so that this capability is implemented with clear verification evidence.
+- **US-05-0592**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define canonical atomic read/write semantics when both old and new values are present so that this capability is implemented with clear verification evidence.
+- **US-05-0593**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define canonical size-discovery semantics when old buffer pointer is NULL so that this capability is implemented with clear verification evidence.
+- **US-05-0594**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define canonical subtree-enumeration request contract for user tooling so that this capability is implemented with clear verification evidence.
+- **US-05-0595**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define canonical metadata-query request contract (type, flags, description, ABI class) so that this capability is implemented with clear verification evidence.
+- **US-05-0596**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add syscall table entries and personality dispatch wiring for native ABI so that this capability is implemented with clear verification evidence.
+- **US-05-0597**: As a Substrate contributor working on 5. System Calls & Personalities, I want to mIB + Name Resolution Paths: so that this capability is implemented with clear verification evidence.
+- **US-05-0598**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement MIB-based syscall path end-to-end (int *name, u_int namelen) so that this capability is implemented with clear verification evidence.
+- **US-05-0599**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement kernel name-to-MIB translation operation for userspace helpers so that this capability is implemented with clear verification evidence.
+- **US-05-0600**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement kernel MIB-to-name translation operation for diagnostics/tooling so that this capability is implemented with clear verification evidence.
+- **US-05-0601**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define max name depth and token-length limits with explicit EINVAL behavior so that this capability is implemented with clear verification evidence.
+- **US-05-0602**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add strict rejection path for mixed name/MIB invocation modes so that this capability is implemented with clear verification evidence.
+- **US-05-0603**: As a Substrate contributor working on 5. System Calls & Personalities, I want to error and Compatibility Semantics: so that this capability is implemented with clear verification evidence.
+- **US-05-0604**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define BSD-consistent errno mapping (ENOENT, ENOMEM, EINVAL, EFAULT, EPERM, EACCES, ENOTDIR) so that this capability is implemented with clear verification evidence.
+- **US-05-0605**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement forward-compat handling for unknown request-structure extensions so that this capability is implemented with clear verification evidence.
+- **US-05-0606**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement backward-compat handling for older request versions so that this capability is implemented with clear verification evidence.
+- **US-05-0607**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add compatibility tests for partial reads, retry loops, and concurrent value mutation so that this capability is implemented with clear verification evidence.
+- **US-05-0608**: As a Substrate contributor working on 5. System Calls & Personalities, I want to permission & Capability Enforcement: so that this capability is implemented with clear verification evidence.
+- **US-05-0609**: As a Substrate contributor working on 5. System Calls & Personalities, I want to wire syscall path into unified sysctl access-control hooks so that this capability is implemented with clear verification evidence.
+- **US-05-0610**: As a Substrate contributor working on 5. System Calls & Personalities, I want to enforce read/write separation at syscall boundary before handler invocation so that this capability is implemented with clear verification evidence.
+- **US-05-0611**: As a Substrate contributor working on 5. System Calls & Personalities, I want to enforce capability-gated writes for privileged nodes so that this capability is implemented with clear verification evidence.
+- **US-05-0612**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add per-personality gate checks before exposing compatibility namespace nodes so that this capability is implemented with clear verification evidence.
+- **US-05-0613**: As a Substrate contributor working on 5. System Calls & Personalities, I want to personality Integration & Overlays: so that this capability is implemented with clear verification evidence.
+- **US-05-0614**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define personality overlay model (native base tree + personality-specific branches) so that this capability is implemented with clear verification evidence.
+- **US-05-0615**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement FreeBSD compatibility overlay for __sysctl expectations so that this capability is implemented with clear verification evidence.
+- **US-05-0616**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement NetBSD/OpenBSD compatibility overlay scaffolding with explicit unsupported-node behavior so that this capability is implemented with clear verification evidence.
+- **US-05-0617**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement per-personality node visibility filters in traversal and enumeration paths so that this capability is implemented with clear verification evidence.
+- **US-05-0618**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add compatibility shims translating personality-specific MIBs to native internal nodes where feasible so that this capability is implemented with clear verification evidence.
+- **US-05-0619**: As a Substrate contributor working on 5. System Calls & Personalities, I want to userspace ABI Tests (Syscall Layer): so that this capability is implemented with clear verification evidence.
+- **US-05-0620**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add integration tests for native MIB reads/writes, size probes, and metadata queries so that this capability is implemented with clear verification evidence.
+- **US-05-0621**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add integration tests for enumeration of children and deep subtree walks so that this capability is implemented with clear verification evidence.
+- **US-05-0622**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add negative tests for malformed pointers, truncated MIBs, and invalid type writes so that this capability is implemented with clear verification evidence.
+- **US-05-0623**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add race tests for concurrent read/write against lock-protected nodes so that this capability is implemented with clear verification evidence.
+- **US-05-0624**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add ABI snapshot tests ensuring stable syscall behavior across kernel revisions so that this capability is implemented with clear verification evidence.
+- **US-05-0625**: As a Substrate contributor working on 5. System Calls & Personalities, I want to bSD Family (NetBSD/OpenBSD): so that this capability is implemented with clear verification evidence.
+- **US-05-0626**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement __sysctl personality entrypoint backed by shared native sysctl core so that this capability is implemented with clear verification evidence.
+- **US-05-0627**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement NetBSD/OpenBSD-specific compatibility mapping table for legacy MIB constants so that this capability is implemented with clear verification evidence.
+- **US-05-0628**: As a Substrate contributor working on 5. System Calls & Personalities, I want to add personality tests validating expected __sysctl behavior and errno semantics so that this capability is implemented with clear verification evidence.
+- **US-05-0629**: As a Substrate contributor working on 5. System Calls & Personalities, I want to support BSD-specific syscalls (ktrace, pledge/unveil) so that this capability is implemented with clear verification evidence.
+- **US-05-0630**: As a Substrate contributor working on 5. System Calls & Personalities, I want to solaris (SVR4): so that this capability is implemented with clear verification evidence.
+- **US-05-0631**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement SVR4 syscalls (getdents64, stream ioctls) so that this capability is implemented with clear verification evidence.
+- **US-05-0632**: As a Substrate contributor working on 5. System Calls & Personalities, I want to support Solaris door IPC emulation so that this capability is implemented with clear verification evidence.
+- **US-05-0633**: As a Substrate contributor working on 5. System Calls & Personalities, I want to eLF Loader Improvements: so that this capability is implemented with clear verification evidence.
+- **US-05-0634**: As a Substrate contributor working on 5. System Calls & Personalities, I want to stack Setup: Properly terminate argv/envp vectors so that this capability is implemented with clear verification evidence.
+- **US-05-0635**: As a Substrate contributor working on 5. System Calls & Personalities, I want to default Environment: Populate PATH and TERM so that this capability is implemented with clear verification evidence.
+- **US-05-0636**: As a Substrate contributor working on 5. System Calls & Personalities, I want to auxiliary Vector: Populate AT_PHDR/PHENT/PHNUM/ENTRY for TLS support so that this capability is implemented with clear verification evidence.
+- **US-05-0637**: As a Substrate contributor working on 5. System Calls & Personalities, I want to interpreter: Handle PT_INTERP (load ld.so) so that this capability is implemented with clear verification evidence.
+- **US-05-0638**: As a Substrate contributor working on 5. System Calls & Personalities, I want to auxiliary Vector: so that this capability is implemented with clear verification evidence.
+- **US-05-0639**: As a Substrate contributor working on 5. System Calls & Personalities, I want to populate AT_PHDR, AT_PHENT, AT_PHNUM so that this capability is implemented with clear verification evidence.
+- **US-05-0640**: As a Substrate contributor working on 5. System Calls & Personalities, I want to populate AT_ENTRY, AT_BASE (interpreter base) so that this capability is implemented with clear verification evidence.
+- **US-05-0641**: As a Substrate contributor working on 5. System Calls & Personalities, I want to populate AT_EXECFN, AT_PLATFORM so that this capability is implemented with clear verification evidence.
+- **US-05-0642**: As a Substrate contributor working on 5. System Calls & Personalities, I want to populate AT_RANDOM, AT_SECURE so that this capability is implemented with clear verification evidence.
+- **US-05-0643**: As a Substrate contributor working on 5. System Calls & Personalities, I want to shebang Support (exec_script): so that this capability is implemented with clear verification evidence.
+- **US-05-0644**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse #! line so that this capability is implemented with clear verification evidence.
+- **US-05-0645**: As a Substrate contributor working on 5. System Calls & Personalities, I want to handle recursion depth limits (prevent loops) so that this capability is implemented with clear verification evidence.
+- **US-05-0646**: As a Substrate contributor working on 5. System Calls & Personalities, I want to argument parsing (#! /bin/sh -x) so that this capability is implemented with clear verification evidence.
+- **US-05-0647**: As a Substrate contributor working on 5. System Calls & Personalities, I want to cOFF Loader (Legacy/Static): so that this capability is implemented with clear verification evidence.
+- **US-05-0648**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse File Header and Optional Header so that this capability is implemented with clear verification evidence.
+- **US-05-0649**: As a Substrate contributor working on 5. System Calls & Personalities, I want to map Sections (Text, Data, BSS) to fixed addresses so that this capability is implemented with clear verification evidence.
+- **US-05-0650**: As a Substrate contributor working on 5. System Calls & Personalities, I want to basic relocation support (for Xenix 386) so that this capability is implemented with clear verification evidence.
+- **US-05-0651**: As a Substrate contributor working on 5. System Calls & Personalities, I want to pE Loader (EFI/Native): so that this capability is implemented with clear verification evidence.
+- **US-05-0652**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse DOS Header -> PE Header so that this capability is implemented with clear verification evidence.
+- **US-05-0653**: As a Substrate contributor working on 5. System Calls & Personalities, I want to parse Data Directories (Import/Export/Reloc) so that this capability is implemented with clear verification evidence.
+- **US-05-0654**: As a Substrate contributor working on 5. System Calls & Personalities, I want to map Image Base and Sections so that this capability is implemented with clear verification evidence.
+- **US-05-0655**: As a Substrate contributor working on 5. System Calls & Personalities, I want to eFI Support: so that this capability is implemented with clear verification evidence.
+- **US-05-0656**: As a Substrate contributor working on 5. System Calls & Personalities, I want to implement IAT (Import Address Table) patching so that this capability is implemented with clear verification evidence.
+- **US-05-0657**: As a Substrate contributor working on 5. System Calls & Personalities, I want to substrate Native PE: so that this capability is implemented with clear verification evidence.
+- **US-05-0658**: As a Substrate contributor working on 5. System Calls & Personalities, I want to define Subsystem ID for Substrate (e.g., in sys/pe.h) so that this capability is implemented with clear verification evidence.
+- **US-05-0659**: As a Substrate contributor working on 5. System Calls & Personalities, I want to native Syscalls: Thunks for syscall instruction directly in PE text so that this capability is implemented with clear verification evidence.
+- **US-05-0660**: As a Substrate contributor working on 5. System Calls & Personalities, I want to relocations: Full .reloc processing (Base Relocations) for ASLR/PIC so that this capability is implemented with clear verification evidence.
+- **US-05-0661**: As a Substrate contributor working on 5. System Calls & Personalities, I want to a.out Loader (Legacy/Multi-OS): so that this capability is implemented with clear verification evidence.
+- **US-05-0662**: As a Substrate contributor working on 5. System Calls & Personalities, I want to legacy a.out: Implement exec_aout for OMAGIC/QMAGIC/ZMAGIC binaries so that this capability is implemented with clear verification evidence.
+- **US-05-0663**: As a Substrate contributor working on 5. System Calls & Personalities, I want to unified a.out Loader: Create a common exec_aout loader for 32-bit a.out (Linux/BSD/Minix) that dispatches based on machine ID/magic so that this capability is implemented with clear verification evidence.
+- **US-05-0664**: As a Substrate contributor working on 5. System Calls & Personalities, I want to sunOS 4.0.x (Sun386i): Support Sun386i a.out format and personality so that this capability is implemented with clear verification evidence.
+- **US-05-0665**: As a Substrate contributor working on 5. System Calls & Personalities, I want to personality / Migration: so that this capability is implemented with clear verification evidence.
+- **US-05-0666**: As a Substrate contributor working on 5. System Calls & Personalities, I want to syscall Translation: Remap foreign syscall numbers to native so that this capability is implemented with clear verification evidence.
+- **US-05-0667**: As a Substrate contributor working on 5. System Calls & Personalities, I want to errno Translation: Remap error codes so that this capability is implemented with clear verification evidence.
+- **US-05-0668**: As a Substrate contributor working on 5. System Calls & Personalities, I want to signal Translation: Remap signal numbers so that this capability is implemented with clear verification evidence.
+- **US-05-0669**: As a Substrate contributor working on 5. System Calls & Personalities, I want to fork() Completeness: so that this capability is implemented with clear verification evidence.
+- **US-05-0670**: As a Substrate contributor working on 5. System Calls & Personalities, I want to copy-on-Write: Duplication of VM space (refcounts) so that this capability is implemented with clear verification evidence.
+- **US-05-0671**: As a Substrate contributor working on 5. System Calls & Personalities, I want to file Descriptors: Increment refcounts on all FDs so that this capability is implemented with clear verification evidence.
+- **US-05-0672**: As a Substrate contributor working on 5. System Calls & Personalities, I want to vfork: Shared VM space, parent blocked until child exec/exit so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-05-0001** (EARS/Ubiquitous): The Substrate system shall system Call ABI (64-bit Clean):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0002** (EARS/Ubiquitous): The Substrate system shall type Definitions:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0003** (EARS/Ubiquitous): The Substrate system shall define off_t, time_t, ino_t, blkcnt_t as 64-bit types in sys/types.h.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0004** (EARS/Ubiquitous): The Substrate system shall verify alignment requirements (8-byte alignment for 64-bit types on i386 stack).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0005** (EARS/Ubiquitous): The Substrate system shall system Call Audit:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0006** (EARS/Ubiquitous): The Substrate system shall audit all existing syscalls for argument types (int vs long vs long long).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0007** (EARS/Ubiquitous): The Substrate system shall identify syscalls needing 64-bit arguments pair splitting on 32-bit (e.g. lseek, truncate, mmap).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0008** (EARS/Ubiquitous): The Substrate system shall kernel Refactoring:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0009** (EARS/Ubiquitous): The Substrate system shall native sys_lseek takes 64-bit offset (split hi/lo on 32-bit stack).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0010** (EARS/Ubiquitous): The Substrate system shall native sys_ftruncate takes 64-bit length (split hi/lo on 32-bit stack).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0011** (EARS/Ubiquitous): The Substrate system shall sys_mmap offset is 64-bit (using split words on i386).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0012** (EARS/Ubiquitous): The Substrate system shall struct stat uses 64-bit ino_t, off_t, blkcnt_t, time_t.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0013** (EARS/Ubiquitous): The Substrate system shall libC Wrappers:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0014** (EARS/Ubiquitous): The Substrate system shall update lseek wrapper to pass high/low words on 32-bit.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0015** (EARS/Ubiquitous): The Substrate system shall update ftruncate wrapper.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0016** (EARS/Ubiquitous): The Substrate system shall update stat/fstat wrappers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0017** (EARS/Ubiquitous): The Substrate system shall personality Compatibility:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0018** (EARS/Ubiquitous): The Substrate system shall ensure 32-bit Linux personality handles register splitting for 64-bit args correctly.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0019** (EARS/Ubiquitous): The Substrate system shall ensure native personality mandates 64-bit types.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0020** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0021** (EARS/Ubiquitous): The Substrate system shall large File Support (LFS): Test creating/seeking > 2GB files.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0022** (EARS/Ubiquitous): The Substrate system shall y2038: Test time_t overflow handling.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0023** (EARS/Ubiquitous): The Substrate system shall mechanisms:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0024** (EARS/Ubiquitous): The Substrate system shall pTY Subsystem (Unix98/System V) - Massive Expansion:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0025** (EARS/Ubiquitous): The Substrate system shall core PTY Driver (/dev/pts/ + /dev/ptmx):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0026** (EARS/Ubiquitous): The Substrate system shall devPTS Filesystem (pts_fs):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0027** (EARS/Ubiquitous): The Substrate system shall pts_mount(): Mount logic.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0028** (EARS/Ubiquitous): The Substrate system shall pts_lookup(): Resolve PTY indices to vnodes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0029** (EARS/Ubiquitous): The Substrate system shall pts_getattr(): Synthesize attributes (uid/gid/mode).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0030** (EARS/Ubiquitous): The Substrate system shall pts_readdir(): List active PTYs.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0031** (EARS/Ubiquitous): The Substrate system shall multiplexer (/dev/ptmx):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0032** (EARS/Ubiquitous): The Substrate system shall ptmx_open(): Allocate next free pts index (0..255+).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0033** (EARS/Ubiquitous): The Substrate system shall create master/slave tty structures.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0034** (EARS/Ubiquitous): The Substrate system shall initialize queues and termios defaults.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0035** (EARS/Ubiquitous): The Substrate system shall data Path:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0036** (EARS/Ubiquitous): The Substrate system shall master Write: Input to Slave Read queue.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0037** (EARS/Ubiquitous): The Substrate system shall slave Write: Input to Master Read queue.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0038** (EARS/Ubiquitous): The Substrate system shall ring Buffers: Lockless (or locked) circular buffers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0039** (EARS/Ubiquitous): The Substrate system shall iOCTL API (libc support):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0040** (EARS/Ubiquitous): The Substrate system shall tIOCGPTN (Get PTY Number): Return index for ptsname().
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0041** (EARS/Ubiquitous): The Substrate system shall tIOCSPTLCK (Lock/Unlock): Handle unlockpt() (prevent race conditions).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0042** (EARS/Ubiquitous): The Substrate system shall tIOCGPKT (Packet Mode): Control byte for master (flush/stop/start/ioctl).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0043** (EARS/Ubiquitous): The Substrate system shall tIOCSIG (Signal): Send specific signal to slave process group.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0044** (EARS/Ubiquitous): The Substrate system shall line Discipline (N_TTY):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0045** (EARS/Ubiquitous): The Substrate system shall input Processing (c_iflag):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0046** (EARS/Ubiquitous): The Substrate system shall iGNBRK, BRKINT (Break handling).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0047** (EARS/Ubiquitous): The Substrate system shall iGNPAR, PARMRK, INPCK (Parity).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0048** (EARS/Ubiquitous): The Substrate system shall iSTRIP (Strip 8th bit).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0049** (EARS/Ubiquitous): The Substrate system shall iNLCR, IGNCR, ICRNL (CR/LF mapping).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0050** (EARS/Ubiquitous): The Substrate system shall iXON, IXOFF (Software flow control XON/XOFF).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0051** (EARS/Ubiquitous): The Substrate system shall output Processing (c_oflag):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0052** (EARS/Ubiquitous): The Substrate system shall oPOST (Enable processing).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0053** (EARS/Ubiquitous): The Substrate system shall oNLCR (NL -> CR/NL translation).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0054** (EARS/Ubiquitous): The Substrate system shall local Processing (c_lflag):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0055** (EARS/Ubiquitous): The Substrate system shall iSIG (Signal generation: VINTR, VQUIT, VSUSP).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0056** (EARS/Ubiquitous): The Substrate system shall iCANON (Canonical mode / Line editing).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0057** (EARS/Ubiquitous): The Substrate system shall eCHO, ECHOE (Erase), ECHOK (Kill), ECHONL.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0058** (EARS/Ubiquitous): The Substrate system shall iEXTEN (Extended processing).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0059** (EARS/Ubiquitous): The Substrate system shall tOSTOP (Background write SIGTTOU).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0060** (EARS/Ubiquitous): The Substrate system shall control Characters (c_cc):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0061** (EARS/Ubiquitous): The Substrate system shall vEOF, VEOL (End of file/line).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0062** (EARS/Ubiquitous): The Substrate system shall vERASE, VKILL (Editing).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0063** (EARS/Ubiquitous): The Substrate system shall vMIN, VTIME (Non-canonical read timing).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0064** (EARS/Ubiquitous): The Substrate system shall sys_statvfs: Filesystem statistics.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0065** (EARS/Ubiquitous): The Substrate system shall implement sys_statvfs/sys_fstatvfs.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0066** (EARS/Ubiquitous): The Substrate system shall integrate with vfs_statfs.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0067** (EARS/Ubiquitous): The Substrate system shall bSD-style Sys_mount Interface & Mount Framework:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0068** (EARS/Ubiquitous): The Substrate system shall aBI Application Interface:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0069** (EARS/Ubiquitous): The Substrate system shall define sys_mount syscall signature (type, source, target, flags, data/len).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0070** (EARS/Ubiquitous): The Substrate system shall create sys/sys/mount.h with syscall definitions.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0071** (EARS/Ubiquitous): The Substrate system shall define struct mount_args equivalent for versioned arguments.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0072** (EARS/Ubiquitous): The Substrate system shall document calling conventions and flag semantics in comments.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0073** (EARS/Ubiquitous): The Substrate system shall add build-time assertions for structure size and alignment.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0074** (EARS/Ubiquitous): The Substrate system shall filesystem Type Registration:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0075** (EARS/Ubiquitous): The Substrate system shall define struct vfsconf or equivalent for filesystem metadata.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0076** (EARS/Ubiquitous): The Substrate system shall create vfs_register() / vfs_unregister() API.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0077** (EARS/Ubiquitous): The Substrate system shall implement internal hashtable/list for filesystem types.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0078** (EARS/Ubiquitous): The Substrate system shall add capability reporting per filesystem type.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0079** (EARS/Ubiquitous): The Substrate system shall ensure filesystem names are validated and namespaced.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0080** (EARS/Ubiquitous): The Substrate system shall mount Lifecycle & VFS Integration:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0081** (EARS/Ubiquitous): The Substrate system shall define struct mount (kernel generic mount structure).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0082** (EARS/Ubiquitous): The Substrate system shall implement vfs_mount_alloc() and vfs_mount_free().
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0083** (EARS/Ubiquitous): The Substrate system shall implement mount binding to VFS namespace (vnode attachment).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0084** (EARS/Ubiquitous): The Substrate system shall implement reference counting and busy checks.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0085** (EARS/Ubiquitous): The Substrate system shall ensure mounts can be stacked or nested safely.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0086** (EARS/Ubiquitous): The Substrate system shall generic Option Parsing:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0087** (EARS/Ubiquitous): The Substrate system shall design generic mount option parser (key=value string/blob).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0088** (EARS/Ubiquitous): The Substrate system shall create API for filesystems to retrieve options.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0089** (EARS/Ubiquitous): The Substrate system shall implement type-safe option getters (int, string, bool).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0090** (EARS/Ubiquitous): The Substrate system shall validate standard options (ro, nosuid, nodev, noexec) generically.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0091** (EARS/Ubiquitous): The Substrate system shall ensure strict validation and copying of userspace data.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0092** (EARS/Ubiquitous): The Substrate system shall virtual Filesystem Support (/dev, /proc):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0093** (EARS/Ubiquitous): The Substrate system shall define mount handler for devfs (mounting /dev).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0094** (EARS/Ubiquitous): The Substrate system shall define mount handler for procfs (mounting /proc).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0095** (EARS/Ubiquitous): The Substrate system shall implement userspace-driven mounting of virtual filesystems via sys_mount.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0096** (EARS/Ubiquitous): The Substrate system shall ensure root vnodes are correctly tied to mount points.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0097** (EARS/Ubiquitous): The Substrate system shall privilege & Security Model:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0098** (EARS/Ubiquitous): The Substrate system shall add suser() / cap_check() for mount syscall.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0099** (EARS/Ubiquitous): The Substrate system shall implement sys_mount flag validation (detect conflicting flags).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0100** (EARS/Ubiquitous): The Substrate system shall ensure mount points are valid directories.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0101** (EARS/Ubiquitous): The Substrate system shall prevent mounting over critical system paths without override.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0102** (EARS/Ubiquitous): The Substrate system shall audit for mount-related vulnerabilities (symlinks, race conditions).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0103** (EARS/Ubiquitous): The Substrate system shall error Handling & Diagnostics:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0104** (EARS/Ubiquitous): The Substrate system shall define EUNKNOWNFS and other specific error codes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0105** (EARS/Ubiquitous): The Substrate system shall propagate errors from filesystem-specific init back to syscall.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0106** (EARS/Ubiquitous): The Substrate system shall add kernel logging for failed mount attempts.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0107** (EARS/Ubiquitous): The Substrate system shall unmount Semantics:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0108** (EARS/Ubiquitous): The Substrate system shall define sys_unmount syscall signature and flags (FORCE, DETACH).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0109** (EARS/Ubiquitous): The Substrate system shall implement VFS layer unmount logic (busy checks).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0110** (EARS/Ubiquitous): The Substrate system shall add filesystem-specific unmount callback.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0111** (EARS/Ubiquitous): The Substrate system shall safe teardown of virtual and real filesystems.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0112** (EARS/Ubiquitous): The Substrate system shall userland Interfaces & Tooling:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0113** (EARS/Ubiquitous): The Substrate system shall add mount(2) and unmount(2) wrappers to libc.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0114** (EARS/Ubiquitous): The Substrate system shall create/Update mount(8) utility in bin/ capable of mounting /dev.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0115** (EARS/Ubiquitous): The Substrate system shall support mount -t type dev dir syntax.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0116** (EARS/Ubiquitous): The Substrate system shall update early boot (init) to mount /dev and /proc explicitly.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0117** (EARS/Ubiquitous): The Substrate system shall testing & Verification:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0118** (EARS/Ubiquitous): The Substrate system shall unit tests for mount argument parsing and validation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0119** (EARS/Ubiquitous): The Substrate system shall integration tests mounting and unmounting /dev and /proc from userspace.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0120** (EARS/Ubiquitous): The Substrate system shall tests for error conditions (invalid FS type, bad options, permission failure).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0121** (EARS/Ubiquitous): The Substrate system shall property and fuzz tests targeting mount option parsing.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0122** (EARS/Ubiquitous): The Substrate system shall audit & Refactor:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0123** (EARS/Ubiquitous): The Substrate system shall audit existing VFS code for assumptions preventing userspace mounting.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0124** (EARS/Ubiquitous): The Substrate system shall remove hardcoded kernel mounts once userspace tools work.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0125** (EARS/Ubiquitous): The Substrate system shall clean up temporary hacks in vfs_init.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0126** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0127** (EARS/Ubiquitous): The Substrate system shall create man/man2/mount.2 describing syscall ABI and flags.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0128** (EARS/Ubiquitous): The Substrate system shall create man/man2/unmount.2.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0129** (EARS/Ubiquitous): The Substrate system shall write Filesystem Developer Guide describing how to implement a mount handler.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0130** (EARS/Ubiquitous): The Substrate system shall implement sys_ioctl framework.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0131** (EARS/Ubiquitous): The Substrate system shall implement sys_pipe and sys_dup2.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0132** (EARS/Ubiquitous): The Substrate system shall compatibility Syscalls (Deep Dive):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0133** (EARS/Ubiquitous): The Substrate system shall bSD-style sys_mount Framework:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0134** (EARS/Ubiquitous): The Substrate system shall group 1: sys_mount ABI Definition.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0135** (EARS/Ubiquitous): The Substrate system shall define canonical mount(2) signature with options blob support. <!-- sys/include/sys/syscall.h, sys/kern/syscall.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0136** (EARS/Ubiquitous): The Substrate system shall implement versioned struct mount_args for ABI stability. <!-- include/sys/mount.h -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0137** (EARS/Ubiquitous): The Substrate system shall document MNT_* flags and error code semantics (EFAULT, EINVAL, EPERM). <!-- docs/abi/mount.md -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0138** (EARS/Ubiquitous): The Substrate system shall add runtime validation for userspace structure alignment and size. <!-- sys/kern/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0139** (EARS/Ubiquitous): The Substrate system shall group 2: Filesystem Type Registration.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0140** (EARS/Ubiquitous): The Substrate system shall implement central vfs_register string-to-vfsops registry. <!-- sys/vfs/vfs_conf.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0141** (EARS/Ubiquitous): The Substrate system shall implement vfs_unregister for safe filesystem module removal. <!-- sys/vfs/vfs_conf.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0142** (EARS/Ubiquitous): The Substrate system shall add capability reporting to struct vfsops (e.g. read-only only). <!-- sys/vfs/vfs.h -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0143** (EARS/Ubiquitous): The Substrate system shall implement FS name validation and namespacing logic. <!-- sys/vfs/vfs_conf.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0144** (EARS/Ubiquitous): The Substrate system shall group 3: Mount Lifecycle & VFS Integration.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0145** (EARS/Ubiquitous): The Substrate system shall implement vfs_mount_alloc() to initialize struct mount instances. <!-- sys/vfs/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0146** (EARS/Ubiquitous): The Substrate system shall implement binding logic to attach root vnode to namespace. <!-- sys/vfs/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0147** (EARS/Ubiquitous): The Substrate system shall implement mount reference-counting for safety during unmount. <!-- sys/vfs/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0148** (EARS/Ubiquitous): The Substrate system shall implement nested mount support and loop detection. <!-- sys/vfs/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0149** (EARS/Ubiquitous): The Substrate system shall group 4: Userspace Mount Option Handling.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0150** (EARS/Ubiquitous): The Substrate system shall implement generic mount option parser for key-value strings. <!-- sys/vfs/vfs_options.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0151** (EARS/Ubiquitous): The Substrate system shall implement safe copying and validation of userspace option blobs. <!-- sys/vfs/vfs_options.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0152** (EARS/Ubiquitous): The Substrate system shall support filesystem-specific options passed via the parser. <!-- sys/vfs/vfs_options.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0153** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall define and document option precedence and fallback behaviors. <!-- man/man2/mount.2 -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0154** (EARS/Ubiquitous): The Substrate system shall group 5: Virtual Filesystem Mounting (/dev, /proc).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0155** (EARS/Ubiquitous): The Substrate system shall define DevFS mount handler with root vnode generation. <!-- sys/fs/devfs/devfs_vfsops.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0156** (EARS/Ubiquitous): The Substrate system shall define ProcFS mount handler with dynamic PID-based population. <!-- sys/fs/procfs/procfs_vfsops.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0157** (EARS/Ubiquitous): The Substrate system shall implement userspace-driven mounting of /dev and /proc entirely from init. <!-- bin/init/main.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0158** (EARS/Ubiquitous): The Substrate system shall define mandatory mount options for virtual filesystems. <!-- sys/fs/virtual_fs.h -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0159** (EARS/Ubiquitous): The Substrate system shall group 6: Permission & Security Model.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0160** (EARS/Ubiquitous): The Substrate system shall implement capability-checks (CAP_SYS_ADMIN) for sys_mount. <!-- sys/kern/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0161** (EARS/Ubiquitous): The Substrate system shall implement MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV enforcement. <!-- sys/vfs/vfs_vnode.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0162** (EARS/Ubiquitous): The Substrate system shall audit and harden against mount-point escape attacks. <!-- sys/vfs/vfs_lookup.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0163** (EARS/Ubiquitous): The Substrate system shall implement mount-point target validation (must be directory, must be owned). <!-- sys/vfs/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0164** (EARS/Ubiquitous): The Substrate system shall group 7: Error Handling & Diagnostics.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0165** (EARS/Ubiquitous): The Substrate system shall define granular E* error codes for mount failures (ENODEV, EINVAL, ENOTDIR, EBUSY). <!-- sys/include/sys/errno.h -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0166** (EARS/Ubiquitous): The Substrate system shall implement structured kernel logging for mount/unmount operations. <!-- sys/vfs/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0167** (EARS/Ubiquitous): The Substrate system shall ensure clean error propagation from FS driver to userspace. <!-- sys/vfs/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0168** (EARS/Ubiquitous): The Substrate system shall group 8: Unmount Support.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0169** (EARS/Ubiquitous): The Substrate system shall define sys_unmount(path, flags) syscall interface. <!-- sys/include/sys/syscall.h -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0170** (EARS/Ubiquitous): The Substrate system shall implement vfs_unmount() core with resource reclamation. <!-- sys/vfs/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0171** (EARS/Ubiquitous): The Substrate system shall implement MNT_FORCE and MNT_DEFERRED unmount logic. <!-- sys/vfs/vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0172** (EARS/Ubiquitous): The Substrate system shall group 9: Userland Interfaces & Tooling.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0173** (EARS/Ubiquitous): The Substrate system shall add mount(2) and unmount(2) wrappers to libc. <!-- lib/libc/sys/mount.S -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0174** (EARS/Ubiquitous): The Substrate system shall implement basic mount(8) utility for shell usage. <!-- bin/mount/mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0175** (EARS/Ubiquitous): The Substrate system shall document required invocation patterns for early boot mounting in /sbin/init. <!-- docs/boot.md -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0176** (EARS/Ubiquitous): The Substrate system shall group 10: Testing & Verification.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0177** (EARS/Ubiquitous): The Substrate system shall unit tests for mount_args parsing and alignment validation. <!-- sys/tests/test_vfs_mount.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0178** (EARS/Ubiquitous): The Substrate system shall integration test: Mount/unmount sequence for DevFS and ProcFS. <!-- sys/tests/test_vfs_integration.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0179** (EARS/Ubiquitous): The Substrate system shall negative tests for error conditions (unknown FS, bad options, permission failure). <!-- sys/tests/test_vfs_errors.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0180** (EARS/Ubiquitous): The Substrate system shall property and fuzz tests targeting mount option parsing. <!-- sys/tests/test_vfs_fuzz.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0181** (EARS/Ubiquitous): The Substrate system shall group 11: Audit & Refactor.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0182** (EARS/Ubiquitous): The Substrate system shall audit existing VFS code for assumptions precluding userspace mounting. <!-- sys/vfs/ -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0183** (EARS/Ubiquitous): The Substrate system shall eliminate existing TODOs in vfs_mount.c and syscall.c. <!-- sys/kern/syscall.c -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0184** (EARS/Ubiquitous): The Substrate system shall group 12: Documentation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0185** (EARS/Ubiquitous): The Substrate system shall create mount(2) manpage describing ABI, flags, and options. <!-- man/man2/mount.2 -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0186** (EARS/Ubiquitous): The Substrate system shall create Filesystem Developer Guide for vfsops implementations. <!-- docs/vfs_dev.md -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0187** (EARS/Ubiquitous): The Substrate system shall document virtual filesystem mount semantics and expected behaviors. <!-- docs/virtual_fs.md -->.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0188** (EARS/Ubiquitous): The Substrate system shall commit-Atomic Expansion (sys_mount/mount framework).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0189** (EARS/Ubiquitous): The Substrate system shall execution Rule: Enforce "one checklist item = one commit" for all items in this expansion.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0190** (EARS/Ubiquitous): The Substrate system shall 1. sys_mount ABI Definition.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0191** (EARS/Ubiquitous): The Substrate system shall reserve and wire canonical syscall numbers for SYS_mount and SYS_unmount in native/Linux/FreeBSD personality dispatch tables.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0192** (EARS/Ubiquitous): The Substrate system shall define canonical kernel entry signature for sys_mount with filesystem type, source, target, flags, and options blob pointer/length.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0193** (EARS/Ubiquitous): The Substrate system shall introduce versioned userspace ABI container (struct mount_args/mount_args_v1) with size/version fields and explicit reserved bytes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0194** (EARS/Ubiquitous): The Substrate system shall add compile-time _Static_assert checks for struct mount_args size/alignment/field offsets in both kernel and userspace headers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0195** (EARS/Ubiquitous): The Substrate system shall add runtime ABI validation in sys_mount for userspace struct size/version/alignment and reserved-field zeroing.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0196** (EARS/Ubiquitous): The Substrate system shall document calling convention, flag semantics, and baseline errno contract for sys_mount ABI.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0197** (EARS/Ubiquitous): The Substrate system shall 2. Filesystem Type Registration.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0198** (EARS/Ubiquitous): The Substrate system shall define vfsconf/filesystem-type descriptor with name, mount callbacks, and capability vector.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0199** (EARS/Ubiquitous): The Substrate system shall implement central filesystem registry (name to mount-handler map) with lookup, duplicate detection, and lifecycle hooks.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0200** (EARS/Ubiquitous): The Substrate system shall add built-in filesystem registration path during VFS init with explicit ordering and failure handling.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0201** (EARS/Ubiquitous): The Substrate system shall add loadable-module registration API (vfs_register_module/vfs_unregister_module) with busy-mount rejection on unload.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0202** (EARS/Ubiquitous): The Substrate system shall require each filesystem to publish mount capability bits (virtual, device-backed, supports_force_unmount, supports_ro, etc.).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0203** (EARS/Ubiquitous): The Substrate system shall enforce filesystem name validation and namespacing policy (e.g., virt.procfs, virt.devfs, disk.ext2) at registration.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0204** (EARS/Ubiquitous): The Substrate system shall 3. Mount Lifecycle and VFS Integration.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0205** (EARS/Ubiquitous): The Substrate system shall define mount object lifecycle states (NEW, ALLOCATED, BOUND, ROOT_ATTACHED, ACTIVE, DYING, DEAD) and legal transitions.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0206** (EARS/Ubiquitous): The Substrate system shall implement vfs_mount_alloc()/vfs_mount_free() with refcount initialization, lock setup, and failure rollback.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0207** (EARS/Ubiquitous): The Substrate system shall implement namespace bind step that attaches mount instance to target vnode (v_mountedhere) and records covering vnode.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0208** (EARS/Ubiquitous): The Substrate system shall implement root-vnode attach/activate flow so filesystem mount handler returns root vnode before mount activation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0209** (EARS/Ubiquitous): The Substrate system shall define unmount reference-counting and busy rules (active vnode refs, cwd/root refs, open fds) with deterministic EBUSY behavior.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0210** (EARS/Ubiquitous): The Substrate system shall implement safe nested/stacked mount handling and mount-loop detection for recursive or cyclic bind attempts.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0211** (EARS/Ubiquitous): The Substrate system shall define mount propagation behavior (private/shared/slave) and implement either support or explicit ENOTSUP for non-private modes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0212** (EARS/Ubiquitous): The Substrate system shall 4. Userspace Mount Option Handling.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0213** (EARS/Ubiquitous): The Substrate system shall define generic kernel mount-option format and parser API for userspace-provided option strings/blobs.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0214** (EARS/Ubiquitous): The Substrate system shall implement copyin-first option ingestion with strict length limits, NUL termination rules, and integer overflow checks.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0215** (EARS/Ubiquitous): The Substrate system shall add typed getters/validators for standard options (ro, rw, nosuid, nodev, noexec) in generic layer.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0216** (EARS/Ubiquitous): The Substrate system shall add pass-through mechanism for filesystem-specific options with per-filesystem schema validation callback.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0217** (EARS/Ubiquitous): The Substrate system shall define option precedence and defaulting rules (syscall flags vs generic options vs filesystem defaults).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0218** (EARS/Ubiquitous): The Substrate system shall 5. Virtual Filesystem Mounting (/dev, /proc).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0219** (EARS/Ubiquitous): The Substrate system shall register devfs mount handler through the generic filesystem registry with explicit capability declaration (virtual, nodev-safe behavior).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0220** (EARS/Ubiquitous): The Substrate system shall register procfs mount handler through the generic filesystem registry with explicit capability declaration (virtual, dynamic entries).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0221** (EARS/Ubiquitous): The Substrate system shall implement userspace-driven mount flow in early init to mount /dev and /proc through sys_mount (no kernel-only implicit mount path).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0222** (EARS/Ubiquitous): The Substrate system shall ensure virtual filesystem handlers always provide a root vnode and support required dynamic population semantics.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0223** (EARS/Ubiquitous): The Substrate system shall define and enforce allowed mount options for devfs/procfs (including explicit "no options" policy where applicable).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0224** (EARS/Ubiquitous): The Substrate system shall 6. Permission and Security Model.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0225** (EARS/Ubiquitous): The Substrate system shall define mount authorization policy (superuser and/or CAP_SYS_ADMIN equivalent) and enforce it in syscall entry path.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0226** (EARS/Ubiquitous): The Substrate system shall implement and enforce mount security flags (MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV) in VFS operation paths.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0227** (EARS/Ubiquitous): The Substrate system shall harden target path resolution against symlink races and traversal escapes during mount.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0228** (EARS/Ubiquitous): The Substrate system shall enforce namespace isolation constraints so mount operations cannot escape caller namespace/chroot boundaries.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0229** (EARS/Ubiquitous): The Substrate system shall perform mount-security audit pass and land hardening fixes for common vulnerabilities (.. escape, TOCTOU, malformed options, refcount abuse).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0230** (EARS/Ubiquitous): The Substrate system shall 7. Error Handling and Diagnostics.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0231** (EARS/Ubiquitous): The Substrate system shall define canonical errno mapping table for mount/unmount failures (unknown fs, invalid options, permission, busy target, invalid target).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0232** (EARS/Ubiquitous): The Substrate system shall ensure filesystem-specific mount errors propagate unchanged through VFS core and syscall boundary when safe.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0233** (EARS/Ubiquitous): The Substrate system shall add structured kernel logging for mount/unmount attempts (caller, fs type, source, target, flags, result).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0234** (EARS/Ubiquitous): The Substrate system shall add diagnostic counters for mount/unmount successes/failures by errno and filesystem type.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0235** (EARS/Ubiquitous): The Substrate system shall 8. Unmount Support.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0236** (EARS/Ubiquitous): The Substrate system shall define sys_unmount ABI (target, flags) including supported lazy/force semantics and unsupported-flag behavior.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0237** (EARS/Ubiquitous): The Substrate system shall implement core unmount teardown pipeline (deactivate mount, detach namespace, flush/release resources, final free).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0238** (EARS/Ubiquitous): The Substrate system shall enforce busy unmount rejection by default and force-unmount override only for filesystems that advertise support.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0239** (EARS/Ubiquitous): The Substrate system shall validate safe teardown parity for both virtual and device-backed filesystems.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0240** (EARS/Ubiquitous): The Substrate system shall 9. Userland Interfaces and Tooling.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0241** (EARS/Ubiquitous): The Substrate system shall add mount(2) and unmount(2) wrappers in libsys and exported libc headers using the canonical ABI.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0242** (EARS/Ubiquitous): The Substrate system shall implement/extend mount(8) utility to issue generic sys_mount requests and support both real and virtual filesystem targets.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0243** (EARS/Ubiquitous): The Substrate system shall align mount(8) invocation semantics with Substrate conventions (mount <device> <mount_point> <filesystem_type>) while retaining option support.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0244** (EARS/Ubiquitous): The Substrate system shall update early initialization flow to mount mandatory virtual filesystems (/dev, /proc) from userspace before dependent services start.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0245** (EARS/Ubiquitous): The Substrate system shall 10. Testing and Verification.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0246** (EARS/Ubiquitous): The Substrate system shall add kernel unit tests for mount_args ABI parsing, size/version/alignment validation, and userspace copy safety.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0247** (EARS/Ubiquitous): The Substrate system shall add kernel unit tests for filesystem registry behavior (register/lookup/duplicate/unregister busy path).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0248** (EARS/Ubiquitous): The Substrate system shall add integration tests for mounting and unmounting /dev and /proc fully from userspace.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0249** (EARS/Ubiquitous): The Substrate system shall add negative integration tests for unknown filesystem names, malformed options, invalid targets, permission failures, and busy unmounts.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0250** (EARS/Ubiquitous): The Substrate system shall add property and fuzz targets for option parser and syscall boundary handling (size fuzzing, pointer fuzzing, option grammar fuzzing).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0251** (EARS/Ubiquitous): The Substrate system shall 11. Audit and Refactor.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0252** (EARS/Ubiquitous): The Substrate system shall audit VFS core, filesystem drivers, and init path for assumptions that mounts are kernel-internal only.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0253** (EARS/Ubiquitous): The Substrate system shall refactor minimal/placeholder mount logic to require filesystem-specific mount handlers through shared VFS contracts.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0254** (EARS/Ubiquitous): The Substrate system shall remove hardcoded or implicit virtual filesystem mount paths from kernel bootstrap once userspace flow is in place.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0255** (EARS/Ubiquitous): The Substrate system shall resolve or remove TODO/FIXME placeholders in mount/syscall/VFS paths with complete implementation tasks.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0256** (EARS/Ubiquitous): The Substrate system shall 12. Documentation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0257** (EARS/Ubiquitous): The Substrate system shall write mount(2) man page documenting syscall ABI, argument ownership, flags, and errno behavior.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0258** (EARS/Ubiquitous): The Substrate system shall write unmount(2) man page documenting teardown semantics, busy/force behavior, and error codes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0259** (EARS/Ubiquitous): The Substrate system shall write filesystem developer guide for mount handler implementation, registration, and capability reporting.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0260** (EARS/Ubiquitous): The Substrate system shall document virtual filesystem mount semantics for /dev and /proc, including expected behavior during early boot.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0261** (EARS/Ubiquitous): The Substrate system shall sys_clone (Process/Thread Creation):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0262** (EARS/Ubiquitous): The Substrate system shall context Duplication:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0263** (EARS/Ubiquitous): The Substrate system shall cLONE_VM: Share address space (refcount pmap).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0264** (EARS/Ubiquitous): The Substrate system shall cLONE_FS: Share cwd/root (refcount nodes).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0265** (EARS/Ubiquitous): The Substrate system shall cLONE_FILES: Share FD table (refcount table).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0266** (EARS/Ubiquitous): The Substrate system shall cLONE_SIGHAND: Share signal handlers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0267** (EARS/Ubiquitous): The Substrate system shall stack & TLS:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0268** (EARS/Ubiquitous): The Substrate system shall switch to user-provided stack (child_stack).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0269** (EARS/Ubiquitous): The Substrate system shall implement CLONE_SETTLS: Set GDT entries (GS base).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0270** (EARS/Ubiquitous): The Substrate system shall thread Grouping:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0271** (EARS/Ubiquitous): The Substrate system shall cLONE_THREAD: Join thread group (pgrp/tgid).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0272** (EARS/Ubiquitous): The Substrate system shall cLONE_PARENT: Share parent process.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0273** (EARS/Ubiquitous): The Substrate system shall event Notification:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0274** (EARS/Ubiquitous): The Substrate system shall sys_select / sys_poll:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0275** (EARS/Ubiquitous): The Substrate system shall select_wait queueing logic.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0276** (EARS/Ubiquitous): The Substrate system shall define struct poll_table (wait queue list).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0277** (EARS/Ubiquitous): The Substrate system shall implement poll_initwait() / poll_freewait().
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0278** (EARS/Ubiquitous): The Substrate system shall per-FD poll method calls poll_wait(wait_queue, poll_table).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0279** (EARS/Ubiquitous): The Substrate system shall timeout handling (sleep with timeout).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0280** (EARS/Ubiquitous): The Substrate system shall convert struct timeval / int timeout_ms to kernel ticks.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0281** (EARS/Ubiquitous): The Substrate system shall use sched_sleep_timeout(chan, ticks) or similar.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0282** (EARS/Ubiquitous): The Substrate system shall handle EINTR on signal during sleep.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0283** (EARS/Ubiquitous): The Substrate system shall bitmask/Revents populating.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0284** (EARS/Ubiquitous): The Substrate system shall select: Populate readfds, writefds, exceptfds bitmasks.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0285** (EARS/Ubiquitous): The Substrate system shall poll: Populate revents field in each struct pollfd.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0286** (EARS/Ubiquitous): The Substrate system shall return count of ready FDs.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0287** (EARS/Ubiquitous): The Substrate system shall wait Queue Infrastructure:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0288** (EARS/Ubiquitous): The Substrate system shall define struct wait_queue_head (spinlock + list head).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0289** (EARS/Ubiquitous): The Substrate system shall define struct wait_queue_entry (thread ref + callback).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0290** (EARS/Ubiquitous): The Substrate system shall implement init_waitqueue_head().
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0291** (EARS/Ubiquitous): The Substrate system shall implement add_wait_queue() / remove_wait_queue().
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0292** (EARS/Ubiquitous): The Substrate system shall implement wake_up() / wake_up_interruptible().
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0293** (EARS/Ubiquitous): The Substrate system shall driver Integration:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0294** (EARS/Ubiquitous): The Substrate system shall add poll method to fs_node_t (already done).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0295** (EARS/Ubiquitous): The Substrate system shall tTY: Wake readers on tty_flip_buffer_push.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0296** (EARS/Ubiquitous): The Substrate system shall pipe: Wake readers/writers on data availability.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0297** (EARS/Ubiquitous): The Substrate system shall socket: Wake on connection/data events.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0298** (EARS/Ubiquitous): The Substrate system shall sys_epoll:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0299** (EARS/Ubiquitous): The Substrate system shall epoll_create: Allocate event context.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0300** (EARS/Ubiquitous): The Substrate system shall define struct eventpoll (rb-tree of interests, ready list).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0301** (EARS/Ubiquitous): The Substrate system shall allocate anonymous FD pointing to eventpoll.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0302** (EARS/Ubiquitous): The Substrate system shall initialize spinlock and wait queue.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0303** (EARS/Ubiquitous): The Substrate system shall epoll_ctl: Add/Modify/Remove file descriptors (O(1) logic).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0304** (EARS/Ubiquitous): The Substrate system shall ePOLL_CTL_ADD: Insert into rb-tree, register callback with target FD.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0305** (EARS/Ubiquitous): The Substrate system shall ePOLL_CTL_MOD: Update event mask in existing entry.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0306** (EARS/Ubiquitous): The Substrate system shall ePOLL_CTL_DEL: Remove from rb-tree, unregister callback.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0307** (EARS/Ubiquitous): The Substrate system shall handle EEXIST/ENOENT error cases.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0308** (EARS/Ubiquitous): The Substrate system shall epoll_wait: Block on event list.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0309** (EARS/Ubiquitous): The Substrate system shall check ready list (events already triggered).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0310** (EARS/Ubiquitous): When empty, sleep on eventpoll wait queue, the Substrate system shall satisfy the specified behavior.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0311** (EARS/Ubiquitous): The Substrate system shall copy ready events to userspace struct epoll_event array.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0312** (EARS/Ubiquitous): The Substrate system shall handle maxevents limit and timeout.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0313** (EARS/Ubiquitous): The Substrate system shall edge-triggered (EPOLLET): Remove from ready list after report.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0314** (EARS/Ubiquitous): The Substrate system shall level-triggered: Keep in ready list if still active.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0315** (EARS/Ubiquitous): The Substrate system shall sys_execve (Loader Dispatch):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0316** (EARS/Ubiquitous): The Substrate system shall path lookup and permission check.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0317** (EARS/Ubiquitous): The Substrate system shall read first 128 bytes (Shebang/Magic detection).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0318** (EARS/Ubiquitous): The Substrate system shall dispatch to correct loader (ELF, Script, COFF, PE).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0319** (EARS/Ubiquitous): The Substrate system shall argument/Environment copying to new userspace stack.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0320** (EARS/Ubiquitous): The Substrate system shall bitness Integration: Update loaders (ELF/PE/AOUT) to set process bitness based on binary format.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0321** (EARS/Ubiquitous): The Substrate system shall iPC Subsystem:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0322** (EARS/Ubiquitous): The Substrate system shall sysV Shared Memory:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0323** (EARS/Ubiquitous): The Substrate system shall shmid_ds structure and key lookup.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0324** (EARS/Ubiquitous): The Substrate system shall shmget: Create/Find segment.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0325** (EARS/Ubiquitous): The Substrate system shall shmat: Map segment into vm_map.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0326** (EARS/Ubiquitous): The Substrate system shall shmdt: Unmap.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0327** (EARS/Ubiquitous): The Substrate system shall sysV Semaphores:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0328** (EARS/Ubiquitous): The Substrate system shall semid_ds and semaphore arrays.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0329** (EARS/Ubiquitous): The Substrate system shall semop: Atomic increment/decrement/wait.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0330** (EARS/Ubiquitous): The Substrate system shall sEM_UNDO logic.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0331** (EARS/Ubiquitous): The Substrate system shall sysV Message Queues:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0332** (EARS/Ubiquitous): The Substrate system shall msqid_ds and message linked list.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0333** (EARS/Ubiquitous): The Substrate system shall msgsnd/msgrcv: Blocking and non-blocking delivery.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0334** (EARS/Ubiquitous): The Substrate system shall pOSIX Shared Memory:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0335** (EARS/Ubiquitous): The Substrate system shall /dev/shm TmpFS integration.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0336** (EARS/Ubiquitous): The Substrate system shall shm_open: File descriptor based access.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0337** (EARS/Ubiquitous): The Substrate system shall pOSIX Semaphores:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0338** (EARS/Ubiquitous): The Substrate system shall named (sem_open) vs Unnamed (sem_init).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0339** (EARS/Ubiquitous): The Substrate system shall sem_t structure.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0340** (EARS/Ubiquitous): The Substrate system shall implement sys_time and RTC reading.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0341** (EARS/Ubiquitous): The Substrate system shall emulation Path Lookup: Check /perso/<perso>/ before root for foreign personalities.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0342** (EARS/Ubiquitous): The Substrate system shall debugging & Tracing:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0343** (EARS/Ubiquitous): The Substrate system shall kDB: Built-in kernel debugger (peek/poke memory, register dump, stack trace).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0344** (EARS/Ubiquitous): The Substrate system shall serial Console: Interactive GDB stub over UART.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0345** (EARS/Ubiquitous): The Substrate system shall dTrace: (As planned in ideas) Dynamic tracing framework.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0346** (EARS/Ubiquitous): The Substrate system shall 64-bit System Call ABI Enforcement:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0347** (EARS/Ubiquitous): The Substrate system shall type Definitions & Alignment:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0348** (EARS/Ubiquitous): The Substrate system shall define off_t, time_t, ino_t, dev_t as 64-bit integers in all architectures (i386/x86_64).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0349** (EARS/Ubiquitous): The Substrate system shall verify size_t and ssize_t match register width but critical structures use explicit width types (e.g., uint64_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0350** (EARS/Ubiquitous): The Substrate system shall audit stat, statfs structures for 64-bit alignment and padding.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0351** (EARS/Ubiquitous): The Substrate system shall ensure struct timespec and struct timeval use 64-bit seconds types.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0352** (EARS/Ubiquitous): The Substrate system shall system Call Audit:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0353** (EARS/Ubiquitous): The Substrate system shall audit all file system calls (open, seek, truncate, mmap) for 64-bit offset support.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0354** (EARS/Ubiquitous): The Substrate system shall audit time-related syscalls (clock_gettime, nanosleep, utimensat) for 64-bit timespecs.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0355** (EARS/Ubiquitous): The Substrate system shall audit resource limit syscalls (getrlimit, setrlimit) for 64-bit values.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0356** (EARS/Ubiquitous): The Substrate system shall audit recvmsg/sendmsg for struct msghdr compatibility.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0357** (EARS/Ubiquitous): The Substrate system shall kernel Refactoring:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0358** (EARS/Ubiquitous): The Substrate system shall refactor sys_lseek to take 64-bit offset (split high/low registers on 32-bit if needed, or use register pairs).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0359** (EARS/Ubiquitous): The Substrate system shall refactor sys_truncate / sys_ftruncate for 64-bit lengths.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0360** (EARS/Ubiquitous): The Substrate system shall ensure VFS layer uses 64-bit offsets exclusively.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0361** (EARS/Ubiquitous): The Substrate system shall implement sys_pselect6 / sys_ppoll with 64-bit timeout support.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0362** (EARS/Ubiquitous): The Substrate system shall libC Wrappers (lib/c):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0363** (EARS/Ubiquitous): The Substrate system shall update lseek to pass 64-bit arguments correctly (EDX:EAX on i386).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0364** (EARS/Ubiquitous): The Substrate system shall ensure _FILE_OFFSET_BITS=64 semantics are default.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0365** (EARS/Ubiquitous): The Substrate system shall implement stat wrapper mapping to 64-bit kernel structure.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0366** (EARS/Ubiquitous): The Substrate system shall personality Compatibility:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0367** (EARS/Ubiquitous): The Substrate system shall implement translation for legacy 32-bit syscalls (Linux old_mmap, stat64 vs stat).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0368** (EARS/Ubiquitous): The Substrate system shall freeBSD 32-bit shim layer updates per ABI.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0369** (EARS/Ubiquitous): The Substrate system shall testing & Verification:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0370** (EARS/Ubiquitous): The Substrate system shall add regression tests for large file support (>2GB and >4GB).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0371** (EARS/Ubiquitous): The Substrate system shall verify time_t overflow behavior (Year 2038 compliance).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0372** (EARS/Ubiquitous): The Substrate system shall verify structure layout with pahole or offsets test.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0373** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0374** (EARS/Ubiquitous): The Substrate system shall document the 64-bit ABI in docs/kernel/syscall_abi.md.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0375** (EARS/Ubiquitous): The Substrate system shall update man2 pages for affected syscalls.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0376** (EARS/Ubiquitous): The Substrate system shall personalities:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0377** (EARS/Ubiquitous): The Substrate system shall xenix & SCO Compatibility (The 6 Flavors):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0378** (EARS/Ubiquitous): The Substrate system shall variants:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0379** (EARS/Ubiquitous): The Substrate system shall microsoft Xenix 8086 (MS-X/86):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0380** (EARS/Ubiquitous): The Substrate system shall loader: Support Magic 0x140 (Old Microsoft 8086 x.out).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0381** (EARS/Ubiquitous): The Substrate system shall execution: Pure Real Mode / VM86 Container.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0382** (EARS/Ubiquitous): The Substrate system shall memory: Small/Middle Memory Models (Separate I/D segments).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0383** (EARS/Ubiquitous): The Substrate system shall emulation: Trap int 10h/int 13h BIOS calls if used.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0384** (EARS/Ubiquitous): The Substrate system shall sCO Xenix 8086 (SCO-X/86):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0385** (EARS/Ubiquitous): The Substrate system shall validation: Verify syscall differences from MS variant.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0386** (EARS/Ubiquitous): The Substrate system shall extensions: Support early SCO-specific ioctls or IPC.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0387** (EARS/Ubiquitous): The Substrate system shall microsoft Xenix 286 (MS-X/286): Protected mode (LDTs).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0388** (EARS/Ubiquitous): The Substrate system shall sCO Xenix 286 (SCO-X/286): Enhanced 286 support.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0389** (EARS/Ubiquitous): The Substrate system shall microsoft Xenix 386 (MS-X/386): Early 32-bit (pre-1987).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0390** (EARS/Ubiquitous): The Substrate system shall sCO Xenix 386 (SCO-X/386): The widespread 32-bit standard (v2.3).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0391** (EARS/Ubiquitous): The Substrate system shall sCO Unix 3.2v2 (SCO-U/3.2v2): COFF based, SVR3.2 compat.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0392** (EARS/Ubiquitous): The Substrate system shall sCO Unix 3.2v4 (SCO-U/ODT3): Enhanced System V ABI (ODT 3.0).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0393** (EARS/Ubiquitous): The Substrate system shall sCO OpenServer 5 (SCO-OSR5): Advanced COFF/ELF hybrid features.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0394** (EARS/Ubiquitous): The Substrate system shall binary Loaders:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0395** (EARS/Ubiquitous): The Substrate system shall x.out (Microsoft / Xenix):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0396** (EARS/Ubiquitous): The Substrate system shall header: Magic 0x206 (286 Small), 0x20C (N86), 0x140 (8086).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0397** (EARS/Ubiquitous): The Substrate system shall segments: TEXT (RX), DATA (RW), BSS (Zero).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0398** (EARS/Ubiquitous): The Substrate system shall symbol Table: Generic Xenix symbol format.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0399** (EARS/Ubiquitous): The Substrate system shall cOFF (Common Object File Format) - SCO/SVR3:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0400** (EARS/Ubiquitous): The Substrate system shall file Header (filehdr):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0401** (EARS/Ubiquitous): The Substrate system shall magic: 0x14C (i386).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0402** (EARS/Ubiquitous): The Substrate system shall number of sections.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0403** (EARS/Ubiquitous): The Substrate system shall time/Date stamp (ignored or used for link verification).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0404** (EARS/Ubiquitous): The Substrate system shall pointer to symbol table / Number of symbols.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0405** (EARS/Ubiquitous): The Substrate system shall optional Header (aouthdr):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0406** (EARS/Ubiquitous): The Substrate system shall magic: 0x10B (ZMAGIC - Demand Paged).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0407** (EARS/Ubiquitous): The Substrate system shall define AOUT_ZMAGIC constant (0x10B).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0408** (EARS/Ubiquitous): The Substrate system shall validate magic number, reject unsupported types (OMAGIC, NMAGIC).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0409** (EARS/Ubiquitous): The Substrate system shall tsize (Text size), dsize (Data size), bsize (BSS size).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0410** (EARS/Ubiquitous): The Substrate system shall parse tsize from offset 4 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0411** (EARS/Ubiquitous): The Substrate system shall parse dsize from offset 8 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0412** (EARS/Ubiquitous): The Substrate system shall parse bsize from offset 12 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0413** (EARS/Ubiquitous): The Substrate system shall validate sizes are reasonable (< 2GB, page-aligned for ZMAGIC).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0414** (EARS/Ubiquitous): The Substrate system shall entry (Entry point virtual address).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0415** (EARS/Ubiquitous): The Substrate system shall parse entry from offset 16 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0416** (EARS/Ubiquitous): The Substrate system shall validate entry is within .text segment bounds.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0417** (EARS/Ubiquitous): The Substrate system shall text_start, data_start.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0418** (EARS/Ubiquitous): The Substrate system shall parse text_start from offset 20 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0419** (EARS/Ubiquitous): The Substrate system shall parse data_start from offset 24 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0420** (EARS/Ubiquitous): The Substrate system shall validate text_start < data_start or handle BSS-only cases.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0421** (EARS/Ubiquitous): The Substrate system shall section Headers (scnhdr):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0422** (EARS/Ubiquitous): The Substrate system shall name (.text, .data, .bss, .lib).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0423** (EARS/Ubiquitous): The Substrate system shall parse 8-byte section name (may be NUL-padded).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0424** (EARS/Ubiquitous): The Substrate system shall handle long names (pointer to string table, /offset format).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0425** (EARS/Ubiquitous): The Substrate system shall identify special sections (.lib, .comment, .debug).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0426** (EARS/Ubiquitous): The Substrate system shall paddr (Physical), vaddr (Virtual).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0427** (EARS/Ubiquitous): The Substrate system shall parse paddr from offset 8 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0428** (EARS/Ubiquitous): The Substrate system shall parse vaddr from offset 12 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0429** (EARS/Ubiquitous): The Substrate system shall validate vaddr is user-space address (< 0xC0000000).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0430** (EARS/Ubiquitous): The Substrate system shall size, scnptr (File offset).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0431** (EARS/Ubiquitous): The Substrate system shall parse size from offset 16 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0432** (EARS/Ubiquitous): The Substrate system shall parse scnptr from offset 20 (uint32_t).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0433** (EARS/Ubiquitous): The Substrate system shall validate scnptr + size <= file size.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0434** (EARS/Ubiquitous): The Substrate system shall flags (STYP_TEXT, STYP_DATA, STYP_BSS).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0435** (EARS/Ubiquitous): The Substrate system shall define flag constants: STYP_TEXT=0x20, STYP_DATA=0x40, STYP_BSS=0x80.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0436** (EARS/Ubiquitous): The Substrate system shall map flags to pmap protections (RX, RW, RW-zero).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0437** (EARS/Ubiquitous): The Substrate system shall handle STYP_LIB (0x800) for shared library sections.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0438** (EARS/Ubiquitous): The Substrate system shall sCO Shared Libraries (.lib section):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0439** (EARS/Ubiquitous): The Substrate system shall parse .lib section header.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0440** (EARS/Ubiquitous): The Substrate system shall locate section with name .lib or flag STYP_LIB.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0441** (EARS/Ubiquitous): The Substrate system shall read section content from scnptr offset.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0442** (EARS/Ubiquitous): The Substrate system shall path entries: Absolute path to shared library.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0443** (EARS/Ubiquitous): The Substrate system shall parse path table offset from .lib header.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0444** (EARS/Ubiquitous): The Substrate system shall iterate path entries (NUL-terminated strings).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0445** (EARS/Ubiquitous): The Substrate system shall resolve library path (search /shlib, /usr/shlib).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0446** (EARS/Ubiquitous): The Substrate system shall load and map referenced shared libraries recursively.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0447** (EARS/Ubiquitous): The Substrate system shall offset entries: Import method (static jump table).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0448** (EARS/Ubiquitous): The Substrate system shall parse import table offset and count.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0449** (EARS/Ubiquitous): The Substrate system shall build jump table at fixed address (0x08000000 typical).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0450** (EARS/Ubiquitous): The Substrate system shall populate jump stubs (jmp [addr]) for each import.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0451** (EARS/Ubiquitous): The Substrate system shall handle import ordinals vs. named imports.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0452** (EARS/Ubiquitous): The Substrate system shall oMF (Intel Object Module Format) - 286/386:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0453** (EARS/Ubiquitous): The Substrate system shall record Types:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0454** (EARS/Ubiquitous): The Substrate system shall 0x80 (THEADR): Module Name.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0455** (EARS/Ubiquitous): The Substrate system shall 0x88 (COMENT): Compiler info / Memory model.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0456** (EARS/Ubiquitous): The Substrate system shall 0x98 (SEGDEF): Segment Definition (Attributes, Size).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0457** (EARS/Ubiquitous): The Substrate system shall 0x9A (GRPDEF): Group Definition (DGROUP).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0458** (EARS/Ubiquitous): The Substrate system shall 0xA0 (LEDATA): Logical Enumerated Data (Content).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0459** (EARS/Ubiquitous): The Substrate system shall 0xB0 (FIXUPP): Relocation Records (Segment-relative, Self-relative).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0460** (EARS/Ubiquitous): The Substrate system shall 0x8A (MODEND): Module End (Main entry point).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0461** (EARS/Ubiquitous): The Substrate system shall loading Logic: Multi-pass linker/loader to resolve inter-segment references.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0462** (EARS/Ubiquitous): The Substrate system shall system Call Interface:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0463** (EARS/Ubiquitous): The Substrate system shall mechanisms (ABI Differences):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0464** (EARS/Ubiquitous): The Substrate system shall iBCS2 / SCO:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0465** (EARS/Ubiquitous): The Substrate system shall lcall 7,0 (Call Gate 0).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0466** (EARS/Ubiquitous): The Substrate system shall linux:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0467** (EARS/Ubiquitous): The Substrate system shall int 0x80 (Interrupt Vector 128).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0468** (EARS/Ubiquitous): The Substrate system shall legacy / Special:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0469** (EARS/Ubiquitous): The Substrate system shall int 0x21 (DOS emulation in VM86).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0470** (EARS/Ubiquitous): The Substrate system shall int 0x7F (Older Xenix).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0471** (EARS/Ubiquitous): The Substrate system shall aBI Translation:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0472** (EARS/Ubiquitous): The Substrate system shall aBI Translation (iBCS2):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0473** (EARS/Ubiquitous): The Substrate system shall stack Frame Decoding:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0474** (EARS/Ubiquitous): The Substrate system shall 16-bit client: arguments at SS:SP+2 (2-byte words).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0475** (EARS/Ubiquitous): The Substrate system shall 32-bit client: arguments at SS:ESP+4 (4-byte words).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0476** (EARS/Ubiquitous): The Substrate system shall cXENIX Dispatcher (Syscall 0x07):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0477** (EARS/Ubiquitous): The Substrate system shall sub-function handling (table driven) for Xenix extensions.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0478** (EARS/Ubiquitous): The Substrate system shall rdchk (check for data), nap (millisecond sleep).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0479** (EARS/Ubiquitous): The Substrate system shall ftime (System V time).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0480** (EARS/Ubiquitous): The Substrate system shall shared Memory (Xenix):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0481** (EARS/Ubiquitous): The Substrate system shall sdget, sdfree (Create/Destroy shared data).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0482** (EARS/Ubiquitous): The Substrate system shall sdenter, sdleave (Attach/Detach).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0483** (EARS/Ubiquitous): The Substrate system shall memory mapping: Map high memory segments via LDT.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0484** (EARS/Ubiquitous): The Substrate system shall xsbrk (Extended break for huge data).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0485** (EARS/Ubiquitous): The Substrate system shall vM86 Support:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0486** (EARS/Ubiquitous): The Substrate system shall v86_init: Initialize VM86 task state.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0487** (EARS/Ubiquitous): The Substrate system shall v86_sleep: Wait for interrupt/event.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0488** (EARS/Ubiquitous): The Substrate system shall monitor BIOS calls trapped via GPF/Invalid Opcode.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0489** (EARS/Ubiquitous): The Substrate system shall eLKS (Embeddable Linux Kernel Subset) - 16-bit Mode:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0490** (EARS/Ubiquitous): The Substrate system shall eLKS (Embeddable Linux Kernel Subset) - 16-bit Mode:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0491** (EARS/Ubiquitous): The Substrate system shall 16-Bit Execution Environment:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0492** (EARS/Ubiquitous): The Substrate system shall lDT Setup:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0493** (EARS/Ubiquitous): The Substrate system shall descriptor 0: NULL.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0494** (EARS/Ubiquitous): The Substrate system shall descriptor 1: CS (Code), 16-bit conforming/non-conforming.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0495** (EARS/Ubiquitous): The Substrate system shall descriptor 2: DS (Data), 16-bit expand-up/down.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0496** (EARS/Ubiquitous): The Substrate system shall segmentation Logic:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0497** (EARS/Ubiquitous): The Substrate system shall small Model: CS != DS/SS.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0498** (EARS/Ubiquitous): The Substrate system shall tiny Model: CS == DS == SS (COM file style).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0499** (EARS/Ubiquitous): The Substrate system shall stack: 16-bit Stack Pointer (SP) wraparound handling.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0500** (EARS/Ubiquitous): The Substrate system shall loader (a.out Minix):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0501** (EARS/Ubiquitous): The Substrate system shall header: 32-byte header (Magic, HeaderLen, Text/Data/Bss sizes).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0502** (EARS/Ubiquitous): The Substrate system shall load: Read segments into allocated low-memory pages.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0503** (EARS/Ubiquitous): The Substrate system shall relocation: Applying fixups if not position independent.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0504** (EARS/Ubiquitous): The Substrate system shall syscall Interface (int 0x80):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0505** (EARS/Ubiquitous): The Substrate system shall trap: IDT entry 0x80 handling 16-bit caller.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0506** (EARS/Ubiquitous): The Substrate system shall argument Fetch:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0507** (EARS/Ubiquitous): The Substrate system shall read BX (First arg), CX (Second), DX (Third), SI, DI.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0508** (EARS/Ubiquitous): The Substrate system shall or read stack arguments if used.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0509** (EARS/Ubiquitous): The Substrate system shall pointer Thunking:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0510** (EARS/Ubiquitous): The Substrate system shall convert DS:BX (16:16) -> Linear Address (LDT[DS].Base + BX).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0511** (EARS/Ubiquitous): The Substrate system shall bounds checking against segment limit.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0512** (EARS/Ubiquitous): The Substrate system shall linux (Massive Expansion):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0513** (EARS/Ubiquitous): The Substrate system shall eLF Loader personality detection (brandelf support).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0514** (EARS/Ubiquitous): The Substrate system shall signal Compatibility:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0515** (EARS/Ubiquitous): The Substrate system shall mapping: Translate Linux signal numbers to native (e.g., SIGCHLD, SIGSTOP).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0516** (EARS/Ubiquitous): The Substrate system shall sigaction: Translate linux_sigaction structure (mask bits).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0517** (EARS/Ubiquitous): The Substrate system shall trampoline: Linux-compatible signal return trampoline.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0518** (EARS/Ubiquitous): The Substrate system shall error Codes:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0519** (EARS/Ubiquitous): The Substrate system shall map internal errno to Linux errno (arch-specific).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0520** (EARS/Ubiquitous): The Substrate system shall fS Path Translation:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0521** (EARS/Ubiquitous): The Substrate system shall /proc -> /compat/linux/proc redirection.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0522** (EARS/Ubiquitous): The Substrate system shall /sys -> /compat/linux/sys redirection.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0523** (EARS/Ubiquitous): The Substrate system shall at() syscalls family support.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0524** (EARS/Ubiquitous): The Substrate system shall networking (socketcall):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0525** (EARS/Ubiquitous): The Substrate system shall multiplexer syscall 102 (sys_socketcall).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0526** (EARS/Ubiquitous): The Substrate system shall socket Creation & Binding:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0527** (EARS/Ubiquitous): The Substrate system shall sYS_SOCKET: Validate domain/type/proto, allocate socket.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0528** (EARS/Ubiquitous): The Substrate system shall sYS_BIND: Copy address from user, call internal bind.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0529** (EARS/Ubiquitous): The Substrate system shall sYS_CONNECT: Copy address, initiate connection.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0530** (EARS/Ubiquitous): The Substrate system shall data Flow:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0531** (EARS/Ubiquitous): The Substrate system shall sYS_SEND/SYS_RECV: Simple IO wrappers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0532** (EARS/Ubiquitous): The Substrate system shall sYS_SENDTO/SYS_RECVFROM: UDP/Connectionless wrappers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0533** (EARS/Ubiquitous): The Substrate system shall sYS_SENDMSG/SYS_RECVMSG: Complex message structure scatter/gather.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0534** (EARS/Ubiquitous): The Substrate system shall state & Options:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0535** (EARS/Ubiquitous): The Substrate system shall sYS_LISTEN: Set backlog.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0536** (EARS/Ubiquitous): The Substrate system shall sYS_ACCEPT: New socket file descriptor creation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0537** (EARS/Ubiquitous): The Substrate system shall sYS_GETSOCKNAME/SYS_GETPEERNAME: Address retrieval.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0538** (EARS/Ubiquitous): The Substrate system shall sYS_SETSOCKOPT/SYS_GETSOCKOPT: Option translation (Linux <-> Native).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0539** (EARS/Ubiquitous): The Substrate system shall sYS_SHUTDOWN: Connection termination.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0540** (EARS/Ubiquitous): The Substrate system shall sYS_SOCKETPAIR: Connected pair creation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0541** (EARS/Ubiquitous): The Substrate system shall iPC Multiplexer (sys_ipc):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0542** (EARS/Ubiquitous): The Substrate system shall multiplexer syscall 117.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0543** (EARS/Ubiquitous): The Substrate system shall **Semaphores (sem*):**.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0544** (EARS/Ubiquitous): The Substrate system shall sEMOP: Atomic array operations.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0545** (EARS/Ubiquitous): The Substrate system shall sEMGET: Get/Create semaphore set.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0546** (EARS/Ubiquitous): The Substrate system shall sEMCTL: Control operations (GETVAL, SETVAL, IPC_RMID).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0547** (EARS/Ubiquitous): The Substrate system shall **Message Queues (msg*):**.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0548** (EARS/Ubiquitous): The Substrate system shall mSGSND: Send message with priority.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0549** (EARS/Ubiquitous): The Substrate system shall mSGRCV: Receive message (blocking/non-blocking).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0550** (EARS/Ubiquitous): The Substrate system shall mSGGET: Get/Create message queue.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0551** (EARS/Ubiquitous): The Substrate system shall mSGCTL: Control operations.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0552** (EARS/Ubiquitous): The Substrate system shall **Shared Memory (shm*):**.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0553** (EARS/Ubiquitous): The Substrate system shall sHMAT: Attach segment to address space.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0554** (EARS/Ubiquitous): The Substrate system shall sHMDT: Detach segment.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0555** (EARS/Ubiquitous): The Substrate system shall sHMGET: Get/Create shared memory segment.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0556** (EARS/Ubiquitous): The Substrate system shall sHMCTL: Control operations (lock/unlock/remove).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0557** (EARS/Ubiquitous): The Substrate system shall ioctls (sys_ioctl):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0558** (EARS/Ubiquitous): The Substrate system shall termios:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0559** (EARS/Ubiquitous): The Substrate system shall tCGETS: Translate native termios to Linux termios.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0560** (EARS/Ubiquitous): The Substrate system shall tCSETS/TCSETSW/TCSETSF: Translate Linux termios to native.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0561** (EARS/Ubiquitous): The Substrate system shall sockio:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0562** (EARS/Ubiquitous): The Substrate system shall sIOCGIFNAME: Get interface name by index.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0563** (EARS/Ubiquitous): The Substrate system shall sIOCGIFADDR: Get interface IP address.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0564** (EARS/Ubiquitous): The Substrate system shall sIOCGIFBRDADDR: Get broadcast address.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0565** (EARS/Ubiquitous): The Substrate system shall sIOCGIFNETMASK: Get network mask.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0566** (EARS/Ubiquitous): The Substrate system shall process Creation (sys_clone extended):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0567** (EARS/Ubiquitous): The Substrate system shall flags Handling:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0568** (EARS/Ubiquitous): The Substrate system shall cLONE_PARENT_SETTID: Store Child TID at parent_tidptr.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0569** (EARS/Ubiquitous): The Substrate system shall cLONE_CHILD_CLEARTID: Store Child TID at child_tidptr and clear on exit.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0570** (EARS/Ubiquitous): The Substrate system shall cLONE_SETTLS: Set GDT/FS/GS base for Thread Local Storage.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0571** (EARS/Ubiquitous): The Substrate system shall cLONE_FILES: Share file descriptor table (refcounting).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0572** (EARS/Ubiquitous): The Substrate system shall cLONE_FS: Share filesystem info (cwd, root).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0573** (EARS/Ubiquitous): The Substrate system shall cLONE_SIGHAND: Share signal handlers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0574** (EARS/Ubiquitous): The Substrate system shall cLONE_VM: Share address space (threads).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0575** (EARS/Ubiquitous): The Substrate system shall minix/386:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0576** (EARS/Ubiquitous): The Substrate system shall implement send/receive message passing syscalls.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0577** (EARS/Ubiquitous): The Substrate system shall map Minix 3 kernel messages to native calls.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0578** (EARS/Ubiquitous): The Substrate system shall freeBSD:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0579** (EARS/Ubiquitous): The Substrate system shall eLF Loader personality detection.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0580** (EARS/Ubiquitous): The Substrate system shall complete thr_new implementation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0581** (EARS/Ubiquitous): The Substrate system shall freeBSD 14.3 Compatibility (i386):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0582** (EARS/Ubiquitous): The Substrate system shall implement struct kinfo_proc (FreeBSD 14.3 layout).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0583** (EARS/Ubiquitous): The Substrate system shall binary Compatibility:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0584** (EARS/Ubiquitous): The Substrate system shall investigate need for virtual /dev/kmem emulation for legacy binaries.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0585** (EARS/Ubiquitous): The Substrate system shall native Porting:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0586** (EARS/Ubiquitous): The Substrate system shall implement libkvm shim in libsys for porting BSD tools to native ABI.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0587** (EARS/Ubiquitous): The Substrate system shall process Translation: Logic to map native process_t to kinfo_proc.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0588** (EARS/Ubiquitous): The Substrate system shall bSD-Style sysctl Syscall Surface (Native + Compat):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0589** (EARS/Ubiquitous): The Substrate system shall native Syscall ABI Contract:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0590** (EARS/Ubiquitous): The Substrate system shall define canonical native sysctl syscall argument contract with versioned request structure.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0591** (EARS/Ubiquitous): The Substrate system shall define strict userspace pointer/length validation rules for old/new buffers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0592** (EARS/Ubiquitous): The Substrate system shall define canonical atomic read/write semantics when both old and new values are present.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0593** (EARS/Ubiquitous): The Substrate system shall define canonical size-discovery semantics when old buffer pointer is NULL.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0594** (EARS/Ubiquitous): The Substrate system shall define canonical subtree-enumeration request contract for user tooling.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0595** (EARS/Ubiquitous): The Substrate system shall define canonical metadata-query request contract (type, flags, description, ABI class).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0596** (EARS/Ubiquitous): The Substrate system shall add syscall table entries and personality dispatch wiring for native ABI.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0597** (EARS/Ubiquitous): The Substrate system shall mIB + Name Resolution Paths:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0598** (EARS/Ubiquitous): The Substrate system shall implement MIB-based syscall path end-to-end (int *name, u_int namelen).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0599** (EARS/Ubiquitous): The Substrate system shall implement kernel name-to-MIB translation operation for userspace helpers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0600** (EARS/Ubiquitous): The Substrate system shall implement kernel MIB-to-name translation operation for diagnostics/tooling.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0601** (EARS/Ubiquitous): The Substrate system shall define max name depth and token-length limits with explicit EINVAL behavior.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0602** (EARS/Ubiquitous): The Substrate system shall add strict rejection path for mixed name/MIB invocation modes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0603** (EARS/Ubiquitous): The Substrate system shall error and Compatibility Semantics:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0604** (EARS/Ubiquitous): The Substrate system shall define BSD-consistent errno mapping (ENOENT, ENOMEM, EINVAL, EFAULT, EPERM, EACCES, ENOTDIR).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0605** (EARS/Ubiquitous): The Substrate system shall implement forward-compat handling for unknown request-structure extensions.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0606** (EARS/Ubiquitous): The Substrate system shall implement backward-compat handling for older request versions.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0607** (EARS/Ubiquitous): The Substrate system shall add compatibility tests for partial reads, retry loops, and concurrent value mutation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0608** (EARS/Ubiquitous): The Substrate system shall permission & Capability Enforcement:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0609** (EARS/Ubiquitous): The Substrate system shall wire syscall path into unified sysctl access-control hooks.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0610** (EARS/Ubiquitous): The Substrate system shall enforce read/write separation at syscall boundary before handler invocation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0611** (EARS/Ubiquitous): The Substrate system shall enforce capability-gated writes for privileged nodes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0612** (EARS/Ubiquitous): The Substrate system shall add per-personality gate checks before exposing compatibility namespace nodes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0613** (EARS/Ubiquitous): The Substrate system shall personality Integration & Overlays:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0614** (EARS/Ubiquitous): The Substrate system shall define personality overlay model (native base tree + personality-specific branches).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0615** (EARS/Ubiquitous): The Substrate system shall implement FreeBSD compatibility overlay for __sysctl expectations.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0616** (EARS/Ubiquitous): The Substrate system shall implement NetBSD/OpenBSD compatibility overlay scaffolding with explicit unsupported-node behavior.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0617** (EARS/Ubiquitous): The Substrate system shall implement per-personality node visibility filters in traversal and enumeration paths.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0618** (EARS/Ubiquitous): The Substrate system shall add compatibility shims translating personality-specific MIBs to native internal nodes where feasible.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0619** (EARS/Ubiquitous): The Substrate system shall userspace ABI Tests (Syscall Layer):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0620** (EARS/Ubiquitous): The Substrate system shall add integration tests for native MIB reads/writes, size probes, and metadata queries.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0621** (EARS/Ubiquitous): The Substrate system shall add integration tests for enumeration of children and deep subtree walks.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0622** (EARS/Ubiquitous): The Substrate system shall add negative tests for malformed pointers, truncated MIBs, and invalid type writes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0623** (EARS/Ubiquitous): The Substrate system shall add race tests for concurrent read/write against lock-protected nodes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0624** (EARS/Ubiquitous): The Substrate system shall add ABI snapshot tests ensuring stable syscall behavior across kernel revisions.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0625** (EARS/Ubiquitous): The Substrate system shall bSD Family (NetBSD/OpenBSD):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0626** (EARS/Ubiquitous): The Substrate system shall implement __sysctl personality entrypoint backed by shared native sysctl core.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0627** (EARS/Ubiquitous): The Substrate system shall implement NetBSD/OpenBSD-specific compatibility mapping table for legacy MIB constants.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0628** (EARS/Ubiquitous): The Substrate system shall add personality tests validating expected __sysctl behavior and errno semantics.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0629** (EARS/Ubiquitous): The Substrate system shall support BSD-specific syscalls (ktrace, pledge/unveil).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0630** (EARS/Ubiquitous): The Substrate system shall solaris (SVR4):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0631** (EARS/Ubiquitous): The Substrate system shall implement SVR4 syscalls (getdents64, stream ioctls).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0632** (EARS/Ubiquitous): The Substrate system shall support Solaris door IPC emulation.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0633** (EARS/Ubiquitous): The Substrate system shall eLF Loader Improvements:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0634** (EARS/Ubiquitous): The Substrate system shall stack Setup: Properly terminate argv/envp vectors.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0635** (EARS/Ubiquitous): The Substrate system shall default Environment: Populate PATH and TERM.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0636** (EARS/Ubiquitous): The Substrate system shall auxiliary Vector: Populate AT_PHDR/PHENT/PHNUM/ENTRY for TLS support.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0637** (EARS/Ubiquitous): The Substrate system shall interpreter: Handle PT_INTERP (load ld.so).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0638** (EARS/Ubiquitous): The Substrate system shall auxiliary Vector:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0639** (EARS/Ubiquitous): The Substrate system shall populate AT_PHDR, AT_PHENT, AT_PHNUM.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0640** (EARS/Ubiquitous): The Substrate system shall populate AT_ENTRY, AT_BASE (interpreter base).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0641** (EARS/Ubiquitous): The Substrate system shall populate AT_EXECFN, AT_PLATFORM.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0642** (EARS/Ubiquitous): The Substrate system shall populate AT_RANDOM, AT_SECURE.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0643** (EARS/Ubiquitous): The Substrate system shall shebang Support (exec_script):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0644** (EARS/Ubiquitous): The Substrate system shall parse #! line.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0645** (EARS/Ubiquitous): The Substrate system shall handle recursion depth limits (prevent loops).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0646** (EARS/Ubiquitous): The Substrate system shall argument parsing (#! /bin/sh -x).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0647** (EARS/Ubiquitous): The Substrate system shall cOFF Loader (Legacy/Static):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0648** (EARS/Ubiquitous): The Substrate system shall parse File Header and Optional Header.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0649** (EARS/Ubiquitous): The Substrate system shall map Sections (Text, Data, BSS) to fixed addresses.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0650** (EARS/Ubiquitous): The Substrate system shall basic relocation support (for Xenix 386).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0651** (EARS/Ubiquitous): The Substrate system shall pE Loader (EFI/Native):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0652** (EARS/Ubiquitous): The Substrate system shall parse DOS Header -> PE Header.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0653** (EARS/Ubiquitous): The Substrate system shall parse Data Directories (Import/Export/Reloc).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0654** (EARS/Ubiquitous): The Substrate system shall map Image Base and Sections.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0655** (EARS/Ubiquitous): The Substrate system shall eFI Support:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0656** (EARS/Ubiquitous): The Substrate system shall implement IAT (Import Address Table) patching.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0657** (EARS/Ubiquitous): The Substrate system shall substrate Native PE:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0658** (EARS/Ubiquitous): The Substrate system shall define Subsystem ID for Substrate (e.g., in sys/pe.h).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0659** (EARS/Ubiquitous): The Substrate system shall native Syscalls: Thunks for syscall instruction directly in PE text.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0660** (EARS/Ubiquitous): The Substrate system shall relocations: Full .reloc processing (Base Relocations) for ASLR/PIC.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0661** (EARS/Ubiquitous): The Substrate system shall a.out Loader (Legacy/Multi-OS):.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0662** (EARS/Ubiquitous): The Substrate system shall legacy a.out: Implement exec_aout for OMAGIC/QMAGIC/ZMAGIC binaries.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0663** (EARS/Ubiquitous): The Substrate system shall unified a.out Loader: Create a common exec_aout loader for 32-bit a.out (Linux/BSD/Minix) that dispatches based on machine ID/magic.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0664** (EARS/Ubiquitous): The Substrate system shall sunOS 4.0.x (Sun386i): Support Sun386i a.out format and personality.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0665** (EARS/Ubiquitous): The Substrate system shall personality / Migration:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0666** (EARS/Ubiquitous): The Substrate system shall syscall Translation: Remap foreign syscall numbers to native.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0667** (EARS/Ubiquitous): The Substrate system shall errno Translation: Remap error codes.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0668** (EARS/Ubiquitous): The Substrate system shall signal Translation: Remap signal numbers.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0669** (EARS/Ubiquitous): The Substrate system shall fork() Completeness:.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0670** (EARS/Ubiquitous): The Substrate system shall copy-on-Write: Duplication of VM space (refcounts).
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0671** (EARS/Ubiquitous): The Substrate system shall file Descriptors: Increment refcounts on all FDs.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-05-0672** (EARS/Ubiquitous): The Substrate system shall vfork: Shared VM space, parent blocked until child exec/exit.
+  - Context: 5. System Calls & Personalities
+  - Verification: design review + implementation evidence + test/doc update.

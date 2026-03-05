@@ -1,0 +1,121 @@
+." ln(1)
+.TH LN 1 "March 2026" "Substrate" "User Commands"
+.SH NAME
+ln \- make links between files
+.SH SYNOPSIS
+.B ln
+.RI [ OPTIONS ]
+.RI TARGET LINK_NAME
+.br
+.B ln
+.RI [ OPTIONS ]
+.RI TARGET
+.br
+.B ln
+.RI [ OPTIONS ]
+.RI TARGET ... DIRECTORY
+.br
+.B ln
+.RI [ OPTIONS ]
+.BI "-t " DIRECTORY " TARGET ..."
+.SH DESCRIPTION
+.B ln
+creates hard links by default, and symbolic links with
+.BR -s .
+.PP
+Destination selection follows POSIX form rules with GNU extensions:
+.TP
+- one source + non-directory destination: create that single link
+.TP
+- multiple sources: final operand must be an existing directory
+.TP
+-
+.B -t
+forces destination-directory mode
+.TP
+-
+.B -T
+disables destination-directory interpretation
+.SH OPTIONS
+.TP
+.BR -f , " --force"
+Remove existing destination before linking.
+.TP
+.BR -i , " --interactive"
+Prompt before replacing an existing destination.
+.TP
+.BR -s , " --symbolic"
+Create symbolic links.
+.TP
+.BR -L , " --logical"
+When hard-linking and source is a symlink, link the referent.
+.TP
+.BR -P , " --physical"
+When hard-linking and source is a symlink, link the symlink itself.
+.TP
+.BR -h , " -n" , " --no-dereference"
+BSD semantics: do not follow destination symlink-to-directory.
+.TP
+.B -F
+BSD semantics: with
+.B -s
+and directory destination collision, remove the directory first.
+.TP
+.B -w
+With
+.B -s
+warn if source path does not currently exist.
+.TP
+.BR -v , " --verbose"
+Print one line per created link.
+.TP
+.BR -b , " --backup" [ =METHOD ]
+Create destination backups before replacement.
+.TP
+.BR -S , " --suffix=" SUFFIX
+Set backup suffix.
+.TP
+.BR -t , " --target-directory=" DIR
+Use
+.I DIR
+as destination directory.
+.TP
+.BR -T , " --no-target-directory"
+Never treat final operand as destination directory.
+.TP
+.BR -r , " --relative"
+With
+.B -s
+compute a relative symlink target from destination directory.
+.TP
+.BR -d , " --directory"
+Attempt hard links to directories when policy allows.
+.TP
+.B --help
+Display help and exit.
+.SH EXIT STATUS
+.TP
+0
+All requested links were created.
+.TP
+1
+One or more link operations failed.
+.SH EXAMPLES
+.TP
+ln file link
+Create a hard link.
+.TP
+ln -s lib.so.1 lib.so
+Create a symbolic link.
+.TP
+ln -s -r /opt/tree/lib/libfoo.so /opt/tree/bin/libfoo.so
+Create a relative symlink target.
+.TP
+ln -t stage/usr/bin tool1 tool2
+Link multiple files into a destination directory.
+.SH SEE ALSO
+.BR cp (1),
+.BR link (2),
+.BR readlink (2),
+.BR unlink (2),
+.BR stat (2)
