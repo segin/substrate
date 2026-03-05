@@ -132,6 +132,7 @@ extern bool test_gmtime_negative_years(void);
 extern bool test_libc_time(void);
 extern bool test_libc_memmove(void);
 extern bool test_libc_strcat(void);
+extern bool test_libc_strncat(void);
 extern bool test_libc_strtok(void);
 extern bool test_libc_memset(void);
 extern bool test_libc_memcmp(void);
@@ -243,6 +244,7 @@ test_case_t tests[] = {
     {"libc_time", test_libc_time},
     {"libc_memmove", test_libc_memmove},
     {"libc_strcat", test_libc_strcat},
+    {"libc_strncat", test_libc_strncat},
     {"libc_strtok", test_libc_strtok},
     {"libc_memset", test_libc_memset},
     {"libc_memcmp", test_libc_memcmp},
