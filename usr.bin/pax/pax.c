@@ -137,14 +137,44 @@ static void apply_subst(const struct opts *o, char *path, size_t psz) {
         char out[PATH_MAX];
         char *src = path;
         char *pos;
-        out[0] = '\0';
+        size_t out_len = 0;
+        size_t out_capacity = sizeof(out) - 1;
+        size_t oldv_len = strlen(r->oldv);
+        size_t newv_len = strlen(r->newv);
+
         while ((pos = strstr(src, r->oldv)) != NULL) {
-            strncat(out, src, (size_t)(pos - src));
-            strncat(out, r->newv, sizeof(out) - strlen(out) - 1);
-            src = pos + strlen(r->oldv);
+            size_t copy_len = (size_t)(pos - src);
+            if (copy_len > out_capacity - out_len) {
+                copy_len = out_capacity - out_len;
+            }
+            if (copy_len > 0) {
+                memcpy(out + out_len, src, copy_len);
+                out_len += copy_len;
+            }
+
+            size_t replace_len = newv_len;
+            if (replace_len > out_capacity - out_len) {
+                replace_len = out_capacity - out_len;
+            }
+            if (replace_len > 0) {
+                memcpy(out + out_len, r->newv, replace_len);
+                out_len += replace_len;
+            }
+
+            src = pos + oldv_len;
             if (!r->global) break;
         }
-        strncat(out, src, sizeof(out) - strlen(out) - 1);
+
+        size_t rest_len = strlen(src);
+        if (rest_len > out_capacity - out_len) {
+            rest_len = out_capacity - out_len;
+        }
+        if (rest_len > 0) {
+            memcpy(out + out_len, src, rest_len);
+            out_len += rest_len;
+        }
+        out[out_len] = '\0';
+
         snprintf(path, psz, "%s", out);
     }
 }

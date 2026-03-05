@@ -817,9 +817,10 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         ext2_fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
     }
 
-    ext2_fs.active_bg_inode_group = (uint32_t)-1;
-    if (!ext2_fs.active_bg_inode_bitmap) {
-        ext2_fs.active_bg_inode_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    // Initialize active inode bitmap cache
+    ext2_fs.active_inode_bg_group = (uint32_t)-1;
+    if (!ext2_fs.active_inode_bg_bitmap) {
+        ext2_fs.active_inode_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
     }
 
     // Setup root node
@@ -828,7 +829,8 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     memcpy(&ext2_root_ctx.inode, &root_inode, sizeof(ext2_inode_t));
     
     memset(&ext2_root, 0, sizeof(fs_node_t));
-    strcpy(ext2_root.name, "/");
+    strncpy(ext2_root.name, "/", sizeof(ext2_root.name) - 1);
+    ext2_root.name[sizeof(ext2_root.name) - 1] = '\0';
     ext2_root.flags = FS_DIRECTORY;
     ext2_root.inode = EXT2_ROOT_INO;
     ext2_root.length = root_inode.i_size;
@@ -968,15 +970,15 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
         if (fs->bgd[group].bg_free_inodes_count == 0) continue;
         
         // Read the inode bitmap if it's not cached
-        if (fs->active_bg_inode_group != group) {
-            fs->active_bg_inode_group = (uint32_t)-1;
-            if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_bg_inode_bitmap) != fs->block_size) {
+        if (fs->active_inode_bg_group != group) {
+            fs->active_inode_bg_group = (uint32_t)-1;
+            if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_inode_bg_bitmap) != fs->block_size) {
                 continue;
             }
-            fs->active_bg_inode_group = group;
+            fs->active_inode_bg_group = group;
         }
         
-        uint8_t *bitmap_buf = fs->active_bg_inode_bitmap;
+        uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
 
         // Find the first free bit (skip reserved inodes in first group)
         uint32_t start = (group == 0) ? fs->sb.s_first_ino : 0;
@@ -1050,15 +1052,15 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     if (group >= fs->group_count) return;
     
     // Read the inode bitmap if it's not cached
-    if (fs->active_bg_inode_group != group) {
-        fs->active_bg_inode_group = (uint32_t)-1;
-        if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_bg_inode_bitmap) != fs->block_size) {
+    if (fs->active_inode_bg_group != group) {
+        fs->active_inode_bg_group = (uint32_t)-1;
+        if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_inode_bg_bitmap) != fs->block_size) {
             return;
         }
-        fs->active_bg_inode_group = group;
+        fs->active_inode_bg_group = group;
     }
     
-    uint8_t *bitmap_buf = fs->active_bg_inode_bitmap;
+    uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
 
     uint32_t byte_idx = index / 8;
     uint32_t bit_idx = index % 8;

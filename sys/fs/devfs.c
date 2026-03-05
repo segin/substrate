@@ -172,7 +172,8 @@ void devfs_register_device(fs_node_t *node) {
     if (node->flags == FS_BLOCKDEVICE) {
         // Storage devices go under storage/
         char path[128];
-        strcpy(path, "storage/");
+        strncpy(path, "storage/", sizeof(path) - 1);
+        path[sizeof(path) - 1] = '\0';
         strncat(path, node->name, sizeof(path) - strlen(path) - 1);
         devfs_add_entry(path, node);
     } else {
@@ -197,7 +198,8 @@ static filesystem_t devfs_fs = {
 void devfs_init(void) {
     // Initialize root node
     memset(&devfs_root_node, 0, sizeof(fs_node_t));
-    strcpy(devfs_root_node.name, "dev");
+    strncpy(devfs_root_node.name, "dev", sizeof(devfs_root_node.name) - 1);
+    devfs_root_node.name[sizeof(devfs_root_node.name) - 1] = '\0';
     devfs_root_node.flags = FS_DIRECTORY;
     devfs_root_node.readdir = &devfs_dir_readdir;
     devfs_root_node.finddir = &devfs_dir_finddir;
@@ -206,7 +208,8 @@ void devfs_init(void) {
     root_entry = kmalloc(sizeof(devfs_entry_t));
     if (root_entry) {
         memset(root_entry, 0, sizeof(devfs_entry_t));
-        strcpy(root_entry->name, "dev");
+        strncpy(root_entry->name, "dev", sizeof(root_entry->name) - 1);
+        root_entry->name[sizeof(root_entry->name) - 1] = '\0';
         root_entry->node = &devfs_root_node;
 
         devfs_root_node.impl = (uintptr_t)root_entry;

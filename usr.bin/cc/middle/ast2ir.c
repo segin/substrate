@@ -226,6 +226,7 @@ static int decode_string_units(const cc_expr_t *e, int wide, unsigned long **out
     size_t i;
     unsigned long *vals = NULL;
     size_t count = 0;
+    size_t cap = 0;
 
     if (out_units == NULL || out_count == NULL || e == NULL || e->kind != CC_EXPR_STR || e->ident == NULL) {
         return -1;
@@ -275,12 +276,16 @@ static int decode_string_units(const cc_expr_t *e, int wide, unsigned long **out
             }
             i += seq;
         }
-        next = (unsigned long *)realloc(vals, (count + 1) * sizeof(*next));
-        if (next == NULL) {
-            free(vals);
-            return -1;
+        if (count >= cap) {
+            size_t ncap = cap == 0 ? 16 : cap * 2;
+            next = (unsigned long *)realloc(vals, ncap * sizeof(*next));
+            if (next == NULL) {
+                free(vals);
+                return -1;
+            }
+            vals = next;
+            cap = ncap;
         }
-        vals = next;
         vals[count++] = v;
     }
     *out_units = vals;

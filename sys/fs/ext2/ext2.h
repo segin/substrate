@@ -134,8 +134,8 @@ typedef struct {
     uint8_t *active_bg_bitmap;
 
     // Active inode group bitmap cache
-    uint32_t active_bg_inode_group;
-    uint8_t *active_bg_inode_bitmap;
+    uint32_t active_inode_bg_group;
+    uint8_t *active_inode_bg_bitmap;
 } ext2_fs_t;
 
 #define EXT2_DCACHE_SIZE 16
