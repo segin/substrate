@@ -22,14 +22,15 @@ void fat_init() {}
 void exfat_init() {}
 void minix_init() {}
 void udf_init() {}
-void procfs_init() {}
+__attribute__((weak)) void procfs_init() {}
 void sysfs_init() {}
 void pseudo_init() {}
 void full_init() {}
 void fuse_init() {}
 void fuse_fs_init() {}
 void p9_init() {}
-void devfs_init() {}
+void devfs_init(void) {}
+void namei_init(void) {}
 void vfs_init_mock_root(void);
 // nchinit and fs_root removed (linked from vfs)
 
@@ -279,6 +280,7 @@ struct fs_node *devfs_root_node_ptr;
 struct nameidata;
 int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 int namei_simple(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
+void namei_init(void) {}
 struct vnode;
 
 // vm_map_lookup stub
@@ -292,7 +294,11 @@ vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
 // vm_phys stubs
 void vm_phys_get_free(uint64_t *free) { *free = 0; }
 void vm_phys_get_used(uint64_t *used) { *used = 0; }
+static struct vm_page mock_pages[256];
+static int mock_page_idx = 0;
+
 void sched_get_system_load(uint32_t *loads) { loads[0]=0; loads[1]=0; loads[2]=0; }
+
 
 // Fix cast:
 uint32_t pmm_get_page(void) { return (uint32_t)(uintptr_t)malloc(4096); }
@@ -334,3 +340,12 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 
+uint32_t pmm_get_total_memory(void) { return 0; }
+uint32_t pmm_get_free_memory(void) { return 0; }
+void cmdline_get(char *buf, size_t buf_len) { buf[0] = '\0'; }
+void sched_get_loadavg(unsigned long loads[3]) { loads[0] = loads[1] = loads[2] = 0; }
+uint32_t sched_count_runnable(void) { return 0; }
+uint32_t sched_count_threads(void) { return 0; }
+int sys_pmap_stats(struct pmap_stats *stats) { return 0; }
+
+void namei_init(void) {}

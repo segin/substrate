@@ -17,7 +17,7 @@
 #include <string.h>
 
 int netbsd_sys_getrusage(int who, struct rusage *rusage) {
-    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -1;
+    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;
 
     struct tms t;
     if ((clock_t)kern_times(&t) == (clock_t)-1) return -1;
@@ -25,20 +25,22 @@ int netbsd_sys_getrusage(int who, struct rusage *rusage) {
     struct rusage kr;
     memset(&kr, 0, sizeof(struct rusage));
 
-    // Ticks to timeval. HZ=100.
+    // Ticks to timeval. HZ=128.
     // user time
     clock_t ut = (who == RUSAGE_SELF) ? t.tms_utime : t.tms_cutime;
-    kr.ru_utime.tv_sec = ut / 100;
-    kr.ru_utime.tv_usec = (ut % 100) * 10000;
+    kr.ru_utime.tv_sec = ut / 128;
+    kr.ru_utime.tv_usec = ((ut % 128) * 1000000) / 128;
 
     // system time
     clock_t st = (who == RUSAGE_SELF) ? t.tms_stime : t.tms_cstime;
-    kr.ru_stime.tv_sec = st / 100;
-    kr.ru_stime.tv_usec = (st % 100) * 10000;
+    kr.ru_stime.tv_sec = st / 128;
+    kr.ru_stime.tv_usec = ((st % 128) * 1000000) / 128;
 
     if (copyout(&kr, rusage, sizeof(struct rusage)) != 0) return -14;
     return 0;
 }
+
+#ifndef HOST_TEST
 
 /* NetBSD syscall table - based on i386 column */
 static void *netbsd_syscalls[MAX_SYSCALLS] = {
@@ -368,3 +370,5 @@ struct personality personality_netbsd = {
     .sigreturn = netbsd_sys_sigreturn,
     .rt_sigreturn = NULL
 };
+
+#endif /* HOST_TEST */

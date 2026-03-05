@@ -24,13 +24,13 @@ UNIT_SRCS = unit/drivers/console/test_ansi.c unit/vm/test_kmem.c unit/vm/test_zo
              unit/kern/prop_sched.c fuzz/fuzz_sched.c \
              unit/perso/test_att.c ../sys/exec/perso/perso_svr3.c ../sys/exec/perso/perso_svr4.c \
              sys/test_sysinfo.c lib/c/test_libc_string_unit.c unit/lib/test_time.c \
-             sys/test_div64.c ../tests/sys/test_pipe_race.c sys/test_mmap_batch.c
+             sys/test_div64.c ../tests/sys/test_pipe_race.c sys/test_mmap_batch.c unit/fs/test_procfs.c
 
 UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_bc
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_readline test_history test_bc
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -41,11 +41,24 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_libc_assert
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
+	./test_libpthread_mutex
+	$(MAKE) -C lib/edit
+	./lib/edit/host_test_history
+	./test_readline
+
+test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
+	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
 
 test_bc:
 	$(MAKE) -C bin/bc test
 
 # Duplicate rule removed
+
+test_libpthread_mutex: lib/test_pthread_mutex.c ../lib/pthreads/pthread.c
+	$(CC) $(CFLAGS_COMMON) -I../include -I../sys/include -I../sys $< -o $@
+
+test_history:
+	$(MAKE) -C lib/edit
 
 test_libc_assert: lib/c/test_assert.c ../lib/c/src/assert.c
 	$(CC) $(CFLAGS_COMMON) -fno-builtin lib/c/test_assert.c -o $@
@@ -153,8 +166,9 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_readline
 	$(MAKE) -C sys clean
+	$(MAKE) -C lib/edit clean
 
 bench_vm_map: bench_vm_map.o mocks_vm.o vm_map.o
 	$(CC) $(CFLAGS_KERN) $^ -o $@

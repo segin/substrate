@@ -87,10 +87,47 @@ test_sparse_roundtrip() {
   pass sparse_roundtrip
 }
 
+test_command_injection() {
+  mkdir -p "$ROOT/inject"
+  printf 'hello' > "$ROOT/inject/file.txt"
+
+  # The filename will be evaluated by sh if snprintf cmd + popen is used
+  local evil_archive="$ROOT/inject/test'; touch \"$ROOT/pwned\"; echo '.tar.gz"
+
+  # Ensure the target doesn't exist
+  rm -f "$ROOT/pwned"
+
+  # Create an archive with the "evil" name using gzip compression
+  set +e
+  (cd "$ROOT/inject" && "$TAR_BIN" -zcf "$evil_archive" file.txt) >/dev/null 2>&1
+  set -e
+
+  # If the file was created, command injection succeeded
+  if [[ -f "$ROOT/pwned" ]]; then
+    echo "[FAIL] command injection detected"
+    return 1
+  fi
+
+  # Clean up and run the test with extraction just in case
+  rm -f "$ROOT/pwned"
+  mkdir -p "$ROOT/inject_out"
+  set +e
+  (cd "$ROOT/inject_out" && "$TAR_BIN" -zxf "$evil_archive") >/dev/null 2>&1
+  set -e
+
+  if [[ -f "$ROOT/pwned" ]]; then
+    echo "[FAIL] command injection detected on extract"
+    return 1
+  fi
+
+  pass command_injection
+}
+
 test_roundtrip_stream
 test_pax_interop
 test_safe_extract
 test_incremental
 test_sparse_roundtrip
+test_command_injection
 
 echo "all tar integration tests passed"

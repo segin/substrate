@@ -742,10 +742,12 @@ static int cat_process_cooked_stream(FILE *fp,
                                      struct cat_cooked_state *state,
                                      struct cat_sink *sink)
 {
-    for (;;) {
-        int ch = fgetc(fp);
+    unsigned char buf[CAT_STACK_BUFSIZE];
 
-        if (ch == EOF) {
+    for (;;) {
+        size_t n = fread(buf, 1, sizeof(buf), fp);
+
+        if (n == 0) {
             if (ferror(fp)) {
                 if (errno == EINTR) {
                     clearerr(fp);
@@ -757,15 +759,12 @@ static int cat_process_cooked_stream(FILE *fp,
             break;
         }
 
-        {
-            unsigned char byte = (unsigned char)ch;
-            if (cat_cooked_process(&byte, 1, cfg, state, cat_sink_emit, sink) < 0) {
-                if (errno == EPIPE) {
-                    return CAT_PROCESS_BROKEN_PIPE;
-                }
-                cat_warn_stdout(options);
-                return CAT_PROCESS_STDOUT_ERROR;
+        if (cat_cooked_process(buf, n, cfg, state, cat_sink_emit, sink) < 0) {
+            if (errno == EPIPE) {
+                return CAT_PROCESS_BROKEN_PIPE;
             }
+            cat_warn_stdout(options);
+            return CAT_PROCESS_STDOUT_ERROR;
         }
     }
 

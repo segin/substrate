@@ -1,6 +1,28 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <termios.h>
+
+static int read_password_no_echo(int fd, char *buffer, size_t size) {
+    struct termios oldt, newt;
+    int n;
+    int term_ok = tcgetattr(fd, &oldt) == 0;
+
+    if (term_ok) {
+        newt = oldt;
+        newt.c_lflag &= ~ECHO;
+        tcsetattr(fd, TCSANOW, &newt);
+    }
+
+    n = read(fd, buffer, size);
+
+    if (term_ok) {
+        tcsetattr(fd, TCSANOW, &oldt);
+    }
+    printf("\n");
+
+    return n;
+}
 
 int main() {
     char user[64];
@@ -16,10 +38,10 @@ int main() {
     
     printf("Password: ");
     fflush(stdout);
-    // TODO: Disable echo
-    n = read(0, pass, 63);
+
+    n = read_password_no_echo(0, pass, 63);
     if(n>0) pass[n-1] = 0;
-    
+
     if (strcmp(user, "root") == 0 && strcmp(pass, "root") == 0) {
         printf("Login successful.\n");
         // exec shell
@@ -29,4 +51,3 @@ int main() {
     }
     return 0;
 }
-

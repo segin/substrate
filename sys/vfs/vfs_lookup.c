@@ -9,8 +9,15 @@
 #include <sys/signal.h>
 #include <string.h>
 #include <kern/panic.h>
+#include <vm/uma.h>
 
 #define MAXSYMLINKS 8
+
+static uma_zone_t *namei_zone;
+
+void namei_init(void) {
+    namei_zone = uma_zcreate("namei", 1024, NULL, NULL, NULL, NULL, 0, 0);
+}
 
 /*
  * pathname lookup (namei)
@@ -35,7 +42,11 @@ namei(struct nameidata *ndp)
     /*
      * Allocation of path buffer.
      */
-    cnp->cn_pnbuf = kmalloc(1024);
+    if (namei_zone) {
+        cnp->cn_pnbuf = uma_zalloc(namei_zone, 0);
+    } else {
+        cnp->cn_pnbuf = kmalloc(1024);
+    }
     if (cnp->cn_pnbuf == NULL)
         return ENOMEM;
 
@@ -46,16 +57,17 @@ namei(struct nameidata *ndp)
         size_t len;
         error = copyinstr(ndp->ni_dirp, cnp->cn_pnbuf, 1024, &len);
         if (error) {
-            kfree(cnp->cn_pnbuf, 1024);
+            if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
             return error;
         }
     } else {
         size_t len = strlen(ndp->ni_dirp);
         if (len >= 1024) {
-            kfree(cnp->cn_pnbuf, 1024);
+            if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
             return ENAMETOOLONG;
         }
-        strcpy(cnp->cn_pnbuf, ndp->ni_dirp);
+        strncpy(cnp->cn_pnbuf, ndp->ni_dirp, 1024 - 1);
+        cnp->cn_pnbuf[1023] = '\0';
     }
 
     ndp->ni_dirp = cnp->cn_pnbuf;
@@ -81,7 +93,7 @@ namei(struct nameidata *ndp)
     }
 
     if (dp == NULL) {
-        kfree(cnp->cn_pnbuf, 1024);
+        if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
         return ENOENT;
     }
 
@@ -183,16 +195,16 @@ namei(struct nameidata *ndp)
             if (nlink++ >= MAXSYMLINKS) {
                 vrele(ndp->ni_vp);
                 vrele(dp);
-                kfree(cnp->cn_pnbuf, 1024);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
                 return ELOOP;
             }
 
             /* Read symlink target */
-            char *target = kmalloc(1024);
+            char *target = namei_zone ? uma_zalloc(namei_zone, 0) : kmalloc(1024);
             if (target == NULL) {
                 vrele(ndp->ni_vp);
                 vrele(dp);
-                kfree(cnp->cn_pnbuf, 1024);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
                 return ENOMEM;
             }
 
@@ -209,19 +221,19 @@ namei(struct nameidata *ndp)
 
             error = VOP_READLINK(ndp->ni_vp, &auio, cnp->cn_cred);
             if (error) {
-                kfree(target, 1024);
+                if (namei_zone) uma_zfree(namei_zone, target); else kfree(target, 1024);
                 vrele(ndp->ni_vp);
                 vrele(dp);
-                kfree(cnp->cn_pnbuf, 1024);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
                 return error;
             }
 
             size_t target_len = 1024 - auio.uio_resid;
             if (target_len >= 1024) {
-                kfree(target, 1024);
+                if (namei_zone) uma_zfree(namei_zone, target); else kfree(target, 1024);
                 vrele(ndp->ni_vp);
                 vrele(dp);
-                kfree(cnp->cn_pnbuf, 1024);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
                 return ENAMETOOLONG;
             }
             target[target_len] = '\0';
@@ -231,27 +243,28 @@ namei(struct nameidata *ndp)
              */
             size_t rem_len = strlen(p);
             if (target_len + rem_len >= 1024) {
-                kfree(target, 1024);
+                if (namei_zone) uma_zfree(namei_zone, target); else kfree(target, 1024);
                 vrele(ndp->ni_vp);
                 vrele(dp);
-                kfree(cnp->cn_pnbuf, 1024);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
                 return ENAMETOOLONG;
             }
 
-            char *new_path = kmalloc(1024);
+            char *new_path = namei_zone ? uma_zalloc(namei_zone, 0) : kmalloc(1024);
             if (new_path == NULL) {
-                kfree(target, 1024);
+                if (namei_zone) uma_zfree(namei_zone, target); else kfree(target, 1024);
                 vrele(ndp->ni_vp);
                 vrele(dp);
-                kfree(cnp->cn_pnbuf, 1024);
+                if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
                 return ENOMEM;
             }
 
             memcpy(new_path, target, target_len);
-            strcpy(new_path + target_len, p);
+            strncpy(new_path + target_len, p, 1024 - target_len - 1);
+            new_path[1023] = '\0';
 
-            kfree(target, 1024);
-            kfree(cnp->cn_pnbuf, 1024);
+            if (namei_zone) uma_zfree(namei_zone, target); else kfree(target, 1024);
+            if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
             cnp->cn_pnbuf = new_path;
             ndp->ni_dirp = cnp->cn_pnbuf;
 
@@ -287,6 +300,6 @@ namei(struct nameidata *ndp)
         }
     }
 
-    kfree(cnp->cn_pnbuf, 1024);
+    if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
     return 0;
 }
