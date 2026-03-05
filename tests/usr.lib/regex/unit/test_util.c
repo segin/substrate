@@ -4,6 +4,33 @@
 #include "../../../../usr.lib/regex/src/regex_internal.h"
 #include "../test_common.h"
 
+int test_util_ascii_tolower(void) {
+    for (uint32_t cp = 'a'; cp <= 'z'; cp++) {
+        TEST_ASSERT(regex_ascii_tolower(cp) == cp);
+    }
+
+    for (uint32_t cp = 'A'; cp <= 'Z'; cp++) {
+        TEST_ASSERT(regex_ascii_tolower(cp) == cp - 'A' + 'a');
+    }
+
+    for (uint32_t cp = '0'; cp <= '9'; cp++) {
+        TEST_ASSERT(regex_ascii_tolower(cp) == cp);
+    }
+
+    TEST_ASSERT(regex_ascii_tolower('@') == '@');
+    TEST_ASSERT(regex_ascii_tolower('[') == '[');
+    TEST_ASSERT(regex_ascii_tolower('`') == '`');
+    TEST_ASSERT(regex_ascii_tolower('{') == '{');
+
+    TEST_ASSERT(regex_ascii_tolower(0) == 0);
+    TEST_ASSERT(regex_ascii_tolower(127) == 127);
+    TEST_ASSERT(regex_ascii_tolower(128) == 128);
+    TEST_ASSERT(regex_ascii_tolower(255) == 255);
+    TEST_ASSERT(regex_ascii_tolower(REGEX_MAX_CODEPOINT) == REGEX_MAX_CODEPOINT);
+
+    return 0;
+}
+
 int test_util_is_newline(void) {
     TEST_ASSERT(regex_is_newline('\n') != 0);
     TEST_ASSERT(regex_is_newline('\r') != 0);
