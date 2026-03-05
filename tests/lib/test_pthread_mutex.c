@@ -30,6 +30,10 @@ int mock_munmap(void *addr, size_t length) { (void)addr; (void)length; return 0;
 // Include the source to test
 #include "../../lib/pthreads/pthread.c"
 
+/*
+ * Validates the missing edge case for null attributes.
+ * Simply calls the init function with a valid mutex pointer and a NULL attribute pointer and asserts success.
+ */
 bool test_pthread_mutex_init_null_attr() {
     local_pthread_mutex_t mutex;
     mutex = 42; // arbitrary value to check if it's zeroed

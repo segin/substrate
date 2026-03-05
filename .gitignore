@@ -214,10 +214,7 @@ usr.bin/as/arm-as
 usr.man/mandoc.db
 /tests/test_libpthread_mutex
 tests/lib/c/test_stdlib
-# cc ssa module test binary
-tests/usr.bin/cc/test_ssa_module
 tests/test_readline
-tests/test_libpthread_mutex
 sys/ksyms_table.c
 sys/ksyms_efi_table.c
 bench_objects/
