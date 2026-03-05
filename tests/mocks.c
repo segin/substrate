@@ -292,7 +292,16 @@ vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va) {
 // vm_phys stubs
 void vm_phys_get_free(uint64_t *free) { *free = 0; }
 void vm_phys_get_used(uint64_t *used) { *used = 0; }
+static struct vm_page mock_pages[256];
+static int mock_page_idx = 0;
+void *vm_phys_alloc_page(void) {
+    if (mock_page_idx >= 256) return NULL;
+    return &mock_pages[mock_page_idx++];
+}
+void vm_phys_free_page(void *page) { (void)page; }
 void sched_get_system_load(uint32_t *loads) { loads[0]=0; loads[1]=0; loads[2]=0; }
+
+void swapper_request_work(void) {}
 
 // Fix cast:
 uint32_t pmm_get_page(void) { return (uint32_t)(uintptr_t)malloc(4096); }
