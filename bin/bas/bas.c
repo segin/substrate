@@ -1,4 +1,5 @@
 #include "bas.h"
+#include <getopt.h>
 
 /* Global Storage */
 Instruction space[SZ_SPACE];
@@ -78,32 +79,51 @@ void bas_error(const char *msg) {
         printf("Error: %s\n", msg);
 }
 
-void load_file(const char *filename) {
+void process_line(char *buf) {
+    /* Trim newline */
+    buf[strcspn(buf, "\r\n")] = 0;
+    if (strlen(buf) == 0) return;
+
+    if (isdigit((unsigned char)buf[0])) {
+        int num = atoi(buf);
+        char *text = strchr(buf, ' ');
+        if (text) {
+            while (*text == ' ') text++;
+
+            /* Compile line into space */
+            int start_offset = space_idx;
+            if (compile_line(num, text, &space_idx)) {
+                add_line(num, start_offset, text);
+            }
+        } else {
+            /* Line number only -> delete? or empty? */
+            /* V7: empty line replaces? */
+        }
+    } else {
+        /* Immediate execution */
+        if (strcmp(buf, "list") == 0) {
+            list_program();
+        } else if (strcmp(buf, "run") == 0) {
+            execute_program();
+        } else if (strcmp(buf, "exit") == 0 || strcmp(buf, "quit") == 0) {
+            exit(0);
+        } else {
+            /* Try to compile as immediate statement */
+            execute_immediate(buf);
+        }
+    }
+}
+
+void bas_load(const char *filename) {
     FILE *f = fopen(filename, "r");
     if (!f) {
-        printf("Error: Could not open file %s\n", filename);
-        return;
+        perror("fopen");
+        exit(EXIT_FAILURE);
     }
 
     char buf[1024];
     while (fgets(buf, sizeof(buf), f)) {
-        /* Trim newline */
-        buf[strcspn(buf, "\r\n")] = 0;
-        if (strlen(buf) == 0) continue;
-
-        if (isdigit(buf[0])) {
-            int num = atoi(buf);
-            char *text = strchr(buf, ' ');
-            if (text) {
-                while (*text == ' ') text++;
-
-                /* Compile line into space */
-                int start_offset = space_idx;
-                if (compile_line(num, text, &space_idx)) {
-                    add_line(num, start_offset, text);
-                }
-            }
-        }
+        process_line(buf);
     }
     fclose(f);
 }
@@ -114,47 +134,30 @@ void bas_loop() {
         printf("> ");
         fflush(stdout);
         if (!fgets(buf, sizeof(buf), stdin)) break;
-        
-        /* Trim newline */
-        buf[strcspn(buf, "\r\n")] = 0;
-        if (strlen(buf) == 0) continue;
-        
-        if (isdigit(buf[0])) {
-            int num = atoi(buf);
-            char *text = strchr(buf, ' ');
-            if (text) {
-                while (*text == ' ') text++;
-                
-                /* Compile line into space */
-                int start_offset = space_idx;
-                if (compile_line(num, text, &space_idx)) {
-                    add_line(num, start_offset, text);
-                }
-            } else {
-                /* Line number only -> delete? or empty? */
-                /* V7: empty line replaces? */
-            }
-        } else {
-            /* Immediate execution */
-            if (strcmp(buf, "list") == 0) {
-                list_program();
-            } else if (strcmp(buf, "run") == 0) {
-                execute_program();
-            } else if (strcmp(buf, "exit") == 0 || strcmp(buf, "quit") == 0) {
-                exit(0);
-            } else {
-                /* Try to compile as immediate statement */
-                execute_immediate(buf);
-            }
-        }
+        process_line(buf);
     }
 }
 
 int main(int argc, char *argv[]) {
-    bas_init();
-    if (argc > 1) {
-        load_file(argv[1]);
+    int opt;
+    struct option long_options[] = {
+        {0, 0, 0, 0}
+    };
+
+    while ((opt = getopt_long(argc, argv, "", long_options, NULL)) != -1) {
+        switch (opt) {
+            default:
+                fprintf(stderr, "Usage: %s [script.bas]\n", argv[0]);
+                exit(EXIT_FAILURE);
+        }
     }
+
+    bas_init();
+
+    if (optind < argc) {
+        bas_load(argv[optind]);
+    }
+
     bas_loop();
     return 0;
 }

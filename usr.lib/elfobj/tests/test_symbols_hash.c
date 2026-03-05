@@ -55,5 +55,17 @@ int main(void) {
     if (elf_validate(obj, &diag) == ELF_OK) fail("validate should reject local-after-global");
     free(diag);
     elf_close(obj);
+
+    /* Test explicit hash function calls */
+    if (elf_hash_sysv(NULL) != 0) fail("sysv hash NULL");
+    if (elf_hash_sysv("") != 0) fail("sysv hash empty");
+    if (elf_hash_sysv("printf") != 0x077905a6) fail("sysv hash printf");
+    if (elf_hash_sysv("exit") != 0x0006cf04) fail("sysv hash exit");
+
+    if (elf_hash_gnu(NULL) != 0) fail("gnu hash NULL");
+    if (elf_hash_gnu("") != 5381) fail("gnu hash empty");
+    if (elf_hash_gnu("printf") != 0x156b2bb8) fail("gnu hash printf");
+    if (elf_hash_gnu("exit") != 0x7c967e3f) fail("gnu hash exit");
+
     return 0;
 }

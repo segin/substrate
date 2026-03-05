@@ -157,7 +157,7 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         
         kprint(" ");
         char pname[32];
-        sprintf("%sp%d", prefix, part_count + 1);
+        snprintf(pname, sizeof(pname), "%sp%d", prefix, part_count + 1);
         kprint(pname);
         part_count++;
     }
@@ -183,7 +183,7 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         
         /* Create partition name */
         char part_name[32];
-        sprintf("%sp%d", prefix, part_num);
+        snprintf(part_name, sizeof(part_name), "%sp%d", prefix, part_num);
         part_num++;
         
         /* Register partition */
