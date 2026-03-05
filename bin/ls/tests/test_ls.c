@@ -12,6 +12,7 @@
 #include <unistd.h>
 
 #include "ls.h"
+#include "ls_sort.h"
 #include "ls_traverse.h"
 
 static char *join_path2(const char *a, const char *b) {
@@ -924,8 +925,160 @@ static void test_machine_parse_and_unicode_width(void) {
     printf("PASS: test_machine_parse_and_unicode_width\n");
 }
 
+static void test_ls_sort_entries_unit(void) {
+    file_info_t files[5];
+    ls_config_t cfg;
+
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.time_type = TIME_MTIME;
+
+    memset(files, 0, sizeof(files));
+
+    // File 0: A directory, largest size, oldest mtime
+    files[0].name = "zebra";
+    files[0].st.st_mode = S_IFDIR;
+    files[0].st.st_size = 1000;
+    files[0].st.st_mtime = 100;
+    files[0].input_index = 0;
+
+    // File 1: A regular file, small size, middle mtime, .c extension
+    files[1].name = "apple.c";
+    files[1].st.st_mode = S_IFREG;
+    files[1].st.st_size = 10;
+    files[1].st.st_mtime = 200;
+    files[1].input_index = 1;
+
+    // File 2: A regular file, medium size, newest mtime, no extension
+    files[2].name = "banana";
+    files[2].st.st_mode = S_IFREG;
+    files[2].st.st_size = 100;
+    files[2].st.st_mtime = 300;
+    files[2].input_index = 2;
+
+    // File 3: A regular file, version 2
+    files[3].name = "file2.txt";
+    files[3].st.st_mode = S_IFREG;
+    files[3].st.st_size = 50;
+    files[3].st.st_mtime = 150;
+    files[3].input_index = 3;
+
+    // File 4: A regular file, version 10
+    files[4].name = "file10.txt";
+    files[4].st.st_mode = S_IFREG;
+    files[4].st.st_size = 50;
+    files[4].st.st_mtime = 150;
+    files[4].input_index = 4;
+
+    // 1. Default sort (alphabetical)
+    ls_sort_entries(files, 5, &cfg);
+    assert(strcmp(files[0].name, "apple.c") == 0);
+    assert(strcmp(files[1].name, "banana") == 0);
+    assert(strcmp(files[2].name, "file10.txt") == 0);
+    assert(strcmp(files[3].name, "file2.txt") == 0);
+    assert(strcmp(files[4].name, "zebra") == 0);
+
+    // 2. Sort size
+    cfg.sort_size = true;
+    ls_sort_entries(files, 5, &cfg);
+    assert(strcmp(files[0].name, "zebra") == 0);
+    assert(strcmp(files[1].name, "banana") == 0);
+    // file10.txt and file2.txt have same size. alphabetical fallback.
+    assert(strcmp(files[2].name, "file10.txt") == 0);
+    assert(strcmp(files[3].name, "file2.txt") == 0);
+    assert(strcmp(files[4].name, "apple.c") == 0);
+    cfg.sort_size = false;
+
+    // 3. Sort time
+    cfg.sort_time = true;
+    ls_sort_entries(files, 5, &cfg);
+    // Newest first
+    assert(strcmp(files[0].name, "banana") == 0);
+    assert(strcmp(files[1].name, "apple.c") == 0);
+    // file10.txt and file2.txt have same time. alphabetical fallback.
+    assert(strcmp(files[2].name, "file10.txt") == 0);
+    assert(strcmp(files[3].name, "file2.txt") == 0);
+    assert(strcmp(files[4].name, "zebra") == 0);
+    cfg.sort_time = false;
+
+    // 4. Version sort
+    cfg.version_sort = true;
+    ls_sort_entries(files, 5, &cfg);
+    assert(strcmp(files[0].name, "apple.c") == 0);
+    assert(strcmp(files[1].name, "banana") == 0);
+    assert(strcmp(files[2].name, "file2.txt") == 0);
+    assert(strcmp(files[3].name, "file10.txt") == 0);
+    assert(strcmp(files[4].name, "zebra") == 0);
+    cfg.version_sort = false;
+
+    // 5. Extension sort
+    cfg.sort_extension = true;
+    ls_sort_entries(files, 5, &cfg);
+    // no extension (banana, zebra)
+    assert(strcmp(files[0].name, "banana") == 0);
+    assert(strcmp(files[1].name, "zebra") == 0);
+    // .c (apple.c)
+    assert(strcmp(files[2].name, "apple.c") == 0);
+    // .txt (file10.txt, file2.txt)
+    assert(strcmp(files[3].name, "file10.txt") == 0);
+    assert(strcmp(files[4].name, "file2.txt") == 0);
+    cfg.sort_extension = false;
+
+    // 6. Dirs first
+    cfg.dirs_first = true;
+    ls_sort_entries(files, 5, &cfg);
+    assert(strcmp(files[0].name, "zebra") == 0);
+    assert(strcmp(files[1].name, "apple.c") == 0);
+    assert(strcmp(files[2].name, "banana") == 0);
+    assert(strcmp(files[3].name, "file10.txt") == 0);
+    assert(strcmp(files[4].name, "file2.txt") == 0);
+    cfg.dirs_first = false;
+
+    // 7. Reverse sort
+    cfg.reverse = true;
+    ls_sort_entries(files, 5, &cfg);
+    assert(strcmp(files[0].name, "zebra") == 0);
+    assert(strcmp(files[1].name, "file2.txt") == 0);
+    assert(strcmp(files[2].name, "file10.txt") == 0);
+    assert(strcmp(files[3].name, "banana") == 0);
+    assert(strcmp(files[4].name, "apple.c") == 0);
+    cfg.reverse = false;
+
+    // 8. No sort
+    cfg.no_sort = true;
+    files[0].name = "zebra"; files[0].input_index = 0;
+    files[1].name = "apple.c"; files[1].input_index = 1;
+    files[2].name = "banana"; files[2].input_index = 2;
+    files[3].name = "file2.txt"; files[3].input_index = 3;
+    files[4].name = "file10.txt"; files[4].input_index = 4;
+    ls_sort_entries(files, 5, &cfg);
+    assert(strcmp(files[0].name, "zebra") == 0);
+    assert(strcmp(files[1].name, "apple.c") == 0);
+    assert(strcmp(files[2].name, "banana") == 0);
+    assert(strcmp(files[3].name, "file2.txt") == 0);
+    assert(strcmp(files[4].name, "file10.txt") == 0);
+    cfg.no_sort = false;
+
+    // 9. Ignore case
+    cfg.sort_ignore_case = true;
+    files[0].name = "Zebra";
+    files[1].name = "apple.c";
+    files[2].name = "Banana";
+    files[3].name = "file2.txt";
+    files[4].name = "File10.txt";
+    ls_sort_entries(files, 5, &cfg);
+    assert(strcmp(files[0].name, "apple.c") == 0);
+    assert(strcmp(files[1].name, "Banana") == 0);
+    assert(strcmp(files[2].name, "File10.txt") == 0);
+    assert(strcmp(files[3].name, "file2.txt") == 0);
+    assert(strcmp(files[4].name, "Zebra") == 0);
+    cfg.sort_ignore_case = false;
+
+    printf("PASS: test_ls_sort_entries_unit\n");
+}
+
 int main(void) {
     (void)setlocale(LC_ALL, "");
+    test_ls_sort_entries_unit();
     test_sorting_modes();
     test_output_modes();
     test_long_and_symlink();
