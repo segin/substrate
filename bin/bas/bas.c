@@ -81,7 +81,7 @@ void bas_error(const char *msg) {
 
 void process_line(char *buf) {
     /* Trim newline */
-    buf[strcspn(buf, "\n")] = 0;
+    buf[strcspn(buf, "\r\n")] = 0;
     if (strlen(buf) == 0) return;
 
     if (isdigit((unsigned char)buf[0])) {
@@ -125,7 +125,6 @@ void bas_load(const char *filename) {
     while (fgets(buf, sizeof(buf), f)) {
         process_line(buf);
     }
-
     fclose(f);
 }
 
