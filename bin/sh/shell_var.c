@@ -206,11 +206,14 @@ char *shell_var_get(const char *name) {
             total += strlen(shell_argv[i]) + 1;
         }
         char *buf = malloc(total + 1);
-        buf[0] = 0;
+        char *ptr = buf;
         for (int i = 0; i < shell_argc; i++) {
-            if (i > 0) strcat(buf, " ");
-            strcat(buf, shell_argv[i]);
+            if (i > 0) *ptr++ = ' ';
+            size_t len = strlen(shell_argv[i]);
+            memcpy(ptr, shell_argv[i], len);
+            ptr += len;
         }
+        *ptr = '\0';
         return buf;
     }
     
@@ -223,11 +226,14 @@ char *shell_var_get(const char *name) {
             total += strlen(shell_argv[i]) + 1;
         }
         char *buf = malloc(total + 1);
-        buf[0] = 0;
+        char *ptr = buf;
         for (int i = 0; i < shell_argc; i++) {
-            if (i > 0) strcat(buf, " ");
-            strcat(buf, shell_argv[i]);
+            if (i > 0) *ptr++ = ' ';
+            size_t len = strlen(shell_argv[i]);
+            memcpy(ptr, shell_argv[i], len);
+            ptr += len;
         }
+        *ptr = '\0';
         return buf;
     }
     

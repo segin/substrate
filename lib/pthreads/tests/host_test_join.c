@@ -28,7 +28,7 @@ int mock_next_tid = 1;
 // Forward declarations
 void *mock_malloc(size_t size);
 void mock_free(void *ptr);
-int64_t mock_syscall(int num, ...);
+long mock_syscall(long num, ...);
 void mock_exit(int status);
 
 // Redefine symbols to use mocks
@@ -61,7 +61,7 @@ void mock_free(void *ptr) {
     }
 }
 
-int64_t mock_syscall(int num, ...) {
+long mock_syscall(long num, ...) {
     va_list args;
     va_start(args, num);
     long arg1 = va_arg(args, long);
