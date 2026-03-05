@@ -279,6 +279,7 @@ struct fs_node *devfs_root_node_ptr;
 struct nameidata;
 int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 int namei_simple(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
+void namei_init(void) {}
 struct vnode;
 
 // vm_map_lookup stub
@@ -342,10 +343,6 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 }
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
-
-struct vm_page *vm_phys_alloc_page(void) { return NULL; }
-void vm_phys_free_page(struct vm_page *m) { (void)m; }
-void swapper_request_work(void) {}
 
 uint32_t pmm_get_total_memory(void) { return 0; }
 uint32_t pmm_get_free_memory(void) { return 0; }
