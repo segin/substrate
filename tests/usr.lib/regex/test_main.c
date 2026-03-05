@@ -5,6 +5,7 @@ int test_api_match(void);
 int test_replace_basic(void);
 int test_dos_limits(void);
 int test_streaming_basic(void);
+int test_streaming_error(void);
 int test_utf8_literal(void);
 
 int main(void) {
@@ -14,6 +15,7 @@ int main(void) {
     failures += test_replace_basic();
     failures += test_dos_limits();
     failures += test_streaming_basic();
+    failures += test_streaming_error();
     failures += test_utf8_literal();
 
     if (failures) {
