@@ -360,9 +360,7 @@ int vn_lock(struct vnode *vp, int flags)
                  * Let's stick to simple logic: Block only if VXLOCK is held.
                  * TODO: Check VXWANT to prevent writer starvation.
                  */
-                 if ((vp->v_flag & VXWANT) && vp->v_lockstate > 0) {
-                     /* Writers are waiting and lock is held shared. Wait to prevent writer starvation. */
-                 } else {
+                 if (!((vp->v_flag & VXWANT) && vp->v_lockstate > 0)) {
                      break;
                  }
             }
