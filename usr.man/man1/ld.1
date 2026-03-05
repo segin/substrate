@@ -1,35 +1,160 @@
-.Dd February 27, 2026
+.Dd March 3, 2026
 .Dt LD 1
 .Os Substrate
 .Sh NAME
 .Nm ld
-.Nd Substrate linker wrapper
+.Nd Substrate ELF linker for i386 and x86-64
 .Sh SYNOPSIS
 .Nm
-.Op Fl m32 | Fl m64
+.Op Fl m32 | Fl m64 | Fl m Ar emulation
 .Op Fl r | Fl shared | Fl pie | Fl static
 .Op Fl o Ar output
+.Op Fl e Ar symbol
 .Op Fl L Ar dir
 .Op Fl l Ar name
+.Op Fl Bstatic | Fl Bdynamic
+.Op Fl -start-group ... Fl -end-group
+.Op Fl -whole-archive | Fl -no-whole-archive
+.Op Fl -as-needed | Fl -no-as-needed
 .Op Fl T Ar script
 .Op Fl -gc-sections
-.Op Fl -strip-all
-.Op Fl -allow-undefined
+.Op Fl -print-gc-sections
+.Op Fl -icf Ns = Ns Ar safe|all|none
+.Op Fl -hash-style Ns = Ns Ar sysv|gnu|both
+.Op Fl -allow-undefined | Fl -no-undefined
+.Op Fl -unresolved-symbols Ns = Ns Ar ignore-all|report-all
+.Op Fl -undefined Ar symbol
+.Op Fl -defsym Ar name=value
+.Op Fl -trace
+.Op Fl -trace-symbol Ns = Ns Ar symbol
+.Op Fl -warn-common
+.Op Fl -fatal-warnings
+.Op Fl -z Ar text|notext|execstack|noexecstack|relro|norelro
+.Op Fl -plugin Ar path
+.Op Fl -plugin-opt Ar option
+.Op Fl -Map Ar file
+.Op Fl -reproduce Ar dir
+.Op Fl -compat Ns = Ns Ar gnu|lld
+.Op Fl -version
+.Op Fl -help
 .Ar input ...
 .Sh DESCRIPTION
 .Nm
-invokes a backend system linker and validates produced ELF output with
-.Xr libelfobj 3 .
-Mode may be inferred from input objects when not explicitly set.
-.Sh ENVIRONMENT
-.Bl -tag -width LD_BACKEND
-.It Ev LD_BACKEND
-Path/name of backend linker executable. If unset,
+is the native Substrate linker implementation for ELF inputs.
+It links
+.Dv ET_REL
+objects and archives into relocatable, executable, and shared outputs.
+It does not forward to external linker backends.
+.Pp
+When no target mode is forced,
 .Nm
-searches PATH.
+auto-selects i386 or x86-64 mode from the first compatible input.
+.Pp
+For
+.Fl l
+resolution,
+.Nm
+searches
+.Fl L
+paths first, then host defaults
+.Pa /usr/lib
+and
+.Pa /usr/local/lib .
+Both regular ELF libraries and GNU ld script wrappers
+.Pq Dv INPUT / Dv GROUP
+are supported.
+.Sh OPTIONS
+.Bl -tag -width "--unresolved-symbols=report-all"
+.It Fl m32 , Fl m64 , Fl m Ar emulation
+Select output architecture mode.
+.It Fl r
+Produce relocatable
+.Dv ET_REL
+output.
+.It Fl shared , Fl pie
+Produce
+.Dv ET_DYN
+output.
+.It Fl static
+Prefer static archive resolution.
+.It Fl L Ar dir , Fl l Ar name
+Add a library search directory and request a library.
+.It Fl Bstatic , Fl Bdynamic
+Toggle static/dynamic library lookup mode for subsequent
+.Fl l
+operands.
+.It Fl -start-group ... Fl -end-group
+Repeatedly scan grouped libraries until no new unresolved symbols are satisfied.
+.It Fl -whole-archive , Fl -no-whole-archive
+Force extraction of all archive members for subsequent
+.Fl l
+or archive inputs.
+.It Fl -as-needed , Fl -no-as-needed
+Control whether DSOs without currently unresolved symbol matches are ignored.
+.It Fl T Ar script
+Use a linker script.
+.It Fl -gc-sections
+Enable section garbage collection.
+.It Fl -print-gc-sections
+Print removed sections while doing
+.Fl -gc-sections .
+.It Fl -icf Ns = Ns Ar mode
+Enable identical code/data folding in
+.Ar safe
+or
+.Ar all
+mode.
+.It Fl -hash-style Ns = Ns Ar style
+Select dynamic symbol hash style.
+.It Fl -defsym Ar name=value
+Define or override an absolute symbol.
+.It Fl -undefined Ar symbol
+Force a symbol into the unresolved root set.
+.It Fl -allow-undefined , Fl -no-undefined
+Set unresolved symbol policy.
+.It Fl -unresolved-symbols Ns = Ns Ar policy
+GNU-style unresolved symbol policy alias.
+.It Fl -trace , Fl -trace-symbol Ns = Ns Ar symbol
+Trace input loading and symbol usage.
+.It Fl -z Ar option
+Set text-relocation, stack-execute, and RELRO policy.
+.It Fl -plugin Ar path
+Set plugin executable used for LTO materialization.
+.It Fl -plugin-opt Ar option
+Pass plugin-specific options.
+.It Fl -Map Ar file
+Write a link map including inputs, sections, program headers, and symbol provenance.
+.It Fl -reproduce Ar dir
+Write a reproducible link bundle containing object snapshots, manifest, and replay script.
+.It Fl -compat Ns = Ns Ar gnu|lld
+Set unsupported-option policy for compatibility behavior.
+.El
+.Sh DIAGNOSTICS
+Diagnostics are emitted in parser-friendly one-line forms such as
+.Dq ld: error: ...
+and
+.Dq ld: warning: ... .
+For select classes,
+.Nm
+adds structured notes with category/source/hint metadata.
+.Sh COMPATIBILITY NOTES
+.Bl -bullet
+.It
+.Nm
+implements GNU-compatible options for the supported feature set but is not a full GNU ld script superset.
+.It
+GNU plugin shared-object API is not loaded directly;
+.Fl -plugin
+expects an executable materializer interface.
+.It
+Behavior for unsupported options differs by
+.Fl -compat
+mode.
 .El
 .Sh EXIT STATUS
 .Ex -std
 .Sh SEE ALSO
 .Xr as 1 ,
-.Xr cc 1
+.Xr cc 1 ,
+.Xr readelf 1 ,
+.Xr elfobj 3

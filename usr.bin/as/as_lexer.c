@@ -123,6 +123,7 @@ static int is_x86_register_name(const char *s) {
         "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp",
         "ax", "bx", "cx", "dx", "si", "di", "sp", "bp",
         "al", "ah", "bl", "bh", "cl", "ch", "dl", "dh",
+        "sil", "dil", "spl", "bpl",
         "rip", "eip", "ip",
         "cs", "ds", "es", "fs", "gs", "ss",
         "st", "mm0", "mm1", "mm2", "mm3", "mm4", "mm5", "mm6", "mm7",
