@@ -12,6 +12,7 @@
 #include <sys/signal.h> // For copyin/copyout
 #include <sys/kern_syscalls.h>
 #include <sys/file.h>
+#include <arch/i386/pmm.h>
 
 /*
  * exec_reset_signals - Reset signal handlers on exec
@@ -99,7 +100,6 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     Elf32_Phdr phdr;
     
     // Use pmap_t from vm_map.h/pmap.h
-    extern void *pmm_alloc_block(void);
     
     void *pmap = pmap_kernel();
     if (current_process && current_process->pmap) {

@@ -15,6 +15,7 @@
 #include <sys/resource.h>
 #include <sys/times.h>
 #include <string.h>
+#include <errno.h>
 
 int netbsd_sys_getrusage(int who, struct rusage *rusage) {
     if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;

@@ -9,18 +9,18 @@
 
 // Helpers from kernel printf.c adapted for libc
 
-static void itoa(char *buf, int64_t val, int force_sign, int space_prefix) {
+static void itoa(char *buf, size_t size, int64_t val, int force_sign, int space_prefix) {
     char tmp[32];
     int i = 0;
     int is_negative = (val < 0);
     
     if (val == 0) {
         if (force_sign) {
-            buf[0] = '+'; buf[1] = '0'; buf[2] = '\0';
+            strlcpy(buf, "+0", size);
         } else if (space_prefix) {
-            buf[0] = ' '; buf[1] = '0'; buf[2] = '\0';
+            strlcpy(buf, " 0", size);
         } else {
-            buf[0] = '0'; buf[1] = '\0';
+            strlcpy(buf, "0", size);
         }
         return;
     }
@@ -34,13 +34,15 @@ static void itoa(char *buf, int64_t val, int force_sign, int space_prefix) {
         uval /= 10;
     }
     
-    int j = 0;
-    if (is_negative) buf[j++] = '-';
-    else if (force_sign) buf[j++] = '+';
-    else if (space_prefix) buf[j++] = ' ';
+    size_t j = 0;
+    if (is_negative) { if (j < size - 1) buf[j++] = '-'; }
+    else if (force_sign) { if (j < size - 1) buf[j++] = '+'; }
+    else if (space_prefix) { if (j < size - 1) buf[j++] = ' '; }
     
-    for (int k = 0; k < i; k++) buf[j++] = tmp[i - k - 1];
-    buf[j] = '\0';
+    for (int k = 0; k < i; k++) {
+        if (j < size - 1) buf[j++] = tmp[i - k - 1];
+    }
+    if (size > 0) buf[j < size ? j : size - 1] = '\0';
 }
 
 static void utoa_hex(char *buf, uint64_t val, int uppercase) {
@@ -58,11 +60,17 @@ static void utoa_hex(char *buf, uint64_t val, int uppercase) {
     buf[i] = '\0';
 }
 
-static void ftoa(char *buf, double val, int precision, int uppercase) {
+static void ftoa(char *buf, size_t size, double val, int precision, int uppercase) {
     if (precision < 0) precision = 6;
-    if (val != val) { strcpy(buf, uppercase ? "NAN" : "nan"); return; }
-    if (val > 1e308 || val < -1e308) { strcpy(buf, uppercase ? "INF" : "inf"); return; }
-    if (val < 0) { *buf++ = '-'; val = -val; }
+    if (val != val) { strlcpy(buf, uppercase ? "NAN" : "nan", size); return; }
+    if (val > 1e308 || val < -1e308) { strlcpy(buf, uppercase ? "INF" : "inf", size); return; }
+    if (val < 0) {
+        if (size > 1) {
+            *buf++ = '-';
+            size--;
+        }
+        val = -val;
+    }
     
     double rounding = 0.5;
     for (int i = 0; i < precision; i++) rounding /= 10.0;
@@ -72,27 +80,37 @@ static void ftoa(char *buf, double val, int precision, int uppercase) {
     double fractional = val - (double)integral;
     
     char tmp[64];
-    itoa(tmp, integral, 0, 0);
-    strcpy(buf, tmp);
-    buf += strlen(tmp);
+    itoa(tmp, sizeof(tmp), integral, 0, 0);
+    size_t len = strlcpy(buf, tmp, size);
+    if (len >= size) len = size > 0 ? size - 1 : 0;
+    buf += len;
+    size -= len;
     
-    if (precision > 0) {
+    if (precision > 0 && size > 1) {
         *buf++ = '.';
-        for (int i = 0; i < precision; i++) {
+        size--;
+        for (int i = 0; i < precision && size > 1; i++) {
             fractional *= 10.0;
             int digit = (int)fractional;
             *buf++ = digit + '0';
+            size--;
             fractional -= digit;
         }
     }
-    *buf = '\0';
+    if (size > 0) *buf = '\0';
 }
 
-static void etoa(char *buf, double val, int precision, int uppercase) {
+static void etoa(char *buf, size_t size, double val, int precision, int uppercase) {
     if (precision < 0) precision = 6;
-    if (val != val) { strcpy(buf, uppercase ? "NAN" : "nan"); return; }
-    if (val > 1e308 || val < -1e308) { strcpy(buf, uppercase ? "INF" : "inf"); return; }
-    if (val < 0) { *buf++ = '-'; val = -val; }
+    if (val != val) { strlcpy(buf, uppercase ? "NAN" : "nan", size); return; }
+    if (val > 1e308 || val < -1e308) { strlcpy(buf, uppercase ? "INF" : "inf", size); return; }
+    if (val < 0) {
+        if (size > 1) {
+            *buf++ = '-';
+            size--;
+        }
+        val = -val;
+    }
 
     int exponent = 0;
     if (val > 0) {
@@ -103,21 +121,24 @@ static void etoa(char *buf, double val, int precision, int uppercase) {
         }
     }
 
-    ftoa(buf, val, precision, uppercase);
-    buf += strlen(buf);
-    *buf++ = uppercase ? 'E' : 'e';
-    *buf++ = (exponent >= 0) ? '+' : '-';
+    ftoa(buf, size, val, precision, uppercase);
+    size_t len = strlen(buf);
+    buf += len;
+    size -= len;
+
+    if (size > 1) { *buf++ = uppercase ? 'E' : 'e'; size--; }
+    if (size > 1) { *buf++ = (exponent >= 0) ? '+' : '-'; size--; }
     if (exponent < 0) exponent = -exponent;
-    if (exponent < 10) *buf++ = '0';
+    if (exponent < 10 && size > 1) { *buf++ = '0'; size--; }
     char exp_buf[16];
-    itoa(exp_buf, exponent, 0, 0);
-    strcpy(buf, exp_buf);
+    itoa(exp_buf, sizeof(exp_buf), exponent, 0, 0);
+    strlcpy(buf, exp_buf, size);
 }
 
-static void gtoa(char *buf, double val, int precision, int uppercase, int alternate_form) {
+static void gtoa(char *buf, size_t size, double val, int precision, int uppercase, int alternate_form) {
     if (precision < 0) precision = 6;
     if (precision == 0) precision = 1;
-    if (val != val || val > 1e308 || val < -1e308) { ftoa(buf, val, precision, uppercase); return; }
+    if (val != val || val > 1e308 || val < -1e308) { ftoa(buf, size, val, precision, uppercase); return; }
 
     double abs_val = (val < 0) ? -val : val;
     int exponent = 0;
@@ -127,8 +148,8 @@ static void gtoa(char *buf, double val, int precision, int uppercase, int altern
         else if (t < 1.0) { while (t < 1.0) { t *= 10.0; exponent--; } }
     }
 
-    if (exponent < -4 || exponent >= precision) etoa(buf, val, precision - 1, uppercase);
-    else ftoa(buf, val, precision - 1 - exponent, uppercase);
+    if (exponent < -4 || exponent >= precision) etoa(buf, size, val, precision - 1, uppercase);
+    else ftoa(buf, size, val, precision - 1 - exponent, uppercase);
 
     if (!alternate_form) {
         char *dot = buf;
@@ -342,9 +363,9 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                     if (length == LEN_LONG_DOUBLE) val = (double)va_arg(ap, long double);
                     else val = va_arg(ap, double);
                     char tmp[128];
-                    if (*f == 'f' || *f == 'F') ftoa(tmp, val, precision, (*f == 'F'));
-                    else if (*f == 'e' || *f == 'E') etoa(tmp, val, precision, (*f == 'E'));
-                    else gtoa(tmp, val, precision, (*f == 'G'), alternate_form);
+                    if (*f == 'f' || *f == 'F') ftoa(tmp, sizeof(tmp), val, precision, (*f == 'F'));
+                    else if (*f == 'e' || *f == 'E') etoa(tmp, sizeof(tmp), val, precision, (*f == 'E'));
+                    else gtoa(tmp, sizeof(tmp), val, precision, (*f == 'G'), alternate_form);
                     int tmp_len = strlen(tmp);
                     if (width > tmp_len && !left_align) for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
                     for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
@@ -354,7 +375,7 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 case 'a':
                 case 'A': {
                     va_arg(ap, double);
-                    char tmp[16]; strcpy(tmp, (*f == 'A') ? "0X1.0P+0" : "0x1.0p+0");
+                    char tmp[16]; strlcpy(tmp, (*f == 'A') ? "0X1.0P+0" : "0x1.0p+0", sizeof(tmp));
                     int tmp_len = strlen(tmp);
                     if (width > tmp_len && !left_align) for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
                     for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);

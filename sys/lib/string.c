@@ -62,6 +62,18 @@ void *memmove(void *dest, const void *src, size_t n) {
     return dest;
 }
 
+size_t strlen(const char *s);
+
+size_t strlcpy(char *dst, const char *src, size_t size) {
+    size_t src_len = strlen(src);
+    if (size > 0) {
+        size_t copy_len = (src_len >= size) ? size - 1 : src_len;
+        memcpy(dst, src, copy_len);
+        dst[copy_len] = '\0';
+    }
+    return src_len;
+}
+
 void *memset(void *s, int c, size_t n) {
     unsigned char *p = s;
     unsigned char val = (unsigned char)c;
