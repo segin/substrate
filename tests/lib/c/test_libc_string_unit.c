@@ -484,6 +484,27 @@ bool test_libc_memcmp(void) {
     return true;
 }
 
+void run_strrchr_tests(void) {
+    printf("Running strrchr tests...\n");
+    const char *str = "hello world";
+
+    ASSERT_STREQ(libc_strrchr(str, 'o'), "orld", "Find 'o' (multiple occurrences, returns last)");
+    ASSERT_STREQ(libc_strrchr(str, 'h'), "hello world", "Find 'h' (first char)");
+    ASSERT_STREQ(libc_strrchr(str, 'd'), "d", "Find 'd' (last char)");
+    ASSERT_STREQ(libc_strrchr(str, 'z'), NULL, "Find 'z' (not present)");
+    ASSERT_STREQ(libc_strrchr(str, '\0'), "", "Find null terminator");
+    ASSERT_STREQ(libc_strrchr(str, 'l'), "ld", "Find 'l' (multiple occurrences)");
+
+    const char *empty = "";
+    ASSERT_STREQ(libc_strrchr(empty, 'a'), NULL, "Empty string, not found");
+    ASSERT_STREQ(libc_strrchr(empty, '\0'), "", "Empty string, null terminator");
+}
+
+bool test_libc_strrchr(void) {
+    run_strrchr_tests();
+    return true;
+}
+
 bool test_libc_strcmp(void) {
     run_strcmp_tests();
     return true;
@@ -514,7 +535,7 @@ int main(void) {
     run_strtok_tests();
     run_memset_tests();
     run_memcmp_tests();
-    run_strcmp_tests();
+    run_strrchr_tests();
     run_strcmp_tests();
     run_strpbrk_tests();
     run_strncmp_tests();

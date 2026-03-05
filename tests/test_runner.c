@@ -134,6 +134,7 @@ extern bool test_libc_strcat(void);
 extern bool test_libc_strtok(void);
 extern bool test_libc_memset(void);
 extern bool test_libc_memcmp(void);
+extern bool test_libc_strrchr(void);
 extern bool test_libc_strcmp(void);
 extern bool test_libc_strpbrk(void);
 
@@ -240,6 +241,7 @@ test_case_t tests[] = {
     {"libc_strtok", test_libc_strtok},
     {"libc_memset", test_libc_memset},
     {"libc_memcmp", test_libc_memcmp},
+    {"libc_strrchr", test_libc_strrchr},
     {"libc_strcmp", test_libc_strcmp},
     {"libc_strpbrk", test_libc_strpbrk},
     {"div64", run_div64_tests},
