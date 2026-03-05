@@ -222,6 +222,26 @@ void run_memcmp_tests(void) {
     ASSERT_TRUE(libc_memcmp(large1, large2, 1024) < 0, "Large buffers differ at end");
 }
 
+void run_strdup_tests(void) {
+    printf("Running strdup tests...\n");
+
+    // Basic duplication
+    const char *orig1 = "Hello, World!";
+    char *dup1 = libc_strdup(orig1);
+    ASSERT_TRUE(dup1 != NULL, "strdup should not return NULL for valid string");
+    ASSERT_TRUE(dup1 != orig1, "strdup should return a new pointer");
+    ASSERT_STREQ(dup1, orig1, "Duplicated string should match original");
+    free(dup1);
+
+    // Empty string
+    const char *orig2 = "";
+    char *dup2 = libc_strdup(orig2);
+    ASSERT_TRUE(dup2 != NULL, "strdup should not return NULL for empty string");
+    ASSERT_TRUE(dup2 != orig2, "strdup should return a new pointer for empty string");
+    ASSERT_STREQ(dup2, orig2, "Duplicated empty string should match original");
+    free(dup2);
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -247,6 +267,11 @@ bool test_libc_memcmp(void) {
     return true;
 }
 
+bool test_libc_strdup(void) {
+    run_strdup_tests();
+    return true;
+}
+
 #ifndef NO_MAIN
 int main(void) {
     run_strlen_tests();
@@ -254,6 +279,7 @@ int main(void) {
     run_strcat_tests();
     run_strtok_tests();
     run_memcmp_tests();
+    run_strdup_tests();
     return 0;
 }
 #endif
