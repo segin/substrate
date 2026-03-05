@@ -50,9 +50,10 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     char header_buf[256];
     int len = kern_read(fd, header_buf, sizeof(header_buf));
     
-    kern_close(fd);
-
-    if (len < 0) return len;
+    if (len < 0) {
+        kern_close(fd);
+        return len;
+    }
     
     // 4. Iterate through handlers
     struct exec_binary_handler *h = exec_handlers;
@@ -60,11 +61,12 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         if (h->check && h->check(path, header_buf, len) == 0) {
             // Match found!
             if (h->load) {
-                return h->load(path, argv, envp);
+                return h->load(fd, path, argv, envp);
             }
         }
         h = h->next;
     }
 
+    kern_close(fd);
     return -ENOEXEC;
 }
