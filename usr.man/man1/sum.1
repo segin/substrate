@@ -1,0 +1,108 @@
+.TH SUM 1 "March 2026" "Substrate" "User Commands"
+.SH NAME
+sum \- compute legacy checksums and block counts
+.SH SYNOPSIS
+.B sum
+.RB [ \-o " 1|2 ]"
+.RB [ \-a " algorithm ]"
+.RB [ \-s " string ]"
+.RB [ \-r ]
+.RB [ \-q ]
+.RB [ \-p ]
+.RB [ \-\-sysv ]
+.RB [ \-\-algorithm= algorithm ]
+.RB [ \-\-compat= "bsd|gnu ]"
+.RI [ file ... ]
+.SH DESCRIPTION
+The
+.B sum
+utility computes historic checksums and block counts.
+.PP
+With no
+.I file
+operands, input is read from standard input.
+A
+.I file
+operand of
+.B -
+also means standard input.
+.PP
+Default behavior uses historic algorithm 1 (BSD rotate checksum)
+with block counts rounded up in 1024-byte units.
+.SH OPTIONS
+.TP
+.BI \-o " 1|2"
+Select historic algorithm 1 (BSD rotate checksum) or 2 (SysV folding sum).
+.TP
+.B \-\-sysv
+Select historic algorithm 2 (equivalent to
+.BR \-o " 2").
+.TP
+.BI \-a " algorithm"
+Add an algorithm selection. Supported names: old1, old2, bsd, sysv, 1, 2.
+Multiple
+.B \-a
+or
+.B \-\-algorithm
+options may be specified.
+.TP
+.BI \-\-algorithm= "algorithm"
+Unified algorithm selector. Same accepted values as
+.BR \-a .
+.TP
+.BI \-\-compat= "bsd|gnu"
+Set short-option conflict behavior.
+Default is
+.BR bsd .
+.TP
+.BI \-s " string"
+In BSD compatibility mode, checksum the literal
+.IR string .
+In GNU compatibility mode, select the SysV algorithm.
+.TP
+.B \-r
+In BSD compatibility mode, requests reverse output format for digest-style
+algorithms (legacy sum algorithms remain unchanged).
+In GNU compatibility mode,
+.B \-r
+selects the BSD algorithm.
+.TP
+.B \-q
+Quiet mode; print checksum only.
+.TP
+.B \-p
+Echo bytes read from standard input to standard output while checksumming.
+.TP
+.B \-\-help
+Display help and exit.
+.TP
+.B \-\-version
+Display version information and exit.
+.SH OUTPUT FORMAT
+For single-algorithm legacy output, each line is:
+.PP
+.RS
+.I checksum blocks
+.RI [ filename ]
+.RE
+.PP
+When more than one algorithm is selected, output lines are prefixed with
+the algorithm tag (
+.B old1
+or
+.BR old2 ).
+.SH CONFORMING TO
+The
+.B sum
+utility follows BSD-first conflict policy when GNU and BSD flags overlap.
+GNU long-option compatibility is provided for
+.BR \-\-sysv ,
+.BR \-\-help ,
+and
+.BR \-\-version .
+.SH EXIT STATUS
+The
+.B sum
+utility exits 0 on success, and >0 if an error occurs.
+.SH SEE ALSO
+.BR cksum (1)

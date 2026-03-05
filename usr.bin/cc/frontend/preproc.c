@@ -901,6 +901,8 @@ static int has_builtin_name(const char *name) {
         strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
         strcmp(name, "__builtin_ctzll") == 0 || strcmp(name, "__builtin_clz") == 0 ||
         strcmp(name, "__builtin_clzl") == 0 || strcmp(name, "__builtin_clzll") == 0 ||
+        strcmp(name, "__builtin_ffs") == 0 || strcmp(name, "__builtin_ffsl") == 0 ||
+        strcmp(name, "__builtin_ffsll") == 0 ||
         strcmp(name, "__builtin_bswap16") == 0 ||
         strcmp(name, "__builtin_bswap32") == 0 || strcmp(name, "__builtin_bswap64") == 0 ||
         strcmp(name, "__builtin_add_overflow") == 0 || strcmp(name, "__builtin_sub_overflow") == 0 ||

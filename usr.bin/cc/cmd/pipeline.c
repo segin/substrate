@@ -91,6 +91,14 @@ int cc_compile_c_to_s(const char *in_c, const char *display_src, const char *out
         cc_tu_free(&tu);
         return -1;
     }
+    if (cc_middle_legalize_module(&ssa, diag) != 0) {
+        if (diag != NULL && diag->message[0] == '\0') {
+            snprintf(diag->message, sizeof(diag->message), "SSA legalization failed");
+        }
+        cc_ssa_module_free(&ssa);
+        cc_tu_free(&tu);
+        return -1;
+    }
     if (timings) {
         t_ast2ir = now_seconds() - t0;
         fprintf(stderr, "cc: timing ast2ir=%.3fs\n", t_ast2ir);
