@@ -1,0 +1,32 @@
+.TH SYS_VM_SWAP 2 "March 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sys_vm_swap \- query swap device statistics
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.PP
+.BI "int sys_vm_swap(sys_swapinfo_t *" swap ", size_t *" count ");"
+.SH DESCRIPTION
+.BR sys_vm_swap ()
+is intended to return swap device information records in
+.I swap
+and record count through
+.IR *count .
+.SH RETURN VALUE
+On success, 0 is returned.
+On error, -1 is returned and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EINVAL
+Invalid pointers.
+.TP
+.B ENOSYS
+Current `lib/sys` implementation is a userspace stub with no backing kernel
+syscall.
+.SH SEE ALSO
+.BR sys_vm_stats (2),
+.BR sys_vm_info (2),
+.BR sys_vm_slabs (2)

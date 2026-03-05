@@ -1,0 +1,30 @@
+.TH SYS_PROC_FDS 2 "March 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sys_proc_fds \- list file descriptors for a process
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.PP
+.BI "int sys_proc_fds(pid_t " pid ", sys_fd_t *" fds ", size_t *" count ");"
+.SH DESCRIPTION
+.BR sys_proc_fds ()
+attempts to enumerate open file descriptors for process
+.IR pid .
+The output array is
+.I fds
+with element count supplied and returned through
+.IR *count .
+.SH RETURN VALUE
+On success, 0 is returned.
+On error, a negative value is returned by the current implementation.
+.SH ERRORS
+.TP
+.B ENOSYS
+Current kernel implementation is a stub.
+.SH NOTES
+Wired in native dispatch, currently unimplemented in kernel.
+.SH SEE ALSO
+.BR sys_proc_info (2),
+.BR sys_proc_list (2),
+.BR open (2)

@@ -1,66 +1,36 @@
-.\" Process this file with
-.\" groff -man -Tascii sys_proc_list.2
-.\"
-.TH SYS_PROC_LIST 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.TH SYS_PROC_LIST 2 "March 2026" "Substrate" "System Calls Manual"
 .SH NAME
-sys_proc_list \- get list of all process IDs
+sys_proc_list \- list active process IDs
 .SH LIBRARY
 System library (libsys, \-lsys)
 .SH SYNOPSIS
-.B #include <sys/types.h>
-.br
-.B #include <sys/syscall.h>
+.B #include <sys/sysinfo.h>
 .PP
-.BI "int sys_proc_list(pid_t *" pids ", size_t " max_count ");"
+.BI "int sys_proc_list(pid_t *" pids ", size_t " count ");"
 .SH DESCRIPTION
-The
-.B sys_proc_list()
-system call retrieves a list of all process IDs in the system and stores
-them in the array pointed to by
+.BR sys_proc_list ()
+returns active PIDs from the kernel process table.
+.PP
+If
+.I pids
+is NULL or
+.I count
+is 0, the call returns the total active process count without copying IDs.
+Otherwise, up to
+.I count
+PIDs are written to
 .IR pids .
-At most
-.I max_count
-PIDs are written to the array.
-.PP
-Zombie processes are excluded from the returned list.
-.PP
-This system call is typically used in conjunction with
-.BR sys_proc_info (2)
-to enumerate all processes and retrieve their attributes.
 .SH RETURN VALUE
-On success, returns the actual number of PIDs written to the array.
-If the number of active processes exceeds
-.IR max_count ,
-only
-.I max_count
-PIDs are returned.
+On success, returns either:
+- total active process count (query mode), or
+- number of PIDs copied.
 .PP
-On error, returns \-1.
+On failure, a negative error value is returned by the current implementation.
 .SH ERRORS
 .TP
 .B EFAULT
-.I pids
-points to an invalid address.
-.SH EXAMPLE
-.nf
-#include <sys/syscall.h>
-#include <sys/sysinfo.h>
-#include <stdio.h>
-
-int main(void) {
-    pid_t pids[256];
-    int count = sys_proc_list(pids, 256);
-    
-    for (int i = 0; i < count; i++) {
-        sys_procinfo_t info;
-        if (sys_proc_info(pids[i], &info) == 0) {
-            printf("PID %d: %s\en", info.pid, info.name);
-        }
-    }
-    return 0;
-}
-.fi
+Output buffer is invalid.
 .SH SEE ALSO
 .BR sys_proc_info (2),
 .BR sys_proc_count (2),
-.BR intro (2)
+.BR getpid (2)

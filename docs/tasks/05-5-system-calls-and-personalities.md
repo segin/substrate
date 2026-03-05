@@ -953,6 +953,46 @@
             - [ ] **File Descriptors:** Increment refcounts on all FDs.
             - [ ] `vfork`: Shared VM space, parent blocked until child exec/exit.
 
+### 5.x Syscall ABI/Dispatch Reality Audit (March 2026)
+- [ ] **Personality ABI Consistency:**
+    - [ ] Document and enforce a single argument ABI contract per personality, including native (`substrate`) stack argument extraction in `syscall_handler`.
+    - [ ] Add tests proving native, Linux, and FreeBSD personality argument decoding for 0-8 argument paths.
+- [ ] **Dispatch Table Completeness:**
+    - [ ] Reconcile syscall numbers defined in `sys/arch/i386/syscall.h` with native dispatch wiring (`SYS_WAITPID`, `SYS_BRK`, `SYS_MUNMAP`, `SYS_CLOCK_GETTIME`, and others currently defined but not mapped).
+    - [ ] Ensure each mapped native syscall has matching man-page coverage and test coverage.
+- [ ] **Process Introspection Completion:**
+    - [ ] Replace `sys_proc_threads`, `sys_proc_fds`, `sys_proc_maps`, `sys_proc_cwd`, `sys_proc_exe`, `sys_proc_cmdline`, and `sys_proc_environ` stubs with real implementations.
+    - [ ] Define stable buffer sizing and truncation semantics for all `sys_proc_*` array-returning calls.
+- [ ] **VM Introspection Completion:**
+    - [ ] Extend kernel-side VM introspection beyond `sys_vm_stats` to support `sys_vm_info`, `sys_vm_swap`, `sys_vm_buffers`, and `sys_vm_slabs`.
+    - [ ] Standardize memory units and conversion semantics (`bytes` vs pages) across `sysinfo` and `sys_vm_*`.
+- [ ] **Error ABI Normalization:**
+    - [ ] Normalize kernel syscall error returns to a single policy and remove mixed positive errno / negative errno / `-1` patterns.
+    - [ ] Add personality-level errno translation tests to validate stable behavior for native/Linux/FreeBSD paths.
+- [ ] **Documentation/Traceability:**
+    - [ ] Keep `docs/syscalls/native-syscall-catalog.md`, `docs/syscalls/sys-proc-family.md`, and `docs/syscalls/sys-vm-family.md` synchronized with syscall table and handler changes.
+
+#### Added User Stories (Delta)
+
+- **US-05-9001**: As a kernel maintainer, I want per-personality syscall argument ABIs to be explicit and tested so dispatch is deterministic across native and compatibility personalities.
+- **US-05-9002**: As a syscall subsystem maintainer, I want numbered syscall constants and dispatch tables reconciled so declared interfaces cannot silently drift from runtime behavior.
+- **US-05-9003**: As a systems developer, I want full `sys_proc_*` support so process inspection tools can rely on stable kernel APIs.
+- **US-05-9004**: As a performance and memory engineer, I want full `sys_vm_*` coverage so userland can inspect VM state without private kernel hooks.
+- **US-05-9005**: As an ABI maintainer, I want one syscall error-return contract so libc/libsys/personality layers have predictable failure semantics.
+
+#### Added INCOSE/EARS Requirements (Delta)
+
+- **REQ-05-9001** (EARS/Ubiquitous): The Substrate system shall define and enforce a documented syscall argument ABI for each supported personality.
+  - Verification: personality ABI test matrix for native/Linux/FreeBSD argument passing.
+- **REQ-05-9002** (EARS/Ubiquitous): The Substrate system shall keep architecture syscall number definitions synchronized with active dispatch tables.
+  - Verification: static consistency audit in CI + runtime dispatch smoke tests.
+- **REQ-05-9003** (EARS/Event-Driven): When a `sys_proc_*` interface is wired in dispatch tables, the Substrate system shall provide functional kernel behavior or explicitly documented `ENOSYS` semantics.
+  - Verification: syscall integration tests + man page status checks.
+- **REQ-05-9004** (EARS/Event-Driven): When `sys_vm_*` interfaces are exported in public headers, the Substrate system shall provide kernel-backed data with documented units and field semantics.
+  - Verification: VM introspection tests comparing expected units and bounds.
+- **REQ-05-9005** (EARS/Ubiquitous): The Substrate system shall use a single documented syscall error-return convention across kernel and wrapper layers.
+  - Verification: wrapper/kernel conformance tests for representative syscall families.
+
 
 ## User Stories
 

@@ -59,6 +59,46 @@
         - [ ] `lib/sys/sysctl.c`: Wrapper function.
         - [ ] Man page: `sysctl(2)`.
 
+### 6a.1 Implementation Reality Audit (March 2026)
+- [ ] **ABI Alignment:**
+    - [ ] Align `lib/sys/syscall.S` calling convention with native personality syscall argument ABI (`substrate` stack-argument path).
+    - [ ] Add ABI conformance tests that validate argument passing for 0-6 argument wrappers under native personality.
+- [ ] **Wrapper Number Hygiene:**
+    - [ ] Remove hardcoded wrapper-only syscall numbers (`SYS_vm86=113`, `SYS_PROC_PERS_NAME=360`) or land matching kernel/header definitions and dispatch wiring.
+    - [ ] Enforce that every `SYS_*` used in `lib/sys` is defined in `sys/arch/i386/syscall.h`.
+- [ ] **Coverage Completion:**
+    - [ ] Add missing `lib/sys` wrappers for wired native syscalls with no typed entry points (`setpriority`, `getpriority`, `clock_gettime`, `waitpid`, `brk`, `munmap`, `futex` as applicable to native ABI policy).
+    - [ ] Add typed wrappers for implemented process introspection and VM info calls as they transition from stubs.
+- [ ] **Stub Burn-Down:**
+    - [ ] Implement kernel handlers for `sys_proc_threads`, `sys_proc_fds`, `sys_proc_maps`, `sys_proc_cwd`, `sys_proc_exe`, `sys_proc_cmdline`, `sys_proc_environ`.
+    - [ ] Replace userspace `ENOSYS` stubs in `lib/sys/sysinfo.c` for `sys_vm_info`, `sys_vm_swap`, `sys_vm_buffers`, and `sys_vm_slabs` with real syscall-backed implementations.
+- [ ] **Error Contract Normalization:**
+    - [ ] Define and enforce one syscall error contract (`-errno` at kernel boundary, libc/libsys normalization policy).
+    - [ ] Add wrapper tests proving consistent return and `errno` behavior across `lib/c` and `lib/sys`.
+- [ ] **Documentation Synchronization:**
+    - [ ] Keep `docs/syscalls/*.md` and `usr.man/man2/sys_proc_*.2`, `usr.man/man2/sys_vm_*.2` synchronized with implementation changes.
+
+#### Added User Stories (Delta)
+
+- **US-07-0053**: As a Substrate contributor, I want `lib/sys` syscall entry ABI to match native personality expectations so wrappers behave correctly under the native ABI.
+- **US-07-0054**: As a Substrate contributor, I want every wrapper `SYS_*` number to be header-defined and dispatch-wired so there are no hidden or orphaned syscall numbers.
+- **US-07-0055**: As a systems developer, I want `sys_proc_*` and `sys_vm_*` wrappers to map to real kernel implementations so process and VM introspection APIs are usable.
+- **US-07-0056**: As a libc/libsys maintainer, I want a single documented error-return contract so callers can handle failures consistently.
+- **US-07-0057**: As a documentation maintainer, I want syscall docs and man pages continuously synchronized with code so API behavior is trustworthy.
+
+#### Added INCOSE/EARS Requirements (Delta)
+
+- **REQ-07-0053** (EARS/Ubiquitous): The Substrate system shall ensure the `lib/sys` raw syscall entry path uses the same argument ABI as native personality syscall dispatch.
+  - Verification: ABI conformance tests for 0-6 argument wrappers under native personality.
+- **REQ-07-0054** (EARS/Ubiquitous): The Substrate system shall define every `SYS_*` used by `lib/sys` in architecture syscall headers and wire each used number in dispatch tables.
+  - Verification: static audit (`rg`) + build-time checks + dispatch table review.
+- **REQ-07-0055** (EARS/Event-Driven): When `sys_proc_*` and `sys_vm_*` wrappers are exposed in public headers, the Substrate system shall provide kernel-backed behavior or explicit documented `ENOSYS` semantics.
+  - Verification: syscall integration tests + man page assertions.
+- **REQ-07-0056** (EARS/Ubiquitous): The Substrate system shall use a single documented syscall error contract across kernel, `lib/c`, and `lib/sys`.
+  - Verification: wrapper test suite validating return value and `errno` behavior.
+- **REQ-07-0057** (EARS/Ubiquitous): The Substrate system shall keep `docs/syscalls/*.md` and related man pages synchronized with syscall implementation changes.
+  - Verification: documentation checklist in task completion and code review.
+
 
 ## User Stories
 

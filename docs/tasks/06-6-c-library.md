@@ -1373,24 +1373,47 @@
             - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)`: executable path.
             - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)`: command line.
             - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)`: environment.
+            - [ ] **Deep Requirements (Architecture-Critical):**
+                - [ ] Define stable, versioned semantics for every `sys_procinfo_t` field (required/optional/zeroed).
+                - [ ] Standardize two-pass sizing contract for variable-length APIs (`*_list`, `*_threads`, `*_fds`, `*_maps`, `*_cmdline`, `*_environ`).
+                - [ ] Define permission model for cross-process visibility (self, same-uid, privileged).
+                - [ ] Add regression tests proving deterministic output ordering and snapshot consistency.
+                - [ ] Primary consumers: `bin/ps`, `bin/top`, future `libkvm` compatibility layer.
         - [ ] **Memory Statistics API (`lib/sys`):**
             - [ ] `sys_vm_stats(sys_vmstat_t *stats)`: global VM statistics.
             - [ ] `sys_vm_info(sys_vminfo_t *info)`: memory zone info (DMA, Normal, HighMem).
             - [ ] `sys_vm_swap(sys_swapinfo_t *swap)`: swap usage statistics.
             - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)`: buffer cache statistics.
             - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)`: slab allocator stats.
+            - [ ] **Deep Requirements (Architecture-Critical):**
+                - [ ] Standardize all units (bytes/pages/KB) and document conversion rules in headers and man pages.
+                - [ ] Guarantee monotonic/coherent read semantics for counters exposed in one structure read.
+                - [ ] Define overflow-safe 32-bit userspace behavior for 64-bit counters.
+                - [ ] Add tests comparing `sys_vm_*` outputs to kernel PMM/VM internal counters.
+                - [ ] Primary consumers: `bin/free`, future `bin/top` memory panes, monitoring tools.
         - [ ] **CPU Information API (`lib/sys`):**
             - [ ] `sys_cpu_count()`: number of CPUs (online/possible/present).
             - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)`: per-CPU info (model, MHz, cache).
             - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)`: per-CPU time accounting.
             - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)`: load averages.
             - [ ] `sys_cpu_topology(int cpu, sys_cputopo_t *topo)`: socket/core/thread topology.
+            - [ ] **Deep Requirements (Architecture-Critical):**
+                - [ ] Define online/offline CPU semantics and hotplug behavior for `sys_cpu_count()`.
+                - [ ] Define per-CPU sampling interval and normalization for `sys_cpu_times()`.
+                - [ ] Document canonical load-average representation and rounding behavior.
+                - [ ] Add SMP-aware correctness tests under CPU affinity and migration.
+                - [ ] Primary consumers: `bin/top`, scheduler diagnostics, performance tooling.
         - [ ] **System Information API (`lib/sys`):**
             - [ ] `sys_uptime(struct timespec *ts)`: system uptime.
             - [ ] `sys_boottime(struct timespec *ts)`: boot timestamp.
             - [ ] `sys_hostname(char *buf, size_t len)`: system hostname.
             - [ ] `sys_domainname(char *buf, size_t len)`: NIS/YP domain name.
             - [ ] `sys_kernel_version(sys_version_t *ver)`: kernel version info.
+            - [ ] **Deep Requirements (Architecture-Critical):**
+                - [ ] Define clock source and monotonic/realtime guarantees for uptime/boottime.
+                - [ ] Unify hostname/domainname behavior between `sysctl`, `uname`, and `sys_*` APIs.
+                - [ ] Add ABI stability tests for `sys_version_t` layout and string truncation rules.
+                - [ ] Primary consumers: shell/session tools, telemetry headers in `top`/`free`/`ps`.
         - [ ] **Network Information API (`lib/sys`):**
             - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)`: list interfaces.
             - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)`: addresses.
@@ -1401,6 +1424,11 @@
             - [ ] `sys_disk_list(sys_diskinfo_t *disks, size_t *count)`: list block devices.
             - [ ] `sys_disk_stats(const char *dev, sys_diskstat_t *stats)`: I/O stats per device.
             - [ ] `sys_mount_list(sys_mountinfo_t *mounts, size_t *count)`: mounted filesystems.
+            - [ ] **Deep Requirements (Architecture-Critical):**
+                - [ ] Define canonical mount-entry ordering, mount flags normalization, and option representation.
+                - [ ] Guarantee consistency between mount control path (`mount(2)`, `umount(2)`) and reporting path (`sys_mount_list`).
+                - [ ] Add integration tests validating `bin/mount` output against `sys_mount_list`.
+                - [ ] Primary consumers: `bin/mount`, `bin/umount`, future storage dashboards.
         - [ ] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
             - [ ] `sys_procinfo_t`: pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
             - [ ] `sys_vmstat_t`: total, free, available, buffers, cached, swap_total, swap_free.

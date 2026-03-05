@@ -1,0 +1,38 @@
+.TH SYS_PROC_THREADS 2 "March 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sys_proc_threads \- list thread IDs for a process
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.PP
+.BI "int sys_proc_threads(pid_t " pid ", tid_t *" tids ", size_t *" count ");"
+.SH DESCRIPTION
+.BR sys_proc_threads ()
+returns thread IDs associated with process
+.IR pid .
+The caller supplies an output array in
+.I tids
+and an in/out element count in
+.IR *count .
+.PP
+If
+.I pid
+is 0, the current process is implied.
+.SH RETURN VALUE
+On success, 0 is returned.
+On error, a negative value is returned by the current implementation.
+.SH ERRORS
+.TP
+.B ENOSYS
+Current kernel implementation is a stub and returns not implemented.
+.TP
+.B EINVAL
+Invalid pointers or invalid count pointer semantics.
+.SH NOTES
+This syscall number is wired in native dispatch, but the current kernel handler
+is a stub in `sys/kern/syscall.c`.
+.SH SEE ALSO
+.BR sys_proc_info (2),
+.BR sys_proc_list (2),
+.BR thr_self (2)

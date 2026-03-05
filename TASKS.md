@@ -9,6 +9,14 @@ All checklist items in the refactored files are intentionally reset to open (`[ 
 - [ ] Keep FreeBSD ABI contract current: `docs/kernel-ldso-abi-freebsd.md`.
 - [ ] Keep Substrate ABI contract current: `docs/kernel-ldso-abi-substrate.md`.
 
+## Syscall Documentation Tracking
+
+- [ ] Keep syscall architecture/ABI docs current: `docs/syscalls/abi-and-dispatch.md`.
+- [ ] Keep native syscall inventory current: `docs/syscalls/native-syscall-catalog.md`.
+- [ ] Keep `lib/sys` wrapper status and gaps current: `docs/syscalls/libsys-wrapper-audit.md`.
+- [ ] Keep `sys_proc_*` documentation and man pages current: `docs/syscalls/sys-proc-family.md`, `usr.man/man2/sys_proc_*.2`.
+- [ ] Keep `sys_vm_*` documentation and man pages current: `docs/syscalls/sys-vm-family.md`, `usr.man/man2/sys_vm_*.2`.
+
 ## Refactored Task Sections
 
 - [ ] [01. 1. Kernel Core (`sys/core`, `sys/kern`)](docs/tasks/01-1-kernel-core.md) (975 checklist items)
@@ -35,6 +43,7 @@ All checklist items in the refactored files are intentionally reset to open (`[ 
 
 ## Notes
 
+- Historical pre-refactor monolithic task list is preserved at `docs/old/TASKS.pre-refactor.md`.
 - Each section file contains:
   - A reimplemented checklist (all open)
   - User stories for every checklist item

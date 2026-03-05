@@ -1,0 +1,32 @@
+.TH SYS_VM_INFO 2 "March 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sys_vm_info \- query VM zone-level memory breakdown
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.PP
+.BI "int sys_vm_info(sys_vminfo_t *" info ");"
+.SH DESCRIPTION
+.BR sys_vm_info ()
+is intended to return per-zone VM totals and free counts (DMA, normal,
+high memory) in
+.IR *info .
+.SH RETURN VALUE
+On success, 0 is returned.
+On error, -1 is returned and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EINVAL
+.I info
+is NULL.
+.TP
+.B ENOSYS
+Current `lib/sys` implementation is a userspace stub with no backing kernel
+syscall.
+.SH SEE ALSO
+.BR sys_vm_stats (2),
+.BR sys_vm_swap (2),
+.BR sysinfo (2)

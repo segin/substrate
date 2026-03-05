@@ -1,0 +1,31 @@
+.TH SYS_VM_BUFFERS 2 "March 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sys_vm_buffers \- query buffer cache statistics
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.PP
+.BI "int sys_vm_buffers(sys_bufinfo_t *" buf ");"
+.SH DESCRIPTION
+.BR sys_vm_buffers ()
+is intended to return buffer-cache counters in
+.IR *buf .
+.SH RETURN VALUE
+On success, 0 is returned.
+On error, -1 is returned and
+.I errno
+is set.
+.SH ERRORS
+.TP
+.B EINVAL
+.I buf
+is NULL.
+.TP
+.B ENOSYS
+Current `lib/sys` implementation is a userspace stub with no backing kernel
+syscall.
+.SH SEE ALSO
+.BR sys_vm_stats (2),
+.BR sys_vm_info (2),
+.BR sys_vm_slabs (2)

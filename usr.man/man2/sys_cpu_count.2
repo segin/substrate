@@ -1,40 +1,24 @@
-.\" Process this file with
-.\" groff -man -Tascii sys_cpu_count.2
-.\"
-.TH SYS_CPU_COUNT 2 "January 2026" "Substrate Kernel" "System Calls Manual"
+.TH SYS_CPU_COUNT 2 "March 2026" "Substrate" "System Calls Manual"
 .SH NAME
-sys_cpu_count \- get number of CPUs in the system
+sys_cpu_count \- return online CPU count
 .SH LIBRARY
 System library (libsys, \-lsys)
 .SH SYNOPSIS
-.B #include <sys/syscall.h>
+.B #include <sys/sysinfo.h>
 .PP
 .BI "int sys_cpu_count(void);"
 .SH DESCRIPTION
-The
-.B sys_cpu_count()
-system call returns the number of CPUs (processors) available in the system.
-.PP
-On uniprocessor systems, this always returns 1.
-On SMP (Symmetric Multi-Processing) systems, this returns the number of
-online CPUs.
-.PP
-This call is useful for applications that need to tune their behavior
-based on available parallelism, such as thread pool sizing.
+.BR sys_cpu_count ()
+returns the kernel's current online CPU count.
 .SH RETURN VALUE
-On success, returns the number of CPUs (always >= 1).
-.PP
-This function does not fail under normal circumstances.
+On success, a value >= 1 is returned.
 .SH ERRORS
-This system call does not return any errors.
+This call currently has no documented error path.
 .SH NOTES
-The current implementation returns 1 as the kernel is uniprocessor.
-Future SMP support will return the actual online CPU count.
-.PP
-This differs from
-.BR sysconf(_SC_NPROCESSORS_ONLN)
-in that it is a direct system call rather than a library interface.
+The kernel path uses SMP CPU-count reporting. A separate userspace helper in
+`lib/sys/sysinfo.c` currently returns a constant 1 and should be aligned with
+this syscall contract.
 .SH SEE ALSO
 .BR sys_proc_count (2),
 .BR uname (2),
-.BR intro (2)
+.BR sysinfo (2)

@@ -1,0 +1,27 @@
+.TH SYS_PROC_ENVIRON 2 "March 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sys_proc_environ \- query process environment vector
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.PP
+.BI "int sys_proc_environ(pid_t " pid ", char **" envp ", size_t *" envc ");"
+.SH DESCRIPTION
+.BR sys_proc_environ ()
+attempts to retrieve environment data for process
+.IR pid .
+The API is designed to return an environment pointer array and element count.
+.SH RETURN VALUE
+On success, 0 is returned.
+On error, a negative value is returned by the current implementation.
+.SH ERRORS
+.TP
+.B ENOSYS
+Current kernel implementation is a stub.
+.SH NOTES
+Wired in native dispatch, currently unimplemented in kernel.
+.SH SEE ALSO
+.BR execve (2),
+.BR sys_proc_cmdline (2),
+.BR sys_proc_info (2)

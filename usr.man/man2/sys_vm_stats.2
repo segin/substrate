@@ -1,0 +1,31 @@
+.TH SYS_VM_STATS 2 "March 2026" "Substrate" "System Calls Manual"
+.SH NAME
+sys_vm_stats \- retrieve virtual memory summary statistics
+.SH LIBRARY
+System library (libsys, \-lsys)
+.SH SYNOPSIS
+.B #include <sys/sysinfo.h>
+.PP
+.BI "int sys_vm_stats(sys_vmstat_t *" stats ");"
+.SH DESCRIPTION
+.BR sys_vm_stats ()
+fills
+.I *stats
+with a VM and swap summary, including total/free/available memory and swap
+capacity/free values.
+.PP
+The `sys_vmstat_t` structure includes:
+- `total`, `free`, `available`
+- `buffers`, `cached`
+- `swap_total`, `swap_free`, `swap_cached`
+.SH RETURN VALUE
+On success, 0 is returned.
+On error, a negative value is returned by the current implementation.
+.SH ERRORS
+.TP
+.B EFAULT
+The supplied user pointer is invalid.
+.SH SEE ALSO
+.BR sysinfo (2),
+.BR pmap_stats (2),
+.BR mmap (2)

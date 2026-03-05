@@ -114,6 +114,23 @@ Libraries:
 
 Headers in `include/` define userspace-facing ABI/API surfaces.
 
+### 6.1 Canonical System-Introspection Surface (`libsys`)
+
+`lib/sys` plus `include/sys/sysinfo.h` is the canonical userspace interface for:
+- process enumeration/introspection (`sys_proc_*`)
+- VM and memory telemetry (`sys_vm_*`, `sysinfo`)
+- CPU/system metadata (`sys_cpu_*`, `sys_uptime`, `sys_hostname`, etc.)
+- mount and filesystem control (`mount(2)`, `umount(2)`, future `sys_mount_list`)
+
+Architecture rule:
+- Base system tools must prefer these typed APIs over ad-hoc parsing of kernel internals.
+- `/proc` and `/sys` are compatibility and observability surfaces, not a replacement for stable typed ABI contracts.
+
+Command integration contract:
+- `bin/ps` and `bin/top`: implement process/cpu views via `sys_proc_*` and `sys_cpu_*`.
+- `bin/free`: implement memory reporting via `sys_vm_stats`/`sysinfo`.
+- `bin/mount` and `bin/umount`: implement control path via `mount(2)`/`umount(2)` and mount-list reporting via typed APIs when available.
+
 ## 7. Toolchain Architecture
 
 ### 7.1 Compiler
@@ -180,6 +197,16 @@ Any boundary change requires:
 - code changes in all affected layers
 - updated tests
 - documented architecture/spec updates
+
+### 9.1 Introspection ABI Stability
+
+The `sys_proc_*`, `sys_vm_*`, `sys_cpu_*`, and system-info interfaces are first-class architecture boundaries.
+Changes to these interfaces require:
+- versioned structure/layout review (`include/sys/sysinfo.h`)
+- syscall number/dispatch review
+- wrapper parity review (`lib/c` and `lib/sys`)
+- userland consumer validation (`ps`, `top`, `free`, `mount`-family tools)
+- man-page and `docs/syscalls/` synchronization
 
 ## 10. Testing Strategy (System-Level)
 
