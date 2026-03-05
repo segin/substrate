@@ -212,6 +212,7 @@ sys/gdb_script.txt
 usr.bin/as/aarch64-as
 usr.bin/as/arm-as
 usr.man/mandoc.db
+tests/bin/ps/test_ps_state
 /tests/test_libpthread_mutex
 tests/lib/c/test_stdlib
 tests/test_readline
