@@ -125,7 +125,11 @@ static elf_err_t out_push(out_sec_t **secs, size_t *count, size_t *cap, const ou
 static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_class_t cls,
                              elf_strtab_t *strtab, size_t *out_size, size_t *out_entsize) {
     size_t entsz = (cls == ELFOBJ_CLASS_64) ? 24 : 16;
-    size_t n = obj->symbol_count + 1;
+    int has_null = (obj->symbol_count > 0 &&
+                    (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
+                    obj->symbols[0]->value == 0 &&
+                    obj->symbols[0]->size == 0);
+    size_t n = obj->symbol_count + (has_null ? 0 : 1);
     uint8_t *buf = (uint8_t *)elf__calloc(n, entsz);
     size_t i;
 
@@ -135,9 +139,12 @@ static uint8_t *build_symtab(const elfobj_t *obj, elfobj_endian_t e, elfobj_clas
 
     for (i = 0; i < obj->symbol_count; ++i) {
         const struct elf_symbol *sym = obj->symbols[i];
-        uint8_t *p = buf + ((i + 1) * entsz);
-        uint32_t st_name = elf__strtab_add(strtab, sym->name ? sym->name : "");
+        uint8_t *p = buf + ((has_null ? i : (i + 1)) * entsz);
+        uint32_t st_name = 0;
         uint8_t st_info = ELF32_ST_INFO(sym->bind, sym->type);
+        if (!(has_null && i == 0)) {
+            st_name = elf__strtab_add(strtab, sym->name ? sym->name : "");
+        }
         if (cls == ELFOBJ_CLASS_32) {
             elf__wr32(p + 0, e, st_name);
             elf__wr32(p + 4, e, (uint32_t)sym->value);
@@ -345,7 +352,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         const char *name = s->name ? s->name : "";
         out_sec_t out;
 
-        if (strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 ||
+        if (s->type == SHT_NULL ||
+            strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 ||
             strcmp(name, ".shstrtab") == 0 ||
             ((s->type == SHT_REL || s->type == SHT_RELA) &&
              (strncmp(name, ".rel", 4) == 0 || strncmp(name, ".rela", 5) == 0) &&
@@ -515,10 +523,14 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
 
     secs[symtab_index].link = (uint32_t)strtab_index;
     {
-        size_t first_global = obj->symbol_count + 1;
+        int has_null = (obj->symbol_count > 0 &&
+                        (obj->symbols[0]->name == NULL || obj->symbols[0]->name[0] == '\0') &&
+                        obj->symbols[0]->value == 0 &&
+                        obj->symbols[0]->size == 0);
+        size_t first_global = obj->symbol_count + (has_null ? 0 : 1);
         for (i = 0; i < obj->symbol_count; ++i) {
             if (obj->symbols[i]->bind != STB_LOCAL) {
-                first_global = i + 1;
+                first_global = i + (has_null ? 0 : 1);
                 break;
             }
         }

@@ -301,6 +301,7 @@ static elfobj_t *make_exec_dyn_obj(const char *test, uint16_t etype) {
 	text = elf_add_section(obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
 	require_true(test, text != NULL, "elf_add_section failed");
 	require_ok(test, "elf_section_set_align", elf_section_set_align(text, 16));
+	require_ok(test, "elf_section_set_addr", elf_section_set_addr(text, 0x401000));
 	require_ok(test, "elf_section_set_data", elf_section_set_data(text, code, sizeof(code)));
 	seg = elf_add_load_segment(obj, PF_R | PF_X, 0x1000);
 	require_true(test, seg != NULL, "elf_add_load_segment failed");
@@ -541,6 +542,26 @@ static void test_entry_point(void) {
 	elf_close(obj);
 }
 
+
+static void test_build_dynstr(void) {
+	const char *t = "build_dynstr";
+	elfobj_t *obj = elf_create(ET_DYN, EM_X86_64, ELFOBJ_CLASS_64, ELFOBJ_ENDIAN_LE);
+	rt_obj_t rt;
+
+	require_true(t, obj != NULL, "elf_create failed");
+	require_true(t, elf_add_symbol(obj, "my_global_sym", 0, 0, STB_GLOBAL, STT_FUNC) != NULL, "add global sym failed");
+	require_true(t, elf_add_symbol(obj, "my_weak_sym", 0, 0, STB_WEAK, STT_OBJECT) != NULL, "add weak sym failed");
+
+	rt = roundtrip_validate(t, obj, ELF_VALIDATE_PERMISSIVE);
+
+	elf_section_t *dynstr = require_section(t, rt.obj, ".dynstr");
+	require_true(t, dynstr != NULL, "missing synthesized .dynstr section");
+	require_true(t, elf_section_size(dynstr) > 0, ".dynstr should not be empty");
+
+	rt_close(&rt);
+	elf_close(obj);
+}
+
 int main(void) {
 	test_minimal();
 	test_many_sections();
@@ -563,6 +584,7 @@ int main(void) {
 	test_reloc_weak();
 	test_tls();
 	test_entry_point();
+	test_build_dynstr();
 	printf("test_write_to_buffer: ALL CHECKS PASSED\n");
 	return(0);
 }
