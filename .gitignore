@@ -214,3 +214,5 @@ usr.man/mandoc.db
 tests/lib/c/test_stdlib
 # cc ssa module test binary
 tests/usr.bin/cc/test_ssa_module
+tests/test_readline
+tests/test_libpthread_mutex

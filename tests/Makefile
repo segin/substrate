@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_history
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_readline test_history
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -44,6 +44,10 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_libpthread_mutex
 	$(MAKE) -C lib/edit
 	./lib/edit/host_test_history
+	./test_readline
+
+test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
+	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
 
 # Duplicate rule removed
 
@@ -159,7 +163,7 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_readline
 	$(MAKE) -C sys clean
 	$(MAKE) -C lib/edit clean
 
