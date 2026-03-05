@@ -128,11 +128,16 @@ char *ast_to_string(ast_node_t *node) {
         size_t len = 0;
         for (int i = 0; i < cmd->arg_count; i++) len += strlen(cmd->args[i]) + 1;
         char *res = malloc(len + 1);
-        res[0] = 0;
+        char *ptr = res;
         for (int i = 0; i < cmd->arg_count; i++) {
-            strcat(res, cmd->args[i]);
-            if (i < cmd->arg_count - 1) strcat(res, " ");
+            size_t arg_len = strlen(cmd->args[i]);
+            memcpy(ptr, cmd->args[i], arg_len);
+            ptr += arg_len;
+            if (i < cmd->arg_count - 1) {
+                *ptr++ = ' ';
+            }
         }
+        *ptr = '\0';
         return res;
     }
     if (node->type == NODE_PIPELINE) {
