@@ -11,6 +11,7 @@
 #include <sys/random.h>
 #include <sys/signal.h> // For copyin/copyout
 #include <sys/kern_syscalls.h>
+#include <sys/file.h>
 
 /*
  * exec_reset_signals - Reset signal handlers on exec
@@ -331,9 +332,12 @@ static int capture_ptr(char *const array[], int index, char **out) {
 
 // Execute a binary - loads ELF and prepares for userspace transition
 // Returns 0 on success, negative error code on failure
-int elf_execve(const char *path, char *const argv[], char *const envp[]) {
+int elf_execve(int fd, const char *path, char *const argv[], char *const envp[]) {
     fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
-    if (!root) return -1;
+    if (!root) {
+        if (fd >= 0) kern_close(fd);
+        return -1;
+    }
 
     // ARG_MAX: Maximum bytes for arguments + environment
     // We use a fixed 32KB buffer to avoid Double Fetch / TOCTOU issues.
@@ -344,17 +348,25 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     int envc = 0;
     int error_code = -1;
 
-    // Lookup the file
-    fs_node_t *file = vfs_lookup(root, path);
+    fs_node_t *file = NULL;
+    if (fd >= 0 && fd < MAX_FD && current_process && current_process->fds[fd]) {
+        file = (fs_node_t *)current_process->fds[fd]->f_data;
+    } else {
+        // Fallback or error if fd is invalid (though exec_dispatch should pass a valid fd)
+        file = vfs_lookup(root, path);
+    }
+
     if (!file) {
         kprint("execve: File not found: ");
         kprint(path);
         kprint("\n");
+        if (fd >= 0) kern_close(fd);
         return -2; // ENOENT
     }
     
     if ((file->flags & 0x7) != FS_FILE) {
         kprint("execve: Not a regular file\n");
+        if (fd >= 0) kern_close(fd);
         return -1;
     }
 
@@ -884,6 +896,7 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
+    if (fd >= 0) kern_close(fd);
 
     // Jump to userspace - does not return
     extern void jump_to_userspace(uint32_t entry, uint32_t stack);
@@ -897,6 +910,7 @@ cleanup:
     if (k_argv) kfree(k_argv, (argc + 1) * sizeof(char*));
     if (k_envp) kfree(k_envp, (envc + 1) * sizeof(char*));
     if (arg_buffer) kfree(arg_buffer, ARG_MAX_BYTES);
+    if (fd >= 0) kern_close(fd);
     return error_code;
 }
 
