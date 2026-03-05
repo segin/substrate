@@ -500,6 +500,35 @@ bool test_libc_strtok(void) {
     return true;
 }
 
+void run_strchr_tests(void) {
+    printf("Running strchr tests...\n");
+    char buf[] = "Hello World";
+
+    // Basic finding
+    ASSERT_EQ((uintptr_t)libc_strchr(buf, 'W'), (uintptr_t)(buf + 6), "Find character in middle");
+    ASSERT_EQ((uintptr_t)libc_strchr(buf, 'H'), (uintptr_t)buf, "Find character at start");
+    ASSERT_EQ((uintptr_t)libc_strchr(buf, 'd'), (uintptr_t)(buf + 10), "Find character at end");
+
+    // Character not in string
+    ASSERT_EQ((uintptr_t)libc_strchr(buf, 'z'), (uintptr_t)NULL, "Character not found");
+
+    // Finding null terminator
+    ASSERT_EQ((uintptr_t)libc_strchr(buf, '\0'), (uintptr_t)(buf + 11), "Find null terminator");
+
+    // Empty string
+    char empty[] = "";
+    ASSERT_EQ((uintptr_t)libc_strchr(empty, 'a'), (uintptr_t)NULL, "Empty string, character not found");
+    ASSERT_EQ((uintptr_t)libc_strchr(empty, '\0'), (uintptr_t)empty, "Empty string, find null terminator");
+
+    // Integer conversion (character value > 255)
+    ASSERT_EQ((uintptr_t)libc_strchr(buf, 'W' + 256), (uintptr_t)(buf + 6), "Integer conversion > 255");
+
+    // Multiple occurrences (finds first)
+    char multiple[] = "abacaba";
+    ASSERT_EQ((uintptr_t)libc_strchr(multiple, 'a'), (uintptr_t)multiple, "First occurrence of 'a'");
+    ASSERT_EQ((uintptr_t)libc_strchr(multiple, 'b'), (uintptr_t)(multiple + 1), "First occurrence of 'b'");
+}
+
 void run_strcmp_tests(void) {
     printf("Running strcmp tests...\n");
 
@@ -588,6 +617,11 @@ bool test_libc_memcmp(void) {
     return true;
 }
 
+bool test_libc_strchr(void) {
+    run_strchr_tests();
+    return true;
+}
+
 void run_strrchr_tests(void) {
     printf("Running strrchr tests...\n");
     const char *str = "hello world";
@@ -640,6 +674,7 @@ int main(void) {
     run_strtok_tests();
     run_memset_tests();
     run_memcmp_tests();
+    run_strchr_tests();
     run_strstr_tests();
     run_strrchr_tests();
     run_strcmp_tests();
