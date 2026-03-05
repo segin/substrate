@@ -96,33 +96,6 @@ console_backend_t *uart_get_console(void) {
     return &uart_console;
 }
 
-#define UART_TX_BUF_SIZE 4096
-static volatile char uart_tx_buf[UART_TX_BUF_SIZE];
-static volatile uint32_t uart_tx_head = 0;
-static volatile uint32_t uart_tx_tail = 0;
-static volatile int uart_tx_active = 0;
-
-static void uart_tx_pump(void) {
-    // If transmitter is not empty, do nothing
-    if ((inb(uart_base_port + 5) & 0x20) == 0) {
-        return;
-    }
-
-    // Write up to 16 bytes to fill the FIFO
-    int count = 0;
-    while (uart_tx_head != uart_tx_tail && count < 16) {
-        outb(uart_base_port + 0, uart_tx_buf[uart_tx_tail]);
-        uart_tx_tail = (uart_tx_tail + 1) % UART_TX_BUF_SIZE;
-        count++;
-    }
-
-    if (uart_tx_head == uart_tx_tail) {
-        uart_tx_active = 0;
-    } else {
-        uart_tx_active = 1;
-    }
-}
-
 void uart_init(void) {
     outb(uart_base_port + 1, 0x00);    // Disable all interrupts
     outb(uart_base_port + 3, 0x80);    // Enable DLAB (set baud rate divisor)
@@ -132,8 +105,8 @@ void uart_init(void) {
     outb(uart_base_port + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
     outb(uart_base_port + 4, 0x0B);    // IRQs enabled, RTS/DSR set
 
-    // Enable Receiver Data Available and Transmitter Holding Register Empty Interrupts
-    outb(uart_base_port + 1, 0x03);
+    // Enable Receiver Data Available interrupts only.
+    outb(uart_base_port + 1, 0x01);
 }
 
 void uart_handler(registers_t *regs) {
@@ -166,8 +139,8 @@ void uart_handler(registers_t *regs) {
                 }
             }
         } else if (type == 1) {
-            // Transmitter Holding Register Empty
-            uart_tx_pump();
+            // Transmitter Holding Register Empty (unused in polling TX mode)
+            (void)inb(uart_base_port + 5);
         } else if (type == 6) {
             // Character Timeout (handle like RDA)
             while (inb(uart_base_port + 5) & 1) {
@@ -203,37 +176,8 @@ int uart_is_transmit_empty(void) {
 }
 
 void uart_putc(char c) {
-    // If running in interrupt context or early boot, just spin
-    // A proper implementation might disable interrupts, buffer it, then re-enable
-
-    // Disable interrupts locally for thread safety
-    uint32_t eflags;
-    __asm__ volatile("pushf; pop %0; cli" : "=r"(eflags));
-
-    uint32_t next_head = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
-
-    // If buffer is full, busy wait until space frees up (interrupts must be enabled!)
-    while (next_head == uart_tx_tail) {
-        // We must re-enable interrupts briefly to let TX handler fire if we are not in an ISR
-        // If we are in an ISR, this will deadlock.
-        if (eflags & 0x200) {
-            __asm__ volatile("sti; nop; cli");
-        } else {
-            // Deadlock avoidance: manually pump if interrupts are permanently off
-            uart_tx_pump();
-        }
-    }
-
-    uart_tx_buf[uart_tx_head] = c;
-    uart_tx_head = next_head;
-
-    if (!uart_tx_active) {
-        uart_tx_pump();
-    }
-
-    if (eflags & 0x200) {
-        __asm__ volatile("sti");
-    }
+    while (uart_is_transmit_empty() == 0);
+    outb(uart_base_port + 0, c);
 }
 
 void uart_write(const char* data, size_t size) {

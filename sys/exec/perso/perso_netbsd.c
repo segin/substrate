@@ -14,6 +14,7 @@
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <sys/resource.h>
 #include <sys/times.h>
+#include <sys/errno.h>
 #include <string.h>
 
 int netbsd_sys_getrusage(int who, struct rusage *rusage) {
