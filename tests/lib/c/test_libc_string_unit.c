@@ -23,6 +23,8 @@
 #define strcpy libc_strcpy
 #undef strncpy
 #define strncpy libc_strncpy
+#undef strlcpy
+#define strlcpy libc_strlcpy
 #undef strcat
 #define strcat libc_strcat
 #undef strncat
@@ -67,6 +69,7 @@ int libc_memcmp(const void *s1, const void *s2, size_t n);
 void *libc_memchr(const void *s, int c, size_t n);
 char *libc_strcpy(char *dest, const char *src);
 char *libc_strncpy(char *dest, const char *src, size_t n);
+size_t libc_strlcpy(char *dest, const char *src, size_t n);
 char *libc_strcat(char *dest, const char *src);
 char *libc_strncat(char *dest, const char *src, size_t n);
 int libc_strcmp(const char *s1, const char *s2);
@@ -587,6 +590,41 @@ void run_strncpy_tests(void) {
     ASSERT_MEM_EQ(dest, "xxxxxxxxxx", 10, "strncpy zero n");
 }
 
+void run_strlcpy_tests(void) {
+    printf("Running strlcpy tests...\n");
+    char dest[20];
+
+    // Test: Basic copy
+    memset(dest, 'X', sizeof(dest));
+    size_t len = libc_strlcpy(dest, "Hello", sizeof(dest));
+    ASSERT_EQ(len, 5, "strlcpy return length");
+    ASSERT_STREQ(dest, "Hello", "strlcpy content");
+    ASSERT_EQ(dest[5], '\0', "strlcpy null terminator");
+    ASSERT_EQ(dest[6], 'X', "strlcpy should not touch beyond null terminator");
+
+    // Test: Truncation
+    memset(dest, 'X', sizeof(dest));
+    len = libc_strlcpy(dest, "Hello", 3);
+    ASSERT_EQ(len, 5, "strlcpy return length with truncation");
+    ASSERT_EQ(dest[0], 'H', "strlcpy truncation content 0");
+    ASSERT_EQ(dest[1], 'e', "strlcpy truncation content 1");
+    ASSERT_EQ(dest[2], '\0', "strlcpy truncation null terminator");
+    ASSERT_EQ(dest[3], 'X', "strlcpy truncation boundary");
+
+    // Test: Zero size
+    memset(dest, 'X', sizeof(dest));
+    len = libc_strlcpy(dest, "Hello", 0);
+    ASSERT_EQ(len, 5, "strlcpy return length with zero size");
+    ASSERT_EQ(dest[0], 'X', "strlcpy zero size should not touch buffer");
+
+    // Test: Empty source
+    memset(dest, 'X', sizeof(dest));
+    len = libc_strlcpy(dest, "", sizeof(dest));
+    ASSERT_EQ(len, 0, "strlcpy return length with empty source");
+    ASSERT_EQ(dest[0], '\0', "strlcpy empty source null terminator");
+    ASSERT_EQ(dest[1], 'X', "strlcpy empty source boundary");
+}
+
 bool test_libc_strncpy(void) {
     run_strncpy_tests();
     return true;
@@ -778,6 +816,11 @@ bool test_libc_strcasecmp(void) {
     return true;
 }
 
+bool test_libc_strlcpy(void) {
+    run_strlcpy_tests();
+    return true;
+}
+
 bool test_libc_strchr(void) {
     run_strchr_tests();
     return true;
@@ -840,6 +883,7 @@ int main(void) {
     run_strcasecmp_tests();
     run_strncpy_tests();
     run_strncasecmp_tests();
+    run_strlcpy_tests();
     run_strchr_tests();
     run_strstr_tests();
     run_strrchr_tests();

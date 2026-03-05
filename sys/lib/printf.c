@@ -6,23 +6,18 @@
 #include <vm/vm_kmem.h>
 
 // Integer to ASCII with optional sign/space prefix
-static void itoa(char *buf, int64_t val, int force_sign, int space_prefix) {
+static void itoa(char *buf, size_t size, int64_t val, int force_sign, int space_prefix) {
     char tmp[32];
     int i = 0;
     int is_negative = (val < 0);
     
     if (val == 0) {
         if (force_sign) {
-            buf[0] = '+';
-            buf[1] = '0';
-            buf[2] = '\0';
+            strlcpy(buf, "+0", size);
         } else if (space_prefix) {
-            buf[0] = ' ';
-            buf[1] = '0';
-            buf[2] = '\0';
+            strlcpy(buf, " 0", size);
         } else {
-            buf[0] = '0';
-            buf[1] = '\0';
+            strlcpy(buf, "0", size);
         }
         return;
     }
@@ -41,20 +36,20 @@ static void itoa(char *buf, int64_t val, int force_sign, int space_prefix) {
     }
     
     // Add sign or space
-    int j = 0;
+    size_t j = 0;
     if (is_negative) {
-        buf[j++] = '-';
+        if (j < size - 1) buf[j++] = '-';
     } else if (force_sign) {
-        buf[j++] = '+';
+        if (j < size - 1) buf[j++] = '+';
     } else if (space_prefix) {
-        buf[j++] = ' ';
+        if (j < size - 1) buf[j++] = ' ';
     }
     
     // Reverse digits
     for (int k = 0; k < i; k++) {
-        buf[j++] = tmp[i - k - 1];
+        if (j < size - 1) buf[j++] = tmp[i - k - 1];
     }
-    buf[j] = '\0';
+    if (size > 0) buf[j < size ? j : size - 1] = '\0';
 }
 
 // Hex conversion helper
@@ -101,21 +96,24 @@ static void utoa_oct(char *buf, uint64_t val) {
 }
 
 // Floating point to ASCII (simplistic)
-static void ftoa(char *buf, double val, int precision, int uppercase) {
+static void ftoa(char *buf, size_t size, double val, int precision, int uppercase) {
     if (precision < 0) precision = 6;
     
     // Handle NaN and Inf
     if (val != val) {
-        strcpy(buf, uppercase ? "NAN" : "nan");
+        strlcpy(buf, uppercase ? "NAN" : "nan", size);
         return;
     }
     if (val > 1e308 || val < -1e308) { // Crude Infinity check
-        strcpy(buf, uppercase ? "INF" : "inf");
+        strlcpy(buf, uppercase ? "INF" : "inf", size);
         return;
     }
 
     if (val < 0) {
-        *buf++ = '-';
+        if (size > 1) {
+            *buf++ = '-';
+            size--;
+        }
         val = -val;
     }
     
@@ -129,38 +127,45 @@ static void ftoa(char *buf, double val, int precision, int uppercase) {
     
     // Print integral part
     char tmp[64];
-    itoa(tmp, integral, 0, 0);
-    strcpy(buf, tmp);
-    buf += strlen(tmp);
+    itoa(tmp, sizeof(tmp), integral, 0, 0);
+    size_t len = strlcpy(buf, tmp, size);
+    if (len >= size) len = size > 0 ? size - 1 : 0;
+    buf += len;
+    size -= len;
     
-    if (precision > 0) {
+    if (precision > 0 && size > 1) {
         *buf++ = '.';
-        for (int i = 0; i < precision; i++) {
+        size--;
+        for (int i = 0; i < precision && size > 1; i++) {
             fractional *= 10.0;
             int digit = (int)fractional;
             *buf++ = digit + '0';
+            size--;
             fractional -= digit;
         }
     }
-    *buf = '\0';
+    if (size > 0) *buf = '\0';
 }
 
 // Scientific notation to ASCII
-static void etoa(char *buf, double val, int precision, int uppercase) {
+static void etoa(char *buf, size_t size, double val, int precision, int uppercase) {
     if (precision < 0) precision = 6;
     
     // Handle NaN and Inf
     if (val != val) {
-        strcpy(buf, uppercase ? "NAN" : "nan");
+        strlcpy(buf, uppercase ? "NAN" : "nan", size);
         return;
     }
     if (val > 1e308 || val < -1e308) {
-        strcpy(buf, uppercase ? "INF" : "inf");
+        strlcpy(buf, uppercase ? "INF" : "inf", size);
         return;
     }
 
     if (val < 0) {
-        *buf++ = '-';
+        if (size > 1) {
+            *buf++ = '-';
+            size--;
+        }
         val = -val;
     }
 
@@ -180,28 +185,30 @@ static void etoa(char *buf, double val, int precision, int uppercase) {
     }
 
     // Reuse ftoa logic for the mantissa (which is now in [1, 10))
-    ftoa(buf, val, precision, uppercase);
-    buf += strlen(buf);
+    ftoa(buf, size, val, precision, uppercase);
+    size_t len = strlen(buf);
+    buf += len;
+    size -= len;
     
-    *buf++ = uppercase ? 'E' : 'e';
-    *buf++ = (exponent >= 0) ? '+' : '-';
+    if (size > 1) { *buf++ = uppercase ? 'E' : 'e'; size--; }
+    if (size > 1) { *buf++ = (exponent >= 0) ? '+' : '-'; size--; }
     if (exponent < 0) exponent = -exponent;
     
     // Exponent is usually at least 2 digits
-    if (exponent < 10) *buf++ = '0';
+    if (exponent < 10 && size > 1) { *buf++ = '0'; size--; }
     char exp_buf[16];
-    itoa(exp_buf, exponent, 0, 0);
-    strcpy(buf, exp_buf);
+    itoa(exp_buf, sizeof(exp_buf), exponent, 0, 0);
+    strlcpy(buf, exp_buf, size);
 }
 
 // Significant digits to ASCII
-static void gtoa(char *buf, double val, int precision, int uppercase, int alternate_form) {
+static void gtoa(char *buf, size_t size, double val, int precision, int uppercase, int alternate_form) {
     if (precision < 0) precision = 6;
     if (precision == 0) precision = 1;
 
     // Handle NaN and Inf
     if (val != val || val > 1e308 || val < -1e308) {
-        ftoa(buf, val, precision, uppercase);
+        ftoa(buf, size, val, precision, uppercase);
         return;
     }
 
@@ -218,10 +225,10 @@ static void gtoa(char *buf, double val, int precision, int uppercase, int altern
 
     if (exponent < -4 || exponent >= precision) {
         // Use scientific notation
-        etoa(buf, val, precision - 1, uppercase);
+        etoa(buf, size, val, precision - 1, uppercase);
     } else {
         // Use decimal notation
-        ftoa(buf, val, precision - 1 - exponent, uppercase);
+        ftoa(buf, size, val, precision - 1 - exponent, uppercase);
     }
 
     // Trim trailing zeros unless alternate form (#) is set
@@ -449,13 +456,13 @@ static void format_hex(struct format_state *state, struct format_flags *flags, u
 static void format_float(struct format_state *state, struct format_flags *flags, double val, char specifier) {
     char tmp[128];
     if (specifier == 'f' || specifier == 'F') {
-        ftoa(tmp, val, flags->precision, (specifier == 'F'));
+        ftoa(tmp, sizeof(tmp), val, flags->precision, (specifier == 'F'));
     } else if (specifier == 'e' || specifier == 'E') {
-        etoa(tmp, val, flags->precision, (specifier == 'E'));
+        etoa(tmp, sizeof(tmp), val, flags->precision, (specifier == 'E'));
     } else if (specifier == 'g' || specifier == 'G') {
-        gtoa(tmp, val, flags->precision, (specifier == 'G'), flags->alternate_form);
+        gtoa(tmp, sizeof(tmp), val, flags->precision, (specifier == 'G'), flags->alternate_form);
     } else if (specifier == 'a' || specifier == 'A') {
-        strcpy(tmp, (specifier == 'A') ? "0X1.0P+0" : "0x1.0p+0");
+        strlcpy(tmp, (specifier == 'A') ? "0X1.0P+0" : "0x1.0p+0", sizeof(tmp));
     }
 
     int tmp_len = strlen(tmp);

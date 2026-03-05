@@ -11,6 +11,7 @@
 #define strlen kernel_strlen
 #define strcpy kernel_strcpy
 #define strncpy kernel_strncpy
+#define strlcpy kernel_strlcpy
 #define strcmp kernel_strcmp
 #define strncmp kernel_strncmp
 #define strchr kernel_strchr
@@ -29,6 +30,7 @@
 #undef strlen
 #undef strcpy
 #undef strncpy
+#undef strlcpy
 #undef strcmp
 #undef strchr
 #undef strspn
@@ -107,6 +109,43 @@ void test_strncpy(void) {
     ASSERT_EQ(dest[5], 'X', "strncpy exact length should not null terminate");
 
     printf("test_strncpy: PASS\n");
+}
+
+void test_strlcpy(void) {
+    char src[] = "Hello";
+    char dest[20];
+
+    // Test: Basic copy
+    memset(dest, 'X', sizeof(dest));
+    size_t len = kernel_strlcpy(dest, src, sizeof(dest));
+    ASSERT_EQ(len, 5, "strlcpy return length");
+    ASSERT_STREQ(dest, src, "strlcpy content");
+    ASSERT_EQ(dest[5], '\0', "strlcpy null terminator");
+    ASSERT_EQ(dest[6], 'X', "strlcpy should not touch beyond null terminator");
+
+    // Test: Truncation
+    memset(dest, 'X', sizeof(dest));
+    len = kernel_strlcpy(dest, src, 3);
+    ASSERT_EQ(len, 5, "strlcpy return length with truncation");
+    ASSERT_EQ(dest[0], 'H', "strlcpy truncation content 0");
+    ASSERT_EQ(dest[1], 'e', "strlcpy truncation content 1");
+    ASSERT_EQ(dest[2], '\0', "strlcpy truncation null terminator");
+    ASSERT_EQ(dest[3], 'X', "strlcpy truncation boundary");
+
+    // Test: Zero size
+    memset(dest, 'X', sizeof(dest));
+    len = kernel_strlcpy(dest, src, 0);
+    ASSERT_EQ(len, 5, "strlcpy return length with zero size");
+    ASSERT_EQ(dest[0], 'X', "strlcpy zero size should not touch buffer");
+
+    // Test: Empty source
+    memset(dest, 'X', sizeof(dest));
+    len = kernel_strlcpy(dest, "", sizeof(dest));
+    ASSERT_EQ(len, 0, "strlcpy return length with empty source");
+    ASSERT_EQ(dest[0], '\0', "strlcpy empty source null terminator");
+    ASSERT_EQ(dest[1], 'X', "strlcpy empty source boundary");
+
+    printf("test_strlcpy: PASS\n");
 }
 
 void test_memmove_comprehensive(void) {
@@ -404,6 +443,7 @@ int main(void) {
     printf("Running String Tests (Host)\n");
     test_strcpy();
     test_strncpy();
+    test_strlcpy();
     test_memmove_comprehensive();
     test_memcmp();
     test_memcmp_comprehensive();
