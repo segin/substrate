@@ -6,6 +6,7 @@ int test_replace_basic(void);
 int test_dos_limits(void);
 int test_streaming_basic(void);
 int test_utf8_literal(void);
+int test_utf8_encode(void);
 int test_unicode_case(void);
 int test_ascii_toupper(void);
 
@@ -17,7 +18,8 @@ int main(void) {
     failures += test_dos_limits();
     failures += test_streaming_basic();
     failures += test_utf8_literal();
-    failures += test_unicode_case();
+    failures += test_utf8_encode();
+    failures += test_utf8_encode();
     failures += test_unicode_case();
     failures += test_ascii_toupper();
 
