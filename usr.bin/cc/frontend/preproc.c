@@ -2079,12 +2079,10 @@ static int emit_dependency_file(pp_state_t *st, const char *in_path) {
         if (out_path == NULL || out_path[0] == '\0') {
             const char *dot = strrchr(in_path, '.');
             size_t n = dot == NULL ? strlen(in_path) : (size_t)(dot - in_path);
-            if (n + 3 >= sizeof(dep_default)) {
+            int res = snprintf(dep_default, sizeof(dep_default), "%.*s.d", (int)n, in_path);
+            if (res < 0 || res >= (int)sizeof(dep_default)) {
                 goto fail;
             }
-            memcpy(dep_default, in_path, n);
-            dep_default[n] = '\0';
-            strcat(dep_default, ".d");
             out_path = dep_default;
         }
         fp = fopen(out_path, "w");

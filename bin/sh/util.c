@@ -117,7 +117,7 @@ void buffer_append(char **buf, size_t *cap, size_t *len, char c) {
             // In a more complex shell we might return error, but for now prevent segfault.
             // Using write/exit to avoid malloc in error handler.
             const char *msg = "sh: Out of memory\n";
-            write(2, msg, strlen(msg));
+            if (write(2, msg, strlen(msg)) < 0) {}
             exit(1);
         }
         *buf = new_buf;
