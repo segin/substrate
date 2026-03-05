@@ -396,6 +396,35 @@ bool test_libc_strtok(void) {
     return true;
 }
 
+void run_strncmp_tests(void) {
+    printf("Running strncmp tests...\n");
+
+    // Equal strings
+    ASSERT_EQ(libc_strncmp("abc", "abc", 5), 0, "Equal strings, n > len");
+    ASSERT_EQ(libc_strncmp("abc", "abc", 3), 0, "Equal strings, n == len");
+    ASSERT_EQ(libc_strncmp("abc", "abcd", 3), 0, "Prefix match, n < len");
+    ASSERT_EQ(libc_strncmp("abcd", "abc", 3), 0, "Prefix match, n < len (reverse)");
+
+    // Differing strings
+    ASSERT_TRUE(libc_strncmp("abc", "abd", 3) < 0, "abc < abd");
+    ASSERT_TRUE(libc_strncmp("abd", "abc", 3) > 0, "abd > abc");
+    ASSERT_EQ(libc_strncmp("abc", "abd", 2), 0, "Diff after n");
+
+    // Empty strings
+    ASSERT_EQ(libc_strncmp("", "", 5), 0, "Empty strings");
+    ASSERT_TRUE(libc_strncmp("a", "", 1) > 0, "a > empty");
+    ASSERT_TRUE(libc_strncmp("", "a", 1) < 0, "empty < a");
+
+    // n=0
+    ASSERT_EQ(libc_strncmp("abc", "xyz", 0), 0, "n=0");
+
+    // Test with embedded nulls
+    ASSERT_EQ(libc_strncmp("a\0b", "a\0c", 3), 0, "Equal with embedded null (stops at null)");
+
+    // Sign verification with large values (ensure unsigned char comparison)
+    ASSERT_TRUE(libc_strncmp("\xff", "\x7f", 1) > 0, "0xff > 0x7f (unsigned)");
+}
+
 bool test_libc_memset(void) {
     run_memset_tests();
     return true;
@@ -403,6 +432,11 @@ bool test_libc_memset(void) {
 
 bool test_libc_memcmp(void) {
     run_memcmp_tests();
+    return true;
+}
+
+bool test_libc_strncmp(void) {
+    run_strncmp_tests();
     return true;
 }
 
@@ -421,6 +455,8 @@ int main(void) {
     run_strtok_tests();
     run_memset_tests();
     run_memcmp_tests();
+    run_strncmp_tests();
+    run_strncmp_tests();
     run_strdup_tests();
     return 0;
 }
