@@ -1,0 +1,165 @@
+# 8. Security and Identity
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 8949-8980.
+
+## Reimplemented Checklist (All Open)
+
+### 8. Security and Identity
+- [ ] **User & Group Management:**
+    - [ ] **Database:**
+        - [ ] Implement `/etc/passwd` parser.
+        - [ ] Implement `/etc/group` parser.
+        - [ ] Implement `/etc/shadow` parser for login.
+    - [ ] **Kernel Credentials:**
+        - [ ] Add `uid, gid, euid, egid, suid, sgid` to Process structure.
+        - [ ] Add supplementary group list to Process structure.
+    - [ ] **System Calls:**
+        - [ ] `getuid`
+        - [ ] `getgid`
+        - [ ] `geteuid`
+        - [ ] `getegid`
+        - [ ] `setuid`
+        - [ ] `setgid`
+        - [ ] `seteuid`
+        - [ ] `setegid`
+        - [ ] `setreuid`
+        - [ ] `setregid`
+        - [ ] `getgroups`
+        - [ ] `setgroups`
+- [ ] **Userland Identity Tools:**
+    - [ ] **`id`:**
+        - [ ] Implement `-u` (UID) flag.
+        - [ ] Implement `-g` (GID) flag.
+        - [ ] Implement `-G` (Groups) flag.
+        - [ ] Implement `-n` (Name) flag.
+        - [ ] Ensure POSIX-compliant output format.
+    - [ ] **`su`:** Enhance with user/group switching.
+    - [ ] **`login`:** Integrate with user database.
+
+
+## User Stories
+
+- **US-12-0001**: As a Substrate contributor working on 8. Security and Identity, I want to user & Group Management: so that this capability is implemented with clear verification evidence.
+- **US-12-0002**: As a Substrate contributor working on 8. Security and Identity, I want to database: so that this capability is implemented with clear verification evidence.
+- **US-12-0003**: As a Substrate contributor working on 8. Security and Identity, I want to implement /etc/passwd parser so that this capability is implemented with clear verification evidence.
+- **US-12-0004**: As a Substrate contributor working on 8. Security and Identity, I want to implement /etc/group parser so that this capability is implemented with clear verification evidence.
+- **US-12-0005**: As a Substrate contributor working on 8. Security and Identity, I want to implement /etc/shadow parser for login so that this capability is implemented with clear verification evidence.
+- **US-12-0006**: As a Substrate contributor working on 8. Security and Identity, I want to kernel Credentials: so that this capability is implemented with clear verification evidence.
+- **US-12-0007**: As a Substrate contributor working on 8. Security and Identity, I want to add uid, gid, euid, egid, suid, sgid to Process structure so that this capability is implemented with clear verification evidence.
+- **US-12-0008**: As a Substrate contributor working on 8. Security and Identity, I want to add supplementary group list to Process structure so that this capability is implemented with clear verification evidence.
+- **US-12-0009**: As a Substrate contributor working on 8. Security and Identity, I want to system Calls: so that this capability is implemented with clear verification evidence.
+- **US-12-0010**: As a Substrate contributor working on 8. Security and Identity, I want to getuid so that this capability is implemented with clear verification evidence.
+- **US-12-0011**: As a Substrate contributor working on 8. Security and Identity, I want to getgid so that this capability is implemented with clear verification evidence.
+- **US-12-0012**: As a Substrate contributor working on 8. Security and Identity, I want to geteuid so that this capability is implemented with clear verification evidence.
+- **US-12-0013**: As a Substrate contributor working on 8. Security and Identity, I want to getegid so that this capability is implemented with clear verification evidence.
+- **US-12-0014**: As a Substrate contributor working on 8. Security and Identity, I want to setuid so that this capability is implemented with clear verification evidence.
+- **US-12-0015**: As a Substrate contributor working on 8. Security and Identity, I want to setgid so that this capability is implemented with clear verification evidence.
+- **US-12-0016**: As a Substrate contributor working on 8. Security and Identity, I want to seteuid so that this capability is implemented with clear verification evidence.
+- **US-12-0017**: As a Substrate contributor working on 8. Security and Identity, I want to setegid so that this capability is implemented with clear verification evidence.
+- **US-12-0018**: As a Substrate contributor working on 8. Security and Identity, I want to setreuid so that this capability is implemented with clear verification evidence.
+- **US-12-0019**: As a Substrate contributor working on 8. Security and Identity, I want to setregid so that this capability is implemented with clear verification evidence.
+- **US-12-0020**: As a Substrate contributor working on 8. Security and Identity, I want to getgroups so that this capability is implemented with clear verification evidence.
+- **US-12-0021**: As a Substrate contributor working on 8. Security and Identity, I want to setgroups so that this capability is implemented with clear verification evidence.
+- **US-12-0022**: As a Substrate contributor working on 8. Security and Identity, I want to userland Identity Tools: so that this capability is implemented with clear verification evidence.
+- **US-12-0023**: As a Substrate contributor working on 8. Security and Identity, I want to id: so that this capability is implemented with clear verification evidence.
+- **US-12-0024**: As a Substrate contributor working on 8. Security and Identity, I want to implement -u (UID) flag so that this capability is implemented with clear verification evidence.
+- **US-12-0025**: As a Substrate contributor working on 8. Security and Identity, I want to implement -g (GID) flag so that this capability is implemented with clear verification evidence.
+- **US-12-0026**: As a Substrate contributor working on 8. Security and Identity, I want to implement -G (Groups) flag so that this capability is implemented with clear verification evidence.
+- **US-12-0027**: As a Substrate contributor working on 8. Security and Identity, I want to implement -n (Name) flag so that this capability is implemented with clear verification evidence.
+- **US-12-0028**: As a Substrate contributor working on 8. Security and Identity, I want to ensure POSIX-compliant output format so that this capability is implemented with clear verification evidence.
+- **US-12-0029**: As a Substrate contributor working on 8. Security and Identity, I want to su: Enhance with user/group switching so that this capability is implemented with clear verification evidence.
+- **US-12-0030**: As a Substrate contributor working on 8. Security and Identity, I want to login: Integrate with user database so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-12-0001** (EARS/Ubiquitous): The Substrate system shall user & Group Management:.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0002** (EARS/Ubiquitous): The Substrate system shall database:.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0003** (EARS/Ubiquitous): The Substrate system shall implement /etc/passwd parser.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0004** (EARS/Ubiquitous): The Substrate system shall implement /etc/group parser.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0005** (EARS/Ubiquitous): The Substrate system shall implement /etc/shadow parser for login.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0006** (EARS/Ubiquitous): The Substrate system shall kernel Credentials:.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0007** (EARS/Ubiquitous): The Substrate system shall add uid, gid, euid, egid, suid, sgid to Process structure.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0008** (EARS/Ubiquitous): The Substrate system shall add supplementary group list to Process structure.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0009** (EARS/Ubiquitous): The Substrate system shall system Calls:.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0010** (EARS/Ubiquitous): The Substrate system shall getuid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0011** (EARS/Ubiquitous): The Substrate system shall getgid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0012** (EARS/Ubiquitous): The Substrate system shall geteuid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0013** (EARS/Ubiquitous): The Substrate system shall getegid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0014** (EARS/Ubiquitous): The Substrate system shall setuid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0015** (EARS/Ubiquitous): The Substrate system shall setgid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0016** (EARS/Ubiquitous): The Substrate system shall seteuid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0017** (EARS/Ubiquitous): The Substrate system shall setegid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0018** (EARS/Ubiquitous): The Substrate system shall setreuid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0019** (EARS/Ubiquitous): The Substrate system shall setregid.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0020** (EARS/Ubiquitous): The Substrate system shall getgroups.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0021** (EARS/Ubiquitous): The Substrate system shall setgroups.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0022** (EARS/Ubiquitous): The Substrate system shall userland Identity Tools:.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0023** (EARS/Ubiquitous): The Substrate system shall id:.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0024** (EARS/Ubiquitous): The Substrate system shall implement -u (UID) flag.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0025** (EARS/Ubiquitous): The Substrate system shall implement -g (GID) flag.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0026** (EARS/Ubiquitous): The Substrate system shall implement -G (Groups) flag.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0027** (EARS/Ubiquitous): The Substrate system shall implement -n (Name) flag.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0028** (EARS/Ubiquitous): The Substrate system shall ensure POSIX-compliant output format.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0029** (EARS/Ubiquitous): The Substrate system shall su: Enhance with user/group switching.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-12-0030** (EARS/Ubiquitous): The Substrate system shall login: Integrate with user database.
+  - Context: 8. Security and Identity
+  - Verification: design review + implementation evidence + test/doc update.

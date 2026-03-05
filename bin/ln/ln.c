@@ -1,15 +1,24 @@
+#include <liblink.h>
 #include <stdio.h>
-#include <unistd.h>
 
-int main(int argc, char *argv[]) {
-    if (argc != 3) {
-        printf("Usage: ln <target> <link_name>\n");
+int
+main(int argc, char **argv)
+{
+    ln_options_t opts;
+    int operand_index;
+    int show_help;
+
+    ln_options_init(&opts, (argc > 0 && argv[0]) ? argv[0] : "ln");
+
+    if (ln_parse_options(&opts, argc, argv, &operand_index, &show_help) != 0) {
+        fprintf(stderr, "%s", ln_usage());
         return 1;
     }
-    if (link(argv[1], argv[2]) != 0) {
-        printf("ln: failed to create link\n");
-        return 1;
+
+    if (show_help) {
+        printf("%s", ln_usage());
+        return 0;
     }
-    return 0;
+
+    return ln_execute(&opts, argc, argv, operand_index);
 }
-

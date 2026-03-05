@@ -1,0 +1,5008 @@
+# 1. Kernel Core (`sys/core`, `sys/kern`)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 7-1101.
+
+## Reimplemented Checklist (All Open)
+
+### 1. Kernel Core (`sys/core`, `sys/kern`)
+- [ ] **Memory Management:**
+    - [ ] **Physical Memory Manager (PMM Refactor):**
+
+        > **Files:** `sys/core/pmm.c`, `sys/vm/phys_mem.c`, `sys/vm/vm_page.h`.
+        >
+        > **Architecture:** Two-phase allocator — watermark (bootstrap) →
+        > buddy (runtime). Returns kernel virtual addresses (0xC0000000+).
+
+        - [ ] **Boot Memory Detection:**
+            - [ ] Parse Multiboot Memory Map (`mmap`).
+            - [ ] Parse e820 Memory Map (legacy BIOS fallback).
+            - [ ] **Hardening:**
+                - [ ] Sanitize memory map entries: validate type, clamp to 32‑bit address space.
+                - [ ] Reject overlapping or zero‑length regions.
+                - [ ] Calculate and report total usable RAM (64‑bit accumulation for >4 GB physical).
+                - [ ] Identify kernel physical bounds from linker symbols (`_kernel_start`, `_kernel_end`).
+                - [ ] Exclude kernel text/data/BSS region from free pool.
+                - [ ] Exclude Multiboot info structure and module regions.
+                - [ ] Reserve BIOS/ACPI regions (type 3/4) and memory holes.
+        - [ ] **Bootstrap Watermark Allocator:**
+            - [ ] Bump allocator for early boot before buddy is ready.
+            - [ ] `pmm_watermark_init(start, end)`: initialize allocator with usable range.
+            - [ ] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment.
+            - [ ] `pmm_watermark_used()`: report bytes consumed.
+            - [ ] Used for: `vm_page_t` array, initial page tables, kernel stacks.
+            - [ ] Watermark region clamped to avoid exceeding available low memory.
+        - [ ] **Dynamic Metadata:**
+            - [ ] Calculate `vm_page_t` array size based on actual detected RAM.
+            - [ ] Allocate array via watermark allocator.
+            - [ ] Remove hardcoded 128 MB static limit.
+            - [ ] Fallback to static bitmap if RAM < 4 MB (constrained environments).
+        - [ ] **Buddy Allocator:**
+            - [ ] Orders 0–10 (4 KB – 4 MB pages).
+            - [ ] **Free Lists:** per‑order doubly‑linked free page lists.
+            - [ ] `vm_phys_alloc_page()`: O(1) single-page allocation from order‑0 free list.
+            - [ ] `vm_phys_alloc_contiguous(order)`: allocate 2^order contiguous pages.
+            - [ ] `vm_phys_free_page(page)`: return page and coalesce with buddy if free.
+            - [ ] `vm_phys_free_contiguous(page, order)`: return and coalesce multi-page block.
+            - [ ] **Buddy Coalescing:** merge adjacent free pages up through orders.
+            - [ ] **Buddy Splitting:** split higher-order blocks when lower order is empty.
+            - [ ] Interrupt‑safe: disable interrupts during alloc/free.
+        - [ ] **Public API (returning kernel virtual addresses):**
+            - [ ] `pmm_alloc_block()`: allocate single page, return 0xC0000000+ virtual address.
+            - [ ] `pmm_free_block(vaddr)`: free single page given virtual address.
+            - [ ] `pmm_alloc_contiguous(count)`: allocate `count` contiguous pages.
+            - [ ] `pmm_free_contiguous(vaddr, count)`: free contiguous block.
+            - [ ] `pmm_get_page(phys_addr)`: look up `vm_page_t` for physical address.
+        - [ ] **Safety & Integration:**
+            - [ ] Fine-grained spinlock for SMP access (`vm_phys_lock`).
+            - [ ] Interrupt disable/restore guards in all API entry points.
+            - [ ] Direct interface with `vm_page.c` queues.
+            - [ ] Low memory watermark: warn when free pages drop below threshold.
+        - [ ] **NUMA-Aware Allocation (deferred):**
+            - [ ] Per-node free lists.
+            - [ ] Node affinity for allocation (prefer local node).
+            - [ ] Cross-node fallback when local node exhausted.
+        - [ ] **Testing:**
+            - [ ] Unit: watermark allocator — sequential allocations, alignment, exhaustion.
+            - [ ] Unit: buddy allocator — alloc/free single pages, verify O(1) behavior.
+            - [ ] Unit: buddy coalescing — free adjacent pages, verify order promotion.
+            - [ ] Unit: buddy splitting — exhaust order 0, verify split from higher order.
+            - [ ] Unit: contiguous allocation — various orders, verify alignment.
+            - [ ] Unit: memory map parsing — Multiboot and e820 with edge cases (overlaps, holes).
+            - [ ] Property: `alloc → free → alloc` returns same page (no leak).
+            - [ ] Property: free page count + allocated count = total pages (invariant).
+            - [ ] Property: buddy free list integrity (no cycles, all entries valid).
+            - [ ] Integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: PMM architecture (watermark → buddy transition).
+            - [ ] Internal doc: virtual vs physical address API convention.
+
+    - [ ] **Memory Management (BSD/Mach Design):**
+
+        - [ ] **Physical Memory (Machine Independent):**
+
+            > **Files:** `sys/vm/vm_page.h`, `sys/vm/vm_page.c`, `sys/vm/phys_mem.c`.
+
+            - [ ] **`vm_page_t` Structure:**
+                - [ ] `phys_addr`: physical address of this page frame.
+                - [ ] `flags`: state flags (see below).
+                - [ ] `wire_count`: wired reference count (cannot be paged out while > 0).
+                - [ ] `ref_count`: general reference count (for COW sharing).
+                - [ ] `order`: buddy allocator order (0 = single page).
+                - [ ] `object`: back-pointer to owning `vm_object` (anonymous, vnode, device).
+                - [ ] `pindex`: page index within owning object.
+                - [ ] `pv_list`: list of `pv_entry` structs for pmap backlinks (which PTEs map this page).
+                - [ ] **State Flags:**
+                    - [ ] `PG_BUSY`: page is being I/O'd (don't touch).
+                    - [ ] `PG_VALID`: page contains valid data.
+                    - [ ] `PG_DIRTY`: page has been modified since last writeback.
+                    - [ ] `PG_ACTIVE`: page is on active queue.
+                    - [ ] `PG_INACTIVE`: page is on inactive queue.
+                    - [ ] `PG_FREE`: page is on free queue.
+                    - [ ] `PG_ZERO`: page is known to be zeroed.
+                    - [ ] `PG_SWAPPED`: page contents are on swap.
+                - [ ] **Initialization:**
+                    - [ ] Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator).
+                    - [ ] Initialize all pages as `PG_FREE`, link into free lists.
+                - [ ] **Accessors:**
+                    - [ ] `pmm_get_page(pa)`: PA-to-page lookup (O(1) via array index).
+                    - [ ] `vm_page_to_phys(page)`: page-to-PA conversion.
+                - [ ] **Ownership Tracking:**
+                    - [ ] Track which `vm_object` (anonymous, vnode, device) owns each page.
+                    - [ ] `vm_page_insert(page, object, pindex)`: link page to object.
+                    - [ ] `vm_page_remove(page)`: unlink page from object.
+                - [ ] **Pmap Backlinks (`pv_entry`):**
+                    - [ ] Track which pmaps/PTEs reference this physical page.
+                    - [ ] `pv_entry`: `{pmap, va, next}` — singly-linked list per page.
+                    - [ ] Used for reverse mapping: given a physical page, find all virtual mappings.
+                    - [ ] Essential for TLB shootdown and page eviction.
+
+            - [ ] **Page Queues:**
+                - [ ] **Queue Types:**
+                    - [ ] **Free Queue:** pages available for immediate allocation.
+                    - [ ] **Active Queue:** recently accessed pages (LRU head).
+                    - [ ] **Inactive Queue:** eviction candidates (LRU tail).
+                    - [ ] **Wired Queue:** kernel/DMA pages that cannot be paged out.
+                    - [ ] **Laundry Queue:** dirty pages waiting to be written to backing store.
+                - [ ] **Queue Operations:**
+                    - [ ] `vm_page_activate(page)`: move to active queue, set `PG_ACTIVE`.
+                    - [ ] `vm_page_deactivate(page)`: move to inactive queue, clear `PG_ACTIVE`.
+                    - [ ] `vm_page_wire(page)`: increment wire count, move to wired queue.
+                    - [ ] `vm_page_unwire(page)`: decrement wire count, move to inactive if count reaches 0.
+                    - [ ] `vm_page_free(page)`: return to free queue, clear all flags.
+                    - [ ] `vm_page_launder(page)`: move to laundry queue for async writeback.
+                - [ ] **LRU Scanning (`vm_pageout_scan`):**
+                    - [ ] Periodic scan of active queue.
+                    - [ ] Check PTE accessed (A) bit via `pmap_is_referenced()`.
+                    - [ ] Clear A bit via `pmap_clear_reference()`.
+                    - [ ] Move unreferenced pages to inactive queue tail.
+                    - [ ] Second-chance algorithm: pages touched again stay active.
+                - [ ] **Page Daemon (`vm_pageout`):**
+                    - [ ] Background kernel thread (`pagedaemon`).
+                    - [ ] Sleep on `vm_pages_needed` wakeup channel.
+                    - [ ] `vm_page_launder()`: write dirty pages to backing store.
+                    - [ ] `vm_page_try_to_free()`: attempt to free clean inactive pages.
+                    - [ ] Priority-based scanning phases: Inactive → Laundry → Active.
+                    - [ ] OOM killer hook: kill process if cannot free memory.
+                - [ ] **Thresholds:**
+                    - [ ] `vm_page_free_min`: absolute minimum free pages (16 default; panic below).
+                    - [ ] `vm_page_free_target`: target free pages (64 default; daemon sleeps above).
+                    - [ ] `vm_page_inactive_target`: target inactive queue length.
+                    - [ ] `vm_page_free_reserved`: reserved for kernel emergencies (8 default).
+                    - [ ] Dynamic threshold adjustment based on total RAM.
+                - [ ] **Statistics (`vm_stat`):**
+                    - [ ] `free_count`, `active_count`, `inactive_count`, `wire_count`, `laundry_count`.
+                    - [ ] `pageins`: pages read from disk.
+                    - [ ] `pageouts`: pages written to disk.
+                    - [ ] `faults`: total page faults handled.
+                    - [ ] `cow_faults`: copy-on-write faults.
+                    - [ ] `reactivations`: pages moved back to active.
+                    - [ ] `zero_fill_pages`: pages satisfied by zero-fill.
+                    - [ ] `/proc/vmstat` or sysctl interface for userspace exposure.
+
+            - [ ] **Testing:**
+                - [ ] Unit: page queue transitions (free→active→inactive→laundry→free).
+                - [ ] Unit: wire/unwire reference counting.
+                - [ ] Unit: `vm_page_insert` / `vm_page_remove` object linkage.
+                - [ ] Unit: `pv_entry` list manipulation (insert, remove, lookup).
+                - [ ] Unit: page daemon thresholds — verify scan triggers at correct free count.
+                - [ ] Property: queue length invariant — sum of all queue counts = total pages.
+                - [ ] Property: no page appears on two queues simultaneously.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: page queue state machine and transitions.
+                - [ ] Internal doc: page daemon algorithm and tuning parameters.
+
+        - [ ] **PMAP Layer (Machine Dependent — i386):**
+
+            > **Files:** `sys/arch/i386/pmap.c`, `pmap.h`.
+            >
+            > **Architecture:** Two-level page tables (PD + PT). 3 GB/1 GB
+            > user/kernel split. Recursive mapping at PDE 1023.
+
+            - [ ] **Initialization (`pmap_bootstrap`):**
+                - [ ] Initialize kernel page directory from static bootstrap allocation.
+                - [ ] Set up recursive mapping at PD entry 1023 (self-reference at 0xFFC00000).
+                - [ ] Map kernel space (0xC0000000+) with global flag if CPUID reports PGE.
+                - [ ] Detect CPU features: PSE (4 MB pages), PGE (global pages), PAE (36‑bit physical).
+                - [ ] Initialize pmap lock for SMP safety.
+                - [ ] Identity-map LAPIC MMIO region (0xFEE00000) with PCD flag.
+                - [ ] Record `kernel_pmap` as authoritative kernel address space.
+
+            - [ ] **Core PTE Manipulation:**
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: insert/update PTE.
+                    - [ ] Allocate page table on demand when PDE is empty.
+                    - [ ] Set `PG_U` (user), `PG_W` (write), `PG_G` (global) flags per `prot`.
+                    - [ ] Invalidate TLB entry for updated VA.
+                    - [ ] Update `pv_entry` list for the physical page.
+                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB.
+                    - [ ] Remove `pv_entry` for this mapping.
+                    - [ ] Free page table if all entries empty (optional reclamation).
+                - [ ] `pmap_kenter(va, pa)`: kernel-only fast path (no locking, no pv_entry).
+                - [ ] `pmap_kremove(va)`: kernel-only removal.
+                - [ ] `pmap_extract(pmap, va)`: return physical address for VA (read PTE).
+                - [ ] `pmap_zero_page(phys)`: zero a physical page via temporary mapping.
+                - [ ] `pmap_copy_page(src_phys, dst_phys)`: copy between physical pages.
+
+            - [ ] **Context Switch (`pmap_activate`):**
+                - [ ] Load `pmap->pdir_phys` into CR3.
+                - [ ] Update `curpmap` thread-local pointer.
+                - [ ] Set TSS ESP0 for kernel stack (scheduler integration).
+
+            - [ ] **Recursive Paging:**
+                - [ ] Reserve PDE 1023 for self-referencing.
+                - [ ] `V_PD` macro: access current PD at 0xFFFFF000.
+                - [ ] `V_PT(n)` macro: access page table `n` at 0xFFC00000 + n×4096.
+                - [ ] All PTE manipulation uses recursive window (no temporary mappings needed).
+
+            - [ ] **Higher-Half Transition:**
+                - [ ] Stable 3 GB/1 GB split: user 0x00000000–0xBFFFFFFF, kernel 0xC0000000–0xFFFFFFFF.
+                - [ ] LMA=0x100000 (1 MB), VMA=0xC0100000 (kernel linked at high address).
+                - [ ] Boot trampoline in `boot.S` enables paging with identity + high mapping.
+
+            - [ ] **Per-Process Address Space (`pmap_t`):**
+                - [ ] **Data Structure:**
+                    - [ ] `pdir` / `pdir_phys`: virtual and physical address of page directory.
+                    - [ ] `ref_count`: reference count for COW sharing.
+                    - [ ] `resident_count`: count of resident pages.
+                    - [ ] `wired_count`: count of wired (unpageable) pages.
+                    - [ ] `stats` (`pmap_stats`): per-pmap counters (faults, cow_faults, zero_fills, protection changes).
+                    - [ ] `lock`: spinlock for SMP safety.
+                    - [ ] `asid`: address space ID (future PCID support, currently 0).
+                    - [ ] `list_entry`: linkage for global pmap list (TLB shootdown).
+                - [ ] **`pmap_create()` — Create New Address Space:**
+                    - [ ] Allocate one 4 KB page for page directory.
+                    - [ ] Zero user portion (PDEs 0–767).
+                    - [ ] Copy kernel PDEs (768–1022) from `kernel_pmap` (shared by reference).
+                    - [ ] Set up recursive mapping in PDE 1023.
+                    - [ ] Initialize reference count to 1.
+                    - [ ] Add to global pmap list.
+                    - [ ] Minimum overhead: 1 PD (4 KB) + PTs allocated on demand.
+                - [ ] **`pmap_destroy()` — Destroy Address Space:**
+                    - [ ] Decrement reference count; return if still referenced (COW children).
+                    - [ ] Walk all user PDEs (0–767):
+                        - [ ] For each present PDE, walk all 1024 PTEs.
+                        - [ ] For each present PTE, free physical page (or decrement refcount).
+                        - [ ] Free page table page.
+                    - [ ] Free page directory page.
+                    - [ ] Remove from global pmap list.
+                - [ ] **`pmap_reference()` / `pmap_release()`:**
+                    - [ ] Atomic increment/decrement of reference count.
+                    - [ ] `pmap_release()`: call `pmap_destroy()` if refcount reaches 0.
+                - [ ] **`pmap_fork()` — Copy-on-Write Fork:**
+                    - [ ] Create new pmap via `pmap_create()`.
+                    - [ ] Walk parent's user PTEs:
+                        - [ ] Copy PTE to child with write bit cleared.
+                        - [ ] Clear write bit in parent too (both now COW).
+                        - [ ] Increment physical page reference count.
+                    - [ ] Track COW pages in pmap stats.
+                - [ ] **Kernel PDE Synchronization:**
+                    - [ ] `kernel_pmap` is authoritative for PDEs 768–1022.
+                    - [ ] `pmap_create()` copies kernel PDEs on creation.
+                    - [ ] `pmap_growkernel(va)`: when kernel maps new pages (vmalloc), update all pmaps.
+                        - [ ] Walk global pmap list and copy new kernel PDEs.
+                    - [ ] Alternatively share kernel PTs by reference (current approach).
+
+            - [ ] **`pmap_protect()` — Change Page Protections:**
+                - [ ] Walk range and update PTE protection bits (R/W, U/S).
+                - [ ] Handle protection upgrade (read → read/write) and downgrade.
+                - [ ] Track protection changes for COW handling.
+                - [ ] Batch TLB invalidations for large ranges (`TLB_BATCH_THRESHOLD`).
+
+            - [ ] **`pmap_copy()` — Copy Mappings Between Address Spaces:**
+                - [ ] Copy PTE entries from source to destination pmap.
+                - [ ] Set up COW if requested (clear write bit in both).
+                - [ ] Increment physical page reference counts.
+                - [ ] Support partial range copy (for `vfork`/`clone`).
+                - [ ] Handle mixed COW and private mappings (`PG_PRIVATE` check).
+
+            - [ ] **Page Reference/Modification Tracking:**
+                - [ ] `pmap_is_referenced(pmap, va)`: check PTE Accessed (A) bit.
+                - [ ] `pmap_is_modified(pmap, va)`: check PTE Dirty (D) bit.
+                - [ ] `pmap_clear_reference(pmap, va)`: clear A bit, invalidate TLB.
+                - [ ] `pmap_clear_modify(pmap, va)`: clear D bit, invalidate TLB.
+                - [ ] `pmap_test_and_clear_ref(page)`: atomic test-and-clear for A bit across all mappings.
+                - [ ] `pmap_test_and_clear_modify(page)`: atomic test-and-clear for D bit.
+                - [ ] Batch variants: `pmap_is_referenced_range()`, `pmap_is_modified_range()`.
+                - [ ] `pmap_track_access(page)`: per-page access frequency tracking for aging.
+                - [ ] Export referenced/modified info to VM layer for page replacement decisions.
+
+            - [ ] **Copy-on-Write System:**
+                - [ ] Mark shared pages read-only in both parent and child.
+                - [ ] **COW Fault Handler:**
+                    - [ ] On write fault to COW page: allocate new physical page.
+                    - [ ] Copy contents from original page.
+                    - [ ] Map new page R/W at faulting VA.
+                    - [ ] Decrement original page refcount.
+                    - [ ] If refcount == 1, optionally remap original R/W in remaining owner.
+                - [ ] `pmap_page_is_cow(page)`: check if page is COW-shared.
+                - [ ] COW statistics: faults, pages saved, duplications.
+                - [ ] `SYS_GET_COW_STATS` (241) syscall and `/proc/cow_stats` procfs entry.
+
+            - [ ] **TLB Management:**
+                - [ ] **Single CPU:**
+                    - [ ] `invlpg(va)`: invalidate single page.
+                    - [ ] CR3 reload: flush entire TLB (expensive, avoid when possible).
+                    - [ ] Track flush statistics.
+                - [ ] **SMP TLB Shootdown:**
+                    - [ ] IPI (Inter-Processor Interrupt) mechanism.
+                    - [ ] `pmap_shootdown_page(va)`: invalidate single page on all CPUs.
+                    - [ ] `pmap_shootdown_range(va, len)`: invalidate range.
+                    - [ ] `pmap_shootdown_all()`: full TLB flush on all CPUs.
+                    - [ ] Deferred shootdown for batch operations.
+                    - [ ] Shootdown completion barrier (wait for all CPUs to acknowledge).
+                - [ ] **INVPCID (future x86_64):**
+                    - [ ] Detect INVPCID support via CPUID.
+                    - [ ] Invalidate by PCID+VA, PCID only, or all-except-global.
+
+            - [ ] **Large Page Support:**
+                - [ ] **4 MB PSE Pages (i386):**
+                    - [ ] Detect PSE via CPUID, set CR4.PSE.
+                    - [ ] Use PDE with PS=1 for 4 MB mappings.
+                    - [ ] `pmap_enter_large(pmap, va, pa, prot, flags)`: create 4 MB mapping.
+                    - [ ] Align VA and PA to 4 MB boundary.
+                    - [ ] Use for kernel text/data to reduce TLB pressure.
+                    - [ ] Demotion: split 4 MB page into 1024 × 4 KB on partial unmap/protect.
+                    - [ ] Promotion: coalesce 1024 aligned 4 KB pages into 4 MB (deferred).
+                - [ ] **2 MB / 1 GB Pages (x86_64 — see x86_64 PMAP below).**
+
+            - [ ] **Global Page Support (PGE):**
+                - [ ] Detect PGE via CPUID, set CR4.PGE.
+                - [ ] Mark kernel pages with `PG_G` flag.
+                - [ ] Global pages survive CR3 reload (not flushed).
+                - [ ] Use CR4 toggle or `INVPCID` to flush global pages when needed.
+
+            - [ ] **ASID/PCID Support (future x86_64):**
+                - [ ] ASID pool management (allocate, free, recycle).
+                - [ ] Assign ASID on pmap creation.
+                - [ ] Include ASID in CR3 on context switch.
+                - [ ] Avoid full TLB flush when switching between processes with different ASIDs.
+
+            - [ ] **PAE Mode (Physical Address Extension — deferred):**
+                - [ ] Three-level page tables: PDPT (4 entries) → PD → PT.
+                - [ ] 64‑bit PTEs: support for NX (No Execute) bit.
+                - [ ] Physical addresses up to 36 bits (64 GB).
+                - [ ] PDPT must be in first 4 GB and 32‑byte aligned.
+
+            - [ ] **PMAP Statistics and Debugging:**
+                - [ ] Per-pmap counters: resident, wired, mapped, faults, cow_faults.
+                - [ ] Global counters: total_pmaps, active_pmaps.
+                - [ ] `pmap_dump(pmap)`: debug dump of pmap contents (PDEs + PTEs).
+                - [ ] `pmap_check(pmap)`: consistency verification (detect leaked pages, orphan PTs).
+                - [ ] Export stats via syscall (`sys_pmap_stats`).
+
+            - [ ] **Page Aging Algorithm Integration:**
+                - [ ] Periodic scanning of all resident pages.
+                - [ ] Decrement age counter if not referenced.
+                - [ ] Pages with age 0 become eviction candidates.
+                - [ ] Support for multiple aging policies (Clock, LRU approximation).
+                - [ ] Hardware A/D bit emulation not needed on x86 (native support).
+
+            - [ ] **Testing:**
+                - [ ] Unit: `pmap_create` → `pmap_destroy` lifecycle (no leaked pages).
+                - [ ] Unit: `pmap_enter` + `pmap_extract` round-trip.
+                - [ ] Unit: `pmap_protect` upgrade and downgrade.
+                - [ ] Unit: `pmap_fork` COW — write to child triggers fault, parent unaffected.
+                - [ ] Unit: `pmap_copy` partial range with mixed COW/private.
+                - [ ] Unit: reference/modification tracking — set/clear/test A and D bits.
+                - [ ] Unit: large page enter/remove (4 MB PSE).
+                - [ ] Unit: TLB shootdown — verify `invlpg` called on remote CPUs.
+                - [ ] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`).
+                - [ ] Property: `pmap_destroy` frees exactly `resident_count` pages.
+                - [ ] Property: recursive mapping at PDE 1023 is self-consistent.
+                - [ ] Integration: fork process, write to COW pages, verify isolation in QEMU.
+                - [ ] Integration: stress test — 100 `pmap_create`/`pmap_destroy` cycles, verify no PMM leak.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: i386 pmap architecture (2-level, recursive, COW).
+                - [ ] Internal doc: TLB management strategy (single CPU + SMP shootdown).
+                - [ ] Internal doc: per-process address space layout (3 GB/1 GB split).
+
+        - [ ] **PMAP Layer (Machine Dependent — x86_64):**
+
+            > **Files:** `sys/arch/x86_64/pmap.c`, `pmap.h`.
+            >
+            > **Architecture:** Four-level page tables (PML4 → PDPT → PD → PT).
+            > Recursive mapping at PML4 entry 510. Canonical 48-bit virtual addressing.
+
+            - [ ] **Initialization (`pmap_bootstrap`):**
+                - [ ] Initialize kernel PML4 from static bootstrap allocation.
+                - [ ] Set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000).
+                - [ ] Map kernel space at canonical upper half (−2 GB).
+                - [ ] Initialize pmap lock for SMP safety.
+                - [ ] Enable NX bit via IA32_EFER.NXE.
+                - [ ] Detect CPU features: PCID, INVPCID, 1 GB pages, PGE.
+
+            - [ ] **Core PTE Manipulation:**
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: walk PML4 → PDPT → PD → PT.
+                    - [ ] Allocate intermediate page table levels on demand.
+                    - [ ] Set NX (No Execute) bit for data pages.
+                    - [ ] Handle user/supervisor, read/write, global flags.
+                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB.
+                - [ ] `pmap_kenter(va, pa)` / `pmap_kremove(va)`: kernel fast paths.
+                - [ ] `pmap_extract(pmap, va)`: return physical address.
+                - [ ] `pmap_zero_page(phys)` / `pmap_copy_page(src, dst)`: page utilities.
+
+            - [ ] **Context Switch (`pmap_activate`):**
+                - [ ] Load `pmap->pml4_phys` into CR3.
+                - [ ] Handle PCID if available (include PCID in CR3 bits 11:0).
+                - [ ] Set `noflush` bit (CR3 bit 63) to avoid TLB flush on PCID switch.
+                - [ ] Update `curpmap` pointer.
+
+            - [ ] **Recursive Paging:**
+                - [ ] Reserve PML4 entry 510 for self-referencing.
+                - [ ] `V_PML4`, `V_PDPT(n)`, `V_PD(n)`, `V_PT(n)` macros for accessing page table levels.
+                - [ ] All PTE manipulation via recursive window.
+
+            - [ ] **Per-Process Address Space:**
+                - [ ] `pmap_create()`: allocate new PML4, copy kernel mappings (entries 256–511).
+                - [ ] `pmap_destroy()`: free all user page table levels (PT → PD → PDPT → PML4) and PML4 itself.
+                - [ ] `pmap_reference()` / `pmap_release()`: reference counting.
+                - [ ] `pmap_fork()`: COW fork with 4-level walk.
+
+            - [ ] **`pmap_protect`:** walk range, update PTE bits (R/W, NX, U/S), invalidate TLB.
+
+            - [ ] **Reference/Modification Tracking:**
+                - [ ] Same API as i386: `pmap_is_referenced`, `pmap_is_modified`, `pmap_clear_*`, `pmap_test_and_clear_*`.
+                - [ ] Range and batch variants.
+
+            - [ ] **Copy-on-Write:** same architecture as i386 (`pmap_fork`, `pmap_page_is_cow`).
+
+            - [ ] **TLB Management:**
+                - [ ] IPI-based SMP shootdown (`pmap_shootdown_page/range/all`).
+                - [ ] INVPCID instruction support (if available):
+                    - [ ] Type 0: invalidate specific PCID + VA.
+                    - [ ] Type 1: invalidate all entries for a PCID.
+                    - [ ] Type 2: invalidate all entries including globals.
+                    - [ ] Type 3: invalidate all entries except globals.
+
+            - [ ] **Large Page Support:**
+                - [ ] **2 MB Pages:** PDE with PS=1, no PT needed.
+                    - [ ] `pmap_enter_2mb(pmap, va, pa, prot, flags)`.
+                    - [ ] `pmap_remove_2mb(pmap, va)`.
+                    - [ ] Automatic promotion: coalesce 512 adjacent 4 KB pages.
+                    - [ ] Demotion: split on partial unmap/protect.
+                - [ ] **1 GB Pages:** PDPTE with PS=1, no PD/PT needed.
+                    - [ ] `pmap_enter_1gb(pmap, va, pa, prot, flags)`.
+                    - [ ] `pmap_remove_1gb(pmap, va)`.
+                    - [ ] Detect support via CPUID (leaf 0x80000001, bit 26).
+                    - [ ] Use for large kernel mappings and huge anonymous regions.
+
+            - [ ] **Global Page Support (PGE):**
+                - [ ] Set CR4.PGE, mark kernel pages with `PG_G`.
+                - [ ] `pmap_set_global(pmap, va)` / `pmap_mark_kernel_global()`.
+
+            - [ ] **PCID Support (Process Context Identifiers):**
+                - [ ] Detect PCID via CPUID (leaf 1, ECX bit 17).
+                - [ ] Detect INVPCID via CPUID (leaf 7, EBX bit 10).
+                - [ ] Set CR4.PCIDE to enable.
+                - [ ] PCID pool: allocate 12-bit IDs (max 4096), recycle via generation counter.
+                - [ ] `pmap_pcid_alloc()` / `pmap_pcid_free()`: pool management.
+                - [ ] Assign PCID on `pmap_create()`, include in CR3 on activate.
+                - [ ] Avoid TLB flush on context switch between different PCIDs.
+
+            - [ ] **NX (No Execute) Bit:**
+                - [ ] Enable via IA32_EFER.NXE MSR.
+                - [ ] Set NX (bit 63 of PTE) for stack, heap, data pages.
+                - [ ] Clear NX for code pages.
+                - [ ] Enforce W^X: pages cannot be both writable and executable.
+
+            - [ ] **5-Level Paging (LA57 — deferred):**
+                - [ ] Detect via CPUID (leaf 7, ECX bit 16).
+                - [ ] PML5 adds 57-bit virtual addressing (128 PB).
+                - [ ] Recursive mapping adjustment for 5 levels.
+
+            - [ ] **PMAP Statistics and Debugging:**
+                - [ ] Same per-pmap and global counters as i386.
+                - [ ] `pmap_dump(pmap)`: debug dump of 4-level page tables.
+                - [ ] `pmap_check(pmap)`: consistency verification.
+
+            - [ ] **Testing:**
+                - [ ] Unit: 4-level page table walk — `pmap_enter` at various canonical addresses.
+                - [ ] Unit: NX enforcement — execute from NX page triggers fault.
+                - [ ] Unit: PCID allocation and recycling under exhaustion.
+                - [ ] Unit: 2 MB page enter/remove.
+                - [ ] Unit: 1 GB page enter/remove (if CPU supports).
+                - [ ] Unit: `pmap_fork` with 4-level walk — COW isolation.
+                - [ ] Unit: INVPCID types 0–3 dispatch.
+                - [ ] Property: PML4 entries 256–511 always match `kernel_pmap`.
+                - [ ] Integration: boot x86_64 kernel, verify user processes get isolated address spaces.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: x86_64 pmap architecture (4-level, PCID, NX).
+                - [ ] Internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros).
+                - [ ] Internal doc: large page promotion/demotion strategy.
+        - [ ] **VM Subsystem (Machine Independent):**
+
+            > **Files:** `sys/vm/vm_map.c`, `vm_fault.c`, `vm_object.c`,
+            > `vm_page.c`, `vm_pager.c`, `vm_swap.c`, `uma_core.c`.
+            >
+            > **Architecture:** BSD/Mach-inspired VM with vm_map → vm_map_entry →
+            > vm_object → vm_page hierarchy. Shadow objects for COW.
+
+            - [ ] **VM Map (`vm_map`):**
+                - [ ] `vm_map` structure representing a process's virtual address space.
+                - [ ] Red-black tree of `vm_map_entry` for O(log N) lookup by VA.
+                - [ ] Linked list of entries for sequential traversal.
+                - [ ] `vm_map_create(pmap, min, max)`: create new map.
+                - [ ] `vm_map_destroy(map)`: tear down entire map.
+                - [ ] `vm_map_lock` / `vm_map_unlock`: reader/writer locking.
+            - [ ] **VM Map Entries (`vm_map_entry`):**
+                - [ ] Represent contiguous virtual regions (text, data, stack, mmap).
+                - [ ] Fields: `start`, `end`, `offset`, `protection`, `max_protection`.
+                - [ ] `object`: backing `vm_object` (anonymous or vnode-backed).
+                - [ ] `inheritance`: share, copy, none (for fork behavior).
+                - [ ] `wired_count`: prevent pageout for this region.
+                - [ ] `vm_map_insert(map, object, offset, start, end, prot)`.
+                - [ ] `vm_map_remove(map, start, end)`: remove entries in range.
+                - [ ] `vm_map_lookup(map, va, &entry)`: find entry containing VA.
+                - [ ] `vm_map_protect(map, start, end, new_prot)`.
+                - [ ] `vm_map_inherit(map, start, end, inheritance)`.
+                - [ ] Entry merging: coalesce adjacent entries with same attributes.
+            - [ ] **VM Objects (`vm_object`):**
+                - [ ] Abstract backing store (anonymous memory, vnode/file, device).
+                - [ ] `resident_pages`: radix tree or hash of `vm_page_t` by page index.
+                - [ ] `ref_count`: number of map entries referencing this object.
+                - [ ] `shadow`: pointer to shadow object (for COW chains).
+                - [ ] `pager`: associated pager (swap, vnode, device, default).
+                - [ ] `vm_object_allocate(size)`: create anonymous object.
+                - [ ] `vm_object_reference(obj)` / `vm_object_deallocate(obj)`.
+                - [ ] `vm_object_page_lookup(obj, pindex)`: find resident page.
+                - [ ] `vm_object_page_insert(obj, page, pindex)`.
+                - [ ] `vm_object_shadow(obj, offset, size)`: create shadow for COW.
+                - [ ] `vm_object_collapse(obj)`: collapse shadow chain when possible.
+            - [ ] **Fault Handler (`vm_fault`):**
+                - [ ] High-level page fault resolution.
+                - [ ] `vm_fault(map, va, fault_type)`: main entry point.
+                - [ ] Look up `vm_map_entry` for faulting VA.
+                - [ ] Check protection against fault type.
+                - [ ] Walk shadow object chain to find page or pager.
+                - [ ] If page found in object: map it via `pmap_enter`.
+                - [ ] If page not found: call pager to fetch from backing store.
+                - [ ] **Zero-fill on demand:** anonymous pages filled with zeros on first access.
+                - [ ] **Prefaulting:** heuristic to load surrounding pages during I/O.
+            - [ ] **Copy-on-Write (COW):**
+                - [ ] `vm_fault` logic for write to read-only shared page.
+                - [ ] Create shadow object on fork.
+                - [ ] Mark parent entries as copy-on-write.
+                - [ ] On write fault: allocate new page, copy contents, update PTE.
+                - [ ] Decrement original page refcount.
+                - [ ] Shadow chain collapse: when shadow has all pages, absorb parent.
+            - [ ] **Swap Subsystem:**
+                - [ ] **Swap Pager (`vm_pager`):**
+                    - [ ] Generic pager interface: `pager_get(obj, pindex)`, `pager_put(obj, pindex)`.
+                    - [ ] Swap pager: move pages to/from swap device.
+                    - [ ] Vnode pager: read/write file-backed pages via VFS.
+                    - [ ] Device pager: direct mapping of device memory (framebuffer, MMIO).
+                    - [ ] Default pager: zero-fill for anonymous memory.
+                - [ ] **Backing Store (`vm_swap`):**
+                    - [ ] Support swap partitions and swap files.
+                    - [ ] Swap space allocation bitmap.
+                    - [ ] `swapon(path)` / `swapoff(path)` syscalls.
+                    - [ ] Per-page swap block tracking.
+                - [ ] **Page Replacement Policy:**
+                    - [ ] Clock/LRU algorithm using A/D bits.
+                    - [ ] Integration with page daemon and page queues.
+            - [ ] **Advanced Features:**
+                - [ ] **File-backed mmap (`MAP_FILE`):**
+                    - [ ] Vnode pager triggers VFS `read` on page fault.
+                    - [ ] Dirty page tracking and `msync` writeback.
+                    - [ ] `MAP_PRIVATE`: COW on write (shadow object).
+                    - [ ] `MAP_SHARED`: write-through to file.
+                - [ ] **Reference Counting & Shared Memory:**
+                    - [ ] `vm_page_t` refcounts: track mappings to each physical frame.
+                    - [ ] `vm_object` refcounts: track regions sharing backing store.
+                    - [ ] `MAP_SHARED` write-through for multi-process shared memory.
+                - [ ] **Lazy Faulting:**
+                    - [ ] Demand paging: allocate frames only on access (zero-fill on demand).
+                    - [ ] Prefaulting: heuristic to load surrounding pages during I/O.
+                    - [ ] Read-ahead for sequential file access patterns.
+            - [ ] **Testing:**
+                - [ ] Unit: vm_map insert/remove/lookup/protect.
+                - [ ] Unit: vm_object create/reference/deallocate/shadow/collapse.
+                - [ ] Unit: vm_fault resolution for anonymous, file-backed, and COW pages.
+                - [ ] Unit: swap pager round-trip (page out → page in).
+                - [ ] Property: vm_map entries are non-overlapping and sorted.
+                - [ ] Property: vm_object refcount reaches 0 only when no entries reference it.
+                - [ ] Integration: mmap anonymous memory, write, fork, verify COW isolation.
+                - [ ] Integration: mmap file, read, modify, msync, verify on-disk.
+            - [ ] **Documentation:**
+                - [ ] Internal doc: VM hierarchy (map → entry → object → page).
+                - [ ] Internal doc: COW shadow chain and collapse algorithm.
+                - [ ] Internal doc: pager interface contract.
+
+    - [ ] **Kernel Allocator (UMA/Slab):**
+
+        > **Files:** `sys/vm/uma_core.c`, `sys/vm/vm_kmem.c`.
+
+        - [ ] **UMA Core (`uma_core.c`):**
+            - [ ] Zone creation: `uma_zcreate(name, size, ctor, dtor, init, fini, align, flags)`.
+            - [ ] Zone destruction: `uma_zdestroy(zone)`.
+            - [ ] `uma_zalloc(zone, flags)`: allocate object from zone.
+            - [ ] `uma_zfree(zone, item)`: free object to zone.
+            - [ ] **Per-CPU Caches (Magazines):**
+                - [ ] Lockless fast-path allocations via per-CPU magazine layer.
+                - [ ] Magazine swap on empty/full (loaded ↔ previous).
+                - [ ] Depot layer: global pool of full/empty magazines.
+            - [ ] **Slab Management:**
+                - [ ] Slab allocation from VM (page-sized).
+                - [ ] Free list within slab for object tracking.
+                - [ ] Partial/full/empty slab lists per zone.
+            - [ ] **Alignment/Coloring:**
+                - [ ] CPU cache line alignment for objects.
+                - [ ] Slab coloring to reduce cache set conflicts.
+            - [ ] **Constructors/Destructors:**
+                - [ ] `ctor` callback on allocation (after init).
+                - [ ] `dtor` callback on free (before fini).
+                - [ ] `init` once per slab object lifetime.
+                - [ ] `fini` once when slab freed.
+            - [ ] **Reclamation:**
+                - [ ] Shrinker callbacks to free unused slabs under memory pressure.
+                - [ ] Bucket draining back to slabs.
+                - [ ] Memory pressure feedback integration with page daemon.
+        - [ ] **Debugging & Safety:**
+            - [ ] **Redzones:** guard bytes before/after objects with canary values.
+            - [ ] **Poisoning:** fill freed memory with 0xDEADBEEF to catch use-after-free.
+            - [ ] **Leak Detection:** track active allocations per zone.
+            - [ ] **Foreign Pointer Protection:** validate pointer belongs to zone on free.
+            - [ ] **`uma_find_slab()` Optimization:** replace O(N) linear search with hash table.
+        - [ ] **General Allocator (`kmalloc`/`kfree`):**
+            - [ ] Power-of-two zones: back `kmalloc` with UMA zones for sizes 16, 32, 64, ..., 4096.
+            - [ ] Large allocations: bypass UMA for >4 KB (direct `vm_map` allocation).
+            - [ ] `krealloc(ptr, size)`: resize allocation.
+            - [ ] Statistics: track memory usage by `malloc_type` (subsystem).
+        - [ ] **Testing:**
+            - [ ] Unit: zone create/alloc/free/destroy lifecycle.
+            - [ ] Unit: per-CPU cache hit/miss paths.
+            - [ ] Unit: slab allocation and free list integrity.
+            - [ ] Unit: ctor/dtor/init/fini callback ordering.
+            - [ ] Unit: redzone corruption detection.
+            - [ ] Unit: poison detection on use-after-free.
+            - [ ] Property: total allocated + free = zone capacity.
+            - [ ] Stress: 10000 alloc/free cycles across multiple zones.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: UMA architecture (zone → slab → magazine → per-CPU cache).
+            - [ ] Internal doc: `kmalloc` power-of-two zone selection.
+
+    - [ ] **User Memory Syscalls:**
+        - [ ] `sys_mmap(addr, len, prot, flags, fd, offset)`: map memory.
+            - [ ] `MAP_ANONYMOUS`: zero-fill anonymous mapping.
+            - [ ] `MAP_PRIVATE`: file-backed COW mapping.
+            - [ ] `MAP_SHARED`: file-backed write-through mapping.
+            - [ ] `MAP_FIXED`: map at exact address (unmap existing).
+            - [ ] Alignment to page boundary.
+        - [ ] `sys_munmap(addr, len)`: unmap region.
+        - [ ] `sys_mprotect(addr, len, prot)`: change protection.
+        - [ ] `sys_brk(addr)` / `sys_sbrk(incr)`: adjust data segment.
+        - [ ] `sys_msync(addr, len, flags)`: sync dirty pages to backing store.
+
+    - [ ] **SMP & Interrupts:**
+
+        > **Files:** `sys/arch/i386/apic.c`, `sys/arch/i386/ioapic.c`,
+        > `sys/arch/i386/smp.c`, `sys/kern/percpu.c`.
+
+        - [ ] **Discovery:**
+            - [ ] Parse ACPI MADT (APIC) to find processor entries.
+            - [ ] Fallback: parse MP Tables (Intel MultiProcessor Spec).
+            - [ ] Record BSP and AP LAPIC IDs.
+        - [ ] **Local APIC (LAPIC):**
+            - [ ] Map LAPIC MMIO base (default 0xFEE00000).
+            - [ ] Set Spurious Interrupt Vector Register (SVR): enable APIC, set vector.
+            - [ ] **Timer:**
+                - [ ] Calibrate against PIT or ACPI PM Timer.
+                - [ ] Set Divider Configuration Register (DCR).
+                - [ ] Periodic mode for scheduler tick.
+                - [ ] One-shot mode for high-resolution sleeps.
+            - [ ] Error Status Register (ESR) and LVT Error vector.
+            - [ ] **IPI (Inter-Processor Interrupt):**
+                - [ ] ICR (Interrupt Command Register) writing logic.
+                - [ ] Send fixed, lowest priority, NMI, INIT, SIPI IPIs.
+                - [ ] Wait for delivery status (busy bit clear).
+        - [ ] **I/O APIC:**
+            - [ ] Enumerate I/O APICs from MADT.
+            - [ ] `ioapic_read` / `ioapic_write` via index/window registers.
+            - [ ] **Redirection Table:**
+                - [ ] Mask/unmask IRQs.
+                - [ ] Set delivery mode (fixed, lowest priority).
+                - [ ] Set destination (physical/logical).
+                - [ ] Set polarity and trigger mode (active high/low, edge/level).
+            - [ ] Legacy ISA IRQ (0–15) → Global System Interrupt (GSI) mapping.
+        - [ ] **AP Bootstrap:**
+            - [ ] Allocate low-memory trampoline page (under 1 MB).
+            - [ ] Copy 16-bit real mode entry code to trampoline.
+            - [ ] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence.
+            - [ ] AP enters protected mode, enables paging, jumps to C entry.
+        - [ ] **Per-CPU Data:**
+            - [ ] GS-base (or FS-base) for CPU-local variable access.
+            - [ ] Per-CPU GDTs and TSSs.
+            - [ ] Per-CPU scheduler runqueues.
+            - [ ] Per-CPU interrupt stacks.
+        - [ ] **Synchronization:**
+            - [ ] Spinlock implementation (ticket locks or MCS locks).
+            - [ ] `lock` prefix for atomic operations.
+            - [ ] Deadlock detection (lock ordering validation).
+            - [ ] Audit all global data structures for race conditions.
+        - [ ] **Testing:**
+            - [ ] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`.
+            - [ ] Unit: LAPIC timer calibration accuracy.
+            - [ ] Unit: IPI send/receive between CPUs.
+            - [ ] Unit: per-CPU data isolation.
+
+    - [ ] **Scheduling (MLFQ Scheduler):**
+
+        > **Files:** `sys/kern/sched.c`, `sys/kern/sched_smp.c`,
+        > `sys/kern/turnstile.c`, `sys/kern/sleepq.c`.
+
+        - [ ] **Algorithm (ULE/MLFQ):**
+            - [ ] Multilevel queues: Realtime, Timeshare, Idle priority classes.
+            - [ ] Interactiveness heuristics: boost I/O-bound threads.
+            - [ ] Priority decay for CPU-bound threads.
+            - [ ] Time slice assignment based on priority class.
+        - [ ] **SMP Scalability:**
+            - [ ] Per-CPU runqueues (eliminate global scheduler lock).
+            - [ ] Work-stealing load balancing when a CPU goes idle.
+            - [ ] CPU affinity (`sched_setaffinity` masks).
+            - [ ] IPI-based preemption of remote CPUs.
+        - [ ] **Synchronization Primitives:**
+            - [ ] **Turnstiles:** priority inheritance for mutexes (prevent priority inversion).
+            - [ ] **Sleep Queues:** hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
+        - [ ] **Context Switching:**
+            - [ ] FPU lazy save: CR0.TS exception for deferred FPU context.
+            - [ ] PCB: refined for thread/process separation.
+            - [ ] `switch_to(old, new)`: save/restore callee-saved registers, swap stacks.
+        - [ ] **Kernel Process (PID 0 — Swapper/Idle):**
+            - [ ] Pageout daemon work in idle loop.
+            - [ ] Ensures valid process context always exists.
+        - [ ] **Process Bitness Tracking:**
+            - [ ] `enum proc_bitness` (16/32/64) field in process struct.
+            - [ ] `proc_set_bitness()` / `proc_get_bitness()` with permission checks.
+            - [ ] Bitness inheritance on fork, transition on exec.
+        - [ ] **Testing:**
+            - [ ] Unit: priority queue insertion/removal ordering.
+            - [ ] Unit: turnstile priority inheritance chain.
+            - [ ] Unit: sleep queue hash distribution.
+            - [ ] Integration: verify load balancing with CPU-intensive workload.
+            - [ ] Integration: verify interactiveness boost for I/O workload.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: MLFQ algorithm and priority classes.
+            - [ ] Internal doc: SMP load balancing and work stealing.
+
+    - [ ] **Synchronization:**
+
+        - [ ] **Kernel Primitives:**
+            - [ ] Spinlocks (with GCC C11 atomic builtins).
+            - [ ] Mutexes (backed by sleep queues).
+            - [ ] Semaphores (counting, backed by sleep queues).
+            - [ ] Reader/writer locks.
+
+        - [ ] **Userspace Synchronization (Futex):**
+
+            > **Files:** `sys/kern/futex.c`, `sys/kern/futex.h`.
+
+            - [ ] **Core Operations:**
+                - [ ] `FUTEX_WAIT`: atomic compare-and-sleep on user-space word.
+                    - [ ] `futex_cmpxchg_user()`: validated userspace CMPXCHG.
+                    - [ ] `validate_uaddr()`: ensure address is in user space.
+                - [ ] `FUTEX_WAKE`: wake up N waiters on a futex word.
+                - [ ] `FUTEX_REQUEUE`: move waiters from one futex to another.
+                    - [ ] Atomic compare before requeue (`FUTEX_CMP_REQUEUE`).
+            - [ ] **Advanced Features:**
+                - [ ] `FUTEX_ROBUST_LIST`: handle owner death.
+                    - [ ] `sys_set_robust_list()` / `sys_get_robust_list()`.
+                    - [ ] `futex_exit_cleanup()`: walk robust list on process exit.
+                    - [ ] Mark owned futexes as `FUTEX_OWNER_DIED`.
+                - [ ] `FUTEX_PI`: priority inheritance support.
+                    - [ ] `futex_lock_pi()` / `futex_unlock_pi()`.
+                    - [ ] `pi_boost_owner()` / `pi_deboost_owner()`.
+                    - [ ] Lock holder inherits waiter's priority.
+            - [ ] **Performance:**
+                - [ ] Hash table bucketing for wait queues (O(1) lookup by address).
+                - [ ] Per-bucket spinlocks.
+            - [ ] **Testing:**
+                - [ ] Unit: FUTEX_WAIT/WAKE basic handshake.
+                - [ ] Unit: FUTEX_REQUEUE moves waiters correctly.
+                - [ ] Unit: robust list cleanup on exit.
+                - [ ] Unit: PI inheritance — low priority holder boosted.
+                - [ ] Property: no orphaned waiters after process exit.
+
+        - [ ] **NTSYNC Driver (Windows NT Sync Primitives):**
+
+            > **Files:** `sys/kern/ntsync.c`, `sys/kern/ntsync.h`.
+
+            - [ ] **Core Infrastructure:**
+                - [ ] `/dev/ntsync` char device with instance-based isolation.
+                - [ ] `ntsync_instance` structure per open file description.
+                - [ ] Object handle management (object FDs returned from ioctls).
+            - [ ] **Semaphore Object:**
+                - [ ] `NTSYNC_IOC_CREATE_SEM`: create semaphore (count, max).
+                - [ ] `NTSYNC_IOC_SEM_POST`: increment semaphore count.
+                - [ ] `NTSYNC_IOC_READ_SEM`: query semaphore state.
+            - [ ] **Mutex Object:**
+                - [ ] `NTSYNC_IOC_CREATE_MUTEX`: create mutex (owner, count).
+                - [ ] `NTSYNC_IOC_MUTEX_UNLOCK`: release mutex ownership.
+                - [ ] `NTSYNC_IOC_READ_MUTEX`: query mutex state.
+                - [ ] `NTSYNC_IOC_KILL_OWNER`: mark mutex as abandoned.
+            - [ ] **Event Object:**
+                - [ ] `NTSYNC_IOC_CREATE_EVENT`: create event (signaled, manual/auto-reset).
+                - [ ] `NTSYNC_IOC_SET_EVENT` / `NTSYNC_IOC_RESET_EVENT` / `NTSYNC_IOC_PULSE_EVENT`.
+                - [ ] `NTSYNC_IOC_READ_EVENT`: query event state.
+            - [ ] **Wait Operations:**
+                - [ ] `NTSYNC_IOC_WAIT_ANY`: wait for any of N objects.
+                - [ ] `NTSYNC_IOC_WAIT_ALL`: wait for all N objects simultaneously.
+                - [ ] Alert event support (optional extra wakeup source).
+                - [ ] Timeout handling (MONOTONIC/REALTIME clocks).
+            - [ ] **Internal Mechanics:**
+                - [ ] Wait queue per object with priority ordering.
+                - [ ] Atomic acquisition semantics (spinlock-protected).
+                - [ ] Cross-object atomicity for WAIT_ALL (multi-lock).
+            - [ ] **Testing:**
+                - [ ] Unit: semaphore create/post/read lifecycle.
+                - [ ] Unit: mutex create/lock/unlock/abandon.
+                - [ ] Unit: event set/reset/pulse.
+                - [ ] Unit: WAIT_ANY with mixed object types.
+                - [ ] Unit: WAIT_ALL atomicity (all-or-nothing).
+                - [ ] Unit: timeout expiry (WNOHANG equivalent).
+
+    - [ ] **Signals:**
+
+        > **Files:** `sys/kern/signal.c`, `sys/kern/sigprop.c`,
+        > `sys/arch/i386/signal.c` (arch-specific delivery).
+
+        - [ ] **Signal Infrastructure:**
+            - [ ] **Per-Process State (`process_t`):**
+                - [ ] `sig_actions[NSIG]`: array of `struct sigaction` per signal.
+                - [ ] `sig_catch`: bitmask of signals with handlers.
+                - [ ] `sig_ignore`: bitmask of signals set to SIG_IGN.
+            - [ ] **Per-Thread State (`thread_t`):**
+                - [ ] `sig_pending`: bitmask of pending signals.
+                - [ ] `sig_mask`: current signal mask (blocked signals).
+                - [ ] `sig_alt_stack`: alternative signal stack (`stack_t`).
+                - [ ] `sig_on_stack`: flag for currently executing on alt stack.
+            - [ ] **Signal Properties Table (`sigprop.c`):**
+                - [ ] Default actions: Terminate, Core, Stop, Ignore, Continue.
+                - [ ] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT.
+                - [ ] Unmaskable: SIGKILL, SIGSTOP (SA_CANTMASK).
+
+        - [ ] **Signal Syscalls:**
+            - [ ] **`sys_sigaction(sig, act, oact)`:**
+                - [ ] Validate signal number (1 ≤ sig ≤ NSIG, not SIGKILL/SIGSTOP).
+                - [ ] Return old action in `oact`, install new from `act`.
+                - [ ] Update `sig_catch`/`sig_ignore` bitmasks.
+                - [ ] Handle flags: `SA_RESETHAND`, `SA_NODEFER`, `SA_RESTART`, `SA_NOCLDSTOP`, `SA_NOCLDWAIT`, `SA_SIGINFO`, `SA_ONSTACK`.
+            - [ ] **`sys_sigprocmask(how, set, oset)`:**
+                - [ ] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK.
+                - [ ] Filter out SIGKILL/SIGSTOP from mask.
+            - [ ] **`sys_sigpending(set)`:** return pending & ~masked signals.
+            - [ ] **`sys_sigsuspend(mask)`:** atomically set mask and sleep; restore on return; always EINTR.
+            - [ ] **`sys_sigaltstack(ss, oss)`:**
+                - [ ] Install/query alternative signal stack.
+                - [ ] Validate `ss_size ≥ MINSIGSTKSZ`.
+                - [ ] Handle `SS_DISABLE`; error if on alt stack.
+            - [ ] **`sys_kill(pid, sig)`:**
+                - [ ] `pid > 0`: specific process.
+                - [ ] `pid == 0`: current process group.
+                - [ ] `pid == -1`: all processes (except init).
+                - [ ] `pid < -1`: process group `|pid|`.
+                - [ ] `sig == 0`: permission check only.
+                - [ ] Permission: same UID or CAP_KILL.
+            - [ ] **`sys_sigreturn(scp)`:**
+                - [ ] Validate sigcontext pointer.
+                - [ ] Verify CS/SS have RPL=3 (user mode).
+                - [ ] Restore GPRs, eflags (mask IOPL/VM/RF), eip.
+                - [ ] Restore signal mask from context.
+            - [ ] **`sys_sigwait(set, sig)`:** synchronous signal consumption (no handler).
+            - [ ] **`sys_sigtimedwait(set, info, timeout)`:** like sigwait with timeout + siginfo.
+
+        - [ ] **Signal Generation:**
+            - [ ] `psignal(p, sig)`: send to process.
+                - [ ] Init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1.
+                - [ ] Select best thread for delivery (not masked).
+                - [ ] If SIGCONT, wake stopped threads; clear pending stops.
+                - [ ] If sleeping interruptibly, wake thread.
+            - [ ] `pgsignal(pgrp, sig)`: send to process group.
+            - [ ] `trapsignal(p, sig, code)`: synchronous trap signal (from exception handler).
+                - [ ] Pass `code` via `siginfo_t` (`si_code`).
+                - [ ] Sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL.
+            - [ ] `sigexit(p, sig)`: terminate with signal.
+                - [ ] Core dump if SA_CORE: call `coredump()`.
+                - [ ] Set exit status to indicate signal termination.
+            - [ ] **Terminal Signals (TTY):**
+                - [ ] SIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp.
+                - [ ] SIGTSTP (Ctrl+Z) to foreground pgrp.
+                - [ ] SIGTTIN: background process reads from TTY.
+                - [ ] SIGTTOU: background process writes to TTY (if TOSTOP).
+                - [ ] SIGHUP: controlling terminal hangup.
+
+        - [ ] **Signal Delivery (Architecture-Specific — i386):**
+            - [ ] **`sendsig()` — Frame Construction:**
+                - [ ] Calculate user stack pointer from `regs->useresp`.
+                - [ ] Subtract `sizeof(struct sigframe)`.
+                - [ ] Align stack to 16-byte boundary (System V ABI).
+            - [ ] **`struct sigframe` Layout:**
+                - [ ] `retaddr`: return address pointing to trampoline.
+                - [ ] `sig`: signal number (first handler argument).
+                - [ ] `sc`: `struct sigcontext` with saved registers.
+            - [ ] **`struct sigcontext` Population:**
+                - [ ] Save segment registers (gs, fs, es, ds).
+                - [ ] Save GPRs (edi, esi, ebp, esp, ebx, edx, ecx, eax).
+                - [ ] Save trap info (trapno, err).
+                - [ ] Save control (eip, cs, eflags, user_esp, user_ss).
+            - [ ] **Handler Invocation:**
+                - [ ] `copyout()` frame to user stack (with fault handling).
+                - [ ] Set `regs->useresp` and `regs->eip` to frame/handler.
+            - [ ] **SA_SIGINFO Extended Frame:**
+                - [ ] Construct `siginfo_t` (si_signo, si_code, si_addr, etc.).
+                - [ ] Construct `ucontext_t` with machine context.
+                - [ ] Handler signature: `void handler(int, siginfo_t *, void *)`.
+            - [ ] **Alt Stack Handling:**
+                - [ ] If `SA_ONSTACK` and alt stack configured: use alt stack SP.
+                - [ ] Set `sig_on_stack` flag.
+
+        - [ ] **Signal Trampoline:**
+            - [ ] Map trampoline page at fixed address (e.g., 0xFFFF1000).
+            - [ ] Page: user-readable, executable, not writable.
+            - [ ] Code: `mov $SYS_sigreturn, %eax; int $0x80`.
+            - [ ] **VDSO Integration (future):**
+                - [ ] Embed trampoline in VDSO page.
+                - [ ] Use `AT_SYSINFO` auxiliary vector entry.
+
+        - [ ] **Signal Mask Management:**
+            - [ ] During handler: block current signal (unless SA_NODEFER) + `sa_mask`.
+            - [ ] Restore original mask in `sys_sigreturn`.
+            - [ ] **Inheritance:**
+                - [ ] `fork()`: child inherits pending signals and mask.
+                - [ ] `exec()`: reset all handlers to SIG_DFL (except SIG_IGN).
+
+        - [ ] **Signal Checking Points:**
+            - [ ] Return from interrupt/exception: `signal_handle_pending()` if returning to user mode.
+            - [ ] Return from syscall: check pending, return EINTR if interruptible.
+            - [ ] Sleep wakeup: `sched_sleep()` returns on signal (EINTR).
+
+        - [ ] **Special Signal Handling:**
+            - [ ] SIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads.
+            - [ ] SIGSTOP: cannot be caught/blocked/ignored; stops all threads.
+            - [ ] SIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED.
+            - [ ] SIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics.
+            - [ ] Job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore.
+
+        - [ ] **PID 1 (Init) Protection:**
+            - [ ] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler.
+            - [ ] If init exits, system halts/panics.
+            - [ ] Init adopts orphaned processes.
+
+        - [ ] **Core Dump (future):**
+            - [ ] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
+            - [ ] `coredump()`: write ELF core format (`/cores/core.PID`).
+            - [ ] Respect `RLIMIT_CORE`.
+
+        - [ ] **Testing:**
+            - [ ] Unit: `sys_sigaction` install/replace/reset handler.
+            - [ ] Unit: `sys_sigprocmask` block/unblock/setmask.
+            - [ ] Unit: `sys_kill` to specific PID, pgrp, all.
+            - [ ] Unit: `psignal` thread selection (prefer unmasked).
+            - [ ] Unit: `sendsig` frame construction and `sigreturn` restoration.
+            - [ ] Unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU.
+            - [ ] Unit: SA_RESTART — interrupted syscall restarted.
+            - [ ] Unit: SA_SIGINFO — extended frame with siginfo + ucontext.
+            - [ ] Property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant).
+            - [ ] Integration: fork, send SIGINT to child, verify termination.
+            - [ ] Integration: job control stop/continue cycle.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: signal lifecycle (generation → delivery → handler → sigreturn).
+            - [ ] Internal doc: i386 signal frame layout.
+            - [ ] Internal doc: signal checking points and SA_RESTART logic.
+
+    - [ ] **Refactor kmain:**
+        - [ ] Move early i386 boot code to `sys/arch/i386/early_boot.c`.
+        - [ ] Create `init_memory` helper.
+        - [ ] Create `init_root_fs` helper.
+        - [ ] Clean up `kmain` flow.
+
+    - [ ] **Kernel Core Maintenance:**
+        - [ ] Refactor `spinlock.c` to use GCC C11 atomic builtins.
+        - [ ] Rewrite `swapper.c` idle loop (race-free).
+        - [ ] Cleanup `sleepq.c` formatting and style.
+        - [ ] Remove obsolete `sys/kern/stubs.c`.
+        - [ ] Modularize `sys/kern/lib.c` into `sys/lib/`.
+        - [ ] Audit `mutex.c` and `semaphore.c` for race conditions.
+        - [ ] Fix `sched_smp.c` CPU ID assumption.
+
+    - [ ] **Update Kernel Documentation:**
+        - [ ] Document Console/UART subsystem changes.
+        - [ ] Document kmain initialization flow.
+        - [ ] Update ARCHITECTURE.md.
+
+    - [ ] **Process Lifecycle & Job Control:**
+
+        - [ ] **Process Termination (`exit` / `_exit`):**
+
+            > `sys_exit(status)` and `sys__exit(status)` both call internal `proc_exit(code)`.
+
+            - [ ] **Phase 1 — State Transition (RUNNING → DYING):**
+                - [ ] Set `p_state` = SDYING.
+                - [ ] Record exit status in `p_xstat`.
+                - [ ] Prevent further scheduling.
+            - [ ] **Phase 2 — Resource Release:**
+                - [ ] **File Descriptors:** `fd_close_all(p)` — close all, decrement refcounts.
+                - [ ] **Virtual Memory:** `pmap_release(p->pmap)` — free user page tables, switch to kernel pmap.
+                - [ ] **VM Map:** release `vm_map` and all `vm_map_entry` structures.
+                - [ ] **CWD / Root:** decrement cwd and root vnode refcounts.
+                - [ ] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY.
+                - [ ] **Pending Signals:** clear all.
+                - [ ] **Timers:** cancel ITIMER_REAL/VIRTUAL/PROF and alarm().
+                - [ ] **System V IPC:** detach shmem, undo semaphores, remove owned msg queues.
+                - [ ] **POSIX IPC:** unlink owned semaphores/shared memory.
+                - [ ] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters.
+                - [ ] **Kernel Locks:** release held mutexes, cancel pending lock requests.
+            - [ ] **Phase 3 — Thread Termination:**
+                - [ ] Set `t->state = THREAD_ZOMBIE` for each thread.
+                - [ ] Interrupt non-current threads, wait for zombie state.
+                - [ ] Free thread stacks and structures.
+                - [ ] Current thread becomes reaper.
+            - [ ] **Phase 4 — Resource Usage Finalization:**
+                - [ ] `rusage_finalize(p)`: accumulate thread times.
+                - [ ] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`.
+            - [ ] **Phase 5 — Orphan Reparenting:**
+                - [ ] `proc_reparent_children(p)`: move children to init.
+                - [ ] Acquire `proctree_lock`.
+                - [ ] For each child: set `p_parent = init`, move to init's children list.
+                - [ ] Wake init if child is zombie.
+                - [ ] If init dying: reparent to swapper (PID 0) or panic.
+            - [ ] **Phase 6 — Process Group / Session Cleanup:**
+                - [ ] Remove from process group; free `struct pgrp` if last member.
+                - [ ] If session leader: SIGHUP to foreground, revoke TTY, mark no leader.
+                - [ ] Check for orphaned process groups → SIGHUP + SIGCONT.
+            - [ ] **Phase 7 — Parent Notification:**
+                - [ ] `psignal(parent, SIGCHLD)`.
+                - [ ] If SA_NOCLDWAIT: auto-reap (no zombie).
+                - [ ] Wake parent on `p_children` channel.
+            - [ ] **Phase 8 — Zombie State (DYING → ZOMBIE):**
+                - [ ] Set `p_state` = SZOMB.
+                - [ ] Only pid, ppid, xstat, rusage remain valid.
+            - [ ] **Phase 9 — Final Context Switch:**
+                - [ ] `current_thread->state = THREAD_ZOMBIE`.
+                - [ ] `sched_yield()` — never returns.
+            - [ ] **Accounting:**
+                - [ ] `acct_process(code)`: write accounting record (command, times, status).
+
+        - [ ] **Edge Cases:**
+            - [ ] Init (PID 1) exit: kernel halts/panics with warning.
+            - [ ] Killed by signal during exit: ignore signals once SDYING.
+            - [ ] Locks held during exit: log warning, force release.
+            - [ ] OOM during exit: must not allocate (only free).
+            - [ ] Vfork exit: wake parent immediately.
+            - [ ] Thread group exit: all threads terminated on any `exit()`.
+
+        - [ ] **Wait Subsystem (`wait4` / `waitpid`):**
+            - [ ] **Search Logic:**
+                - [ ] `pid > 0`: specific child.
+                - [ ] `pid == -1`: any child.
+                - [ ] `pid == 0`: same process group.
+                - [ ] `pid < -1`: process group `|pid|`.
+            - [ ] **WNOHANG:** return 0 if no zombies, ECHILD if no children.
+            - [ ] **Blocking Wait:** `sched_sleep(&p_children)`, handle EINTR, re-scan.
+            - [ ] **Reaping (ZOMBIE → FREE):**
+                - [ ] Copy xstat and rusage to user buffer.
+                - [ ] Remove from siblings list and process group.
+                - [ ] Free process structure.
+            - [ ] **Job Control (`WUNTRACED` / `WCONTINUED`):**
+                - [ ] Report stopped children (SSTOP).
+                - [ ] Report continued children (P_CONTINUED flag).
+
+        - [ ] **Process Groups & Sessions:**
+            - [ ] **Core Structures:**
+                - [ ] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr).
+                - [ ] `struct session`: `s_id`, `s_leader`, `s_ttyvp`, `s_login`.
+                - [ ] Invariants: every process → one group → one session.
+            - [ ] **Session Management:**
+                - [ ] `sys_setsid()`: create new session + pgrp; EPERM if already leader; detach CTTY.
+                - [ ] `sys_getsid(pid)`: return session ID.
+            - [ ] **Group Management:**
+                - [ ] `sys_setpgid(pid, pgid)`: join/create group; must be same session.
+                - [ ] `sys_getpgid(pid)`: return group ID.
+            - [ ] **Controlling Terminal (CTTY):**
+                - [ ] `TIOCSCTTY`: assign CTTY (session leader, no existing CTTY, TTY unowned).
+                - [ ] `TIOCNOTTY`: release CTTY, SIGHUP to foreground group.
+                - [ ] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check).
+            - [ ] **Orphaned Process Groups:**
+                - [ ] Detection: no member with parent in different group of same session.
+                - [ ] Action: SIGHUP + SIGCONT to stopped members.
+
+        - [ ] **Testing:**
+            - [ ] Unit: proc_exit phases 1–9 ordering and resource cleanup.
+            - [ ] Unit: wait4 search logic (specific, any, pgrp).
+            - [ ] Unit: WNOHANG returns 0 / ECHILD correctly.
+            - [ ] Unit: orphan reparenting to init.
+            - [ ] Unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY.
+            - [ ] Unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery.
+            - [ ] Property: no zombie leaks (all zombies eventually reaped or auto-reaped).
+            - [ ] Integration: fork → exec → exit → waitpid cycle.
+            - [ ] Integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED.
+        - [ ] **Documentation:**
+            - [ ] Internal doc: process exit 9-phase teardown.
+            - [ ] Internal doc: wait4 search semantics and blocking.
+            - [ ] Internal doc: session/pgrp lifecycle and CTTY ownership.
+
+
+## User Stories
+
+- **US-01-0001**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to memory Management: so that this capability is implemented with clear verification evidence.
+- **US-01-0002**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to physical Memory Manager (PMM Refactor): so that this capability is implemented with clear verification evidence.
+- **US-01-0003**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to boot Memory Detection: so that this capability is implemented with clear verification evidence.
+- **US-01-0004**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to parse Multiboot Memory Map (mmap) so that this capability is implemented with clear verification evidence.
+- **US-01-0005**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to parse e820 Memory Map (legacy BIOS fallback) so that this capability is implemented with clear verification evidence.
+- **US-01-0006**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to hardening: so that this capability is implemented with clear verification evidence.
+- **US-01-0007**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sanitize memory map entries: validate type, clamp to 32-bit address space so that this capability is implemented with clear verification evidence.
+- **US-01-0008**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reject overlapping or zero-length regions so that this capability is implemented with clear verification evidence.
+- **US-01-0009**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to calculate and report total usable RAM (64-bit accumulation for >4 GB physical) so that this capability is implemented with clear verification evidence.
+- **US-01-0010**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to identify kernel physical bounds from linker symbols (_kernel_start, _kernel_end) so that this capability is implemented with clear verification evidence.
+- **US-01-0011**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to exclude kernel text/data/BSS region from free pool so that this capability is implemented with clear verification evidence.
+- **US-01-0012**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to exclude Multiboot info structure and module regions so that this capability is implemented with clear verification evidence.
+- **US-01-0013**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reserve BIOS/ACPI regions (type 3/4) and memory holes so that this capability is implemented with clear verification evidence.
+- **US-01-0014**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to bootstrap Watermark Allocator: so that this capability is implemented with clear verification evidence.
+- **US-01-0015**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to bump allocator for early boot before buddy is ready so that this capability is implemented with clear verification evidence.
+- **US-01-0016**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_init(start, end): initialize allocator with usable range so that this capability is implemented with clear verification evidence.
+- **US-01-0017**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_alloc(size, align): allocate size bytes with alignment so that this capability is implemented with clear verification evidence.
+- **US-01-0018**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_used(): report bytes consumed so that this capability is implemented with clear verification evidence.
+- **US-01-0019**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to used for: vm_page_t array, initial page tables, kernel stacks so that this capability is implemented with clear verification evidence.
+- **US-01-0020**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to watermark region clamped to avoid exceeding available low memory so that this capability is implemented with clear verification evidence.
+- **US-01-0021**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to dynamic Metadata: so that this capability is implemented with clear verification evidence.
+- **US-01-0022**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to calculate vm_page_t array size based on actual detected RAM so that this capability is implemented with clear verification evidence.
+- **US-01-0023**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to allocate array via watermark allocator so that this capability is implemented with clear verification evidence.
+- **US-01-0024**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to remove hardcoded 128 MB static limit so that this capability is implemented with clear verification evidence.
+- **US-01-0025**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fallback to static bitmap if RAM < 4 MB (constrained environments) so that this capability is implemented with clear verification evidence.
+- **US-01-0026**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to buddy Allocator: so that this capability is implemented with clear verification evidence.
+- **US-01-0027**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to orders 0-10 (4 KB - 4 MB pages) so that this capability is implemented with clear verification evidence.
+- **US-01-0028**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free Lists: per-order doubly-linked free page lists so that this capability is implemented with clear verification evidence.
+- **US-01-0029**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_alloc_page(): O(1) single-page allocation from order-0 free list so that this capability is implemented with clear verification evidence.
+- **US-01-0030**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_alloc_contiguous(order): allocate 2^order contiguous pages so that this capability is implemented with clear verification evidence.
+- **US-01-0031**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_free_page(page): return page and coalesce with buddy if free so that this capability is implemented with clear verification evidence.
+- **US-01-0032**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_free_contiguous(page, order): return and coalesce multi-page block so that this capability is implemented with clear verification evidence.
+- **US-01-0033**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to buddy Coalescing: merge adjacent free pages up through orders so that this capability is implemented with clear verification evidence.
+- **US-01-0034**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to buddy Splitting: split higher-order blocks when lower order is empty so that this capability is implemented with clear verification evidence.
+- **US-01-0035**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to interrupt-safe: disable interrupts during alloc/free so that this capability is implemented with clear verification evidence.
+- **US-01-0036**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to public API (returning kernel virtual addresses): so that this capability is implemented with clear verification evidence.
+- **US-01-0037**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_alloc_block(): allocate single page, return 0xC0000000+ virtual address so that this capability is implemented with clear verification evidence.
+- **US-01-0038**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_free_block(vaddr): free single page given virtual address so that this capability is implemented with clear verification evidence.
+- **US-01-0039**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_alloc_contiguous(count): allocate count contiguous pages so that this capability is implemented with clear verification evidence.
+- **US-01-0040**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_free_contiguous(vaddr, count): free contiguous block so that this capability is implemented with clear verification evidence.
+- **US-01-0041**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_get_page(phys_addr): look up vm_page_t for physical address so that this capability is implemented with clear verification evidence.
+- **US-01-0042**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to safety & Integration: so that this capability is implemented with clear verification evidence.
+- **US-01-0043**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fine-grained spinlock for SMP access (vm_phys_lock) so that this capability is implemented with clear verification evidence.
+- **US-01-0044**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to interrupt disable/restore guards in all API entry points so that this capability is implemented with clear verification evidence.
+- **US-01-0045**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to direct interface with vm_page.c queues so that this capability is implemented with clear verification evidence.
+- **US-01-0046**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to low memory watermark: warn when free pages drop below threshold so that this capability is implemented with clear verification evidence.
+- **US-01-0047**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nUMA-Aware Allocation (deferred): so that this capability is implemented with clear verification evidence.
+- **US-01-0048**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-node free lists so that this capability is implemented with clear verification evidence.
+- **US-01-0049**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to node affinity for allocation (prefer local node) so that this capability is implemented with clear verification evidence.
+- **US-01-0050**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cross-node fallback when local node exhausted so that this capability is implemented with clear verification evidence.
+- **US-01-0051**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0052**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: watermark allocator - sequential allocations, alignment, exhaustion so that this capability is implemented with clear verification evidence.
+- **US-01-0053**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: buddy allocator - alloc/free single pages, verify O(1) behavior so that this capability is implemented with clear verification evidence.
+- **US-01-0054**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: buddy coalescing - free adjacent pages, verify order promotion so that this capability is implemented with clear verification evidence.
+- **US-01-0055**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: buddy splitting - exhaust order 0, verify split from higher order so that this capability is implemented with clear verification evidence.
+- **US-01-0056**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: contiguous allocation - various orders, verify alignment so that this capability is implemented with clear verification evidence.
+- **US-01-0057**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: memory map parsing - Multiboot and e820 with edge cases (overlaps, holes) so that this capability is implemented with clear verification evidence.
+- **US-01-0058**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: alloc → free → alloc returns same page (no leak) so that this capability is implemented with clear verification evidence.
+- **US-01-0059**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: free page count + allocated count = total pages (invariant) so that this capability is implemented with clear verification evidence.
+- **US-01-0060**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: buddy free list integrity (no cycles, all entries valid) so that this capability is implemented with clear verification evidence.
+- **US-01-0061**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU so that this capability is implemented with clear verification evidence.
+- **US-01-0062**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0063**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: PMM architecture (watermark → buddy transition) so that this capability is implemented with clear verification evidence.
+- **US-01-0064**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: virtual vs physical address API convention so that this capability is implemented with clear verification evidence.
+- **US-01-0065**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to memory Management (BSD/Mach Design): so that this capability is implemented with clear verification evidence.
+- **US-01-0066**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to physical Memory (Machine Independent): so that this capability is implemented with clear verification evidence.
+- **US-01-0067**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_t Structure: so that this capability is implemented with clear verification evidence.
+- **US-01-0068**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phys_addr: physical address of this page frame so that this capability is implemented with clear verification evidence.
+- **US-01-0069**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to flags: state flags (see below) so that this capability is implemented with clear verification evidence.
+- **US-01-0070**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wire_count: wired reference count (cannot be paged out while > 0) so that this capability is implemented with clear verification evidence.
+- **US-01-0071**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ref_count: general reference count (for COW sharing) so that this capability is implemented with clear verification evidence.
+- **US-01-0072**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to order: buddy allocator order (0 = single page) so that this capability is implemented with clear verification evidence.
+- **US-01-0073**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to object: back-pointer to owning vm_object (anonymous, vnode, device) so that this capability is implemented with clear verification evidence.
+- **US-01-0074**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pindex: page index within owning object so that this capability is implemented with clear verification evidence.
+- **US-01-0075**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pv_list: list of pv_entry structs for pmap backlinks (which PTEs map this page) so that this capability is implemented with clear verification evidence.
+- **US-01-0076**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to state Flags: so that this capability is implemented with clear verification evidence.
+- **US-01-0077**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pG_BUSY: page is being I/O'd (don't touch) so that this capability is implemented with clear verification evidence.
+- **US-01-0078**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pG_VALID: page contains valid data so that this capability is implemented with clear verification evidence.
+- **US-01-0079**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pG_DIRTY: page has been modified since last writeback so that this capability is implemented with clear verification evidence.
+- **US-01-0080**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pG_ACTIVE: page is on active queue so that this capability is implemented with clear verification evidence.
+- **US-01-0081**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pG_INACTIVE: page is on inactive queue so that this capability is implemented with clear verification evidence.
+- **US-01-0082**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pG_FREE: page is on free queue so that this capability is implemented with clear verification evidence.
+- **US-01-0083**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pG_ZERO: page is known to be zeroed so that this capability is implemented with clear verification evidence.
+- **US-01-0084**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pG_SWAPPED: page contents are on swap so that this capability is implemented with clear verification evidence.
+- **US-01-0085**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to initialization: so that this capability is implemented with clear verification evidence.
+- **US-01-0086**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to allocate vm_page_t[] array based on detected RAM (via watermark allocator) so that this capability is implemented with clear verification evidence.
+- **US-01-0087**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to initialize all pages as PG_FREE, link into free lists so that this capability is implemented with clear verification evidence.
+- **US-01-0088**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to accessors: so that this capability is implemented with clear verification evidence.
+- **US-01-0089**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_get_page(pa): PA-to-page lookup (O(1) via array index) so that this capability is implemented with clear verification evidence.
+- **US-01-0090**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_to_phys(page): page-to-PA conversion so that this capability is implemented with clear verification evidence.
+- **US-01-0091**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ownership Tracking: so that this capability is implemented with clear verification evidence.
+- **US-01-0092**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to track which vm_object (anonymous, vnode, device) owns each page so that this capability is implemented with clear verification evidence.
+- **US-01-0093**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_insert(page, object, pindex): link page to object so that this capability is implemented with clear verification evidence.
+- **US-01-0094**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_remove(page): unlink page from object so that this capability is implemented with clear verification evidence.
+- **US-01-0095**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap Backlinks (pv_entry): so that this capability is implemented with clear verification evidence.
+- **US-01-0096**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to track which pmaps/PTEs reference this physical page so that this capability is implemented with clear verification evidence.
+- **US-01-0097**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pv_entry: {pmap, va, next} - singly-linked list per page so that this capability is implemented with clear verification evidence.
+- **US-01-0098**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to used for reverse mapping: given a physical page, find all virtual mappings so that this capability is implemented with clear verification evidence.
+- **US-01-0099**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to essential for TLB shootdown and page eviction so that this capability is implemented with clear verification evidence.
+- **US-01-0100**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to page Queues: so that this capability is implemented with clear verification evidence.
+- **US-01-0101**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to queue Types: so that this capability is implemented with clear verification evidence.
+- **US-01-0102**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free Queue: pages available for immediate allocation so that this capability is implemented with clear verification evidence.
+- **US-01-0103**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to active Queue: recently accessed pages (LRU head) so that this capability is implemented with clear verification evidence.
+- **US-01-0104**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to inactive Queue: eviction candidates (LRU tail) so that this capability is implemented with clear verification evidence.
+- **US-01-0105**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wired Queue: kernel/DMA pages that cannot be paged out so that this capability is implemented with clear verification evidence.
+- **US-01-0106**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to laundry Queue: dirty pages waiting to be written to backing store so that this capability is implemented with clear verification evidence.
+- **US-01-0107**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to queue Operations: so that this capability is implemented with clear verification evidence.
+- **US-01-0108**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_activate(page): move to active queue, set PG_ACTIVE so that this capability is implemented with clear verification evidence.
+- **US-01-0109**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_deactivate(page): move to inactive queue, clear PG_ACTIVE so that this capability is implemented with clear verification evidence.
+- **US-01-0110**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_wire(page): increment wire count, move to wired queue so that this capability is implemented with clear verification evidence.
+- **US-01-0111**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_unwire(page): decrement wire count, move to inactive if count reaches 0 so that this capability is implemented with clear verification evidence.
+- **US-01-0112**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_free(page): return to free queue, clear all flags so that this capability is implemented with clear verification evidence.
+- **US-01-0113**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_launder(page): move to laundry queue for async writeback so that this capability is implemented with clear verification evidence.
+- **US-01-0114**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to lRU Scanning (vm_pageout_scan): so that this capability is implemented with clear verification evidence.
+- **US-01-0115**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to periodic scan of active queue so that this capability is implemented with clear verification evidence.
+- **US-01-0116**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to check PTE accessed (A) bit via pmap_is_referenced() so that this capability is implemented with clear verification evidence.
+- **US-01-0117**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to clear A bit via pmap_clear_reference() so that this capability is implemented with clear verification evidence.
+- **US-01-0118**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to move unreferenced pages to inactive queue tail so that this capability is implemented with clear verification evidence.
+- **US-01-0119**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to second-chance algorithm: pages touched again stay active so that this capability is implemented with clear verification evidence.
+- **US-01-0120**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to page Daemon (vm_pageout): so that this capability is implemented with clear verification evidence.
+- **US-01-0121**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to background kernel thread (pagedaemon) so that this capability is implemented with clear verification evidence.
+- **US-01-0122**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sleep on vm_pages_needed wakeup channel so that this capability is implemented with clear verification evidence.
+- **US-01-0123**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_launder(): write dirty pages to backing store so that this capability is implemented with clear verification evidence.
+- **US-01-0124**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_try_to_free(): attempt to free clean inactive pages so that this capability is implemented with clear verification evidence.
+- **US-01-0125**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to priority-based scanning phases: Inactive → Laundry → Active so that this capability is implemented with clear verification evidence.
+- **US-01-0126**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to oOM killer hook: kill process if cannot free memory so that this capability is implemented with clear verification evidence.
+- **US-01-0127**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to thresholds: so that this capability is implemented with clear verification evidence.
+- **US-01-0128**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_free_min: absolute minimum free pages (16 default; panic below) so that this capability is implemented with clear verification evidence.
+- **US-01-0129**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_free_target: target free pages (64 default; daemon sleeps above) so that this capability is implemented with clear verification evidence.
+- **US-01-0130**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_inactive_target: target inactive queue length so that this capability is implemented with clear verification evidence.
+- **US-01-0131**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_free_reserved: reserved for kernel emergencies (8 default) so that this capability is implemented with clear verification evidence.
+- **US-01-0132**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to dynamic threshold adjustment based on total RAM so that this capability is implemented with clear verification evidence.
+- **US-01-0133**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to statistics (vm_stat): so that this capability is implemented with clear verification evidence.
+- **US-01-0134**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free_count, active_count, inactive_count, wire_count, laundry_count so that this capability is implemented with clear verification evidence.
+- **US-01-0135**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pageins: pages read from disk so that this capability is implemented with clear verification evidence.
+- **US-01-0136**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pageouts: pages written to disk so that this capability is implemented with clear verification evidence.
+- **US-01-0137**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to faults: total page faults handled so that this capability is implemented with clear verification evidence.
+- **US-01-0138**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cow_faults: copy-on-write faults so that this capability is implemented with clear verification evidence.
+- **US-01-0139**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reactivations: pages moved back to active so that this capability is implemented with clear verification evidence.
+- **US-01-0140**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to zero_fill_pages: pages satisfied by zero-fill so that this capability is implemented with clear verification evidence.
+- **US-01-0141**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to /proc/vmstat or sysctl interface for userspace exposure so that this capability is implemented with clear verification evidence.
+- **US-01-0142**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0143**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: page queue transitions (free→active→inactive→laundry→free) so that this capability is implemented with clear verification evidence.
+- **US-01-0144**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: wire/unwire reference counting so that this capability is implemented with clear verification evidence.
+- **US-01-0145**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: vm_page_insert / vm_page_remove object linkage so that this capability is implemented with clear verification evidence.
+- **US-01-0146**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: pv_entry list manipulation (insert, remove, lookup) so that this capability is implemented with clear verification evidence.
+- **US-01-0147**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: page daemon thresholds - verify scan triggers at correct free count so that this capability is implemented with clear verification evidence.
+- **US-01-0148**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: queue length invariant - sum of all queue counts = total pages so that this capability is implemented with clear verification evidence.
+- **US-01-0149**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: no page appears on two queues simultaneously so that this capability is implemented with clear verification evidence.
+- **US-01-0150**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0151**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: page queue state machine and transitions so that this capability is implemented with clear verification evidence.
+- **US-01-0152**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: page daemon algorithm and tuning parameters so that this capability is implemented with clear verification evidence.
+- **US-01-0153**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pMAP Layer (Machine Dependent - i386): so that this capability is implemented with clear verification evidence.
+- **US-01-0154**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to initialization (pmap_bootstrap): so that this capability is implemented with clear verification evidence.
+- **US-01-0155**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to initialize kernel page directory from static bootstrap allocation so that this capability is implemented with clear verification evidence.
+- **US-01-0156**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set up recursive mapping at PD entry 1023 (self-reference at 0xFFC00000) so that this capability is implemented with clear verification evidence.
+- **US-01-0157**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to map kernel space (0xC0000000+) with global flag if CPUID reports PGE so that this capability is implemented with clear verification evidence.
+- **US-01-0158**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detect CPU features: PSE (4 MB pages), PGE (global pages), PAE (36-bit physical) so that this capability is implemented with clear verification evidence.
+- **US-01-0159**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to initialize pmap lock for SMP safety so that this capability is implemented with clear verification evidence.
+- **US-01-0160**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to identity-map LAPIC MMIO region (0xFEE00000) with PCD flag so that this capability is implemented with clear verification evidence.
+- **US-01-0161**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to record kernel_pmap as authoritative kernel address space so that this capability is implemented with clear verification evidence.
+- **US-01-0162**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core PTE Manipulation: so that this capability is implemented with clear verification evidence.
+- **US-01-0163**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_enter(pmap, va, pa, prot, flags): insert/update PTE so that this capability is implemented with clear verification evidence.
+- **US-01-0164**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to allocate page table on demand when PDE is empty so that this capability is implemented with clear verification evidence.
+- **US-01-0165**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set PG_U (user), PG_W (write), PG_G (global) flags per prot so that this capability is implemented with clear verification evidence.
+- **US-01-0166**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to invalidate TLB entry for updated VA so that this capability is implemented with clear verification evidence.
+- **US-01-0167**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to update pv_entry list for the physical page so that this capability is implemented with clear verification evidence.
+- **US-01-0168**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_remove(pmap, va): clear PTE, invalidate TLB so that this capability is implemented with clear verification evidence.
+- **US-01-0169**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to remove pv_entry for this mapping so that this capability is implemented with clear verification evidence.
+- **US-01-0170**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free page table if all entries empty (optional reclamation) so that this capability is implemented with clear verification evidence.
+- **US-01-0171**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_kenter(va, pa): kernel-only fast path (no locking, no pv_entry) so that this capability is implemented with clear verification evidence.
+- **US-01-0172**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_kremove(va): kernel-only removal so that this capability is implemented with clear verification evidence.
+- **US-01-0173**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_extract(pmap, va): return physical address for VA (read PTE) so that this capability is implemented with clear verification evidence.
+- **US-01-0174**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_zero_page(phys): zero a physical page via temporary mapping so that this capability is implemented with clear verification evidence.
+- **US-01-0175**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_copy_page(src_phys, dst_phys): copy between physical pages so that this capability is implemented with clear verification evidence.
+- **US-01-0176**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to context Switch (pmap_activate): so that this capability is implemented with clear verification evidence.
+- **US-01-0177**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to load pmap->pdir_phys into CR3 so that this capability is implemented with clear verification evidence.
+- **US-01-0178**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to update curpmap thread-local pointer so that this capability is implemented with clear verification evidence.
+- **US-01-0179**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set TSS ESP0 for kernel stack (scheduler integration) so that this capability is implemented with clear verification evidence.
+- **US-01-0180**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to recursive Paging: so that this capability is implemented with clear verification evidence.
+- **US-01-0181**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reserve PDE 1023 for self-referencing so that this capability is implemented with clear verification evidence.
+- **US-01-0182**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to v_PD macro: access current PD at 0xFFFFF000 so that this capability is implemented with clear verification evidence.
+- **US-01-0183**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to v_PT(n) macro: access page table n at 0xFFC00000 + n×4096 so that this capability is implemented with clear verification evidence.
+- **US-01-0184**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to all PTE manipulation uses recursive window (no temporary mappings needed) so that this capability is implemented with clear verification evidence.
+- **US-01-0185**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to higher-Half Transition: so that this capability is implemented with clear verification evidence.
+- **US-01-0186**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to stable 3 GB/1 GB split: user 0x00000000-0xBFFFFFFF, kernel 0xC0000000-0xFFFFFFFF so that this capability is implemented with clear verification evidence.
+- **US-01-0187**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to lMA=0x100000 (1 MB), VMA=0xC0100000 (kernel linked at high address) so that this capability is implemented with clear verification evidence.
+- **US-01-0188**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to boot trampoline in boot.S enables paging with identity + high mapping so that this capability is implemented with clear verification evidence.
+- **US-01-0189**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-Process Address Space (pmap_t): so that this capability is implemented with clear verification evidence.
+- **US-01-0190**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to data Structure: so that this capability is implemented with clear verification evidence.
+- **US-01-0191**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pdir / pdir_phys: virtual and physical address of page directory so that this capability is implemented with clear verification evidence.
+- **US-01-0192**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ref_count: reference count for COW sharing so that this capability is implemented with clear verification evidence.
+- **US-01-0193**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to resident_count: count of resident pages so that this capability is implemented with clear verification evidence.
+- **US-01-0194**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wired_count: count of wired (unpageable) pages so that this capability is implemented with clear verification evidence.
+- **US-01-0195**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to stats (pmap_stats): per-pmap counters (faults, cow_faults, zero_fills, protection changes) so that this capability is implemented with clear verification evidence.
+- **US-01-0196**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to lock: spinlock for SMP safety so that this capability is implemented with clear verification evidence.
+- **US-01-0197**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to asid: address space ID (future PCID support, currently 0) so that this capability is implemented with clear verification evidence.
+- **US-01-0198**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to list_entry: linkage for global pmap list (TLB shootdown) so that this capability is implemented with clear verification evidence.
+- **US-01-0199**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_create() - Create New Address Space: so that this capability is implemented with clear verification evidence.
+- **US-01-0200**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to allocate one 4 KB page for page directory so that this capability is implemented with clear verification evidence.
+- **US-01-0201**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to zero user portion (PDEs 0-767) so that this capability is implemented with clear verification evidence.
+- **US-01-0202**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copy kernel PDEs (768-1022) from kernel_pmap (shared by reference) so that this capability is implemented with clear verification evidence.
+- **US-01-0203**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set up recursive mapping in PDE 1023 so that this capability is implemented with clear verification evidence.
+- **US-01-0204**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to initialize reference count to 1 so that this capability is implemented with clear verification evidence.
+- **US-01-0205**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to add to global pmap list so that this capability is implemented with clear verification evidence.
+- **US-01-0206**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to minimum overhead: 1 PD (4 KB) + PTs allocated on demand so that this capability is implemented with clear verification evidence.
+- **US-01-0207**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_destroy() - Destroy Address Space: so that this capability is implemented with clear verification evidence.
+- **US-01-0208**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to decrement reference count; return if still referenced (COW children) so that this capability is implemented with clear verification evidence.
+- **US-01-0209**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to walk all user PDEs (0-767): so that this capability is implemented with clear verification evidence.
+- **US-01-0210**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to for each present PDE, walk all 1024 PTEs so that this capability is implemented with clear verification evidence.
+- **US-01-0211**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to for each present PTE, free physical page (or decrement refcount) so that this capability is implemented with clear verification evidence.
+- **US-01-0212**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free page table page so that this capability is implemented with clear verification evidence.
+- **US-01-0213**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free page directory page so that this capability is implemented with clear verification evidence.
+- **US-01-0214**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to remove from global pmap list so that this capability is implemented with clear verification evidence.
+- **US-01-0215**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_reference() / pmap_release(): so that this capability is implemented with clear verification evidence.
+- **US-01-0216**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to atomic increment/decrement of reference count so that this capability is implemented with clear verification evidence.
+- **US-01-0217**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_release(): call pmap_destroy() if refcount reaches 0 so that this capability is implemented with clear verification evidence.
+- **US-01-0218**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_fork() - Copy-on-Write Fork: so that this capability is implemented with clear verification evidence.
+- **US-01-0219**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to create new pmap via pmap_create() so that this capability is implemented with clear verification evidence.
+- **US-01-0220**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to walk parent's user PTEs: so that this capability is implemented with clear verification evidence.
+- **US-01-0221**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copy PTE to child with write bit cleared so that this capability is implemented with clear verification evidence.
+- **US-01-0222**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to clear write bit in parent too (both now COW) so that this capability is implemented with clear verification evidence.
+- **US-01-0223**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to increment physical page reference count so that this capability is implemented with clear verification evidence.
+- **US-01-0224**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to track COW pages in pmap stats so that this capability is implemented with clear verification evidence.
+- **US-01-0225**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel PDE Synchronization: so that this capability is implemented with clear verification evidence.
+- **US-01-0226**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel_pmap is authoritative for PDEs 768-1022 so that this capability is implemented with clear verification evidence.
+- **US-01-0227**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_create() copies kernel PDEs on creation so that this capability is implemented with clear verification evidence.
+- **US-01-0228**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_growkernel(va): when kernel maps new pages (vmalloc), update all pmaps so that this capability is implemented with clear verification evidence.
+- **US-01-0229**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to walk global pmap list and copy new kernel PDEs so that this capability is implemented with clear verification evidence.
+- **US-01-0230**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to alternatively share kernel PTs by reference (current approach) so that this capability is implemented with clear verification evidence.
+- **US-01-0231**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_protect() - Change Page Protections: so that this capability is implemented with clear verification evidence.
+- **US-01-0232**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to walk range and update PTE protection bits (R/W, U/S) so that this capability is implemented with clear verification evidence.
+- **US-01-0233**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to handle protection upgrade (read → read/write) and downgrade so that this capability is implemented with clear verification evidence.
+- **US-01-0234**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to track protection changes for COW handling so that this capability is implemented with clear verification evidence.
+- **US-01-0235**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to batch TLB invalidations for large ranges (TLB_BATCH_THRESHOLD) so that this capability is implemented with clear verification evidence.
+- **US-01-0236**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_copy() - Copy Mappings Between Address Spaces: so that this capability is implemented with clear verification evidence.
+- **US-01-0237**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copy PTE entries from source to destination pmap so that this capability is implemented with clear verification evidence.
+- **US-01-0238**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set up COW if requested (clear write bit in both) so that this capability is implemented with clear verification evidence.
+- **US-01-0239**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to increment physical page reference counts so that this capability is implemented with clear verification evidence.
+- **US-01-0240**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to support partial range copy (for vfork/clone) so that this capability is implemented with clear verification evidence.
+- **US-01-0241**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to handle mixed COW and private mappings (PG_PRIVATE check) so that this capability is implemented with clear verification evidence.
+- **US-01-0242**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to page Reference/Modification Tracking: so that this capability is implemented with clear verification evidence.
+- **US-01-0243**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_is_referenced(pmap, va): check PTE Accessed (A) bit so that this capability is implemented with clear verification evidence.
+- **US-01-0244**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_is_modified(pmap, va): check PTE Dirty (D) bit so that this capability is implemented with clear verification evidence.
+- **US-01-0245**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_clear_reference(pmap, va): clear A bit, invalidate TLB so that this capability is implemented with clear verification evidence.
+- **US-01-0246**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_clear_modify(pmap, va): clear D bit, invalidate TLB so that this capability is implemented with clear verification evidence.
+- **US-01-0247**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_test_and_clear_ref(page): atomic test-and-clear for A bit across all mappings so that this capability is implemented with clear verification evidence.
+- **US-01-0248**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_test_and_clear_modify(page): atomic test-and-clear for D bit so that this capability is implemented with clear verification evidence.
+- **US-01-0249**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to batch variants: pmap_is_referenced_range(), pmap_is_modified_range() so that this capability is implemented with clear verification evidence.
+- **US-01-0250**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_track_access(page): per-page access frequency tracking for aging so that this capability is implemented with clear verification evidence.
+- **US-01-0251**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to export referenced/modified info to VM layer for page replacement decisions so that this capability is implemented with clear verification evidence.
+- **US-01-0252**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copy-on-Write System: so that this capability is implemented with clear verification evidence.
+- **US-01-0253**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mark shared pages read-only in both parent and child so that this capability is implemented with clear verification evidence.
+- **US-01-0254**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cOW Fault Handler: so that this capability is implemented with clear verification evidence.
+- **US-01-0255**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to on write fault to COW page: allocate new physical page so that this capability is implemented with clear verification evidence.
+- **US-01-0256**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copy contents from original page so that this capability is implemented with clear verification evidence.
+- **US-01-0257**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to map new page R/W at faulting VA so that this capability is implemented with clear verification evidence.
+- **US-01-0258**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to decrement original page refcount so that this capability is implemented with clear verification evidence.
+- **US-01-0259**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if refcount == 1, optionally remap original R/W in remaining owner so that this capability is implemented with clear verification evidence.
+- **US-01-0260**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_page_is_cow(page): check if page is COW-shared so that this capability is implemented with clear verification evidence.
+- **US-01-0261**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cOW statistics: faults, pages saved, duplications so that this capability is implemented with clear verification evidence.
+- **US-01-0262**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sYS_GET_COW_STATS (241) syscall and /proc/cow_stats procfs entry so that this capability is implemented with clear verification evidence.
+- **US-01-0263**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to tLB Management: so that this capability is implemented with clear verification evidence.
+- **US-01-0264**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to single CPU: so that this capability is implemented with clear verification evidence.
+- **US-01-0265**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to invlpg(va): invalidate single page so that this capability is implemented with clear verification evidence.
+- **US-01-0266**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cR3 reload: flush entire TLB (expensive, avoid when possible) so that this capability is implemented with clear verification evidence.
+- **US-01-0267**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to track flush statistics so that this capability is implemented with clear verification evidence.
+- **US-01-0268**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sMP TLB Shootdown: so that this capability is implemented with clear verification evidence.
+- **US-01-0269**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iPI (Inter-Processor Interrupt) mechanism so that this capability is implemented with clear verification evidence.
+- **US-01-0270**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_shootdown_page(va): invalidate single page on all CPUs so that this capability is implemented with clear verification evidence.
+- **US-01-0271**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_shootdown_range(va, len): invalidate range so that this capability is implemented with clear verification evidence.
+- **US-01-0272**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_shootdown_all(): full TLB flush on all CPUs so that this capability is implemented with clear verification evidence.
+- **US-01-0273**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to deferred shootdown for batch operations so that this capability is implemented with clear verification evidence.
+- **US-01-0274**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to shootdown completion barrier (wait for all CPUs to acknowledge) so that this capability is implemented with clear verification evidence.
+- **US-01-0275**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iNVPCID (future x86_64): so that this capability is implemented with clear verification evidence.
+- **US-01-0276**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detect INVPCID support via CPUID so that this capability is implemented with clear verification evidence.
+- **US-01-0277**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to invalidate by PCID+VA, PCID only, or all-except-global so that this capability is implemented with clear verification evidence.
+- **US-01-0278**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to large Page Support: so that this capability is implemented with clear verification evidence.
+- **US-01-0279**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to 4 MB PSE Pages (i386): so that this capability is implemented with clear verification evidence.
+- **US-01-0280**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detect PSE via CPUID, set CR4.PSE so that this capability is implemented with clear verification evidence.
+- **US-01-0281**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to use PDE with PS=1 for 4 MB mappings so that this capability is implemented with clear verification evidence.
+- **US-01-0282**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_enter_large(pmap, va, pa, prot, flags): create 4 MB mapping so that this capability is implemented with clear verification evidence.
+- **US-01-0283**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to align VA and PA to 4 MB boundary so that this capability is implemented with clear verification evidence.
+- **US-01-0284**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to use for kernel text/data to reduce TLB pressure so that this capability is implemented with clear verification evidence.
+- **US-01-0285**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to demotion: split 4 MB page into 1024 × 4 KB on partial unmap/protect so that this capability is implemented with clear verification evidence.
+- **US-01-0286**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to promotion: coalesce 1024 aligned 4 KB pages into 4 MB (deferred) so that this capability is implemented with clear verification evidence.
+- **US-01-0287**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to 2 MB / 1 GB Pages (x86_64 - see x86_64 PMAP below) so that this capability is implemented with clear verification evidence.
+- **US-01-0288**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to global Page Support (PGE): so that this capability is implemented with clear verification evidence.
+- **US-01-0289**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detect PGE via CPUID, set CR4.PGE so that this capability is implemented with clear verification evidence.
+- **US-01-0290**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mark kernel pages with PG_G flag so that this capability is implemented with clear verification evidence.
+- **US-01-0291**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to global pages survive CR3 reload (not flushed) so that this capability is implemented with clear verification evidence.
+- **US-01-0292**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to use CR4 toggle or INVPCID to flush global pages when needed so that this capability is implemented with clear verification evidence.
+- **US-01-0293**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to aSID/PCID Support (future x86_64): so that this capability is implemented with clear verification evidence.
+- **US-01-0294**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to aSID pool management (allocate, free, recycle) so that this capability is implemented with clear verification evidence.
+- **US-01-0295**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to assign ASID on pmap creation so that this capability is implemented with clear verification evidence.
+- **US-01-0296**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to include ASID in CR3 on context switch so that this capability is implemented with clear verification evidence.
+- **US-01-0297**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to avoid full TLB flush when switching between processes with different ASIDs so that this capability is implemented with clear verification evidence.
+- **US-01-0298**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pAE Mode (Physical Address Extension - deferred): so that this capability is implemented with clear verification evidence.
+- **US-01-0299**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to three-level page tables: PDPT (4 entries) → PD → PT so that this capability is implemented with clear verification evidence.
+- **US-01-0300**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to 64-bit PTEs: support for NX (No Execute) bit so that this capability is implemented with clear verification evidence.
+- **US-01-0301**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to physical addresses up to 36 bits (64 GB) so that this capability is implemented with clear verification evidence.
+- **US-01-0302**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pDPT must be in first 4 GB and 32-byte aligned so that this capability is implemented with clear verification evidence.
+- **US-01-0303**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pMAP Statistics and Debugging: so that this capability is implemented with clear verification evidence.
+- **US-01-0304**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-pmap counters: resident, wired, mapped, faults, cow_faults so that this capability is implemented with clear verification evidence.
+- **US-01-0305**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to global counters: total_pmaps, active_pmaps so that this capability is implemented with clear verification evidence.
+- **US-01-0306**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_dump(pmap): debug dump of pmap contents (PDEs + PTEs) so that this capability is implemented with clear verification evidence.
+- **US-01-0307**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_check(pmap): consistency verification (detect leaked pages, orphan PTs) so that this capability is implemented with clear verification evidence.
+- **US-01-0308**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to export stats via syscall (sys_pmap_stats) so that this capability is implemented with clear verification evidence.
+- **US-01-0309**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to page Aging Algorithm Integration: so that this capability is implemented with clear verification evidence.
+- **US-01-0310**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to periodic scanning of all resident pages so that this capability is implemented with clear verification evidence.
+- **US-01-0311**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to decrement age counter if not referenced so that this capability is implemented with clear verification evidence.
+- **US-01-0312**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pages with age 0 become eviction candidates so that this capability is implemented with clear verification evidence.
+- **US-01-0313**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to support for multiple aging policies (Clock, LRU approximation) so that this capability is implemented with clear verification evidence.
+- **US-01-0314**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to hardware A/D bit emulation not needed on x86 (native support) so that this capability is implemented with clear verification evidence.
+- **US-01-0315**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0316**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: pmap_create → pmap_destroy lifecycle (no leaked pages) so that this capability is implemented with clear verification evidence.
+- **US-01-0317**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: pmap_enter + pmap_extract round-trip so that this capability is implemented with clear verification evidence.
+- **US-01-0318**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: pmap_protect upgrade and downgrade so that this capability is implemented with clear verification evidence.
+- **US-01-0319**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: pmap_fork COW - write to child triggers fault, parent unaffected so that this capability is implemented with clear verification evidence.
+- **US-01-0320**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: pmap_copy partial range with mixed COW/private so that this capability is implemented with clear verification evidence.
+- **US-01-0321**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: reference/modification tracking - set/clear/test A and D bits so that this capability is implemented with clear verification evidence.
+- **US-01-0322**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: large page enter/remove (4 MB PSE) so that this capability is implemented with clear verification evidence.
+- **US-01-0323**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: TLB shootdown - verify invlpg called on remote CPUs so that this capability is implemented with clear verification evidence.
+- **US-01-0324**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: pmap_create always produces valid kernel PDE copies (768-1022 match kernel_pmap) so that this capability is implemented with clear verification evidence.
+- **US-01-0325**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: pmap_destroy frees exactly resident_count pages so that this capability is implemented with clear verification evidence.
+- **US-01-0326**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: recursive mapping at PDE 1023 is self-consistent so that this capability is implemented with clear verification evidence.
+- **US-01-0327**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: fork process, write to COW pages, verify isolation in QEMU so that this capability is implemented with clear verification evidence.
+- **US-01-0328**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: stress test - 100 pmap_create/pmap_destroy cycles, verify no PMM leak so that this capability is implemented with clear verification evidence.
+- **US-01-0329**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0330**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: i386 pmap architecture (2-level, recursive, COW) so that this capability is implemented with clear verification evidence.
+- **US-01-0331**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: TLB management strategy (single CPU + SMP shootdown) so that this capability is implemented with clear verification evidence.
+- **US-01-0332**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: per-process address space layout (3 GB/1 GB split) so that this capability is implemented with clear verification evidence.
+- **US-01-0333**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pMAP Layer (Machine Dependent - x86_64): so that this capability is implemented with clear verification evidence.
+- **US-01-0334**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to initialization (pmap_bootstrap): so that this capability is implemented with clear verification evidence.
+- **US-01-0335**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to initialize kernel PML4 from static bootstrap allocation so that this capability is implemented with clear verification evidence.
+- **US-01-0336**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000) so that this capability is implemented with clear verification evidence.
+- **US-01-0337**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to map kernel space at canonical upper half (−2 GB) so that this capability is implemented with clear verification evidence.
+- **US-01-0338**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to initialize pmap lock for SMP safety so that this capability is implemented with clear verification evidence.
+- **US-01-0339**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to enable NX bit via IA32_EFER.NXE so that this capability is implemented with clear verification evidence.
+- **US-01-0340**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detect CPU features: PCID, INVPCID, 1 GB pages, PGE so that this capability is implemented with clear verification evidence.
+- **US-01-0341**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core PTE Manipulation: so that this capability is implemented with clear verification evidence.
+- **US-01-0342**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_enter(pmap, va, pa, prot, flags): walk PML4 → PDPT → PD → PT so that this capability is implemented with clear verification evidence.
+- **US-01-0343**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to allocate intermediate page table levels on demand so that this capability is implemented with clear verification evidence.
+- **US-01-0344**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set NX (No Execute) bit for data pages so that this capability is implemented with clear verification evidence.
+- **US-01-0345**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to handle user/supervisor, read/write, global flags so that this capability is implemented with clear verification evidence.
+- **US-01-0346**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_remove(pmap, va): clear PTE, invalidate TLB so that this capability is implemented with clear verification evidence.
+- **US-01-0347**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_kenter(va, pa) / pmap_kremove(va): kernel fast paths so that this capability is implemented with clear verification evidence.
+- **US-01-0348**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_extract(pmap, va): return physical address so that this capability is implemented with clear verification evidence.
+- **US-01-0349**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_zero_page(phys) / pmap_copy_page(src, dst): page utilities so that this capability is implemented with clear verification evidence.
+- **US-01-0350**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to context Switch (pmap_activate): so that this capability is implemented with clear verification evidence.
+- **US-01-0351**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to load pmap->pml4_phys into CR3 so that this capability is implemented with clear verification evidence.
+- **US-01-0352**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to handle PCID if available (include PCID in CR3 bits 11:0) so that this capability is implemented with clear verification evidence.
+- **US-01-0353**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set noflush bit (CR3 bit 63) to avoid TLB flush on PCID switch so that this capability is implemented with clear verification evidence.
+- **US-01-0354**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to update curpmap pointer so that this capability is implemented with clear verification evidence.
+- **US-01-0355**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to recursive Paging: so that this capability is implemented with clear verification evidence.
+- **US-01-0356**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reserve PML4 entry 510 for self-referencing so that this capability is implemented with clear verification evidence.
+- **US-01-0357**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to v_PML4, V_PDPT(n), V_PD(n), V_PT(n) macros for accessing page table levels so that this capability is implemented with clear verification evidence.
+- **US-01-0358**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to all PTE manipulation via recursive window so that this capability is implemented with clear verification evidence.
+- **US-01-0359**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-Process Address Space: so that this capability is implemented with clear verification evidence.
+- **US-01-0360**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_create(): allocate new PML4, copy kernel mappings (entries 256-511) so that this capability is implemented with clear verification evidence.
+- **US-01-0361**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_destroy(): free all user page table levels (PT → PD → PDPT → PML4) and PML4 itself so that this capability is implemented with clear verification evidence.
+- **US-01-0362**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_reference() / pmap_release(): reference counting so that this capability is implemented with clear verification evidence.
+- **US-01-0363**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_fork(): COW fork with 4-level walk so that this capability is implemented with clear verification evidence.
+- **US-01-0364**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_protect: walk range, update PTE bits (R/W, NX, U/S), invalidate TLB so that this capability is implemented with clear verification evidence.
+- **US-01-0365**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reference/Modification Tracking: so that this capability is implemented with clear verification evidence.
+- **US-01-0366**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to same API as i386: pmap_is_referenced, pmap_is_modified, pmap_clear_*, pmap_test_and_clear_* so that this capability is implemented with clear verification evidence.
+- **US-01-0367**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to range and batch variants so that this capability is implemented with clear verification evidence.
+- **US-01-0368**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copy-on-Write: same architecture as i386 (pmap_fork, pmap_page_is_cow) so that this capability is implemented with clear verification evidence.
+- **US-01-0369**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to tLB Management: so that this capability is implemented with clear verification evidence.
+- **US-01-0370**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iPI-based SMP shootdown (pmap_shootdown_page/range/all) so that this capability is implemented with clear verification evidence.
+- **US-01-0371**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iNVPCID instruction support (if available): so that this capability is implemented with clear verification evidence.
+- **US-01-0372**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to type 0: invalidate specific PCID + VA so that this capability is implemented with clear verification evidence.
+- **US-01-0373**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to type 1: invalidate all entries for a PCID so that this capability is implemented with clear verification evidence.
+- **US-01-0374**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to type 2: invalidate all entries including globals so that this capability is implemented with clear verification evidence.
+- **US-01-0375**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to type 3: invalidate all entries except globals so that this capability is implemented with clear verification evidence.
+- **US-01-0376**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to large Page Support: so that this capability is implemented with clear verification evidence.
+- **US-01-0377**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to 2 MB Pages: PDE with PS=1, no PT needed so that this capability is implemented with clear verification evidence.
+- **US-01-0378**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_enter_2mb(pmap, va, pa, prot, flags) so that this capability is implemented with clear verification evidence.
+- **US-01-0379**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_remove_2mb(pmap, va) so that this capability is implemented with clear verification evidence.
+- **US-01-0380**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to automatic promotion: coalesce 512 adjacent 4 KB pages so that this capability is implemented with clear verification evidence.
+- **US-01-0381**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to demotion: split on partial unmap/protect so that this capability is implemented with clear verification evidence.
+- **US-01-0382**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to 1 GB Pages: PDPTE with PS=1, no PD/PT needed so that this capability is implemented with clear verification evidence.
+- **US-01-0383**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_enter_1gb(pmap, va, pa, prot, flags) so that this capability is implemented with clear verification evidence.
+- **US-01-0384**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_remove_1gb(pmap, va) so that this capability is implemented with clear verification evidence.
+- **US-01-0385**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detect support via CPUID (leaf 0x80000001, bit 26) so that this capability is implemented with clear verification evidence.
+- **US-01-0386**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to use for large kernel mappings and huge anonymous regions so that this capability is implemented with clear verification evidence.
+- **US-01-0387**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to global Page Support (PGE): so that this capability is implemented with clear verification evidence.
+- **US-01-0388**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set CR4.PGE, mark kernel pages with PG_G so that this capability is implemented with clear verification evidence.
+- **US-01-0389**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_set_global(pmap, va) / pmap_mark_kernel_global() so that this capability is implemented with clear verification evidence.
+- **US-01-0390**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pCID Support (Process Context Identifiers): so that this capability is implemented with clear verification evidence.
+- **US-01-0391**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detect PCID via CPUID (leaf 1, ECX bit 17) so that this capability is implemented with clear verification evidence.
+- **US-01-0392**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detect INVPCID via CPUID (leaf 7, EBX bit 10) so that this capability is implemented with clear verification evidence.
+- **US-01-0393**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set CR4.PCIDE to enable so that this capability is implemented with clear verification evidence.
+- **US-01-0394**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pCID pool: allocate 12-bit IDs (max 4096), recycle via generation counter so that this capability is implemented with clear verification evidence.
+- **US-01-0395**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_pcid_alloc() / pmap_pcid_free(): pool management so that this capability is implemented with clear verification evidence.
+- **US-01-0396**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to assign PCID on pmap_create(), include in CR3 on activate so that this capability is implemented with clear verification evidence.
+- **US-01-0397**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to avoid TLB flush on context switch between different PCIDs so that this capability is implemented with clear verification evidence.
+- **US-01-0398**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nX (No Execute) Bit: so that this capability is implemented with clear verification evidence.
+- **US-01-0399**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to enable via IA32_EFER.NXE MSR so that this capability is implemented with clear verification evidence.
+- **US-01-0400**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set NX (bit 63 of PTE) for stack, heap, data pages so that this capability is implemented with clear verification evidence.
+- **US-01-0401**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to clear NX for code pages so that this capability is implemented with clear verification evidence.
+- **US-01-0402**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to enforce W^X: pages cannot be both writable and executable so that this capability is implemented with clear verification evidence.
+- **US-01-0403**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to 5-Level Paging (LA57 - deferred): so that this capability is implemented with clear verification evidence.
+- **US-01-0404**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detect via CPUID (leaf 7, ECX bit 16) so that this capability is implemented with clear verification evidence.
+- **US-01-0405**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pML5 adds 57-bit virtual addressing (128 PB) so that this capability is implemented with clear verification evidence.
+- **US-01-0406**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to recursive mapping adjustment for 5 levels so that this capability is implemented with clear verification evidence.
+- **US-01-0407**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pMAP Statistics and Debugging: so that this capability is implemented with clear verification evidence.
+- **US-01-0408**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to same per-pmap and global counters as i386 so that this capability is implemented with clear verification evidence.
+- **US-01-0409**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_dump(pmap): debug dump of 4-level page tables so that this capability is implemented with clear verification evidence.
+- **US-01-0410**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmap_check(pmap): consistency verification so that this capability is implemented with clear verification evidence.
+- **US-01-0411**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0412**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: 4-level page table walk - pmap_enter at various canonical addresses so that this capability is implemented with clear verification evidence.
+- **US-01-0413**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: NX enforcement - execute from NX page triggers fault so that this capability is implemented with clear verification evidence.
+- **US-01-0414**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: PCID allocation and recycling under exhaustion so that this capability is implemented with clear verification evidence.
+- **US-01-0415**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: 2 MB page enter/remove so that this capability is implemented with clear verification evidence.
+- **US-01-0416**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: 1 GB page enter/remove (if CPU supports) so that this capability is implemented with clear verification evidence.
+- **US-01-0417**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: pmap_fork with 4-level walk - COW isolation so that this capability is implemented with clear verification evidence.
+- **US-01-0418**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: INVPCID types 0-3 dispatch so that this capability is implemented with clear verification evidence.
+- **US-01-0419**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: PML4 entries 256-511 always match kernel_pmap so that this capability is implemented with clear verification evidence.
+- **US-01-0420**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: boot x86_64 kernel, verify user processes get isolated address spaces so that this capability is implemented with clear verification evidence.
+- **US-01-0421**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0422**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: x86_64 pmap architecture (4-level, PCID, NX) so that this capability is implemented with clear verification evidence.
+- **US-01-0423**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros) so that this capability is implemented with clear verification evidence.
+- **US-01-0424**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: large page promotion/demotion strategy so that this capability is implemented with clear verification evidence.
+- **US-01-0425**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vM Subsystem (Machine Independent): so that this capability is implemented with clear verification evidence.
+- **US-01-0426**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vM Map (vm_map): so that this capability is implemented with clear verification evidence.
+- **US-01-0427**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_map structure representing a process's virtual address space so that this capability is implemented with clear verification evidence.
+- **US-01-0428**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to red-black tree of vm_map_entry for O(log N) lookup by VA so that this capability is implemented with clear verification evidence.
+- **US-01-0429**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to linked list of entries for sequential traversal so that this capability is implemented with clear verification evidence.
+- **US-01-0430**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_map_create(pmap, min, max): create new map so that this capability is implemented with clear verification evidence.
+- **US-01-0431**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_map_destroy(map): tear down entire map so that this capability is implemented with clear verification evidence.
+- **US-01-0432**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_map_lock / vm_map_unlock: reader/writer locking so that this capability is implemented with clear verification evidence.
+- **US-01-0433**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vM Map Entries (vm_map_entry): so that this capability is implemented with clear verification evidence.
+- **US-01-0434**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to represent contiguous virtual regions (text, data, stack, mmap) so that this capability is implemented with clear verification evidence.
+- **US-01-0435**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fields: start, end, offset, protection, max_protection so that this capability is implemented with clear verification evidence.
+- **US-01-0436**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to object: backing vm_object (anonymous or vnode-backed) so that this capability is implemented with clear verification evidence.
+- **US-01-0437**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to inheritance: share, copy, none (for fork behavior) so that this capability is implemented with clear verification evidence.
+- **US-01-0438**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wired_count: prevent pageout for this region so that this capability is implemented with clear verification evidence.
+- **US-01-0439**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_map_insert(map, object, offset, start, end, prot) so that this capability is implemented with clear verification evidence.
+- **US-01-0440**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_map_remove(map, start, end): remove entries in range so that this capability is implemented with clear verification evidence.
+- **US-01-0441**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_map_lookup(map, va, &entry): find entry containing VA so that this capability is implemented with clear verification evidence.
+- **US-01-0442**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_map_protect(map, start, end, new_prot) so that this capability is implemented with clear verification evidence.
+- **US-01-0443**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_map_inherit(map, start, end, inheritance) so that this capability is implemented with clear verification evidence.
+- **US-01-0444**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to entry merging: coalesce adjacent entries with same attributes so that this capability is implemented with clear verification evidence.
+- **US-01-0445**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vM Objects (vm_object): so that this capability is implemented with clear verification evidence.
+- **US-01-0446**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to abstract backing store (anonymous memory, vnode/file, device) so that this capability is implemented with clear verification evidence.
+- **US-01-0447**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to resident_pages: radix tree or hash of vm_page_t by page index so that this capability is implemented with clear verification evidence.
+- **US-01-0448**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ref_count: number of map entries referencing this object so that this capability is implemented with clear verification evidence.
+- **US-01-0449**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to shadow: pointer to shadow object (for COW chains) so that this capability is implemented with clear verification evidence.
+- **US-01-0450**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pager: associated pager (swap, vnode, device, default) so that this capability is implemented with clear verification evidence.
+- **US-01-0451**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_object_allocate(size): create anonymous object so that this capability is implemented with clear verification evidence.
+- **US-01-0452**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_object_reference(obj) / vm_object_deallocate(obj) so that this capability is implemented with clear verification evidence.
+- **US-01-0453**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_object_page_lookup(obj, pindex): find resident page so that this capability is implemented with clear verification evidence.
+- **US-01-0454**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_object_page_insert(obj, page, pindex) so that this capability is implemented with clear verification evidence.
+- **US-01-0455**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_object_shadow(obj, offset, size): create shadow for COW so that this capability is implemented with clear verification evidence.
+- **US-01-0456**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_object_collapse(obj): collapse shadow chain when possible so that this capability is implemented with clear verification evidence.
+- **US-01-0457**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fault Handler (vm_fault): so that this capability is implemented with clear verification evidence.
+- **US-01-0458**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to high-level page fault resolution so that this capability is implemented with clear verification evidence.
+- **US-01-0459**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_fault(map, va, fault_type): main entry point so that this capability is implemented with clear verification evidence.
+- **US-01-0460**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to look up vm_map_entry for faulting VA so that this capability is implemented with clear verification evidence.
+- **US-01-0461**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to check protection against fault type so that this capability is implemented with clear verification evidence.
+- **US-01-0462**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to walk shadow object chain to find page or pager so that this capability is implemented with clear verification evidence.
+- **US-01-0463**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if page found in object: map it via pmap_enter so that this capability is implemented with clear verification evidence.
+- **US-01-0464**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if page not found: call pager to fetch from backing store so that this capability is implemented with clear verification evidence.
+- **US-01-0465**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to zero-fill on demand: anonymous pages filled with zeros on first access so that this capability is implemented with clear verification evidence.
+- **US-01-0466**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to prefaulting: heuristic to load surrounding pages during I/O so that this capability is implemented with clear verification evidence.
+- **US-01-0467**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copy-on-Write (COW): so that this capability is implemented with clear verification evidence.
+- **US-01-0468**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_fault logic for write to read-only shared page so that this capability is implemented with clear verification evidence.
+- **US-01-0469**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to create shadow object on fork so that this capability is implemented with clear verification evidence.
+- **US-01-0470**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mark parent entries as copy-on-write so that this capability is implemented with clear verification evidence.
+- **US-01-0471**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to on write fault: allocate new page, copy contents, update PTE so that this capability is implemented with clear verification evidence.
+- **US-01-0472**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to decrement original page refcount so that this capability is implemented with clear verification evidence.
+- **US-01-0473**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to shadow chain collapse: when shadow has all pages, absorb parent so that this capability is implemented with clear verification evidence.
+- **US-01-0474**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swap Subsystem: so that this capability is implemented with clear verification evidence.
+- **US-01-0475**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swap Pager (vm_pager): so that this capability is implemented with clear verification evidence.
+- **US-01-0476**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to generic pager interface: pager_get(obj, pindex), pager_put(obj, pindex) so that this capability is implemented with clear verification evidence.
+- **US-01-0477**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swap pager: move pages to/from swap device so that this capability is implemented with clear verification evidence.
+- **US-01-0478**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vnode pager: read/write file-backed pages via VFS so that this capability is implemented with clear verification evidence.
+- **US-01-0479**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to device pager: direct mapping of device memory (framebuffer, MMIO) so that this capability is implemented with clear verification evidence.
+- **US-01-0480**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to default pager: zero-fill for anonymous memory so that this capability is implemented with clear verification evidence.
+- **US-01-0481**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to backing Store (vm_swap): so that this capability is implemented with clear verification evidence.
+- **US-01-0482**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to support swap partitions and swap files so that this capability is implemented with clear verification evidence.
+- **US-01-0483**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swap space allocation bitmap so that this capability is implemented with clear verification evidence.
+- **US-01-0484**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swapon(path) / swapoff(path) syscalls so that this capability is implemented with clear verification evidence.
+- **US-01-0485**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-page swap block tracking so that this capability is implemented with clear verification evidence.
+- **US-01-0486**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to page Replacement Policy: so that this capability is implemented with clear verification evidence.
+- **US-01-0487**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to clock/LRU algorithm using A/D bits so that this capability is implemented with clear verification evidence.
+- **US-01-0488**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration with page daemon and page queues so that this capability is implemented with clear verification evidence.
+- **US-01-0489**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to advanced Features: so that this capability is implemented with clear verification evidence.
+- **US-01-0490**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to file-backed mmap (MAP_FILE): so that this capability is implemented with clear verification evidence.
+- **US-01-0491**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vnode pager triggers VFS read on page fault so that this capability is implemented with clear verification evidence.
+- **US-01-0492**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to dirty page tracking and msync writeback so that this capability is implemented with clear verification evidence.
+- **US-01-0493**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mAP_PRIVATE: COW on write (shadow object) so that this capability is implemented with clear verification evidence.
+- **US-01-0494**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mAP_SHARED: write-through to file so that this capability is implemented with clear verification evidence.
+- **US-01-0495**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reference Counting & Shared Memory: so that this capability is implemented with clear verification evidence.
+- **US-01-0496**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_page_t refcounts: track mappings to each physical frame so that this capability is implemented with clear verification evidence.
+- **US-01-0497**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_object refcounts: track regions sharing backing store so that this capability is implemented with clear verification evidence.
+- **US-01-0498**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mAP_SHARED write-through for multi-process shared memory so that this capability is implemented with clear verification evidence.
+- **US-01-0499**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to lazy Faulting: so that this capability is implemented with clear verification evidence.
+- **US-01-0500**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to demand paging: allocate frames only on access (zero-fill on demand) so that this capability is implemented with clear verification evidence.
+- **US-01-0501**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to prefaulting: heuristic to load surrounding pages during I/O so that this capability is implemented with clear verification evidence.
+- **US-01-0502**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to read-ahead for sequential file access patterns so that this capability is implemented with clear verification evidence.
+- **US-01-0503**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0504**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: vm_map insert/remove/lookup/protect so that this capability is implemented with clear verification evidence.
+- **US-01-0505**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: vm_object create/reference/deallocate/shadow/collapse so that this capability is implemented with clear verification evidence.
+- **US-01-0506**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: vm_fault resolution for anonymous, file-backed, and COW pages so that this capability is implemented with clear verification evidence.
+- **US-01-0507**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: swap pager round-trip (page out → page in) so that this capability is implemented with clear verification evidence.
+- **US-01-0508**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: vm_map entries are non-overlapping and sorted so that this capability is implemented with clear verification evidence.
+- **US-01-0509**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: vm_object refcount reaches 0 only when no entries reference it so that this capability is implemented with clear verification evidence.
+- **US-01-0510**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: mmap anonymous memory, write, fork, verify COW isolation so that this capability is implemented with clear verification evidence.
+- **US-01-0511**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: mmap file, read, modify, msync, verify on-disk so that this capability is implemented with clear verification evidence.
+- **US-01-0512**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0513**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: VM hierarchy (map → entry → object → page) so that this capability is implemented with clear verification evidence.
+- **US-01-0514**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: COW shadow chain and collapse algorithm so that this capability is implemented with clear verification evidence.
+- **US-01-0515**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: pager interface contract so that this capability is implemented with clear verification evidence.
+- **US-01-0516**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Allocator (UMA/Slab): so that this capability is implemented with clear verification evidence.
+- **US-01-0517**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to uMA Core (uma_core.c): so that this capability is implemented with clear verification evidence.
+- **US-01-0518**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to zone creation: uma_zcreate(name, size, ctor, dtor, init, fini, align, flags) so that this capability is implemented with clear verification evidence.
+- **US-01-0519**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to zone destruction: uma_zdestroy(zone) so that this capability is implemented with clear verification evidence.
+- **US-01-0520**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to uma_zalloc(zone, flags): allocate object from zone so that this capability is implemented with clear verification evidence.
+- **US-01-0521**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to uma_zfree(zone, item): free object to zone so that this capability is implemented with clear verification evidence.
+- **US-01-0522**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU Caches (Magazines): so that this capability is implemented with clear verification evidence.
+- **US-01-0523**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to lockless fast-path allocations via per-CPU magazine layer so that this capability is implemented with clear verification evidence.
+- **US-01-0524**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to magazine swap on empty/full (loaded ↔ previous) so that this capability is implemented with clear verification evidence.
+- **US-01-0525**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to depot layer: global pool of full/empty magazines so that this capability is implemented with clear verification evidence.
+- **US-01-0526**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to slab Management: so that this capability is implemented with clear verification evidence.
+- **US-01-0527**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to slab allocation from VM (page-sized) so that this capability is implemented with clear verification evidence.
+- **US-01-0528**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free list within slab for object tracking so that this capability is implemented with clear verification evidence.
+- **US-01-0529**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to partial/full/empty slab lists per zone so that this capability is implemented with clear verification evidence.
+- **US-01-0530**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to alignment/Coloring: so that this capability is implemented with clear verification evidence.
+- **US-01-0531**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cPU cache line alignment for objects so that this capability is implemented with clear verification evidence.
+- **US-01-0532**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to slab coloring to reduce cache set conflicts so that this capability is implemented with clear verification evidence.
+- **US-01-0533**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to constructors/Destructors: so that this capability is implemented with clear verification evidence.
+- **US-01-0534**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ctor callback on allocation (after init) so that this capability is implemented with clear verification evidence.
+- **US-01-0535**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to dtor callback on free (before fini) so that this capability is implemented with clear verification evidence.
+- **US-01-0536**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to init once per slab object lifetime so that this capability is implemented with clear verification evidence.
+- **US-01-0537**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fini once when slab freed so that this capability is implemented with clear verification evidence.
+- **US-01-0538**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reclamation: so that this capability is implemented with clear verification evidence.
+- **US-01-0539**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to shrinker callbacks to free unused slabs under memory pressure so that this capability is implemented with clear verification evidence.
+- **US-01-0540**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to bucket draining back to slabs so that this capability is implemented with clear verification evidence.
+- **US-01-0541**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to memory pressure feedback integration with page daemon so that this capability is implemented with clear verification evidence.
+- **US-01-0542**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to debugging & Safety: so that this capability is implemented with clear verification evidence.
+- **US-01-0543**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to redzones: guard bytes before/after objects with canary values so that this capability is implemented with clear verification evidence.
+- **US-01-0544**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to poisoning: fill freed memory with 0xDEADBEEF to catch use-after-free so that this capability is implemented with clear verification evidence.
+- **US-01-0545**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to leak Detection: track active allocations per zone so that this capability is implemented with clear verification evidence.
+- **US-01-0546**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to foreign Pointer Protection: validate pointer belongs to zone on free so that this capability is implemented with clear verification evidence.
+- **US-01-0547**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to uma_find_slab() Optimization: replace O(N) linear search with hash table so that this capability is implemented with clear verification evidence.
+- **US-01-0548**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to general Allocator (kmalloc/kfree): so that this capability is implemented with clear verification evidence.
+- **US-01-0549**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to power-of-two zones: back kmalloc with UMA zones for sizes 16, 32, 64, ..., 4096 so that this capability is implemented with clear verification evidence.
+- **US-01-0550**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to large allocations: bypass UMA for >4 KB (direct vm_map allocation) so that this capability is implemented with clear verification evidence.
+- **US-01-0551**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to krealloc(ptr, size): resize allocation so that this capability is implemented with clear verification evidence.
+- **US-01-0552**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to statistics: track memory usage by malloc_type (subsystem) so that this capability is implemented with clear verification evidence.
+- **US-01-0553**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0554**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: zone create/alloc/free/destroy lifecycle so that this capability is implemented with clear verification evidence.
+- **US-01-0555**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: per-CPU cache hit/miss paths so that this capability is implemented with clear verification evidence.
+- **US-01-0556**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: slab allocation and free list integrity so that this capability is implemented with clear verification evidence.
+- **US-01-0557**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: ctor/dtor/init/fini callback ordering so that this capability is implemented with clear verification evidence.
+- **US-01-0558**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: redzone corruption detection so that this capability is implemented with clear verification evidence.
+- **US-01-0559**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: poison detection on use-after-free so that this capability is implemented with clear verification evidence.
+- **US-01-0560**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: total allocated + free = zone capacity so that this capability is implemented with clear verification evidence.
+- **US-01-0561**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to stress: 10000 alloc/free cycles across multiple zones so that this capability is implemented with clear verification evidence.
+- **US-01-0562**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0563**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: UMA architecture (zone → slab → magazine → per-CPU cache) so that this capability is implemented with clear verification evidence.
+- **US-01-0564**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: kmalloc power-of-two zone selection so that this capability is implemented with clear verification evidence.
+- **US-01-0565**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to user Memory Syscalls: so that this capability is implemented with clear verification evidence.
+- **US-01-0566**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_mmap(addr, len, prot, flags, fd, offset): map memory so that this capability is implemented with clear verification evidence.
+- **US-01-0567**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mAP_ANONYMOUS: zero-fill anonymous mapping so that this capability is implemented with clear verification evidence.
+- **US-01-0568**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mAP_PRIVATE: file-backed COW mapping so that this capability is implemented with clear verification evidence.
+- **US-01-0569**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mAP_SHARED: file-backed write-through mapping so that this capability is implemented with clear verification evidence.
+- **US-01-0570**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mAP_FIXED: map at exact address (unmap existing) so that this capability is implemented with clear verification evidence.
+- **US-01-0571**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to alignment to page boundary so that this capability is implemented with clear verification evidence.
+- **US-01-0572**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_munmap(addr, len): unmap region so that this capability is implemented with clear verification evidence.
+- **US-01-0573**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_mprotect(addr, len, prot): change protection so that this capability is implemented with clear verification evidence.
+- **US-01-0574**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_brk(addr) / sys_sbrk(incr): adjust data segment so that this capability is implemented with clear verification evidence.
+- **US-01-0575**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_msync(addr, len, flags): sync dirty pages to backing store so that this capability is implemented with clear verification evidence.
+- **US-01-0576**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sMP & Interrupts: so that this capability is implemented with clear verification evidence.
+- **US-01-0577**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to discovery: so that this capability is implemented with clear verification evidence.
+- **US-01-0578**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to parse ACPI MADT (APIC) to find processor entries so that this capability is implemented with clear verification evidence.
+- **US-01-0579**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fallback: parse MP Tables (Intel MultiProcessor Spec) so that this capability is implemented with clear verification evidence.
+- **US-01-0580**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to record BSP and AP LAPIC IDs so that this capability is implemented with clear verification evidence.
+- **US-01-0581**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to local APIC (LAPIC): so that this capability is implemented with clear verification evidence.
+- **US-01-0582**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to map LAPIC MMIO base (default 0xFEE00000) so that this capability is implemented with clear verification evidence.
+- **US-01-0583**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set Spurious Interrupt Vector Register (SVR): enable APIC, set vector so that this capability is implemented with clear verification evidence.
+- **US-01-0584**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to timer: so that this capability is implemented with clear verification evidence.
+- **US-01-0585**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to calibrate against PIT or ACPI PM Timer so that this capability is implemented with clear verification evidence.
+- **US-01-0586**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set Divider Configuration Register (DCR) so that this capability is implemented with clear verification evidence.
+- **US-01-0587**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to periodic mode for scheduler tick so that this capability is implemented with clear verification evidence.
+- **US-01-0588**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to one-shot mode for high-resolution sleeps so that this capability is implemented with clear verification evidence.
+- **US-01-0589**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to error Status Register (ESR) and LVT Error vector so that this capability is implemented with clear verification evidence.
+- **US-01-0590**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iPI (Inter-Processor Interrupt): so that this capability is implemented with clear verification evidence.
+- **US-01-0591**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iCR (Interrupt Command Register) writing logic so that this capability is implemented with clear verification evidence.
+- **US-01-0592**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to send fixed, lowest priority, NMI, INIT, SIPI IPIs so that this capability is implemented with clear verification evidence.
+- **US-01-0593**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wait for delivery status (busy bit clear) so that this capability is implemented with clear verification evidence.
+- **US-01-0594**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to i/O APIC: so that this capability is implemented with clear verification evidence.
+- **US-01-0595**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to enumerate I/O APICs from MADT so that this capability is implemented with clear verification evidence.
+- **US-01-0596**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ioapic_read / ioapic_write via index/window registers so that this capability is implemented with clear verification evidence.
+- **US-01-0597**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to redirection Table: so that this capability is implemented with clear verification evidence.
+- **US-01-0598**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mask/unmask IRQs so that this capability is implemented with clear verification evidence.
+- **US-01-0599**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set delivery mode (fixed, lowest priority) so that this capability is implemented with clear verification evidence.
+- **US-01-0600**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set destination (physical/logical) so that this capability is implemented with clear verification evidence.
+- **US-01-0601**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set polarity and trigger mode (active high/low, edge/level) so that this capability is implemented with clear verification evidence.
+- **US-01-0602**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to legacy ISA IRQ (0-15) → Global System Interrupt (GSI) mapping so that this capability is implemented with clear verification evidence.
+- **US-01-0603**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to aP Bootstrap: so that this capability is implemented with clear verification evidence.
+- **US-01-0604**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to allocate low-memory trampoline page (under 1 MB) so that this capability is implemented with clear verification evidence.
+- **US-01-0605**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copy 16-bit real mode entry code to trampoline so that this capability is implemented with clear verification evidence.
+- **US-01-0606**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence so that this capability is implemented with clear verification evidence.
+- **US-01-0607**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to aP enters protected mode, enables paging, jumps to C entry so that this capability is implemented with clear verification evidence.
+- **US-01-0608**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU Data: so that this capability is implemented with clear verification evidence.
+- **US-01-0609**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to gS-base (or FS-base) for CPU-local variable access so that this capability is implemented with clear verification evidence.
+- **US-01-0610**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU GDTs and TSSs so that this capability is implemented with clear verification evidence.
+- **US-01-0611**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU scheduler runqueues so that this capability is implemented with clear verification evidence.
+- **US-01-0612**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU interrupt stacks so that this capability is implemented with clear verification evidence.
+- **US-01-0613**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to synchronization: so that this capability is implemented with clear verification evidence.
+- **US-01-0614**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to spinlock implementation (ticket locks or MCS locks) so that this capability is implemented with clear verification evidence.
+- **US-01-0615**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to lock prefix for atomic operations so that this capability is implemented with clear verification evidence.
+- **US-01-0616**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to deadlock detection (lock ordering validation) so that this capability is implemented with clear verification evidence.
+- **US-01-0617**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to audit all global data structures for race conditions so that this capability is implemented with clear verification evidence.
+- **US-01-0618**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0619**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: boot SMP with 2, 4, 8 CPUs in QEMU -smp N so that this capability is implemented with clear verification evidence.
+- **US-01-0620**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: LAPIC timer calibration accuracy so that this capability is implemented with clear verification evidence.
+- **US-01-0621**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: IPI send/receive between CPUs so that this capability is implemented with clear verification evidence.
+- **US-01-0622**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: per-CPU data isolation so that this capability is implemented with clear verification evidence.
+- **US-01-0623**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to scheduling (MLFQ Scheduler): so that this capability is implemented with clear verification evidence.
+- **US-01-0624**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to algorithm (ULE/MLFQ): so that this capability is implemented with clear verification evidence.
+- **US-01-0625**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to multilevel queues: Realtime, Timeshare, Idle priority classes so that this capability is implemented with clear verification evidence.
+- **US-01-0626**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to interactiveness heuristics: boost I/O-bound threads so that this capability is implemented with clear verification evidence.
+- **US-01-0627**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to priority decay for CPU-bound threads so that this capability is implemented with clear verification evidence.
+- **US-01-0628**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to time slice assignment based on priority class so that this capability is implemented with clear verification evidence.
+- **US-01-0629**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sMP Scalability: so that this capability is implemented with clear verification evidence.
+- **US-01-0630**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-CPU runqueues (eliminate global scheduler lock) so that this capability is implemented with clear verification evidence.
+- **US-01-0631**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to work-stealing load balancing when a CPU goes idle so that this capability is implemented with clear verification evidence.
+- **US-01-0632**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cPU affinity (sched_setaffinity masks) so that this capability is implemented with clear verification evidence.
+- **US-01-0633**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iPI-based preemption of remote CPUs so that this capability is implemented with clear verification evidence.
+- **US-01-0634**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to synchronization Primitives: so that this capability is implemented with clear verification evidence.
+- **US-01-0635**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to turnstiles: priority inheritance for mutexes (prevent priority inversion) so that this capability is implemented with clear verification evidence.
+- **US-01-0636**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sleep Queues: hashed wait queues for sleep/wakeup (O(1) lookup) so that this capability is implemented with clear verification evidence.
+- **US-01-0637**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to context Switching: so that this capability is implemented with clear verification evidence.
+- **US-01-0638**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fPU lazy save: CR0.TS exception for deferred FPU context so that this capability is implemented with clear verification evidence.
+- **US-01-0639**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pCB: refined for thread/process separation so that this capability is implemented with clear verification evidence.
+- **US-01-0640**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to switch_to(old, new): save/restore callee-saved registers, swap stacks so that this capability is implemented with clear verification evidence.
+- **US-01-0641**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Process (PID 0 - Swapper/Idle): so that this capability is implemented with clear verification evidence.
+- **US-01-0642**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pageout daemon work in idle loop so that this capability is implemented with clear verification evidence.
+- **US-01-0643**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ensures valid process context always exists so that this capability is implemented with clear verification evidence.
+- **US-01-0644**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to process Bitness Tracking: so that this capability is implemented with clear verification evidence.
+- **US-01-0645**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to enum proc_bitness (16/32/64) field in process struct so that this capability is implemented with clear verification evidence.
+- **US-01-0646**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to proc_set_bitness() / proc_get_bitness() with permission checks so that this capability is implemented with clear verification evidence.
+- **US-01-0647**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to bitness inheritance on fork, transition on exec so that this capability is implemented with clear verification evidence.
+- **US-01-0648**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0649**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: priority queue insertion/removal ordering so that this capability is implemented with clear verification evidence.
+- **US-01-0650**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: turnstile priority inheritance chain so that this capability is implemented with clear verification evidence.
+- **US-01-0651**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: sleep queue hash distribution so that this capability is implemented with clear verification evidence.
+- **US-01-0652**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: verify load balancing with CPU-intensive workload so that this capability is implemented with clear verification evidence.
+- **US-01-0653**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: verify interactiveness boost for I/O workload so that this capability is implemented with clear verification evidence.
+- **US-01-0654**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0655**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: MLFQ algorithm and priority classes so that this capability is implemented with clear verification evidence.
+- **US-01-0656**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: SMP load balancing and work stealing so that this capability is implemented with clear verification evidence.
+- **US-01-0657**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to synchronization: so that this capability is implemented with clear verification evidence.
+- **US-01-0658**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Primitives: so that this capability is implemented with clear verification evidence.
+- **US-01-0659**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to spinlocks (with GCC C11 atomic builtins) so that this capability is implemented with clear verification evidence.
+- **US-01-0660**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mutexes (backed by sleep queues) so that this capability is implemented with clear verification evidence.
+- **US-01-0661**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to semaphores (counting, backed by sleep queues) so that this capability is implemented with clear verification evidence.
+- **US-01-0662**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reader/writer locks so that this capability is implemented with clear verification evidence.
+- **US-01-0663**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to userspace Synchronization (Futex): so that this capability is implemented with clear verification evidence.
+- **US-01-0664**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core Operations: so that this capability is implemented with clear verification evidence.
+- **US-01-0665**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fUTEX_WAIT: atomic compare-and-sleep on user-space word so that this capability is implemented with clear verification evidence.
+- **US-01-0666**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to futex_cmpxchg_user(): validated userspace CMPXCHG so that this capability is implemented with clear verification evidence.
+- **US-01-0667**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to validate_uaddr(): ensure address is in user space so that this capability is implemented with clear verification evidence.
+- **US-01-0668**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fUTEX_WAKE: wake up N waiters on a futex word so that this capability is implemented with clear verification evidence.
+- **US-01-0669**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fUTEX_REQUEUE: move waiters from one futex to another so that this capability is implemented with clear verification evidence.
+- **US-01-0670**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to atomic compare before requeue (FUTEX_CMP_REQUEUE) so that this capability is implemented with clear verification evidence.
+- **US-01-0671**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to advanced Features: so that this capability is implemented with clear verification evidence.
+- **US-01-0672**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fUTEX_ROBUST_LIST: handle owner death so that this capability is implemented with clear verification evidence.
+- **US-01-0673**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_set_robust_list() / sys_get_robust_list() so that this capability is implemented with clear verification evidence.
+- **US-01-0674**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to futex_exit_cleanup(): walk robust list on process exit so that this capability is implemented with clear verification evidence.
+- **US-01-0675**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mark owned futexes as FUTEX_OWNER_DIED so that this capability is implemented with clear verification evidence.
+- **US-01-0676**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fUTEX_PI: priority inheritance support so that this capability is implemented with clear verification evidence.
+- **US-01-0677**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to futex_lock_pi() / futex_unlock_pi() so that this capability is implemented with clear verification evidence.
+- **US-01-0678**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pi_boost_owner() / pi_deboost_owner() so that this capability is implemented with clear verification evidence.
+- **US-01-0679**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to lock holder inherits waiter's priority so that this capability is implemented with clear verification evidence.
+- **US-01-0680**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to performance: so that this capability is implemented with clear verification evidence.
+- **US-01-0681**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to hash table bucketing for wait queues (O(1) lookup by address) so that this capability is implemented with clear verification evidence.
+- **US-01-0682**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-bucket spinlocks so that this capability is implemented with clear verification evidence.
+- **US-01-0683**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0684**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: FUTEX_WAIT/WAKE basic handshake so that this capability is implemented with clear verification evidence.
+- **US-01-0685**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: FUTEX_REQUEUE moves waiters correctly so that this capability is implemented with clear verification evidence.
+- **US-01-0686**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: robust list cleanup on exit so that this capability is implemented with clear verification evidence.
+- **US-01-0687**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: PI inheritance - low priority holder boosted so that this capability is implemented with clear verification evidence.
+- **US-01-0688**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: no orphaned waiters after process exit so that this capability is implemented with clear verification evidence.
+- **US-01-0689**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC Driver (Windows NT Sync Primitives): so that this capability is implemented with clear verification evidence.
+- **US-01-0690**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core Infrastructure: so that this capability is implemented with clear verification evidence.
+- **US-01-0691**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to /dev/ntsync char device with instance-based isolation so that this capability is implemented with clear verification evidence.
+- **US-01-0692**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ntsync_instance structure per open file description so that this capability is implemented with clear verification evidence.
+- **US-01-0693**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to object handle management (object FDs returned from ioctls) so that this capability is implemented with clear verification evidence.
+- **US-01-0694**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to semaphore Object: so that this capability is implemented with clear verification evidence.
+- **US-01-0695**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_CREATE_SEM: create semaphore (count, max) so that this capability is implemented with clear verification evidence.
+- **US-01-0696**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_SEM_POST: increment semaphore count so that this capability is implemented with clear verification evidence.
+- **US-01-0697**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_READ_SEM: query semaphore state so that this capability is implemented with clear verification evidence.
+- **US-01-0698**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mutex Object: so that this capability is implemented with clear verification evidence.
+- **US-01-0699**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_CREATE_MUTEX: create mutex (owner, count) so that this capability is implemented with clear verification evidence.
+- **US-01-0700**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_MUTEX_UNLOCK: release mutex ownership so that this capability is implemented with clear verification evidence.
+- **US-01-0701**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_READ_MUTEX: query mutex state so that this capability is implemented with clear verification evidence.
+- **US-01-0702**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_KILL_OWNER: mark mutex as abandoned so that this capability is implemented with clear verification evidence.
+- **US-01-0703**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to event Object: so that this capability is implemented with clear verification evidence.
+- **US-01-0704**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_CREATE_EVENT: create event (signaled, manual/auto-reset) so that this capability is implemented with clear verification evidence.
+- **US-01-0705**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_SET_EVENT / NTSYNC_IOC_RESET_EVENT / NTSYNC_IOC_PULSE_EVENT so that this capability is implemented with clear verification evidence.
+- **US-01-0706**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_READ_EVENT: query event state so that this capability is implemented with clear verification evidence.
+- **US-01-0707**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wait Operations: so that this capability is implemented with clear verification evidence.
+- **US-01-0708**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_WAIT_ANY: wait for any of N objects so that this capability is implemented with clear verification evidence.
+- **US-01-0709**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC_IOC_WAIT_ALL: wait for all N objects simultaneously so that this capability is implemented with clear verification evidence.
+- **US-01-0710**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to alert event support (optional extra wakeup source) so that this capability is implemented with clear verification evidence.
+- **US-01-0711**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to timeout handling (MONOTONIC/REALTIME clocks) so that this capability is implemented with clear verification evidence.
+- **US-01-0712**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal Mechanics: so that this capability is implemented with clear verification evidence.
+- **US-01-0713**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wait queue per object with priority ordering so that this capability is implemented with clear verification evidence.
+- **US-01-0714**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to atomic acquisition semantics (spinlock-protected) so that this capability is implemented with clear verification evidence.
+- **US-01-0715**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cross-object atomicity for WAIT_ALL (multi-lock) so that this capability is implemented with clear verification evidence.
+- **US-01-0716**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0717**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: semaphore create/post/read lifecycle so that this capability is implemented with clear verification evidence.
+- **US-01-0718**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: mutex create/lock/unlock/abandon so that this capability is implemented with clear verification evidence.
+- **US-01-0719**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: event set/reset/pulse so that this capability is implemented with clear verification evidence.
+- **US-01-0720**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: WAIT_ANY with mixed object types so that this capability is implemented with clear verification evidence.
+- **US-01-0721**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: WAIT_ALL atomicity (all-or-nothing) so that this capability is implemented with clear verification evidence.
+- **US-01-0722**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: timeout expiry (WNOHANG equivalent) so that this capability is implemented with clear verification evidence.
+- **US-01-0723**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signals: so that this capability is implemented with clear verification evidence.
+- **US-01-0724**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Infrastructure: so that this capability is implemented with clear verification evidence.
+- **US-01-0725**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-Process State (process_t): so that this capability is implemented with clear verification evidence.
+- **US-01-0726**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sig_actions[NSIG]: array of struct sigaction per signal so that this capability is implemented with clear verification evidence.
+- **US-01-0727**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sig_catch: bitmask of signals with handlers so that this capability is implemented with clear verification evidence.
+- **US-01-0728**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sig_ignore: bitmask of signals set to SIG_IGN so that this capability is implemented with clear verification evidence.
+- **US-01-0729**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-Thread State (thread_t): so that this capability is implemented with clear verification evidence.
+- **US-01-0730**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sig_pending: bitmask of pending signals so that this capability is implemented with clear verification evidence.
+- **US-01-0731**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sig_mask: current signal mask (blocked signals) so that this capability is implemented with clear verification evidence.
+- **US-01-0732**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sig_alt_stack: alternative signal stack (stack_t) so that this capability is implemented with clear verification evidence.
+- **US-01-0733**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sig_on_stack: flag for currently executing on alt stack so that this capability is implemented with clear verification evidence.
+- **US-01-0734**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Properties Table (sigprop.c): so that this capability is implemented with clear verification evidence.
+- **US-01-0735**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to default actions: Terminate, Core, Stop, Ignore, Continue so that this capability is implemented with clear verification evidence.
+- **US-01-0736**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sigprop[NSIG]: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT so that this capability is implemented with clear verification evidence.
+- **US-01-0737**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unmaskable: SIGKILL, SIGSTOP (SA_CANTMASK) so that this capability is implemented with clear verification evidence.
+- **US-01-0738**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Syscalls: so that this capability is implemented with clear verification evidence.
+- **US-01-0739**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_sigaction(sig, act, oact): so that this capability is implemented with clear verification evidence.
+- **US-01-0740**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to validate signal number (1 ≤ sig ≤ NSIG, not SIGKILL/SIGSTOP) so that this capability is implemented with clear verification evidence.
+- **US-01-0741**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to return old action in oact, install new from act so that this capability is implemented with clear verification evidence.
+- **US-01-0742**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to update sig_catch/sig_ignore bitmasks so that this capability is implemented with clear verification evidence.
+- **US-01-0743**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to handle flags: SA_RESETHAND, SA_NODEFER, SA_RESTART, SA_NOCLDSTOP, SA_NOCLDWAIT, SA_SIGINFO, SA_ONSTACK so that this capability is implemented with clear verification evidence.
+- **US-01-0744**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_sigprocmask(how, set, oset): so that this capability is implemented with clear verification evidence.
+- **US-01-0745**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to apply set based on how: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK so that this capability is implemented with clear verification evidence.
+- **US-01-0746**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to filter out SIGKILL/SIGSTOP from mask so that this capability is implemented with clear verification evidence.
+- **US-01-0747**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_sigpending(set): return pending & ~masked signals so that this capability is implemented with clear verification evidence.
+- **US-01-0748**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_sigsuspend(mask): atomically set mask and sleep; restore on return; always EINTR so that this capability is implemented with clear verification evidence.
+- **US-01-0749**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_sigaltstack(ss, oss): so that this capability is implemented with clear verification evidence.
+- **US-01-0750**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to install/query alternative signal stack so that this capability is implemented with clear verification evidence.
+- **US-01-0751**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to validate ss_size ≥ MINSIGSTKSZ so that this capability is implemented with clear verification evidence.
+- **US-01-0752**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to handle SS_DISABLE; error if on alt stack so that this capability is implemented with clear verification evidence.
+- **US-01-0753**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_kill(pid, sig): so that this capability is implemented with clear verification evidence.
+- **US-01-0754**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pid > 0: specific process so that this capability is implemented with clear verification evidence.
+- **US-01-0755**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pid == 0: current process group so that this capability is implemented with clear verification evidence.
+- **US-01-0756**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pid == -1: all processes (except init) so that this capability is implemented with clear verification evidence.
+- **US-01-0757**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pid < -1: process group |pid| so that this capability is implemented with clear verification evidence.
+- **US-01-0758**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sig == 0: permission check only so that this capability is implemented with clear verification evidence.
+- **US-01-0759**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to permission: same UID or CAP_KILL so that this capability is implemented with clear verification evidence.
+- **US-01-0760**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_sigreturn(scp): so that this capability is implemented with clear verification evidence.
+- **US-01-0761**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to validate sigcontext pointer so that this capability is implemented with clear verification evidence.
+- **US-01-0762**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to verify CS/SS have RPL=3 (user mode) so that this capability is implemented with clear verification evidence.
+- **US-01-0763**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to restore GPRs, eflags (mask IOPL/VM/RF), eip so that this capability is implemented with clear verification evidence.
+- **US-01-0764**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to restore signal mask from context so that this capability is implemented with clear verification evidence.
+- **US-01-0765**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_sigwait(set, sig): synchronous signal consumption (no handler) so that this capability is implemented with clear verification evidence.
+- **US-01-0766**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_sigtimedwait(set, info, timeout): like sigwait with timeout + siginfo so that this capability is implemented with clear verification evidence.
+- **US-01-0767**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Generation: so that this capability is implemented with clear verification evidence.
+- **US-01-0768**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to psignal(p, sig): send to process so that this capability is implemented with clear verification evidence.
+- **US-01-0769**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1 so that this capability is implemented with clear verification evidence.
+- **US-01-0770**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to select best thread for delivery (not masked) so that this capability is implemented with clear verification evidence.
+- **US-01-0771**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if SIGCONT, wake stopped threads; clear pending stops so that this capability is implemented with clear verification evidence.
+- **US-01-0772**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if sleeping interruptibly, wake thread so that this capability is implemented with clear verification evidence.
+- **US-01-0773**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pgsignal(pgrp, sig): send to process group so that this capability is implemented with clear verification evidence.
+- **US-01-0774**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to trapsignal(p, sig, code): synchronous trap signal (from exception handler) so that this capability is implemented with clear verification evidence.
+- **US-01-0775**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pass code via siginfo_t (si_code) so that this capability is implemented with clear verification evidence.
+- **US-01-0776**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL so that this capability is implemented with clear verification evidence.
+- **US-01-0777**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sigexit(p, sig): terminate with signal so that this capability is implemented with clear verification evidence.
+- **US-01-0778**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core dump if SA_CORE: call coredump() so that this capability is implemented with clear verification evidence.
+- **US-01-0779**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set exit status to indicate signal termination so that this capability is implemented with clear verification evidence.
+- **US-01-0780**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to terminal Signals (TTY): so that this capability is implemented with clear verification evidence.
+- **US-01-0781**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp so that this capability is implemented with clear verification evidence.
+- **US-01-0782**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sIGTSTP (Ctrl+Z) to foreground pgrp so that this capability is implemented with clear verification evidence.
+- **US-01-0783**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sIGTTIN: background process reads from TTY so that this capability is implemented with clear verification evidence.
+- **US-01-0784**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sIGTTOU: background process writes to TTY (if TOSTOP) so that this capability is implemented with clear verification evidence.
+- **US-01-0785**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sIGHUP: controlling terminal hangup so that this capability is implemented with clear verification evidence.
+- **US-01-0786**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Delivery (Architecture-Specific - i386): so that this capability is implemented with clear verification evidence.
+- **US-01-0787**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sendsig() - Frame Construction: so that this capability is implemented with clear verification evidence.
+- **US-01-0788**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to calculate user stack pointer from regs->useresp so that this capability is implemented with clear verification evidence.
+- **US-01-0789**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to subtract sizeof(struct sigframe) so that this capability is implemented with clear verification evidence.
+- **US-01-0790**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to align stack to 16-byte boundary (System V ABI) so that this capability is implemented with clear verification evidence.
+- **US-01-0791**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to struct sigframe Layout: so that this capability is implemented with clear verification evidence.
+- **US-01-0792**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to retaddr: return address pointing to trampoline so that this capability is implemented with clear verification evidence.
+- **US-01-0793**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sig: signal number (first handler argument) so that this capability is implemented with clear verification evidence.
+- **US-01-0794**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sc: struct sigcontext with saved registers so that this capability is implemented with clear verification evidence.
+- **US-01-0795**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to struct sigcontext Population: so that this capability is implemented with clear verification evidence.
+- **US-01-0796**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to save segment registers (gs, fs, es, ds) so that this capability is implemented with clear verification evidence.
+- **US-01-0797**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to save GPRs (edi, esi, ebp, esp, ebx, edx, ecx, eax) so that this capability is implemented with clear verification evidence.
+- **US-01-0798**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to save trap info (trapno, err) so that this capability is implemented with clear verification evidence.
+- **US-01-0799**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to save control (eip, cs, eflags, user_esp, user_ss) so that this capability is implemented with clear verification evidence.
+- **US-01-0800**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to handler Invocation: so that this capability is implemented with clear verification evidence.
+- **US-01-0801**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copyout() frame to user stack (with fault handling) so that this capability is implemented with clear verification evidence.
+- **US-01-0802**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set regs->useresp and regs->eip to frame/handler so that this capability is implemented with clear verification evidence.
+- **US-01-0803**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sA_SIGINFO Extended Frame: so that this capability is implemented with clear verification evidence.
+- **US-01-0804**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to construct siginfo_t (si_signo, si_code, si_addr, etc.) so that this capability is implemented with clear verification evidence.
+- **US-01-0805**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to construct ucontext_t with machine context so that this capability is implemented with clear verification evidence.
+- **US-01-0806**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to handler signature: void handler(int, siginfo_t *, void *) so that this capability is implemented with clear verification evidence.
+- **US-01-0807**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to alt Stack Handling: so that this capability is implemented with clear verification evidence.
+- **US-01-0808**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if SA_ONSTACK and alt stack configured: use alt stack SP so that this capability is implemented with clear verification evidence.
+- **US-01-0809**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set sig_on_stack flag so that this capability is implemented with clear verification evidence.
+- **US-01-0810**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Trampoline: so that this capability is implemented with clear verification evidence.
+- **US-01-0811**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to map trampoline page at fixed address (e.g., 0xFFFF1000) so that this capability is implemented with clear verification evidence.
+- **US-01-0812**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to page: user-readable, executable, not writable so that this capability is implemented with clear verification evidence.
+- **US-01-0813**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to code: mov $SYS_sigreturn, %eax; int $0x80 so that this capability is implemented with clear verification evidence.
+- **US-01-0814**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vDSO Integration (future): so that this capability is implemented with clear verification evidence.
+- **US-01-0815**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to embed trampoline in VDSO page so that this capability is implemented with clear verification evidence.
+- **US-01-0816**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to use AT_SYSINFO auxiliary vector entry so that this capability is implemented with clear verification evidence.
+- **US-01-0817**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Mask Management: so that this capability is implemented with clear verification evidence.
+- **US-01-0818**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to during handler: block current signal (unless SA_NODEFER) + sa_mask so that this capability is implemented with clear verification evidence.
+- **US-01-0819**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to restore original mask in sys_sigreturn so that this capability is implemented with clear verification evidence.
+- **US-01-0820**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to inheritance: so that this capability is implemented with clear verification evidence.
+- **US-01-0821**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fork(): child inherits pending signals and mask so that this capability is implemented with clear verification evidence.
+- **US-01-0822**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to exec(): reset all handlers to SIG_DFL (except SIG_IGN) so that this capability is implemented with clear verification evidence.
+- **US-01-0823**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Checking Points: so that this capability is implemented with clear verification evidence.
+- **US-01-0824**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to return from interrupt/exception: signal_handle_pending() if returning to user mode so that this capability is implemented with clear verification evidence.
+- **US-01-0825**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to return from syscall: check pending, return EINTR if interruptible so that this capability is implemented with clear verification evidence.
+- **US-01-0826**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sleep wakeup: sched_sleep() returns on signal (EINTR) so that this capability is implemented with clear verification evidence.
+- **US-01-0827**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to special Signal Handling: so that this capability is implemented with clear verification evidence.
+- **US-01-0828**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads so that this capability is implemented with clear verification evidence.
+- **US-01-0829**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sIGSTOP: cannot be caught/blocked/ignored; stops all threads so that this capability is implemented with clear verification evidence.
+- **US-01-0830**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED so that this capability is implemented with clear verification evidence.
+- **US-01-0831**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics so that this capability is implemented with clear verification evidence.
+- **US-01-0832**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore so that this capability is implemented with clear verification evidence.
+- **US-01-0833**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pID 1 (Init) Protection: so that this capability is implemented with clear verification evidence.
+- **US-01-0834**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler so that this capability is implemented with clear verification evidence.
+- **US-01-0835**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if init exits, system halts/panics so that this capability is implemented with clear verification evidence.
+- **US-01-0836**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to init adopts orphaned processes so that this capability is implemented with clear verification evidence.
+- **US-01-0837**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core Dump (future): so that this capability is implemented with clear verification evidence.
+- **US-01-0838**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS so that this capability is implemented with clear verification evidence.
+- **US-01-0839**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to coredump(): write ELF core format (/cores/core.PID) so that this capability is implemented with clear verification evidence.
+- **US-01-0840**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to respect RLIMIT_CORE so that this capability is implemented with clear verification evidence.
+- **US-01-0841**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0842**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: sys_sigaction install/replace/reset handler so that this capability is implemented with clear verification evidence.
+- **US-01-0843**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: sys_sigprocmask block/unblock/setmask so that this capability is implemented with clear verification evidence.
+- **US-01-0844**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: sys_kill to specific PID, pgrp, all so that this capability is implemented with clear verification evidence.
+- **US-01-0845**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: psignal thread selection (prefer unmasked) so that this capability is implemented with clear verification evidence.
+- **US-01-0846**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: sendsig frame construction and sigreturn restoration so that this capability is implemented with clear verification evidence.
+- **US-01-0847**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU so that this capability is implemented with clear verification evidence.
+- **US-01-0848**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: SA_RESTART - interrupted syscall restarted so that this capability is implemented with clear verification evidence.
+- **US-01-0849**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: SA_SIGINFO - extended frame with siginfo + ucontext so that this capability is implemented with clear verification evidence.
+- **US-01-0850**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant) so that this capability is implemented with clear verification evidence.
+- **US-01-0851**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: fork, send SIGINT to child, verify termination so that this capability is implemented with clear verification evidence.
+- **US-01-0852**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: job control stop/continue cycle so that this capability is implemented with clear verification evidence.
+- **US-01-0853**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0854**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: signal lifecycle (generation → delivery → handler → sigreturn) so that this capability is implemented with clear verification evidence.
+- **US-01-0855**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: i386 signal frame layout so that this capability is implemented with clear verification evidence.
+- **US-01-0856**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: signal checking points and SA_RESTART logic so that this capability is implemented with clear verification evidence.
+- **US-01-0857**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to refactor kmain: so that this capability is implemented with clear verification evidence.
+- **US-01-0858**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to move early i386 boot code to sys/arch/i386/early_boot.c so that this capability is implemented with clear verification evidence.
+- **US-01-0859**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to create init_memory helper so that this capability is implemented with clear verification evidence.
+- **US-01-0860**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to create init_root_fs helper so that this capability is implemented with clear verification evidence.
+- **US-01-0861**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to clean up kmain flow so that this capability is implemented with clear verification evidence.
+- **US-01-0862**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Core Maintenance: so that this capability is implemented with clear verification evidence.
+- **US-01-0863**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to refactor spinlock.c to use GCC C11 atomic builtins so that this capability is implemented with clear verification evidence.
+- **US-01-0864**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to rewrite swapper.c idle loop (race-free) so that this capability is implemented with clear verification evidence.
+- **US-01-0865**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cleanup sleepq.c formatting and style so that this capability is implemented with clear verification evidence.
+- **US-01-0866**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to remove obsolete sys/kern/stubs.c so that this capability is implemented with clear verification evidence.
+- **US-01-0867**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to modularize sys/kern/lib.c into sys/lib/ so that this capability is implemented with clear verification evidence.
+- **US-01-0868**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to audit mutex.c and semaphore.c for race conditions so that this capability is implemented with clear verification evidence.
+- **US-01-0869**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fix sched_smp.c CPU ID assumption so that this capability is implemented with clear verification evidence.
+- **US-01-0870**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to update Kernel Documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0871**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to document Console/UART subsystem changes so that this capability is implemented with clear verification evidence.
+- **US-01-0872**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to document kmain initialization flow so that this capability is implemented with clear verification evidence.
+- **US-01-0873**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to update ARCHITECTURE.md so that this capability is implemented with clear verification evidence.
+- **US-01-0874**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to process Lifecycle & Job Control: so that this capability is implemented with clear verification evidence.
+- **US-01-0875**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to process Termination (exit / _exit): so that this capability is implemented with clear verification evidence.
+- **US-01-0876**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 1 - State Transition (RUNNING → DYING): so that this capability is implemented with clear verification evidence.
+- **US-01-0877**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set p_state = SDYING so that this capability is implemented with clear verification evidence.
+- **US-01-0878**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to record exit status in p_xstat so that this capability is implemented with clear verification evidence.
+- **US-01-0879**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to prevent further scheduling so that this capability is implemented with clear verification evidence.
+- **US-01-0880**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 2 - Resource Release: so that this capability is implemented with clear verification evidence.
+- **US-01-0881**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to file Descriptors: fd_close_all(p) - close all, decrement refcounts so that this capability is implemented with clear verification evidence.
+- **US-01-0882**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to virtual Memory: pmap_release(p->pmap) - free user page tables, switch to kernel pmap so that this capability is implemented with clear verification evidence.
+- **US-01-0883**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vM Map: release vm_map and all vm_map_entry structures so that this capability is implemented with clear verification evidence.
+- **US-01-0884**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cWD / Root: decrement cwd and root vnode refcounts so that this capability is implemented with clear verification evidence.
+- **US-01-0885**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to controlling Terminal: if session leader, SIGHUP to foreground group, revoke TTY so that this capability is implemented with clear verification evidence.
+- **US-01-0886**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pending Signals: clear all so that this capability is implemented with clear verification evidence.
+- **US-01-0887**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to timers: cancel ITIMER_REAL/VIRTUAL/PROF and alarm() so that this capability is implemented with clear verification evidence.
+- **US-01-0888**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to system V IPC: detach shmem, undo semaphores, remove owned msg queues so that this capability is implemented with clear verification evidence.
+- **US-01-0889**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pOSIX IPC: unlink owned semaphores/shared memory so that this capability is implemented with clear verification evidence.
+- **US-01-0890**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to futex Cleanup: process robust list, mark FUTEX_OWNER_DIED, wake waiters so that this capability is implemented with clear verification evidence.
+- **US-01-0891**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Locks: release held mutexes, cancel pending lock requests so that this capability is implemented with clear verification evidence.
+- **US-01-0892**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 3 - Thread Termination: so that this capability is implemented with clear verification evidence.
+- **US-01-0893**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set t->state = THREAD_ZOMBIE for each thread so that this capability is implemented with clear verification evidence.
+- **US-01-0894**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to interrupt non-current threads, wait for zombie state so that this capability is implemented with clear verification evidence.
+- **US-01-0895**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free thread stacks and structures so that this capability is implemented with clear verification evidence.
+- **US-01-0896**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to current thread becomes reaper so that this capability is implemented with clear verification evidence.
+- **US-01-0897**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 4 - Resource Usage Finalization: so that this capability is implemented with clear verification evidence.
+- **US-01-0898**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to rusage_finalize(p): accumulate thread times so that this capability is implemented with clear verification evidence.
+- **US-01-0899**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to record ru_utime, ru_stime, ru_maxrss, ru_minflt, ru_majflt, ru_nvcsw, ru_nivcsw so that this capability is implemented with clear verification evidence.
+- **US-01-0900**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 5 - Orphan Reparenting: so that this capability is implemented with clear verification evidence.
+- **US-01-0901**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to proc_reparent_children(p): move children to init so that this capability is implemented with clear verification evidence.
+- **US-01-0902**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to acquire proctree_lock so that this capability is implemented with clear verification evidence.
+- **US-01-0903**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to for each child: set p_parent = init, move to init's children list so that this capability is implemented with clear verification evidence.
+- **US-01-0904**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wake init if child is zombie so that this capability is implemented with clear verification evidence.
+- **US-01-0905**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if init dying: reparent to swapper (PID 0) or panic so that this capability is implemented with clear verification evidence.
+- **US-01-0906**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 6 - Process Group / Session Cleanup: so that this capability is implemented with clear verification evidence.
+- **US-01-0907**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to remove from process group; free struct pgrp if last member so that this capability is implemented with clear verification evidence.
+- **US-01-0908**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if session leader: SIGHUP to foreground, revoke TTY, mark no leader so that this capability is implemented with clear verification evidence.
+- **US-01-0909**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to check for orphaned process groups → SIGHUP + SIGCONT so that this capability is implemented with clear verification evidence.
+- **US-01-0910**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 7 - Parent Notification: so that this capability is implemented with clear verification evidence.
+- **US-01-0911**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to psignal(parent, SIGCHLD) so that this capability is implemented with clear verification evidence.
+- **US-01-0912**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if SA_NOCLDWAIT: auto-reap (no zombie) so that this capability is implemented with clear verification evidence.
+- **US-01-0913**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wake parent on p_children channel so that this capability is implemented with clear verification evidence.
+- **US-01-0914**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 8 - Zombie State (DYING → ZOMBIE): so that this capability is implemented with clear verification evidence.
+- **US-01-0915**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set p_state = SZOMB so that this capability is implemented with clear verification evidence.
+- **US-01-0916**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to only pid, ppid, xstat, rusage remain valid so that this capability is implemented with clear verification evidence.
+- **US-01-0917**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 9 - Final Context Switch: so that this capability is implemented with clear verification evidence.
+- **US-01-0918**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to current_thread->state = THREAD_ZOMBIE so that this capability is implemented with clear verification evidence.
+- **US-01-0919**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sched_yield() - never returns so that this capability is implemented with clear verification evidence.
+- **US-01-0920**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to accounting: so that this capability is implemented with clear verification evidence.
+- **US-01-0921**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to acct_process(code): write accounting record (command, times, status) so that this capability is implemented with clear verification evidence.
+- **US-01-0922**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to edge Cases: so that this capability is implemented with clear verification evidence.
+- **US-01-0923**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to init (PID 1) exit: kernel halts/panics with warning so that this capability is implemented with clear verification evidence.
+- **US-01-0924**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to killed by signal during exit: ignore signals once SDYING so that this capability is implemented with clear verification evidence.
+- **US-01-0925**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to locks held during exit: log warning, force release so that this capability is implemented with clear verification evidence.
+- **US-01-0926**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to oOM during exit: must not allocate (only free) so that this capability is implemented with clear verification evidence.
+- **US-01-0927**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vfork exit: wake parent immediately so that this capability is implemented with clear verification evidence.
+- **US-01-0928**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to thread group exit: all threads terminated on any exit() so that this capability is implemented with clear verification evidence.
+- **US-01-0929**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wait Subsystem (wait4 / waitpid): so that this capability is implemented with clear verification evidence.
+- **US-01-0930**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to search Logic: so that this capability is implemented with clear verification evidence.
+- **US-01-0931**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pid > 0: specific child so that this capability is implemented with clear verification evidence.
+- **US-01-0932**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pid == -1: any child so that this capability is implemented with clear verification evidence.
+- **US-01-0933**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pid == 0: same process group so that this capability is implemented with clear verification evidence.
+- **US-01-0934**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pid < -1: process group |pid| so that this capability is implemented with clear verification evidence.
+- **US-01-0935**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wNOHANG: return 0 if no zombies, ECHILD if no children so that this capability is implemented with clear verification evidence.
+- **US-01-0936**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to blocking Wait: sched_sleep(&p_children), handle EINTR, re-scan so that this capability is implemented with clear verification evidence.
+- **US-01-0937**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reaping (ZOMBIE → FREE): so that this capability is implemented with clear verification evidence.
+- **US-01-0938**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to copy xstat and rusage to user buffer so that this capability is implemented with clear verification evidence.
+- **US-01-0939**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to remove from siblings list and process group so that this capability is implemented with clear verification evidence.
+- **US-01-0940**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free process structure so that this capability is implemented with clear verification evidence.
+- **US-01-0941**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to job Control (WUNTRACED / WCONTINUED): so that this capability is implemented with clear verification evidence.
+- **US-01-0942**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to report stopped children (SSTOP) so that this capability is implemented with clear verification evidence.
+- **US-01-0943**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to report continued children (P_CONTINUED flag) so that this capability is implemented with clear verification evidence.
+- **US-01-0944**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to process Groups & Sessions: so that this capability is implemented with clear verification evidence.
+- **US-01-0945**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core Structures: so that this capability is implemented with clear verification evidence.
+- **US-01-0946**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to struct pgrp: pg_id, pg_members (list), pg_session (ptr) so that this capability is implemented with clear verification evidence.
+- **US-01-0947**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to struct session: s_id, s_leader, s_ttyvp, s_login so that this capability is implemented with clear verification evidence.
+- **US-01-0948**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to invariants: every process → one group → one session so that this capability is implemented with clear verification evidence.
+- **US-01-0949**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to session Management: so that this capability is implemented with clear verification evidence.
+- **US-01-0950**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_setsid(): create new session + pgrp; EPERM if already leader; detach CTTY so that this capability is implemented with clear verification evidence.
+- **US-01-0951**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_getsid(pid): return session ID so that this capability is implemented with clear verification evidence.
+- **US-01-0952**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to group Management: so that this capability is implemented with clear verification evidence.
+- **US-01-0953**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_setpgid(pid, pgid): join/create group; must be same session so that this capability is implemented with clear verification evidence.
+- **US-01-0954**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sys_getpgid(pid): return group ID so that this capability is implemented with clear verification evidence.
+- **US-01-0955**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to controlling Terminal (CTTY): so that this capability is implemented with clear verification evidence.
+- **US-01-0956**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to tIOCSCTTY: assign CTTY (session leader, no existing CTTY, TTY unowned) so that this capability is implemented with clear verification evidence.
+- **US-01-0957**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to tIOCNOTTY: release CTTY, SIGHUP to foreground group so that this capability is implemented with clear verification evidence.
+- **US-01-0958**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to tcsetpgrp / tcgetpgrp: set/get foreground group (SIGTTOU check) so that this capability is implemented with clear verification evidence.
+- **US-01-0959**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to orphaned Process Groups: so that this capability is implemented with clear verification evidence.
+- **US-01-0960**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to detection: no member with parent in different group of same session so that this capability is implemented with clear verification evidence.
+- **US-01-0961**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to action: SIGHUP + SIGCONT to stopped members so that this capability is implemented with clear verification evidence.
+- **US-01-0962**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0963**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: proc_exit phases 1-9 ordering and resource cleanup so that this capability is implemented with clear verification evidence.
+- **US-01-0964**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: wait4 search logic (specific, any, pgrp) so that this capability is implemented with clear verification evidence.
+- **US-01-0965**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: WNOHANG returns 0 / ECHILD correctly so that this capability is implemented with clear verification evidence.
+- **US-01-0966**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: orphan reparenting to init so that this capability is implemented with clear verification evidence.
+- **US-01-0967**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY so that this capability is implemented with clear verification evidence.
+- **US-01-0968**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery so that this capability is implemented with clear verification evidence.
+- **US-01-0969**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: no zombie leaks (all zombies eventually reaped or auto-reaped) so that this capability is implemented with clear verification evidence.
+- **US-01-0970**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: fork → exec → exit → waitpid cycle so that this capability is implemented with clear verification evidence.
+- **US-01-0971**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED so that this capability is implemented with clear verification evidence.
+- **US-01-0972**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0973**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: process exit 9-phase teardown so that this capability is implemented with clear verification evidence.
+- **US-01-0974**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: wait4 search semantics and blocking so that this capability is implemented with clear verification evidence.
+- **US-01-0975**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: session/pgrp lifecycle and CTTY ownership so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-01-0001** (EARS/Ubiquitous): The Substrate system shall memory Management:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0002** (EARS/Ubiquitous): The Substrate system shall physical Memory Manager (PMM Refactor):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0003** (EARS/Ubiquitous): The Substrate system shall boot Memory Detection:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0004** (EARS/Ubiquitous): The Substrate system shall parse Multiboot Memory Map (mmap).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0005** (EARS/Ubiquitous): The Substrate system shall parse e820 Memory Map (legacy BIOS fallback).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0006** (EARS/Ubiquitous): The Substrate system shall hardening:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0007** (EARS/Ubiquitous): The Substrate system shall sanitize memory map entries: validate type, clamp to 32-bit address space.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0008** (EARS/Ubiquitous): The Substrate system shall reject overlapping or zero-length regions.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0009** (EARS/Ubiquitous): The Substrate system shall calculate and report total usable RAM (64-bit accumulation for >4 GB physical).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0010** (EARS/Ubiquitous): The Substrate system shall identify kernel physical bounds from linker symbols (_kernel_start, _kernel_end).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0011** (EARS/Ubiquitous): The Substrate system shall exclude kernel text/data/BSS region from free pool.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0012** (EARS/Ubiquitous): The Substrate system shall exclude Multiboot info structure and module regions.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0013** (EARS/Ubiquitous): The Substrate system shall reserve BIOS/ACPI regions (type 3/4) and memory holes.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0014** (EARS/Ubiquitous): The Substrate system shall bootstrap Watermark Allocator:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0015** (EARS/Ubiquitous): The Substrate system shall bump allocator for early boot before buddy is ready.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0016** (EARS/Ubiquitous): The Substrate system shall pmm_watermark_init(start, end): initialize allocator with usable range.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0017** (EARS/Ubiquitous): The Substrate system shall pmm_watermark_alloc(size, align): allocate size bytes with alignment.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0018** (EARS/Ubiquitous): The Substrate system shall pmm_watermark_used(): report bytes consumed.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0019** (EARS/Ubiquitous): The Substrate system shall used for: vm_page_t array, initial page tables, kernel stacks.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0020** (EARS/Ubiquitous): The Substrate system shall watermark region clamped to avoid exceeding available low memory.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0021** (EARS/Ubiquitous): The Substrate system shall dynamic Metadata:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0022** (EARS/Ubiquitous): The Substrate system shall calculate vm_page_t array size based on actual detected RAM.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0023** (EARS/Ubiquitous): The Substrate system shall allocate array via watermark allocator.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0024** (EARS/Ubiquitous): The Substrate system shall remove hardcoded 128 MB static limit.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0025** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall fallback to static bitmap if RAM < 4 MB (constrained environments).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0026** (EARS/Ubiquitous): The Substrate system shall buddy Allocator:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0027** (EARS/Ubiquitous): The Substrate system shall orders 0-10 (4 KB - 4 MB pages).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0028** (EARS/Ubiquitous): The Substrate system shall free Lists: per-order doubly-linked free page lists.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0029** (EARS/Ubiquitous): The Substrate system shall vm_phys_alloc_page(): O(1) single-page allocation from order-0 free list.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0030** (EARS/Ubiquitous): The Substrate system shall vm_phys_alloc_contiguous(order): allocate 2^order contiguous pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0031** (EARS/Ubiquitous): The Substrate system shall vm_phys_free_page(page): return page and coalesce with buddy if free.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0032** (EARS/Ubiquitous): The Substrate system shall vm_phys_free_contiguous(page, order): return and coalesce multi-page block.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0033** (EARS/Ubiquitous): The Substrate system shall buddy Coalescing: merge adjacent free pages up through orders.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0034** (EARS/Ubiquitous): The Substrate system shall buddy Splitting: split higher-order blocks when lower order is empty.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0035** (EARS/Ubiquitous): The Substrate system shall interrupt-safe: disable interrupts during alloc/free.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0036** (EARS/Ubiquitous): The Substrate system shall public API (returning kernel virtual addresses):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0037** (EARS/Ubiquitous): The Substrate system shall pmm_alloc_block(): allocate single page, return 0xC0000000+ virtual address.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0038** (EARS/Ubiquitous): The Substrate system shall pmm_free_block(vaddr): free single page given virtual address.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0039** (EARS/Ubiquitous): The Substrate system shall pmm_alloc_contiguous(count): allocate count contiguous pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0040** (EARS/Ubiquitous): The Substrate system shall pmm_free_contiguous(vaddr, count): free contiguous block.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0041** (EARS/Ubiquitous): The Substrate system shall pmm_get_page(phys_addr): look up vm_page_t for physical address.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0042** (EARS/Ubiquitous): The Substrate system shall safety & Integration:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0043** (EARS/Ubiquitous): The Substrate system shall fine-grained spinlock for SMP access (vm_phys_lock).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0044** (EARS/Ubiquitous): The Substrate system shall interrupt disable/restore guards in all API entry points.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0045** (EARS/Ubiquitous): The Substrate system shall direct interface with vm_page.c queues.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0046** (EARS/Ubiquitous): The Substrate system shall low memory watermark: warn when free pages drop below threshold.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0047** (EARS/Ubiquitous): The Substrate system shall nUMA-Aware Allocation (deferred):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0048** (EARS/Ubiquitous): The Substrate system shall per-node free lists.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0049** (EARS/Ubiquitous): The Substrate system shall node affinity for allocation (prefer local node).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0050** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall cross-node fallback when local node exhausted.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0051** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0052** (EARS/Ubiquitous): The Substrate system shall unit: watermark allocator - sequential allocations, alignment, exhaustion.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0053** (EARS/Ubiquitous): The Substrate system shall unit: buddy allocator - alloc/free single pages, verify O(1) behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0054** (EARS/Ubiquitous): The Substrate system shall unit: buddy coalescing - free adjacent pages, verify order promotion.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0055** (EARS/Ubiquitous): The Substrate system shall unit: buddy splitting - exhaust order 0, verify split from higher order.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0056** (EARS/Ubiquitous): The Substrate system shall unit: contiguous allocation - various orders, verify alignment.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0057** (EARS/Ubiquitous): The Substrate system shall unit: memory map parsing - Multiboot and e820 with edge cases (overlaps, holes).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0058** (EARS/Ubiquitous): The Substrate system shall property: alloc → free → alloc returns same page (no leak).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0059** (EARS/Ubiquitous): The Substrate system shall property: free page count + allocated count = total pages (invariant).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0060** (EARS/Ubiquitous): The Substrate system shall property: buddy free list integrity (no cycles, all entries valid).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0061** (EARS/Ubiquitous): The Substrate system shall integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0062** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0063** (EARS/Ubiquitous): The Substrate system shall internal doc: PMM architecture (watermark → buddy transition).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0064** (EARS/Ubiquitous): The Substrate system shall internal doc: virtual vs physical address API convention.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0065** (EARS/Ubiquitous): The Substrate system shall memory Management (BSD/Mach Design):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0066** (EARS/Ubiquitous): The Substrate system shall physical Memory (Machine Independent):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0067** (EARS/Ubiquitous): The Substrate system shall vm_page_t Structure:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0068** (EARS/Ubiquitous): The Substrate system shall phys_addr: physical address of this page frame.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0069** (EARS/Ubiquitous): The Substrate system shall flags: state flags (see below).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0070** (EARS/Ubiquitous): The Substrate system shall wire_count: wired reference count (cannot be paged out while > 0).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0071** (EARS/Ubiquitous): The Substrate system shall ref_count: general reference count (for COW sharing).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0072** (EARS/Ubiquitous): The Substrate system shall order: buddy allocator order (0 = single page).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0073** (EARS/Ubiquitous): The Substrate system shall object: back-pointer to owning vm_object (anonymous, vnode, device).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0074** (EARS/Ubiquitous): The Substrate system shall pindex: page index within owning object.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0075** (EARS/Ubiquitous): The Substrate system shall pv_list: list of pv_entry structs for pmap backlinks (which PTEs map this page).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0076** (EARS/Ubiquitous): The Substrate system shall state Flags:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0077** (EARS/Ubiquitous): The Substrate system shall pG_BUSY: page is being I/O'd (don't touch).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0078** (EARS/Ubiquitous): The Substrate system shall pG_VALID: page contains valid data.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0079** (EARS/Ubiquitous): The Substrate system shall pG_DIRTY: page has been modified since last writeback.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0080** (EARS/Ubiquitous): The Substrate system shall pG_ACTIVE: page is on active queue.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0081** (EARS/Ubiquitous): The Substrate system shall pG_INACTIVE: page is on inactive queue.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0082** (EARS/Ubiquitous): The Substrate system shall pG_FREE: page is on free queue.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0083** (EARS/Ubiquitous): The Substrate system shall pG_ZERO: page is known to be zeroed.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0084** (EARS/Ubiquitous): The Substrate system shall pG_SWAPPED: page contents are on swap.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0085** (EARS/Ubiquitous): The Substrate system shall initialization:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0086** (EARS/Ubiquitous): The Substrate system shall allocate vm_page_t[] array based on detected RAM (via watermark allocator).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0087** (EARS/Ubiquitous): The Substrate system shall initialize all pages as PG_FREE, link into free lists.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0088** (EARS/Ubiquitous): The Substrate system shall accessors:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0089** (EARS/Ubiquitous): The Substrate system shall pmm_get_page(pa): PA-to-page lookup (O(1) via array index).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0090** (EARS/Ubiquitous): The Substrate system shall vm_page_to_phys(page): page-to-PA conversion.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0091** (EARS/Ubiquitous): The Substrate system shall ownership Tracking:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0092** (EARS/Ubiquitous): The Substrate system shall track which vm_object (anonymous, vnode, device) owns each page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0093** (EARS/Ubiquitous): The Substrate system shall vm_page_insert(page, object, pindex): link page to object.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0094** (EARS/Ubiquitous): The Substrate system shall vm_page_remove(page): unlink page from object.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0095** (EARS/Ubiquitous): The Substrate system shall pmap Backlinks (pv_entry):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0096** (EARS/Ubiquitous): The Substrate system shall track which pmaps/PTEs reference this physical page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0097** (EARS/Ubiquitous): The Substrate system shall pv_entry: {pmap, va, next} - singly-linked list per page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0098** (EARS/Ubiquitous): The Substrate system shall used for reverse mapping: given a physical page, find all virtual mappings.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0099** (EARS/Ubiquitous): The Substrate system shall essential for TLB shootdown and page eviction.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0100** (EARS/Ubiquitous): The Substrate system shall page Queues:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0101** (EARS/Ubiquitous): The Substrate system shall queue Types:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0102** (EARS/Ubiquitous): The Substrate system shall free Queue: pages available for immediate allocation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0103** (EARS/Ubiquitous): The Substrate system shall active Queue: recently accessed pages (LRU head).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0104** (EARS/Ubiquitous): The Substrate system shall inactive Queue: eviction candidates (LRU tail).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0105** (EARS/Ubiquitous): The Substrate system shall wired Queue: kernel/DMA pages that cannot be paged out.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0106** (EARS/Ubiquitous): The Substrate system shall laundry Queue: dirty pages waiting to be written to backing store.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0107** (EARS/Ubiquitous): The Substrate system shall queue Operations:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0108** (EARS/Ubiquitous): The Substrate system shall vm_page_activate(page): move to active queue, set PG_ACTIVE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0109** (EARS/Ubiquitous): The Substrate system shall vm_page_deactivate(page): move to inactive queue, clear PG_ACTIVE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0110** (EARS/Ubiquitous): The Substrate system shall vm_page_wire(page): increment wire count, move to wired queue.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0111** (EARS/Ubiquitous): The Substrate system shall vm_page_unwire(page): decrement wire count, move to inactive if count reaches 0.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0112** (EARS/Ubiquitous): The Substrate system shall vm_page_free(page): return to free queue, clear all flags.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0113** (EARS/Ubiquitous): The Substrate system shall vm_page_launder(page): move to laundry queue for async writeback.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0114** (EARS/Ubiquitous): The Substrate system shall lRU Scanning (vm_pageout_scan):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0115** (EARS/Ubiquitous): The Substrate system shall periodic scan of active queue.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0116** (EARS/Ubiquitous): The Substrate system shall check PTE accessed (A) bit via pmap_is_referenced().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0117** (EARS/Ubiquitous): The Substrate system shall clear A bit via pmap_clear_reference().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0118** (EARS/Ubiquitous): The Substrate system shall move unreferenced pages to inactive queue tail.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0119** (EARS/Ubiquitous): The Substrate system shall second-chance algorithm: pages touched again stay active.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0120** (EARS/Ubiquitous): The Substrate system shall page Daemon (vm_pageout):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0121** (EARS/Ubiquitous): The Substrate system shall background kernel thread (pagedaemon).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0122** (EARS/Ubiquitous): The Substrate system shall sleep on vm_pages_needed wakeup channel.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0123** (EARS/Ubiquitous): The Substrate system shall vm_page_launder(): write dirty pages to backing store.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0124** (EARS/Ubiquitous): The Substrate system shall vm_page_try_to_free(): attempt to free clean inactive pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0125** (EARS/Ubiquitous): The Substrate system shall priority-based scanning phases: Inactive → Laundry → Active.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0126** (EARS/Ubiquitous): The Substrate system shall oOM killer hook: kill process if cannot free memory.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0127** (EARS/Ubiquitous): The Substrate system shall thresholds:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0128** (EARS/Ubiquitous): The Substrate system shall vm_page_free_min: absolute minimum free pages (16 default; panic below).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0129** (EARS/Ubiquitous): The Substrate system shall vm_page_free_target: target free pages (64 default; daemon sleeps above).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0130** (EARS/Ubiquitous): The Substrate system shall vm_page_inactive_target: target inactive queue length.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0131** (EARS/Ubiquitous): The Substrate system shall vm_page_free_reserved: reserved for kernel emergencies (8 default).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0132** (EARS/Ubiquitous): The Substrate system shall dynamic threshold adjustment based on total RAM.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0133** (EARS/Ubiquitous): The Substrate system shall statistics (vm_stat):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0134** (EARS/Ubiquitous): The Substrate system shall free_count, active_count, inactive_count, wire_count, laundry_count.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0135** (EARS/Ubiquitous): The Substrate system shall pageins: pages read from disk.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0136** (EARS/Ubiquitous): The Substrate system shall pageouts: pages written to disk.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0137** (EARS/Ubiquitous): The Substrate system shall faults: total page faults handled.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0138** (EARS/Ubiquitous): The Substrate system shall cow_faults: copy-on-write faults.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0139** (EARS/Ubiquitous): The Substrate system shall reactivations: pages moved back to active.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0140** (EARS/Ubiquitous): The Substrate system shall zero_fill_pages: pages satisfied by zero-fill.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0141** (EARS/Ubiquitous): The Substrate system shall /proc/vmstat or sysctl interface for userspace exposure.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0142** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0143** (EARS/Ubiquitous): The Substrate system shall unit: page queue transitions (free→active→inactive→laundry→free).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0144** (EARS/Ubiquitous): The Substrate system shall unit: wire/unwire reference counting.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0145** (EARS/Ubiquitous): The Substrate system shall unit: vm_page_insert / vm_page_remove object linkage.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0146** (EARS/Ubiquitous): The Substrate system shall unit: pv_entry list manipulation (insert, remove, lookup).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0147** (EARS/Ubiquitous): The Substrate system shall unit: page daemon thresholds - verify scan triggers at correct free count.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0148** (EARS/Ubiquitous): The Substrate system shall property: queue length invariant - sum of all queue counts = total pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0149** (EARS/Ubiquitous): The Substrate system shall property: no page appears on two queues simultaneously.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0150** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0151** (EARS/Ubiquitous): The Substrate system shall internal doc: page queue state machine and transitions.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0152** (EARS/Ubiquitous): The Substrate system shall internal doc: page daemon algorithm and tuning parameters.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0153** (EARS/Ubiquitous): The Substrate system shall pMAP Layer (Machine Dependent - i386):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0154** (EARS/Ubiquitous): The Substrate system shall initialization (pmap_bootstrap):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0155** (EARS/Ubiquitous): The Substrate system shall initialize kernel page directory from static bootstrap allocation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0156** (EARS/Ubiquitous): The Substrate system shall set up recursive mapping at PD entry 1023 (self-reference at 0xFFC00000).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0157** (EARS/Ubiquitous): The Substrate system shall map kernel space (0xC0000000+) with global flag if CPUID reports PGE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0158** (EARS/Ubiquitous): The Substrate system shall detect CPU features: PSE (4 MB pages), PGE (global pages), PAE (36-bit physical).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0159** (EARS/Ubiquitous): The Substrate system shall initialize pmap lock for SMP safety.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0160** (EARS/Ubiquitous): The Substrate system shall identity-map LAPIC MMIO region (0xFEE00000) with PCD flag.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0161** (EARS/Ubiquitous): The Substrate system shall record kernel_pmap as authoritative kernel address space.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0162** (EARS/Ubiquitous): The Substrate system shall core PTE Manipulation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0163** (EARS/Ubiquitous): The Substrate system shall pmap_enter(pmap, va, pa, prot, flags): insert/update PTE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0164** (EARS/Ubiquitous): The Substrate system shall allocate page table on demand when PDE is empty.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0165** (EARS/Ubiquitous): The Substrate system shall set PG_U (user), PG_W (write), PG_G (global) flags per prot.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0166** (EARS/Ubiquitous): The Substrate system shall invalidate TLB entry for updated VA.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0167** (EARS/Ubiquitous): The Substrate system shall update pv_entry list for the physical page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0168** (EARS/Ubiquitous): The Substrate system shall pmap_remove(pmap, va): clear PTE, invalidate TLB.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0169** (EARS/Ubiquitous): The Substrate system shall remove pv_entry for this mapping.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0170** (EARS/Ubiquitous): The Substrate system shall free page table if all entries empty (optional reclamation).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0171** (EARS/Ubiquitous): The Substrate system shall pmap_kenter(va, pa): kernel-only fast path (no locking, no pv_entry).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0172** (EARS/Ubiquitous): The Substrate system shall pmap_kremove(va): kernel-only removal.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0173** (EARS/Ubiquitous): The Substrate system shall pmap_extract(pmap, va): return physical address for VA (read PTE).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0174** (EARS/Ubiquitous): The Substrate system shall pmap_zero_page(phys): zero a physical page via temporary mapping.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0175** (EARS/Ubiquitous): The Substrate system shall pmap_copy_page(src_phys, dst_phys): copy between physical pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0176** (EARS/Ubiquitous): The Substrate system shall context Switch (pmap_activate):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0177** (EARS/Ubiquitous): The Substrate system shall load pmap->pdir_phys into CR3.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0178** (EARS/Ubiquitous): The Substrate system shall update curpmap thread-local pointer.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0179** (EARS/Ubiquitous): The Substrate system shall set TSS ESP0 for kernel stack (scheduler integration).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0180** (EARS/Ubiquitous): The Substrate system shall recursive Paging:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0181** (EARS/Ubiquitous): The Substrate system shall reserve PDE 1023 for self-referencing.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0182** (EARS/Ubiquitous): The Substrate system shall v_PD macro: access current PD at 0xFFFFF000.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0183** (EARS/Ubiquitous): The Substrate system shall v_PT(n) macro: access page table n at 0xFFC00000 + n×4096.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0184** (EARS/Ubiquitous): The Substrate system shall all PTE manipulation uses recursive window (no temporary mappings needed).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0185** (EARS/Ubiquitous): The Substrate system shall higher-Half Transition:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0186** (EARS/Ubiquitous): The Substrate system shall stable 3 GB/1 GB split: user 0x00000000-0xBFFFFFFF, kernel 0xC0000000-0xFFFFFFFF.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0187** (EARS/Ubiquitous): The Substrate system shall lMA=0x100000 (1 MB), VMA=0xC0100000 (kernel linked at high address).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0188** (EARS/Ubiquitous): The Substrate system shall boot trampoline in boot.S enables paging with identity + high mapping.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0189** (EARS/Ubiquitous): The Substrate system shall per-Process Address Space (pmap_t):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0190** (EARS/Ubiquitous): The Substrate system shall data Structure:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0191** (EARS/Ubiquitous): The Substrate system shall pdir / pdir_phys: virtual and physical address of page directory.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0192** (EARS/Ubiquitous): The Substrate system shall ref_count: reference count for COW sharing.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0193** (EARS/Ubiquitous): The Substrate system shall resident_count: count of resident pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0194** (EARS/Ubiquitous): The Substrate system shall wired_count: count of wired (unpageable) pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0195** (EARS/Ubiquitous): The Substrate system shall stats (pmap_stats): per-pmap counters (faults, cow_faults, zero_fills, protection changes).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0196** (EARS/Ubiquitous): The Substrate system shall lock: spinlock for SMP safety.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0197** (EARS/Ubiquitous): The Substrate system shall asid: address space ID (future PCID support, currently 0).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0198** (EARS/Ubiquitous): The Substrate system shall list_entry: linkage for global pmap list (TLB shootdown).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0199** (EARS/Ubiquitous): The Substrate system shall pmap_create() - Create New Address Space:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0200** (EARS/Ubiquitous): The Substrate system shall allocate one 4 KB page for page directory.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0201** (EARS/Ubiquitous): The Substrate system shall zero user portion (PDEs 0-767).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0202** (EARS/Ubiquitous): The Substrate system shall copy kernel PDEs (768-1022) from kernel_pmap (shared by reference).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0203** (EARS/Ubiquitous): The Substrate system shall set up recursive mapping in PDE 1023.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0204** (EARS/Ubiquitous): The Substrate system shall initialize reference count to 1.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0205** (EARS/Ubiquitous): The Substrate system shall add to global pmap list.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0206** (EARS/Ubiquitous): The Substrate system shall minimum overhead: 1 PD (4 KB) + PTs allocated on demand.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0207** (EARS/Ubiquitous): The Substrate system shall pmap_destroy() - Destroy Address Space:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0208** (EARS/Ubiquitous): The Substrate system shall decrement reference count; return if still referenced (COW children).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0209** (EARS/Ubiquitous): The Substrate system shall walk all user PDEs (0-767):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0210** (EARS/Ubiquitous): The Substrate system shall for each present PDE, walk all 1024 PTEs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0211** (EARS/Ubiquitous): The Substrate system shall for each present PTE, free physical page (or decrement refcount).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0212** (EARS/Ubiquitous): The Substrate system shall free page table page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0213** (EARS/Ubiquitous): The Substrate system shall free page directory page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0214** (EARS/Ubiquitous): The Substrate system shall remove from global pmap list.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0215** (EARS/Ubiquitous): The Substrate system shall pmap_reference() / pmap_release():.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0216** (EARS/Ubiquitous): The Substrate system shall atomic increment/decrement of reference count.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0217** (EARS/Ubiquitous): The Substrate system shall pmap_release(): call pmap_destroy() if refcount reaches 0.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0218** (EARS/Ubiquitous): The Substrate system shall pmap_fork() - Copy-on-Write Fork:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0219** (EARS/Ubiquitous): The Substrate system shall create new pmap via pmap_create().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0220** (EARS/Ubiquitous): The Substrate system shall walk parent's user PTEs:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0221** (EARS/Ubiquitous): The Substrate system shall copy PTE to child with write bit cleared.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0222** (EARS/Ubiquitous): The Substrate system shall clear write bit in parent too (both now COW).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0223** (EARS/Ubiquitous): The Substrate system shall increment physical page reference count.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0224** (EARS/Ubiquitous): The Substrate system shall track COW pages in pmap stats.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0225** (EARS/Ubiquitous): The Substrate system shall kernel PDE Synchronization:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0226** (EARS/Ubiquitous): The Substrate system shall kernel_pmap is authoritative for PDEs 768-1022.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0227** (EARS/Ubiquitous): The Substrate system shall pmap_create() copies kernel PDEs on creation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0228** (EARS/Ubiquitous): The Substrate system shall pmap_growkernel(va): when kernel maps new pages (vmalloc), update all pmaps.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0229** (EARS/Ubiquitous): The Substrate system shall walk global pmap list and copy new kernel PDEs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0230** (EARS/Ubiquitous): The Substrate system shall alternatively share kernel PTs by reference (current approach).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0231** (EARS/Ubiquitous): The Substrate system shall pmap_protect() - Change Page Protections:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0232** (EARS/Ubiquitous): The Substrate system shall walk range and update PTE protection bits (R/W, U/S).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0233** (EARS/Ubiquitous): The Substrate system shall handle protection upgrade (read → read/write) and downgrade.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0234** (EARS/Ubiquitous): The Substrate system shall track protection changes for COW handling.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0235** (EARS/Ubiquitous): The Substrate system shall batch TLB invalidations for large ranges (TLB_BATCH_THRESHOLD).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0236** (EARS/Ubiquitous): The Substrate system shall pmap_copy() - Copy Mappings Between Address Spaces:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0237** (EARS/Ubiquitous): The Substrate system shall copy PTE entries from source to destination pmap.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0238** (EARS/Ubiquitous): The Substrate system shall set up COW if requested (clear write bit in both).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0239** (EARS/Ubiquitous): The Substrate system shall increment physical page reference counts.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0240** (EARS/Ubiquitous): The Substrate system shall support partial range copy (for vfork/clone).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0241** (EARS/Ubiquitous): The Substrate system shall handle mixed COW and private mappings (PG_PRIVATE check).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0242** (EARS/Ubiquitous): The Substrate system shall page Reference/Modification Tracking:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0243** (EARS/Ubiquitous): The Substrate system shall pmap_is_referenced(pmap, va): check PTE Accessed (A) bit.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0244** (EARS/Ubiquitous): The Substrate system shall pmap_is_modified(pmap, va): check PTE Dirty (D) bit.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0245** (EARS/Ubiquitous): The Substrate system shall pmap_clear_reference(pmap, va): clear A bit, invalidate TLB.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0246** (EARS/Ubiquitous): The Substrate system shall pmap_clear_modify(pmap, va): clear D bit, invalidate TLB.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0247** (EARS/Ubiquitous): The Substrate system shall pmap_test_and_clear_ref(page): atomic test-and-clear for A bit across all mappings.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0248** (EARS/Ubiquitous): The Substrate system shall pmap_test_and_clear_modify(page): atomic test-and-clear for D bit.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0249** (EARS/Ubiquitous): The Substrate system shall batch variants: pmap_is_referenced_range(), pmap_is_modified_range().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0250** (EARS/Ubiquitous): The Substrate system shall pmap_track_access(page): per-page access frequency tracking for aging.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0251** (EARS/Ubiquitous): The Substrate system shall export referenced/modified info to VM layer for page replacement decisions.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0252** (EARS/Ubiquitous): The Substrate system shall copy-on-Write System:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0253** (EARS/Ubiquitous): The Substrate system shall mark shared pages read-only in both parent and child.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0254** (EARS/Ubiquitous): The Substrate system shall cOW Fault Handler:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0255** (EARS/Ubiquitous): When write fault to COW page: allocate new physical page, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0256** (EARS/Ubiquitous): The Substrate system shall copy contents from original page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0257** (EARS/Ubiquitous): The Substrate system shall map new page R/W at faulting VA.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0258** (EARS/Ubiquitous): The Substrate system shall decrement original page refcount.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0259** (EARS/Ubiquitous): When refcount == 1, optionally remap original R/W in remaining owner, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0260** (EARS/Ubiquitous): The Substrate system shall pmap_page_is_cow(page): check if page is COW-shared.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0261** (EARS/Ubiquitous): The Substrate system shall cOW statistics: faults, pages saved, duplications.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0262** (EARS/Ubiquitous): The Substrate system shall sYS_GET_COW_STATS (241) syscall and /proc/cow_stats procfs entry.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0263** (EARS/Ubiquitous): The Substrate system shall tLB Management:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0264** (EARS/Ubiquitous): The Substrate system shall single CPU:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0265** (EARS/Ubiquitous): The Substrate system shall invlpg(va): invalidate single page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0266** (EARS/Ubiquitous): The Substrate system shall cR3 reload: flush entire TLB (expensive, avoid when possible).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0267** (EARS/Ubiquitous): The Substrate system shall track flush statistics.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0268** (EARS/Ubiquitous): The Substrate system shall sMP TLB Shootdown:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0269** (EARS/Ubiquitous): The Substrate system shall iPI (Inter-Processor Interrupt) mechanism.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0270** (EARS/Ubiquitous): The Substrate system shall pmap_shootdown_page(va): invalidate single page on all CPUs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0271** (EARS/Ubiquitous): The Substrate system shall pmap_shootdown_range(va, len): invalidate range.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0272** (EARS/Ubiquitous): The Substrate system shall pmap_shootdown_all(): full TLB flush on all CPUs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0273** (EARS/Ubiquitous): The Substrate system shall deferred shootdown for batch operations.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0274** (EARS/Ubiquitous): The Substrate system shall shootdown completion barrier (wait for all CPUs to acknowledge).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0275** (EARS/Ubiquitous): The Substrate system shall iNVPCID (future x86_64):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0276** (EARS/Ubiquitous): The Substrate system shall detect INVPCID support via CPUID.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0277** (EARS/Ubiquitous): The Substrate system shall invalidate by PCID+VA, PCID only, or all-except-global.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0278** (EARS/Ubiquitous): The Substrate system shall large Page Support:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0279** (EARS/Ubiquitous): The Substrate system shall 4 MB PSE Pages (i386):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0280** (EARS/Ubiquitous): The Substrate system shall detect PSE via CPUID, set CR4.PSE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0281** (EARS/Ubiquitous): The Substrate system shall use PDE with PS=1 for 4 MB mappings.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0282** (EARS/Ubiquitous): The Substrate system shall pmap_enter_large(pmap, va, pa, prot, flags): create 4 MB mapping.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0283** (EARS/Ubiquitous): The Substrate system shall align VA and PA to 4 MB boundary.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0284** (EARS/Ubiquitous): The Substrate system shall use for kernel text/data to reduce TLB pressure.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0285** (EARS/Ubiquitous): The Substrate system shall demotion: split 4 MB page into 1024 × 4 KB on partial unmap/protect.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0286** (EARS/Ubiquitous): The Substrate system shall promotion: coalesce 1024 aligned 4 KB pages into 4 MB (deferred).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0287** (EARS/Ubiquitous): The Substrate system shall 2 MB / 1 GB Pages (x86_64 - see x86_64 PMAP below).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0288** (EARS/Ubiquitous): The Substrate system shall global Page Support (PGE):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0289** (EARS/Ubiquitous): The Substrate system shall detect PGE via CPUID, set CR4.PGE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0290** (EARS/Ubiquitous): The Substrate system shall mark kernel pages with PG_G flag.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0291** (EARS/Ubiquitous): The Substrate system shall global pages survive CR3 reload (not flushed).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0292** (EARS/Ubiquitous): The Substrate system shall use CR4 toggle or INVPCID to flush global pages when needed.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0293** (EARS/Ubiquitous): The Substrate system shall aSID/PCID Support (future x86_64):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0294** (EARS/Ubiquitous): The Substrate system shall aSID pool management (allocate, free, recycle).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0295** (EARS/Ubiquitous): The Substrate system shall assign ASID on pmap creation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0296** (EARS/Ubiquitous): The Substrate system shall include ASID in CR3 on context switch.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0297** (EARS/Ubiquitous): The Substrate system shall avoid full TLB flush when switching between processes with different ASIDs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0298** (EARS/Ubiquitous): The Substrate system shall pAE Mode (Physical Address Extension - deferred):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0299** (EARS/Ubiquitous): The Substrate system shall three-level page tables: PDPT (4 entries) → PD → PT.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0300** (EARS/Ubiquitous): The Substrate system shall 64-bit PTEs: support for NX (No Execute) bit.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0301** (EARS/Ubiquitous): The Substrate system shall physical addresses up to 36 bits (64 GB).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0302** (EARS/Ubiquitous): The Substrate system shall pDPT must be in first 4 GB and 32-byte aligned.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0303** (EARS/Ubiquitous): The Substrate system shall pMAP Statistics and Debugging:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0304** (EARS/Ubiquitous): The Substrate system shall per-pmap counters: resident, wired, mapped, faults, cow_faults.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0305** (EARS/Ubiquitous): The Substrate system shall global counters: total_pmaps, active_pmaps.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0306** (EARS/Ubiquitous): The Substrate system shall pmap_dump(pmap): debug dump of pmap contents (PDEs + PTEs).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0307** (EARS/Ubiquitous): The Substrate system shall pmap_check(pmap): consistency verification (detect leaked pages, orphan PTs).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0308** (EARS/Ubiquitous): The Substrate system shall export stats via syscall (sys_pmap_stats).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0309** (EARS/Ubiquitous): The Substrate system shall page Aging Algorithm Integration:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0310** (EARS/Ubiquitous): The Substrate system shall periodic scanning of all resident pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0311** (EARS/Ubiquitous): The Substrate system shall decrement age counter if not referenced.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0312** (EARS/Ubiquitous): The Substrate system shall pages with age 0 become eviction candidates.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0313** (EARS/Ubiquitous): The Substrate system shall support for multiple aging policies (Clock, LRU approximation).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0314** (EARS/Ubiquitous): The Substrate system shall hardware A/D bit emulation not needed on x86 (native support).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0315** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0316** (EARS/Ubiquitous): The Substrate system shall unit: pmap_create → pmap_destroy lifecycle (no leaked pages).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0317** (EARS/Ubiquitous): The Substrate system shall unit: pmap_enter + pmap_extract round-trip.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0318** (EARS/Ubiquitous): The Substrate system shall unit: pmap_protect upgrade and downgrade.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0319** (EARS/Ubiquitous): The Substrate system shall unit: pmap_fork COW - write to child triggers fault, parent unaffected.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0320** (EARS/Ubiquitous): The Substrate system shall unit: pmap_copy partial range with mixed COW/private.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0321** (EARS/Ubiquitous): The Substrate system shall unit: reference/modification tracking - set/clear/test A and D bits.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0322** (EARS/Ubiquitous): The Substrate system shall unit: large page enter/remove (4 MB PSE).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0323** (EARS/Ubiquitous): The Substrate system shall unit: TLB shootdown - verify invlpg called on remote CPUs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0324** (EARS/Ubiquitous): The Substrate system shall property: pmap_create always produces valid kernel PDE copies (768-1022 match kernel_pmap).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0325** (EARS/Ubiquitous): The Substrate system shall property: pmap_destroy frees exactly resident_count pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0326** (EARS/Ubiquitous): The Substrate system shall property: recursive mapping at PDE 1023 is self-consistent.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0327** (EARS/Ubiquitous): The Substrate system shall integration: fork process, write to COW pages, verify isolation in QEMU.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0328** (EARS/Ubiquitous): The Substrate system shall integration: stress test - 100 pmap_create/pmap_destroy cycles, verify no PMM leak.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0329** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0330** (EARS/Ubiquitous): The Substrate system shall internal doc: i386 pmap architecture (2-level, recursive, COW).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0331** (EARS/Ubiquitous): The Substrate system shall internal doc: TLB management strategy (single CPU + SMP shootdown).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0332** (EARS/Ubiquitous): The Substrate system shall internal doc: per-process address space layout (3 GB/1 GB split).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0333** (EARS/Ubiquitous): The Substrate system shall pMAP Layer (Machine Dependent - x86_64):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0334** (EARS/Ubiquitous): The Substrate system shall initialization (pmap_bootstrap):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0335** (EARS/Ubiquitous): The Substrate system shall initialize kernel PML4 from static bootstrap allocation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0336** (EARS/Ubiquitous): The Substrate system shall set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0337** (EARS/Ubiquitous): The Substrate system shall map kernel space at canonical upper half (−2 GB).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0338** (EARS/Ubiquitous): The Substrate system shall initialize pmap lock for SMP safety.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0339** (EARS/Ubiquitous): The Substrate system shall enable NX bit via IA32_EFER.NXE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0340** (EARS/Ubiquitous): The Substrate system shall detect CPU features: PCID, INVPCID, 1 GB pages, PGE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0341** (EARS/Ubiquitous): The Substrate system shall core PTE Manipulation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0342** (EARS/Ubiquitous): The Substrate system shall pmap_enter(pmap, va, pa, prot, flags): walk PML4 → PDPT → PD → PT.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0343** (EARS/Ubiquitous): The Substrate system shall allocate intermediate page table levels on demand.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0344** (EARS/Ubiquitous): The Substrate system shall set NX (No Execute) bit for data pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0345** (EARS/Ubiquitous): The Substrate system shall handle user/supervisor, read/write, global flags.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0346** (EARS/Ubiquitous): The Substrate system shall pmap_remove(pmap, va): clear PTE, invalidate TLB.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0347** (EARS/Ubiquitous): The Substrate system shall pmap_kenter(va, pa) / pmap_kremove(va): kernel fast paths.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0348** (EARS/Ubiquitous): The Substrate system shall pmap_extract(pmap, va): return physical address.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0349** (EARS/Ubiquitous): The Substrate system shall pmap_zero_page(phys) / pmap_copy_page(src, dst): page utilities.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0350** (EARS/Ubiquitous): The Substrate system shall context Switch (pmap_activate):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0351** (EARS/Ubiquitous): The Substrate system shall load pmap->pml4_phys into CR3.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0352** (EARS/Ubiquitous): The Substrate system shall handle PCID if available (include PCID in CR3 bits 11:0).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0353** (EARS/Ubiquitous): The Substrate system shall set noflush bit (CR3 bit 63) to avoid TLB flush on PCID switch.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0354** (EARS/Ubiquitous): The Substrate system shall update curpmap pointer.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0355** (EARS/Ubiquitous): The Substrate system shall recursive Paging:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0356** (EARS/Ubiquitous): The Substrate system shall reserve PML4 entry 510 for self-referencing.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0357** (EARS/Ubiquitous): The Substrate system shall v_PML4, V_PDPT(n), V_PD(n), V_PT(n) macros for accessing page table levels.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0358** (EARS/Ubiquitous): The Substrate system shall all PTE manipulation via recursive window.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0359** (EARS/Ubiquitous): The Substrate system shall per-Process Address Space:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0360** (EARS/Ubiquitous): The Substrate system shall pmap_create(): allocate new PML4, copy kernel mappings (entries 256-511).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0361** (EARS/Ubiquitous): The Substrate system shall pmap_destroy(): free all user page table levels (PT → PD → PDPT → PML4) and PML4 itself.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0362** (EARS/Ubiquitous): The Substrate system shall pmap_reference() / pmap_release(): reference counting.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0363** (EARS/Ubiquitous): The Substrate system shall pmap_fork(): COW fork with 4-level walk.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0364** (EARS/Ubiquitous): The Substrate system shall pmap_protect: walk range, update PTE bits (R/W, NX, U/S), invalidate TLB.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0365** (EARS/Ubiquitous): The Substrate system shall reference/Modification Tracking:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0366** (EARS/Ubiquitous): The Substrate system shall same API as i386: pmap_is_referenced, pmap_is_modified, pmap_clear_*, pmap_test_and_clear_*.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0367** (EARS/Ubiquitous): The Substrate system shall range and batch variants.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0368** (EARS/Ubiquitous): The Substrate system shall copy-on-Write: same architecture as i386 (pmap_fork, pmap_page_is_cow).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0369** (EARS/Ubiquitous): The Substrate system shall tLB Management:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0370** (EARS/Ubiquitous): The Substrate system shall iPI-based SMP shootdown (pmap_shootdown_page/range/all).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0371** (EARS/Ubiquitous): The Substrate system shall iNVPCID instruction support (if available):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0372** (EARS/Ubiquitous): The Substrate system shall type 0: invalidate specific PCID + VA.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0373** (EARS/Ubiquitous): The Substrate system shall type 1: invalidate all entries for a PCID.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0374** (EARS/Ubiquitous): The Substrate system shall type 2: invalidate all entries including globals.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0375** (EARS/Ubiquitous): The Substrate system shall type 3: invalidate all entries except globals.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0376** (EARS/Ubiquitous): The Substrate system shall large Page Support:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0377** (EARS/Ubiquitous): The Substrate system shall 2 MB Pages: PDE with PS=1, no PT needed.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0378** (EARS/Ubiquitous): The Substrate system shall pmap_enter_2mb(pmap, va, pa, prot, flags).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0379** (EARS/Ubiquitous): The Substrate system shall pmap_remove_2mb(pmap, va).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0380** (EARS/Ubiquitous): The Substrate system shall automatic promotion: coalesce 512 adjacent 4 KB pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0381** (EARS/Ubiquitous): The Substrate system shall demotion: split on partial unmap/protect.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0382** (EARS/Ubiquitous): The Substrate system shall 1 GB Pages: PDPTE with PS=1, no PD/PT needed.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0383** (EARS/Ubiquitous): The Substrate system shall pmap_enter_1gb(pmap, va, pa, prot, flags).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0384** (EARS/Ubiquitous): The Substrate system shall pmap_remove_1gb(pmap, va).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0385** (EARS/Ubiquitous): The Substrate system shall detect support via CPUID (leaf 0x80000001, bit 26).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0386** (EARS/Ubiquitous): The Substrate system shall use for large kernel mappings and huge anonymous regions.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0387** (EARS/Ubiquitous): The Substrate system shall global Page Support (PGE):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0388** (EARS/Ubiquitous): The Substrate system shall set CR4.PGE, mark kernel pages with PG_G.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0389** (EARS/Ubiquitous): The Substrate system shall pmap_set_global(pmap, va) / pmap_mark_kernel_global().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0390** (EARS/Ubiquitous): The Substrate system shall pCID Support (Process Context Identifiers):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0391** (EARS/Ubiquitous): The Substrate system shall detect PCID via CPUID (leaf 1, ECX bit 17).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0392** (EARS/Ubiquitous): The Substrate system shall detect INVPCID via CPUID (leaf 7, EBX bit 10).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0393** (EARS/Ubiquitous): The Substrate system shall set CR4.PCIDE to enable.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0394** (EARS/Ubiquitous): The Substrate system shall pCID pool: allocate 12-bit IDs (max 4096), recycle via generation counter.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0395** (EARS/Ubiquitous): The Substrate system shall pmap_pcid_alloc() / pmap_pcid_free(): pool management.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0396** (EARS/Ubiquitous): The Substrate system shall assign PCID on pmap_create(), include in CR3 on activate.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0397** (EARS/Ubiquitous): The Substrate system shall avoid TLB flush on context switch between different PCIDs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0398** (EARS/Ubiquitous): The Substrate system shall nX (No Execute) Bit:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0399** (EARS/Ubiquitous): The Substrate system shall enable via IA32_EFER.NXE MSR.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0400** (EARS/Ubiquitous): The Substrate system shall set NX (bit 63 of PTE) for stack, heap, data pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0401** (EARS/Ubiquitous): The Substrate system shall clear NX for code pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0402** (EARS/Ubiquitous): The Substrate system shall enforce W^X: pages cannot be both writable and executable.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0403** (EARS/Ubiquitous): The Substrate system shall 5-Level Paging (LA57 - deferred):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0404** (EARS/Ubiquitous): The Substrate system shall detect via CPUID (leaf 7, ECX bit 16).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0405** (EARS/Ubiquitous): The Substrate system shall pML5 adds 57-bit virtual addressing (128 PB).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0406** (EARS/Ubiquitous): The Substrate system shall recursive mapping adjustment for 5 levels.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0407** (EARS/Ubiquitous): The Substrate system shall pMAP Statistics and Debugging:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0408** (EARS/Ubiquitous): The Substrate system shall same per-pmap and global counters as i386.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0409** (EARS/Ubiquitous): The Substrate system shall pmap_dump(pmap): debug dump of 4-level page tables.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0410** (EARS/Ubiquitous): The Substrate system shall pmap_check(pmap): consistency verification.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0411** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0412** (EARS/Ubiquitous): The Substrate system shall unit: 4-level page table walk - pmap_enter at various canonical addresses.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0413** (EARS/Ubiquitous): The Substrate system shall unit: NX enforcement - execute from NX page triggers fault.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0414** (EARS/Ubiquitous): The Substrate system shall unit: PCID allocation and recycling under exhaustion.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0415** (EARS/Ubiquitous): The Substrate system shall unit: 2 MB page enter/remove.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0416** (EARS/Ubiquitous): The Substrate system shall unit: 1 GB page enter/remove (if CPU supports).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0417** (EARS/Ubiquitous): The Substrate system shall unit: pmap_fork with 4-level walk - COW isolation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0418** (EARS/Ubiquitous): The Substrate system shall unit: INVPCID types 0-3 dispatch.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0419** (EARS/Ubiquitous): The Substrate system shall property: PML4 entries 256-511 always match kernel_pmap.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0420** (EARS/Ubiquitous): The Substrate system shall integration: boot x86_64 kernel, verify user processes get isolated address spaces.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0421** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0422** (EARS/Ubiquitous): The Substrate system shall internal doc: x86_64 pmap architecture (4-level, PCID, NX).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0423** (EARS/Ubiquitous): The Substrate system shall internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0424** (EARS/Ubiquitous): The Substrate system shall internal doc: large page promotion/demotion strategy.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0425** (EARS/Ubiquitous): The Substrate system shall vM Subsystem (Machine Independent):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0426** (EARS/Ubiquitous): The Substrate system shall vM Map (vm_map):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0427** (EARS/Ubiquitous): The Substrate system shall vm_map structure representing a process's virtual address space.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0428** (EARS/Ubiquitous): The Substrate system shall red-black tree of vm_map_entry for O(log N) lookup by VA.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0429** (EARS/Ubiquitous): The Substrate system shall linked list of entries for sequential traversal.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0430** (EARS/Ubiquitous): The Substrate system shall vm_map_create(pmap, min, max): create new map.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0431** (EARS/Ubiquitous): The Substrate system shall vm_map_destroy(map): tear down entire map.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0432** (EARS/Ubiquitous): The Substrate system shall vm_map_lock / vm_map_unlock: reader/writer locking.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0433** (EARS/Ubiquitous): The Substrate system shall vM Map Entries (vm_map_entry):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0434** (EARS/Ubiquitous): The Substrate system shall represent contiguous virtual regions (text, data, stack, mmap).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0435** (EARS/Ubiquitous): The Substrate system shall fields: start, end, offset, protection, max_protection.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0436** (EARS/Ubiquitous): The Substrate system shall object: backing vm_object (anonymous or vnode-backed).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0437** (EARS/Ubiquitous): The Substrate system shall inheritance: share, copy, none (for fork behavior).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0438** (EARS/Ubiquitous): The Substrate system shall wired_count: prevent pageout for this region.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0439** (EARS/Ubiquitous): The Substrate system shall vm_map_insert(map, object, offset, start, end, prot).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0440** (EARS/Ubiquitous): The Substrate system shall vm_map_remove(map, start, end): remove entries in range.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0441** (EARS/Ubiquitous): The Substrate system shall vm_map_lookup(map, va, &entry): find entry containing VA.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0442** (EARS/Ubiquitous): The Substrate system shall vm_map_protect(map, start, end, new_prot).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0443** (EARS/Ubiquitous): The Substrate system shall vm_map_inherit(map, start, end, inheritance).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0444** (EARS/Ubiquitous): The Substrate system shall entry merging: coalesce adjacent entries with same attributes.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0445** (EARS/Ubiquitous): The Substrate system shall vM Objects (vm_object):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0446** (EARS/Ubiquitous): The Substrate system shall abstract backing store (anonymous memory, vnode/file, device).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0447** (EARS/Ubiquitous): The Substrate system shall resident_pages: radix tree or hash of vm_page_t by page index.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0448** (EARS/Ubiquitous): The Substrate system shall ref_count: number of map entries referencing this object.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0449** (EARS/Ubiquitous): The Substrate system shall shadow: pointer to shadow object (for COW chains).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0450** (EARS/Ubiquitous): The Substrate system shall pager: associated pager (swap, vnode, device, default).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0451** (EARS/Ubiquitous): The Substrate system shall vm_object_allocate(size): create anonymous object.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0452** (EARS/Ubiquitous): The Substrate system shall vm_object_reference(obj) / vm_object_deallocate(obj).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0453** (EARS/Ubiquitous): The Substrate system shall vm_object_page_lookup(obj, pindex): find resident page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0454** (EARS/Ubiquitous): The Substrate system shall vm_object_page_insert(obj, page, pindex).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0455** (EARS/Ubiquitous): The Substrate system shall vm_object_shadow(obj, offset, size): create shadow for COW.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0456** (EARS/Ubiquitous): The Substrate system shall vm_object_collapse(obj): collapse shadow chain when possible.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0457** (EARS/Ubiquitous): The Substrate system shall fault Handler (vm_fault):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0458** (EARS/Ubiquitous): The Substrate system shall high-level page fault resolution.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0459** (EARS/Ubiquitous): The Substrate system shall vm_fault(map, va, fault_type): main entry point.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0460** (EARS/Ubiquitous): The Substrate system shall look up vm_map_entry for faulting VA.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0461** (EARS/Ubiquitous): The Substrate system shall check protection against fault type.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0462** (EARS/Ubiquitous): The Substrate system shall walk shadow object chain to find page or pager.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0463** (EARS/Ubiquitous): When page found in object: map it via pmap_enter, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0464** (EARS/Ubiquitous): When page not found: call pager to fetch from backing store, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0465** (EARS/Ubiquitous): The Substrate system shall zero-fill on demand: anonymous pages filled with zeros on first access.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0466** (EARS/Ubiquitous): The Substrate system shall prefaulting: heuristic to load surrounding pages during I/O.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0467** (EARS/Ubiquitous): The Substrate system shall copy-on-Write (COW):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0468** (EARS/Ubiquitous): The Substrate system shall vm_fault logic for write to read-only shared page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0469** (EARS/Ubiquitous): The Substrate system shall create shadow object on fork.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0470** (EARS/Ubiquitous): The Substrate system shall mark parent entries as copy-on-write.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0471** (EARS/Ubiquitous): When write fault: allocate new page, copy contents, update PTE, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0472** (EARS/Ubiquitous): The Substrate system shall decrement original page refcount.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0473** (EARS/Ubiquitous): The Substrate system shall shadow chain collapse: when shadow has all pages, absorb parent.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0474** (EARS/Ubiquitous): The Substrate system shall swap Subsystem:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0475** (EARS/Ubiquitous): The Substrate system shall swap Pager (vm_pager):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0476** (EARS/Ubiquitous): The Substrate system shall generic pager interface: pager_get(obj, pindex), pager_put(obj, pindex).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0477** (EARS/Ubiquitous): The Substrate system shall swap pager: move pages to/from swap device.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0478** (EARS/Ubiquitous): The Substrate system shall vnode pager: read/write file-backed pages via VFS.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0479** (EARS/Ubiquitous): The Substrate system shall device pager: direct mapping of device memory (framebuffer, MMIO).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0480** (EARS/Ubiquitous): The Substrate system shall default pager: zero-fill for anonymous memory.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0481** (EARS/Ubiquitous): The Substrate system shall backing Store (vm_swap):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0482** (EARS/Ubiquitous): The Substrate system shall support swap partitions and swap files.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0483** (EARS/Ubiquitous): The Substrate system shall swap space allocation bitmap.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0484** (EARS/Ubiquitous): The Substrate system shall swapon(path) / swapoff(path) syscalls.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0485** (EARS/Ubiquitous): The Substrate system shall per-page swap block tracking.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0486** (EARS/Ubiquitous): The Substrate system shall page Replacement Policy:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0487** (EARS/Ubiquitous): The Substrate system shall clock/LRU algorithm using A/D bits.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0488** (EARS/Ubiquitous): The Substrate system shall integration with page daemon and page queues.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0489** (EARS/Ubiquitous): The Substrate system shall advanced Features:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0490** (EARS/Ubiquitous): The Substrate system shall file-backed mmap (MAP_FILE):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0491** (EARS/Ubiquitous): The Substrate system shall vnode pager triggers VFS read on page fault.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0492** (EARS/Ubiquitous): The Substrate system shall dirty page tracking and msync writeback.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0493** (EARS/Ubiquitous): The Substrate system shall mAP_PRIVATE: COW on write (shadow object).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0494** (EARS/Ubiquitous): The Substrate system shall mAP_SHARED: write-through to file.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0495** (EARS/Ubiquitous): The Substrate system shall reference Counting & Shared Memory:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0496** (EARS/Ubiquitous): The Substrate system shall vm_page_t refcounts: track mappings to each physical frame.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0497** (EARS/Ubiquitous): The Substrate system shall vm_object refcounts: track regions sharing backing store.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0498** (EARS/Ubiquitous): The Substrate system shall mAP_SHARED write-through for multi-process shared memory.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0499** (EARS/Ubiquitous): The Substrate system shall lazy Faulting:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0500** (EARS/Ubiquitous): The Substrate system shall demand paging: allocate frames only on access (zero-fill on demand).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0501** (EARS/Ubiquitous): The Substrate system shall prefaulting: heuristic to load surrounding pages during I/O.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0502** (EARS/Ubiquitous): The Substrate system shall read-ahead for sequential file access patterns.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0503** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0504** (EARS/Ubiquitous): The Substrate system shall unit: vm_map insert/remove/lookup/protect.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0505** (EARS/Ubiquitous): The Substrate system shall unit: vm_object create/reference/deallocate/shadow/collapse.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0506** (EARS/Ubiquitous): The Substrate system shall unit: vm_fault resolution for anonymous, file-backed, and COW pages.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0507** (EARS/Ubiquitous): The Substrate system shall unit: swap pager round-trip (page out → page in).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0508** (EARS/Ubiquitous): The Substrate system shall property: vm_map entries are non-overlapping and sorted.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0509** (EARS/Ubiquitous): The Substrate system shall property: vm_object refcount reaches 0 only when no entries reference it.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0510** (EARS/Ubiquitous): The Substrate system shall integration: mmap anonymous memory, write, fork, verify COW isolation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0511** (EARS/Ubiquitous): The Substrate system shall integration: mmap file, read, modify, msync, verify on-disk.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0512** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0513** (EARS/Ubiquitous): The Substrate system shall internal doc: VM hierarchy (map → entry → object → page).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0514** (EARS/Ubiquitous): The Substrate system shall internal doc: COW shadow chain and collapse algorithm.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0515** (EARS/Ubiquitous): The Substrate system shall internal doc: pager interface contract.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0516** (EARS/Ubiquitous): The Substrate system shall kernel Allocator (UMA/Slab):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0517** (EARS/Ubiquitous): The Substrate system shall uMA Core (uma_core.c):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0518** (EARS/Ubiquitous): The Substrate system shall zone creation: uma_zcreate(name, size, ctor, dtor, init, fini, align, flags).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0519** (EARS/Ubiquitous): The Substrate system shall zone destruction: uma_zdestroy(zone).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0520** (EARS/Ubiquitous): The Substrate system shall uma_zalloc(zone, flags): allocate object from zone.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0521** (EARS/Ubiquitous): The Substrate system shall uma_zfree(zone, item): free object to zone.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0522** (EARS/Ubiquitous): The Substrate system shall per-CPU Caches (Magazines):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0523** (EARS/Ubiquitous): The Substrate system shall lockless fast-path allocations via per-CPU magazine layer.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0524** (EARS/Ubiquitous): The Substrate system shall magazine swap on empty/full (loaded ↔ previous).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0525** (EARS/Ubiquitous): The Substrate system shall depot layer: global pool of full/empty magazines.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0526** (EARS/Ubiquitous): The Substrate system shall slab Management:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0527** (EARS/Ubiquitous): The Substrate system shall slab allocation from VM (page-sized).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0528** (EARS/Ubiquitous): The Substrate system shall free list within slab for object tracking.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0529** (EARS/Ubiquitous): The Substrate system shall partial/full/empty slab lists per zone.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0530** (EARS/Ubiquitous): The Substrate system shall alignment/Coloring:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0531** (EARS/Ubiquitous): The Substrate system shall cPU cache line alignment for objects.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0532** (EARS/Ubiquitous): The Substrate system shall slab coloring to reduce cache set conflicts.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0533** (EARS/Ubiquitous): The Substrate system shall constructors/Destructors:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0534** (EARS/Ubiquitous): The Substrate system shall ctor callback on allocation (after init).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0535** (EARS/Ubiquitous): The Substrate system shall dtor callback on free (before fini).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0536** (EARS/Ubiquitous): The Substrate system shall init once per slab object lifetime.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0537** (EARS/Ubiquitous): The Substrate system shall fini once when slab freed.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0538** (EARS/Ubiquitous): The Substrate system shall reclamation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0539** (EARS/Ubiquitous): The Substrate system shall shrinker callbacks to free unused slabs under memory pressure.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0540** (EARS/Ubiquitous): The Substrate system shall bucket draining back to slabs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0541** (EARS/Ubiquitous): The Substrate system shall memory pressure feedback integration with page daemon.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0542** (EARS/Ubiquitous): The Substrate system shall debugging & Safety:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0543** (EARS/Ubiquitous): The Substrate system shall redzones: guard bytes before/after objects with canary values.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0544** (EARS/Ubiquitous): The Substrate system shall poisoning: fill freed memory with 0xDEADBEEF to catch use-after-free.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0545** (EARS/Ubiquitous): The Substrate system shall leak Detection: track active allocations per zone.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0546** (EARS/Ubiquitous): The Substrate system shall foreign Pointer Protection: validate pointer belongs to zone on free.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0547** (EARS/Ubiquitous): The Substrate system shall uma_find_slab() Optimization: replace O(N) linear search with hash table.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0548** (EARS/Ubiquitous): The Substrate system shall general Allocator (kmalloc/kfree):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0549** (EARS/Ubiquitous): The Substrate system shall power-of-two zones: back kmalloc with UMA zones for sizes 16, 32, 64, ..., 4096.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0550** (EARS/Ubiquitous): The Substrate system shall large allocations: bypass UMA for >4 KB (direct vm_map allocation).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0551** (EARS/Ubiquitous): The Substrate system shall krealloc(ptr, size): resize allocation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0552** (EARS/Ubiquitous): The Substrate system shall statistics: track memory usage by malloc_type (subsystem).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0553** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0554** (EARS/Ubiquitous): The Substrate system shall unit: zone create/alloc/free/destroy lifecycle.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0555** (EARS/Ubiquitous): The Substrate system shall unit: per-CPU cache hit/miss paths.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0556** (EARS/Ubiquitous): The Substrate system shall unit: slab allocation and free list integrity.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0557** (EARS/Ubiquitous): The Substrate system shall unit: ctor/dtor/init/fini callback ordering.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0558** (EARS/Ubiquitous): The Substrate system shall unit: redzone corruption detection.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0559** (EARS/Ubiquitous): The Substrate system shall unit: poison detection on use-after-free.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0560** (EARS/Ubiquitous): The Substrate system shall property: total allocated + free = zone capacity.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0561** (EARS/Ubiquitous): The Substrate system shall stress: 10000 alloc/free cycles across multiple zones.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0562** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0563** (EARS/Ubiquitous): The Substrate system shall internal doc: UMA architecture (zone → slab → magazine → per-CPU cache).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0564** (EARS/Ubiquitous): The Substrate system shall internal doc: kmalloc power-of-two zone selection.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0565** (EARS/Ubiquitous): The Substrate system shall user Memory Syscalls:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0566** (EARS/Ubiquitous): The Substrate system shall sys_mmap(addr, len, prot, flags, fd, offset): map memory.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0567** (EARS/Ubiquitous): The Substrate system shall mAP_ANONYMOUS: zero-fill anonymous mapping.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0568** (EARS/Ubiquitous): The Substrate system shall mAP_PRIVATE: file-backed COW mapping.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0569** (EARS/Ubiquitous): The Substrate system shall mAP_SHARED: file-backed write-through mapping.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0570** (EARS/Ubiquitous): The Substrate system shall mAP_FIXED: map at exact address (unmap existing).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0571** (EARS/Ubiquitous): The Substrate system shall alignment to page boundary.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0572** (EARS/Ubiquitous): The Substrate system shall sys_munmap(addr, len): unmap region.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0573** (EARS/Ubiquitous): The Substrate system shall sys_mprotect(addr, len, prot): change protection.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0574** (EARS/Ubiquitous): The Substrate system shall sys_brk(addr) / sys_sbrk(incr): adjust data segment.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0575** (EARS/Ubiquitous): The Substrate system shall sys_msync(addr, len, flags): sync dirty pages to backing store.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0576** (EARS/Ubiquitous): The Substrate system shall sMP & Interrupts:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0577** (EARS/Ubiquitous): The Substrate system shall discovery:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0578** (EARS/Ubiquitous): The Substrate system shall parse ACPI MADT (APIC) to find processor entries.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0579** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall fallback: parse MP Tables (Intel MultiProcessor Spec).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0580** (EARS/Ubiquitous): The Substrate system shall record BSP and AP LAPIC IDs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0581** (EARS/Ubiquitous): The Substrate system shall local APIC (LAPIC):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0582** (EARS/Ubiquitous): The Substrate system shall map LAPIC MMIO base (default 0xFEE00000).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0583** (EARS/Ubiquitous): The Substrate system shall set Spurious Interrupt Vector Register (SVR): enable APIC, set vector.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0584** (EARS/Ubiquitous): The Substrate system shall timer:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0585** (EARS/Ubiquitous): The Substrate system shall calibrate against PIT or ACPI PM Timer.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0586** (EARS/Ubiquitous): The Substrate system shall set Divider Configuration Register (DCR).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0587** (EARS/Ubiquitous): The Substrate system shall periodic mode for scheduler tick.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0588** (EARS/Ubiquitous): The Substrate system shall one-shot mode for high-resolution sleeps.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0589** (EARS/Ubiquitous): The Substrate system shall error Status Register (ESR) and LVT Error vector.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0590** (EARS/Ubiquitous): The Substrate system shall iPI (Inter-Processor Interrupt):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0591** (EARS/Ubiquitous): The Substrate system shall iCR (Interrupt Command Register) writing logic.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0592** (EARS/Ubiquitous): The Substrate system shall send fixed, lowest priority, NMI, INIT, SIPI IPIs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0593** (EARS/Ubiquitous): The Substrate system shall wait for delivery status (busy bit clear).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0594** (EARS/Ubiquitous): The Substrate system shall i/O APIC:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0595** (EARS/Ubiquitous): The Substrate system shall enumerate I/O APICs from MADT.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0596** (EARS/Ubiquitous): The Substrate system shall ioapic_read / ioapic_write via index/window registers.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0597** (EARS/Ubiquitous): The Substrate system shall redirection Table:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0598** (EARS/Ubiquitous): The Substrate system shall mask/unmask IRQs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0599** (EARS/Ubiquitous): The Substrate system shall set delivery mode (fixed, lowest priority).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0600** (EARS/Ubiquitous): The Substrate system shall set destination (physical/logical).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0601** (EARS/Ubiquitous): The Substrate system shall set polarity and trigger mode (active high/low, edge/level).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0602** (EARS/Ubiquitous): The Substrate system shall legacy ISA IRQ (0-15) → Global System Interrupt (GSI) mapping.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0603** (EARS/Ubiquitous): The Substrate system shall aP Bootstrap:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0604** (EARS/Ubiquitous): The Substrate system shall allocate low-memory trampoline page (under 1 MB).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0605** (EARS/Ubiquitous): The Substrate system shall copy 16-bit real mode entry code to trampoline.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0606** (EARS/Ubiquitous): The Substrate system shall send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0607** (EARS/Ubiquitous): The Substrate system shall aP enters protected mode, enables paging, jumps to C entry.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0608** (EARS/Ubiquitous): The Substrate system shall per-CPU Data:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0609** (EARS/Ubiquitous): The Substrate system shall gS-base (or FS-base) for CPU-local variable access.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0610** (EARS/Ubiquitous): The Substrate system shall per-CPU GDTs and TSSs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0611** (EARS/Ubiquitous): The Substrate system shall per-CPU scheduler runqueues.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0612** (EARS/Ubiquitous): The Substrate system shall per-CPU interrupt stacks.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0613** (EARS/Ubiquitous): The Substrate system shall synchronization:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0614** (EARS/Ubiquitous): The Substrate system shall spinlock implementation (ticket locks or MCS locks).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0615** (EARS/Ubiquitous): The Substrate system shall lock prefix for atomic operations.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0616** (EARS/Ubiquitous): The Substrate system shall deadlock detection (lock ordering validation).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0617** (EARS/Ubiquitous): The Substrate system shall audit all global data structures for race conditions.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0618** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0619** (EARS/Ubiquitous): The Substrate system shall integration: boot SMP with 2, 4, 8 CPUs in QEMU -smp N.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0620** (EARS/Ubiquitous): The Substrate system shall unit: LAPIC timer calibration accuracy.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0621** (EARS/Ubiquitous): The Substrate system shall unit: IPI send/receive between CPUs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0622** (EARS/Ubiquitous): The Substrate system shall unit: per-CPU data isolation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0623** (EARS/Ubiquitous): The Substrate system shall scheduling (MLFQ Scheduler):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0624** (EARS/Ubiquitous): The Substrate system shall algorithm (ULE/MLFQ):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0625** (EARS/Ubiquitous): The Substrate system shall multilevel queues: Realtime, Timeshare, Idle priority classes.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0626** (EARS/Ubiquitous): The Substrate system shall interactiveness heuristics: boost I/O-bound threads.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0627** (EARS/Ubiquitous): The Substrate system shall priority decay for CPU-bound threads.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0628** (EARS/Ubiquitous): The Substrate system shall time slice assignment based on priority class.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0629** (EARS/Ubiquitous): The Substrate system shall sMP Scalability:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0630** (EARS/Ubiquitous): The Substrate system shall per-CPU runqueues (eliminate global scheduler lock).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0631** (EARS/Ubiquitous): The Substrate system shall work-stealing load balancing when a CPU goes idle.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0632** (EARS/Ubiquitous): The Substrate system shall cPU affinity (sched_setaffinity masks).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0633** (EARS/Ubiquitous): The Substrate system shall iPI-based preemption of remote CPUs.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0634** (EARS/Ubiquitous): The Substrate system shall synchronization Primitives:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0635** (EARS/Ubiquitous): The Substrate system shall turnstiles: priority inheritance for mutexes (prevent priority inversion).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0636** (EARS/Ubiquitous): The Substrate system shall sleep Queues: hashed wait queues for sleep/wakeup (O(1) lookup).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0637** (EARS/Ubiquitous): The Substrate system shall context Switching:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0638** (EARS/Ubiquitous): The Substrate system shall fPU lazy save: CR0.TS exception for deferred FPU context.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0639** (EARS/Ubiquitous): The Substrate system shall pCB: refined for thread/process separation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0640** (EARS/Ubiquitous): The Substrate system shall switch_to(old, new): save/restore callee-saved registers, swap stacks.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0641** (EARS/Ubiquitous): The Substrate system shall kernel Process (PID 0 - Swapper/Idle):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0642** (EARS/Ubiquitous): The Substrate system shall pageout daemon work in idle loop.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0643** (EARS/Ubiquitous): The Substrate system shall ensures valid process context always exists.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0644** (EARS/Ubiquitous): The Substrate system shall process Bitness Tracking:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0645** (EARS/Ubiquitous): The Substrate system shall enum proc_bitness (16/32/64) field in process struct.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0646** (EARS/Ubiquitous): The Substrate system shall proc_set_bitness() / proc_get_bitness() with permission checks.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0647** (EARS/Ubiquitous): The Substrate system shall bitness inheritance on fork, transition on exec.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0648** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0649** (EARS/Ubiquitous): The Substrate system shall unit: priority queue insertion/removal ordering.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0650** (EARS/Ubiquitous): The Substrate system shall unit: turnstile priority inheritance chain.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0651** (EARS/Ubiquitous): The Substrate system shall unit: sleep queue hash distribution.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0652** (EARS/Ubiquitous): The Substrate system shall integration: verify load balancing with CPU-intensive workload.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0653** (EARS/Ubiquitous): The Substrate system shall integration: verify interactiveness boost for I/O workload.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0654** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0655** (EARS/Ubiquitous): The Substrate system shall internal doc: MLFQ algorithm and priority classes.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0656** (EARS/Ubiquitous): The Substrate system shall internal doc: SMP load balancing and work stealing.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0657** (EARS/Ubiquitous): The Substrate system shall synchronization:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0658** (EARS/Ubiquitous): The Substrate system shall kernel Primitives:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0659** (EARS/Ubiquitous): The Substrate system shall spinlocks (with GCC C11 atomic builtins).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0660** (EARS/Ubiquitous): The Substrate system shall mutexes (backed by sleep queues).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0661** (EARS/Ubiquitous): The Substrate system shall semaphores (counting, backed by sleep queues).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0662** (EARS/Ubiquitous): The Substrate system shall reader/writer locks.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0663** (EARS/Ubiquitous): The Substrate system shall userspace Synchronization (Futex):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0664** (EARS/Ubiquitous): The Substrate system shall core Operations:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0665** (EARS/Ubiquitous): The Substrate system shall fUTEX_WAIT: atomic compare-and-sleep on user-space word.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0666** (EARS/Ubiquitous): The Substrate system shall futex_cmpxchg_user(): validated userspace CMPXCHG.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0667** (EARS/Ubiquitous): The Substrate system shall validate_uaddr(): ensure address is in user space.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0668** (EARS/Ubiquitous): The Substrate system shall fUTEX_WAKE: wake up N waiters on a futex word.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0669** (EARS/Ubiquitous): The Substrate system shall fUTEX_REQUEUE: move waiters from one futex to another.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0670** (EARS/Ubiquitous): The Substrate system shall atomic compare before requeue (FUTEX_CMP_REQUEUE).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0671** (EARS/Ubiquitous): The Substrate system shall advanced Features:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0672** (EARS/Ubiquitous): The Substrate system shall fUTEX_ROBUST_LIST: handle owner death.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0673** (EARS/Ubiquitous): The Substrate system shall sys_set_robust_list() / sys_get_robust_list().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0674** (EARS/Ubiquitous): The Substrate system shall futex_exit_cleanup(): walk robust list on process exit.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0675** (EARS/Ubiquitous): The Substrate system shall mark owned futexes as FUTEX_OWNER_DIED.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0676** (EARS/Ubiquitous): The Substrate system shall fUTEX_PI: priority inheritance support.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0677** (EARS/Ubiquitous): The Substrate system shall futex_lock_pi() / futex_unlock_pi().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0678** (EARS/Ubiquitous): The Substrate system shall pi_boost_owner() / pi_deboost_owner().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0679** (EARS/Ubiquitous): The Substrate system shall lock holder inherits waiter's priority.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0680** (EARS/Ubiquitous): The Substrate system shall performance:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0681** (EARS/Ubiquitous): The Substrate system shall hash table bucketing for wait queues (O(1) lookup by address).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0682** (EARS/Ubiquitous): The Substrate system shall per-bucket spinlocks.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0683** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0684** (EARS/Ubiquitous): The Substrate system shall unit: FUTEX_WAIT/WAKE basic handshake.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0685** (EARS/Ubiquitous): The Substrate system shall unit: FUTEX_REQUEUE moves waiters correctly.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0686** (EARS/Ubiquitous): The Substrate system shall unit: robust list cleanup on exit.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0687** (EARS/Ubiquitous): The Substrate system shall unit: PI inheritance - low priority holder boosted.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0688** (EARS/Ubiquitous): The Substrate system shall property: no orphaned waiters after process exit.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0689** (EARS/Ubiquitous): The Substrate system shall nTSYNC Driver (Windows NT Sync Primitives):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0690** (EARS/Ubiquitous): The Substrate system shall core Infrastructure:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0691** (EARS/Ubiquitous): The Substrate system shall /dev/ntsync char device with instance-based isolation.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0692** (EARS/Ubiquitous): The Substrate system shall ntsync_instance structure per open file description.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0693** (EARS/Ubiquitous): The Substrate system shall object handle management (object FDs returned from ioctls).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0694** (EARS/Ubiquitous): The Substrate system shall semaphore Object:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0695** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_CREATE_SEM: create semaphore (count, max).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0696** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_SEM_POST: increment semaphore count.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0697** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_READ_SEM: query semaphore state.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0698** (EARS/Ubiquitous): The Substrate system shall mutex Object:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0699** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_CREATE_MUTEX: create mutex (owner, count).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0700** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_MUTEX_UNLOCK: release mutex ownership.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0701** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_READ_MUTEX: query mutex state.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0702** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_KILL_OWNER: mark mutex as abandoned.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0703** (EARS/Ubiquitous): The Substrate system shall event Object:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0704** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_CREATE_EVENT: create event (signaled, manual/auto-reset).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0705** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_SET_EVENT / NTSYNC_IOC_RESET_EVENT / NTSYNC_IOC_PULSE_EVENT.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0706** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_READ_EVENT: query event state.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0707** (EARS/Ubiquitous): The Substrate system shall wait Operations:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0708** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_WAIT_ANY: wait for any of N objects.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0709** (EARS/Ubiquitous): The Substrate system shall nTSYNC_IOC_WAIT_ALL: wait for all N objects simultaneously.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0710** (EARS/Ubiquitous): The Substrate system shall alert event support (optional extra wakeup source).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0711** (EARS/Ubiquitous): The Substrate system shall timeout handling (MONOTONIC/REALTIME clocks).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0712** (EARS/Ubiquitous): The Substrate system shall internal Mechanics:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0713** (EARS/Ubiquitous): The Substrate system shall wait queue per object with priority ordering.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0714** (EARS/Ubiquitous): The Substrate system shall atomic acquisition semantics (spinlock-protected).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0715** (EARS/Ubiquitous): The Substrate system shall cross-object atomicity for WAIT_ALL (multi-lock).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0716** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0717** (EARS/Ubiquitous): The Substrate system shall unit: semaphore create/post/read lifecycle.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0718** (EARS/Ubiquitous): The Substrate system shall unit: mutex create/lock/unlock/abandon.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0719** (EARS/Ubiquitous): The Substrate system shall unit: event set/reset/pulse.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0720** (EARS/Ubiquitous): The Substrate system shall unit: WAIT_ANY with mixed object types.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0721** (EARS/Ubiquitous): The Substrate system shall unit: WAIT_ALL atomicity (all-or-nothing).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0722** (EARS/Ubiquitous): The Substrate system shall unit: timeout expiry (WNOHANG equivalent).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0723** (EARS/Ubiquitous): The Substrate system shall signals:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0724** (EARS/Ubiquitous): The Substrate system shall signal Infrastructure:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0725** (EARS/Ubiquitous): The Substrate system shall per-Process State (process_t):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0726** (EARS/Ubiquitous): The Substrate system shall sig_actions[NSIG]: array of struct sigaction per signal.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0727** (EARS/Ubiquitous): The Substrate system shall sig_catch: bitmask of signals with handlers.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0728** (EARS/Ubiquitous): The Substrate system shall sig_ignore: bitmask of signals set to SIG_IGN.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0729** (EARS/Ubiquitous): The Substrate system shall per-Thread State (thread_t):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0730** (EARS/Ubiquitous): The Substrate system shall sig_pending: bitmask of pending signals.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0731** (EARS/Ubiquitous): The Substrate system shall sig_mask: current signal mask (blocked signals).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0732** (EARS/Ubiquitous): The Substrate system shall sig_alt_stack: alternative signal stack (stack_t).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0733** (EARS/Ubiquitous): The Substrate system shall sig_on_stack: flag for currently executing on alt stack.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0734** (EARS/Ubiquitous): The Substrate system shall signal Properties Table (sigprop.c):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0735** (EARS/Ubiquitous): The Substrate system shall default actions: Terminate, Core, Stop, Ignore, Continue.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0736** (EARS/Ubiquitous): The Substrate system shall sigprop[NSIG]: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0737** (EARS/Ubiquitous): The Substrate system shall unmaskable: SIGKILL, SIGSTOP (SA_CANTMASK).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0738** (EARS/Ubiquitous): The Substrate system shall signal Syscalls:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0739** (EARS/Ubiquitous): The Substrate system shall sys_sigaction(sig, act, oact):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0740** (EARS/Ubiquitous): The Substrate system shall validate signal number (1 ≤ sig ≤ NSIG, not SIGKILL/SIGSTOP).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0741** (EARS/Ubiquitous): The Substrate system shall return old action in oact, install new from act.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0742** (EARS/Ubiquitous): The Substrate system shall update sig_catch/sig_ignore bitmasks.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0743** (EARS/Ubiquitous): The Substrate system shall handle flags: SA_RESETHAND, SA_NODEFER, SA_RESTART, SA_NOCLDSTOP, SA_NOCLDWAIT, SA_SIGINFO, SA_ONSTACK.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0744** (EARS/Ubiquitous): The Substrate system shall sys_sigprocmask(how, set, oset):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0745** (EARS/Ubiquitous): The Substrate system shall apply set based on how: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0746** (EARS/Ubiquitous): The Substrate system shall filter out SIGKILL/SIGSTOP from mask.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0747** (EARS/Ubiquitous): The Substrate system shall sys_sigpending(set): return pending & ~masked signals.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0748** (EARS/Ubiquitous): The Substrate system shall sys_sigsuspend(mask): atomically set mask and sleep; restore on return; always EINTR.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0749** (EARS/Ubiquitous): The Substrate system shall sys_sigaltstack(ss, oss):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0750** (EARS/Ubiquitous): The Substrate system shall install/query alternative signal stack.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0751** (EARS/Ubiquitous): The Substrate system shall validate ss_size ≥ MINSIGSTKSZ.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0752** (EARS/Ubiquitous): The Substrate system shall handle SS_DISABLE; error if on alt stack.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0753** (EARS/Ubiquitous): The Substrate system shall sys_kill(pid, sig):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0754** (EARS/Ubiquitous): The Substrate system shall pid > 0: specific process.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0755** (EARS/Ubiquitous): The Substrate system shall pid == 0: current process group.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0756** (EARS/Ubiquitous): The Substrate system shall pid == -1: all processes (except init).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0757** (EARS/Ubiquitous): The Substrate system shall pid < -1: process group |pid|.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0758** (EARS/Ubiquitous): The Substrate system shall sig == 0: permission check only.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0759** (EARS/Ubiquitous): The Substrate system shall permission: same UID or CAP_KILL.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0760** (EARS/Ubiquitous): The Substrate system shall sys_sigreturn(scp):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0761** (EARS/Ubiquitous): The Substrate system shall validate sigcontext pointer.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0762** (EARS/Ubiquitous): The Substrate system shall verify CS/SS have RPL=3 (user mode).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0763** (EARS/Ubiquitous): The Substrate system shall restore GPRs, eflags (mask IOPL/VM/RF), eip.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0764** (EARS/Ubiquitous): The Substrate system shall restore signal mask from context.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0765** (EARS/Ubiquitous): The Substrate system shall sys_sigwait(set, sig): synchronous signal consumption (no handler).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0766** (EARS/Ubiquitous): The Substrate system shall sys_sigtimedwait(set, info, timeout): like sigwait with timeout + siginfo.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0767** (EARS/Ubiquitous): The Substrate system shall signal Generation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0768** (EARS/Ubiquitous): The Substrate system shall psignal(p, sig): send to process.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0769** (EARS/Ubiquitous): The Substrate system shall init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0770** (EARS/Ubiquitous): The Substrate system shall select best thread for delivery (not masked).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0771** (EARS/Ubiquitous): When SIGCONT, wake stopped threads; clear pending stops, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0772** (EARS/Ubiquitous): When sleeping interruptibly, wake thread, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0773** (EARS/Ubiquitous): The Substrate system shall pgsignal(pgrp, sig): send to process group.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0774** (EARS/Ubiquitous): The Substrate system shall trapsignal(p, sig, code): synchronous trap signal (from exception handler).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0775** (EARS/Ubiquitous): The Substrate system shall pass code via siginfo_t (si_code).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0776** (EARS/Ubiquitous): The Substrate system shall sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0777** (EARS/Ubiquitous): The Substrate system shall sigexit(p, sig): terminate with signal.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0778** (EARS/Ubiquitous): The Substrate system shall core dump if SA_CORE: call coredump().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0779** (EARS/Ubiquitous): The Substrate system shall set exit status to indicate signal termination.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0780** (EARS/Ubiquitous): The Substrate system shall terminal Signals (TTY):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0781** (EARS/Ubiquitous): The Substrate system shall sIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0782** (EARS/Ubiquitous): The Substrate system shall sIGTSTP (Ctrl+Z) to foreground pgrp.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0783** (EARS/Ubiquitous): The Substrate system shall sIGTTIN: background process reads from TTY.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0784** (EARS/Ubiquitous): The Substrate system shall sIGTTOU: background process writes to TTY (if TOSTOP).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0785** (EARS/Ubiquitous): The Substrate system shall sIGHUP: controlling terminal hangup.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0786** (EARS/Ubiquitous): The Substrate system shall signal Delivery (Architecture-Specific - i386):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0787** (EARS/Ubiquitous): The Substrate system shall sendsig() - Frame Construction:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0788** (EARS/Ubiquitous): The Substrate system shall calculate user stack pointer from regs->useresp.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0789** (EARS/Ubiquitous): The Substrate system shall subtract sizeof(struct sigframe).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0790** (EARS/Ubiquitous): The Substrate system shall align stack to 16-byte boundary (System V ABI).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0791** (EARS/Ubiquitous): The Substrate system shall struct sigframe Layout:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0792** (EARS/Ubiquitous): The Substrate system shall retaddr: return address pointing to trampoline.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0793** (EARS/Ubiquitous): The Substrate system shall sig: signal number (first handler argument).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0794** (EARS/Ubiquitous): The Substrate system shall sc: struct sigcontext with saved registers.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0795** (EARS/Ubiquitous): The Substrate system shall struct sigcontext Population:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0796** (EARS/Ubiquitous): The Substrate system shall save segment registers (gs, fs, es, ds).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0797** (EARS/Ubiquitous): The Substrate system shall save GPRs (edi, esi, ebp, esp, ebx, edx, ecx, eax).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0798** (EARS/Ubiquitous): The Substrate system shall save trap info (trapno, err).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0799** (EARS/Ubiquitous): The Substrate system shall save control (eip, cs, eflags, user_esp, user_ss).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0800** (EARS/Ubiquitous): The Substrate system shall handler Invocation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0801** (EARS/Ubiquitous): The Substrate system shall copyout() frame to user stack (with fault handling).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0802** (EARS/Ubiquitous): The Substrate system shall set regs->useresp and regs->eip to frame/handler.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0803** (EARS/Ubiquitous): The Substrate system shall sA_SIGINFO Extended Frame:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0804** (EARS/Ubiquitous): The Substrate system shall construct siginfo_t (si_signo, si_code, si_addr, etc.).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0805** (EARS/Ubiquitous): The Substrate system shall construct ucontext_t with machine context.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0806** (EARS/Ubiquitous): The Substrate system shall handler signature: void handler(int, siginfo_t *, void *).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0807** (EARS/Ubiquitous): The Substrate system shall alt Stack Handling:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0808** (EARS/Ubiquitous): When SA_ONSTACK and alt stack configured: use alt stack SP, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0809** (EARS/Ubiquitous): The Substrate system shall set sig_on_stack flag.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0810** (EARS/Ubiquitous): The Substrate system shall signal Trampoline:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0811** (EARS/Ubiquitous): The Substrate system shall map trampoline page at fixed address (e.g., 0xFFFF1000).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0812** (EARS/Ubiquitous): The Substrate system shall page: user-readable, executable, not writable.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0813** (EARS/Ubiquitous): The Substrate system shall code: mov $SYS_sigreturn, %eax; int $0x80.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0814** (EARS/Ubiquitous): The Substrate system shall vDSO Integration (future):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0815** (EARS/Ubiquitous): The Substrate system shall embed trampoline in VDSO page.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0816** (EARS/Ubiquitous): The Substrate system shall use AT_SYSINFO auxiliary vector entry.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0817** (EARS/Ubiquitous): The Substrate system shall signal Mask Management:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0818** (EARS/Ubiquitous): The Substrate system shall during handler: block current signal (unless SA_NODEFER) + sa_mask.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0819** (EARS/Ubiquitous): The Substrate system shall restore original mask in sys_sigreturn.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0820** (EARS/Ubiquitous): The Substrate system shall inheritance:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0821** (EARS/Ubiquitous): The Substrate system shall fork(): child inherits pending signals and mask.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0822** (EARS/Ubiquitous): The Substrate system shall exec(): reset all handlers to SIG_DFL (except SIG_IGN).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0823** (EARS/Ubiquitous): The Substrate system shall signal Checking Points:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0824** (EARS/Ubiquitous): The Substrate system shall return from interrupt/exception: signal_handle_pending() if returning to user mode.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0825** (EARS/Ubiquitous): The Substrate system shall return from syscall: check pending, return EINTR if interruptible.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0826** (EARS/Ubiquitous): The Substrate system shall sleep wakeup: sched_sleep() returns on signal (EINTR).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0827** (EARS/Ubiquitous): The Substrate system shall special Signal Handling:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0828** (EARS/Ubiquitous): The Substrate system shall sIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0829** (EARS/Ubiquitous): The Substrate system shall sIGSTOP: cannot be caught/blocked/ignored; stops all threads.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0830** (EARS/Ubiquitous): The Substrate system shall sIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0831** (EARS/Ubiquitous): The Substrate system shall sIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0832** (EARS/Ubiquitous): The Substrate system shall job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0833** (EARS/Ubiquitous): The Substrate system shall pID 1 (Init) Protection:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0834** (EARS/Ubiquitous): The Substrate system shall ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0835** (EARS/Ubiquitous): When init exits, system halts/panics, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0836** (EARS/Ubiquitous): The Substrate system shall init adopts orphaned processes.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0837** (EARS/Ubiquitous): The Substrate system shall core Dump (future):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0838** (EARS/Ubiquitous): The Substrate system shall signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0839** (EARS/Ubiquitous): The Substrate system shall coredump(): write ELF core format (/cores/core.PID).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0840** (EARS/Ubiquitous): The Substrate system shall respect RLIMIT_CORE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0841** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0842** (EARS/Ubiquitous): The Substrate system shall unit: sys_sigaction install/replace/reset handler.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0843** (EARS/Ubiquitous): The Substrate system shall unit: sys_sigprocmask block/unblock/setmask.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0844** (EARS/Ubiquitous): The Substrate system shall unit: sys_kill to specific PID, pgrp, all.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0845** (EARS/Ubiquitous): The Substrate system shall unit: psignal thread selection (prefer unmasked).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0846** (EARS/Ubiquitous): The Substrate system shall unit: sendsig frame construction and sigreturn restoration.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0847** (EARS/Ubiquitous): The Substrate system shall unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0848** (EARS/Ubiquitous): The Substrate system shall unit: SA_RESTART - interrupted syscall restarted.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0849** (EARS/Ubiquitous): The Substrate system shall unit: SA_SIGINFO - extended frame with siginfo + ucontext.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0850** (EARS/Ubiquitous): The Substrate system shall property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0851** (EARS/Ubiquitous): The Substrate system shall integration: fork, send SIGINT to child, verify termination.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0852** (EARS/Ubiquitous): The Substrate system shall integration: job control stop/continue cycle.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0853** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0854** (EARS/Ubiquitous): The Substrate system shall internal doc: signal lifecycle (generation → delivery → handler → sigreturn).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0855** (EARS/Ubiquitous): The Substrate system shall internal doc: i386 signal frame layout.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0856** (EARS/Ubiquitous): The Substrate system shall internal doc: signal checking points and SA_RESTART logic.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0857** (EARS/Ubiquitous): The Substrate system shall refactor kmain:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0858** (EARS/Ubiquitous): The Substrate system shall move early i386 boot code to sys/arch/i386/early_boot.c.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0859** (EARS/Ubiquitous): The Substrate system shall create init_memory helper.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0860** (EARS/Ubiquitous): The Substrate system shall create init_root_fs helper.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0861** (EARS/Ubiquitous): The Substrate system shall clean up kmain flow.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0862** (EARS/Ubiquitous): The Substrate system shall kernel Core Maintenance:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0863** (EARS/Ubiquitous): The Substrate system shall refactor spinlock.c to use GCC C11 atomic builtins.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0864** (EARS/Ubiquitous): The Substrate system shall rewrite swapper.c idle loop (race-free).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0865** (EARS/Ubiquitous): The Substrate system shall cleanup sleepq.c formatting and style.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0866** (EARS/Ubiquitous): The Substrate system shall remove obsolete sys/kern/stubs.c.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0867** (EARS/Ubiquitous): The Substrate system shall modularize sys/kern/lib.c into sys/lib/.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0868** (EARS/Ubiquitous): The Substrate system shall audit mutex.c and semaphore.c for race conditions.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0869** (EARS/Ubiquitous): The Substrate system shall fix sched_smp.c CPU ID assumption.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0870** (EARS/Ubiquitous): The Substrate system shall update Kernel Documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0871** (EARS/Ubiquitous): The Substrate system shall document Console/UART subsystem changes.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0872** (EARS/Ubiquitous): The Substrate system shall document kmain initialization flow.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0873** (EARS/Ubiquitous): The Substrate system shall update ARCHITECTURE.md.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0874** (EARS/Ubiquitous): The Substrate system shall process Lifecycle & Job Control:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0875** (EARS/Ubiquitous): The Substrate system shall process Termination (exit / _exit):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0876** (EARS/Ubiquitous): The Substrate system shall phase 1 - State Transition (RUNNING → DYING):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0877** (EARS/Ubiquitous): The Substrate system shall set p_state = SDYING.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0878** (EARS/Ubiquitous): The Substrate system shall record exit status in p_xstat.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0879** (EARS/Ubiquitous): The Substrate system shall prevent further scheduling.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0880** (EARS/Ubiquitous): The Substrate system shall phase 2 - Resource Release:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0881** (EARS/Ubiquitous): The Substrate system shall file Descriptors: fd_close_all(p) - close all, decrement refcounts.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0882** (EARS/Ubiquitous): The Substrate system shall virtual Memory: pmap_release(p->pmap) - free user page tables, switch to kernel pmap.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0883** (EARS/Ubiquitous): The Substrate system shall vM Map: release vm_map and all vm_map_entry structures.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0884** (EARS/Ubiquitous): The Substrate system shall cWD / Root: decrement cwd and root vnode refcounts.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0885** (EARS/Ubiquitous): The Substrate system shall controlling Terminal: if session leader, SIGHUP to foreground group, revoke TTY.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0886** (EARS/Ubiquitous): The Substrate system shall pending Signals: clear all.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0887** (EARS/Ubiquitous): The Substrate system shall timers: cancel ITIMER_REAL/VIRTUAL/PROF and alarm().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0888** (EARS/Ubiquitous): The Substrate system shall system V IPC: detach shmem, undo semaphores, remove owned msg queues.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0889** (EARS/Ubiquitous): The Substrate system shall pOSIX IPC: unlink owned semaphores/shared memory.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0890** (EARS/Ubiquitous): The Substrate system shall futex Cleanup: process robust list, mark FUTEX_OWNER_DIED, wake waiters.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0891** (EARS/Ubiquitous): The Substrate system shall kernel Locks: release held mutexes, cancel pending lock requests.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0892** (EARS/Ubiquitous): The Substrate system shall phase 3 - Thread Termination:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0893** (EARS/Ubiquitous): The Substrate system shall set t->state = THREAD_ZOMBIE for each thread.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0894** (EARS/Ubiquitous): The Substrate system shall interrupt non-current threads, wait for zombie state.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0895** (EARS/Ubiquitous): The Substrate system shall free thread stacks and structures.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0896** (EARS/Ubiquitous): The Substrate system shall current thread becomes reaper.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0897** (EARS/Ubiquitous): The Substrate system shall phase 4 - Resource Usage Finalization:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0898** (EARS/Ubiquitous): The Substrate system shall rusage_finalize(p): accumulate thread times.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0899** (EARS/Ubiquitous): The Substrate system shall record ru_utime, ru_stime, ru_maxrss, ru_minflt, ru_majflt, ru_nvcsw, ru_nivcsw.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0900** (EARS/Ubiquitous): The Substrate system shall phase 5 - Orphan Reparenting:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0901** (EARS/Ubiquitous): The Substrate system shall proc_reparent_children(p): move children to init.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0902** (EARS/Ubiquitous): The Substrate system shall acquire proctree_lock.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0903** (EARS/Ubiquitous): The Substrate system shall for each child: set p_parent = init, move to init's children list.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0904** (EARS/Ubiquitous): The Substrate system shall wake init if child is zombie.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0905** (EARS/Ubiquitous): When init dying: reparent to swapper (PID 0) or panic, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0906** (EARS/Ubiquitous): The Substrate system shall phase 6 - Process Group / Session Cleanup:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0907** (EARS/Ubiquitous): The Substrate system shall remove from process group; free struct pgrp if last member.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0908** (EARS/Ubiquitous): When session leader: SIGHUP to foreground, revoke TTY, mark no leader, the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0909** (EARS/Ubiquitous): The Substrate system shall check for orphaned process groups → SIGHUP + SIGCONT.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0910** (EARS/Ubiquitous): The Substrate system shall phase 7 - Parent Notification:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0911** (EARS/Ubiquitous): The Substrate system shall psignal(parent, SIGCHLD).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0912** (EARS/Ubiquitous): When SA_NOCLDWAIT: auto-reap (no zombie), the Substrate system shall satisfy the specified behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0913** (EARS/Ubiquitous): The Substrate system shall wake parent on p_children channel.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0914** (EARS/Ubiquitous): The Substrate system shall phase 8 - Zombie State (DYING → ZOMBIE):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0915** (EARS/Ubiquitous): The Substrate system shall set p_state = SZOMB.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0916** (EARS/Ubiquitous): The Substrate system shall only pid, ppid, xstat, rusage remain valid.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0917** (EARS/Ubiquitous): The Substrate system shall phase 9 - Final Context Switch:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0918** (EARS/Ubiquitous): The Substrate system shall current_thread->state = THREAD_ZOMBIE.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0919** (EARS/Ubiquitous): The Substrate system shall sched_yield() - never returns.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0920** (EARS/Ubiquitous): The Substrate system shall accounting:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0921** (EARS/Ubiquitous): The Substrate system shall acct_process(code): write accounting record (command, times, status).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0922** (EARS/Ubiquitous): The Substrate system shall edge Cases:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0923** (EARS/Ubiquitous): The Substrate system shall init (PID 1) exit: kernel halts/panics with warning.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0924** (EARS/Ubiquitous): The Substrate system shall killed by signal during exit: ignore signals once SDYING.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0925** (EARS/Ubiquitous): The Substrate system shall locks held during exit: log warning, force release.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0926** (EARS/Ubiquitous): The Substrate system shall oOM during exit: must not allocate (only free).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0927** (EARS/Ubiquitous): The Substrate system shall vfork exit: wake parent immediately.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0928** (EARS/Ubiquitous): The Substrate system shall thread group exit: all threads terminated on any exit().
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0929** (EARS/Ubiquitous): The Substrate system shall wait Subsystem (wait4 / waitpid):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0930** (EARS/Ubiquitous): The Substrate system shall search Logic:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0931** (EARS/Ubiquitous): The Substrate system shall pid > 0: specific child.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0932** (EARS/Ubiquitous): The Substrate system shall pid == -1: any child.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0933** (EARS/Ubiquitous): The Substrate system shall pid == 0: same process group.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0934** (EARS/Ubiquitous): The Substrate system shall pid < -1: process group |pid|.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0935** (EARS/Ubiquitous): The Substrate system shall wNOHANG: return 0 if no zombies, ECHILD if no children.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0936** (EARS/Ubiquitous): The Substrate system shall blocking Wait: sched_sleep(&p_children), handle EINTR, re-scan.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0937** (EARS/Ubiquitous): The Substrate system shall reaping (ZOMBIE → FREE):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0938** (EARS/Ubiquitous): The Substrate system shall copy xstat and rusage to user buffer.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0939** (EARS/Ubiquitous): The Substrate system shall remove from siblings list and process group.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0940** (EARS/Ubiquitous): The Substrate system shall free process structure.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0941** (EARS/Ubiquitous): The Substrate system shall job Control (WUNTRACED / WCONTINUED):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0942** (EARS/Ubiquitous): The Substrate system shall report stopped children (SSTOP).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0943** (EARS/Ubiquitous): The Substrate system shall report continued children (P_CONTINUED flag).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0944** (EARS/Ubiquitous): The Substrate system shall process Groups & Sessions:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0945** (EARS/Ubiquitous): The Substrate system shall core Structures:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0946** (EARS/Ubiquitous): The Substrate system shall struct pgrp: pg_id, pg_members (list), pg_session (ptr).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0947** (EARS/Ubiquitous): The Substrate system shall struct session: s_id, s_leader, s_ttyvp, s_login.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0948** (EARS/Ubiquitous): The Substrate system shall invariants: every process → one group → one session.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0949** (EARS/Ubiquitous): The Substrate system shall session Management:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0950** (EARS/Ubiquitous): The Substrate system shall sys_setsid(): create new session + pgrp; EPERM if already leader; detach CTTY.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0951** (EARS/Ubiquitous): The Substrate system shall sys_getsid(pid): return session ID.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0952** (EARS/Ubiquitous): The Substrate system shall group Management:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0953** (EARS/Ubiquitous): The Substrate system shall sys_setpgid(pid, pgid): join/create group; must be same session.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0954** (EARS/Ubiquitous): The Substrate system shall sys_getpgid(pid): return group ID.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0955** (EARS/Ubiquitous): The Substrate system shall controlling Terminal (CTTY):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0956** (EARS/Ubiquitous): The Substrate system shall tIOCSCTTY: assign CTTY (session leader, no existing CTTY, TTY unowned).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0957** (EARS/Ubiquitous): The Substrate system shall tIOCNOTTY: release CTTY, SIGHUP to foreground group.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0958** (EARS/Ubiquitous): The Substrate system shall tcsetpgrp / tcgetpgrp: set/get foreground group (SIGTTOU check).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0959** (EARS/Ubiquitous): The Substrate system shall orphaned Process Groups:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0960** (EARS/Ubiquitous): The Substrate system shall detection: no member with parent in different group of same session.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0961** (EARS/Ubiquitous): The Substrate system shall action: SIGHUP + SIGCONT to stopped members.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0962** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0963** (EARS/Ubiquitous): The Substrate system shall unit: proc_exit phases 1-9 ordering and resource cleanup.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0964** (EARS/Ubiquitous): The Substrate system shall unit: wait4 search logic (specific, any, pgrp).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0965** (EARS/Ubiquitous): The Substrate system shall unit: WNOHANG returns 0 / ECHILD correctly.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0966** (EARS/Ubiquitous): The Substrate system shall unit: orphan reparenting to init.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0967** (EARS/Ubiquitous): The Substrate system shall unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0968** (EARS/Ubiquitous): The Substrate system shall unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0969** (EARS/Ubiquitous): The Substrate system shall property: no zombie leaks (all zombies eventually reaped or auto-reaped).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0970** (EARS/Ubiquitous): The Substrate system shall integration: fork → exec → exit → waitpid cycle.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0971** (EARS/Ubiquitous): The Substrate system shall integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0972** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0973** (EARS/Ubiquitous): The Substrate system shall internal doc: process exit 9-phase teardown.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0974** (EARS/Ubiquitous): The Substrate system shall internal doc: wait4 search semantics and blocking.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0975** (EARS/Ubiquitous): The Substrate system shall internal doc: session/pgrp lifecycle and CTTY ownership.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
