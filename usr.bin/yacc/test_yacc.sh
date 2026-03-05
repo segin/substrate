@@ -225,4 +225,19 @@ rm -f test_reads.tab.c test_reads.tab.h test_reads.output
 rm -f test_cnop.tab.c test_cnop.tab.h test_cnop.output test_cnop.log
 rm -f test_cyes.tab.c test_cyes.tab.h test_cyes.output test_cyes.log
 
+
+echo "Testing list.y (empty rules and recursive structures)..."
+rm -f test_list.tab.c test_list.tab.h test_list.output test_list.log
+./yacc -v -d -b test_list ../../tests/usr.bin/yacc/list.y > test_list.log 2>&1
+if [ $? -ne 0 ]; then echo "yacc execution failed for list.y"; exit 1; fi
+echo "list.y passed"
+
+echo "Testing precedence.y (complex precedence rules)..."
+rm -f test_prec.tab.c test_prec.tab.h test_prec.output test_prec.log
+./yacc -v -d -b test_prec ../../tests/usr.bin/yacc/precedence.y > test_prec.log 2>&1
+if [ $? -ne 0 ]; then echo "yacc execution failed for precedence.y"; exit 1; fi
+echo "precedence.y passed"
+
+rm -f test_list.tab.c test_list.tab.h test_list.output test_list.log
+rm -f test_prec.tab.c test_prec.tab.h test_prec.output test_prec.log
 exit 0

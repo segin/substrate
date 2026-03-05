@@ -38,6 +38,8 @@ bin/*/*
 !bin/*/*.h
 !bin/*/*.S
 !bin/*/src/
+!bin/*/tests/
+!bin/*/tests/**
 
 sbin/*
 !sbin/*/

@@ -26,6 +26,7 @@ typedef struct {
 } strvec_t;
 
 typedef struct {
+    const char *self_path;
     int invoked_as_cpp;
     int mode_E;
     int mode_S;
@@ -277,6 +278,32 @@ static int capture_cmd_output(char *const argv[], char *out, size_t outsz) {
     return 0;
 }
 
+static int as_supports_from_cc_flag(const char *as_prog) {
+    static char cached_prog[PATH_MAX];
+    static int cached = -1;
+    char buf[512];
+    char *argv[3];
+
+    if (as_prog == NULL || as_prog[0] == '\0') {
+        return 0;
+    }
+    if (cached >= 0 && strcmp(cached_prog, as_prog) == 0) {
+        return cached;
+    }
+
+    argv[0] = (char *)as_prog;
+    argv[1] = "--target-help";
+    argv[2] = NULL;
+    if (capture_cmd_output(argv, buf, sizeof(buf)) != 0) {
+        cached = 0;
+    } else {
+        cached = strstr(buf, "Substrate assembler target help:") != NULL ? 1 : 0;
+    }
+
+    snprintf(cached_prog, sizeof(cached_prog), "%s", as_prog);
+    return cached;
+}
+
 static int gcc_print_file_name(const char *name, cc_target_t target, char out[PATH_MAX]) {
     char opt[PATH_MAX];
     char *argv[4];
@@ -447,6 +474,12 @@ static int make_temp_path(cc_opts_t *o, const char *prefix, const char *suffix, 
 
 static void cleanup_temp_files(const cc_opts_t *o) {
     size_t i;
+    const char *keep;
+
+    keep = getenv("CC_KEEP_TEMPS");
+    if (keep != NULL && keep[0] != '\0' && strcmp(keep, "0") != 0) {
+        return;
+    }
 
     for (i = 0; i < o->temp_files.count; ++i) {
         unlink(o->temp_files.items[i]);
@@ -1224,22 +1257,58 @@ static int run_bootstrap_frontend(const cc_opts_t *o, const char *in_c, const ch
     return (int)i;
 }
 
+static const char *resolve_tool_default(const cc_opts_t *o, const char *env_name, const char *tool_name,
+                                        const char *sibling_dir, char *buf, size_t bufsz) {
+    const char *override;
+    const char *self;
+    const char *slash;
+    size_t dirlen;
+
+    override = getenv(env_name);
+    if (override != NULL && override[0] != '\0') {
+        return override;
+    }
+    if (o == NULL || o->self_path == NULL || o->self_path[0] == '\0' || buf == NULL || bufsz == 0) {
+        return tool_name;
+    }
+
+    self = o->self_path;
+    slash = strrchr(self, '/');
+    if (slash == NULL) {
+        return tool_name;
+    }
+    dirlen = (size_t)(slash - self);
+
+    if (snprintf(buf, bufsz, "%.*s/../%s/%s", (int)dirlen, self, sibling_dir, tool_name) > 0 &&
+        access(buf, X_OK) == 0) {
+        return buf;
+    }
+    if (snprintf(buf, bufsz, "%.*s/%s", (int)dirlen, self, tool_name) > 0 && access(buf, X_OK) == 0) {
+        return buf;
+    }
+    return tool_name;
+}
+
 static int run_as(const cc_opts_t *o, const char *in_s, const char *out_o) {
-    const char *as_prog = getenv("AS");
-    size_t argc = 5 + o->as_flags.count;
+    char as_path[PATH_MAX];
+    const char *as_prog;
+    int pass_from_cc = 0;
+    size_t argc;
     char **argv;
     size_t i;
     size_t at = 0;
 
+    as_prog = resolve_tool_default(o, "AS", "as", "as", as_path, sizeof(as_path));
+    pass_from_cc = as_supports_from_cc_flag(as_prog);
+    argc = (pass_from_cc ? 6 : 5) + o->as_flags.count;
     argv = (char **)calloc(argc + 1, sizeof(*argv));
     if (argv == NULL) {
         return -1;
     }
-
-    if (as_prog == NULL || as_prog[0] == '\0') {
-        as_prog = "as";
-    }
     argv[at++] = (char *)as_prog;
+    if (pass_from_cc) {
+        argv[at++] = "--from-cc";
+    }
     argv[at++] = o->target == CC_TARGET_I386 ? "--32" : "--64";
     for (i = 0; i < o->as_flags.count; ++i) {
         argv[at++] = o->as_flags.items[i];
@@ -1255,7 +1324,8 @@ static int run_as(const cc_opts_t *o, const char *in_s, const char *out_o) {
 }
 
 static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
-    const char *ld_prog = getenv("LD");
+    char ld_path[PATH_MAX];
+    const char *ld_prog;
     char crt1[PATH_MAX];
     char crti[PATH_MAX];
     char crtbegin[PATH_MAX];
@@ -1273,9 +1343,7 @@ static int run_ld(const cc_opts_t *o, const strvec_t *objs, const char *out) {
         return -1;
     }
 
-    if (ld_prog == NULL || ld_prog[0] == '\0') {
-        ld_prog = "ld";
-    }
+    ld_prog = resolve_tool_default(o, "LD", "ld", "ld", ld_path, sizeof(ld_path));
     argv[at++] = (char *)ld_prog;
     argv[at++] = "-m";
     argv[at++] = o->target == CC_TARGET_I386 ? "elf_i386" : "elf_x86_64";
@@ -1424,6 +1492,7 @@ int cc_main(int argc, char **argv) {
     setenv("SUBSTRATE_CC_ACTIVE", "1", 1);
 
     memset(&o, 0, sizeof(o));
+    o.self_path = (argc > 0) ? argv[0] : NULL;
     memset(&obj_files, 0, sizeof(obj_files));
     o.i386_isa_level = 6;
     o.i386_has_sse = 0;

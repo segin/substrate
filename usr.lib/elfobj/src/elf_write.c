@@ -24,8 +24,86 @@ static uint64_t align_up(uint64_t v, uint64_t a) {
     return (v + (a - 1)) & ~(a - 1);
 }
 
+static uint64_t align_with_page_mod(uint64_t off, uint64_t align, uint64_t addr) {
+    uint64_t want = addr & 0xfffu;
+    uint64_t cur;
+    uint64_t steps;
+
+    off = align_up(off, align ? align : 1);
+    cur = off & 0xfffu;
+    if (cur == want) {
+        return off;
+    }
+    if (cur < want) {
+        return off + (want - cur);
+    }
+    steps = 0x1000u - (cur - want);
+    return off + steps;
+}
+
 static int u64_add_checked(uint64_t a, uint64_t b, uint64_t *out) {
     return elf__u64_add(a, b, out);
+}
+
+static int find_alloc_file_bias(const out_sec_t *secs, size_t sec_count, uint64_t *out_bias) {
+    size_t i;
+
+    if (secs == NULL || out_bias == NULL) {
+        return 0;
+    }
+    for (i = 1; i < sec_count; ++i) {
+        if ((secs[i].flags & SHF_ALLOC) == 0 || secs[i].type == SHT_NOBITS || secs[i].size == 0) {
+            continue;
+        }
+        if (secs[i].addr < secs[i].offset) {
+            continue;
+        }
+        *out_bias = secs[i].addr - secs[i].offset;
+        return 1;
+    }
+    return 0;
+}
+
+static uint32_t count_gnu_verdef_entries(const out_sec_t *sec, elfobj_endian_t endian) {
+    size_t off = 0;
+    uint32_t count = 0;
+
+    if (sec == NULL || sec->data == NULL || sec->size < 20) {
+        return 0;
+    }
+    while (off + 20 <= sec->size) {
+        uint32_t next = elf__rd32(sec->data + off + 16, endian);
+        count++;
+        if (next == 0) {
+            break;
+        }
+        if (next < 20 || next > sec->size - off) {
+            break;
+        }
+        off += next;
+    }
+    return count;
+}
+
+static uint32_t count_gnu_verneed_entries(const out_sec_t *sec, elfobj_endian_t endian) {
+    size_t off = 0;
+    uint32_t count = 0;
+
+    if (sec == NULL || sec->data == NULL || sec->size < 16) {
+        return 0;
+    }
+    while (off + 16 <= sec->size) {
+        uint32_t next = elf__rd32(sec->data + off + 12, endian);
+        count++;
+        if (next == 0) {
+            break;
+        }
+        if (next < 16 || next > sec->size - off) {
+            break;
+        }
+        off += next;
+    }
+    return count;
 }
 
 static elf_err_t out_push(out_sec_t **secs, size_t *count, size_t *cap, const out_sec_t *in) {
@@ -229,6 +307,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     uint8_t *symtab_data = NULL;
     uint8_t *dynstr_data = NULL;
     size_t dynstr_size = 0;
+    int has_dynstr_section = 0;
     size_t symtab_size = 0;
     size_t symtab_entsz = 0;
     uint64_t shoff;
@@ -269,7 +348,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         if (strcmp(name, ".symtab") == 0 || strcmp(name, ".strtab") == 0 ||
             strcmp(name, ".shstrtab") == 0 ||
             ((s->type == SHT_REL || s->type == SHT_RELA) &&
-             (strncmp(name, ".rel", 4) == 0 || strncmp(name, ".rela", 5) == 0))) {
+             (strncmp(name, ".rel", 4) == 0 || strncmp(name, ".rela", 5) == 0) &&
+             (s->flags & SHF_ALLOC) == 0)) {
             continue;
         }
         memset(&out, 0, sizeof(out));
@@ -283,6 +363,9 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         out.entsize = s->entsize;
         out.data = s->data;
         out.size = s->type == SHT_NOBITS ? s->size : s->data_size;
+        if (strcmp(name, ".dynstr") == 0) {
+            has_dynstr_section = 1;
+        }
         if (out_push(&secs, &sec_count, &sec_cap, &out) != ELF_OK) {
             err = ELF_ERR_OOM;
             goto done;
@@ -389,7 +472,7 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
         }
     }
 
-    if (obj->type == ET_EXEC || obj->type == ET_DYN) {
+    if ((obj->type == ET_EXEC || obj->type == ET_DYN) && !has_dynstr_section) {
         out_sec_t dynst;
         dynstr_data = build_dynstr(obj, &dynstr_size);
         if (dynstr_data == NULL && dynstr_size != 0) {
@@ -447,6 +530,157 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             secs[i].link = (uint32_t)symtab_index;
         }
     }
+    {
+        size_t dynsym_index = (size_t)-1;
+        size_t dynstr_index = (size_t)-1;
+        size_t dynamic_index = (size_t)-1;
+        size_t hash_index = (size_t)-1;
+        size_t gnu_hash_index = (size_t)-1;
+        size_t gnu_versym_index = (size_t)-1;
+        size_t gnu_verdef_index = (size_t)-1;
+        size_t gnu_verneed_index = (size_t)-1;
+        size_t rela_plt_index = (size_t)-1;
+        size_t rel_plt_index = (size_t)-1;
+        size_t rela_dyn_index = (size_t)-1;
+        size_t rel_dyn_index = (size_t)-1;
+        size_t plt_index = (size_t)-1;
+        size_t gotplt_index = (size_t)-1;
+        size_t got_index = (size_t)-1;
+        for (i = 1; i < sec_count; ++i) {
+            const char *nm = secs[i].name != NULL ? secs[i].name : "";
+            if (strcmp(nm, ".dynsym") == 0) {
+                dynsym_index = i;
+            } else if (strcmp(nm, ".dynstr") == 0) {
+                dynstr_index = i;
+            } else if (strcmp(nm, ".dynamic") == 0) {
+                dynamic_index = i;
+            } else if (strcmp(nm, ".hash") == 0) {
+                hash_index = i;
+            } else if (strcmp(nm, ".gnu.hash") == 0) {
+                gnu_hash_index = i;
+            } else if (strcmp(nm, ".gnu.version") == 0) {
+                gnu_versym_index = i;
+            } else if (strcmp(nm, ".gnu.version_d") == 0) {
+                gnu_verdef_index = i;
+            } else if (strcmp(nm, ".gnu.version_r") == 0) {
+                gnu_verneed_index = i;
+            } else if (strcmp(nm, ".rela.plt") == 0) {
+                rela_plt_index = i;
+            } else if (strcmp(nm, ".rel.plt") == 0) {
+                rel_plt_index = i;
+            } else if (strcmp(nm, ".rela.dyn") == 0) {
+                rela_dyn_index = i;
+            } else if (strcmp(nm, ".rel.dyn") == 0) {
+                rel_dyn_index = i;
+            } else if (strcmp(nm, ".plt") == 0) {
+                plt_index = i;
+            } else if (strcmp(nm, ".got.plt") == 0) {
+                gotplt_index = i;
+            } else if (strcmp(nm, ".got") == 0) {
+                got_index = i;
+            }
+        }
+        if (dynsym_index != (size_t)-1) {
+            if (secs[dynsym_index].entsize == 0) {
+                secs[dynsym_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 16;
+            }
+            if (secs[dynsym_index].info == 0) {
+                secs[dynsym_index].info = 1;
+            }
+            if (dynstr_index != (size_t)-1) {
+                secs[dynsym_index].link = (uint32_t)dynstr_index;
+            }
+        }
+        if (dynamic_index != (size_t)-1) {
+            if (secs[dynamic_index].entsize == 0) {
+                secs[dynamic_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
+            }
+            if (dynstr_index != (size_t)-1) {
+                secs[dynamic_index].link = (uint32_t)dynstr_index;
+            }
+        }
+        if (dynsym_index != (size_t)-1) {
+            if (hash_index != (size_t)-1) {
+                if (secs[hash_index].entsize == 0) {
+                    secs[hash_index].entsize = 4;
+                }
+                secs[hash_index].link = (uint32_t)dynsym_index;
+            }
+            if (gnu_hash_index != (size_t)-1) {
+                secs[gnu_hash_index].link = (uint32_t)dynsym_index;
+            }
+            if (gnu_versym_index != (size_t)-1) {
+                if (secs[gnu_versym_index].entsize == 0) {
+                    secs[gnu_versym_index].entsize = 2;
+                }
+                secs[gnu_versym_index].link = (uint32_t)dynsym_index;
+            }
+            if (gnu_verdef_index != (size_t)-1) {
+                if (secs[gnu_verdef_index].entsize == 0) {
+                    secs[gnu_verdef_index].entsize = 20;
+                }
+                if (dynstr_index != (size_t)-1) {
+                    secs[gnu_verdef_index].link = (uint32_t)dynstr_index;
+                }
+                if (secs[gnu_verdef_index].info == 0) {
+                    secs[gnu_verdef_index].info =
+                        count_gnu_verdef_entries(&secs[gnu_verdef_index], obj->endian);
+                }
+            }
+            if (gnu_verneed_index != (size_t)-1) {
+                if (secs[gnu_verneed_index].entsize == 0) {
+                    secs[gnu_verneed_index].entsize = 16;
+                }
+                if (dynstr_index != (size_t)-1) {
+                    secs[gnu_verneed_index].link = (uint32_t)dynstr_index;
+                }
+                if (secs[gnu_verneed_index].info == 0) {
+                    secs[gnu_verneed_index].info =
+                        count_gnu_verneed_entries(&secs[gnu_verneed_index], obj->endian);
+                }
+            }
+            if (rela_plt_index != (size_t)-1) {
+                if (secs[rela_plt_index].entsize == 0) {
+                    secs[rela_plt_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 12;
+                }
+                secs[rela_plt_index].link = (uint32_t)dynsym_index;
+                if (plt_index != (size_t)-1 && secs[rela_plt_index].info == 0) {
+                    secs[rela_plt_index].info = (uint32_t)plt_index;
+                } else if (gotplt_index != (size_t)-1 && secs[rela_plt_index].info == 0) {
+                    secs[rela_plt_index].info = (uint32_t)gotplt_index;
+                }
+            }
+            if (rel_plt_index != (size_t)-1) {
+                if (secs[rel_plt_index].entsize == 0) {
+                    secs[rel_plt_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
+                }
+                secs[rel_plt_index].link = (uint32_t)dynsym_index;
+                if (plt_index != (size_t)-1 && secs[rel_plt_index].info == 0) {
+                    secs[rel_plt_index].info = (uint32_t)plt_index;
+                } else if (gotplt_index != (size_t)-1 && secs[rel_plt_index].info == 0) {
+                    secs[rel_plt_index].info = (uint32_t)gotplt_index;
+                }
+            }
+            if (rela_dyn_index != (size_t)-1) {
+                if (secs[rela_dyn_index].entsize == 0) {
+                    secs[rela_dyn_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 24 : 12;
+                }
+                secs[rela_dyn_index].link = (uint32_t)dynsym_index;
+                if (got_index != (size_t)-1 && secs[rela_dyn_index].info == 0) {
+                    secs[rela_dyn_index].info = (uint32_t)got_index;
+                }
+            }
+            if (rel_dyn_index != (size_t)-1) {
+                if (secs[rel_dyn_index].entsize == 0) {
+                    secs[rel_dyn_index].entsize = obj->cls == ELFOBJ_CLASS_64 ? 16 : 8;
+                }
+                secs[rel_dyn_index].link = (uint32_t)dynsym_index;
+                if (got_index != (size_t)-1 && secs[rel_dyn_index].info == 0) {
+                    secs[rel_dyn_index].info = (uint32_t)got_index;
+                }
+            }
+        }
+    }
 
     if (obj->segment_count != 0) {
         phnum = obj->segment_count;
@@ -496,7 +730,11 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
             secs[i].offset = 0;
             continue;
         }
-        off = align_up(off, secs[i].addralign ? secs[i].addralign : 1);
+        if ((secs[i].flags & SHF_ALLOC) != 0 && secs[i].addr != 0) {
+            off = align_with_page_mod(off, secs[i].addralign ? secs[i].addralign : 1, secs[i].addr);
+        } else {
+            off = align_up(off, secs[i].addralign ? secs[i].addralign : 1);
+        }
         secs[i].offset = off;
         if (!u64_add_checked(off, secs[i].size, &off)) {
             err = ELF_ERR_BOUNDS;
@@ -581,6 +819,8 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
     if (phnum != 0) {
         if (obj->segment_count != 0) {
             size_t phidx;
+            uint64_t file_bias = 0;
+            int have_file_bias = find_alloc_file_bias(secs, sec_count, &file_bias);
             for (phidx = 0; phidx < phnum; ++phidx) {
                 struct elf_segment *seg = obj->segments[phidx];
                 uint8_t *p = img + phoff + (phidx * phentsz);
@@ -588,6 +828,10 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                 uint64_t hi_off = 0;
                 uint64_t lo_addr = UINT64_MAX;
                 uint64_t hi_addr = 0;
+                uint64_t out_filesz;
+                uint64_t out_memsz;
+                uint64_t out_off;
+                uint64_t out_vaddr;
                 size_t j;
 
                 for (j = 0; j < seg->section_count; ++j) {
@@ -623,29 +867,68 @@ elf_err_t elf__write_to_buffer(elfobj_t *obj, uint8_t **out_buf, size_t *out_sz)
                         hi_addr = end_addr;
                     }
                 }
+
+                if (seg->type == PT_PHDR) {
+                    uint64_t ph_bytes = (uint64_t)phnum * (uint64_t)phentsz;
+                    lo_off = phoff;
+                    if (!u64_add_checked(phoff, ph_bytes, &hi_off)) {
+                        err = ELF_ERR_BOUNDS;
+                        goto done;
+                    }
+                    if (have_file_bias) {
+                        if (!u64_add_checked(file_bias, phoff, &lo_addr) ||
+                            !u64_add_checked(lo_addr, ph_bytes, &hi_addr)) {
+                            err = ELF_ERR_BOUNDS;
+                            goto done;
+                        }
+                    } else {
+                        lo_addr = 0;
+                        hi_addr = ph_bytes;
+                    }
+                }
+
                 if (lo_off == UINT64_MAX) {
                     lo_off = 0;
                 }
                 if (lo_addr == UINT64_MAX) {
                     lo_addr = 0;
                 }
+                out_off = lo_off;
+                out_vaddr = lo_addr;
+                out_filesz = hi_off >= lo_off ? (hi_off - lo_off) : 0;
+                out_memsz = hi_addr >= lo_addr ? (hi_addr - lo_addr) : 0;
+                if (seg->type == PT_LOAD && (seg->flags & 0x1u) != 0 && out_off != 0) {
+                    uint64_t delta = out_off;
+                    if (out_vaddr < delta) {
+                        err = ELF_ERR_BOUNDS;
+                        goto done;
+                    }
+                    out_off = 0;
+                    out_vaddr -= delta;
+                    if (!u64_add_checked(out_filesz, delta, &out_filesz) ||
+                        !u64_add_checked(out_memsz, delta, &out_memsz)) {
+                        err = ELF_ERR_BOUNDS;
+                        goto done;
+                    }
+                }
+
                 if (obj->cls == ELFOBJ_CLASS_32) {
                     elf__wr32(p + 0, obj->endian, seg->type);
-                    elf__wr32(p + 4, obj->endian, (uint32_t)lo_off);
-                    elf__wr32(p + 8, obj->endian, (uint32_t)lo_addr);
-                    elf__wr32(p + 12, obj->endian, (uint32_t)lo_addr);
-                    elf__wr32(p + 16, obj->endian, (uint32_t)(hi_off - lo_off));
-                    elf__wr32(p + 20, obj->endian, (uint32_t)(hi_addr - lo_addr));
+                    elf__wr32(p + 4, obj->endian, (uint32_t)out_off);
+                    elf__wr32(p + 8, obj->endian, (uint32_t)out_vaddr);
+                    elf__wr32(p + 12, obj->endian, (uint32_t)out_vaddr);
+                    elf__wr32(p + 16, obj->endian, (uint32_t)out_filesz);
+                    elf__wr32(p + 20, obj->endian, (uint32_t)out_memsz);
                     elf__wr32(p + 24, obj->endian, seg->flags);
                     elf__wr32(p + 28, obj->endian, (uint32_t)(seg->align ? seg->align : 1));
                 } else {
                     elf__wr32(p + 0, obj->endian, seg->type);
                     elf__wr32(p + 4, obj->endian, seg->flags);
-                    elf__wr64(p + 8, obj->endian, lo_off);
-                    elf__wr64(p + 16, obj->endian, lo_addr);
-                    elf__wr64(p + 24, obj->endian, lo_addr);
-                    elf__wr64(p + 32, obj->endian, hi_off - lo_off);
-                    elf__wr64(p + 40, obj->endian, hi_addr - lo_addr);
+                    elf__wr64(p + 8, obj->endian, out_off);
+                    elf__wr64(p + 16, obj->endian, out_vaddr);
+                    elf__wr64(p + 24, obj->endian, out_vaddr);
+                    elf__wr64(p + 32, obj->endian, out_filesz);
+                    elf__wr64(p + 40, obj->endian, out_memsz);
                     elf__wr64(p + 48, obj->endian, seg->align ? seg->align : 1);
                 }
             }

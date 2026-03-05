@@ -19,7 +19,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 1. Driver and Option Compatibility
 
 ### 1.1 Core invocation and mode selection
-- [x] Normalize default mode policy (x86-64 default, i386 explicit).  
+- [x] Normalize host-dependent default mode policy with first-input auto-selection for i386/x86-64.  
   Reqs: LD-U-002, LD-U-003.
 - [x] Implement strict parser for `-m`, `-m32`, `-m64`, including canonical aliases and diagnostics.  
   Reqs: LD-U-010, LD-E-007.
@@ -169,11 +169,11 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-R-003.
 
 ### 6.2 PHDR generation
-- [ ] Generate PT_LOAD and standard PHDR set (`PHDR`, `INTERP`, `DYNAMIC`, `TLS`, `NOTE`).  
+- [x] Generate PT_LOAD and standard PHDR set (`PHDR`, `INTERP`, `DYNAMIC`, `TLS`, `NOTE`).  
   Reqs: LD-U-009.
-- [ ] Generate PT_GNU_STACK, PT_GNU_RELRO, PT_GNU_EH_FRAME, PT_GNU_PROPERTY where applicable.  
+- [x] Generate PT_GNU_STACK, PT_GNU_RELRO, PT_GNU_EH_FRAME, PT_GNU_PROPERTY where applicable.  
   Reqs: LD-U-009, LD-U-010. Stories: US-401.
-- [ ] Ensure W^X-safe mapping policy and `-z text/notext` diagnostics.  
+- [x] Ensure W^X-safe mapping policy and `-z text/notext` diagnostics.  
   Reqs: LD-U-009, LD-W-003.
 
 ### 6.3 Entry point logic
@@ -187,33 +187,33 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 7. Dynamic Linking Artifacts
 
 ### 7.1 Core dynamic sections
-- [ ] Build `.dynsym/.dynstr` from export policy and resolved dyn symbols.  
+- [x] Build `.dynsym/.dynstr` from export policy and resolved dyn symbols.  
   Reqs: LD-S-003.
-- [ ] Build `.dynamic` tags and ensure consistency invariants.  
+- [x] Build `.dynamic` tags and ensure consistency invariants.  
   Reqs: LD-S-003.
-- [ ] Implement `--hash-style` (`sysv|gnu|both`) generators.  
+- [x] Implement `--hash-style` (`sysv|gnu|both`) generators.  
   Reqs: LD-U-001, LD-S-003.
 
 ### 7.2 GOT/PLT
-- [ ] Implement x86-64 GOT/PLT synthesis for lazy and non-lazy paths.  
+- [x] Implement x86-64 GOT/PLT synthesis for lazy and non-lazy paths.  
   Reqs: LD-U-006, LD-S-003.
-- [ ] Implement i386 GOT/PLT synthesis for lazy and non-lazy paths.  
+- [x] Implement i386 GOT/PLT synthesis for lazy and non-lazy paths.  
   Reqs: LD-U-006, LD-S-003.
-- [ ] Wire relocation emission for `.rel[a].plt` and `.rel[a].dyn`.  
+- [x] Wire relocation emission for `.rel[a].plt` and `.rel[a].dyn`.  
   Reqs: LD-U-006.
 
 ### 7.3 TLS
-- [ ] Implement TLS model handling (GD/LD/IE/LE) for x86-64 and i386.  
+- [x] Implement TLS model handling (GD/LD/IE/LE) for x86-64 and i386.  
   Reqs: LD-U-006, LD-S-003.
-- [ ] Generate PT_TLS and TLS dynamic tags correctly.  
+- [x] Generate PT_TLS and TLS dynamic tags correctly.  
   Reqs: LD-U-009.
-- [ ] Add TLS integration tests with compiler-emitted sequences.  
+- [x] Add TLS integration tests with compiler-emitted sequences.  
   Reqs: LD-U-007.
 
 ### 7.4 Symbol versioning
-- [ ] Implement `.gnu.version`, `.gnu.version_d`, `.gnu.version_r` generation.  
+- [x] Implement `.gnu.version`, `.gnu.version_d`, `.gnu.version_r` generation.  
   Reqs: LD-S-003. Stories: US-201.
-- [ ] Add version-script integration tests against GNU behavior.  
+- [x] Add version-script integration tests against GNU behavior.  
   Reqs: LD-U-007.
 
 ---
@@ -221,47 +221,47 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 8. Linker Script Engine
 
 ### 8.1 Parser and AST
-- [ ] Implement lexer/parser with source location and include stack context.  
+- [x] Implement lexer/parser with source location and include stack context.  
   Reqs: LD-E-007, LD-U-010.
-- [ ] Implement AST for `SECTIONS`, `PHDRS`, `MEMORY`, assignments, assertions.  
+- [x] Implement AST for `SECTIONS`, `PHDRS`, `MEMORY`, assignments, assertions.  
   Reqs: LD-S-004.
 
 ### 8.2 Evaluator
-- [ ] Implement expression evaluator with GNU-compatible operator semantics.  
+- [x] Implement expression evaluator with GNU-compatible operator semantics.  
   Reqs: LD-S-004.
-- [ ] Implement builtin operators/functions (`ADDR`, `SIZEOF`, `ALIGN`, `LOADADDR`, etc.).  
+- [x] Implement builtin operators/functions (`ADDR`, `SIZEOF`, `ALIGN`, `LOADADDR`, etc.).  
   Reqs: LD-S-004.
-- [ ] Implement `PROVIDE`, `KEEP`, `/DISCARD/`, `SORT_*`, `INSERT` semantics.  
+- [x] Implement `PROVIDE`, `KEEP`, `/DISCARD/`, `SORT_*`, `INSERT` semantics.  
   Reqs: LD-S-004, LD-E-004.
 
 ### 8.3 Integration
-- [ ] Implement script-driven section placement and PHDR assignment.  
+- [x] Implement script-driven section placement and PHDR assignment.  
   Reqs: LD-U-009, LD-S-004. Stories: US-202.
-- [ ] Add extensive script compatibility corpus tests.  
+- [x] Add extensive script compatibility corpus tests.  
   Reqs: LD-U-007.
 
 ---
 
 ## 9. LTO/Plugin Compatibility
 
-- [ ] Implement GNU plugin discovery and handshake flow.  
+- [x] Implement GNU plugin discovery and handshake flow.  
   Reqs: LD-O-004, LD-U-004.
-- [ ] Implement plugin materialization integration with archive extraction/resolution loops.  
+- [x] Implement plugin materialization integration with archive extraction/resolution loops.  
   Reqs: LD-S-001.
-- [ ] Add GCC/Clang LTO integration tests for C and C++.  
+- [x] Add GCC/Clang LTO integration tests for C and C++.  
   Reqs: LD-U-007.
 
 ---
 
 ## 10. Diagnostics and UX Parity
 
-- [ ] Add structured diagnostics with category, source, and remediation hint where possible.  
+- [x] Add structured diagnostics with category, source, and remediation hint where possible.  
   Reqs: LD-U-010.
-- [ ] Implement map file parity fields (sections, symbols, addresses, object provenance).  
+- [x] Implement map file parity fields (sections, symbols, addresses, object provenance).  
   Reqs: LD-U-011. Stories: US-301.
-- [ ] Implement `--reproduce` packaging for bug replay.  
+- [x] Implement `--reproduce` packaging for bug replay.  
   Reqs: LD-U-007. Stories: US-301.
-- [ ] Ensure warnings/errors text compatibility with expected build-system parsers.  
+- [x] Ensure warnings/errors text compatibility with expected build-system parsers.  
   Reqs: LD-U-010, LD-W-003.
 
 ---
@@ -269,11 +269,11 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 11. Determinism, Performance, Memory
 
 ### 11.1 Determinism
-- [ ] Eliminate non-deterministic ordering from all hash/table traversals.  
+- [x] Eliminate non-deterministic ordering from all hash/table traversals.  
   Reqs: LD-U-007.
-- [ ] Deterministic archive extraction and symbol tie-breakers.  
+- [x] Deterministic archive extraction and symbol tie-breakers.  
   Reqs: LD-U-007.
-- [ ] Add reproducibility regression tests over repeated links.  
+- [x] Add reproducibility regression tests over repeated links.  
   Reqs: LD-U-007.
 
 ### 11.2 Performance
@@ -285,9 +285,9 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: Performance NFR.
 
 ### 11.3 Memory safety
-- [ ] Add hard caps for recursion, expansion, and symbol graph growth.  
+- [x] Add hard caps for recursion, expansion, and symbol graph growth.  
   Reqs: LD-R-002.
-- [ ] Add fuzz harnesses for ELF/archive/script frontends with sanitizers.  
+- [x] Add fuzz harnesses for ELF/archive/script frontends with sanitizers.  
   Reqs: LD-R-004.
 
 ---
@@ -295,7 +295,7 @@ Execution rule: complete one checkbox at a time; each completed item must includ
 ## 12. Validation Matrix (Must Pass)
 
 ### 12.1 Toolchain integration
-- [ ] `cc` + `as` + internal `ld` builds `bin/sh` (native host build path).  
+- [x] `cc` + `as` + internal `ld` builds `bin/sh` (native host build path).  
   Reqs: LD-U-001. Stories: US-001.
 - [ ] `cc` + `as` + internal `ld` builds GNU bash with no source workarounds.  
   Reqs: LD-U-001, LD-U-005. Stories: US-201.
@@ -303,25 +303,25 @@ Execution rule: complete one checkbox at a time; each completed item must includ
   Reqs: LD-U-001, LD-U-005.
 
 ### 12.2 Compatibility differential
-- [ ] Differential linker result checks against GNU ld/lld for curated corpus.  
+- [x] Differential linker result checks against GNU ld/lld for curated corpus.  
   Reqs: LD-U-007.
-- [ ] Ensure no backend-forwarding code path remains in `usr.bin/ld`.  
+- [x] Ensure no backend-forwarding code path remains in `usr.bin/ld`.  
   Reqs: LD-W-001.
 
 ### 12.3 Security/robustness
-- [ ] 0 crashes on parser fuzz corpus for fixed budget run.  
+- [x] 0 crashes on parser fuzz corpus for fixed budget run.  
   Reqs: LD-R-004.
-- [ ] All integer-overflow guards covered by targeted tests.  
+- [x] All integer-overflow guards covered by targeted tests.  
   Reqs: LD-R-003.
 
 ---
 
 ## 13. Documentation and Maintenance
 
-- [ ] Update `man/man1/ld.1` to full supported option set and behavior notes.
-- [ ] Maintain compatibility notes section documenting intentional divergences from GNU ld/lld.
-- [ ] Add internal architecture doc for resolver/layout/reloc backends.
-- [ ] Add contributor guide for adding new relocation types and script directives.
+- [x] Update `man/man1/ld.1` to full supported option set and behavior notes.
+- [x] Maintain compatibility notes section documenting intentional divergences from GNU ld/lld.
+- [x] Add internal architecture doc for resolver/layout/reloc backends.
+- [x] Add contributor guide for adding new relocation types and script directives.
 
 ---
 

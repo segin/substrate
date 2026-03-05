@@ -1,8 +1,11 @@
 #include "as_elf_emit.h"
+#include "as_x86_encode.h"
+#include "as_x86_avx2.h"
 
 #include "elfobj.h"
 
 #include <ctype.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -45,6 +48,9 @@ typedef struct {
     size_t len;
     size_t cap;
 } bytebuf_t;
+
+static const char *first_symbol_in_expr(const as_expr_t *e);
+static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add_out);
 
 static void set_err(emit_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
@@ -128,6 +134,1578 @@ static int bytebuf_append_u64_le(bytebuf_t *b, uint64_t v, unsigned width) {
     return 0;
 }
 
+static int streq_ci(const char *a, const char *b) {
+    size_t i;
+
+    if (a == NULL || b == NULL) {
+        return 0;
+    }
+    for (i = 0; a[i] != '\0' && b[i] != '\0'; ++i) {
+        char ca = a[i];
+        char cb = b[i];
+        if (ca >= 'A' && ca <= 'Z') {
+            ca = (char)(ca + ('a' - 'A'));
+        }
+        if (cb >= 'A' && cb <= 'Z') {
+            cb = (char)(cb + ('a' - 'A'));
+        }
+        if (ca != cb) {
+            return 0;
+        }
+    }
+    return a[i] == '\0' && b[i] == '\0';
+}
+
+static int parse_int64(const char *s, long long *out) {
+    char *end;
+    long long v;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    v = strtoll(s, &end, 0);
+    if (end == s || *end != '\0') {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int eval_expr_const(const as_expr_t *e, long long *out) {
+    long long l;
+    long long r;
+
+    if (e == NULL || out == NULL) {
+        return -1;
+    }
+    switch (e->kind) {
+    case AS_EXPR_CONST:
+        *out = e->value;
+        return 0;
+    case AS_EXPR_UNARY:
+        if (eval_expr_const(e->lhs, &l) != 0) {
+            return -1;
+        }
+        if (e->op == AS_EXPR_OP_NEG) {
+            *out = -l;
+            return 0;
+        }
+        if (e->op == AS_EXPR_OP_BNOT) {
+            *out = ~l;
+            return 0;
+        }
+        return -1;
+    case AS_EXPR_BINARY:
+        if (eval_expr_const(e->lhs, &l) != 0 || eval_expr_const(e->rhs, &r) != 0) {
+            return -1;
+        }
+        switch (e->op) {
+        case AS_EXPR_OP_ADD:
+            *out = l + r;
+            return 0;
+        case AS_EXPR_OP_SUB:
+            *out = l - r;
+            return 0;
+        case AS_EXPR_OP_MUL:
+            *out = l * r;
+            return 0;
+        case AS_EXPR_OP_DIV:
+            if (r == 0) return -1;
+            *out = l / r;
+            return 0;
+        case AS_EXPR_OP_MOD:
+            if (r == 0) return -1;
+            *out = l % r;
+            return 0;
+        case AS_EXPR_OP_OR:
+            *out = l | r;
+            return 0;
+        case AS_EXPR_OP_AND:
+            *out = l & r;
+            return 0;
+        case AS_EXPR_OP_XOR:
+            *out = l ^ r;
+            return 0;
+        case AS_EXPR_OP_SHL:
+            *out = l << (r & 63);
+            return 0;
+        case AS_EXPR_OP_SHR:
+            *out = l >> (r & 63);
+            return 0;
+        default:
+            return -1;
+        }
+    default:
+        return -1;
+    }
+}
+
+static int expr_has_symbol(const as_expr_t *e) {
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == AS_EXPR_SYMBOL || e->kind == AS_EXPR_LOCAL_REF) {
+        return 1;
+    }
+    if (expr_has_symbol(e->lhs) || expr_has_symbol(e->rhs)) {
+        return 1;
+    }
+    return 0;
+}
+
+static int parse_x86_reg(const char *name, as_x86_reg_t *out) {
+    static const struct {
+        const char *name;
+        as_x86_reg_t reg;
+    } map[] = {
+        {"al", AS_X86_REG_RAX}, {"ax", AS_X86_REG_RAX}, {"eax", AS_X86_REG_RAX}, {"rax", AS_X86_REG_RAX},
+        {"cl", AS_X86_REG_RCX}, {"cx", AS_X86_REG_RCX}, {"ecx", AS_X86_REG_RCX}, {"rcx", AS_X86_REG_RCX},
+        {"dl", AS_X86_REG_RDX}, {"dx", AS_X86_REG_RDX}, {"edx", AS_X86_REG_RDX}, {"rdx", AS_X86_REG_RDX},
+        {"bl", AS_X86_REG_RBX}, {"bx", AS_X86_REG_RBX}, {"ebx", AS_X86_REG_RBX}, {"rbx", AS_X86_REG_RBX},
+        {"spl", AS_X86_REG_RSP}, {"sp", AS_X86_REG_RSP}, {"esp", AS_X86_REG_RSP}, {"rsp", AS_X86_REG_RSP},
+        {"bpl", AS_X86_REG_RBP}, {"bp", AS_X86_REG_RBP}, {"ebp", AS_X86_REG_RBP}, {"rbp", AS_X86_REG_RBP},
+        {"sil", AS_X86_REG_RSI}, {"si", AS_X86_REG_RSI}, {"esi", AS_X86_REG_RSI}, {"rsi", AS_X86_REG_RSI},
+        {"dil", AS_X86_REG_RDI}, {"di", AS_X86_REG_RDI}, {"edi", AS_X86_REG_RDI}, {"rdi", AS_X86_REG_RDI},
+        {"r8b", AS_X86_REG_R8}, {"r8w", AS_X86_REG_R8}, {"r8d", AS_X86_REG_R8}, {"r8", AS_X86_REG_R8},
+        {"r9b", AS_X86_REG_R9}, {"r9w", AS_X86_REG_R9}, {"r9d", AS_X86_REG_R9}, {"r9", AS_X86_REG_R9},
+        {"r10b", AS_X86_REG_R10}, {"r10w", AS_X86_REG_R10}, {"r10d", AS_X86_REG_R10}, {"r10", AS_X86_REG_R10},
+        {"r11b", AS_X86_REG_R11}, {"r11w", AS_X86_REG_R11}, {"r11d", AS_X86_REG_R11}, {"r11", AS_X86_REG_R11},
+        {"r12b", AS_X86_REG_R12}, {"r12w", AS_X86_REG_R12}, {"r12d", AS_X86_REG_R12}, {"r12", AS_X86_REG_R12},
+        {"r13b", AS_X86_REG_R13}, {"r13w", AS_X86_REG_R13}, {"r13d", AS_X86_REG_R13}, {"r13", AS_X86_REG_R13},
+        {"r14b", AS_X86_REG_R14}, {"r14w", AS_X86_REG_R14}, {"r14d", AS_X86_REG_R14}, {"r14", AS_X86_REG_R14},
+        {"r15b", AS_X86_REG_R15}, {"r15w", AS_X86_REG_R15}, {"r15d", AS_X86_REG_R15}, {"r15", AS_X86_REG_R15},
+    };
+    size_t i;
+
+    if (name == NULL || out == NULL) {
+        return -1;
+    }
+    for (i = 0; i < sizeof(map) / sizeof(map[0]); ++i) {
+        if (streq_ci(name, map[i].name)) {
+            *out = map[i].reg;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int x86_reg_width_bits(const char *name) {
+    const char *p = name;
+    size_t n;
+
+    if (p == NULL || p[0] == '\0') {
+        return 0;
+    }
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    n = strlen(p);
+    if (n == 0) {
+        return 0;
+    }
+    if (n >= 3 && (p[0] == 'x' || p[0] == 'X') && (p[1] == 'm' || p[1] == 'M') && (p[2] == 'm' || p[2] == 'M')) {
+        return 128;
+    }
+    if (n >= 3 && (p[0] == 'y' || p[0] == 'Y') && (p[1] == 'm' || p[1] == 'M') && (p[2] == 'm' || p[2] == 'M')) {
+        return 256;
+    }
+    if (n >= 3 && (p[0] == 'z' || p[0] == 'Z') && (p[1] == 'm' || p[1] == 'M') && (p[2] == 'm' || p[2] == 'M')) {
+        return 512;
+    }
+    if (n >= 2 && (p[0] == 'm' || p[0] == 'M') && (p[1] == 'm' || p[1] == 'M')) {
+        return 64;
+    }
+    if (streq_ci(p, "al") || streq_ci(p, "ah") || streq_ci(p, "bl") || streq_ci(p, "bh") || streq_ci(p, "cl") ||
+        streq_ci(p, "ch") || streq_ci(p, "dl") || streq_ci(p, "dh") || streq_ci(p, "sil") || streq_ci(p, "dil") ||
+        streq_ci(p, "spl") || streq_ci(p, "bpl")) {
+        return 8;
+    }
+    if (n >= 3 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1]) && (p[n - 1] == 'b' || p[n - 1] == 'B')) {
+        return 8;
+    }
+    if (streq_ci(p, "ax") || streq_ci(p, "bx") || streq_ci(p, "cx") || streq_ci(p, "dx") || streq_ci(p, "si") ||
+        streq_ci(p, "di") || streq_ci(p, "sp") || streq_ci(p, "bp") || streq_ci(p, "ip")) {
+        return 16;
+    }
+    if (n >= 3 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1]) && (p[n - 1] == 'w' || p[n - 1] == 'W')) {
+        return 16;
+    }
+    if (n > 1 && (p[0] == 'e' || p[0] == 'E')) {
+        return 32;
+    }
+    if (n >= 3 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1]) && (p[n - 1] == 'd' || p[n - 1] == 'D')) {
+        return 32;
+    }
+    if (streq_ci(p, "rax") || streq_ci(p, "rbx") || streq_ci(p, "rcx") || streq_ci(p, "rdx") || streq_ci(p, "rsi") ||
+        streq_ci(p, "rdi") || streq_ci(p, "rsp") || streq_ci(p, "rbp") || streq_ci(p, "rip")) {
+        return 64;
+    }
+    if (n >= 2 && (p[0] == 'r' || p[0] == 'R') && isdigit((unsigned char)p[1])) {
+        return 64;
+    }
+    return 0;
+}
+
+static int mnemonic_needs_uniform_width(const char *mn) {
+    return streq_ci(mn, "mov") || streq_ci(mn, "add") || streq_ci(mn, "sub") || streq_ci(mn, "and") ||
+           streq_ci(mn, "or") || streq_ci(mn, "xor") || streq_ci(mn, "cmp") || streq_ci(mn, "test") ||
+           streq_ci(mn, "xchg");
+}
+
+static int infer_uniform_operand_width_bits(const as_instruction_t *insn, const size_t *op_index, size_t op_count,
+                                            int *out_bits, char *errbuf, size_t errbuf_sz) {
+    size_t j;
+    int bits = 0;
+
+    if (insn == NULL || op_index == NULL || out_bits == NULL) {
+        return -1;
+    }
+    for (j = 0; j < op_count; ++j) {
+        const as_operand_t *op = &insn->operands[op_index[j]];
+        int cur = 0;
+
+        if (op->kind == AS_OPERAND_REGISTER && op->u.reg != NULL) {
+            cur = x86_reg_width_bits(op->u.reg);
+        } else if (op->kind == AS_OPERAND_MEMORY && op->u.mem.size_bits > 0) {
+            cur = op->u.mem.size_bits;
+        }
+        if (cur == 0) {
+            continue;
+        }
+        if (bits == 0) {
+            bits = cur;
+            continue;
+        }
+        if (bits != cur) {
+            if (errbuf != NULL && errbuf_sz > 0) {
+                snprintf(errbuf, errbuf_sz, "conflicting operand sizes");
+            }
+            return -1;
+        }
+    }
+    *out_bits = bits;
+    return 0;
+}
+
+static as_x86_seg_t map_seg(const char *s) {
+    if (s == NULL) return AS_X86_SEG_NONE;
+    if (streq_ci(s, "cs")) return AS_X86_SEG_CS;
+    if (streq_ci(s, "ds")) return AS_X86_SEG_DS;
+    if (streq_ci(s, "es")) return AS_X86_SEG_ES;
+    if (streq_ci(s, "fs")) return AS_X86_SEG_FS;
+    if (streq_ci(s, "gs")) return AS_X86_SEG_GS;
+    if (streq_ci(s, "ss")) return AS_X86_SEG_SS;
+    return AS_X86_SEG_NONE;
+}
+
+static int is_rel_mnemonic(const char *mn) {
+    if (mn == NULL || mn[0] == '\0') {
+        return 0;
+    }
+    if (streq_ci(mn, "call") || streq_ci(mn, "jmp")) {
+        return 1;
+    }
+    if ((mn[0] == 'j' || mn[0] == 'J') && mn[1] != '\0') {
+        return 1;
+    }
+    return 0;
+}
+
+static int is_size_suffixable_base(const char *mn) {
+    static const char *const names[] = {
+        "add", "sub", "and", "or", "xor", "cmp", "mov", "lea", "imul", "shl",
+        "shr", "sar", "ror", "rol", "bt", "bts", "movsx", "movzx", "test", "push",
+        "mul", "div", "idiv",
+        "pop", "ret", "leave",
+    };
+    size_t i;
+
+    if (mn == NULL) {
+        return 0;
+    }
+    for (i = 0; i < sizeof(names) / sizeof(names[0]); ++i) {
+        if (strcmp(mn, names[i]) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int has_x86_size_suffix(const char *mn, char *suffix_out) {
+    size_t n;
+    char c;
+    char tmp[32];
+
+    if (mn == NULL) {
+        return 0;
+    }
+    n = strlen(mn);
+    if (n < 2) {
+        return 0;
+    }
+    c = mn[n - 1];
+    if (c != 'b' && c != 'w' && c != 'l' && c != 'q') {
+        return 0;
+    }
+    if (n >= sizeof(tmp)) {
+        return 0;
+    }
+    memcpy(tmp, mn, n - 1);
+    tmp[n - 1] = '\0';
+    if (!is_size_suffixable_base(tmp)) {
+        return 0;
+    }
+    if (suffix_out != NULL) {
+        *suffix_out = c;
+    }
+    return 1;
+}
+
+static int normalize_x86_mnemonic(const char *src, char *dst, size_t dst_sz, char *suffix_out) {
+    size_t i;
+    size_t n;
+    char suffix = '\0';
+
+    if (src == NULL || dst == NULL || dst_sz == 0) {
+        return -1;
+    }
+    n = strlen(src);
+    if (n + 1 > dst_sz) {
+        return -1;
+    }
+    for (i = 0; i < n; ++i) {
+        dst[i] = (char)tolower((unsigned char)src[i]);
+    }
+    dst[n] = '\0';
+
+    if (strcmp(dst, "movslq") == 0) {
+        if (dst_sz < sizeof("movsxd")) {
+            return -1;
+        }
+        memcpy(dst, "movsxd", sizeof("movsxd"));
+        suffix = 'q';
+        if (suffix_out != NULL) {
+            *suffix_out = suffix;
+        }
+        return 0;
+    }
+    if (strcmp(dst, "movsbq") == 0 || strcmp(dst, "movsbl") == 0 || strcmp(dst, "movsbw") == 0) {
+        if (dst_sz < sizeof("movsxb")) {
+            return -1;
+        }
+        memcpy(dst, "movsxb", sizeof("movsxb"));
+        if (strcmp(dst, "movsxb") == 0 && n >= 1) {
+            char last = (char)tolower((unsigned char)src[n - 1]);
+            suffix = (last == 'q' || last == 'l' || last == 'w') ? last : 'l';
+        }
+        if (suffix_out != NULL) {
+            *suffix_out = suffix;
+        }
+        return 0;
+    }
+    if (strcmp(dst, "movswq") == 0 || strcmp(dst, "movswl") == 0) {
+        if (dst_sz < sizeof("movsxw")) {
+            return -1;
+        }
+        memcpy(dst, "movsxw", sizeof("movsxw"));
+        suffix = (char)tolower((unsigned char)src[n - 1]) == 'q' ? 'q' : 'l';
+        if (suffix_out != NULL) {
+            *suffix_out = suffix;
+        }
+        return 0;
+    }
+    if (strcmp(dst, "movzbq") == 0 || strcmp(dst, "movzbl") == 0 || strcmp(dst, "movzbw") == 0) {
+        if (dst_sz < sizeof("movzxb")) {
+            return -1;
+        }
+        memcpy(dst, "movzxb", sizeof("movzxb"));
+        {
+            char last = (char)tolower((unsigned char)src[n - 1]);
+            suffix = (last == 'q' || last == 'l' || last == 'w') ? last : 'l';
+        }
+        if (suffix_out != NULL) {
+            *suffix_out = suffix;
+        }
+        return 0;
+    }
+    if (strcmp(dst, "movzwq") == 0 || strcmp(dst, "movzwl") == 0) {
+        if (dst_sz < sizeof("movzxw")) {
+            return -1;
+        }
+        memcpy(dst, "movzxw", sizeof("movzxw"));
+        suffix = (char)tolower((unsigned char)src[n - 1]) == 'q' ? 'q' : 'l';
+        if (suffix_out != NULL) {
+            *suffix_out = suffix;
+        }
+        return 0;
+    }
+    if (strcmp(dst, "movabsq") == 0 || strcmp(dst, "movabs") == 0) {
+        if (dst_sz < sizeof("movabs")) {
+            return -1;
+        }
+        memcpy(dst, "movabs", sizeof("movabs"));
+        suffix = 'q';
+        if (suffix_out != NULL) {
+            *suffix_out = suffix;
+        }
+        return 0;
+    }
+    if (strncmp(dst, "cvtsi2sd", 8) == 0 && n == 9 &&
+        (dst[8] == 'q' || dst[8] == 'l' || dst[8] == 'w')) {
+        dst[8] = '\0';
+        suffix = src[n - 1];
+        if (suffix_out != NULL) {
+            *suffix_out = suffix;
+        }
+        return 0;
+    }
+
+    if (has_x86_size_suffix(dst, &suffix)) {
+        dst[n - 1] = '\0';
+    } else {
+        suffix = '\0';
+    }
+    if (suffix_out != NULL) {
+        *suffix_out = suffix;
+    }
+    return 0;
+}
+
+static int parse_xmm_reg(const char *name, unsigned *out) {
+    const char *p = name;
+    unsigned v = 0;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (!(p[0] == 'x' || p[0] == 'X') || !(p[1] == 'm' || p[1] == 'M') || !(p[2] == 'm' || p[2] == 'M')) {
+        return -1;
+    }
+    p += 3;
+    if (!isdigit((unsigned char)*p)) {
+        return -1;
+    }
+    while (isdigit((unsigned char)*p)) {
+        v = (v * 10u) + (unsigned)(*p - '0');
+        ++p;
+    }
+    if (*p != '\0' || v > 15u) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int parse_ymm_reg(const char *name, unsigned *out) {
+    const char *p = name;
+    unsigned v = 0;
+
+    if (p == NULL || out == NULL) {
+        return -1;
+    }
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (!(p[0] == 'y' || p[0] == 'Y') || !(p[1] == 'm' || p[1] == 'M') || !(p[2] == 'm' || p[2] == 'M')) {
+        return -1;
+    }
+    p += 3;
+    if (!isdigit((unsigned char)*p)) {
+        return -1;
+    }
+    while (isdigit((unsigned char)*p)) {
+        v = (v * 10u) + (unsigned)(*p - '0');
+        ++p;
+    }
+    if (*p != '\0' || v > 15u) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int parse_st_index(const char *s, unsigned *out) {
+    const char *p;
+    unsigned v = 0;
+
+    if (s == NULL || out == NULL) {
+        return -1;
+    }
+    p = s;
+    while (*p == '%' || isspace((unsigned char)*p)) {
+        ++p;
+    }
+    if (!(p[0] == 's' || p[0] == 'S') || !(p[1] == 't' || p[1] == 'T') || p[2] != '(') {
+        return -1;
+    }
+    p += 3;
+    if (!isdigit((unsigned char)*p)) {
+        return -1;
+    }
+    while (isdigit((unsigned char)*p)) {
+        v = (v * 10u) + (unsigned)(*p - '0');
+        ++p;
+    }
+    if (*p != ')' || p[1] != '\0' || v > 7u) {
+        return -1;
+    }
+    *out = v;
+    return 0;
+}
+
+static int is_x86_low8_reg(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    return streq_ci(name, "al") || streq_ci(name, "%al") || streq_ci(name, "bl") || streq_ci(name, "%bl") ||
+           streq_ci(name, "cl") || streq_ci(name, "%cl") || streq_ci(name, "dl") || streq_ci(name, "%dl") ||
+           streq_ci(name, "sil") || streq_ci(name, "%sil") || streq_ci(name, "dil") || streq_ci(name, "%dil") ||
+           streq_ci(name, "spl") || streq_ci(name, "%spl") || streq_ci(name, "bpl") || streq_ci(name, "%bpl") ||
+           streq_ci(name, "r8b") || streq_ci(name, "%r8b") || streq_ci(name, "r9b") || streq_ci(name, "%r9b") ||
+           streq_ci(name, "r10b") || streq_ci(name, "%r10b") || streq_ci(name, "r11b") || streq_ci(name, "%r11b") ||
+           streq_ci(name, "r12b") || streq_ci(name, "%r12b") || streq_ci(name, "r13b") || streq_ci(name, "%r13b") ||
+           streq_ci(name, "r14b") || streq_ci(name, "%r14b") || streq_ci(name, "r15b") || streq_ci(name, "%r15b");
+}
+
+static int emit_x86_64_xmm_memop(unsigned char prefix, unsigned char opcode, unsigned xr, const as_mem_operand_t *mem,
+                                 unsigned char *out, size_t out_cap, size_t *out_len) {
+    as_x86_reg_t base;
+    unsigned breg;
+    long long disp = 0;
+    int has_disp = 0;
+    unsigned char rex;
+    unsigned char modrm;
+    unsigned char mod;
+    int need_sib;
+    size_t pos = 0;
+
+    if (mem == NULL || out == NULL || out_len == NULL || out_cap < 10) {
+        return -1;
+    }
+    if (mem->base_reg == NULL || parse_x86_reg(mem->base_reg, &base) != 0) {
+        return -1;
+    }
+    if (mem->index_reg != NULL || mem->segment_reg != NULL) {
+        return -1;
+    }
+    if (mem->disp != NULL) {
+        if (eval_expr_const(mem->disp, &disp) != 0) {
+            return -1;
+        }
+        has_disp = 1;
+    }
+
+    breg = (unsigned)base & 15u;
+    need_sib = ((breg & 7u) == 4u) ? 1 : 0;
+    if (!has_disp && ((breg & 7u) == 5u)) {
+        has_disp = 1;
+        disp = 0;
+    }
+    if (!has_disp) {
+        mod = 0;
+    } else if (disp >= -128 && disp <= 127) {
+        mod = 1;
+    } else {
+        mod = 2;
+    }
+
+    out[pos++] = prefix;
+    rex = (unsigned char)(0x40u | ((xr & 8u) ? 0x04u : 0u) | ((breg & 8u) ? 0x01u : 0u));
+    if (rex != 0x40u) {
+        out[pos++] = rex;
+    }
+    out[pos++] = 0x0f;
+    out[pos++] = opcode;
+    modrm = (unsigned char)((mod << 6) | ((xr & 7u) << 3) | (breg & 7u));
+    out[pos++] = modrm;
+    if (need_sib) {
+        out[pos++] = (unsigned char)(0x20u | (breg & 7u)); /* scale=1,index=none,base=breg */
+    }
+    if (mod == 1) {
+        out[pos++] = (unsigned char)((int8_t)disp);
+    } else if (mod == 2) {
+        out[pos++] = (unsigned char)(disp & 0xff);
+        out[pos++] = (unsigned char)((disp >> 8) & 0xff);
+        out[pos++] = (unsigned char)((disp >> 16) & 0xff);
+        out[pos++] = (unsigned char)((disp >> 24) & 0xff);
+    }
+    *out_len = pos;
+    return 0;
+}
+
+static int emit_i386_special(const as_instruction_t *insn, int intel_syntax,
+                             unsigned char *out, size_t out_cap, size_t *out_len) {
+    const as_operand_t *a;
+    const as_operand_t *b;
+    const as_operand_t *src;
+    const as_operand_t *dst;
+    char mnbuf[32];
+    unsigned xr;
+    unsigned xm;
+    unsigned stidx;
+
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    if (insn == NULL || out == NULL || out_cap < 8) {
+        return -1;
+    }
+    if (normalize_x86_mnemonic(insn->mnemonic, mnbuf, sizeof(mnbuf), NULL) != 0) {
+        return -1;
+    }
+    if (insn->prefixes != 0 || insn->segment_override != NULL) {
+        return -1;
+    }
+
+    a = insn->operand_count > 0 ? &insn->operands[0] : NULL;
+    b = insn->operand_count > 1 ? &insn->operands[1] : NULL;
+    src = intel_syntax ? b : a;
+    dst = intel_syntax ? a : b;
+
+    if (strcmp(mnbuf, "fld1") == 0) {
+        if (insn->operand_count != 0) {
+            return -1;
+        }
+        out[0] = 0xd9;
+        out[1] = 0xe8;
+        if (out_len != NULL) {
+            *out_len = 2;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "fstp") == 0) {
+        if (insn->operand_count != 1 || a == NULL || a->kind != AS_OPERAND_COPROCESSOR ||
+            parse_st_index(a->u.coproc, &stidx) != 0) {
+            return -1;
+        }
+        out[0] = 0xdd;
+        out[1] = (unsigned char)(0xd8u + stidx);
+        if (out_len != NULL) {
+            *out_len = 2;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "pxor") == 0 || strcmp(mnbuf, "movdqa") == 0) {
+        unsigned char opcode = strcmp(mnbuf, "pxor") == 0 ? 0xef : 0x6f;
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_xmm_reg(src->u.reg, &xm) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+            return -1;
+        }
+        out[0] = 0x66;
+        out[1] = 0x0f;
+        out[2] = opcode;
+        out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+        if (out_len != NULL) {
+            *out_len = 4;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "cvtsi2sd") == 0) {
+        as_x86_reg_t gr;
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_x86_reg(src->u.reg, &gr) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+            return -1;
+        }
+        out[0] = 0xf2;
+        out[1] = 0x0f;
+        out[2] = 0x2a;
+        out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (gr & 7u));
+        if (out_len != NULL) {
+            *out_len = 4;
+        }
+        return 0;
+    }
+
+    return -1;
+}
+
+static int emit_x86_64_special(const as_instruction_t *insn, int intel_syntax, unsigned isa_level,
+                               unsigned char *out, size_t out_cap, size_t *out_len) {
+    const as_operand_t *a;
+    const as_operand_t *b;
+    const as_operand_t *src;
+    const as_operand_t *dst;
+    char mnbuf[32];
+    unsigned xr;
+    unsigned xm;
+    as_x86_reg_t gr;
+    long long imm64;
+    unsigned char rex;
+
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    if (insn == NULL || out == NULL || out_cap < 12) {
+        return -1;
+    }
+    if (normalize_x86_mnemonic(insn->mnemonic, mnbuf, sizeof(mnbuf), NULL) != 0) {
+        return -1;
+    }
+    if (insn->prefixes != 0 || insn->segment_override != NULL) {
+        return -1;
+    }
+
+    a = insn->operand_count > 0 ? &insn->operands[0] : NULL;
+    b = insn->operand_count > 1 ? &insn->operands[1] : NULL;
+    src = intel_syntax ? b : a;
+    dst = intel_syntax ? a : b;
+
+    if (strcmp(mnbuf, "movabs") == 0) {
+        size_t i;
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            (src->kind != AS_OPERAND_IMMEDIATE && src->kind != AS_OPERAND_LABEL_REF) ||
+            dst->kind != AS_OPERAND_REGISTER ||
+            parse_x86_reg(dst->u.reg, &gr) != 0) {
+            return -1;
+        }
+        if (eval_expr_const(src->u.expr, &imm64) != 0) {
+            if (expr_has_symbol(src->u.expr)) {
+                imm64 = 0;
+            } else {
+                return -1;
+            }
+        }
+        rex = (unsigned char)(0x48u | (((unsigned)gr >> 3) & 0x1u));
+        out[0] = rex;
+        out[1] = (unsigned char)(0xb8u + ((unsigned)gr & 7u));
+        for (i = 0; i < 8; ++i) {
+            out[2 + i] = (unsigned char)(((unsigned long long)imm64 >> (i * 8u)) & 0xffu);
+        }
+        if (out_len != NULL) {
+            *out_len = 10;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "movdqa") == 0) {
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_xmm_reg(src->u.reg, &xm) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+            return -1;
+        }
+        rex = (unsigned char)(0x40u | ((xr & 8u) ? 0x04u : 0u) | ((xm & 8u) ? 0x01u : 0u));
+        out[0] = 0x66;
+        if (rex != 0x40u) {
+            out[1] = rex;
+            out[2] = 0x0f;
+            out[3] = 0x6f;
+            out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+            if (out_len != NULL) {
+                *out_len = 5;
+            }
+        } else {
+            out[1] = 0x0f;
+            out[2] = 0x6f;
+            out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+            if (out_len != NULL) {
+                *out_len = 4;
+            }
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "movdqu") == 0) {
+        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
+            return -1;
+        }
+        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
+            parse_xmm_reg(src->u.reg, &xm) == 0 && parse_xmm_reg(dst->u.reg, &xr) == 0) {
+            rex = (unsigned char)(0x40u | ((xr & 8u) ? 0x04u : 0u) | ((xm & 8u) ? 0x01u : 0u));
+            out[0] = 0xf3;
+            if (rex != 0x40u) {
+                out[1] = rex;
+                out[2] = 0x0f;
+                out[3] = 0x6f;
+                out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+                if (out_len != NULL) {
+                    *out_len = 5;
+                }
+            } else {
+                out[1] = 0x0f;
+                out[2] = 0x6f;
+                out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+                if (out_len != NULL) {
+                    *out_len = 4;
+                }
+            }
+            return 0;
+        }
+        if (src->kind == AS_OPERAND_MEMORY && dst->kind == AS_OPERAND_REGISTER &&
+            parse_xmm_reg(dst->u.reg, &xr) == 0) {
+            return emit_x86_64_xmm_memop(0xf3, 0x6f, xr, &src->u.mem, out, out_cap, out_len);
+        }
+        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_MEMORY &&
+            parse_xmm_reg(src->u.reg, &xr) == 0) {
+            return emit_x86_64_xmm_memop(0xf3, 0x7f, xr, &dst->u.mem, out, out_cap, out_len);
+        }
+        return -1;
+    }
+    if (strcmp(mnbuf, "movsd") == 0) {
+        if (insn->operand_count != 2 || src == NULL || dst == NULL) {
+            return -1;
+        }
+        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_REGISTER &&
+            parse_xmm_reg(src->u.reg, &xm) == 0 && parse_xmm_reg(dst->u.reg, &xr) == 0) {
+            rex = (unsigned char)(0x40u | ((xr & 8u) ? 0x04u : 0u) | ((xm & 8u) ? 0x01u : 0u));
+            out[0] = 0xf2;
+            if (rex != 0x40u) {
+                out[1] = rex;
+                out[2] = 0x0f;
+                out[3] = 0x10;
+                out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+                if (out_len != NULL) {
+                    *out_len = 5;
+                }
+            } else {
+                out[1] = 0x0f;
+                out[2] = 0x10;
+                out[3] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (xm & 7u));
+                if (out_len != NULL) {
+                    *out_len = 4;
+                }
+            }
+            return 0;
+        }
+        if (src->kind == AS_OPERAND_MEMORY && dst->kind == AS_OPERAND_REGISTER &&
+            parse_xmm_reg(dst->u.reg, &xr) == 0) {
+            return emit_x86_64_xmm_memop(0xf2, 0x10, xr, &src->u.mem, out, out_cap, out_len);
+        }
+        if (src->kind == AS_OPERAND_REGISTER && dst->kind == AS_OPERAND_MEMORY &&
+            parse_xmm_reg(src->u.reg, &xr) == 0) {
+            return emit_x86_64_xmm_memop(0xf2, 0x11, xr, &dst->u.mem, out, out_cap, out_len);
+        }
+        return -1;
+    }
+    if (strcmp(mnbuf, "cvtsi2sd") == 0) {
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_x86_reg(src->u.reg, &gr) != 0 || parse_xmm_reg(dst->u.reg, &xr) != 0) {
+            return -1;
+        }
+        rex = (unsigned char)(0x48u | ((xr & 8u) ? 0x04u : 0u) | ((((unsigned)gr) & 8u) ? 0x01u : 0u));
+        out[0] = 0xf2;
+        out[1] = rex;
+        out[2] = 0x0f;
+        out[3] = 0x2a;
+        out[4] = (unsigned char)(0xc0u | ((xr & 7u) << 3) | (((unsigned)gr) & 7u));
+        if (out_len != NULL) {
+            *out_len = 5;
+        }
+        return 0;
+    }
+    if (strcmp(mnbuf, "vpbroadcastd") == 0) {
+        as_x86_avx2_insn_t avx2;
+        unsigned yd;
+        unsigned xs;
+        char avxerr[128];
+        if (isa_level < 3u) {
+            return -2;
+        }
+        if (insn->operand_count != 2 || src == NULL || dst == NULL ||
+            src->kind != AS_OPERAND_REGISTER || dst->kind != AS_OPERAND_REGISTER ||
+            parse_xmm_reg(src->u.reg, &xs) != 0 || parse_ymm_reg(dst->u.reg, &yd) != 0) {
+            return -1;
+        }
+        memset(&avx2, 0, sizeof(avx2));
+        avx2.mnemonic = "vpbroadcastd";
+        avx2.op_count = 2;
+        avx2.vector_bits = 256;
+        avx2.op1.kind = AS_X86_OP_REG;
+        avx2.op1.u.reg = (as_x86_reg_t)yd;
+        avx2.op2.kind = AS_X86_OP_REG;
+        avx2.op2.u.reg = (as_x86_reg_t)xs;
+        if (as_x86_encode_avx2(&avx2, out, out_cap, out_len, avxerr, sizeof(avxerr)) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+
+    return -1;
+}
+
+static int convert_operand_x86(const as_operand_t *op, const char *mnemonic, as_x86_operand_t *dst, int is64,
+                               char *errbuf, size_t errbuf_sz) {
+    long long v;
+
+    memset(dst, 0, sizeof(*dst));
+    if (op == NULL) {
+        dst->kind = AS_X86_OP_NONE;
+        return 0;
+    }
+
+    switch (op->kind) {
+    case AS_OPERAND_REGISTER:
+        dst->kind = AS_X86_OP_REG;
+        if (parse_x86_reg(op->u.reg, &dst->u.reg) != 0) {
+            snprintf(errbuf, errbuf_sz, "unknown x86 register: %s", op->u.reg != NULL ? op->u.reg : "<null>");
+            return -1;
+        }
+        return 0;
+    case AS_OPERAND_IMMEDIATE:
+        if (is_rel_mnemonic(mnemonic)) {
+            dst->kind = AS_X86_OP_REL;
+            if (eval_expr_const(op->u.expr, &v) == 0) {
+                dst->u.rel = (int32_t)v;
+            } else {
+                dst->u.rel = 0;
+            }
+            return 0;
+        }
+        dst->kind = AS_X86_OP_IMM;
+        if (eval_expr_const(op->u.expr, &v) == 0) {
+            dst->u.imm = (int64_t)v;
+            return 0;
+        }
+        if (expr_has_symbol(op->u.expr)) {
+            dst->u.imm = 0;
+            return 0;
+        }
+        snprintf(errbuf, errbuf_sz, "non-constant immediate in %s", mnemonic != NULL ? mnemonic : "<insn>");
+        return -1;
+    case AS_OPERAND_LABEL_REF:
+        if (is_rel_mnemonic(mnemonic)) {
+            dst->kind = AS_X86_OP_REL;
+            if (eval_expr_const(op->u.expr, &v) == 0) {
+                dst->u.rel = (int32_t)v;
+            } else {
+                dst->u.rel = 0;
+            }
+            return 0;
+        }
+        dst->kind = AS_X86_OP_MEM;
+        memset(&dst->u.mem, 0, sizeof(dst->u.mem));
+        dst->u.mem.scale = 1;
+        dst->u.mem.disp_only = 1;
+        dst->u.mem.has_disp = 1;
+        dst->u.mem.disp = 0;
+        return 0;
+    case AS_OPERAND_MEMORY:
+        dst->kind = AS_X86_OP_MEM;
+        memset(&dst->u.mem, 0, sizeof(dst->u.mem));
+        dst->u.mem.size_bits = (unsigned)(op->u.mem.size_bits > 0 ? op->u.mem.size_bits : 0);
+        if (op->u.mem.base_reg != NULL) {
+            if (is64 && streq_ci(op->u.mem.base_reg, "rip")) {
+                dst->u.mem.rip_relative = 1;
+            } else if (parse_x86_reg(op->u.mem.base_reg, &dst->u.mem.base) == 0) {
+                dst->u.mem.has_base = 1;
+            } else {
+                snprintf(errbuf, errbuf_sz, "unknown x86 base register: %s", op->u.mem.base_reg);
+                return -1;
+            }
+        }
+        if (op->u.mem.index_reg != NULL) {
+            if (parse_x86_reg(op->u.mem.index_reg, &dst->u.mem.index) == 0) {
+                dst->u.mem.has_index = 1;
+            } else {
+                snprintf(errbuf, errbuf_sz, "unknown x86 index register: %s", op->u.mem.index_reg);
+                return -1;
+            }
+        }
+        dst->u.mem.scale = op->u.mem.scale > 0 ? (unsigned)op->u.mem.scale : 1u;
+        if (op->u.mem.disp != NULL) {
+            if (eval_expr_const(op->u.mem.disp, &v) == 0) {
+                dst->u.mem.has_disp = 1;
+                dst->u.mem.disp = (int32_t)v;
+            } else if (expr_has_symbol(op->u.mem.disp)) {
+                dst->u.mem.has_disp = 1;
+                dst->u.mem.disp = 0;
+            } else {
+                snprintf(errbuf, errbuf_sz, "unsupported memory displacement expression");
+                return -1;
+            }
+        }
+        if (!dst->u.mem.has_base && !dst->u.mem.has_index) {
+            dst->u.mem.disp_only = 1;
+            if (!dst->u.mem.has_disp) {
+                dst->u.mem.has_disp = 1;
+                dst->u.mem.disp = 0;
+            }
+        }
+        return 0;
+    default:
+        snprintf(errbuf, errbuf_sz, "unsupported operand kind for x86 encode");
+        return -1;
+    }
+}
+
+static int append_directive_data(bytebuf_t *buf, const as_directive_t *d) {
+    size_t i;
+    unsigned width = 0;
+    long long v;
+
+    if (d == NULL || d->name == NULL) {
+        return 0;
+    }
+    if (strcmp(d->name, ".byte") == 0) width = 1;
+    else if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
+             strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0) width = 2;
+    else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) width = 4;
+    else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) width = 8;
+
+    if (width != 0) {
+        for (i = 0; i < d->arg_count; ++i) {
+            if (parse_int64(d->args[i], &v) == 0) {
+                if (bytebuf_append_u64_le(buf, (uint64_t)v, width) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            {
+                char *sym = NULL;
+                int64_t add = 0;
+                if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
+                    free(sym);
+                    if (bytebuf_append_zeros(buf, width) != 0) {
+                        return -1;
+                    }
+                    continue;
+                }
+                free(sym);
+            }
+            return -1;
+        }
+        return 1;
+    }
+
+    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0) {
+        if (d->arg_count < 1 || parse_int64(d->args[0], &v) != 0 || v < 0) {
+            return -1;
+        }
+        if (bytebuf_append_zeros(buf, (size_t)v) != 0) {
+            return -1;
+        }
+        return 1;
+    }
+
+    if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
+        size_t align = 1;
+        size_t need;
+        if (d->arg_count < 1 || parse_int64(d->args[0], &v) != 0 || v < 0) {
+            return -1;
+        }
+        if (strcmp(d->name, ".p2align") == 0) {
+            if (v >= (long long)(sizeof(size_t) * CHAR_BIT - 1)) {
+                return -1;
+            }
+            align = (size_t)1u << (unsigned)v;
+        } else {
+            align = (size_t)v;
+        }
+        if (align == 0 || (align & (align - 1)) != 0) {
+            return -1;
+        }
+        need = (align - (buf->len & (align - 1))) & (align - 1);
+        if (need > 0 && bytebuf_append_zeros(buf, need) != 0) {
+            return -1;
+        }
+        return 1;
+    }
+
+    if (strcmp(d->name, ".ascii") == 0 || strcmp(d->name, ".asciz") == 0 || strcmp(d->name, ".string") == 0) {
+        int nul = (strcmp(d->name, ".ascii") == 0) ? 0 : 1;
+        for (i = 0; i < d->arg_count; ++i) {
+            const char *s = d->args[i] != NULL ? d->args[i] : "";
+            if (bytebuf_append(buf, s, strlen(s)) != 0) {
+                return -1;
+            }
+            if (nul && bytebuf_append_zeros(buf, 1) != 0) {
+                return -1;
+            }
+        }
+        return 1;
+    }
+
+    if (strcmp(d->name, ".float") == 0 || strcmp(d->name, ".double") == 0) {
+        int is_double = strcmp(d->name, ".double") == 0;
+        for (i = 0; i < d->arg_count; ++i) {
+            char *end;
+            double dv = strtod(d->args[i], &end);
+            if (end == d->args[i] || *end != '\0') {
+                return -1;
+            }
+            if (is_double) {
+                union {
+                    double d;
+                    uint64_t u;
+                } u64;
+                u64.d = dv;
+                if (bytebuf_append_u64_le(buf, u64.u, 8) != 0) {
+                    return -1;
+                }
+            } else {
+                union {
+                    float f;
+                    uint32_t u;
+                } u32;
+                u32.f = (float)dv;
+                if (bytebuf_append_u64_le(buf, (uint64_t)u32.u, 4) != 0) {
+                    return -1;
+                }
+            }
+        }
+        return 1;
+    }
+
+    return 0;
+}
+
+static const char *section_from_directive(const as_directive_t *d) {
+    const char *arg;
+    static char secbuf[256];
+    size_t i;
+    size_t n = 0;
+
+    if (d == NULL || d->name == NULL) {
+        return NULL;
+    }
+    if (strcmp(d->name, ".text") == 0) return ".text";
+    if (strcmp(d->name, ".data") == 0) return ".data";
+    if (strcmp(d->name, ".rodata") == 0) return ".rodata";
+    if (strcmp(d->name, ".bss") == 0) return ".bss";
+    if ((strcmp(d->name, ".section") == 0 || strcmp(d->name, ".pushsection") == 0) &&
+        d->arg_count > 0 && d->args[0] != NULL && d->args[0][0] != '\0') {
+        arg = d->args[0];
+        while (*arg != '\0' && isspace((unsigned char)*arg)) {
+            arg++;
+        }
+        if (*arg == '"' || *arg == '\'') {
+            char q = *arg++;
+            while (*arg != '\0' && *arg != q && n + 1 < sizeof(secbuf)) {
+                secbuf[n++] = *arg++;
+            }
+            secbuf[n] = '\0';
+            return secbuf;
+        }
+        for (i = 0; arg[i] != '\0' && n + 1 < sizeof(secbuf); ++i) {
+            if (isspace((unsigned char)arg[i])) {
+                break;
+            }
+            secbuf[n++] = arg[i];
+        }
+        while (n > 0 && isspace((unsigned char)secbuf[n - 1])) {
+            n--;
+        }
+        secbuf[n] = '\0';
+        return n > 0 ? secbuf : NULL;
+    }
+    return NULL;
+}
+
+typedef struct {
+    char *name;
+    bytebuf_t buf;
+} sec_buf_t;
+
+typedef struct {
+    sec_buf_t *items;
+    size_t count;
+    size_t cap;
+} sec_buf_vec_t;
+
+typedef struct {
+    char *current;
+    char *previous;
+    char **stack;
+    size_t stack_count;
+    size_t stack_cap;
+} section_track_t;
+
+static void sec_buf_vec_free(sec_buf_vec_t *v) {
+    size_t i;
+
+    if (v == NULL) {
+        return;
+    }
+    for (i = 0; i < v->count; ++i) {
+        free(v->items[i].name);
+        free(v->items[i].buf.data);
+    }
+    free(v->items);
+    memset(v, 0, sizeof(*v));
+}
+
+static sec_buf_t *sec_buf_find(sec_buf_vec_t *v, const char *name) {
+    size_t i;
+
+    if (v == NULL || name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->items[i].name, name) == 0) {
+            return &v->items[i];
+        }
+    }
+    return NULL;
+}
+
+static sec_buf_t *sec_buf_get_or_add(sec_buf_vec_t *v, const char *name) {
+    sec_buf_t *next;
+
+    if (v == NULL || name == NULL || name[0] == '\0') {
+        return NULL;
+    }
+    next = sec_buf_find(v, name);
+    if (next != NULL) {
+        return next;
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 8 : v->cap * 2;
+        sec_buf_t *grow = (sec_buf_t *)realloc(v->items, ncap * sizeof(*grow));
+        if (grow == NULL) {
+            return NULL;
+        }
+        v->items = grow;
+        v->cap = ncap;
+    }
+    memset(&v->items[v->count], 0, sizeof(v->items[v->count]));
+    v->items[v->count].name = xstrdup(name);
+    if (v->items[v->count].name == NULL) {
+        return NULL;
+    }
+    v->count++;
+    return &v->items[v->count - 1];
+}
+
+static int section_track_init(section_track_t *st) {
+    if (st == NULL) {
+        return -1;
+    }
+    memset(st, 0, sizeof(*st));
+    st->current = xstrdup(".text");
+    st->previous = xstrdup(".text");
+    if (st->current == NULL || st->previous == NULL) {
+        free(st->current);
+        free(st->previous);
+        memset(st, 0, sizeof(*st));
+        return -1;
+    }
+    return 0;
+}
+
+static void section_track_free(section_track_t *st) {
+    size_t i;
+
+    if (st == NULL) {
+        return;
+    }
+    for (i = 0; i < st->stack_count; ++i) {
+        free(st->stack[i]);
+    }
+    free(st->stack);
+    free(st->current);
+    free(st->previous);
+    memset(st, 0, sizeof(*st));
+}
+
+static int section_track_switch(section_track_t *st, const char *name) {
+    char *next;
+    char *old;
+
+    if (st == NULL || name == NULL || name[0] == '\0') {
+        return -1;
+    }
+    next = xstrdup(name);
+    if (next == NULL) {
+        return -1;
+    }
+    old = st->current;
+    st->current = next;
+    free(st->previous);
+    st->previous = old;
+    return 0;
+}
+
+static int section_track_push(section_track_t *st) {
+    char **next;
+
+    if (st == NULL || st->current == NULL) {
+        return -1;
+    }
+    if (st->stack_count == st->stack_cap) {
+        size_t ncap = st->stack_cap == 0 ? 8 : st->stack_cap * 2;
+        next = (char **)realloc(st->stack, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        st->stack = next;
+        st->stack_cap = ncap;
+    }
+    st->stack[st->stack_count] = xstrdup(st->current);
+    if (st->stack[st->stack_count] == NULL) {
+        return -1;
+    }
+    st->stack_count++;
+    return 0;
+}
+
+static int section_track_apply_directive(section_track_t *st, const as_directive_t *d) {
+    const char *sec_name;
+    char *tmp;
+
+    if (st == NULL || d == NULL || d->name == NULL) {
+        return 0;
+    }
+    if (strcmp(d->name, ".previous") == 0) {
+        tmp = st->current;
+        st->current = st->previous;
+        st->previous = tmp;
+        return 1;
+    }
+    if (strcmp(d->name, ".popsection") == 0) {
+        if (st->stack_count == 0) {
+            return 1;
+        }
+        sec_name = st->stack[--st->stack_count];
+        if (section_track_switch(st, sec_name) != 0) {
+            free((char *)sec_name);
+            return -1;
+        }
+        free((char *)sec_name);
+        return 1;
+    }
+    sec_name = section_from_directive(d);
+    if (sec_name == NULL) {
+        return 0;
+    }
+    if (strcmp(d->name, ".pushsection") == 0 && section_track_push(st) != 0) {
+        return -1;
+    }
+    if (section_track_switch(st, sec_name) != 0) {
+        return -1;
+    }
+    return 1;
+}
+
+static elf_section_t *section_for_name(emit_ctx_t *ctx, const char *name) {
+    if (ctx == NULL || name == NULL) {
+        return NULL;
+    }
+    if (strcmp(name, ".text") == 0) {
+        return ctx->text_sec;
+    }
+    if (strcmp(name, ".data") == 0) {
+        return ctx->data_sec;
+    }
+    return elf_find_section(ctx->obj, name);
+}
+
+static int instruction_has_symbolic_reloc(const as_instruction_t *in) {
+    size_t i;
+
+    if (in == NULL) {
+        return 0;
+    }
+    for (i = 0; i < in->operand_count; ++i) {
+        const as_operand_t *op = &in->operands[i];
+        const as_expr_t *e = NULL;
+        if (op->kind == AS_OPERAND_IMMEDIATE || op->kind == AS_OPERAND_LABEL_REF) {
+            e = op->u.expr;
+        } else if (op->kind == AS_OPERAND_MEMORY) {
+            e = op->u.mem.disp;
+        } else {
+            continue;
+        }
+        if (first_symbol_in_expr(e) != NULL) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int encode_x86_stmt(const as_elf_cfg_t *cfg, const as_stmt_t *st, unsigned char *code, size_t code_cap,
+                           size_t *code_len, char *encerr, size_t encerr_sz) {
+    as_x86_insn_t in;
+    size_t j;
+    size_t op_index[3] = {0, 1, 2};
+    char mnbuf[32];
+    char suffix = '\0';
+    int intel_syntax;
+
+    if (cfg == NULL || st == NULL || code == NULL || code_len == NULL || encerr == NULL || encerr_sz == 0) {
+        return -1;
+    }
+    if (st->kind != AS_STMT_INSTRUCTION) {
+        return -1;
+    }
+
+    intel_syntax = (st->u.instr.syntax_intel != 0) ? 1 : (cfg->intel_syntax != 0);
+    memset(&in, 0, sizeof(in));
+    if (normalize_x86_mnemonic(st->u.instr.mnemonic, mnbuf, sizeof(mnbuf), &suffix) != 0) {
+        snprintf(encerr, encerr_sz, "unsupported mnemonic length");
+        return -1;
+    }
+    in.mnemonic = mnbuf;
+    in.seg_override = map_seg(st->u.instr.segment_override);
+    in.lock_prefix = (st->u.instr.prefixes & AS_PREFIX_LOCK) != 0;
+    if ((st->u.instr.prefixes & AS_PREFIX_REPNE) != 0) {
+        in.rep_prefix = 2;
+    } else if ((st->u.instr.prefixes & (AS_PREFIX_REP | AS_PREFIX_REPE)) != 0) {
+        in.rep_prefix = 1;
+    }
+    in.op_count = st->u.instr.operand_count > 3 ? 3 : st->u.instr.operand_count;
+    if (suffix == 'b') {
+        in.byte_op = 1;
+    } else if (suffix == 'w') {
+        in.operand_size_override = 1;
+    } else if (suffix == 'q') {
+        in.rex_w = 1;
+    }
+
+    if (!intel_syntax && in.op_count == 2) {
+        op_index[0] = 1;
+        op_index[1] = 0;
+    } else if (!intel_syntax && in.op_count == 3 && streq_ci(mnbuf, "imul")) {
+        op_index[0] = 2;
+        op_index[1] = 1;
+        op_index[2] = 0;
+    }
+
+    if (intel_syntax && suffix == '\0' && mnemonic_needs_uniform_width(mnbuf) && in.op_count > 0) {
+        int bits = 0;
+        if (infer_uniform_operand_width_bits(&st->u.instr, op_index, in.op_count, &bits, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+        if (bits == 8) {
+            in.byte_op = 1;
+        } else if (bits == 16) {
+            in.operand_size_override = 1;
+        } else if (bits == 64) {
+            if (!cfg->is_64) {
+                snprintf(encerr, encerr_sz, "unsupported Intel size qualifier: qword in 32-bit mode");
+                return -1;
+            }
+            in.rex_w = 1;
+        }
+    }
+
+    if (streq_ci(mnbuf, "mov") && in.op_count == 2) {
+        const as_operand_t *dst_raw = &st->u.instr.operands[op_index[0]];
+        const as_operand_t *src_raw = &st->u.instr.operands[op_index[1]];
+        long long immv;
+        if (dst_raw->kind == AS_OPERAND_REGISTER && src_raw->kind == AS_OPERAND_IMMEDIATE &&
+            is_x86_low8_reg(dst_raw->u.reg) && eval_expr_const(src_raw->u.expr, &immv) == 0 &&
+            (immv < -128 || immv > 255)) {
+            fprintf(stderr, "as: warning: %s:%u: immediate truncated to 8 bits\n",
+                    st->file != NULL ? st->file : "<input>", st->line);
+        }
+    }
+
+    if (!cfg->is_64 && emit_i386_special(&st->u.instr, intel_syntax, code, code_cap, code_len) == 0) {
+        return 0;
+    }
+    if (cfg->is_64) {
+        int s64 = emit_x86_64_special(&st->u.instr, intel_syntax, cfg->x86_64_isa_level, code, code_cap, code_len);
+        if (s64 == 0) {
+            return 0;
+        }
+        if (s64 == -2) {
+            snprintf(encerr, encerr_sz, "AVX2 instruction requires -march=x86-64-v3 or higher");
+            return -1;
+        }
+    }
+
+    for (j = 0; j < in.op_count; ++j) {
+        if (convert_operand_x86(&st->u.instr.operands[op_index[j]], in.mnemonic, &in.ops[j], cfg->is_64, encerr,
+                                encerr_sz) != 0) {
+            return -1;
+        }
+    }
+    if (in.seg_override == AS_X86_SEG_NONE) {
+        for (j = 0; j < in.op_count; ++j) {
+            const as_operand_t *op = &st->u.instr.operands[op_index[j]];
+            if (op->kind == AS_OPERAND_MEMORY && op->u.mem.segment_reg != NULL) {
+                in.seg_override = map_seg(op->u.mem.segment_reg);
+                break;
+            }
+        }
+    }
+
+    if (cfg->is_64) {
+        if (as_x86_encode_x86_64(&in, code, code_cap, code_len, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    } else {
+        if (as_x86_encode_i386(&in, code, code_cap, code_len, encerr, encerr_sz) != 0) {
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static int emit_text_program(emit_ctx_t *ctx) {
+    bytebuf_t text;
+    size_t i;
+    unsigned char code[32];
+    size_t code_len;
+    char encerr[256];
+    section_track_t track;
+    int trc;
+
+    memset(&text, 0, sizeof(text));
+    if (section_track_init(&track) != 0) {
+        return -1;
+    }
+
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        int drc;
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            trc = section_track_apply_directive(&track, &st->u.directive);
+            if (trc < 0) {
+                section_track_free(&track);
+                free(text.data);
+                return -1;
+            }
+            if (trc > 0) {
+                continue;
+            }
+            if (strcmp(track.current, ".text") != 0) {
+                continue;
+            }
+            drc = append_directive_data(&text, &st->u.directive);
+            if (drc < 0) {
+                section_track_free(&track);
+                free(text.data);
+                return -1;
+            }
+            continue;
+        }
+        if (st->kind != AS_STMT_INSTRUCTION) {
+            continue;
+        }
+        if (strcmp(track.current, ".text") != 0) {
+            continue;
+        }
+
+        {
+            if (encode_x86_stmt(ctx->cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+                set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
+                section_track_free(&track);
+                free(text.data);
+                return -1;
+            }
+            if (bytebuf_append(&text, code, code_len) != 0) {
+                section_track_free(&track);
+                free(text.data);
+                return -1;
+            }
+        }
+    }
+
+    if (ctx->text_sec != NULL && elf_section_set_data(ctx->text_sec, text.data, text.len) != ELF_OK) {
+        section_track_free(&track);
+        free(text.data);
+        return -1;
+    }
+    section_track_free(&track);
+    free(text.data);
+    return 0;
+}
+
 static uint8_t map_bind(as_sym_bind_t bind) {
     switch (bind) {
     case AS_SYM_BIND_GLOBAL:
@@ -181,6 +1759,48 @@ static uint32_t reloc_type_for_machine(unsigned machine) {
     }
 }
 
+static uint32_t reloc_type_for_symbol(unsigned machine, const char *name, uint32_t fallback) {
+    if (name == NULL) {
+        return fallback;
+    }
+    if (machine == EM_386) {
+        if (strstr(name, "@PLT") != NULL) {
+            return R_386_PLT32;
+        }
+        return fallback;
+    }
+    if (machine == EM_X86_64) {
+        if (strstr(name, "@PLT") != NULL) {
+            return R_X86_64_PLT32;
+        }
+        if (strstr(name, "@GOTPCREL") != NULL) {
+            return R_X86_64_GOTPCREL;
+        }
+        if (strstr(name, "@GOTTPOFF") != NULL) {
+            return R_X86_64_GOTTPOFF;
+        }
+        return fallback;
+    }
+    return fallback;
+}
+
+static void strip_reloc_modifier(char *name) {
+    char *at;
+
+    if (name == NULL) {
+        return;
+    }
+    at = strchr(name, '@');
+    if (at == NULL || at[1] == '\0') {
+        return;
+    }
+    if (strcasecmp(at + 1, "PLT") == 0 ||
+        strcasecmp(at + 1, "GOTPCREL") == 0 ||
+        strcasecmp(at + 1, "GOTTPOFF") == 0) {
+        *at = '\0';
+    }
+}
+
 static elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name) {
     size_t i;
 
@@ -190,6 +1810,34 @@ static elf_symbol_t *find_emit_symbol(emit_ctx_t *ctx, const char *name) {
         }
     }
     return NULL;
+}
+
+static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *sym);
+
+static elf_symbol_t *ensure_emit_symbol(emit_ctx_t *ctx, const char *name) {
+    elf_symbol_t *sym;
+    elf_section_t *sec;
+
+    if (name == NULL || name[0] == '\0') {
+        return NULL;
+    }
+    sym = find_emit_symbol(ctx, name);
+    if (sym != NULL) {
+        return sym;
+    }
+
+    sym = elf_add_symbol(ctx->obj, name, 0, 0, STB_GLOBAL, STT_NOTYPE);
+    if (sym == NULL) {
+        return NULL;
+    }
+    sec = section_for_name(ctx, name);
+    if (sec != NULL) {
+        (void)elf_symbol_define(sym, sec, 0);
+    }
+    if (append_emit_symbol(ctx, name, sym) != 0) {
+        return NULL;
+    }
+    return sym;
 }
 
 static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *sym) {
@@ -210,119 +1858,70 @@ static int append_emit_symbol(emit_ctx_t *ctx, const char *name, elf_symbol_t *s
 }
 
 static int emit_data_program(emit_ctx_t *ctx, const as_data_program_t *data) {
-    bytebuf_t buf;
+    sec_buf_vec_t secbufs;
+    section_track_t track;
     size_t i;
+    int trc;
 
-    memset(&buf, 0, sizeof(buf));
-
-    for (i = 0; i < data->count; ++i) {
-        const as_data_op_t *op = &data->items[i];
-        size_t j;
-
-        switch (op->kind) {
-        case AS_DATA_INT:
-            for (j = 0; j < op->u.ints.count; ++j) {
-                if (bytebuf_append_u64_le(&buf, (uint64_t)op->u.ints.values[j], op->u.ints.width) != 0) {
-                    free(buf.data);
-                    return -1;
-                }
-            }
-            break;
-        case AS_DATA_FLOAT:
-            for (j = 0; j < op->u.floats.count; ++j) {
-                if (op->u.floats.is_double) {
-                    double d = op->u.floats.values[j];
-                    if (bytebuf_append(&buf, &d, sizeof(d)) != 0) {
-                        free(buf.data);
-                        return -1;
-                    }
-                } else {
-                    float f = (float)op->u.floats.values[j];
-                    if (bytebuf_append(&buf, &f, sizeof(f)) != 0) {
-                        free(buf.data);
-                        return -1;
-                    }
-                }
-            }
-            break;
-        case AS_DATA_STRING:
-            if (bytebuf_append(&buf, op->u.str.bytes, op->u.str.len) != 0) {
-                free(buf.data);
-                return -1;
-            }
-            if (op->u.str.nul_terminated && bytebuf_append_zeros(&buf, 1) != 0) {
-                free(buf.data);
-                return -1;
-            }
-            break;
-        case AS_DATA_ZERO:
-            if (bytebuf_append_zeros(&buf, (size_t)op->u.zero.count) != 0) {
-                free(buf.data);
-                return -1;
-            }
-            break;
-        case AS_DATA_FILL:
-            for (j = 0; j < (size_t)op->u.fill.repeat; ++j) {
-                if (bytebuf_append_u64_le(&buf, op->u.fill.value, (unsigned)op->u.fill.size) != 0) {
-                    free(buf.data);
-                    return -1;
-                }
-            }
-            break;
-        case AS_DATA_ORG:
-            if (op->u.org.offset > buf.len && bytebuf_append_zeros(&buf, (size_t)(op->u.org.offset - buf.len)) != 0) {
-                free(buf.data);
-                return -1;
-            }
-            break;
-        case AS_DATA_INCBIN: {
-            FILE *fp;
-            unsigned char tmp[512];
-            size_t nread;
-            unsigned long long skip_left = op->u.incbin.skip;
-            unsigned long long take_left = op->u.incbin.has_count ? op->u.incbin.count : ~0ULL;
-
-            fp = fopen(op->u.incbin.path, "rb");
-            if (fp == NULL) {
-                free(buf.data);
-                return -1;
-            }
-            while (skip_left > 0) {
-                size_t chunk = skip_left > sizeof(tmp) ? sizeof(tmp) : (size_t)skip_left;
-                nread = fread(tmp, 1, chunk, fp);
-                if (nread == 0) {
-                    break;
-                }
-                skip_left -= nread;
-            }
-            while (take_left > 0) {
-                size_t want = take_left > sizeof(tmp) ? sizeof(tmp) : (size_t)take_left;
-                nread = fread(tmp, 1, want, fp);
-                if (nread == 0) {
-                    break;
-                }
-                if (bytebuf_append(&buf, tmp, nread) != 0) {
-                    fclose(fp);
-                    free(buf.data);
-                    return -1;
-                }
-                if (op->u.incbin.has_count) {
-                    take_left -= nread;
-                }
-            }
-            fclose(fp);
-            break;
-        }
-        default:
-            break;
-        }
-    }
-
-    if (ctx->data_sec != NULL && elf_section_set_data(ctx->data_sec, buf.data, buf.len) != ELF_OK) {
-        free(buf.data);
+    (void)data;
+    memset(&secbufs, 0, sizeof(secbufs));
+    if (section_track_init(&track) != 0) {
         return -1;
     }
-    free(buf.data);
+
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        sec_buf_t *sb;
+        int drc;
+        elf_section_t *sec;
+
+        if (st->kind != AS_STMT_DIRECTIVE) {
+            continue;
+        }
+        trc = section_track_apply_directive(&track, &st->u.directive);
+        if (trc < 0) {
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
+        }
+        if (trc > 0 || strcmp(track.current, ".text") == 0) {
+            continue;
+        }
+        sec = section_for_name(ctx, track.current);
+        if (sec == NULL) {
+            set_err(ctx, "%s:%u: unknown section %s", st->file != NULL ? st->file : "<input>", st->line, track.current);
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
+        }
+        sb = sec_buf_get_or_add(&secbufs, track.current);
+        if (sb == NULL) {
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
+        }
+        drc = append_directive_data(&sb->buf, &st->u.directive);
+        if (drc < 0) {
+            set_err(ctx, "%s:%u: malformed %s directive data", st->file != NULL ? st->file : "<input>", st->line, track.current);
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
+        }
+    }
+
+    for (i = 0; i < secbufs.count; ++i) {
+        elf_section_t *sec = section_for_name(ctx, secbufs.items[i].name);
+        if (sec == NULL) {
+            continue;
+        }
+        if (elf_section_set_data(sec, secbufs.items[i].buf.data, secbufs.items[i].buf.len) != ELF_OK) {
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
+        }
+    }
+    section_track_free(&track);
+    sec_buf_vec_free(&secbufs);
     return 0;
 }
 
@@ -364,105 +1963,1312 @@ static int ensure_section_exists(emit_ctx_t *ctx, const char *name, uint32_t typ
     return 0;
 }
 
+typedef struct {
+    char *name;
+    elf_section_t *sec;
+    uint64_t off;
+} sym_loc_t;
+
+static void free_sym_locs(sym_loc_t *locs, size_t count) {
+    size_t i;
+
+    if (locs == NULL) {
+        return;
+    }
+    for (i = 0; i < count; ++i) {
+        free(locs[i].name);
+    }
+    free(locs);
+}
+
+static const sym_loc_t *find_sym_loc(const sym_loc_t *locs, size_t count, const char *name) {
+    size_t i;
+
+    if (locs == NULL || name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < count; ++i) {
+        if (strcmp(locs[i].name, name) == 0) {
+            return &locs[i];
+        }
+    }
+    return NULL;
+}
+
+static int upsert_sym_loc(sym_loc_t **locs, size_t *count, const char *name, elf_section_t *sec, uint64_t off) {
+    sym_loc_t *next;
+    size_t i;
+
+    if (locs == NULL || count == NULL || name == NULL) {
+        return -1;
+    }
+
+    for (i = 0; i < *count; ++i) {
+        if (strcmp((*locs)[i].name, name) == 0) {
+            (*locs)[i].sec = sec;
+            (*locs)[i].off = off;
+            return 0;
+        }
+    }
+
+    next = (sym_loc_t *)realloc(*locs, (*count + 1) * sizeof(*next));
+    if (next == NULL) {
+        return -1;
+    }
+    *locs = next;
+    (*locs)[*count].name = xstrdup(name);
+    if ((*locs)[*count].name == NULL) {
+        return -1;
+    }
+    (*locs)[*count].sec = sec;
+    (*locs)[*count].off = off;
+    (*count)++;
+    return 0;
+}
+
+static int collect_symbol_locations(emit_ctx_t *ctx, sym_loc_t **locs, size_t *loc_count) {
+    size_t i;
+    sec_buf_vec_t secbufs;
+    section_track_t track;
+
+    if (ctx == NULL || locs == NULL || loc_count == NULL) {
+        return -1;
+    }
+    *locs = NULL;
+    *loc_count = 0;
+    memset(&secbufs, 0, sizeof(secbufs));
+    if (section_track_init(&track) != 0) {
+        return -1;
+    }
+
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        uint64_t cur_off;
+        elf_section_t *cur_sec;
+        sec_buf_t *sb;
+        size_t j;
+        int trc;
+
+        sb = sec_buf_get_or_add(&secbufs, track.current);
+        if (sb == NULL) {
+            free_sym_locs(*locs, *loc_count);
+            *locs = NULL;
+            *loc_count = 0;
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
+        }
+        cur_off = (uint64_t)sb->buf.len;
+        cur_sec = section_for_name(ctx, track.current);
+
+        for (j = 0; j < st->label_count; ++j) {
+            if (upsert_sym_loc(locs, loc_count, st->labels[j].name, cur_sec, cur_off) != 0) {
+                free_sym_locs(*locs, *loc_count);
+                *locs = NULL;
+                *loc_count = 0;
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+        }
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            int drc;
+
+            trc = section_track_apply_directive(&track, &st->u.directive);
+            if (trc < 0) {
+                free_sym_locs(*locs, *loc_count);
+                *locs = NULL;
+                *loc_count = 0;
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+            if (trc > 0) {
+                continue;
+            }
+            drc = append_directive_data(&sb->buf, &st->u.directive);
+            if (drc < 0) {
+                free_sym_locs(*locs, *loc_count);
+                *locs = NULL;
+                *loc_count = 0;
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                set_err(ctx, "%s:%u: malformed directive data", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+            continue;
+        }
+
+        if (st->kind == AS_STMT_INSTRUCTION && strcmp(track.current, ".text") == 0) {
+            unsigned char code[32];
+            size_t code_len = 0;
+            char encerr[256];
+            if (encode_x86_stmt(ctx->cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+                free_sym_locs(*locs, *loc_count);
+                *locs = NULL;
+                *loc_count = 0;
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
+                return -1;
+            }
+            if (bytebuf_append(&sb->buf, code, code_len) != 0) {
+                free_sym_locs(*locs, *loc_count);
+                *locs = NULL;
+                *loc_count = 0;
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+        }
+    }
+
+    section_track_free(&track);
+    sec_buf_vec_free(&secbufs);
+    return 0;
+}
+
 static int emit_symbols(emit_ctx_t *ctx, const as_symtab_t *symtab) {
     size_t i;
+    sym_loc_t *locs = NULL;
+    size_t loc_count = 0;
+
+    if (collect_symbol_locations(ctx, &locs, &loc_count) != 0) {
+        return -1;
+    }
 
     for (i = 0; i < symtab->count; ++i) {
         const as_symbol_t *s = &symtab->items[i];
         elf_symbol_t *esym;
+        const sym_loc_t *loc;
 
         esym = elf_add_symbol(ctx->obj, s->name, 0, s->size, map_bind(s->bind), map_type(s->type));
         if (esym == NULL) {
+            free_sym_locs(locs, loc_count);
             return -1;
         }
         if (elf_symbol_set_visibility(esym, map_vis(s->visibility)) != ELF_OK) {
+            free_sym_locs(locs, loc_count);
             return -1;
         }
         if (s->version != NULL && elf_symbol_set_version(esym, 1) != ELF_OK) {
+            free_sym_locs(locs, loc_count);
             return -1;
         }
         if (s->is_common) {
             if (elf_symbol_set_shndx(esym, SHN_COMMON) != ELF_OK) {
+                free_sym_locs(locs, loc_count);
                 return -1;
             }
         } else if (s->defined) {
-            if (ctx->text_sec != NULL && elf_symbol_define(esym, ctx->text_sec, 0) != ELF_OK) {
+            loc = find_sym_loc(locs, loc_count, s->name);
+            if (loc != NULL && loc->sec != NULL) {
+                if (elf_symbol_define(esym, loc->sec, loc->off) != ELF_OK) {
+                    free_sym_locs(locs, loc_count);
+                    return -1;
+                }
+            } else if (ctx->text_sec != NULL && elf_symbol_define(esym, ctx->text_sec, 0) != ELF_OK) {
+                free_sym_locs(locs, loc_count);
                 return -1;
             }
         }
 
         if (append_emit_symbol(ctx, s->name, esym) != 0) {
+            free_sym_locs(locs, loc_count);
             return -1;
         }
     }
 
+    free_sym_locs(locs, loc_count);
     return 0;
 }
 
-static int add_reloc_for_symbol(emit_ctx_t *ctx, const char *name, uint64_t *offset_inout) {
+static int add_reloc_for_symbol_ex(emit_ctx_t *ctx, elf_section_t *sec, const char *name,
+                                   uint64_t offset, uint32_t fallback_type, int64_t addend) {
+    char *sym_name;
     elf_symbol_t *sym;
     uint32_t rtype;
 
-    sym = find_emit_symbol(ctx, name);
-    if (sym == NULL) {
-        return 0;
-    }
-    if (ctx->text_sec == NULL) {
-        return 0;
-    }
-
-    rtype = reloc_type_for_machine(ctx->cfg != NULL ? ctx->cfg->machine : EM_386);
-    if (elf_add_relocation(ctx->text_sec, *offset_inout, sym, rtype, 0) != ELF_OK) {
+    sym_name = xstrdup(name);
+    if (sym_name == NULL) {
         return -1;
     }
-
-    *offset_inout += (ctx->cfg != NULL && ctx->cfg->is_64) ? 8 : 4;
+    strip_reloc_modifier(sym_name);
+    if (sym_name[0] == '\0') {
+        free(sym_name);
+        return -1;
+    }
+    sym = ensure_emit_symbol(ctx, sym_name);
+    if (sym == NULL) {
+        free(sym_name);
+        return -1;
+    }
+    if (sec == NULL) {
+        free(sym_name);
+        return 0;
+    }
+    rtype = reloc_type_for_symbol(ctx->cfg != NULL ? ctx->cfg->machine : EM_386, name, fallback_type);
+    if (elf_add_relocation(sec, offset, sym, rtype, addend) != ELF_OK) {
+        free(sym_name);
+        return -1;
+    }
+    free(sym_name);
     return 0;
 }
 
-static int walk_expr_relocs(emit_ctx_t *ctx, const as_expr_t *e, uint64_t *off) {
+static const char *first_symbol_in_expr(const as_expr_t *e) {
     if (e == NULL) {
-        return 0;
+        return NULL;
     }
     if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL) {
-        if (add_reloc_for_symbol(ctx, e->symbol, off) != 0) {
-            return -1;
+        return e->symbol;
+    }
+    if (e->lhs != NULL) {
+        const char *s = first_symbol_in_expr(e->lhs);
+        if (s != NULL) {
+            return s;
         }
     }
-    if (walk_expr_relocs(ctx, e->lhs, off) != 0) {
+    if (e->rhs != NULL) {
+        return first_symbol_in_expr(e->rhs);
+    }
+    return NULL;
+}
+
+static char *trim_copy_arg(const char *s) {
+    const char *p;
+    const char *q;
+    size_t n;
+    char *out;
+
+    if (s == NULL) {
+        return NULL;
+    }
+    p = s;
+    while (*p != '\0' && isspace((unsigned char)*p)) {
+        ++p;
+    }
+    q = p + strlen(p);
+    while (q > p && isspace((unsigned char)q[-1])) {
+        --q;
+    }
+    n = (size_t)(q - p);
+    out = (char *)malloc(n + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, p, n);
+    out[n] = '\0';
+    return out;
+}
+
+static int parse_symbol_addend_arg(const char *arg, char **sym_out, int64_t *add_out) {
+    char *tmp;
+    char *compact;
+    size_t i;
+    size_t n;
+    char *sep = NULL;
+    int sign = 1;
+    long long v = 0;
+
+    if (sym_out == NULL || add_out == NULL) {
         return -1;
     }
-    if (walk_expr_relocs(ctx, e->rhs, off) != 0) {
+    *sym_out = NULL;
+    *add_out = 0;
+    tmp = trim_copy_arg(arg);
+    if (tmp == NULL) {
         return -1;
+    }
+    if (tmp[0] == '\0') {
+        free(tmp);
+        return -1;
+    }
+    if (parse_int64(tmp, &v) == 0) {
+        free(tmp);
+        return 0;
+    }
+
+    n = strlen(tmp);
+    compact = (char *)malloc(n + 1);
+    if (compact == NULL) {
+        free(tmp);
+        return -1;
+    }
+    n = 0;
+    for (i = 0; tmp[i] != '\0'; ++i) {
+        if (!isspace((unsigned char)tmp[i])) {
+            compact[n++] = tmp[i];
+        }
+    }
+    compact[n] = '\0';
+    free(tmp);
+
+    for (i = 1; compact[i] != '\0'; ++i) {
+        if (compact[i] == '+' || compact[i] == '-') {
+            sep = &compact[i];
+            break;
+        }
+    }
+    if (sep != NULL) {
+        long long addv;
+        char opch = *sep;
+        *sep = '\0';
+        sign = opch == '-' ? -1 : 1;
+        if (parse_int64(sep + 1, &addv) == 0) {
+            *add_out = (int64_t)(sign > 0 ? addv : -addv);
+        }
+    }
+    if (compact[0] == '\0') {
+        free(compact);
+        return -1;
+    }
+    *sym_out = compact;
+    return 0;
+}
+
+typedef struct {
+    char *name;
+    unsigned type;
+    unsigned flags;
+    unsigned align;
+    int touched;
+    bytebuf_t buf;
+} bin_section_t;
+
+typedef struct {
+    bin_section_t *items;
+    size_t count;
+    size_t cap;
+} bin_section_vec_t;
+
+static void bin_section_vec_free(bin_section_vec_t *v) {
+    size_t i;
+
+    if (v == NULL) {
+        return;
+    }
+    for (i = 0; i < v->count; ++i) {
+        free(v->items[i].name);
+        free(v->items[i].buf.data);
+    }
+    free(v->items);
+    memset(v, 0, sizeof(*v));
+}
+
+static int bin_section_vec_push(bin_section_vec_t *v, const char *name, unsigned type, unsigned flags, unsigned align) {
+    bin_section_t *next;
+
+    if (v == NULL || name == NULL || name[0] == '\0') {
+        return -1;
+    }
+    if (v->count == v->cap) {
+        size_t ncap = v->cap == 0 ? 16 : v->cap * 2;
+        next = (bin_section_t *)realloc(v->items, ncap * sizeof(*next));
+        if (next == NULL) {
+            return -1;
+        }
+        v->items = next;
+        v->cap = ncap;
+    }
+    memset(&v->items[v->count], 0, sizeof(v->items[v->count]));
+    v->items[v->count].name = xstrdup(name);
+    if (v->items[v->count].name == NULL) {
+        return -1;
+    }
+    v->items[v->count].type = type;
+    v->items[v->count].flags = flags;
+    v->items[v->count].align = align > 0 ? align : 1;
+    v->count++;
+    return 0;
+}
+
+static bin_section_t *bin_section_find(bin_section_vec_t *v, const char *name) {
+    size_t i;
+
+    if (v == NULL || name == NULL) {
+        return NULL;
+    }
+    for (i = 0; i < v->count; ++i) {
+        if (strcmp(v->items[i].name, name) == 0) {
+            return &v->items[i];
+        }
+    }
+    return NULL;
+}
+
+static int bin_sections_init(bin_section_vec_t *v, const as_section_state_t *sections) {
+    size_t i;
+
+    if (v == NULL) {
+        return -1;
+    }
+    memset(v, 0, sizeof(*v));
+    if (sections == NULL) {
+        return 0;
+    }
+    for (i = 0; i < sections->count; ++i) {
+        const as_section_t *s = &sections->items[i];
+        bin_section_t *cur = bin_section_find(v, s->name);
+        if (cur == NULL) {
+            if (bin_section_vec_push(v, s->name, s->type, s->flags, s->align) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (s->align > cur->align) {
+            cur->align = s->align;
+        }
+        cur->flags |= s->flags;
+        if (s->type == SHT_NOBITS) {
+            cur->type = SHT_NOBITS;
+        }
     }
     return 0;
 }
 
-static int emit_relocations(emit_ctx_t *ctx) {
-    size_t i;
-    uint64_t off = 0;
+static bin_section_t *bin_section_get_or_add(bin_section_vec_t *v, const char *name) {
+    bin_section_t *sec;
+    unsigned type = SHT_PROGBITS;
+    unsigned flags = 0;
+    unsigned align = 1;
 
-    for (i = 0; i < ctx->parsed->count; ++i) {
-        const as_stmt_t *st = &ctx->parsed->items[i];
-        size_t j;
+    sec = bin_section_find(v, name);
+    if (sec != NULL) {
+        return sec;
+    }
+    if (strcmp(name, ".text") == 0) {
+        type = SHT_PROGBITS;
+        flags = SHF_ALLOC | SHF_EXECINSTR;
+        align = 16;
+    } else if (strcmp(name, ".rodata") == 0) {
+        type = SHT_PROGBITS;
+        flags = SHF_ALLOC;
+        align = 4;
+    } else if (strcmp(name, ".data") == 0) {
+        type = SHT_PROGBITS;
+        flags = SHF_ALLOC | SHF_WRITE;
+        align = 4;
+    } else if (strcmp(name, ".bss") == 0) {
+        type = SHT_NOBITS;
+        flags = SHF_ALLOC | SHF_WRITE;
+        align = 4;
+    }
+    if (bin_section_vec_push(v, name, type, flags, align) != 0) {
+        return NULL;
+    }
+    return &v->items[v->count - 1];
+}
 
-        if (st->kind != AS_STMT_INSTRUCTION) {
-            continue;
+static int parse_nonneg_u64_or_reloc(emit_ctx_t *ctx, const as_stmt_t *st, const char *arg,
+                                     const char *what, unsigned long long *out) {
+    long long v;
+    char *sym = NULL;
+    int64_t add = 0;
+
+    if (parse_int64(arg, &v) == 0) {
+        if (v < 0) {
+            set_err(ctx, "%s:%u: %s must be non-negative", st->file != NULL ? st->file : "<input>", st->line, what);
+            return -1;
         }
-        for (j = 0; j < st->u.instr.operand_count; ++j) {
-            const as_operand_t *op = &st->u.instr.operands[j];
-            if (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) {
-                if (walk_expr_relocs(ctx, op->u.expr, &off) != 0) {
+        *out = (unsigned long long)v;
+        return 0;
+    }
+    if (parse_symbol_addend_arg(arg, &sym, &add) == 0 && sym != NULL) {
+        set_err(ctx, "%s:%u: unresolved relocation to '%s' not allowed with -O binary",
+                st->file != NULL ? st->file : "<input>", st->line, sym);
+        free(sym);
+        return -1;
+    }
+    set_err(ctx, "%s:%u: invalid %s argument: %s", st->file != NULL ? st->file : "<input>", st->line, what, arg);
+    free(sym);
+    return -1;
+}
+
+static char *dirname_dup2(const char *path) {
+    const char *slash;
+    size_t n;
+    char *out;
+
+    if (path == NULL) {
+        return NULL;
+    }
+    slash = strrchr(path, '/');
+    if (slash == NULL) {
+        return xstrdup(".");
+    }
+    if (slash == path) {
+        return xstrdup("/");
+    }
+    n = (size_t)(slash - path);
+    out = (char *)malloc(n + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, path, n);
+    out[n] = '\0';
+    return out;
+}
+
+static char *join_path2(const char *a, const char *b) {
+    size_t an;
+    size_t bn;
+    char *out;
+
+    if (a == NULL || b == NULL) {
+        return NULL;
+    }
+    an = strlen(a);
+    bn = strlen(b);
+    out = (char *)malloc(an + 1 + bn + 1);
+    if (out == NULL) {
+        return NULL;
+    }
+    memcpy(out, a, an);
+    out[an] = '/';
+    memcpy(out + an + 1, b, bn);
+    out[an + 1 + bn] = '\0';
+    return out;
+}
+
+static int append_incbin_bytes(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, const as_directive_t *d) {
+    const char *path_arg;
+    char *resolved = NULL;
+    unsigned long long skip = 0;
+    unsigned long long count = 0;
+    int has_count = 0;
+    FILE *fp = NULL;
+    unsigned char tmp[1024];
+
+    if (d->arg_count < 1) {
+        set_err(ctx, "%s:%u: .incbin requires path argument", st->file != NULL ? st->file : "<input>", st->line);
+        return -1;
+    }
+    path_arg = d->args[0];
+    if (path_arg == NULL || path_arg[0] == '\0') {
+        set_err(ctx, "%s:%u: malformed .incbin path", st->file != NULL ? st->file : "<input>", st->line);
+        return -1;
+    }
+    if (path_arg[0] == '/') {
+        resolved = xstrdup(path_arg);
+    } else {
+        char *dir = dirname_dup2(st->file);
+        if (dir != NULL) {
+            resolved = join_path2(dir, path_arg);
+        }
+        free(dir);
+    }
+    if (resolved == NULL) {
+        set_err(ctx, "%s:%u: failed to resolve .incbin path", st->file != NULL ? st->file : "<input>", st->line);
+        return -1;
+    }
+    if (d->arg_count >= 2 && parse_nonneg_u64_or_reloc(ctx, st, d->args[1], ".incbin skip", &skip) != 0) {
+        free(resolved);
+        return -1;
+    }
+    if (d->arg_count >= 3 && parse_nonneg_u64_or_reloc(ctx, st, d->args[2], ".incbin count", &count) != 0) {
+        free(resolved);
+        return -1;
+    }
+    has_count = (d->arg_count >= 3) ? 1 : 0;
+
+    fp = fopen(resolved, "rb");
+    if (fp == NULL) {
+        set_err(ctx, "%s:%u: failed to open .incbin file %s", st->file != NULL ? st->file : "<input>", st->line, resolved);
+        free(resolved);
+        return -1;
+    }
+    free(resolved);
+
+    while (skip > 0) {
+        size_t want = skip > sizeof(tmp) ? sizeof(tmp) : (size_t)skip;
+        size_t nread = fread(tmp, 1, want, fp);
+        if (nread == 0) {
+            break;
+        }
+        skip -= nread;
+    }
+    while (!has_count || count > 0) {
+        size_t want = sizeof(tmp);
+        size_t nread;
+        if (has_count && count < want) {
+            want = (size_t)count;
+        }
+        nread = fread(tmp, 1, want, fp);
+        if (nread == 0) {
+            break;
+        }
+        if (bytebuf_append(&sec->buf, tmp, nread) != 0) {
+            fclose(fp);
+            set_err(ctx, "%s:%u: out of memory while appending .incbin", st->file != NULL ? st->file : "<input>",
+                    st->line);
+            return -1;
+        }
+        if (has_count) {
+            count -= nread;
+        }
+    }
+    fclose(fp);
+    sec->touched = 1;
+    return 0;
+}
+
+static int append_data_directive_binary(emit_ctx_t *ctx, const as_stmt_t *st, bin_section_t *sec, int *handled) {
+    const as_directive_t *d;
+    size_t i;
+
+    if (ctx == NULL || st == NULL || sec == NULL || handled == NULL || st->kind != AS_STMT_DIRECTIVE) {
+        return -1;
+    }
+    d = &st->u.directive;
+    *handled = 0;
+
+    if (strcmp(d->name, ".incbin") == 0) {
+        *handled = 1;
+        return append_incbin_bytes(ctx, st, sec, d);
+    }
+    if (strcmp(d->name, ".ascii") == 0 || strcmp(d->name, ".asciz") == 0 || strcmp(d->name, ".string") == 0) {
+        int nul = (strcmp(d->name, ".ascii") == 0) ? 0 : 1;
+        *handled = 1;
+        for (i = 0; i < d->arg_count; ++i) {
+            const char *s = d->args[i] != NULL ? d->args[i] : "";
+            if (bytebuf_append(&sec->buf, s, strlen(s)) != 0) {
+                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+            if (nul && bytebuf_append_zeros(&sec->buf, 1) != 0) {
+                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".float") == 0 || strcmp(d->name, ".double") == 0) {
+        int is_double = strcmp(d->name, ".double") == 0;
+        *handled = 1;
+        for (i = 0; i < d->arg_count; ++i) {
+            char *tmp = trim_copy_arg(d->args[i]);
+            char *end;
+            double dv;
+            if (tmp == NULL || tmp[0] == '\0') {
+                free(tmp);
+                set_err(ctx, "%s:%u: malformed %s argument", st->file != NULL ? st->file : "<input>", st->line, d->name);
+                return -1;
+            }
+            dv = strtod(tmp, &end);
+            if (end == tmp || *end != '\0') {
+                char *sym = NULL;
+                int64_t add = 0;
+                if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
+                    set_err(ctx, "%s:%u: unresolved relocation to '%s' not allowed with -O binary",
+                            st->file != NULL ? st->file : "<input>", st->line, sym);
+                    free(sym);
+                } else {
+                    set_err(ctx, "%s:%u: malformed %s argument", st->file != NULL ? st->file : "<input>", st->line,
+                            d->name);
+                }
+                free(tmp);
+                return -1;
+            }
+            free(tmp);
+            if (is_double) {
+                if (bytebuf_append(&sec->buf, &dv, sizeof(dv)) != 0) {
+                    set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
                     return -1;
                 }
-            } else if (op->kind == AS_OPERAND_MEMORY) {
-                if (walk_expr_relocs(ctx, op->u.mem.disp, &off) != 0) {
+            } else {
+                float fv = (float)dv;
+                if (bytebuf_append(&sec->buf, &fv, sizeof(fv)) != 0) {
+                    set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
                     return -1;
                 }
             }
         }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".align") == 0 || strcmp(d->name, ".balign") == 0 || strcmp(d->name, ".p2align") == 0) {
+        unsigned long long raw;
+        size_t align;
+        size_t need;
+        *handled = 1;
+        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], d->name, &raw) != 0) {
+            return -1;
+        }
+        if (strcmp(d->name, ".p2align") == 0) {
+            if (raw >= (unsigned long long)(sizeof(size_t) * CHAR_BIT - 1)) {
+                set_err(ctx, "%s:%u: .p2align exponent too large", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+            align = (size_t)1u << (unsigned)raw;
+        } else {
+            align = (size_t)raw;
+        }
+        if (align == 0 || (align & (align - 1)) != 0) {
+            set_err(ctx, "%s:%u: alignment must be a power of two", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        need = (align - (sec->buf.len & (align - 1))) & (align - 1);
+        if (need > 0 && bytebuf_append_zeros(&sec->buf, need) != 0) {
+            set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".org") == 0) {
+        unsigned long long off;
+        *handled = 1;
+        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], ".org offset", &off) != 0) {
+            return -1;
+        }
+        if ((size_t)off < sec->buf.len) {
+            set_err(ctx, "%s:%u: backward .org is not supported in binary mode",
+                    st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        if ((size_t)off > sec->buf.len && bytebuf_append_zeros(&sec->buf, (size_t)off - sec->buf.len) != 0) {
+            set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".zero") == 0 || strcmp(d->name, ".space") == 0 || strcmp(d->name, ".skip") == 0) {
+        unsigned long long n;
+        *handled = 1;
+        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], d->name, &n) != 0) {
+            return -1;
+        }
+        if (n > 0 && bytebuf_append_zeros(&sec->buf, (size_t)n) != 0) {
+            set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".fill") == 0) {
+        unsigned long long repeat = 0;
+        unsigned long long size = 1;
+        unsigned long long value = 0;
+        *handled = 1;
+        if (d->arg_count < 1 || parse_nonneg_u64_or_reloc(ctx, st, d->args[0], ".fill repeat", &repeat) != 0) {
+            return -1;
+        }
+        if (d->arg_count >= 2 && parse_nonneg_u64_or_reloc(ctx, st, d->args[1], ".fill size", &size) != 0) {
+            return -1;
+        }
+        if (d->arg_count >= 3 && parse_nonneg_u64_or_reloc(ctx, st, d->args[2], ".fill value", &value) != 0) {
+            return -1;
+        }
+        if (size == 0 || size > 8) {
+            set_err(ctx, "%s:%u: .fill size must be in [1,8]", st->file != NULL ? st->file : "<input>", st->line);
+            return -1;
+        }
+        for (i = 0; i < (size_t)repeat; ++i) {
+            if (bytebuf_append_u64_le(&sec->buf, value, (unsigned)size) != 0) {
+                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+        }
+        sec->touched = 1;
+        return 0;
+    }
+    if (strcmp(d->name, ".byte") == 0 || strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
+        strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0 || strcmp(d->name, ".long") == 0 ||
+        strcmp(d->name, ".int") == 0 || strcmp(d->name, ".4byte") == 0 || strcmp(d->name, ".quad") == 0 ||
+        strcmp(d->name, ".8byte") == 0) {
+        unsigned width = 1;
+        *handled = 1;
+        if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 || strcmp(d->name, ".hword") == 0 ||
+            strcmp(d->name, ".2byte") == 0) {
+            width = 2;
+        } else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".int") == 0 || strcmp(d->name, ".4byte") == 0) {
+            width = 4;
+        } else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) {
+            width = 8;
+        }
+        for (i = 0; i < d->arg_count; ++i) {
+            long long v;
+            if (parse_int64(d->args[i], &v) != 0) {
+                char *sym = NULL;
+                int64_t add = 0;
+                if (parse_symbol_addend_arg(d->args[i], &sym, &add) == 0 && sym != NULL) {
+                    set_err(ctx, "%s:%u: unresolved relocation to '%s' not allowed with -O binary",
+                            st->file != NULL ? st->file : "<input>", st->line, sym);
+                    free(sym);
+                } else {
+                    set_err(ctx, "%s:%u: malformed %s argument", st->file != NULL ? st->file : "<input>", st->line,
+                            d->name);
+                }
+                return -1;
+            }
+            if (bytebuf_append_u64_le(&sec->buf, (uint64_t)v, width) != 0) {
+                set_err(ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                return -1;
+            }
+        }
+        sec->touched = 1;
+        return 0;
     }
 
+    return 0;
+}
+
+static int is_binary_metadata_directive(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (strcmp(name, ".globl") == 0 || strcmp(name, ".global") == 0 || strcmp(name, ".local") == 0 ||
+        strcmp(name, ".weak") == 0 || strcmp(name, ".type") == 0 || strcmp(name, ".size") == 0 ||
+        strcmp(name, ".hidden") == 0 || strcmp(name, ".protected") == 0 || strcmp(name, ".internal") == 0 ||
+        strcmp(name, ".symver") == 0 || strcmp(name, ".comm") == 0 || strcmp(name, ".lcomm") == 0 ||
+        strcmp(name, ".file") == 0 || strcmp(name, ".loc") == 0 || strcmp(name, ".ident") == 0) {
+        return 1;
+    }
+    if (strncmp(name, ".cfi_", 5) == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+static int write_binary_file(emit_ctx_t *ctx, const bin_section_vec_t *v, const char *out_path) {
+    static const char *const first_order[] = {".text", ".rodata", ".data"};
+    bytebuf_t out;
+    size_t i;
+    unsigned char *used;
+    FILE *fp;
+
+    memset(&out, 0, sizeof(out));
+    used = (unsigned char *)calloc(v->count, 1);
+    if (used == NULL) {
+        return -1;
+    }
+
+    for (i = 0; i < sizeof(first_order) / sizeof(first_order[0]); ++i) {
+        size_t j;
+        for (j = 0; j < v->count; ++j) {
+            const bin_section_t *s = &v->items[j];
+            size_t align;
+            size_t need;
+            if (used[j] || strcmp(s->name, first_order[i]) != 0) {
+                continue;
+            }
+            if (s->buf.len == 0 && !s->touched) {
+                used[j] = 1;
+                continue;
+            }
+            align = s->align > 0 ? s->align : 1;
+            if ((align & (align - 1)) != 0) {
+                align = 1;
+            }
+            need = (align - (out.len & (align - 1))) & (align - 1);
+            if (need > 0 && bytebuf_append_zeros(&out, need) != 0) {
+                free(used);
+                free(out.data);
+                return -1;
+            }
+            if (s->type == SHT_NOBITS) {
+                if (s->buf.len > 0 && bytebuf_append_zeros(&out, s->buf.len) != 0) {
+                    free(used);
+                    free(out.data);
+                    return -1;
+                }
+            } else if (s->buf.len > 0 && bytebuf_append(&out, s->buf.data, s->buf.len) != 0) {
+                free(used);
+                free(out.data);
+                return -1;
+            }
+            used[j] = 1;
+        }
+    }
+
+    for (i = 0; i < v->count; ++i) {
+        const bin_section_t *s = &v->items[i];
+        size_t align;
+        size_t need;
+        if (used[i] || strcmp(s->name, ".bss") == 0) {
+            continue;
+        }
+        if (s->buf.len == 0 && !s->touched) {
+            used[i] = 1;
+            continue;
+        }
+        align = s->align > 0 ? s->align : 1;
+        if ((align & (align - 1)) != 0) {
+            align = 1;
+        }
+        need = (align - (out.len & (align - 1))) & (align - 1);
+        if (need > 0 && bytebuf_append_zeros(&out, need) != 0) {
+            free(used);
+            free(out.data);
+            return -1;
+        }
+        if (s->type == SHT_NOBITS) {
+            if (s->buf.len > 0 && bytebuf_append_zeros(&out, s->buf.len) != 0) {
+                free(used);
+                free(out.data);
+                return -1;
+            }
+        } else if (s->buf.len > 0 && bytebuf_append(&out, s->buf.data, s->buf.len) != 0) {
+            free(used);
+            free(out.data);
+            return -1;
+        }
+        used[i] = 1;
+    }
+
+    for (i = 0; i < v->count; ++i) {
+        const bin_section_t *s = &v->items[i];
+        size_t align;
+        size_t need;
+        if (used[i] || strcmp(s->name, ".bss") != 0) {
+            continue;
+        }
+        if (s->buf.len == 0 && !s->touched) {
+            used[i] = 1;
+            continue;
+        }
+        align = s->align > 0 ? s->align : 1;
+        if ((align & (align - 1)) != 0) {
+            align = 1;
+        }
+        need = (align - (out.len & (align - 1))) & (align - 1);
+        if (need > 0 && bytebuf_append_zeros(&out, need) != 0) {
+            free(used);
+            free(out.data);
+            return -1;
+        }
+        if (s->buf.len > 0 && bytebuf_append_zeros(&out, s->buf.len) != 0) {
+            free(used);
+            free(out.data);
+            return -1;
+        }
+        used[i] = 1;
+    }
+
+    free(used);
+    fp = fopen(out_path, "wb");
+    if (fp == NULL) {
+        free(out.data);
+        set_err(ctx, "failed to open output file: %s", out_path);
+        return -1;
+    }
+    if (out.len > 0 && fwrite(out.data, 1, out.len, fp) != out.len) {
+        fclose(fp);
+        free(out.data);
+        set_err(ctx, "failed to write output file: %s", out_path);
+        return -1;
+    }
+    fclose(fp);
+    free(out.data);
+    return 0;
+}
+
+int as_elf_emit_binary_file(const as_parse_result_t *parsed,
+                            const as_section_state_t *sections,
+                            const as_elf_cfg_t *cfg,
+                            const char *out_path,
+                            char *errbuf,
+                            size_t errbuf_sz) {
+    emit_ctx_t ctx;
+    bin_section_vec_t sv;
+    const char *cur_section = ".text";
+    size_t i;
+
+    if (parsed == NULL || cfg == NULL || out_path == NULL) {
+        return -1;
+    }
+    if (!(cfg->machine == EM_386 || cfg->machine == EM_X86_64)) {
+        if (errbuf != NULL && errbuf_sz > 0) {
+            snprintf(errbuf, errbuf_sz, "binary output currently supports x86/i386 targets only");
+        }
+        return -1;
+    }
+
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.cfg = cfg;
+    ctx.parsed = parsed;
+    ctx.errbuf = errbuf;
+    ctx.errbuf_sz = errbuf_sz;
+    if (errbuf != NULL && errbuf_sz > 0) {
+        errbuf[0] = '\0';
+    }
+    if (bin_sections_init(&sv, sections) != 0) {
+        set_err(&ctx, "failed to initialize section layout");
+        return -1;
+    }
+
+    for (i = 0; i < parsed->count; ++i) {
+        const as_stmt_t *st = &parsed->items[i];
+        bin_section_t *sec = bin_section_get_or_add(&sv, cur_section);
+        if (sec == NULL) {
+            set_err(&ctx, "out of memory");
+            goto fail;
+        }
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            const as_directive_t *d = &st->u.directive;
+            const char *next = section_from_directive(d);
+            int handled = 0;
+
+            if (next != NULL) {
+                cur_section = next;
+                continue;
+            }
+            if (is_binary_metadata_directive(d->name)) {
+                set_err(&ctx, "%s:%u: ELF metadata directive %s is not supported with -O binary",
+                        st->file != NULL ? st->file : "<input>", st->line, d->name);
+                goto fail;
+            }
+            if (append_data_directive_binary(&ctx, st, sec, &handled) != 0) {
+                goto fail;
+            }
+            (void)handled;
+            continue;
+        }
+        if (st->kind == AS_STMT_INSTRUCTION) {
+            unsigned char code[32];
+            size_t code_len = 0;
+            char encerr[256];
+
+            if (sec->type == SHT_NOBITS) {
+                set_err(&ctx, "%s:%u: instructions are not allowed in SHT_NOBITS section %s",
+                        st->file != NULL ? st->file : "<input>", st->line, sec->name);
+                goto fail;
+            }
+            if (instruction_has_symbolic_reloc(&st->u.instr)) {
+                set_err(&ctx, "%s:%u: unresolved relocation in instruction is not allowed with -O binary",
+                        st->file != NULL ? st->file : "<input>", st->line);
+                goto fail;
+            }
+            if (encode_x86_stmt(cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+                set_err(&ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
+                goto fail;
+            }
+            if (bytebuf_append(&sec->buf, code, code_len) != 0) {
+                set_err(&ctx, "%s:%u: out of memory", st->file != NULL ? st->file : "<input>", st->line);
+                goto fail;
+            }
+            sec->touched = 1;
+        }
+    }
+
+    if (write_binary_file(&ctx, &sv, out_path) != 0) {
+        goto fail;
+    }
+    bin_section_vec_free(&sv);
+    return 0;
+
+fail:
+    bin_section_vec_free(&sv);
+    return -1;
+}
+
+static uint32_t default_text_reloc_type(unsigned machine, const as_instruction_t *in, const as_operand_t *op) {
+    if (machine == EM_386) {
+        if (op != NULL && (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+            in != NULL && is_rel_mnemonic(in->mnemonic)) {
+            if (streq_ci(in->mnemonic, "call")) {
+                return R_386_PLT32;
+            }
+            return R_386_PC32;
+        }
+        return R_386_32;
+    }
+    if (machine == EM_X86_64) {
+        if (op != NULL && (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+            in != NULL && is_rel_mnemonic(in->mnemonic)) {
+            if (streq_ci(in->mnemonic, "call")) {
+                return R_X86_64_PLT32;
+            }
+            return R_X86_64_PC32;
+        }
+        if (op != NULL && op->kind == AS_OPERAND_MEMORY && op->u.mem.base_reg != NULL &&
+            streq_ci(op->u.mem.base_reg, "rip")) {
+            return R_X86_64_PC32;
+        }
+        return R_X86_64_64;
+    }
+    return reloc_type_for_machine(machine);
+}
+
+static int emit_relocations(emit_ctx_t *ctx) {
+    size_t i;
+    unsigned machine = ctx->cfg != NULL ? ctx->cfg->machine : EM_386;
+    sec_buf_vec_t secbufs;
+    section_track_t track;
+    static int trace_env = -1;
+
+    if (trace_env < 0) {
+        const char *v = getenv("AS_DEBUG_RELOC_TRACE");
+        trace_env = (v != NULL && v[0] != '\0') ? 1 : 0;
+    }
+    memset(&secbufs, 0, sizeof(secbufs));
+    if (section_track_init(&track) != 0) {
+        return -1;
+    }
+
+    for (i = 0; i < ctx->parsed->count; ++i) {
+        const as_stmt_t *st = &ctx->parsed->items[i];
+        sec_buf_t *sb;
+        elf_section_t *cur_sec;
+        uint64_t cur_off;
+        int trc;
+        size_t j;
+
+        sb = sec_buf_get_or_add(&secbufs, track.current);
+        if (sb == NULL) {
+            section_track_free(&track);
+            sec_buf_vec_free(&secbufs);
+            return -1;
+        }
+        cur_sec = section_for_name(ctx, track.current);
+        cur_off = (uint64_t)sb->buf.len;
+
+        if (st->kind == AS_STMT_DIRECTIVE) {
+            const as_directive_t *d = &st->u.directive;
+            int drc;
+
+            trc = section_track_apply_directive(&track, d);
+            if (trc < 0) {
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+            if (trc > 0) {
+                continue;
+            }
+            if (strcmp(track.current, ".text") != 0) {
+                unsigned width = 0;
+                if (strcmp(d->name, ".byte") == 0) width = 1;
+                else if (strcmp(d->name, ".word") == 0 || strcmp(d->name, ".short") == 0 ||
+                         strcmp(d->name, ".hword") == 0 || strcmp(d->name, ".2byte") == 0) width = 2;
+                else if (strcmp(d->name, ".long") == 0 || strcmp(d->name, ".4byte") == 0) width = 4;
+                else if (strcmp(d->name, ".quad") == 0 || strcmp(d->name, ".8byte") == 0) width = 8;
+
+                if (width != 0) {
+                    for (j = 0; j < d->arg_count; ++j) {
+                        char *sym = NULL;
+                        int64_t addend = 0;
+                        if (parse_symbol_addend_arg(d->args[j], &sym, &addend) == 0 && sym != NULL) {
+                            uint32_t t = reloc_type_for_machine(machine);
+                            if (add_reloc_for_symbol_ex(ctx, cur_sec, sym, cur_off + (uint64_t)(j * width), t, addend) != 0) {
+                                free(sym);
+                                section_track_free(&track);
+                                sec_buf_vec_free(&secbufs);
+                                return -1;
+                            }
+                            free(sym);
+                        }
+                    }
+                }
+            }
+            drc = append_directive_data(&sb->buf, d);
+            if (drc < 0) {
+                set_err(ctx, "%s:%u: malformed directive data", st->file != NULL ? st->file : "<input>", st->line);
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+            continue;
+        }
+        if (st->kind != AS_STMT_INSTRUCTION) {
+            continue;
+        }
+        if (strcmp(track.current, ".text") != 0) {
+            continue;
+        }
+        {
+            unsigned char code[32];
+            size_t code_len = 0;
+            char encerr[256];
+            size_t rel_count = 0;
+
+            if (encode_x86_stmt(ctx->cfg, st, code, sizeof(code), &code_len, encerr, sizeof(encerr)) != 0) {
+                set_err(ctx, "%s:%u: %s", st->file != NULL ? st->file : "<input>", st->line, encerr);
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+            if (trace_env) {
+                fprintf(stderr, "as: reloc-trace insn %s:%u mnem=%s text_off=0x%llx len=%llu\n",
+                        st->file != NULL ? st->file : "<input>",
+                        st->line,
+                        st->u.instr.mnemonic != NULL ? st->u.instr.mnemonic : "<null>",
+                        (unsigned long long)cur_off,
+                        (unsigned long long)code_len);
+            }
+            for (j = 0; j < st->u.instr.operand_count; ++j) {
+                const as_operand_t *op = &st->u.instr.operands[j];
+                const as_expr_t *e = NULL;
+                const char *sym;
+                uint32_t t;
+                uint64_t reloc_off;
+                uint64_t reloc_width = 4;
+                int64_t addend = 0;
+
+                if (op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) {
+                    e = op->u.expr;
+                } else if (op->kind == AS_OPERAND_MEMORY) {
+                    e = op->u.mem.disp;
+                }
+                sym = first_symbol_in_expr(e);
+                if (sym == NULL) {
+                    continue;
+                }
+                t = default_text_reloc_type(machine, &st->u.instr, op);
+                if (machine == EM_X86_64 && t == R_X86_64_64) {
+                    reloc_width = 8;
+                }
+                if (code_len < reloc_width) {
+                    set_err(ctx, "%s:%u: relocation width exceeds encoded instruction size",
+                            st->file != NULL ? st->file : "<input>", st->line);
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
+                }
+                if (machine == EM_X86_64) {
+                    if ((op->kind == AS_OPERAND_LABEL_REF || op->kind == AS_OPERAND_IMMEDIATE) &&
+                        is_rel_mnemonic(st->u.instr.mnemonic)) {
+                        addend = -4;
+                    } else if (op->kind == AS_OPERAND_MEMORY &&
+                               op->u.mem.base_reg != NULL &&
+                               streq_ci(op->u.mem.base_reg, "rip")) {
+                        addend = -4;
+                    }
+                }
+                if (rel_count > 0) {
+                    set_err(ctx, "%s:%u: multiple symbolic relocations in one x86 instruction are not yet supported",
+                            st->file != NULL ? st->file : "<input>", st->line);
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
+                }
+                reloc_off = cur_off + (uint64_t)code_len - reloc_width;
+                if (trace_env) {
+                    fprintf(stderr, "as: reloc-trace   -> sym=%s type=%u off=0x%llx addend=%lld\n",
+                            sym, (unsigned)t, (unsigned long long)reloc_off, (long long)addend);
+                }
+                if (add_reloc_for_symbol_ex(ctx, ctx->text_sec, sym, reloc_off, t, addend) != 0) {
+                    section_track_free(&track);
+                    sec_buf_vec_free(&secbufs);
+                    return -1;
+                }
+                rel_count++;
+            }
+            if (bytebuf_append(&sb->buf, code, code_len) != 0) {
+                section_track_free(&track);
+                sec_buf_vec_free(&secbufs);
+                return -1;
+            }
+        }
+    }
+
+    section_track_free(&track);
+    sec_buf_vec_free(&secbufs);
     return 0;
 }
 
@@ -516,12 +3322,7 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
         }
 
         if (strcmp(s->name, ".text") == 0 && s->subsection == 0) {
-            static unsigned char text_pad[512];
             ctx.text_sec = es;
-            if (elf_section_set_data(es, text_pad, sizeof(text_pad)) != ELF_OK) {
-                set_err(&ctx, "failed to seed .text data");
-                goto fail;
-            }
         }
         if (strcmp(s->name, ".data") == 0 && s->subsection == 0) {
             ctx.data_sec = es;
@@ -536,13 +3337,18 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
         }
     }
     if (ctx.text_sec == NULL) {
-        static unsigned char text_pad2[512];
         ctx.text_sec = elf_add_section(ctx.obj, ".text", SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR);
-        if (ctx.text_sec == NULL || elf_section_set_align(ctx.text_sec, 16) != ELF_OK ||
-            elf_section_set_data(ctx.text_sec, text_pad2, sizeof(text_pad2)) != ELF_OK) {
+        if (ctx.text_sec == NULL || elf_section_set_align(ctx.text_sec, 16) != ELF_OK) {
             set_err(&ctx, "failed to create .text");
             goto fail;
         }
+    }
+
+    if (emit_text_program(&ctx) != 0) {
+        if (ctx.errbuf == NULL || ctx.errbuf[0] == '\0') {
+            set_err(&ctx, "failed to emit text instructions");
+        }
+        goto fail;
     }
 
     if (emit_data_program(&ctx, data) != 0) {
@@ -582,16 +3388,14 @@ int as_elf_emit_file(const as_parse_result_t *parsed,
 
     collect_directive_presence(parsed, &has_file_loc, &has_cfi);
     if (has_file_loc) {
-        static const unsigned char dbg_line_stub[] = {0x00, 0x00, 0x00, 0x00, 0x02, 0x00};
-        if (ensure_section_exists(&ctx, ".debug_line", SHT_PROGBITS, 0, 1, dbg_line_stub, sizeof(dbg_line_stub)) != 0) {
+        if (ensure_section_exists(&ctx, ".debug_line", SHT_PROGBITS, 0, 1, NULL, 0) != 0) {
             set_err(&ctx, "failed to emit .debug_line");
             goto fail;
         }
     }
     if (has_cfi) {
-        static const unsigned char eh_stub[] = {0x14, 0x00, 0x00, 0x00};
-        if (ensure_section_exists(&ctx, ".eh_frame", SHT_PROGBITS, SHF_ALLOC, 4, eh_stub, sizeof(eh_stub)) != 0 ||
-            ensure_section_exists(&ctx, ".eh_frame_hdr", SHT_PROGBITS, SHF_ALLOC, 4, eh_stub, sizeof(eh_stub)) != 0) {
+        if (ensure_section_exists(&ctx, ".eh_frame", SHT_PROGBITS, SHF_ALLOC, 4, NULL, 0) != 0 ||
+            ensure_section_exists(&ctx, ".eh_frame_hdr", SHT_PROGBITS, SHF_ALLOC, 4, NULL, 0) != 0) {
             set_err(&ctx, "failed to emit .eh_frame/.eh_frame_hdr");
             goto fail;
         }
