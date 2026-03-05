@@ -35,6 +35,7 @@
 #define arc4random_buf tested_arc4random_buf
 #define arc4random tested_arc4random
 #define arc4random_uniform tested_arc4random_uniform
+#define getopt tested_getopt
 
 // Include the source file directly
 #include "../../../lib/c/src/stdlib.c"
@@ -177,6 +178,96 @@ void test_realloc_zero_size(void) {
     printf("test_realloc_zero_size passed\n");
 }
 
+extern char *optarg;
+extern int optind, opterr, optopt;
+
+static void reset_getopt_state(void) {
+    optarg = NULL;
+    optind = 1;
+    opterr = 0; // Disable printing to stderr during tests
+    optopt = 0;
+}
+
+void test_getopt_basic(void) {
+    reset_getopt_state();
+    char *argv[] = {"prog", "-a", "-b", NULL};
+    int argc = 3;
+
+    assert(tested_getopt(argc, argv, "ab") == 'a');
+    assert(tested_getopt(argc, argv, "ab") == 'b');
+    assert(tested_getopt(argc, argv, "ab") == -1);
+    printf("test_getopt_basic passed\n");
+}
+
+void test_getopt_with_args(void) {
+    reset_getopt_state();
+    char *argv[] = {"prog", "-c", "foo", "-d", "bar", NULL};
+    int argc = 5;
+
+    assert(tested_getopt(argc, argv, "c:d:") == 'c');
+    assert(optarg != NULL && strcmp(optarg, "foo") == 0);
+    assert(tested_getopt(argc, argv, "c:d:") == 'd');
+    assert(optarg != NULL && strcmp(optarg, "bar") == 0);
+    assert(tested_getopt(argc, argv, "c:d:") == -1);
+
+    // combined options, args follow
+    reset_getopt_state();
+    char *argv2[] = {"prog", "-xc", "foo", NULL};
+    int argc2 = 3;
+    assert(tested_getopt(argc2, argv2, "xc:") == 'x');
+    assert(tested_getopt(argc2, argv2, "xc:") == 'c');
+    assert(optarg != NULL && strcmp(optarg, "foo") == 0);
+    assert(tested_getopt(argc2, argv2, "xc:") == -1);
+
+    // arg immediately follows option char
+    reset_getopt_state();
+    char *argv3[] = {"prog", "-cfoo", NULL};
+    int argc3 = 2;
+    assert(tested_getopt(argc3, argv3, "c:") == 'c');
+    assert(optarg != NULL && strcmp(optarg, "foo") == 0);
+    assert(tested_getopt(argc3, argv3, "c:") == -1);
+
+    printf("test_getopt_with_args passed\n");
+}
+
+void test_getopt_errors(void) {
+    reset_getopt_state();
+    char *argv[] = {"prog", "-x", NULL};
+    int argc = 2;
+
+    // Unknown option
+    assert(tested_getopt(argc, argv, "ab") == '?');
+    assert(optopt == 'x');
+
+    // Missing argument
+    reset_getopt_state();
+    char *argv2[] = {"prog", "-c", NULL};
+    int argc2 = 2;
+    assert(tested_getopt(argc2, argv2, "c:") == '?');
+    assert(optopt == 'c');
+
+    printf("test_getopt_errors passed\n");
+}
+
+void test_getopt_end_of_options(void) {
+    reset_getopt_state();
+    char *argv[] = {"prog", "-a", "--", "-b", NULL};
+    int argc = 4;
+
+    assert(tested_getopt(argc, argv, "ab") == 'a');
+    assert(tested_getopt(argc, argv, "ab") == -1);
+    assert(optind == 3); // points to "-b" now
+
+    reset_getopt_state();
+    char *argv2[] = {"prog", "-a", "nonopt", "-b", NULL};
+    int argc2 = 4;
+    assert(tested_getopt(argc2, argv2, "ab") == 'a');
+    assert(tested_getopt(argc2, argv2, "ab") == -1); // Stops parsing when it hits "nonopt"
+    assert(optind == 2); // points to "nonopt"
+
+    printf("test_getopt_end_of_options passed\n");
+}
+
 int main(void) {
     printf("Running stdlib tests...\n");
     test_atoi_basic();
@@ -189,6 +280,10 @@ int main(void) {
     test_labs();
     test_llabs();
     test_realloc_zero_size();
+    test_getopt_basic();
+    test_getopt_with_args();
+    test_getopt_errors();
+    test_getopt_end_of_options();
     printf("All tests passed!\n");
     return 0;
 }
