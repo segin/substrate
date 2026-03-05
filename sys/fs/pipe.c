@@ -83,7 +83,7 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
 
     fs_node_t *rn = (fs_node_t *)kmalloc(sizeof(fs_node_t));
     memset(rn, 0, sizeof(fs_node_t));
-    strncpy(rn->name, "pipe_read", sizeof(rn->name));
+    strncpy(rn->name, "pipe_read", sizeof(rn->name) - 1);
     rn->name[sizeof(rn->name) - 1] = '\0';
     rn->flags = FS_PIPE;
     rn->read = &pipe_read;
@@ -91,7 +91,7 @@ void pipe_create(fs_node_t **read_node, fs_node_t **write_node) {
 
     fs_node_t *wn = (fs_node_t *)kmalloc(sizeof(fs_node_t));
     memset(wn, 0, sizeof(fs_node_t));
-    strncpy(wn->name, "pipe_write", sizeof(wn->name));
+    strncpy(wn->name, "pipe_write", sizeof(wn->name) - 1);
     wn->name[sizeof(wn->name) - 1] = '\0';
     wn->flags = FS_PIPE;
     wn->write = &pipe_write;
