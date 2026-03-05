@@ -41,6 +41,9 @@ int main(void) {
     if (elf_section_set_merge(data, 1, 1) != ELF_OK) fail("set merge");
     if (elf_section_set_tls(tdata, 1) != ELF_OK) fail("set tls");
     if (elf_section_set_note_info(note, 7, "TESTNOTE") != ELF_OK) fail("set note");
+    if (elf_section_set_name(data, ".rodata.str1.1") != ELF_OK) fail("set name");
+    if (elf_section_set_name(NULL, ".rodata") != ELF_ERR_STATE) fail("set name (NULL section)");
+    if (elf_section_set_name(data, NULL) != ELF_ERR_STATE) fail("set name (NULL name)");
 
     if (elf_reorder_section(obj, note, 1) != ELF_OK) fail("reorder section");
     if (elf_remove_section(obj, data) != ELF_OK) fail("remove section");
@@ -54,9 +57,16 @@ int main(void) {
     if (elf_segment_add_section(load, dyn) != ELF_OK) fail("assign load dynamic");
     if (elf_segment_add_section(tls, tdata) != ELF_OK) fail("assign tls");
     if (elf_segment_type(load) != PT_LOAD) fail("load type");
+    if (elf_segment_flags(load) != 0x5) fail("load flags");
+    if (elf_segment_flags(tls) != 0x4) fail("tls flags");
+    if (elf_segment_flags(NULL) != 0) fail("null segment flags");
     if (!elf_segment_contains_section(load, text)) fail("load contains text");
     if (elf_segment_section_count(load) < 1) fail("load section count");
     if (elf_segment_count(obj) < 3) fail("segment count");
+
+    if (elf_segment_align(load) != 0x1000) fail("load align");
+    if (elf_segment_align(tls) != 8) fail("tls align");
+    if (elf_segment_align(NULL) != 0) fail("null segment align");
 
     if (elf_validate(obj, &diag) != ELF_OK) fail(diag ? diag : "validate");
     free(diag);
