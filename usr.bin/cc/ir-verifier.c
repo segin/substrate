@@ -11,6 +11,9 @@ int main(int argc, char **argv) {
         return 2;
     }
 
+    /* Test that freeing NULL does not segfault. */
+    ir_module_free(NULL);
+
     ir_module_init(&m);
     err.msg = NULL;
     err.line = 0;
