@@ -15,6 +15,7 @@
 #define strncmp kernel_strncmp
 #define strchr kernel_strchr
 #define strspn kernel_strspn
+#define strcspn kernel_strcspn
 #define strpbrk kernel_strpbrk
 
 // Include the source file directly
@@ -281,6 +282,18 @@ void test_strspn(void) {
     printf("test_strspn: PASS\n");
 }
 
+void test_strcspn(void) {
+    ASSERT_EQ(kernel_strcspn("hello", "l"), 2, "strcspn basic");
+    ASSERT_EQ(kernel_strcspn("hello", "ol"), 2, "strcspn first of multiple");
+    ASSERT_EQ(kernel_strcspn("hello", "z"), 5, "strcspn not found");
+    ASSERT_EQ(kernel_strcspn("hello", ""), 5, "strcspn empty reject");
+    ASSERT_EQ(kernel_strcspn("", "z"), 0, "strcspn empty string");
+    ASSERT_EQ(kernel_strcspn("", ""), 0, "strcspn both empty");
+    ASSERT_EQ(kernel_strcspn("hello", "h"), 0, "strcspn found at start");
+    ASSERT_EQ(kernel_strcspn("hello", "o"), 4, "strcspn found at end");
+    printf("test_strcspn: PASS\n");
+}
+
 void test_strchr(void) {
     char buf[] = "Hello World";
     ASSERT_EQ((uintptr_t)kernel_strchr(buf, 'W'), (uintptr_t)(buf + 6), "strchr found");
@@ -397,6 +410,7 @@ int main(void) {
     test_strcmp();
     test_strncmp();
     test_strspn();
+    test_strcspn();
     test_strchr();
     test_strchr_comprehensive();
     test_strpbrk();

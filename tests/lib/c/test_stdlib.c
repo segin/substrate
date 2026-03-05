@@ -167,6 +167,17 @@ void test_llabs(void) {
     printf("test_llabs passed\n");
 }
 
+void test_realloc_zero_size(void) {
+    void *ptr = tested_malloc(10);
+    assert(ptr != NULL);
+
+    // According to C standard, realloc(ptr, 0) should free the memory and return NULL
+    void *new_ptr = tested_realloc(ptr, 0);
+    assert(new_ptr == NULL);
+
+    printf("test_realloc_zero_size passed\n");
+}
+
 extern char *optarg;
 extern int optind, opterr, optopt;
 
@@ -268,6 +279,32 @@ void test_realloc(void) {
     printf("test_realloc passed\n");
 }
 
+void test_calloc(void) {
+    // Test basic allocation
+    int *arr = tested_calloc(4, sizeof(int));
+    assert(arr != NULL);
+    for (int i = 0; i < 4; i++) {
+        assert(arr[i] == 0);
+    }
+    tested_free(arr);
+
+    // Test zero allocation
+    void *p = tested_calloc(0, 10);
+    assert(p == NULL);
+
+    p = tested_calloc(10, 0);
+    assert(p == NULL);
+
+    // Test overflow
+    assert(tested_calloc(SIZE_MAX, 2) == NULL);
+    assert(tested_calloc(2, SIZE_MAX) == NULL);
+    assert(tested_calloc(SIZE_MAX / 2 + 1, 2) == NULL);
+    assert(tested_calloc(SIZE_MAX, SIZE_MAX) == NULL);
+    assert(tested_calloc(SIZE_MAX / 4, 5) == NULL);
+
+    printf("test_calloc passed\n");
+}
+
 int main(void) {
     printf("Running stdlib tests...\n");
     test_atoi_basic();
@@ -279,11 +316,13 @@ int main(void) {
     test_abs();
     test_labs();
     test_llabs();
+    test_realloc_zero_size();
     test_getopt_basic();
     test_getopt_with_args();
     test_getopt_errors();
     test_getopt_end_of_options();
     test_realloc();
+    test_calloc();
     printf("All tests passed!\n");
     return 0;
 }
