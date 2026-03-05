@@ -1,8 +1,8 @@
-#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <assert.h>
 
 // Mocking required things to test pthread.c
 #define sys_thr_create mock_sys_thr_create
@@ -31,6 +31,10 @@ int mock_munmap(void *addr, size_t length) { (void)addr; (void)length; return 0;
 // Include the source to test
 #include "../../lib/pthreads/pthread.c"
 
+/*
+ * Validates the missing edge case for null attributes.
+ * Simply calls the init function with a valid mutex pointer and a NULL attribute pointer and asserts success.
+ */
 bool test_pthread_mutex_init_null_attr() {
     local_pthread_mutex_t mutex;
     mutex = 42; // arbitrary value to check if it's zeroed
@@ -39,16 +43,10 @@ bool test_pthread_mutex_init_null_attr() {
     int ret = pthread_mutex_init(&mutex, NULL);
 
     // Assert success
-    if (ret != 0) {
-        printf("pthread_mutex_init returned %d (expected 0)\n", ret);
-        return false;
-    }
+    assert(ret == 0);
 
     // Check if it's correctly zeroed
-    if (mutex != 0) {
-        printf("pthread_mutex_init did not set mutex to 0 (got %d)\n", mutex);
-        return false;
-    }
+    assert(mutex == 0);
 
     return true;
 }

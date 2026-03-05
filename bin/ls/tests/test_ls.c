@@ -14,6 +14,7 @@
 #include "ls.h"
 #include "ls_sort.h"
 #include "ls_traverse.h"
+#include "ls_colors.h"
 
 static char *join_path2(const char *a, const char *b) {
     size_t al = strlen(a);
@@ -1076,6 +1077,36 @@ static void test_ls_sort_entries_unit(void) {
     printf("PASS: test_ls_sort_entries_unit\n");
 }
 
+static void test_ls_colors_get(void) {
+    ls_colors_init();
+
+    assert(ls_colors_get("dir", S_IFDIR) != NULL);
+    assert(ls_colors_get("link", S_IFLNK) != NULL);
+    assert(ls_colors_get("sock", S_IFSOCK) != NULL);
+    assert(ls_colors_get("fifo", S_IFIFO) != NULL);
+    assert(ls_colors_get("blk", S_IFBLK) != NULL);
+    assert(ls_colors_get("chr", S_IFCHR) != NULL);
+
+    assert(ls_colors_get("exe_u", S_IFREG | S_IXUSR) != NULL);
+    assert(ls_colors_get("exe_g", S_IFREG | S_IXGRP) != NULL);
+    assert(ls_colors_get("exe_o", S_IFREG | S_IXOTH) != NULL);
+
+    assert(ls_colors_get("file", S_IFREG) != NULL);
+
+    assert(strcmp(ls_colors_get("dir", S_IFDIR), "\033[01;34m") == 0);
+    assert(strcmp(ls_colors_get("link", S_IFLNK), "\033[01;36m") == 0);
+    assert(strcmp(ls_colors_get("sock", S_IFSOCK), "\033[01;35m") == 0);
+    assert(strcmp(ls_colors_get("fifo", S_IFIFO), "\033[40;33m") == 0);
+    assert(strcmp(ls_colors_get("blk", S_IFBLK), "\033[40;33;01m") == 0);
+    assert(strcmp(ls_colors_get("chr", S_IFCHR), "\033[40;33;01m") == 0);
+    assert(strcmp(ls_colors_get("exe_u", S_IFREG | S_IXUSR), "\033[01;32m") == 0);
+    assert(strcmp(ls_colors_get("exe_g", S_IFREG | S_IXGRP), "\033[01;32m") == 0);
+    assert(strcmp(ls_colors_get("exe_o", S_IFREG | S_IXOTH), "\033[01;32m") == 0);
+    assert(strcmp(ls_colors_get("file", S_IFREG), "") == 0);
+
+    printf("PASS: test_ls_colors_get\n");
+}
+
 int main(void) {
     (void)setlocale(LC_ALL, "");
     test_ls_sort_entries_unit();
@@ -1088,5 +1119,6 @@ int main(void) {
     test_special_files_and_permission_denied();
     test_recursive_one_file_system();
     test_machine_parse_and_unicode_width();
+    test_ls_colors_get();
     return 0;
 }
