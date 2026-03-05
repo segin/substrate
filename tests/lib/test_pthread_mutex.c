@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <assert.h>
 
 // Mocking required things to test pthread.c
 #define sys_thr_create mock_sys_thr_create
@@ -39,16 +40,10 @@ bool test_pthread_mutex_init_null_attr() {
     int ret = pthread_mutex_init(&mutex, NULL);
 
     // Assert success
-    if (ret != 0) {
-        printf("pthread_mutex_init returned %d (expected 0)\n", ret);
-        return false;
-    }
+    assert(ret == 0);
 
     // Check if it's correctly zeroed
-    if (mutex != 0) {
-        printf("pthread_mutex_init did not set mutex to 0 (got %d)\n", mutex);
-        return false;
-    }
+    assert(mutex == 0);
 
     return true;
 }
