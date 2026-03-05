@@ -156,6 +156,7 @@ udf_test
 stat_verify
 host_test_*
 tests/sys/host_test_*
+!tests/sys/host_test_*.c
 *.img
 
 # Keep source trees under usr.bin/tests tracked even with *.bin rules.
