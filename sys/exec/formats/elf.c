@@ -442,8 +442,16 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             if (len > remaining) {
                 ret = -7; // E2BIG
             } else {
-                strcpy(p_buf, uarg);
-                copied_len = len;
+                strncpy(p_buf, uarg, remaining);
+                p_buf[remaining - 1] = '\0';
+                // Calculate actual copied length considering possible truncation
+                // if uarg was modified between strlen and strncpy (TOCTOU).
+                // Use the original len if no truncation occurred, otherwise remaining.
+                copied_len = 0;
+                while (copied_len < remaining && p_buf[copied_len] != '\0') {
+                    copied_len++;
+                }
+                copied_len++; // include null terminator
                 ret = 0;
             }
         }
@@ -478,8 +486,16 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             if (len > remaining) {
                 ret = -7; // E2BIG
             } else {
-                strcpy(p_buf, uarg);
-                copied_len = len;
+                strncpy(p_buf, uarg, remaining);
+                p_buf[remaining - 1] = '\0';
+                // Calculate actual copied length considering possible truncation
+                // if uarg was modified between strlen and strncpy (TOCTOU).
+                // Use the original len if no truncation occurred, otherwise remaining.
+                copied_len = 0;
+                while (copied_len < remaining && p_buf[copied_len] != '\0') {
+                    copied_len++;
+                }
+                copied_len++; // include null terminator
                 ret = 0;
             }
         }
@@ -558,6 +574,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             if (*p == '/') name = p + 1;
         }
         strncpy(current_process->comm, name, sizeof(current_process->comm) - 1);
+        current_process->comm[sizeof(current_process->comm) - 1] = '\0';
         
         // Initialize VM map
         extern vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max);

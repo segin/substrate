@@ -209,3 +209,5 @@ sys/gdb_script.txt
 usr.bin/as/aarch64-as
 usr.bin/as/arm-as
 usr.man/mandoc.db
+sys/ksyms_table.c
+sys/ksyms_efi_table.c
