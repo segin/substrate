@@ -101,7 +101,7 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         
         kprint(" ");
         char sname[32];
-        sprintf("%s%c", prefix, 'a' + i);
+        sprintf(sname, "%s%c", prefix, 'a' + i);
         kprint(sname);
         slice_count++;
     }
