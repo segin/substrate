@@ -66,7 +66,8 @@ namei(struct nameidata *ndp)
             if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
             return ENAMETOOLONG;
         }
-        strcpy(cnp->cn_pnbuf, ndp->ni_dirp);
+        strncpy(cnp->cn_pnbuf, ndp->ni_dirp, 1024);
+        cnp->cn_pnbuf[1023] = '\0';
     }
 
     ndp->ni_dirp = cnp->cn_pnbuf;
@@ -259,7 +260,8 @@ namei(struct nameidata *ndp)
             }
 
             memcpy(new_path, target, target_len);
-            strcpy(new_path + target_len, p);
+            strncpy(new_path + target_len, p, 1024 - target_len);
+            new_path[1023] = '\0';
 
             if (namei_zone) uma_zfree(namei_zone, target); else kfree(target, 1024);
             if (namei_zone) uma_zfree(namei_zone, cnp->cn_pnbuf); else kfree(cnp->cn_pnbuf, 1024);
