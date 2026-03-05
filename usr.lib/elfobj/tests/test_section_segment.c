@@ -54,6 +54,9 @@ int main(void) {
     if (elf_segment_add_section(load, dyn) != ELF_OK) fail("assign load dynamic");
     if (elf_segment_add_section(tls, tdata) != ELF_OK) fail("assign tls");
     if (elf_segment_type(load) != PT_LOAD) fail("load type");
+    if (elf_segment_flags(load) != 0x5) fail("load flags");
+    if (elf_segment_flags(tls) != 0x4) fail("tls flags");
+    if (elf_segment_flags(NULL) != 0) fail("null segment flags");
     if (!elf_segment_contains_section(load, text)) fail("load contains text");
     if (elf_segment_section_count(load) < 1) fail("load section count");
     if (elf_segment_count(obj) < 3) fail("segment count");
