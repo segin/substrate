@@ -216,3 +216,5 @@ tests/lib/c/test_stdlib
 tests/usr.bin/cc/test_ssa_module
 tests/test_readline
 tests/test_libpthread_mutex
+sys/ksyms_table.c
+sys/ksyms_efi_table.c

@@ -739,7 +739,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             if (*p == '/') name = p + 1;
         }
         strncpy(current_process->comm, name, sizeof(current_process->comm) - 1);
-
+        current_process->comm[sizeof(current_process->comm) - 1] = '\0';
         // Initialize VM map
         extern vm_map_t *vm_map_create(pmap_t pmap, uintptr_t min, uintptr_t max);
         if (current_process->vm_map) {
