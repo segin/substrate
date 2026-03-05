@@ -207,6 +207,12 @@ static void init_root_fs(void) {
 void kinit_task(void *arg) {
     (void)arg;  // Unused now that we use cmdline_get
     char *init_path = NULL;
+    char *const init_envp[] = {
+        "PATH=/bin:/sbin:/usr/bin:/usr/sbin",
+        "HOME=/",
+        "TERM=linux",
+        NULL
+    };
     
     kprint("kinit: Starting init process...\n");
     
@@ -226,7 +232,8 @@ void kinit_task(void *arg) {
         kprint("kinit: Trying ");
         kprint(init_path);
         kprint("\n");
-        if (elf_execve(-1, init_path, NULL, NULL) == 0) {
+        char *init_argv[] = { init_path, NULL };
+        if (elf_execve(-1, init_path, init_argv, init_envp) == 0) {
             goto exec_success;
         }
         panic("kinit: Requested init failed.");
@@ -234,10 +241,19 @@ void kinit_task(void *arg) {
 
     // Default paths
     kprint("kinit: Trying default init paths...\n");
-    if (elf_execve(-1, "/sbin/init", NULL, NULL) == 0) goto exec_success;
-    if (elf_execve(-1, "/etc/init", NULL, NULL) == 0) goto exec_success;
-    if (elf_execve(-1, "/bin/init", NULL, NULL) == 0) goto exec_success;
-    if (elf_execve(-1, "/bin/sh", NULL, NULL) == 0) goto exec_success;
+    const char *init_paths[] = {
+        "/sbin/init",
+        "/etc/init",
+        "/bin/init",
+        "/bin/sh",
+        NULL
+    };
+    for (int i = 0; init_paths[i] != NULL; i++) {
+        char *default_argv[] = { (char *)init_paths[i], NULL };
+        if (elf_execve(-1, init_paths[i], default_argv, init_envp) == 0) {
+            goto exec_success;
+        }
+    }
 
     panic("kinit: No init found. Try passing init= option to kernel.");
 

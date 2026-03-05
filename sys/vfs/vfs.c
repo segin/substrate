@@ -10,6 +10,7 @@
 #include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/file.h>
+#include <drivers/storage/blkdev.h>
 #include <vm/vm_kmem.h>
 
 struct mountlist mountlist;
@@ -110,6 +111,21 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
                     }
                 }
                 dev_node = current;
+            }
+        }
+
+        /*
+         * Early boot fallback: block devices can be registered before devfs
+         * initializes its directory tree. If /dev/storage/<name> wasn't found
+         * in devfs yet, resolve directly from the blkdev registry.
+         */
+        if (!dev_node && strncmp(device, "/dev/storage/", 13) == 0) {
+            const char *dev_name = device + 13;
+            if (*dev_name && strchr(dev_name, '/') == NULL) {
+                blkdev_t *bdev = blkdev_get(dev_name);
+                if (bdev) {
+                    dev_node = &bdev->node;
+                }
             }
         }
     }
@@ -663,4 +679,3 @@ int vfs_unmount_legacy(const char *path) {
 
     return 0;
 }
-

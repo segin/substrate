@@ -516,7 +516,11 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     rand_ptr = sp;
 
     uint8_t rand_buf[16];
-    random_get_bytes(rand_buf, sizeof(rand_buf));
+    int rand_rc = random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_NONBLOCK);
+    if (rand_rc != (int)sizeof(rand_buf)) {
+        /* Avoid stalling exec during early boot when entropy is still low. */
+        random_get_bytes_flags(rand_buf, sizeof(rand_buf), GRND_INSECURE);
+    }
 
     for (int i = 0; i < 4; i++) {
         uint32_t val;

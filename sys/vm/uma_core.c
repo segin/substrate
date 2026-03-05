@@ -174,22 +174,24 @@ uma_zone_t *uma_zcreate(
     // Items we can fit if header is ON page
     // (4096 - header) / size  vs  4096 / size
     
-    size_t onpage_overhead = sizeof(uma_slab_t);
-    size_t effective_size = zone->uz_rsize;
+    // Simplistic check: If request > 1/2 page, force offpage to get 1 item.
     
-    // Simplistic check: If request > 1/2 page, force offpage to get 1 item
-    // Or if offpage gives us more items.
-    
-    int onpage_count = (4096 - onpage_overhead) / (effective_size + 1); // +1 for freelist
-    if (onpage_count == 0) onpage_count = 1;
-    
-    int offpage_count = 4096 / effective_size; 
     // Note: offpage still needs freelist if we don't put it in the slab header
     // But standard UMA often puts freelist in the item itself when free, or a bitmap.
     // implementation uses us_freelist pointer at end of header.
     // If offpage, header + freelist bitmap must be allocated from slab_zone.
     
-    if (size > 2048 || (offpage_count > onpage_count)) {
+    /*
+     * Keep small/medium zones on-page.
+     *
+     * Off-page slab metadata currently allocates headers via kzalloc(),
+     * which re-enters UMA. If most small zones are forced off-page,
+     * first allocations can recurse deeply and stall early boot.
+     *
+     * Restrict off-page slabs to large objects where on-page metadata
+     * cannot fit efficiently.
+     */
+    if (size > 2048) {
         zone->uz_flags |= UMA_ZONE_OFFPAGE;
         zone->uz_ipers = 4096 / zone->uz_rsize;
     } else {
