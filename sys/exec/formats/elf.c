@@ -42,7 +42,9 @@ static void exec_reset_signals(void) {
 
 static int is_linux_ldso_path(const char *interp_path) {
     if (!interp_path) return 0;
-    return strcmp(interp_path, "/lib/ld-linux.so.2") == 0;
+    return strcmp(interp_path, "/lib/ld-linux.so.2") == 0 ||
+           strcmp(interp_path, "/lib64/ld-linux-x86-64.so.2") == 0 ||
+           strcmp(interp_path, "/lib/ld-linux-x86-64.so.2") == 0;
 }
 
 int elf_check_file(Elf32_Ehdr *hdr) {
