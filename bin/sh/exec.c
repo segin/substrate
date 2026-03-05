@@ -583,13 +583,13 @@ static int builtin_exec(int argc, char **argv) {
 static int builtin_eval(int argc, char **argv) {
     int status = 0;
     if (argc > 1) {
-        int total_len = 0;
+        size_t total_len = 0;
         for (int i = 1; i < argc; i++) total_len += strlen(argv[i]) + 1;
-        char *line = malloc(total_len + 1);
+        char *line = malloc(total_len);
         if (line) {
             char *ptr = line;
             for (int i = 1; i < argc; i++) {
-                int len = strlen(argv[i]);
+                size_t len = strlen(argv[i]);
                 memcpy(ptr, argv[i], len);
                 ptr += len;
                 if (i < argc - 1) *ptr++ = ' ';
@@ -1347,7 +1347,7 @@ static int apply_redirections(ast_redirection_t *redir) {
                     if (redir->heredoc_content) {
                         char *heredoc_expanded = expand_heredoc(redir->heredoc_content, redir->quoted);
                         if (heredoc_expanded) {
-                            write(p[1], heredoc_expanded, strlen(heredoc_expanded));
+                            if (write(p[1], heredoc_expanded, strlen(heredoc_expanded)) < 0) perror("write");
                             free(heredoc_expanded);
                         }
                     }

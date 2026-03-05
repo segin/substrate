@@ -15,7 +15,7 @@ SRCS += test_nanosleep.c test_reboot.c test_pipe_race.c test_chacha20.c
 
 OBJS = $(SRCS:.c=.o)
 
-HOST_TESTS = host_test_kmem_test host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_printf_vsnprintf host_test_vm_swap host_test_wait_bench host_test_acct_compress host_test_procfs host_test_kern_write host_test_cmdline property_cmdline host_test_perso_netbsd_rusage host_test_input_subsys host_test_compat
+HOST_TESTS = host_test_kmem_test host_test_udf_large_write host_test_udf_truncate_expand host_test_minix_vuln host_test_crc32 host_test_compat_lseek32 host_test_elf_execve_toctou host_test_negdi2 host_test_string host_test_div64 host_test_printf_specifiers host_test_printf_vsnprintf host_test_vm_swap host_test_wait_bench host_test_acct_compress host_test_procfs host_test_kern_write host_test_cmdline property_cmdline host_test_perso_netbsd_rusage host_test_input_subsys host_test_compat host_test_udf_read_vds
 
 all: tests.o $(HOST_TESTS)
 
@@ -44,11 +44,17 @@ host_test_udf_large_write: host_test_udf_large_write.c
 host_test_udf_truncate_expand: host_test_udf_truncate_expand.c
 	$(CC) -g -Wall -I../../sys -I. -idirafter ../../sys/include -idirafter ../../include host_test_udf_truncate_expand.c -o $@
 
+host_test_udf_read_vds: host_test_udf_read_vds.c
+	$(CC) -g -Wall -I../../sys -I. -Ivuln_mocks -idirafter ../../sys/include -idirafter ../../include host_test_udf_read_vds.c -o $@
+
 host_test_minix_vuln: host_test_minix_vuln.c
 	$(CC) -g -Wall -DHOST_TEST -I. -I../../sys -idirafter ../../sys/include host_test_minix_vuln.c -o $@
 
 host_test_crc32: host_test_crc32.c
 	$(CC) -g -Wall -DHOST_TEST -I. -idirafter ../../sys/include host_test_crc32.c -o $@
+
+host_test_compat_lseek32: host_test_compat_lseek32.c
+	$(CC) -g -Wall -DHOST_TEST -Imock_compat_include -I../../sys/include -I../../include -I../../sys -I. host_test_compat_lseek32.c -o $@
 
 host_test_elf_execve_toctou: host_test_elf_execve_toctou.c
 	$(CC) -g -Wall -DHOST_TEST -I../../sys/include -I../../sys -I. host_test_elf_execve_toctou.c -o $@

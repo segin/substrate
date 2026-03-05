@@ -100,7 +100,6 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
     Elf32_Phdr phdr;
     
     // Use pmap_t from vm_map.h/pmap.h
-    
     void *pmap = pmap_kernel();
     if (current_process && current_process->pmap) {
         pmap = (void*)((uintptr_t)current_process->pmap);
