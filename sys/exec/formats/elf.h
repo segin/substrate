@@ -174,6 +174,10 @@ typedef struct {
 #define ELFCLASS32 1
 #define ELFCLASS64 2
 
+// ELF machine types
+#define EM_386      3
+#define EM_X86_64   62
+
 #define EI_OSABI 7
 #define ELFOSABI_SYSV       0
 #define ELFOSABI_HPUX       1

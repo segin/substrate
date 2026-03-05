@@ -13,6 +13,7 @@
 #include <sys/kern_syscalls.h>
 #include <sys/file.h>
 #include <arch/i386/pmm.h>
+#include <stdio.h>
 
 /*
  * exec_reset_signals - Reset signal handlers on exec
@@ -45,6 +46,32 @@ static int is_linux_ldso_path(const char *interp_path) {
     return strcmp(interp_path, "/lib/ld-linux.so.2") == 0 ||
            strcmp(interp_path, "/lib64/ld-linux-x86-64.so.2") == 0 ||
            strcmp(interp_path, "/lib/ld-linux-x86-64.so.2") == 0;
+}
+
+static int elf_machine_matches_kernel(const Elf32_Ehdr *ehdr) {
+    if (!ehdr) return 0;
+
+#if defined(__i386__)
+    if (ehdr->e_ident[EI_CLASS] != ELFCLASS32 || ehdr->e_machine != EM_386) {
+        char buf[96];
+        sprintf(buf, "ELF: Unsupported machine/class for i386 kernel (machine=%u class=%u)\n",
+                (unsigned int)ehdr->e_machine, (unsigned int)ehdr->e_ident[EI_CLASS]);
+        kprint(buf);
+        return 0;
+    }
+#elif defined(__x86_64__)
+    if (ehdr->e_ident[EI_CLASS] != ELFCLASS64 || ehdr->e_machine != EM_X86_64) {
+        char buf[96];
+        sprintf(buf, "ELF: Unsupported machine/class for x86_64 kernel (machine=%u class=%u)\n",
+                (unsigned int)ehdr->e_machine, (unsigned int)ehdr->e_ident[EI_CLASS]);
+        kprint(buf);
+        return 0;
+    }
+#else
+    #error "Unsupported architecture for ELF loader"
+#endif
+
+    return 1;
 }
 
 int elf_check_file(Elf32_Ehdr *hdr) {
@@ -84,8 +111,7 @@ uint32_t elf_load(fs_node_t *file, uint32_t load_base, char *interp_path, uint32
         return 0;
     }
     
-    if (ehdr.e_machine != 3) { // EM_386
-        kprint("ELF: Not i386 architecture\n");
+    if (!elf_machine_matches_kernel(&ehdr)) {
         return 0;
     }
     
