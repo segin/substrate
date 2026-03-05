@@ -78,6 +78,36 @@ void bas_error(const char *msg) {
         printf("Error: %s\n", msg);
 }
 
+void load_file(const char *filename) {
+    FILE *f = fopen(filename, "r");
+    if (!f) {
+        printf("Error: Could not open file %s\n", filename);
+        return;
+    }
+
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), f)) {
+        /* Trim newline */
+        buf[strcspn(buf, "\r\n")] = 0;
+        if (strlen(buf) == 0) continue;
+
+        if (isdigit(buf[0])) {
+            int num = atoi(buf);
+            char *text = strchr(buf, ' ');
+            if (text) {
+                while (*text == ' ') text++;
+
+                /* Compile line into space */
+                int start_offset = space_idx;
+                if (compile_line(num, text, &space_idx)) {
+                    add_line(num, start_offset, text);
+                }
+            }
+        }
+    }
+    fclose(f);
+}
+
 void bas_loop() {
     char buf[1024];
     while (1) {
@@ -86,7 +116,7 @@ void bas_loop() {
         if (!fgets(buf, sizeof(buf), stdin)) break;
         
         /* Trim newline */
-        buf[strcspn(buf, "\n")] = 0;
+        buf[strcspn(buf, "\r\n")] = 0;
         if (strlen(buf) == 0) continue;
         
         if (isdigit(buf[0])) {
@@ -123,7 +153,7 @@ void bas_loop() {
 int main(int argc, char *argv[]) {
     bas_init();
     if (argc > 1) {
-        printf("Loading %s... (TODO)\n", argv[1]);
+        load_file(argv[1]);
     }
     bas_loop();
     return 0;
