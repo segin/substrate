@@ -84,6 +84,7 @@ static bool archive_is_thin = false;
 /* Symbol table entry */
 struct sym_entry {
     char *name;
+    size_t name_len;
     uint64_t offset; /* File offset of member header */
     struct ar_memb *member; /* Pointer to member */
     struct sym_entry *next;
@@ -1401,6 +1402,7 @@ static void get_elf_symbols(struct ar_memb *m, struct sym_entry **sym_head) {
             free(s);
             continue;
         }
+        s->name_len = strlen(name);
 
         s->offset = 0;
         s->member = m;
@@ -1512,7 +1514,7 @@ static void ranlib(void) {
     qsort(arr, count, sizeof(struct sym_entry*), compare_syms);
 
     int strsize = 0;
-    for (int i = 0; i < count; i++) strsize += strlen(arr[i]->name) + 1;
+    for (int i = 0; i < count; i++) strsize += arr[i]->name_len + 1;
 
     size_t total_size;
     if (archive_format == ARFMT_GNU) {
@@ -1690,7 +1692,7 @@ static void write_archive(const char *path) {
 
             /* Fill symdef data */
             int strsize = 0;
-            for (int i = 0; i < count; i++) strsize += strlen(arr[i]->name) + 1;
+            for (int i = 0; i < count; i++) strsize += arr[i]->name_len + 1;
             if (archive_format == ARFMT_GNU) {
                 uint64_t max_off = 0;
                 for (int i = 0; i < count; i++) {
@@ -1720,8 +1722,8 @@ static void write_archive(const char *path) {
                     }
                     strp = p;
                     for (int i = 0; i < count; i++) {
-                        strcpy((char *)strp + stroff, arr[i]->name);
-                        stroff += strlen(arr[i]->name) + 1;
+                        memcpy((char *)strp + stroff, arr[i]->name, arr[i]->name_len + 1);
+                        stroff += arr[i]->name_len + 1;
                     }
                 } else {
                     size_t total = sizeof(uint32_t) + (size_t)count * sizeof(uint32_t) + strsize;
@@ -1745,8 +1747,8 @@ static void write_archive(const char *path) {
                     }
                     strp = p;
                     for (int i = 0; i < count; i++) {
-                        strcpy((char *)strp + stroff, arr[i]->name);
-                        stroff += strlen(arr[i]->name) + 1;
+                        memcpy((char *)strp + stroff, arr[i]->name, arr[i]->name_len + 1);
+                        stroff += arr[i]->name_len + 1;
                     }
                 }
             } else {
@@ -1764,8 +1766,8 @@ static void write_archive(const char *path) {
                 for (int i = 0; i < count; i++) {
                     ra[i].ran_un.ran_strx = stroff;
                     ra[i].ran_off = (uint32_t)arr[i]->offset;
-                    strcpy(strp + stroff, arr[i]->name);
-                    stroff += strlen(arr[i]->name) + 1;
+                    memcpy(strp + stroff, arr[i]->name, arr[i]->name_len + 1);
+                    stroff += arr[i]->name_len + 1;
                 }
             }
             free(arr);
