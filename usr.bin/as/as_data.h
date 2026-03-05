@@ -15,6 +15,7 @@ typedef enum {
     AS_DATA_FLOAT,
     AS_DATA_STRING,
     AS_DATA_ZERO,
+    AS_DATA_ALIGN,
     AS_DATA_FILL,
     AS_DATA_ORG,
     AS_DATA_INCBIN,
@@ -44,6 +45,9 @@ typedef struct {
         struct {
             unsigned long long count;
         } zero;
+        struct {
+            unsigned long long value;
+        } align;
         struct {
             unsigned long long repeat;
             unsigned long long size;

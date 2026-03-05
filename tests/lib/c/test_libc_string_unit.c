@@ -184,6 +184,56 @@ void run_strcat_tests(void) {
     ASSERT_EQ(strcmp(dest, "Hello World"), 0, "Basic strcat");
 }
 
+void run_memset_tests(void) {
+    printf("Running memset tests...\n");
+    char buf[256];
+
+    // Basic functionality
+    libc_memset(buf, 'A', 10);
+    for (int i = 0; i < 10; i++) {
+        ASSERT_EQ(buf[i], 'A', "Basic memset");
+    }
+
+    // Zero length
+    buf[0] = 'B';
+    libc_memset(buf, 'A', 0);
+    ASSERT_EQ(buf[0], 'B', "Zero length memset");
+
+    // Unaligned start, short length
+    libc_memset(buf, 0, sizeof(buf));
+    libc_memset(buf + 1, 'C', 2);
+    ASSERT_EQ(buf[0], 0, "Unaligned start before");
+    ASSERT_EQ(buf[1], 'C', "Unaligned start pos 1");
+    ASSERT_EQ(buf[2], 'C', "Unaligned start pos 2");
+    ASSERT_EQ(buf[3], 0, "Unaligned start after");
+
+    // Unaligned start, crossing word boundary
+    libc_memset(buf, 0, sizeof(buf));
+    libc_memset(buf + 3, 'D', 6);
+    ASSERT_EQ(buf[2], 0, "Cross word before");
+    for (int i = 3; i < 9; i++) {
+        ASSERT_EQ(buf[i], 'D', "Cross word pos");
+    }
+    ASSERT_EQ(buf[9], 0, "Cross word after");
+
+    // Large fill (word-aligned)
+    libc_memset(buf, 0, sizeof(buf));
+    libc_memset(buf, 0xAA, 128);
+    for (int i = 0; i < 128; i++) {
+        ASSERT_EQ((unsigned char)buf[i], 0xAA, "Large word-aligned fill");
+    }
+    ASSERT_EQ(buf[128], 0, "Large word-aligned fill after");
+
+    // Large fill (unaligned start)
+    libc_memset(buf, 0, sizeof(buf));
+    libc_memset(buf + 1, 0x55, 128);
+    ASSERT_EQ(buf[0], 0, "Large unaligned start before");
+    for (int i = 1; i < 129; i++) {
+        ASSERT_EQ((unsigned char)buf[i], 0x55, "Large unaligned start fill");
+    }
+    ASSERT_EQ(buf[129], 0, "Large unaligned start after");
+}
+
 void run_memcmp_tests(void) {
     printf("Running memcmp tests...\n");
 
@@ -220,10 +270,114 @@ void run_memcmp_tests(void) {
     ASSERT_EQ(libc_memcmp(large1, large2, 1024), 0, "Large equal buffers");
     large2[1023] = 'B';
     ASSERT_TRUE(libc_memcmp(large1, large2, 1024) < 0, "Large buffers differ at end");
+
+    // Identical pointers
+    ASSERT_EQ(libc_memcmp(large1, large1, 1024), 0, "Identical pointers");
+    ASSERT_EQ(libc_memcmp("abc", "abc", 3), 0, "Identical string pointers");
+
+    // Null pointers with n=0
+    ASSERT_EQ(libc_memcmp(NULL, NULL, 0), 0, "NULL pointers n=0");
+    ASSERT_EQ(libc_memcmp("abc", NULL, 0), 0, "First pointer valid, second NULL n=0");
+    ASSERT_EQ(libc_memcmp(NULL, "abc", 0), 0, "First pointer NULL, second valid n=0");
+
+    // Exact difference values
+    ASSERT_EQ(libc_memcmp("a", "b", 1), 'a' - 'b', "Exact numeric diff 'a' - 'b'");
+    ASSERT_EQ(libc_memcmp("b", "a", 1), 'b' - 'a', "Exact numeric diff 'b' - 'a'");
+
+    unsigned char x[] = {255};
+    unsigned char y[] = {127};
+    ASSERT_EQ(libc_memcmp(x, y, 1), 255 - 127, "Exact numeric diff 255 - 127");
+}
+
+void run_strdup_tests(void) {
+    printf("Running strdup tests...\n");
+
+    // Basic duplication
+    const char *orig1 = "Hello, World!";
+    char *dup1 = libc_strdup(orig1);
+    ASSERT_TRUE(dup1 != NULL, "strdup should not return NULL for valid string");
+    ASSERT_TRUE(dup1 != orig1, "strdup should return a new pointer");
+    ASSERT_STREQ(dup1, orig1, "Duplicated string should match original");
+    free(dup1);
+
+    // Empty string
+    const char *orig2 = "";
+    char *dup2 = libc_strdup(orig2);
+    ASSERT_TRUE(dup2 != NULL, "strdup should not return NULL for empty string");
+    ASSERT_TRUE(dup2 != orig2, "strdup should return a new pointer for empty string");
+    ASSERT_STREQ(dup2, orig2, "Duplicated empty string should match original");
+    free(dup2);
+}
+
+void run_strspn_tests(void) {
+    printf("Running strspn tests...\n");
+
+    // Empty strings
+    ASSERT_EQ(libc_strspn("", ""), 0, "Empty s and empty accept");
+    ASSERT_EQ(libc_strspn("", "abc"), 0, "Empty s and non-empty accept");
+    ASSERT_EQ(libc_strspn("abc", ""), 0, "Non-empty s and empty accept");
+
+    // Basic functionality
+    ASSERT_EQ(libc_strspn("abcde", "abc"), 3, "s starts with accept characters");
+    ASSERT_EQ(libc_strspn("abcde", "cba"), 3, "s starts with accept characters, different order");
+    ASSERT_EQ(libc_strspn("abcde", "xyz"), 0, "s starts with no accept characters");
+    ASSERT_EQ(libc_strspn("abcde", "abcde"), 5, "s consists entirely of accept characters");
+    ASSERT_EQ(libc_strspn("abcde", "edcba"), 5, "s consists entirely of accept characters, different order");
+
+    // Multiple occurrences and overlapping characters
+    ASSERT_EQ(libc_strspn("abacaba", "ab"), 3, "Multiple occurrences of accept characters");
+    ASSERT_EQ(libc_strspn("abacaba", "abc"), 7, "All characters match");
+
+    // Missing matching character early on
+    ASSERT_EQ(libc_strspn("abxyz", "ab"), 2, "Mismatch after valid characters");
+    ASSERT_EQ(libc_strspn("xyzab", "ab"), 0, "No initial match");
+
+    // Duplicates in accept string
+    ASSERT_EQ(libc_strspn("hello", "hlleo"), 5, "Accept has duplicates");
+    ASSERT_EQ(libc_strspn("hello", "he"), 2, "Accept has subset");
+}
+
+void run_strcpy_tests(void) {
+    printf("Running strcpy tests...\n");
+    char dest[256];
+
+    // Basic copy
+    memset(dest, 'X', sizeof(dest));
+    char *ret = libc_strcpy(dest, "Hello World");
+    ASSERT_EQ((uintptr_t)ret, (uintptr_t)dest, "strcpy returns destination pointer");
+    ASSERT_STREQ(dest, "Hello World", "Basic strcpy");
+    ASSERT_EQ(dest[11], '\0', "Null terminator copied");
+    ASSERT_EQ(dest[12], 'X', "Did not overwrite past null terminator");
+
+    // Empty string
+    memset(dest, 'X', sizeof(dest));
+    ret = libc_strcpy(dest, "");
+    ASSERT_EQ((uintptr_t)ret, (uintptr_t)dest, "strcpy returns destination pointer for empty string");
+    ASSERT_STREQ(dest, "", "Empty strcpy");
+    ASSERT_EQ(dest[0], '\0', "Null terminator copied for empty string");
+    ASSERT_EQ(dest[1], 'X', "Did not overwrite past null terminator for empty string");
+
+    // Large string
+    char large_src[128];
+    memset(large_src, 'A', 127);
+    large_src[127] = '\0';
+    memset(dest, 'X', sizeof(dest));
+    libc_strcpy(dest, large_src);
+    ASSERT_STREQ(dest, large_src, "Large strcpy");
+}
+
+bool test_libc_strcpy(void) {
+    run_strcpy_tests();
+    return true;
 }
 
 bool test_libc_strlen(void) {
     run_strlen_tests();
+    return true;
+}
+
+bool test_libc_strspn(void) {
+    run_strspn_tests();
     return true;
 }
 
@@ -271,6 +425,11 @@ void run_strncmp_tests(void) {
     ASSERT_TRUE(libc_strncmp("\xff", "\x7f", 1) > 0, "0xff > 0x7f (unsigned)");
 }
 
+bool test_libc_memset(void) {
+    run_memset_tests();
+    return true;
+}
+
 bool test_libc_memcmp(void) {
     run_memcmp_tests();
     return true;
@@ -281,14 +440,24 @@ bool test_libc_strncmp(void) {
     return true;
 }
 
+bool test_libc_strdup(void) {
+    run_strdup_tests();
+    return true;
+}
+
 #ifndef NO_MAIN
 int main(void) {
+    run_strcpy_tests();
     run_strlen_tests();
+    run_strspn_tests();
     run_memmove_tests();
     run_strcat_tests();
     run_strtok_tests();
+    run_memset_tests();
     run_memcmp_tests();
     run_strncmp_tests();
+    run_strncmp_tests();
+    run_strdup_tests();
     return 0;
 }
 #endif
