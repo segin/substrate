@@ -29,7 +29,8 @@ void full_init() {}
 void fuse_init() {}
 void fuse_fs_init() {}
 void p9_init() {}
-void devfs_init() {}
+void devfs_init(void) {}
+void namei_init(void) {}
 void vfs_init_mock_root(void);
 // nchinit and fs_root removed (linked from vfs)
 
@@ -343,10 +344,6 @@ void uma_zfree(uma_zone_t *zone, void *item) {
 
 void uma_zone_set_max(uma_zone_t *zone, int max) { (void)zone; (void)max; }
 
-struct vm_page *vm_phys_alloc_page(void) { return NULL; }
-void vm_phys_free_page(struct vm_page *m) { (void)m; }
-void swapper_request_work(void) {}
-
 uint32_t pmm_get_total_memory(void) { return 0; }
 uint32_t pmm_get_free_memory(void) { return 0; }
 void cmdline_get(char *buf, size_t buf_len) { buf[0] = '\0'; }
@@ -354,3 +351,5 @@ void sched_get_loadavg(unsigned long loads[3]) { loads[0] = loads[1] = loads[2] 
 uint32_t sched_count_runnable(void) { return 0; }
 uint32_t sched_count_threads(void) { return 0; }
 int sys_pmap_stats(struct pmap_stats *stats) { return 0; }
+
+void namei_init(void) {}

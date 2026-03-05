@@ -4,11 +4,13 @@ CFLAGS := $(CFLAGS) -I../../../include -I../../../sys -I../src
 
 TESTS = test_roundtrip test_invalid test_link test_reader_writer test_roundtrip_identity \
 	test_section_segment test_symbols_hash test_reloc_backend test_link_services \
-	test_debug_unwind test_validate_hardening test_perf_io test_matrix test_multiarch_api test_write_to_buffer
+	test_debug_unwind test_validate_hardening test_perf_io test_matrix test_multiarch_api \
+	test_write_to_buffer test_ensure_symbols_relocs test_push_section
 
 .PHONY: all clean
 
 all: $(TESTS)
+	./test_push_section
 	./test_write_to_buffer
 	./test_roundtrip
 	./test_invalid
@@ -24,6 +26,7 @@ all: $(TESTS)
 	./test_perf_io
 	./test_matrix
 	./test_multiarch_api
+	./test_ensure_symbols_relocs
 	./test_build_install.sh
 	./test_tool_integration.sh
 	@if [ "${ELFOBJ_RUN_PERF_GATE:-0}" = "1" ]; then ./test_perf_gate.sh; fi
@@ -73,6 +76,12 @@ test_multiarch_api: test_multiarch_api.c ../libelfobj.a
 
 test_write_to_buffer: test_write_to_buffer.c ../libelfobj.a
 	$(CC) $(CFLAGS) test_write_to_buffer.c ../libelfobj.a -o test_write_to_buffer
+
+test_push_section: test_push_section.c ../libelfobj.a
+	$(CC) $(CFLAGS) test_push_section.c ../libelfobj.a -o test_push_section
+
+test_ensure_symbols_relocs: test_ensure_symbols_relocs.c ../libelfobj.a
+	$(CC) $(CFLAGS) test_ensure_symbols_relocs.c ../libelfobj.a -o test_ensure_symbols_relocs
 
 clean:
 	rm -f $(TESTS) *.o tmp_*.o tmp_*.elf tmp_identity_*.o tmp_rel*.o tmp_rela*.o \

@@ -587,11 +587,14 @@ static int builtin_eval(int argc, char **argv) {
         for (int i = 1; i < argc; i++) total_len += strlen(argv[i]) + 1;
         char *line = malloc(total_len + 1);
         if (line) {
-            line[0] = 0;
+            char *ptr = line;
             for (int i = 1; i < argc; i++) {
-                strcat(line, argv[i]);
-                if (i < argc - 1) strcat(line, " ");
+                int len = strlen(argv[i]);
+                memcpy(ptr, argv[i], len);
+                ptr += len;
+                if (i < argc - 1) *ptr++ = ' ';
             }
+            *ptr = '\0';
             status = execute_line(line);
             free(line);
         }
