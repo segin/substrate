@@ -1054,6 +1054,10 @@ static int is_integral_type(cc_type_t t) {
            t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG || t == CC_TYPE_ENUM || t == CC_TYPE_BITINT;
 }
 
+static cc_type_t size_type(void) {
+    return g_pointer_size_bytes >= 8 ? CC_TYPE_ULONG : CC_TYPE_UINT;
+}
+
 static int is_numeric_type(cc_type_t t) {
     return is_integral_type(t) || is_float_type(t) || is_complex_type(t) || t == CC_TYPE_ATOMIC;
 }
@@ -3588,7 +3592,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
         }
-        e->value_type = CC_TYPE_INT;
+        e->value_type = size_type();
         e->struct_id = -1;
         return 0;
 
