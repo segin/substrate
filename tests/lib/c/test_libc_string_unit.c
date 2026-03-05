@@ -396,6 +396,26 @@ bool test_libc_strtok(void) {
     return true;
 }
 
+void run_strpbrk_tests(void) {
+    printf("Running strpbrk tests...\n");
+
+    const char *str = "hello world";
+
+    // Character found
+    ASSERT_STREQ(libc_strpbrk(str, "w"), "world", "Find single character");
+    ASSERT_STREQ(libc_strpbrk(str, "ol"), "llo world", "Find first of multiple characters");
+    ASSERT_STREQ(libc_strpbrk(str, "d"), "d", "Find character at end");
+    ASSERT_STREQ(libc_strpbrk(str, "h"), "hello world", "Find character at beginning");
+
+    // Character not found
+    ASSERT_EQ((void*)libc_strpbrk(str, "xyz"), NULL, "Characters not in string");
+
+    // Empty strings
+    ASSERT_EQ((void*)libc_strpbrk("", "abc"), NULL, "Empty search string");
+    ASSERT_EQ((void*)libc_strpbrk(str, ""), NULL, "Empty accept string");
+    ASSERT_EQ((void*)libc_strpbrk("", ""), NULL, "Both strings empty");
+}
+
 void run_strncmp_tests(void) {
     printf("Running strncmp tests...\n");
 
@@ -435,6 +455,11 @@ bool test_libc_memcmp(void) {
     return true;
 }
 
+bool test_libc_strpbrk(void) {
+    run_strpbrk_tests();
+    return true;
+}
+
 bool test_libc_strncmp(void) {
     run_strncmp_tests();
     return true;
@@ -455,7 +480,8 @@ int main(void) {
     run_strtok_tests();
     run_memset_tests();
     run_memcmp_tests();
-    run_strncmp_tests();
+    run_strpbrk_tests();
+    run_strpbrk_tests();
     run_strncmp_tests();
     run_strdup_tests();
     return 0;
