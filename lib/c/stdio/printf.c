@@ -131,15 +131,23 @@ static void gtoa(char *buf, double val, int precision, int uppercase, int altern
     else ftoa(buf, val, precision - 1 - exponent, uppercase);
 
     if (!alternate_form) {
-        char *dot = strchr(buf, '.');
-        if (dot) {
-            char *e = strchr(dot, 'e');
-            if (!e) e = strchr(dot, 'E');
-            char *end = e ? e : dot + strlen(dot);
-            char *p = end - 1;
-            while (p > dot && *p == '0') *p-- = '\0';
-            if (*p == '.') *p = '\0';
-            if (e) memmove(p + (*p == '\0' ? 0 : 1), e, strlen(e) + 1);
+        char *dot = buf;
+        while (*dot && *dot != '.') dot++;
+
+        if (*dot == '.') {
+            char *e = dot + 1;
+            while (*e && *e != 'e' && *e != 'E') e++;
+
+            char *p = e - 1;
+            while (p > dot && *p == '0') p--;
+            if (*p == '.') p--;
+
+            p++;
+
+            if (*e) {
+                while (*e) *p++ = *e++;
+            }
+            *p = '\0';
         }
     }
 }

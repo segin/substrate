@@ -317,17 +317,16 @@ elf_err_t elf_remove_section(elfobj_t *obj, elf_section_t *section) {
         return ELF_ERR_NOTFOUND;
     }
 
-    for (i = 0; i < obj->reloc_count;) {
+    size_t out_relocs = 0;
+    for (i = 0; i < obj->reloc_count; i++) {
         struct elf_reloc *r = obj->relocs[i];
         if (r != NULL && r->section == section) {
             free(r);
-            memmove(&obj->relocs[i], &obj->relocs[i + 1],
-                    (obj->reloc_count - i - 1) * sizeof(obj->relocs[0]));
-            obj->reloc_count--;
-            continue;
+        } else {
+            obj->relocs[out_relocs++] = r;
         }
-        i++;
     }
+    obj->reloc_count = out_relocs;
     for (i = 0; i < obj->symbol_count; ++i) {
         struct elf_symbol *sym = obj->symbols[i];
         if (sym == NULL) {
