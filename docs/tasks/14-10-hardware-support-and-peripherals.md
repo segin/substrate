@@ -1,0 +1,1065 @@
+# 10. Hardware Support & Peripherals
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 9064-9643.
+
+## Reimplemented Checklist (All Open)
+
+### 10. Hardware Support & Peripherals
+- [ ] **USB Subsystem:**
+    - [ ] **Host Controllers:**
+        - [ ] **UHCI (Universal Host Controller Interface):**
+            - [ ] Implement UHCI register access.
+                - Files: `sys/drivers/usb/uhci.c` (new), `sys/drivers/usb/uhci.h` (new)
+                - Registers: USBCMD, USBSTS, USBINTR, FRNUM, FLBASEADD, SOFMOD, PORTSC
+                - Tests: integration (register read/write from QEMU UHCI)
+                - Docs: `uhci.4`
+                - Acceptance: Controller detected and accessible
+            - [ ] Implement Frame List allocation and setup.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Logic: 1024-entry frame list (4KB aligned), each entry points to QH/TD
+                - Tests: unit (frame list allocation, alignment)
+                - Docs: `uhci.4`
+                - Acceptance: Frame list in FLBASEADD, HC processing
+            - [ ] Implement Queue Head (QH) management.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Structure: `uhci_qh_t` with horizontal/vertical pointers
+                - Logic: Skeleton QHs for interrupt, control, bulk
+                - Tests: unit (QH linking, traversal)
+                - Docs: `uhci.4`
+                - Acceptance: QH hierarchy operational
+            - [ ] Implement Transfer Descriptor (TD) management.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Structure: `uhci_td_t` with link, status, token, buffer
+                - Tests: unit (TD allocation, status parsing)
+                - Docs: `uhci.4`
+                - Acceptance: TDs processed by HC
+            - [ ] Implement interrupt handling.
+                - Files: `sys/drivers/usb/uhci.c`
+                - Events: USBINT (completion), USBERRINT (error), Resume, Host System Error
+                - Tests: integration (IRQ fires on transfer completion)
+                - Docs: `uhci.4`
+                - Acceptance: Interrupts handled, URBs completed
+        - [ ] **OHCI (Open Host Controller Interface):**
+            - [ ] Implement OHCI register access.
+                - Files: `sys/drivers/usb/ohci.c` (new), `sys/drivers/usb/ohci.h` (new)
+                - Registers: HcRevision, HcControl, HcCommandStatus, HcInterruptStatus, HcHCCA
+                - Tests: integration (MMIO register access)
+                - Docs: `ohci.4`
+                - Acceptance: Controller detected
+            - [ ] Implement HCCA (Host Controller Communications Area).
+                - Files: `sys/drivers/usb/ohci.c`
+                - Structure: 256-byte aligned, interrupt table, frame number, done head
+                - Tests: unit (HCCA allocation, alignment, done head updates)
+                - Docs: `ohci.4`
+                - Acceptance: HCCA operational
+            - [ ] Implement Endpoint Descriptor (ED) management.
+                - Files: `sys/drivers/usb/ohci.c`
+                - Structure: `ohci_ed_t` with FA, EN, D, S, K, F, MPS, TailP, HeadP, NextED
+                - Logic: Control, bulk, interrupt, isochronous ED lists
+                - Tests: unit (ED creation, list insertion)
+                - Docs: `ohci.4`
+                - Acceptance: EDs processed by HC
+            - [ ] Implement Transfer Descriptor (TD) management.
+                - Files: `sys/drivers/usb/ohci.c`
+                - Structure: `ohci_td_t` with flags, CBP, NextTD, BE
+                - Tests: unit (TD allocation, completion status)
+                - Docs: `ohci.4`
+                - Acceptance: TDs processed correctly
+            - [ ] Implement interrupt and done queue handling.
+                - Files: `sys/drivers/usb/ohci.c`
+                - Logic: Process HccaDoneHead, complete URBs
+                - Tests: integration (URB completion via done queue)
+                - Docs: `ohci.4`
+                - Acceptance: Transfer completion signaled
+        - [ ] **EHCI (Enhanced Host Controller Interface):**
+            - [ ] Implement EHCI capability and operational register access.
+                - Files: `sys/drivers/usb/ehci.c` (new), `sys/drivers/usb/ehci.h` (new)
+                - Capability: CAPLENGTH, HCSPARAMS, HCCPARAMS
+                - Operational: USBCMD, USBSTS, USBINTR, FRINDEX, PERIODICLISTBASE, ASYNCLISTADDR
+                - Tests: integration (capability parsing, operational access)
+                - Docs: `ehci.4`
+                - Acceptance: Controller initialized
+            - [ ] Implement Asynchronous Schedule (Control/Bulk).
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: Queue Head (QH) linked list, ASYNCLISTADDR
+                - Logic: Async schedule enable, reclamation
+                - Tests: integration (async schedule active, control transfers work)
+                - Docs: `ehci.4`
+                - Acceptance: Async schedule operational
+            - [ ] Implement Queue Head (QH) management.
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: `ehci_qh_t` with horizontal link, endpoint chars, overlay
+                - Tests: unit (QH allocation, overlay handling)
+                - Docs: `ehci.4`
+                - Acceptance: QHs processed by HC
+            - [ ] Implement Queue Transfer Descriptor (qTD) management.
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: `ehci_qtd_t` with next, alt_next, token, buffer pointers
+                - Tests: unit (qTD linking, token status parsing)
+                - Docs: `ehci.4`
+                - Acceptance: qTDs executed correctly
+            - [ ] Implement Periodic Schedule (Interrupt/Isochronous).
+                - Files: `sys/drivers/usb/ehci.c`
+                - Structure: 1024-entry frame list, interrupt QHs, iTDs/siTDs
+                - Tests: integration (periodic schedule, interrupt transfers)
+                - Docs: `ehci.4`
+                - Acceptance: Periodic transfers work
+            - [ ] Implement interrupt handling.
+                - Files: `sys/drivers/usb/ehci.c`
+                - Events: USB Interrupt, USB Error, Port Change, Frame List Rollover, Host System Error
+                - Tests: integration (transfer completion IRQ)
+                - Docs: `ehci.4`
+                - Acceptance: Interrupts handled correctly
+        - [ ] **xHCI (eXtensible Host Controller Interface):**
+            - [ ] Implement xHCI capability structure parsing.
+                - Files: `sys/drivers/usb/xhci.c` (new), `sys/drivers/usb/xhci.h` (new)
+                - Capability: CAPLENGTH, HCSPARAMS1/2/3, HCCPARAMS1/2, DBOFF, RTSOFF
+                - Extended: Supported Protocol, Legacy Support, Capability IDs
+                - Tests: integration (parse all capabilities from QEMU xHCI)
+                - Docs: `xhci.4`
+                - Acceptance: Capabilities detected correctly
+            - [ ] Implement Command Ring setup and processing.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: TRB ring with Link TRBs, CRCR register
+                - Commands: Enable Slot, Address Device, Configure Endpoint, Evaluate Context
+                - Tests: unit (ring wrap, command completion)
+                - Docs: `xhci.4`
+                - Acceptance: Commands processed by xHC
+            - [ ] Implement Event Ring setup and handling.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: Event Ring Segment Table, ERDP, interrupter registers
+                - Events: Transfer, Command Completion, Port Status Change
+                - Tests: integration (events received on completion)
+                - Docs: `xhci.4`
+                - Acceptance: Events processed correctly
+            - [ ] Implement Transfer Ring management.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: Per-endpoint transfer rings with TRBs
+                - TRB types: Normal, Setup, Data, Status, Isoch, Link
+                - Tests: unit (TRB enqueue, ring wrap)
+                - Docs: `xhci.4`
+                - Acceptance: Transfer TRBs executed
+            - [ ] Implement Doorbell mechanism.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Logic: Ring doorbell to notify xHC of new work
+                - Tests: unit (doorbell write triggers processing)
+                - Docs: `xhci.4`
+                - Acceptance: xHC processes TRBs after doorbell
+            - [ ] Implement Device Context management.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Structure: DCBAA, Device Context, Slot Context, Endpoint Contexts
+                - Logic: Allocate on Enable Slot, configure on Set Address
+                - Tests: integration (device addressed, endpoints configured)
+                - Docs: `xhci.4`
+                - Acceptance: Device contexts properly managed
+            - [ ] Implement Scratchpad Buffer allocation.
+                - Files: `sys/drivers/usb/xhci.c`
+                - Logic: Parse HCSPARAMS2 for scratchpad count, allocate buffers
+                - Tests: unit (scratchpad pages allocated)
+                - Docs: `xhci.4`
+                - Acceptance: xHC has required scratchpad
+    - [ ] **Core Stack:**
+        - [ ] **USB Device Abstraction:**
+            - [ ] Define `struct usb_device`.
+                - Files: `sys/kern/usb/usb.h` (new)
+                - Fields: address, speed, state, config, parent, driver, ep0_pipe, descriptors
+                - Tests: unit (struct layout)
+                - Docs: `usb_device.9`
+                - Acceptance: Device structure defined
+            - [ ] Define `struct usb_endpoint`.
+                - Files: `sys/kern/usb/usb.h`
+                - Fields: address, type, direction, maxpacket, interval, toggle
+                - Tests: unit (endpoint descriptor parsing)
+                - Docs: `usb_endpoint.9`
+                - Acceptance: Endpoint structure defined
+            - [ ] Define `struct usb_interface`.
+                - Files: `sys/kern/usb/usb.h`
+                - Fields: number, altsetting, class, subclass, protocol, endpoints, driver
+                - Tests: unit (interface descriptor parsing)
+                - Docs: `usb_interface.9`
+                - Acceptance: Interface structure defined
+        - [ ] **Device Enumeration:**
+            - [ ] Implement USB device state machine.
+                - Files: `sys/kern/usb/usb_core.c` (new)
+                - States: DEFAULT, ADDRESS, CONFIGURED, SUSPENDED
+                - Logic: State transitions on SET_ADDRESS, SET_CONFIGURATION
+                - Tests: integration (device reaches CONFIGURED)
+                - Docs: `usb_state_machine.9`
+                - Acceptance: Proper state transitions
+            - [ ] Implement SET_ADDRESS control transfer.
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Assign address, update HCD data structures
+                - Tests: integration (device responds at new address)
+                - Docs: `usb_set_address.9`
+                - Acceptance: Address assigned successfully
+            - [ ] Implement GET_DESCRIPTOR (Device).
+                - Files: `sys/kern/usb/usb_core.c`
+                - Fields: bcdUSB, bDeviceClass, idVendor, idProduct, bNumConfigurations
+                - Tests: unit (descriptor parsing)
+                - Docs: `usb_get_descriptor.9`
+                - Acceptance: Device descriptor parsed
+            - [ ] Implement GET_DESCRIPTOR (Configuration).
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Read wTotalLength, then full config+interface+endpoint tree
+                - Tests: unit (nested descriptor parsing)
+                - Docs: `usb_get_descriptor.9`
+                - Acceptance: Full configuration tree available
+            - [ ] Implement GET_DESCRIPTOR (String).
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Language ID query, string index query, UTF-16 to UTF-8
+                - Tests: unit (string descriptor decoding)
+                - Docs: `usb_get_descriptor.9`
+                - Acceptance: Manufacturer/product strings available
+            - [ ] Implement SET_CONFIGURATION.
+                - Files: `sys/kern/usb/usb_core.c`
+                - Logic: Select configuration, enable endpoints
+                - Tests: integration (device ready for class-specific commands)
+                - Docs: `usb_set_configuration.9`
+                - Acceptance: Device configured
+        - [ ] **Hub Driver:**
+            - [ ] Implement hub descriptor parsing.
+                - Files: `sys/drivers/usb/hub.c` (new)
+                - Fields: bNbrPorts, wHubCharacteristics, bPwrOn2PwrGood
+                - Tests: unit (hub descriptor fields)
+                - Docs: `usb_hub.4`
+                - Acceptance: Hub ports detected
+            - [ ] Implement port status change interrupt handling.
+                - Files: `sys/drivers/usb/hub.c`
+                - Logic: Interrupt endpoint polling, status change bitmap parsing
+                - Tests: integration (device connect detected via interrupt)
+                - Docs: `usb_hub.4`
+                - Acceptance: Port changes signaled
+            - [ ] Implement GET_PORT_STATUS.
+                - Files: `sys/drivers/usb/hub.c`
+                - Fields: wPortStatus, wPortChange (connection, enable, suspend, reset)
+                - Tests: unit (status bits parsed)
+                - Docs: `usb_hub.4`
+                - Acceptance: Port status queried
+            - [ ] Implement SET_PORT_FEATURE (power, reset, enable).
+                - Files: `sys/drivers/usb/hub.c`
+                - Features: PORT_POWER, PORT_RESET, PORT_ENABLE, PORT_SUSPEND
+                - Tests: integration (port reset triggers enumeration)
+                - Docs: `usb_hub.4`
+                - Acceptance: Port features controlled
+            - [ ] Implement CLEAR_PORT_FEATURE (change acknowledgment).
+                - Files: `sys/drivers/usb/hub.c`
+                - Features: C_PORT_CONNECTION, C_PORT_ENABLE, C_PORT_RESET
+                - Tests: unit (change bits cleared)
+                - Docs: `usb_hub.4`
+                - Acceptance: Change conditions cleared
+            - [ ] Implement root hub emulation for HCDs.
+                - Files: `sys/kern/usb/usb_roothub.c` (new)
+                - Logic: Translate hub requests to HCD port operations
+                - Tests: integration (root hub appears as normal hub)
+                - Docs: `usb_roothub.9`
+                - Acceptance: Root hub enumerable
+        - [ ] **URB (USB Request Block) Lifecycle:**
+            - [ ] Define `struct urb`.
+                - Files: `sys/kern/usb/urb.h` (new)
+                - Fields: dev, pipe, transfer_buffer, transfer_buffer_length, actual_length, status, complete, context, interval, setup_packet
+                - Tests: unit (struct layout)
+                - Docs: `urb.9`
+                - Acceptance: URB structure defined
+            - [ ] Implement `usb_alloc_urb()`.
+                - Files: `sys/kern/usb/urb.c` (new)
+                - API: Allocate URB from pool/kmalloc
+                - Tests: unit (allocation, free)
+                - Docs: `usb_alloc_urb.9`
+                - Acceptance: URB allocated
+            - [ ] Implement `usb_submit_urb()`.
+                - Files: `sys/kern/usb/urb.c`
+                - API: Submit URB to HCD for processing
+                - Logic: Build pipe info, call HCD urb_enqueue
+                - Tests: integration (URB submitted and completed)
+                - Docs: `usb_submit_urb.9`
+                - Acceptance: URB reaches device
+            - [ ] Implement `usb_unlink_urb()`.
+                - Files: `sys/kern/usb/urb.c`
+                - API: Cancel pending URB
+                - Logic: Call HCD urb_dequeue, complete with -ECONNRESET
+                - Tests: unit (unlink pending URB)
+                - Docs: `usb_unlink_urb.9`
+                - Acceptance: URB cancelled
+            - [ ] Implement URB completion callback mechanism.
+                - Files: `sys/kern/usb/urb.c`
+                - Logic: Call urb->complete from HCD interrupt context or thread
+                - Tests: integration (completion callback invoked)
+                - Docs: `urb_completion.9`
+                - Acceptance: Callback called with correct status
+    - [ ] **Class Drivers:**
+        - [ ] **HID (Human Interface Device):**
+            - [ ] Implement HID report descriptor parsing.
+                - Files: `sys/drivers/usb/hid.c` (new), `sys/drivers/usb/hid.h` (new)
+                - Logic: Parse Usage Page, Usage, Collection, Input/Output/Feature items
+                - Tests: unit (keyboard descriptor, mouse descriptor), fuzzer (malformed descriptors)
+                - Docs: `usb_hid.4`
+                - Acceptance: Report fields extracted
+            - [ ] Implement keyboard scancode translation.
+                - Files: `sys/drivers/usb/hid_keyboard.c` (new)
+                - Logic: USB HID Usage to PS/2 scancode mapping
+                - Modifier handling: Shift, Ctrl, Alt, GUI keys
+                - Tests: unit (key press/release events)
+                - Docs: `hid_keyboard.4`
+                - Acceptance: Keyboard input works
+            - [ ] Implement mouse relative motion reporting.
+                - Files: `sys/drivers/usb/hid_mouse.c` (new)
+                - Logic: Parse X/Y relative, button state, wheel
+                - Tests: unit (motion events, button events)
+                - Docs: `hid_mouse.4`
+                - Acceptance: Mouse input works
+            - [ ] Implement HID interrupt IN polling.
+                - Files: `sys/drivers/usb/hid.c`
+                - Logic: Submit interrupt URB, re-submit on completion
+                - Tests: integration (continuous input polling)
+                - Docs: `usb_hid.4`
+                - Acceptance: Events received continuously
+        - [ ] **Mass Storage (MSC):**
+            - [ ] Implement Bulk-Only Transport (BOT) state machine.
+                - Files: `sys/drivers/usb/usb_storage.c` (new), `sys/drivers/usb/usb_storage.h` (new)
+                - States: COMMAND, DATA, STATUS, RESET
+                - Tests: integration (full command sequence)
+                - Docs: `usb_storage.4`
+                - Acceptance: BOT protocol works
+            - [ ] Implement Command Block Wrapper (CBW) construction.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Fields: dCBWSignature, dCBWTag, dCBWDataTransferLength, bmCBWFlags, bCBWLUN, bCBWCBLength, CBWCB
+                - Tests: unit (CBW format correct)
+                - Docs: `usb_storage.4`
+                - Acceptance: CBW accepted by device
+            - [ ] Implement Command Status Wrapper (CSW) parsing.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Fields: dCSWSignature, dCSWTag, dCSWDataResidue, bCSWStatus
+                - Status: PASSED, FAILED, PHASE_ERROR
+                - Tests: unit (CSW parsing, error handling)
+                - Docs: `usb_storage.4`
+                - Acceptance: CSW correctly interpreted
+            - [ ] Implement bulk data transfer (IN/OUT).
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Logic: Submit bulk URBs for data phase
+                - Tests: integration (read/write data)
+                - Docs: `usb_storage.4`
+                - Acceptance: Data transferred correctly
+            - [ ] Implement BOT reset recovery.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - Logic: Bulk-Only Mass Storage Reset, Clear Feature HALT
+                - Tests: integration (recovery from stall)
+                - Docs: `usb_storage.4`
+                - Acceptance: Device recovers after error
+            - [ ] Integrate with SCSI mid-layer.
+                - Files: `sys/drivers/usb/usb_storage.c`
+                - API: Implement scsi_link_t execute callback
+                - Logic: Wrap SCSI CDBs in CBW, parse CSW status
+                - Tests: integration (SCSI INQUIRY via USB)
+                - Docs: `usb_storage.4`
+                - Acceptance: USB storage appears as SCSI device
+        - [ ] **CDC-ACM (Communications Device Class - Abstract Control Model):**
+            - [ ] Implement CDC functional descriptor parsing.
+                - Files: `sys/drivers/usb/cdc_acm.c` (new)
+                - Descriptors: Header, Call Management, ACM, Union
+                - Tests: unit (descriptor parsing)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Functional descriptors understood
+            - [ ] Implement SET_LINE_CODING.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Fields: dwDTERate, bCharFormat, bParityType, bDataBits
+                - Tests: unit (baud rate setting)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Line coding sent
+            - [ ] Implement GET_LINE_CODING.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Tests: unit (retrieve current settings)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Settings retrieved
+            - [ ] Implement SET_CONTROL_LINE_STATE.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Signals: DTR, RTS
+                - Tests: unit (control signals set)
+                - Docs: `cdc_acm.4`
+                - Acceptance: DTR/RTS toggled
+            - [ ] Implement serial notification handling.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Notifications: SERIAL_STATE (DCD, DSR, RI, break, framing error)
+                - Tests: integration (notifications received)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Modem signals reported
+            - [ ] Integrate with TTY subsystem.
+                - Files: `sys/drivers/usb/cdc_acm.c`
+                - Logic: Register as /dev/ttyUSBN, implement tty_ldisc operations
+                - Tests: integration (cat /dev/ttyUSB0 works)
+                - Docs: `cdc_acm.4`
+                - Acceptance: Serial device usable
+- [ ] **Audio Subsystem:**
+    - [ ] **Native API (Sun/NetBSD AudioIO):**
+        - [ ] **Device Nodes:**
+            - [ ] Create `/dev/audio` character device.
+                - Files: `sys/drivers/audio/audio.c` (new), `sys/drivers/audio/audio.h` (new)
+                - Mode: Read/write, supports playback and recording
+                - Tests: integration (open /dev/audio for playback)
+                - Docs: `audio.4`
+                - Acceptance: Device node accessible
+            - [ ] Create `/dev/audioctl` control-only device.
+                - Files: `sys/drivers/audio/audio.c`
+                - Mode: ioctl only, no read/write data
+                - Tests: unit (ioctl works, read/write fails)
+                - Docs: `audio.4`
+                - Acceptance: Control-only access
+            - [ ] Create `/dev/mixer` mixer device.
+                - Files: `sys/drivers/audio/mixer.c` (new)
+                - Mode: ioctl for volume/source control
+                - Tests: integration (mixer ioctls work)
+                - Docs: `mixer.4`
+                - Acceptance: Mixer accessible
+        - [ ] **`audio_info_t` Structure:**
+            - [ ] Define `audio_info_t` encapsulating audio parameters.
+                - Files: `sys/drivers/audio/audio.h`
+                - Fields: `play` (audio_prinfo_t), `record` (audio_prinfo_t), `monitor_gain`, `blocksize`
+                - Subfields: sample_rate, channels, precision, encoding, gain, port, buffer_size
+                - Tests: unit (struct layout, initialization)
+                - Docs: `audio_info.9`
+                - Acceptance: Structure defined per NetBSD/Sun spec
+            - [ ] Define `AUDIO_ENCODING_*` constants.
+                - Files: `sys/drivers/audio/audio.h`
+                - Values: ULAW, ALAW, PCM8, PCM16, PCM24, PCM32
+                - Tests: unit (encoding constants defined)
+                - Docs: `audio_encoding.9`
+                - Acceptance: Encoding types enumerated
+        - [ ] **Audio Ioctls:**
+            - [ ] Implement `AUDIO_GETINFO` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Return current audio_info_t settings
+                - Tests: unit (getinfo returns valid data)
+                - Docs: `audio.4`
+                - Acceptance: Current settings retrieved
+            - [ ] Implement `AUDIO_SETINFO` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Set audio parameters (sample rate, channels, encoding)
+                - Logic: Validate parameters, reconfigure hardware
+                - Tests: unit (setinfo success, invalid params rejected)
+                - Docs: `audio.4`
+                - Acceptance: Parameters applied to hardware
+            - [ ] Implement `AUDIO_DRAIN` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Block until playback buffer empty
+                - Tests: integration (drain waits for playback)
+                - Docs: `audio.4`
+                - Acceptance: Returns after buffers drained
+            - [ ] Implement `AUDIO_FLUSH` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Discard buffered data, reset pointers
+                - Tests: unit (flush clears buffers)
+                - Docs: `audio.4`
+                - Acceptance: Buffers emptied immediately
+            - [ ] Implement `AUDIO_GETDEV` ioctl.
+                - Files: `sys/drivers/audio/audio.c`
+                - API: Return audio device name/version
+                - Tests: unit (device info returned)
+                - Docs: `audio.4`
+                - Acceptance: Correct device info
+    - [ ] **Driver Implementation:**
+        - [ ] **Circular DMA Buffers:**
+            - [ ] Implement ring buffer management.
+                - Files: `sys/drivers/audio/audio_ring.c` (new)
+                - Structure: Read/write pointers, buffer size, highwater/lowwater marks
+                - Tests: unit (wrap-around, overflow detection, underrun detection)
+                - Docs: `audio_ring.9`
+                - Acceptance: Ring buffer operational
+            - [ ] Implement DMA descriptor chain setup.
+                - Files: `sys/drivers/audio/audio_dma.c` (new)
+                - Logic: Scatter-gather DMA for continuous playback
+                - Tests: integration (continuous audio without gaps)
+                - Docs: `audio_dma.9`
+                - Acceptance: Gapless playback
+            - [ ] Implement buffer interrupt handling.
+                - Files: `sys/drivers/audio/audio_dma.c`
+                - Logic: Refill/drain buffers on DMA completion interrupt
+                - Tests: integration (interrupts keep stream running)
+                - Docs: `audio_dma.9`
+                - Acceptance: Stable interrupt-driven I/O
+        - [ ] **Mixer:**
+            - [ ] Implement `MIXER_READ` ioctl.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Channels: VOLUME, BASS, TREBLE, SYNTH, PCM, SPEAKER, LINE, MIC, CD
+                - Tests: unit (read each channel)
+                - Docs: `mixer.4`
+                - Acceptance: Channel levels retrieved
+            - [ ] Implement `MIXER_WRITE` ioctl.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Logic: Set left/right channel levels (0-100 scale)
+                - Tests: unit (write each channel)
+                - Docs: `mixer.4`
+                - Acceptance: Channel levels set
+            - [ ] Implement mute control.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Logic: Toggle mute per channel
+                - Tests: unit (mute on/off)
+                - Docs: `mixer.4`
+                - Acceptance: Mute works
+            - [ ] Implement source selection.
+                - Files: `sys/drivers/audio/mixer.c`
+                - Sources: Mic, Line In, CD, Aux
+                - Tests: unit (source switch)
+                - Docs: `mixer.4`
+                - Acceptance: Recording source selectable
+        - [ ] **AC97 Codec:**
+            - [ ] Implement AC97 register read/write.
+                - Files: `sys/drivers/audio/ac97.c` (new), `sys/drivers/audio/ac97.h` (new)
+                - Registers: Master Volume, PCM Out Volume, Record Select, Reset, etc.
+                - Tests: unit (register access)
+                - Docs: `ac97.4`
+                - Acceptance: Codec registers accessible
+            - [ ] Implement AC97 codec detection.
+                - Files: `sys/drivers/audio/ac97.c`
+                - Logic: Read Vendor ID registers, detect codec type
+                - Tests: integration (codec detected in QEMU)
+                - Docs: `ac97.4`
+                - Acceptance: Codec identified
+            - [ ] Implement AC97 mixer integration.
+                - Files: `sys/drivers/audio/ac97.c`
+                - Logic: Map mixer ioctls to AC97 registers
+                - Tests: integration (mixer controls AC97 volumes)
+                - Docs: `ac97.4`
+                - Acceptance: Mixer controls codec
+            - [ ] Implement AC97 link controller interface.
+                - Files: `sys/drivers/audio/ac97.c`
+                - Logic: Timing for codec register access via link
+                - Tests: unit (link timing correct)
+                - Docs: `ac97.4`
+                - Acceptance: Stable codec communication
+        - [ ] **Intel High Definition Audio (HDA):**
+            - [ ] Implement HDA controller register access.
+                - Files: `sys/drivers/audio/hda.c` (new), `sys/drivers/audio/hda.h` (new)
+                - Registers: GCAP, VMIN, VMAJ, GCTL, WAKEEN, STATESTS, CORB*, RIRB*, Stream Descriptors
+                - Tests: integration (controller detected)
+                - Docs: `hda.4`
+                - Acceptance: HDA controller accessible
+            - [ ] Implement CORB (Command Output Ring Buffer) setup.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Allocate CORB memory, set CORBLBASE/CORBUBASE, enable
+                - Tests: unit (CORB operational)
+                - Docs: `hda.4`
+                - Acceptance: Commands can be sent
+            - [ ] Implement RIRB (Response Input Ring Buffer) setup.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Allocate RIRB memory, set RIRBLBASE/RIRBUBASE, enable
+                - Tests: unit (RIRB receives responses)
+                - Docs: `hda.4`
+                - Acceptance: Responses received
+            - [ ] Implement codec enumeration.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Read STATESTS, probe codec addresses 0-14
+                - Tests: integration (codec detected)
+                - Docs: `hda.4`
+                - Acceptance: Codec found
+            - [ ] Implement widget parsing.
+                - Files: `sys/drivers/audio/hda_codec.c` (new)
+                - Logic: Get Parameter verb to read widget types, connections
+                - Widgets: Audio Output, Audio Input, Audio Mixer, Audio Selector, Pin Complex
+                - Tests: unit (widget graph parsed)
+                - Docs: `hda.4`
+                - Acceptance: Audio path discovered
+            - [ ] Implement Stream Descriptor setup.
+                - Files: `sys/drivers/audio/hda.c`
+                - Registers: SDnCTL, SDnSTS, SDnLPIB, SDnCBL, SDnLVI, SDnFMT, SDnBDPL/U
+                - Logic: Configure stream format, buffer descriptor list
+                - Tests: integration (stream configured)
+                - Docs: `hda.4`
+                - Acceptance: Stream ready for data
+            - [ ] Implement Buffer Descriptor List (BDL) management.
+                - Files: `sys/drivers/audio/hda.c`
+                - Structure: Array of (address, length, IOC) entries
+                - Logic: Scatter-gather DMA for audio data
+                - Tests: unit (BDL wrap, IOC interrupts)
+                - Docs: `hda.4`
+                - Acceptance: Audio data transferred
+            - [ ] Implement stream interrupt handling.
+                - Files: `sys/drivers/audio/hda.c`
+                - Logic: Buffer completion, underrun/overrun detection
+                - Tests: integration (continuous playback via interrupts)
+                - Docs: `hda.4`
+                - Acceptance: Stable audio playback
+    
+- [ ] **Power Management (ACPI):**
+    - [ ] **ACPICA:** Port Intel ACPICA or write custom AML parser.
+    - [ ] **States:**
+        - [ ] System Shutdown (`S5`)
+        - [ ] Reboot
+
+
+## User Stories
+
+- **US-14-0001**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to uSB Subsystem: so that this capability is implemented with clear verification evidence.
+- **US-14-0002**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to host Controllers: so that this capability is implemented with clear verification evidence.
+- **US-14-0003**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to uHCI (Universal Host Controller Interface): so that this capability is implemented with clear verification evidence.
+- **US-14-0004**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement UHCI register access so that this capability is implemented with clear verification evidence.
+- **US-14-0005**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Frame List allocation and setup so that this capability is implemented with clear verification evidence.
+- **US-14-0006**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Queue Head (QH) management so that this capability is implemented with clear verification evidence.
+- **US-14-0007**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Transfer Descriptor (TD) management so that this capability is implemented with clear verification evidence.
+- **US-14-0008**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement interrupt handling so that this capability is implemented with clear verification evidence.
+- **US-14-0009**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to oHCI (Open Host Controller Interface): so that this capability is implemented with clear verification evidence.
+- **US-14-0010**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement OHCI register access so that this capability is implemented with clear verification evidence.
+- **US-14-0011**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement HCCA (Host Controller Communications Area) so that this capability is implemented with clear verification evidence.
+- **US-14-0012**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Endpoint Descriptor (ED) management so that this capability is implemented with clear verification evidence.
+- **US-14-0013**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Transfer Descriptor (TD) management so that this capability is implemented with clear verification evidence.
+- **US-14-0014**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement interrupt and done queue handling so that this capability is implemented with clear verification evidence.
+- **US-14-0015**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to eHCI (Enhanced Host Controller Interface): so that this capability is implemented with clear verification evidence.
+- **US-14-0016**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement EHCI capability and operational register access so that this capability is implemented with clear verification evidence.
+- **US-14-0017**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Asynchronous Schedule (Control/Bulk) so that this capability is implemented with clear verification evidence.
+- **US-14-0018**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Queue Head (QH) management so that this capability is implemented with clear verification evidence.
+- **US-14-0019**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Queue Transfer Descriptor (qTD) management so that this capability is implemented with clear verification evidence.
+- **US-14-0020**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Periodic Schedule (Interrupt/Isochronous) so that this capability is implemented with clear verification evidence.
+- **US-14-0021**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement interrupt handling so that this capability is implemented with clear verification evidence.
+- **US-14-0022**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to xHCI (eXtensible Host Controller Interface): so that this capability is implemented with clear verification evidence.
+- **US-14-0023**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement xHCI capability structure parsing so that this capability is implemented with clear verification evidence.
+- **US-14-0024**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Command Ring setup and processing so that this capability is implemented with clear verification evidence.
+- **US-14-0025**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Event Ring setup and handling so that this capability is implemented with clear verification evidence.
+- **US-14-0026**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Transfer Ring management so that this capability is implemented with clear verification evidence.
+- **US-14-0027**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Doorbell mechanism so that this capability is implemented with clear verification evidence.
+- **US-14-0028**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Device Context management so that this capability is implemented with clear verification evidence.
+- **US-14-0029**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Scratchpad Buffer allocation so that this capability is implemented with clear verification evidence.
+- **US-14-0030**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to core Stack: so that this capability is implemented with clear verification evidence.
+- **US-14-0031**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to uSB Device Abstraction: so that this capability is implemented with clear verification evidence.
+- **US-14-0032**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to define struct usb_device so that this capability is implemented with clear verification evidence.
+- **US-14-0033**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to define struct usb_endpoint so that this capability is implemented with clear verification evidence.
+- **US-14-0034**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to define struct usb_interface so that this capability is implemented with clear verification evidence.
+- **US-14-0035**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to device Enumeration: so that this capability is implemented with clear verification evidence.
+- **US-14-0036**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement USB device state machine so that this capability is implemented with clear verification evidence.
+- **US-14-0037**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement SET_ADDRESS control transfer so that this capability is implemented with clear verification evidence.
+- **US-14-0038**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement GET_DESCRIPTOR (Device) so that this capability is implemented with clear verification evidence.
+- **US-14-0039**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement GET_DESCRIPTOR (Configuration) so that this capability is implemented with clear verification evidence.
+- **US-14-0040**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement GET_DESCRIPTOR (String) so that this capability is implemented with clear verification evidence.
+- **US-14-0041**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement SET_CONFIGURATION so that this capability is implemented with clear verification evidence.
+- **US-14-0042**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to hub Driver: so that this capability is implemented with clear verification evidence.
+- **US-14-0043**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement hub descriptor parsing so that this capability is implemented with clear verification evidence.
+- **US-14-0044**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement port status change interrupt handling so that this capability is implemented with clear verification evidence.
+- **US-14-0045**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement GET_PORT_STATUS so that this capability is implemented with clear verification evidence.
+- **US-14-0046**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement SET_PORT_FEATURE (power, reset, enable) so that this capability is implemented with clear verification evidence.
+- **US-14-0047**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement CLEAR_PORT_FEATURE (change acknowledgment) so that this capability is implemented with clear verification evidence.
+- **US-14-0048**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement root hub emulation for HCDs so that this capability is implemented with clear verification evidence.
+- **US-14-0049**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to uRB (USB Request Block) Lifecycle: so that this capability is implemented with clear verification evidence.
+- **US-14-0050**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to define struct urb so that this capability is implemented with clear verification evidence.
+- **US-14-0051**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement usb_alloc_urb() so that this capability is implemented with clear verification evidence.
+- **US-14-0052**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement usb_submit_urb() so that this capability is implemented with clear verification evidence.
+- **US-14-0053**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement usb_unlink_urb() so that this capability is implemented with clear verification evidence.
+- **US-14-0054**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement URB completion callback mechanism so that this capability is implemented with clear verification evidence.
+- **US-14-0055**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to class Drivers: so that this capability is implemented with clear verification evidence.
+- **US-14-0056**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to hID (Human Interface Device): so that this capability is implemented with clear verification evidence.
+- **US-14-0057**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement HID report descriptor parsing so that this capability is implemented with clear verification evidence.
+- **US-14-0058**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement keyboard scancode translation so that this capability is implemented with clear verification evidence.
+- **US-14-0059**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement mouse relative motion reporting so that this capability is implemented with clear verification evidence.
+- **US-14-0060**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement HID interrupt IN polling so that this capability is implemented with clear verification evidence.
+- **US-14-0061**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to mass Storage (MSC): so that this capability is implemented with clear verification evidence.
+- **US-14-0062**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Bulk-Only Transport (BOT) state machine so that this capability is implemented with clear verification evidence.
+- **US-14-0063**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Command Block Wrapper (CBW) construction so that this capability is implemented with clear verification evidence.
+- **US-14-0064**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Command Status Wrapper (CSW) parsing so that this capability is implemented with clear verification evidence.
+- **US-14-0065**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement bulk data transfer (IN/OUT) so that this capability is implemented with clear verification evidence.
+- **US-14-0066**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement BOT reset recovery so that this capability is implemented with clear verification evidence.
+- **US-14-0067**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to integrate with SCSI mid-layer so that this capability is implemented with clear verification evidence.
+- **US-14-0068**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to cDC-ACM (Communications Device Class - Abstract Control Model): so that this capability is implemented with clear verification evidence.
+- **US-14-0069**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement CDC functional descriptor parsing so that this capability is implemented with clear verification evidence.
+- **US-14-0070**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement SET_LINE_CODING so that this capability is implemented with clear verification evidence.
+- **US-14-0071**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement GET_LINE_CODING so that this capability is implemented with clear verification evidence.
+- **US-14-0072**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement SET_CONTROL_LINE_STATE so that this capability is implemented with clear verification evidence.
+- **US-14-0073**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement serial notification handling so that this capability is implemented with clear verification evidence.
+- **US-14-0074**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to integrate with TTY subsystem so that this capability is implemented with clear verification evidence.
+- **US-14-0075**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to audio Subsystem: so that this capability is implemented with clear verification evidence.
+- **US-14-0076**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to native API (Sun/NetBSD AudioIO): so that this capability is implemented with clear verification evidence.
+- **US-14-0077**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to device Nodes: so that this capability is implemented with clear verification evidence.
+- **US-14-0078**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to create /dev/audio character device so that this capability is implemented with clear verification evidence.
+- **US-14-0079**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to create /dev/audioctl control-only device so that this capability is implemented with clear verification evidence.
+- **US-14-0080**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to create /dev/mixer mixer device so that this capability is implemented with clear verification evidence.
+- **US-14-0081**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to audio_info_t Structure: so that this capability is implemented with clear verification evidence.
+- **US-14-0082**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to define audio_info_t encapsulating audio parameters so that this capability is implemented with clear verification evidence.
+- **US-14-0083**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to define AUDIO_ENCODING_* constants so that this capability is implemented with clear verification evidence.
+- **US-14-0084**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to audio Ioctls: so that this capability is implemented with clear verification evidence.
+- **US-14-0085**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement AUDIO_GETINFO ioctl so that this capability is implemented with clear verification evidence.
+- **US-14-0086**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement AUDIO_SETINFO ioctl so that this capability is implemented with clear verification evidence.
+- **US-14-0087**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement AUDIO_DRAIN ioctl so that this capability is implemented with clear verification evidence.
+- **US-14-0088**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement AUDIO_FLUSH ioctl so that this capability is implemented with clear verification evidence.
+- **US-14-0089**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement AUDIO_GETDEV ioctl so that this capability is implemented with clear verification evidence.
+- **US-14-0090**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to driver Implementation: so that this capability is implemented with clear verification evidence.
+- **US-14-0091**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to circular DMA Buffers: so that this capability is implemented with clear verification evidence.
+- **US-14-0092**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement ring buffer management so that this capability is implemented with clear verification evidence.
+- **US-14-0093**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement DMA descriptor chain setup so that this capability is implemented with clear verification evidence.
+- **US-14-0094**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement buffer interrupt handling so that this capability is implemented with clear verification evidence.
+- **US-14-0095**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to mixer: so that this capability is implemented with clear verification evidence.
+- **US-14-0096**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement MIXER_READ ioctl so that this capability is implemented with clear verification evidence.
+- **US-14-0097**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement MIXER_WRITE ioctl so that this capability is implemented with clear verification evidence.
+- **US-14-0098**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement mute control so that this capability is implemented with clear verification evidence.
+- **US-14-0099**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement source selection so that this capability is implemented with clear verification evidence.
+- **US-14-0100**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to aC97 Codec: so that this capability is implemented with clear verification evidence.
+- **US-14-0101**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement AC97 register read/write so that this capability is implemented with clear verification evidence.
+- **US-14-0102**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement AC97 codec detection so that this capability is implemented with clear verification evidence.
+- **US-14-0103**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement AC97 mixer integration so that this capability is implemented with clear verification evidence.
+- **US-14-0104**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement AC97 link controller interface so that this capability is implemented with clear verification evidence.
+- **US-14-0105**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to intel High Definition Audio (HDA): so that this capability is implemented with clear verification evidence.
+- **US-14-0106**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement HDA controller register access so that this capability is implemented with clear verification evidence.
+- **US-14-0107**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement CORB (Command Output Ring Buffer) setup so that this capability is implemented with clear verification evidence.
+- **US-14-0108**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement RIRB (Response Input Ring Buffer) setup so that this capability is implemented with clear verification evidence.
+- **US-14-0109**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement codec enumeration so that this capability is implemented with clear verification evidence.
+- **US-14-0110**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement widget parsing so that this capability is implemented with clear verification evidence.
+- **US-14-0111**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Stream Descriptor setup so that this capability is implemented with clear verification evidence.
+- **US-14-0112**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement Buffer Descriptor List (BDL) management so that this capability is implemented with clear verification evidence.
+- **US-14-0113**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to implement stream interrupt handling so that this capability is implemented with clear verification evidence.
+- **US-14-0114**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to power Management (ACPI): so that this capability is implemented with clear verification evidence.
+- **US-14-0115**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to aCPICA: Port Intel ACPICA or write custom AML parser so that this capability is implemented with clear verification evidence.
+- **US-14-0116**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to states: so that this capability is implemented with clear verification evidence.
+- **US-14-0117**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to system Shutdown (S5) so that this capability is implemented with clear verification evidence.
+- **US-14-0118**: As a Substrate contributor working on 10. Hardware Support & Peripherals, I want to reboot so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-14-0001** (EARS/Ubiquitous): The Substrate system shall uSB Subsystem:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0002** (EARS/Ubiquitous): The Substrate system shall host Controllers:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0003** (EARS/Ubiquitous): The Substrate system shall uHCI (Universal Host Controller Interface):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0004** (EARS/Ubiquitous): The Substrate system shall implement UHCI register access.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0005** (EARS/Ubiquitous): The Substrate system shall implement Frame List allocation and setup.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0006** (EARS/Ubiquitous): The Substrate system shall implement Queue Head (QH) management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0007** (EARS/Ubiquitous): The Substrate system shall implement Transfer Descriptor (TD) management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0008** (EARS/Ubiquitous): The Substrate system shall implement interrupt handling.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0009** (EARS/Ubiquitous): The Substrate system shall oHCI (Open Host Controller Interface):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0010** (EARS/Ubiquitous): The Substrate system shall implement OHCI register access.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0011** (EARS/Ubiquitous): The Substrate system shall implement HCCA (Host Controller Communications Area).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0012** (EARS/Ubiquitous): The Substrate system shall implement Endpoint Descriptor (ED) management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0013** (EARS/Ubiquitous): The Substrate system shall implement Transfer Descriptor (TD) management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0014** (EARS/Ubiquitous): The Substrate system shall implement interrupt and done queue handling.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0015** (EARS/Ubiquitous): The Substrate system shall eHCI (Enhanced Host Controller Interface):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0016** (EARS/Ubiquitous): The Substrate system shall implement EHCI capability and operational register access.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0017** (EARS/Ubiquitous): The Substrate system shall implement Asynchronous Schedule (Control/Bulk).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0018** (EARS/Ubiquitous): The Substrate system shall implement Queue Head (QH) management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0019** (EARS/Ubiquitous): The Substrate system shall implement Queue Transfer Descriptor (qTD) management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0020** (EARS/Ubiquitous): The Substrate system shall implement Periodic Schedule (Interrupt/Isochronous).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0021** (EARS/Ubiquitous): The Substrate system shall implement interrupt handling.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0022** (EARS/Ubiquitous): The Substrate system shall xHCI (eXtensible Host Controller Interface):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0023** (EARS/Ubiquitous): The Substrate system shall implement xHCI capability structure parsing.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0024** (EARS/Ubiquitous): The Substrate system shall implement Command Ring setup and processing.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0025** (EARS/Ubiquitous): The Substrate system shall implement Event Ring setup and handling.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0026** (EARS/Ubiquitous): The Substrate system shall implement Transfer Ring management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0027** (EARS/Ubiquitous): The Substrate system shall implement Doorbell mechanism.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0028** (EARS/Ubiquitous): The Substrate system shall implement Device Context management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0029** (EARS/Ubiquitous): The Substrate system shall implement Scratchpad Buffer allocation.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0030** (EARS/Ubiquitous): The Substrate system shall core Stack:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0031** (EARS/Ubiquitous): The Substrate system shall uSB Device Abstraction:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0032** (EARS/Ubiquitous): The Substrate system shall define struct usb_device.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0033** (EARS/Ubiquitous): The Substrate system shall define struct usb_endpoint.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0034** (EARS/Ubiquitous): The Substrate system shall define struct usb_interface.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0035** (EARS/Ubiquitous): The Substrate system shall device Enumeration:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0036** (EARS/Ubiquitous): The Substrate system shall implement USB device state machine.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0037** (EARS/Ubiquitous): The Substrate system shall implement SET_ADDRESS control transfer.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0038** (EARS/Ubiquitous): The Substrate system shall implement GET_DESCRIPTOR (Device).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0039** (EARS/Ubiquitous): The Substrate system shall implement GET_DESCRIPTOR (Configuration).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0040** (EARS/Ubiquitous): The Substrate system shall implement GET_DESCRIPTOR (String).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0041** (EARS/Ubiquitous): The Substrate system shall implement SET_CONFIGURATION.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0042** (EARS/Ubiquitous): The Substrate system shall hub Driver:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0043** (EARS/Ubiquitous): The Substrate system shall implement hub descriptor parsing.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0044** (EARS/Ubiquitous): The Substrate system shall implement port status change interrupt handling.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0045** (EARS/Ubiquitous): The Substrate system shall implement GET_PORT_STATUS.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0046** (EARS/Ubiquitous): The Substrate system shall implement SET_PORT_FEATURE (power, reset, enable).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0047** (EARS/Ubiquitous): The Substrate system shall implement CLEAR_PORT_FEATURE (change acknowledgment).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0048** (EARS/Ubiquitous): The Substrate system shall implement root hub emulation for HCDs.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0049** (EARS/Ubiquitous): The Substrate system shall uRB (USB Request Block) Lifecycle:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0050** (EARS/Ubiquitous): The Substrate system shall define struct urb.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0051** (EARS/Ubiquitous): The Substrate system shall implement usb_alloc_urb().
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0052** (EARS/Ubiquitous): The Substrate system shall implement usb_submit_urb().
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0053** (EARS/Ubiquitous): The Substrate system shall implement usb_unlink_urb().
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0054** (EARS/Ubiquitous): The Substrate system shall implement URB completion callback mechanism.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0055** (EARS/Ubiquitous): The Substrate system shall class Drivers:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0056** (EARS/Ubiquitous): The Substrate system shall hID (Human Interface Device):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0057** (EARS/Ubiquitous): The Substrate system shall implement HID report descriptor parsing.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0058** (EARS/Ubiquitous): The Substrate system shall implement keyboard scancode translation.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0059** (EARS/Ubiquitous): The Substrate system shall implement mouse relative motion reporting.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0060** (EARS/Ubiquitous): The Substrate system shall implement HID interrupt IN polling.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0061** (EARS/Ubiquitous): The Substrate system shall mass Storage (MSC):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0062** (EARS/Ubiquitous): The Substrate system shall implement Bulk-Only Transport (BOT) state machine.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0063** (EARS/Ubiquitous): The Substrate system shall implement Command Block Wrapper (CBW) construction.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0064** (EARS/Ubiquitous): The Substrate system shall implement Command Status Wrapper (CSW) parsing.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0065** (EARS/Ubiquitous): The Substrate system shall implement bulk data transfer (IN/OUT).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0066** (EARS/Ubiquitous): The Substrate system shall implement BOT reset recovery.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0067** (EARS/Ubiquitous): The Substrate system shall integrate with SCSI mid-layer.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0068** (EARS/Ubiquitous): The Substrate system shall cDC-ACM (Communications Device Class - Abstract Control Model):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0069** (EARS/Ubiquitous): The Substrate system shall implement CDC functional descriptor parsing.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0070** (EARS/Ubiquitous): The Substrate system shall implement SET_LINE_CODING.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0071** (EARS/Ubiquitous): The Substrate system shall implement GET_LINE_CODING.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0072** (EARS/Ubiquitous): The Substrate system shall implement SET_CONTROL_LINE_STATE.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0073** (EARS/Ubiquitous): The Substrate system shall implement serial notification handling.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0074** (EARS/Ubiquitous): The Substrate system shall integrate with TTY subsystem.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0075** (EARS/Ubiquitous): The Substrate system shall audio Subsystem:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0076** (EARS/Ubiquitous): The Substrate system shall native API (Sun/NetBSD AudioIO):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0077** (EARS/Ubiquitous): The Substrate system shall device Nodes:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0078** (EARS/Ubiquitous): The Substrate system shall create /dev/audio character device.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0079** (EARS/Ubiquitous): The Substrate system shall create /dev/audioctl control-only device.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0080** (EARS/Ubiquitous): The Substrate system shall create /dev/mixer mixer device.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0081** (EARS/Ubiquitous): The Substrate system shall audio_info_t Structure:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0082** (EARS/Ubiquitous): The Substrate system shall define audio_info_t encapsulating audio parameters.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0083** (EARS/Ubiquitous): The Substrate system shall define AUDIO_ENCODING_* constants.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0084** (EARS/Ubiquitous): The Substrate system shall audio Ioctls:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0085** (EARS/Ubiquitous): The Substrate system shall implement AUDIO_GETINFO ioctl.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0086** (EARS/Ubiquitous): The Substrate system shall implement AUDIO_SETINFO ioctl.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0087** (EARS/Ubiquitous): The Substrate system shall implement AUDIO_DRAIN ioctl.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0088** (EARS/Ubiquitous): The Substrate system shall implement AUDIO_FLUSH ioctl.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0089** (EARS/Ubiquitous): The Substrate system shall implement AUDIO_GETDEV ioctl.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0090** (EARS/Ubiquitous): The Substrate system shall driver Implementation:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0091** (EARS/Ubiquitous): The Substrate system shall circular DMA Buffers:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0092** (EARS/Ubiquitous): The Substrate system shall implement ring buffer management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0093** (EARS/Ubiquitous): The Substrate system shall implement DMA descriptor chain setup.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0094** (EARS/Ubiquitous): The Substrate system shall implement buffer interrupt handling.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0095** (EARS/Ubiquitous): The Substrate system shall mixer:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0096** (EARS/Ubiquitous): The Substrate system shall implement MIXER_READ ioctl.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0097** (EARS/Ubiquitous): The Substrate system shall implement MIXER_WRITE ioctl.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0098** (EARS/Ubiquitous): The Substrate system shall implement mute control.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0099** (EARS/Ubiquitous): The Substrate system shall implement source selection.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0100** (EARS/Ubiquitous): The Substrate system shall aC97 Codec:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0101** (EARS/Ubiquitous): The Substrate system shall implement AC97 register read/write.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0102** (EARS/Ubiquitous): The Substrate system shall implement AC97 codec detection.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0103** (EARS/Ubiquitous): The Substrate system shall implement AC97 mixer integration.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0104** (EARS/Ubiquitous): The Substrate system shall implement AC97 link controller interface.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0105** (EARS/Ubiquitous): The Substrate system shall intel High Definition Audio (HDA):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0106** (EARS/Ubiquitous): The Substrate system shall implement HDA controller register access.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0107** (EARS/Ubiquitous): The Substrate system shall implement CORB (Command Output Ring Buffer) setup.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0108** (EARS/Ubiquitous): The Substrate system shall implement RIRB (Response Input Ring Buffer) setup.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0109** (EARS/Ubiquitous): The Substrate system shall implement codec enumeration.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0110** (EARS/Ubiquitous): The Substrate system shall implement widget parsing.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0111** (EARS/Ubiquitous): The Substrate system shall implement Stream Descriptor setup.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0112** (EARS/Ubiquitous): The Substrate system shall implement Buffer Descriptor List (BDL) management.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0113** (EARS/Ubiquitous): The Substrate system shall implement stream interrupt handling.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0114** (EARS/Ubiquitous): The Substrate system shall power Management (ACPI):.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0115** (EARS/Ubiquitous): The Substrate system shall aCPICA: Port Intel ACPICA or write custom AML parser.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0116** (EARS/Ubiquitous): The Substrate system shall states:.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0117** (EARS/Ubiquitous): The Substrate system shall system Shutdown (S5).
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-14-0118** (EARS/Ubiquitous): The Substrate system shall reboot.
+  - Context: 10. Hardware Support & Peripherals
+  - Verification: design review + implementation evidence + test/doc update.
