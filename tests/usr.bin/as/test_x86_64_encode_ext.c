@@ -91,6 +91,7 @@ int main(void) {
     memset(&insn, 0, sizeof(insn));
     insn.mnemonic = "mov";
     insn.op_count = 2;
+    insn.rex_w = 1;
     insn.ops[0] = reg_op(AS_X86_REG_R8);
     insn.ops[1] = mem_full(AS_X86_REG_R9, AS_X86_REG_R10, 8, 0x20);
     {
@@ -101,6 +102,7 @@ int main(void) {
     memset(&insn, 0, sizeof(insn));
     insn.mnemonic = "mov";
     insn.op_count = 2;
+    insn.rex_w = 1;
     insn.ops[0] = reg_op(AS_X86_REG_RAX);
     insn.ops[1] = mem_rip(0x1234);
     {
@@ -111,6 +113,7 @@ int main(void) {
     memset(&insn, 0, sizeof(insn));
     insn.mnemonic = "mov";
     insn.op_count = 2;
+    insn.rex_w = 1;
     insn.ops[0] = reg_op(AS_X86_REG_R9);
     insn.ops[1] = reg_op(AS_X86_REG_RAX);
     {
@@ -124,6 +127,28 @@ int main(void) {
     insn.ops[0] = mem_base(AS_X86_REG_R12);
     {
         const uint8_t exp[] = {0x49, 0x0f, 0xc7, 0x0c, 0x24};
+        check_encode64(&insn, exp, sizeof(exp));
+    }
+
+    memset(&insn, 0, sizeof(insn));
+    insn.mnemonic = "call";
+    insn.op_count = 1;
+    insn.ops[0] = reg_op(AS_X86_REG_R11);
+    {
+        const uint8_t exp[] = {0x41, 0xff, 0xd3};
+        check_encode64(&insn, exp, sizeof(exp));
+    }
+
+    insn.mnemonic = "jmp";
+    {
+        const uint8_t exp[] = {0x41, 0xff, 0xe3};
+        check_encode64(&insn, exp, sizeof(exp));
+    }
+
+    insn.mnemonic = "call";
+    insn.ops[0] = mem_base(AS_X86_REG_R12);
+    {
+        const uint8_t exp[] = {0x41, 0xff, 0x14, 0x24};
         check_encode64(&insn, exp, sizeof(exp));
     }
 
@@ -149,10 +174,11 @@ int main(void) {
     memset(&insn, 0, sizeof(insn));
     insn.mnemonic = "mov";
     insn.op_count = 2;
+    insn.rex_w = 1;
     insn.ops[0] = reg_op(AS_X86_REG_R15);
     insn.ops[1] = imm_op(0x11223344);
     {
-        const uint8_t exp[] = {0x49, 0xbf, 0x44, 0x33, 0x22, 0x11};
+        const uint8_t exp[] = {0x49, 0xc7, 0xc7, 0x44, 0x33, 0x22, 0x11};
         check_encode64(&insn, exp, sizeof(exp));
     }
 

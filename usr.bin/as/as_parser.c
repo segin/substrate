@@ -1256,6 +1256,8 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
     int has_lparen;
     int has_lbr;
     as_expr_t *e;
+    int star_separate;
+    int star_attached;
 
     if (n == 0) {
         return -1;
@@ -1264,6 +1266,49 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
     op->raw = join_tokens(tokv, n, 0);
     if (op->raw == NULL) {
         return -1;
+    }
+
+    /*
+     * AT&T indirect operands may be prefixed with '*', e.g. call *%r11 or
+     * jmp *foo(%rip). Parse the inner operand normally.
+     */
+    star_separate = (n > 1 &&
+                     (tokv[0].kind == AS_TOK_OPERATOR || tokv[0].kind == AS_TOK_PUNCT) &&
+                     strcmp(tokv[0].text, "*") == 0);
+    star_attached = (tokv[0].text != NULL && tokv[0].text[0] == '*' && tokv[0].text[1] != '\0');
+    if (star_separate || star_attached) {
+        as_operand_t inner;
+        as_token_t *tmp = NULL;
+        const as_token_t *inner_tokv;
+        size_t inner_n;
+
+        if (star_separate) {
+            inner_tokv = tokv + 1;
+            inner_n = n - 1;
+        } else {
+            tmp = (as_token_t *)malloc(n * sizeof(*tmp));
+            if (tmp == NULL) {
+                return -1;
+            }
+            memcpy(tmp, tokv, n * sizeof(*tmp));
+            tmp[0].text = tokv[0].text + 1;
+            inner_tokv = tmp;
+            inner_n = n;
+        }
+
+        memset(&inner, 0, sizeof(inner));
+        if (parse_operand_slice(ctx, inner_tokv, inner_n, &inner) != 0) {
+            free(tmp);
+            return -1;
+        }
+        free(tmp);
+        free(op->raw);
+        *op = inner;
+        op->raw = join_tokens(tokv, n, 0);
+        if (op->raw == NULL) {
+            return -1;
+        }
+        return 0;
     }
 
     if (parse_register_list(tokv, n, op) == 0) {
@@ -1578,6 +1623,12 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                     /* Shift suffix consumed by previous operand. */
                 } else {
                     if (parse_operand_slice(ctx, tokv + start, i - start, &op) != 0) {
+                        char *bad = join_tokens(tokv + start, i - start, 0);
+                        set_err(ctx, "%s:%u: invalid operand '%s'",
+                                tokv[start].file != NULL ? tokv[start].file : "<input>",
+                                tokv[start].line,
+                                bad != NULL ? bad : "<unknown>");
+                        free(bad);
                         free(in.mnemonic);
                         free(in.arm_condition);
                         free(in.segment_override);

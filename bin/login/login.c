@@ -27,6 +27,7 @@ int main() {
     }
 
     n = read(0, pass, 63);
+
     if(n>0) pass[n-1] = 0;
     
     if (term_ok) {
@@ -43,4 +44,3 @@ int main() {
     }
     return 0;
 }
-

@@ -1105,7 +1105,7 @@ static void expr_clear_array_meta(cc_expr_t *e) {
 static void expr_set_array_meta_decl(cc_expr_t *e, long array_len, int array_ndim,
                                      const long array_dims[CC_MAX_ARRAY_DIMS]) {
     int i;
-    if (e->kind != CC_EXPR_CAST) {
+    if (e->kind != CC_EXPR_CAST && !(e->kind == CC_EXPR_SIZEOF && e->lhs == NULL)) {
         expr_clear_array_meta(e);
     }
     if (e == NULL || array_ndim <= 0 || array_dims == NULL) {
@@ -1834,6 +1834,44 @@ static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t,
     return -1;
 }
 
+static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
+                                  const long array_dims[CC_MAX_ARRAY_DIMS]) {
+    cc_type_t elem_type;
+    int elem_struct_id;
+    long elem_size;
+    long count = 1;
+    int i;
+
+    if (array_ndim <= 0) {
+        return type_size_bytes_struct(tu, t, struct_id);
+    }
+    elem_type = t;
+    elem_struct_id = struct_id;
+    if (is_pointer_type(t)) {
+        for (i = 0; i < array_ndim; ++i) {
+            elem_type = ptr_base_type(elem_type);
+            if (elem_struct_id >= 0 && elem_type != CC_TYPE_VOID) {
+                elem_struct_id = -1;
+            }
+        }
+    }
+    elem_size = type_size_bytes_struct(tu, elem_type, elem_struct_id);
+    if (elem_size <= 0) {
+        return -1;
+    }
+    for (i = 0; i < array_ndim; ++i) {
+        long d = array_dims != NULL ? array_dims[i] : 0;
+        if (d <= 0 || count > LONG_MAX / d) {
+            return -1;
+        }
+        count *= d;
+    }
+    if (elem_size > LONG_MAX / count) {
+        return -1;
+    }
+    return elem_size * count;
+}
+
 static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out) {
     long a;
     long b;
@@ -1929,7 +1967,7 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
         if (e->lhs != NULL) {
             *out = type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
         } else {
-            *out = type_size_bytes_struct(tu, e->aux_type, e->aux_struct_id);
+            *out = array_type_size_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
         }
         return *out < 0 ? -1 : 0;
 
@@ -2040,7 +2078,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         set_diag(diag, "null expression in semantic analysis");
         return -1;
     }
-    if (e->kind != CC_EXPR_CAST) {
+    if (e->kind != CC_EXPR_CAST && !(e->kind == CC_EXPR_SIZEOF && e->lhs == NULL)) {
         expr_clear_array_meta(e);
     }
 
@@ -3545,7 +3583,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
         } else {
-            if (type_size_bytes_struct(tu, e->aux_type, e->aux_struct_id) < 0) {
+            if (array_type_size_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims) < 0) {
                 set_diag(diag, "sizeof unsupported for this type");
                 return -1;
             }
@@ -5184,7 +5222,7 @@ fail_global_item:
             }
             goto fail_decl;
         }
-        if (g_std_c17 && !g_std_c23 && f->has_body && !f->has_prototype) {
+        if (g_std_c17 && !g_std_c23 && f->has_body && f->has_oldstyle_param_decls) {
             char msg[256];
             snprintf(msg, sizeof(msg), "old-style function definition is obsolescent in C17: %s", f->name);
             if (emit_warning(diag, f->line, f->col, msg, 0) != 0) {
@@ -5238,6 +5276,10 @@ fail_global_item:
         }
         for (j = 0; j < i; ++j) {
             cc_function_t *prev = &tu->funcs[j];
+            int prev_static;
+            int cur_static;
+            int prev_extern;
+            int cur_extern;
             if (strcmp(prev->name, f->name) != 0) {
                 continue;
             }
@@ -5247,6 +5289,26 @@ fail_global_item:
                              f->name);
                 }
                 goto fail_decl;
+            }
+            prev_static = ((prev->storage & CC_STORAGE_STATIC) != 0);
+            cur_static = ((f->storage & CC_STORAGE_STATIC) != 0);
+            prev_extern = ((prev->storage & CC_STORAGE_EXTERN) != 0);
+            cur_extern = ((f->storage & CC_STORAGE_EXTERN) != 0);
+            if ((prev_static && cur_extern) || (cur_static && prev_extern)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "conflicting storage-class for function declaration: %s", f->name);
+                }
+                goto fail_decl;
+            }
+            /*
+             * C inline/linkage rule interaction:
+             * a prior extern declaration keeps a later plain inline definition
+             * externally visible in this TU.
+             */
+            if ((prev_extern || cur_extern) && !prev_static && !cur_static) {
+                prev->storage |= CC_STORAGE_EXTERN;
+                f->storage |= CC_STORAGE_EXTERN;
             }
             if (prev->has_body && f->has_body) {
                 int prev_inline = ((prev->storage & CC_STORAGE_INLINE) != 0);
