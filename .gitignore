@@ -209,3 +209,4 @@ sys/gdb_script.txt
 usr.bin/as/aarch64-as
 usr.bin/as/arm-as
 usr.man/mandoc.db
+tests/lib/c/test_stdlib
