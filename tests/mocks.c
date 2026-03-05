@@ -29,7 +29,8 @@ void full_init() {}
 void fuse_init() {}
 void fuse_fs_init() {}
 void p9_init() {}
-void devfs_init() {}
+void devfs_init(void) {}
+void namei_init(void) {}
 void vfs_init_mock_root(void);
 // nchinit and fs_root removed (linked from vfs)
 
