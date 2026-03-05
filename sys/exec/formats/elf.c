@@ -11,6 +11,7 @@
 #include <sys/random.h>
 #include <sys/signal.h> // For copyin/copyout
 #include <sys/kern_syscalls.h>
+#include <sys/file.h>
 
 /*
  * exec_reset_signals - Reset signal handlers on exec
@@ -348,7 +349,7 @@ static int capture_ptr(char *const array[], int index, char **out) {
 
 // Execute a binary - loads ELF and prepares for userspace transition
 // Returns 0 on success, negative error code on failure
-int elf_execve(const char *path, char *const argv[], char *const envp[]) {
+int elf_execve(const char *path, int fd, char *const argv[], char *const envp[]) {
     fs_node_t *root = (current_process && current_process->root_node) ? current_process->root_node : fs_root;
     if (!root) return -1;
 
@@ -361,8 +362,14 @@ int elf_execve(const char *path, char *const argv[], char *const envp[]) {
     int envc = 0;
     int error_code = -1;
 
-    // Lookup the file
-    fs_node_t *file = vfs_lookup(root, path);
+    // Lookup the file using fd or fallback to path
+    fs_node_t *file = NULL;
+    if (fd >= 0 && fd < MAX_FD && current_process && current_process->fds[fd]) {
+        file = (fs_node_t*)current_process->fds[fd]->f_data;
+    } else {
+        file = vfs_lookup(root, path);
+    }
+
     if (!file) {
         kprint("execve: File not found: ");
         kprint(path);
