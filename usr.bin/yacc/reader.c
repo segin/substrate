@@ -37,8 +37,6 @@ static bucket *make_dummy(void);
 
 /* ... */
 
-/* Track current rule's RHS length for $N translation */
-
 static bucket *make_dummy(void) {
     char name[32];
     snprintf(name, sizeof(name), "$@%d", ++gen_sym_count);
@@ -601,7 +599,6 @@ static void parse_rules(void) {
                     if (nrules >= MAXPROD) no_space();
                     plhs[nrules] = lhs->index;
                     rrhs[nrules] = nitems;
-                    /* Note: defs.h has plhs, rlhs. Usually plhs is sufficient. rlhs might be per-item? */
                     /* Let's stick to: plhs[rule] = lhs_symbol_index. ritem[item_index] = symbol_index. */
                     /* We need to track where a rule starts in ritem. 'rrhs[rule]' can point to start in ritem. */
                     n_deferred = 0; /* New rule */

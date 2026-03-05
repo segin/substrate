@@ -448,7 +448,9 @@ static int skip_balanced_parens(parser_t *p);
 static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, char **out_str);
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
-static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, int allow_void, const char *what);
+static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
+                           int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
+                           const char *what);
 static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type, int *out_struct_id);
 static cc_expr_t *parse_expr(parser_t *p);
 static cc_expr_t *parse_cond(parser_t *p);
@@ -457,6 +459,7 @@ static void free_expr(cc_expr_t *e);
 static void free_stmt(cc_stmt_t *s);
 static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *out);
 static int parse_array_extent(parser_t *p, long *out_n, int *out_const_n);
+static int parse_params(parser_t *p, cc_function_t *f);
 static int parse_function(parser_t *p, cc_function_t *f);
 static int function_param_index_by_name(const cc_function_t *f, const char *name);
 static cc_type_t adjust_oldstyle_param_type(cc_type_t ty, int array_ndim);
@@ -762,6 +765,22 @@ static void var_pop_to_depth(parser_t *p, int depth) {
     while (p->var_count > 0 && p->vars[p->var_count - 1].depth > depth) {
         free(p->vars[p->var_count - 1].name);
         p->var_count--;
+    }
+}
+
+static void struct_hide_to_depth(parser_t *p, int depth) {
+    size_t i;
+    if (p == NULL) {
+        return;
+    }
+    for (i = 0; i < p->struct_count; ++i) {
+        if (p->structs[i].depth > depth) {
+            /*
+             * Preserve parsed type records for semantic/lowering consumers,
+             * but hide out-of-scope tags from future parser lookups.
+             */
+            p->structs[i].depth = INT_MAX;
+        }
     }
 }
 
@@ -1779,7 +1798,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     return -1;
                 }
                 if (is_declspec_start(p)) {
-                    if (parse_type_name(p, &aty, &asid, 1, "expected type name in _Alignas/alignas") != 0) {
+                    if (parse_type_name(p, &aty, &asid, NULL, NULL, NULL, 1,
+                                        "expected type name in _Alignas/alignas") != 0) {
                         return -1;
                     }
                     align = parser_type_align_bytes(p, aty, asid);
@@ -1827,7 +1847,8 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     if (expect(p, TOK_LPAREN, "expected '(' after _Atomic") != 0) {
                         return -1;
                     }
-                    if (parse_type_name(p, &aty, &asid, 1, "expected type name in _Atomic(...)") != 0) {
+                    if (parse_type_name(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in _Atomic(...)") !=
+                        0) {
                         return -1;
                     }
                     if (expect(p, TOK_RPAREN, "expected ')' after _Atomic(...)") != 0) {
@@ -1931,7 +1952,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                     return -1;
                 }
                 if (is_declspec_start(p)) {
-                    if (parse_type_name(p, &ty, &sid, 1, "expected type name in typeof") != 0) {
+                    if (parse_type_name(p, &ty, &sid, NULL, NULL, NULL, 1, "expected type name in typeof") != 0) {
                         return -1;
                     }
                 } else {
@@ -2646,7 +2667,7 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 if (next_tok(p) != 0) {
                     return -1;
                 }
-                if (parse_type_name(p, &uty, &usid, 1, "expected enum underlying type") != 0) {
+                if (parse_type_name(p, &uty, &usid, NULL, NULL, NULL, 1, "expected enum underlying type") != 0) {
                     return -1;
                 }
                 if (usid >= 0) {
@@ -2770,10 +2791,6 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     }
 
     if (!seen) {
-        set_diag(p->diag, p->tok.line, p->tok.col, what);
-        return -1;
-    }
-    if (!seen_type) {
         char near_tok[40];
         size_t n = 0;
         near_tok[0] = '\0';
@@ -2782,14 +2799,42 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             memcpy(near_tok, p->tok.start, n);
             near_tok[n] = '\0';
         }
-        if (near_tok[0] != '\0') {
-            char msg[128];
-            snprintf(msg, sizeof(msg), "expected type specifier in declaration near '%s'", near_tok);
+        if (what != NULL && near_tok[0] != '\0') {
+            char msg[160];
+            snprintf(msg, sizeof(msg), "%s near '%s'", what, near_tok);
             set_diag(p->diag, p->tok.line, p->tok.col, msg);
         } else {
-            set_diag(p->diag, p->tok.line, p->tok.col, "expected type specifier in declaration");
+            set_diag(p->diag, p->tok.line, p->tok.col, what);
         }
         return -1;
+    }
+    if (!seen_type) {
+        if (g_parser_allow_oldstyle_funcdecl && seen) {
+            /*
+             * GNU toolchains accept implicit int in declaration-specifier
+             * lists such as `extern foo();`. Keep this enabled in legacy/GNU
+             * modes so autoconf probes compile.
+             */
+            seen_int = 1;
+            seen_type = 1;
+        } else {
+            char near_tok[40];
+            size_t n = 0;
+            near_tok[0] = '\0';
+            if (p->tok.start != NULL && p->tok.len > 0) {
+                n = p->tok.len < sizeof(near_tok) - 1 ? p->tok.len : sizeof(near_tok) - 1;
+                memcpy(near_tok, p->tok.start, n);
+                near_tok[n] = '\0';
+            }
+            if (near_tok[0] != '\0') {
+                char msg[128];
+                snprintf(msg, sizeof(msg), "expected type specifier in declaration near '%s'", near_tok);
+                set_diag(p->diag, p->tok.line, p->tok.col, msg);
+            } else {
+                set_diag(p->diag, p->tok.line, p->tok.col, "expected type specifier in declaration");
+            }
+            return -1;
+        }
     }
 
     if (seen_alias) {
@@ -4069,10 +4114,6 @@ static int parse_asm_label_list(parser_t *p, char ***items, size_t *count) {
 }
 
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s) {
-    if (!parser_is_gnu_mode()) {
-        set_diag(p->diag, p->tok.line, p->tok.col, "inline asm requires GNU mode");
-        return -1;
-    }
     s->kind = CC_STMT_ASM;
     if (next_tok(p) != 0) {
         return -1;
@@ -4633,10 +4674,17 @@ static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs) {
     return 0;
 }
 
-static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, int allow_void, const char *what) {
+static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
+                           int *out_array_ndim, long out_array_dims[CC_MAX_ARRAY_DIMS], int allow_void,
+                           const char *what) {
     cc_type_t ty;
     int sid = -1;
-    if (parse_declspec(p, &ty, &sid, NULL, NULL, NULL, allow_void, what, NULL, NULL, NULL) != 0) {
+    long decl_array_len = -1;
+    int decl_array_ndim = 0;
+    long decl_array_dims[CC_MAX_ARRAY_DIMS];
+    memset(decl_array_dims, 0, sizeof(decl_array_dims));
+    if (parse_declspec(p, &ty, &sid, &decl_array_len, &decl_array_ndim, decl_array_dims, allow_void, what, NULL, NULL,
+                       NULL) != 0) {
         return -1;
     }
     while (is_ptr_declarator_tok(p->tok.kind)) {
@@ -4652,6 +4700,20 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
             if (next_tok(p) != 0) {
                 return -1;
             }
+        }
+    }
+    if (p->tok.kind == TOK_LBRACK) {
+        long suffix_array_len = -1;
+        int suffix_array_ndim = 0;
+        long suffix_array_dims[CC_MAX_ARRAY_DIMS];
+        memset(suffix_array_dims, 0, sizeof(suffix_array_dims));
+        if (parse_array_suffix(p, &ty, &suffix_array_len, &suffix_array_ndim, suffix_array_dims) != 0) {
+            return -1;
+        }
+        if (prepend_array_info(&decl_array_len, &decl_array_ndim, decl_array_dims, suffix_array_len, suffix_array_ndim,
+                               suffix_array_dims) != 0) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
+            return -1;
         }
     }
     while (p->tok.kind == TOK_LPAREN) {
@@ -4701,25 +4763,17 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                 return -1;
             }
         }
-        while (p->tok.kind == TOK_LBRACK) {
-            ty = ptr_of_type(ty);
-            if (ty == CC_TYPE_VOID) {
-                set_ptr_depth_diag(p, __LINE__);
+        if (p->tok.kind == TOK_LBRACK) {
+            long suffix_array_len = -1;
+            int suffix_array_ndim = 0;
+            long suffix_array_dims[CC_MAX_ARRAY_DIMS];
+            memset(suffix_array_dims, 0, sizeof(suffix_array_dims));
+            if (parse_array_suffix(p, &ty, &suffix_array_len, &suffix_array_ndim, suffix_array_dims) != 0) {
                 return -1;
             }
-            if (next_tok(p) != 0) {
-                return -1;
-            }
-            while (p->tok.kind != TOK_RBRACK) {
-                if (p->tok.kind == TOK_EOF) {
-                    set_diag(p->diag, p->tok.line, p->tok.col, "unterminated abstract array declarator");
-                    return -1;
-                }
-                if (next_tok(p) != 0) {
-                    return -1;
-                }
-            }
-            if (expect(p, TOK_RBRACK, "expected ']' in abstract array declarator") != 0) {
+            if (prepend_array_info(&decl_array_len, &decl_array_ndim, decl_array_dims, suffix_array_len,
+                                   suffix_array_ndim, suffix_array_dims) != 0) {
+                set_diag(p->diag, p->tok.line, p->tok.col, "array rank > 4 is not yet supported");
                 return -1;
             }
         }
@@ -4735,6 +4789,15 @@ static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id,
     *out_type = ty;
     if (out_struct_id != NULL) {
         *out_struct_id = sid;
+    }
+    if (out_array_len != NULL) {
+        *out_array_len = decl_array_len;
+    }
+    if (out_array_ndim != NULL) {
+        *out_array_ndim = decl_array_ndim;
+    }
+    if (out_array_dims != NULL) {
+        memcpy(out_array_dims, decl_array_dims, sizeof(decl_array_dims));
     }
     return 0;
 }
@@ -5564,7 +5627,7 @@ static int parse_static_assert_decl(parser_t *p, int require_semi) {
     if (!is_static_assert_tok(p)) {
         return -1;
     }
-    if (!parser_is_c11_or_newer()) {
+    if (!parser_is_c11_or_newer() && !parser_relax_static_asserts()) {
         set_diag(p->diag, p->tok.line, p->tok.col, "_Static_assert requires C11 or newer");
         return -1;
     }
@@ -5683,7 +5746,8 @@ static cc_expr_t *parse_generic_expr(parser_t *p) {
                 free(items);
                 return NULL;
             }
-        } else if (parse_type_name(p, &assoc.type, &assoc.struct_id, 1, "expected type name in _Generic") != 0) {
+        } else if (parse_type_name(p, &assoc.type, &assoc.struct_id, NULL, NULL, NULL, 1,
+                                   "expected type name in _Generic") != 0) {
             free_expr(control);
             free(items);
             return NULL;
@@ -6030,7 +6094,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 cc_type_t designator_base_type = CC_TYPE_VOID;
                 int designator_base_sid = -1;
 
-                if (parse_type_name(p, &sty, &ssid, 1, "expected type name in __builtin_offsetof") != 0) {
+                if (parse_type_name(p, &sty, &ssid, NULL, NULL, NULL, 1,
+                                    "expected type name in __builtin_offsetof") != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -6239,7 +6304,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 int s1 = -1;
                 int s2 = -1;
                 int same = 0;
-                if (parse_type_name(p, &t1, &s1, 1, "expected first type in __builtin_types_compatible_p") != 0) {
+                if (parse_type_name(p, &t1, &s1, NULL, NULL, NULL, 1,
+                                    "expected first type in __builtin_types_compatible_p") != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -6247,7 +6313,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                if (parse_type_name(p, &t2, &s2, 1, "expected second type in __builtin_types_compatible_p") != 0) {
+                if (parse_type_name(p, &t2, &s2, NULL, NULL, NULL, 1,
+                                    "expected second type in __builtin_types_compatible_p") != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -6381,7 +6448,8 @@ static cc_expr_t *parse_primary(parser_t *p) {
                     free_expr(e);
                     return NULL;
                 }
-                if (parse_type_name(p, &aty, &asid, 1, "expected type name in __builtin_va_arg") != 0) {
+                if (parse_type_name(p, &aty, &asid, NULL, NULL, NULL, 1,
+                                    "expected type name in __builtin_va_arg") != 0) {
                     free_expr(e);
                     return NULL;
                 }
@@ -7066,10 +7134,17 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 free_expr(e);
                 return NULL;
             }
-            if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, 1, "expected type name in sizeof") != 0) {
+            long sizeof_array_len = -1;
+            int sizeof_array_ndim = 0;
+            long sizeof_array_dims[CC_MAX_ARRAY_DIMS];
+            memset(sizeof_array_dims, 0, sizeof(sizeof_array_dims));
+            if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, &sizeof_array_len, &sizeof_array_ndim,
+                                sizeof_array_dims, 1, "expected type name in sizeof") != 0) {
                 free_expr(e);
                 return NULL;
             }
+            e->array_ndim = sizeof_array_ndim;
+            memcpy(e->array_dims, sizeof_array_dims, sizeof(e->array_dims));
             if (expect(p, TOK_RPAREN, "expected ')' after sizeof type") != 0) {
                 free_expr(e);
                 return NULL;
@@ -7105,7 +7180,8 @@ static cc_expr_t *parse_unary(parser_t *p) {
             return NULL;
         }
         if (is_type_name_start_after_lparen(p)) {
-            if (parse_type_name(p, &aty, &asid, 1, "expected type name in _Alignof/alignof") != 0) {
+            if (parse_type_name(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in _Alignof/alignof") !=
+                0) {
                 return NULL;
             }
             if (expect(p, TOK_RPAREN, "expected ')' after _Alignof/alignof type") != 0) {
@@ -7139,7 +7215,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
             free_expr(e);
             return NULL;
         }
-        if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, 1, "expected cast type") != 0) {
+        if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, NULL, NULL, NULL, 1, "expected cast type") != 0) {
             free_expr(e);
             return NULL;
         }
@@ -8002,6 +8078,7 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         int is_fn_decl = 0;
         int track_var = 0;
         int prefixed_fn_ptr = 0;
+        int fn_decl_hoisted = 0;
         long inner_array_len = -1;
         int inner_array_ndim = 0;
         long inner_array_dims[CC_MAX_ARRAY_DIMS];
@@ -8262,17 +8339,54 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         decl_attrs_clear(&suffix_attrs);
         decl_attrs_clear(&merged_attrs);
         if (!is_typedef && !complex_fn_ptr_decl && !prefixed_fn_ptr && p->tok.kind == TOK_LPAREN) {
-            if (skip_balanced_parens(p) != 0) {
+            cc_function_t fn_decl;
+
+            memset(&fn_decl, 0, sizeof(fn_decl));
+            fn_decl.line = s.line;
+            fn_decl.col = s.col;
+            fn_decl.ret_type = s.type;
+            fn_decl.ret_struct_id = s.type_struct_id;
+            fn_decl.storage = s.storage;
+            fn_decl.attr_flags = s.attr_flags;
+            fn_decl.attr_align = s.attr_align;
+            fn_decl.has_body = 0;
+            if (next_tok(p) != 0) {
                 free_stmt(&s);
                 return -1;
+            }
+            if (p->tok.kind != TOK_RPAREN) {
+                if (parse_params(p, &fn_decl) != 0) {
+                    free_func(&fn_decl);
+                    free_stmt(&s);
+                    return -1;
+                }
+            }
+            if (expect(p, TOK_RPAREN, "expected ')' after parameter list") != 0) {
+                free_func(&fn_decl);
+                free_stmt(&s);
+                return -1;
+            }
+            if (parser_is_c23_or_newer() && fn_decl.param_count == 0 && !fn_decl.is_variadic && !fn_decl.has_prototype) {
+                fn_decl.has_prototype = 1;
             }
             is_fn_decl = 1;
-            s.type = CC_TYPE_VOID;
-            s.type_struct_id = -1;
+            fn_decl.name = s.decl_name;
+            s.decl_name = NULL;
+            fn_decl.attr_section = s.attr_section;
+            s.attr_section = NULL;
+            fn_decl.attr_alias = s.attr_alias;
+            s.attr_alias = NULL;
             if (skip_decl_gnu_suffix(p, NULL) != 0) {
+                free_func(&fn_decl);
                 free_stmt(&s);
                 return -1;
             }
+            if (parser_push_hoisted_func(p, &fn_decl) != 0) {
+                free_func(&fn_decl);
+                free_stmt(&s);
+                return -1;
+            }
+            fn_decl_hoisted = 1;
         }
         if (is_typedef && !complex_fn_ptr_decl && p->tok.kind == TOK_LPAREN) {
             int depth = 1;
@@ -8391,6 +8505,11 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                 }
                 free_stmt(&s);
             } else if (is_fn_decl) {
+                if (!fn_decl_hoisted) {
+                    set_diag(p->diag, p->tok.line, p->tok.col, "internal error: failed to record function declaration");
+                    free_stmt(&s);
+                    return -1;
+                }
                 free_stmt(&s);
             } else {
                 if (push_stmt_arr(arr, count, s) != 0) {
@@ -9196,18 +9315,33 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     f->col = p->tok.col;
     f->has_body = 0;
     f->has_prototype = 0;
+    f->has_oldstyle_param_decls = 0;
     decl_attrs_reset(&spec_attrs);
     decl_attrs_reset(&suffix_attrs);
     decl_attrs_reset(&merged_attrs);
 
-    if (parse_declspec(p, &ftype, &ftype_sid, NULL, NULL, NULL, 1, "expected function return type", &is_typedef,
-                       NULL, &spec_attrs) != 0) {
-        return -1;
-    }
-    fn_storage = p->last_storage;
-    if (is_typedef) {
-        set_diag(p->diag, p->tok.line, p->tok.col, "typedef is not valid in function definition");
-        decl_attrs_clear(&spec_attrs);
+    if (is_declspec_start(p)) {
+        if (parse_declspec(p, &ftype, &ftype_sid, NULL, NULL, NULL, 1, "expected function return type", &is_typedef,
+                           NULL, &spec_attrs) != 0) {
+            return -1;
+        }
+        fn_storage = p->last_storage;
+        if (is_typedef) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "typedef is not valid in function definition");
+            decl_attrs_clear(&spec_attrs);
+            return -1;
+        }
+    } else if (g_parser_allow_oldstyle_funcdecl) {
+        /*
+         * Legacy/GNU compatibility: allow omitted return type in function
+         * definitions/declarations (`main() { ... }` => `int main() { ... }`).
+         */
+        ftype = CC_TYPE_INT;
+        ftype_sid = -1;
+        fn_storage = 0;
+        is_typedef = 0;
+    } else {
+        set_diag(p->diag, p->tok.line, p->tok.col, "expected function return type");
         return -1;
     }
     if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
@@ -9255,9 +9389,13 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     }
     f->ret_struct_id = ftype_sid;
     f->storage = fn_storage;
-    if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & CC_STORAGE_EXTERN) == 0 && !g_parser_gnu89_inline) {
-        /* C99-style fallback: emit an internal body unless explicitly extern. */
-        f->storage |= CC_STORAGE_STATIC;
+    if ((f->storage & CC_STORAGE_INLINE) != 0 && (f->storage & (CC_STORAGE_STATIC | CC_STORAGE_EXTERN)) == 0 &&
+        g_parser_gnu89_inline) {
+        /*
+         * GNU89 inline mode keeps plain inline definitions externally
+         * visible unless explicitly static.
+         */
+        f->storage |= CC_STORAGE_EXTERN;
     }
 
     if (expect(p, TOK_LPAREN, "expected '(' after function name") != 0) {
@@ -9273,6 +9411,13 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     if (expect(p, TOK_RPAREN, "expected ')' after parameter list") != 0) {
         decl_attrs_clear(&spec_attrs);
         return -1;
+    }
+    if (parser_is_c23_or_newer() && f->param_count == 0 && !f->is_variadic && !f->has_prototype) {
+        /*
+         * In C23 mode, an empty parameter list is a prototype for a
+         * parameterless function, not an old-style declaration.
+         */
+        f->has_prototype = 1;
     }
     if (wrapped_fn_ptr_decl) {
         if (expect(p, TOK_RPAREN, "expected ')' in function declarator") != 0) {
@@ -9342,6 +9487,9 @@ static int parse_function(parser_t *p, cc_function_t *f) {
                 return -1;
             }
         }
+    }
+    if (oldstyle_decl_count > 0) {
+        f->has_oldstyle_param_decls = 1;
     }
     for (oldstyle_i = 0; oldstyle_i < oldstyle_decl_count; ++oldstyle_i) {
         cc_stmt_t *ds = &oldstyle_decls[oldstyle_i];
@@ -9476,6 +9624,7 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     }
     typedef_pop_to_depth(p, saved_depth);
     var_pop_to_depth(p, saved_depth);
+    struct_hide_to_depth(p, saved_depth);
     p->scope_depth = saved_depth;
     return 0;
 }

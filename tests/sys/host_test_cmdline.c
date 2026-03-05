@@ -8,33 +8,35 @@ void kprint(const char *msg) {
     printf("%s", msg);
 }
 
-// Include the source file directly
-#include "../../sys/kern/cmdline.c"
+#include <kern/cmdline.h>
 
 void test_cmdline_init(void) {
     printf("Running test_cmdline_init...\n");
 
+    char buf[1024];
+
     // Empty
     cmdline_init("");
-    assert(kernel_cmdline[0] == 0);
-    assert(initialized == 1);
+    assert(cmdline_get_full(buf, sizeof(buf)) == 0);
+    assert(buf[0] == 0);
 
     // Normal
     cmdline_init("foo=bar");
-    assert(strcmp(kernel_cmdline, "foo=bar") == 0);
+    assert(cmdline_get_full(buf, sizeof(buf)) == 0);
+    assert(strcmp(buf, "foo=bar") == 0);
 
     // Null
     cmdline_init(NULL);
-    assert(kernel_cmdline[0] == 0);
-    assert(initialized == 1);
+    assert(cmdline_get_full(buf, sizeof(buf)) == 0);
+    assert(buf[0] == 0);
 
     // Long
     char long_cmd[2000];
     memset(long_cmd, 'a', sizeof(long_cmd));
     long_cmd[sizeof(long_cmd)-1] = 0;
     cmdline_init(long_cmd);
-    assert(strlen(kernel_cmdline) == sizeof(kernel_cmdline) - 1);
-    assert(kernel_cmdline[sizeof(kernel_cmdline)-1] == 0);
+    assert(cmdline_get_full(buf, sizeof(buf)) == 0);
+    assert(strlen(buf) == 1023); // 1024 - 1
 
     printf("PASS\n");
 }

@@ -93,6 +93,8 @@ This section defines every major capability area needed to replace `lld`/`gold` 
 ### 4.1 Core Driver/CLI
 
 - `-o`, `-m`, `-L`, `-l`, `-r`, `-shared`, `-pie`, `-static`, `-Bstatic`, `-Bdynamic`
+- Host-dependent execution model: one host-built `ld` binary must directly support i386 and x86-64 linking without backend forwarding or wrapper binaries.
+- Host-dependent default mode with first-input auto-selection: if `-m*` is omitted, default to host mode, but auto-select i386/x86-64 from first compatible input when required.
 - `--start-group/--end-group`, `--whole-archive/--no-whole-archive`
 - `-e`, `--entry`, `--defsym`, `--undefined`
 - `--gc-sections`, `--print-gc-sections`
@@ -240,6 +242,7 @@ Requirement IDs are normative.
 - **LD-U-010**: The linker **shall** provide diagnostics in `tool: file:line:col: level: message` form when source location is known.
 - **LD-U-011**: The linker **shall** provide a map file when `-Map` is requested.
 - **LD-U-012**: The linker **shall** reject malformed ELF inputs safely.
+- **LD-U-013**: The linker **shall** run as a host-native binary while directly linking both i386 and x86-64 ELF inputs with deterministic mode selection semantics.
 
 ### 5.2 Event-Driven (E)
 
@@ -365,4 +368,3 @@ Requirement IDs are normative.
 - Regression/fuzz/perf test suites.
 - Compatibility report against GNU ld/lld/gold behaviors.
 - Removed host-linker forwarding paths.
-
