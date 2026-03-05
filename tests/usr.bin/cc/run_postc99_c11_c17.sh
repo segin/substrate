@@ -41,6 +41,8 @@ grep -q "# asm clobber memory" /tmp/cc_native_c11_atomic_fence_32.s
 
 "$CC_BIN" -std=c17 native_c17_register.c -o /tmp/cc_native_c17_register
 /tmp/cc_native_c17_register
+"$CC_BIN" -std=c17 -Wall -Wextra -Werror native_c17_empty_param_no_oldstyle.c -o /tmp/cc_native_c17_empty_param_no_oldstyle
+/tmp/cc_native_c17_empty_param_no_oldstyle
 ! "$CC_BIN" -std=c17 -Wall -Werror -c native_bad_c17_register_obsolescent.c -o /tmp/cc_native_bad_c17_register_obsolescent.o
 ! "$CC_BIN" -std=c17 -Wall -Werror -c native_bad_c17_oldstyle_obsolescent.c -o /tmp/cc_native_bad_c17_oldstyle_obsolescent.o
 

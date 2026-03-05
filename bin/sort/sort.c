@@ -14,12 +14,9 @@ char lines[MAX_LINES][MAX_LEN];
 
 int main(int argc, char *argv[]) {
     int count = 0;
+    int exit_status = 0;
 
-    if (argc == 1) {
-        while (count < MAX_LINES && fgets(lines[count], MAX_LEN, stdin)) {
-            count++;
-        }
-    } else {
+    if (argc > 1) {
         for (int i = 1; i < argc; i++) {
             FILE *f;
             if (strcmp(argv[i], "-") == 0) {
@@ -27,7 +24,8 @@ int main(int argc, char *argv[]) {
             } else {
                 f = fopen(argv[i], "r");
                 if (!f) {
-                    fprintf(stderr, "sort: cannot open %s\n", argv[i]);
+                    perror(argv[i]);
+                    exit_status = 1;
                     continue;
                 }
             }
@@ -39,10 +37,10 @@ int main(int argc, char *argv[]) {
             if (f != stdin) {
                 fclose(f);
             }
-
-            if (count >= MAX_LINES) {
-                break;
-            }
+        }
+    } else {
+        while (count < MAX_LINES && fgets(lines[count], MAX_LEN, stdin)) {
+            count++;
         }
     }
     
@@ -51,5 +49,5 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < count; i++) {
         printf("%s", lines[i]);
     }
-    return 0;
+    return exit_status;
 }

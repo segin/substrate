@@ -22,6 +22,8 @@ x64_entry:
     movdqa %xmm0, %xmm1
     cvtsi2sd %rax, %xmm0
     call ext_func@PLT
+    call *%r11
+    ud2
     leave
     ret
 .size x64_entry, .-x64_entry
@@ -54,10 +56,13 @@ cmp "$TMP/x64_valid_a.o" "$TMP/x64_valid_b.o"
 objdump -dr "$TMP/x64_valid_a.o" | grep -q "movabs"
 objdump -dr "$TMP/x64_valid_a.o" | grep -Eq "r8|r9"
 objdump -dr "$TMP/x64_valid_a.o" | grep -q "(%rip)"
+objdump -dr "$TMP/x64_valid_a.o" | grep -q "ud2"
+objdump -dr "$TMP/x64_valid_a.o" | grep -Eq "callq?[[:space:]]+\\*%r11"
 
 readelf --wide -r "$TMP/x64_valid_a.o" | grep -Eq "R_X86_64_(PLT32|PC32)"
 readelf --wide -r "$TMP/x64_valid_a.o" | grep -Eq "R_X86_64_(GOTPCREL|GOTPCRELX|REX_GOTPCRELX)"
 readelf --wide -r "$TMP/x64_valid_a.o" | grep -Eq "R_X86_64_(GOTTPOFF|TLSGD|TLSLD|TPOFF32)"
+readelf --wide -s "$TMP/x64_valid_a.o" | grep -Eq "GLOBAL[[:space:]]+DEFAULT[[:space:]]+UND[[:space:]]+ext_func"
 
 if "$AS" -64 -march=x86-64-v2 -o "$TMP/avx2_bad.o" "$TMP/avx2_only.s" >"$TMP/avx_bad.out" 2>"$TMP/avx_bad.err"; then
     echo "expected AVX2 with -march=x86-64-v2 to fail"

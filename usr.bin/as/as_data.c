@@ -418,6 +418,38 @@ static int parse_zero_like(data_ctx_t *ctx, const as_stmt_t *st) {
     return 0;
 }
 
+static int parse_align_directive(data_ctx_t *ctx, const as_stmt_t *st) {
+    as_data_op_t op;
+    long long v;
+    unsigned long long align;
+
+    if (st->u.directive.arg_count < 1 || parse_s64(st->u.directive.args[0], &v) != 0 || v < 0) {
+        return -1;
+    }
+    if (strcmp(st->u.directive.name, ".p2align") == 0) {
+        if (v >= 63) {
+            return -1;
+        }
+        align = 1ULL << (unsigned)v;
+    } else {
+        align = (unsigned long long)v;
+    }
+    if (align == 0 || (align & (align - 1ULL)) != 0) {
+        return -1;
+    }
+
+    if (init_op_from_stmt(&op, st) != 0) {
+        return -1;
+    }
+    op.kind = AS_DATA_ALIGN;
+    op.u.align.value = align;
+    if (push_op(ctx->out, &op) != 0) {
+        free_op(&op);
+        return -1;
+    }
+    return 0;
+}
+
 static int parse_fill(data_ctx_t *ctx, const as_stmt_t *st) {
     as_data_op_t op;
     unsigned long long repeat = 0;
@@ -581,6 +613,8 @@ int as_data_build(const as_parse_result_t *parsed, as_data_program_t *out,
             rc = parse_string_directive(&ctx, st, 1);
         } else if (strcmp(dname, ".zero") == 0 || strcmp(dname, ".space") == 0 || strcmp(dname, ".skip") == 0) {
             rc = parse_zero_like(&ctx, st);
+        } else if (strcmp(dname, ".align") == 0 || strcmp(dname, ".balign") == 0 || strcmp(dname, ".p2align") == 0) {
+            rc = parse_align_directive(&ctx, st);
         } else if (strcmp(dname, ".fill") == 0) {
             rc = parse_fill(&ctx, st);
         } else if (strcmp(dname, ".org") == 0) {

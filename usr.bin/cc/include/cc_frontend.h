@@ -438,6 +438,7 @@ typedef struct {
     char *attr_alias;
     int has_body;
     int has_prototype;
+    int has_oldstyle_param_decls;
     int is_variadic;
     cc_param_t *params;
     size_t param_count;
