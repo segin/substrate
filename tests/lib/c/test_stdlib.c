@@ -165,6 +165,18 @@ void test_llabs(void) {
     assert(tested_llabs(-LLONG_MAX) == LLONG_MAX);
     printf("test_llabs passed\n");
 }
+
+void test_realloc_zero_size(void) {
+    void *ptr = tested_malloc(10);
+    assert(ptr != NULL);
+
+    // According to C standard, realloc(ptr, 0) should free the memory and return NULL
+    void *new_ptr = tested_realloc(ptr, 0);
+    assert(new_ptr == NULL);
+
+    printf("test_realloc_zero_size passed\n");
+}
+
 int main(void) {
     printf("Running stdlib tests...\n");
     test_atoi_basic();
@@ -176,6 +188,7 @@ int main(void) {
     test_abs();
     test_labs();
     test_llabs();
+    test_realloc_zero_size();
     printf("All tests passed!\n");
     return 0;
 }
