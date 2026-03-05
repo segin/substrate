@@ -18,6 +18,8 @@ typedef struct {
     int array_ndim;
     long array_dims[CC_MAX_ARRAY_DIMS];
     int value;
+    int addr_value;
+    long addr_size;
     int is_static_storage;
     char *static_sym;
     int depth;
@@ -56,6 +58,7 @@ static int emit_global_addr(cc_ssa_function_t *sf, const char *name, cc_diag_t *
 static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t **vars, size_t *var_count,
                       const lower_ctx_t *ctx, int depth, int break_label, int continue_label, const cc_stmt_t *s,
                       int *saw_ret, cc_diag_t *diag);
+static int emit_local_storage_alloc(cc_ssa_function_t *sf, long total_size, cc_diag_t *diag);
 static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out_i, double *out_f,
                                  int *out_is_float, char **out_sym);
 static int eval_global_addr_symbol_addend(const cc_translation_unit_t *tu, const cc_expr_t *e, char **out_sym,
@@ -90,7 +93,9 @@ static void free_asm_instr_fields(cc_ssa_instr_t *in) {
     }
     free(in->sym);
     free(in->asm_out_values);
+    free(in->asm_out_sizes);
     free(in->asm_in_values);
+    free(in->asm_in_sizes);
     if (in->asm_out_constraints != NULL) {
         for (i = 0; i < in->asm_out_count; ++i) {
             free(in->asm_out_constraints[i]);
@@ -1150,10 +1155,172 @@ static int var_define(var_entry_t **vars, size_t *var_count, const char *name, c
         memset((*vars)[*var_count].array_dims, 0, sizeof((*vars)[*var_count].array_dims));
     }
     (*vars)[*var_count].value = value;
+    (*vars)[*var_count].addr_value = -1;
+    (*vars)[*var_count].addr_size = 0;
     (*vars)[*var_count].is_static_storage = is_static_storage ? 1 : 0;
     (*vars)[*var_count].static_sym = sym_dup;
     (*vars)[*var_count].depth = depth;
     (*var_count)++;
+    return 0;
+}
+
+static int is_complete_struct_object_type(const cc_translation_unit_t *tu, cc_type_t t, int struct_id) {
+    if (tu == NULL || struct_id < 0 || (size_t)struct_id >= tu->struct_count) {
+        return 0;
+    }
+    if (!tu->structs[struct_id].complete) {
+        return 0;
+    }
+    if (is_pointer_type(t)) {
+        return 0;
+    }
+    if (t == CC_TYPE_ATOMIC || t == CC_TYPE_BITINT) {
+        return 0;
+    }
+    return 1;
+}
+
+static int var_is_aggregate_or_array(const cc_translation_unit_t *tu, const var_entry_t *v) {
+    if (v == NULL) {
+        return 0;
+    }
+    if (is_complete_struct_object_type(tu, v->type, v->struct_id)) {
+        return 1;
+    }
+    if ((v->array_ndim > 0 && v->array_len >= 0) ||
+        is_array_object_decl(v->type, v->array_len, v->array_ndim)) {
+        return 1;
+    }
+    return 0;
+}
+
+static long var_object_size_bytes(const cc_translation_unit_t *tu, const var_entry_t *v) {
+    long sz;
+    if (v == NULL) {
+        return -1;
+    }
+    if (is_complete_struct_object_type(tu, v->type, v->struct_id)) {
+        sz = tu->structs[v->struct_id].size;
+        if (sz <= 0) {
+            sz = 1;
+        }
+        return sz;
+    }
+    sz = type_size_bytes_with_struct(tu, v->type, v->struct_id);
+    if (sz <= 0) {
+        sz = g_pointer_size_bytes;
+    }
+    return sz;
+}
+
+static int ensure_local_var_addressable(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, var_entry_t *v, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int rhs;
+
+    if (v == NULL) {
+        set_diag(diag, "internal error: null local variable");
+        return -1;
+    }
+    if (v->addr_value >= 0) {
+        return v->addr_value;
+    }
+    if (var_is_aggregate_or_array(tu, v)) {
+        v->addr_value = v->value;
+        v->addr_size = var_object_size_bytes(tu, v);
+        return v->addr_value;
+    }
+
+    v->addr_size = var_object_size_bytes(tu, v);
+    if (v->addr_size <= 0) {
+        set_diag(diag, "unsupported address-taken local type");
+        return -1;
+    }
+    v->addr_value = emit_local_storage_alloc(sf, v->addr_size, diag);
+    if (v->addr_value < 0) {
+        return -1;
+    }
+
+    rhs = v->value;
+    rhs = normalize_float_value(sf, rhs, v->type, diag);
+    if (rhs < 0) {
+        return -1;
+    }
+    rhs = normalize_integral_value(sf, rhs, v->type, diag);
+    if (rhs < 0) {
+        return -1;
+    }
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_STORE;
+    in.dst = -1;
+    in.lhs = v->addr_value;
+    in.rhs = rhs;
+    in.imm = v->addr_size;
+    if (push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory materializing address-taken local variable");
+        return -1;
+    }
+    return v->addr_value;
+}
+
+static int emit_local_var_scalar_load(cc_ssa_function_t *sf, const var_entry_t *v, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    cc_value_type_t vt;
+    long size;
+
+    if (v == NULL) {
+        set_diag(diag, "internal error: null local variable in scalar load");
+        return -1;
+    }
+    if (v->addr_value < 0) {
+        return v->value;
+    }
+
+    vt = type_to_val(v->type);
+    size = v->addr_size > 0 ? v->addr_size : g_pointer_size_bytes;
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_LOAD;
+    in.dst = new_value(sf, vt);
+    in.lhs = v->addr_value;
+    in.rhs = -1;
+    in.imm = size;
+    in.is_unsigned = is_unsigned_load_type(v->type) ? 1 : 0;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory loading local scalar variable");
+        return -1;
+    }
+    return in.dst;
+}
+
+static int emit_local_var_scalar_store(cc_ssa_function_t *sf, const var_entry_t *v, int rhs, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    long size;
+
+    if (v == NULL) {
+        set_diag(diag, "internal error: null local variable in scalar store");
+        return -1;
+    }
+    if (v->addr_value < 0) {
+        if (emit_mov_instr(sf, v->value, rhs) != 0) {
+            set_diag(diag, "out of memory moving local scalar variable");
+            return -1;
+        }
+        return 0;
+    }
+
+    size = v->addr_size > 0 ? v->addr_size : g_pointer_size_bytes;
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_STORE;
+    in.dst = -1;
+    in.lhs = v->addr_value;
+    in.rhs = rhs;
+    in.imm = size;
+    in.is_unsigned = is_unsigned_load_type(v->type) ? 1 : 0;
+    if (push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory storing local scalar variable");
+        return -1;
+    }
     return 0;
 }
 
@@ -1181,15 +1348,36 @@ static const cc_function_t *find_fn(const cc_translation_unit_t *tu, const char 
 
 static const cc_global_t *find_global(const cc_translation_unit_t *tu, const char *name) {
     size_t i;
+    size_t best_idx = 0;
+    const cc_global_t *best = NULL;
+    int best_score = -1;
     if (tu == NULL || name == NULL) {
         return NULL;
     }
     for (i = 0; i < tu->global_count; ++i) {
         if (strcmp(tu->globals[i].name, name) == 0) {
-            return &tu->globals[i];
+            const cc_global_t *g = &tu->globals[i];
+            int score = 0;
+            if (g->init != NULL) {
+                score += 8;
+            }
+            if (g->array_len > 0) {
+                score += 4;
+            }
+            if (g->array_ndim > 0) {
+                score += 2;
+            }
+            if ((g->storage & CC_STORAGE_EXTERN) == 0) {
+                score += 1;
+            }
+            if (best == NULL || score > best_score || (score == best_score && i > best_idx)) {
+                best = g;
+                best_idx = i;
+                best_score = score;
+            }
         }
     }
-    return NULL;
+    return best;
 }
 
 static int member_base_struct_id(const cc_expr_t *e) {
@@ -1314,6 +1502,44 @@ static long array_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_ty
     return elem_size * elem_count;
 }
 
+static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
+                                  const long array_dims[CC_MAX_ARRAY_DIMS]) {
+    cc_type_t elem_type;
+    int elem_struct_id;
+    long elem_size;
+    long count = 1;
+    int i;
+
+    if (array_ndim <= 0) {
+        return type_size_bytes_struct(tu, t, struct_id);
+    }
+    elem_type = t;
+    elem_struct_id = struct_id;
+    if (is_pointer_type(t)) {
+        for (i = 0; i < array_ndim; ++i) {
+            elem_type = ptr_base_type(elem_type);
+            if (elem_struct_id >= 0 && elem_type != CC_TYPE_VOID) {
+                elem_struct_id = -1;
+            }
+        }
+    }
+    elem_size = type_size_bytes_with_struct(tu, elem_type, elem_struct_id);
+    if (elem_size <= 0) {
+        return -1;
+    }
+    for (i = 0; i < array_ndim; ++i) {
+        long d = array_dims != NULL ? array_dims[i] : 0;
+        if (d <= 0 || count > LONG_MAX / d) {
+            return -1;
+        }
+        count *= d;
+    }
+    if (elem_size > LONG_MAX / count) {
+        return -1;
+    }
+    return elem_size * count;
+}
+
 static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
                               const cc_expr_t *e) {
     if (e == NULL) {
@@ -1330,6 +1556,28 @@ static long sizeof_expr_bytes(const cc_translation_unit_t *tu, var_entry_t *vars
             const cc_global_t *g = find_global(tu, e->ident);
             if (g != NULL) {
                 long n = array_size_bytes(tu, g->type, g->type_struct_id, g->array_len);
+                if (is_pointer_type(g->type) && g->array_len <= 0 && g->init != NULL) {
+                    cc_type_t elem_type = ptr_base_type(g->type);
+                    int elem_sid = (elem_type == CC_TYPE_VOID) ? g->type_struct_id : -1;
+                    long elem_size = type_size_bytes_with_struct(tu, elem_type, elem_sid);
+                    long count = 0;
+
+                    if (elem_size > 0) {
+                        if (g->init->kind == CC_EXPR_INIT_LIST) {
+                            if (g->init->arg_count == 1 && g->init->args[0] != NULL && g->init->args[0]->kind == CC_EXPR_STR &&
+                                (elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+                                count = string_literal_size_bytes(g->init->args[0]->ident);
+                            } else {
+                                count = (long)g->init->arg_count;
+                            }
+                        } else if (g->init->kind == CC_EXPR_STR && (elem_type == CC_TYPE_CHAR || elem_type == CC_TYPE_UCHAR)) {
+                            count = string_literal_size_bytes(g->init->ident);
+                        }
+                        if (count > 0 && elem_size <= LONG_MAX / count) {
+                            return elem_size * count;
+                        }
+                    }
+                }
                 if (n > 0) {
                     return n;
                 }
@@ -1427,19 +1675,7 @@ static int expr_is_array_pointer_chain(const cc_translation_unit_t *tu, var_entr
 }
 
 static int builtin_bswap_bits(const char *name) {
-    if (name == NULL) {
-        return 0;
-    }
-    if (strcmp(name, "__builtin_bswap16") == 0) {
-        return 16;
-    }
-    if (strcmp(name, "__builtin_bswap32") == 0) {
-        return 32;
-    }
-    if (strcmp(name, "__builtin_bswap64") == 0) {
-        return 64;
-    }
-    return 0;
+    return(cc_builtin_bswap_bits(name));
 }
 
 typedef enum {
@@ -1458,6 +1694,7 @@ typedef enum {
     BUILTIN_UNPREDICTABLE,
     BUILTIN_CLZ,
     BUILTIN_CTZ,
+    BUILTIN_FFS,
     BUILTIN_POPCOUNT,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
@@ -1541,6 +1778,10 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
         strcmp(name, "__builtin_ctzll") == 0) {
         return BUILTIN_CTZ;
+    }
+    if (strcmp(name, "__builtin_ffs") == 0 || strcmp(name, "__builtin_ffsl") == 0 ||
+        strcmp(name, "__builtin_ffsll") == 0) {
+        return BUILTIN_FFS;
     }
     if (strcmp(name, "__builtin_popcount") == 0 || strcmp(name, "__builtin_popcountl") == 0 ||
         strcmp(name, "__builtin_popcountll") == 0) {
@@ -2396,43 +2637,14 @@ static int lower_popcount64(cc_ssa_function_t *sf, int v, cc_diag_t *diag) {
     return emit_i64_binop_instr(sf, CC_SSA_SHR, v, c56, 1, diag);
 }
 
-static int lower_builtin_ctz(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
-                             var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
-    int bits;
-    int x;
+static int lower_builtin_ctz_from_normalized(cc_ssa_function_t *sf, int x, int bits, cc_diag_t *diag) {
     int zero;
     int low;
     int v;
     int one;
 
-    bits = builtin_bitop_width(e);
     if (bits <= 0 || bits > 64) {
         bits = 64;
-    }
-
-    x = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
-    if (x < 0) {
-        return -1;
-    }
-    x = cast_value(sf, x, CC_VAL_I64, diag);
-    if (x < 0) {
-        return -1;
-    }
-    x = normalize_integral_value(sf, x, e->args[0]->value_type, diag);
-    if (x < 0) {
-        return -1;
-    }
-
-    if (bits < 64) {
-        unsigned long long mask = (1ULL << bits) - 1ULL;
-        int cmask = emit_const_u64_instr(sf, mask, diag);
-        if (cmask < 0) {
-            return -1;
-        }
-        x = emit_i64_binop_instr(sf, CC_SSA_AND, x, cmask, 0, diag);
-        if (x < 0) {
-            return -1;
-        }
     }
 
     zero = emit_const_i64_instr(sf, 0);
@@ -2467,6 +2679,130 @@ static int lower_builtin_ctz(const cc_translation_unit_t *tu, cc_ssa_function_t 
     }
 
     return lower_popcount64(sf, v, diag);
+}
+
+static int lower_builtin_ctz(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                             var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    int bits;
+    int x;
+
+    bits = builtin_bitop_width(e);
+    if (bits <= 0 || bits > 64) {
+        bits = 64;
+    }
+
+    x = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+    if (x < 0) {
+        return -1;
+    }
+    x = cast_value(sf, x, CC_VAL_I64, diag);
+    if (x < 0) {
+        return -1;
+    }
+    x = normalize_integral_value(sf, x, e->args[0]->value_type, diag);
+    if (x < 0) {
+        return -1;
+    }
+
+    if (bits < 64) {
+        unsigned long long mask = (1ULL << bits) - 1ULL;
+        int cmask = emit_const_u64_instr(sf, mask, diag);
+        if (cmask < 0) {
+            return -1;
+        }
+        x = emit_i64_binop_instr(sf, CC_SSA_AND, x, cmask, 0, diag);
+        if (x < 0) {
+            return -1;
+        }
+    }
+    return lower_builtin_ctz_from_normalized(sf, x, bits, diag);
+}
+
+static int lower_builtin_ffs(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
+                             var_entry_t *vars, size_t var_count, int depth, const cc_expr_t *e, cc_diag_t *diag) {
+    cc_ssa_instr_t in;
+    int bits;
+    int x;
+    int z;
+    int one;
+    int cmp;
+    int ctz;
+    int nz;
+    int dst;
+    int l_nz;
+    int l_z;
+    int l_end;
+
+    bits = builtin_bitop_width(e);
+    if (bits <= 0 || bits > 64) {
+        bits = 64;
+    }
+
+    x = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+    if (x < 0) {
+        return -1;
+    }
+    x = cast_value(sf, x, CC_VAL_I64, diag);
+    if (x < 0) {
+        return -1;
+    }
+    x = normalize_integral_value(sf, x, e->args[0]->value_type, diag);
+    if (x < 0) {
+        return -1;
+    }
+
+    if (bits < 64) {
+        unsigned long long mask = (1ULL << bits) - 1ULL;
+        int cmask = emit_const_u64_instr(sf, mask, diag);
+        if (cmask < 0) {
+            return -1;
+        }
+        x = emit_i64_binop_instr(sf, CC_SSA_AND, x, cmask, 0, diag);
+        if (x < 0) {
+            return -1;
+        }
+    }
+
+    z = emit_const_i64_instr(sf, 0);
+    one = emit_const_i64_instr(sf, 1);
+    if (z < 0 || one < 0) {
+        return -1;
+    }
+
+    memset(&in, 0, sizeof(in));
+    in.op = CC_SSA_CMP;
+    in.cmp_kind = CC_CMP_NE;
+    in.is_unsigned = 1;
+    in.dst = new_value(sf, CC_VAL_I64);
+    in.lhs = x;
+    in.rhs = z;
+    if (in.dst < 0 || push_instr(sf, in) != 0) {
+        set_diag(diag, "out of memory lowering __builtin_ffs compare");
+        return -1;
+    }
+    cmp = in.dst;
+
+    dst = new_value(sf, CC_VAL_I64);
+    l_nz = new_label(sf);
+    l_z = new_label(sf);
+    l_end = new_label(sf);
+    if (dst < 0 || emit_br_cond_instr(sf, cmp, l_nz, l_z) != 0 || emit_label_instr(sf, l_nz) != 0) {
+        set_diag(diag, "out of memory lowering __builtin_ffs control flow");
+        return -1;
+    }
+
+    ctz = lower_builtin_ctz_from_normalized(sf, x, bits, diag);
+    if (ctz < 0) {
+        return -1;
+    }
+    nz = emit_i64_binop_instr(sf, CC_SSA_ADD, ctz, one, 0, diag);
+    if (nz < 0 || emit_mov_instr(sf, dst, nz) != 0 || emit_br_instr(sf, l_end) != 0 || emit_label_instr(sf, l_z) != 0 ||
+        emit_mov_instr(sf, dst, z) != 0 || emit_br_instr(sf, l_end) != 0 || emit_label_instr(sf, l_end) != 0) {
+        set_diag(diag, "out of memory lowering __builtin_ffs value");
+        return -1;
+    }
+
+    return dst;
 }
 
 static int lower_builtin_clz(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, const lower_ctx_t *ctx,
@@ -2832,6 +3168,24 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return in.dst;
         }
+        if (vars[idx].addr_value >= 0 && !var_is_aggregate_or_array(tu, &vars[idx])) {
+            long mem_size = vars[idx].addr_size > 0 ? vars[idx].addr_size : var_object_size_bytes(tu, &vars[idx]);
+            if (mem_size <= 0) {
+                set_diag(diag, "unsupported address-taken local object type in lowering");
+                return -1;
+            }
+            in.op = CC_SSA_LOAD;
+            in.dst = new_value(sf, type_to_val(vars[idx].type));
+            in.lhs = vars[idx].addr_value;
+            in.rhs = -1;
+            in.imm = mem_size;
+            in.is_unsigned = is_unsigned_load_type(vars[idx].type) ? 1 : 0;
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
+                set_diag(diag, "out of memory loading address-taken local");
+                return -1;
+            }
+            return in.dst;
+        }
         return vars[idx].value;
     }
 
@@ -2873,17 +3227,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return emit_global_addr(sf, vars[idx].static_sym, diag);
         }
-        if (vars[idx].type == CC_TYPE_VOID && vars[idx].struct_id >= 0) {
-            return cast_value(sf, vars[idx].value, CC_VAL_I64, diag);
-        }
-        in.op = CC_SSA_ADDR;
-        in.dst = new_value(sf, CC_VAL_I64);
-        in.lhs = vars[idx].value;
-        in.rhs = -1;
-        if (in.dst < 0 || push_instr(sf, in) != 0) {
+        if (ensure_local_var_addressable(tu, sf, &vars[idx], diag) < 0) {
             return -1;
         }
-        return in.dst;
+        return cast_value(sf, vars[idx].addr_value, CC_VAL_I64, diag);
     }
 
     case CC_EXPR_LABEL_ADDR: {
@@ -3409,12 +3756,17 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         builtin_kind_t bk = builtin_kind(e->ident);
         int bswap_bits = builtin_bswap_bits(e->ident);
         int indirect_callee = -1;
+        int ident_var_idx = -1;
+        const cc_global_t *ident_global = NULL;
         if (e->ident != NULL) {
             callee = find_fn(tu, e->ident);
+            ident_var_idx = var_find_visible(vars, var_count, e->ident, depth);
+            ident_global = find_global(tu, e->ident);
         }
         if (bk == BUILTIN_VA_START) {
             int dst_idx;
             int last_idx;
+            int va_start_dst;
             if (e->arg_count != 2 || e->args[0] == NULL || e->args[1] == NULL || e->args[0]->kind != CC_EXPR_IDENT ||
                 e->args[1]->kind != CC_EXPR_IDENT) {
                 set_diag(diag, "__builtin_va_start lowering expects (identifier, parameter-identifier)");
@@ -3432,13 +3784,17 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_VA_START;
-            in.dst = vars[dst_idx].value;
+            in.dst = new_value(sf, CC_VAL_I64);
             in.imm = (long)(last_idx + 1);
-            if (push_instr(sf, in) != 0) {
+            if (in.dst < 0 || push_instr(sf, in) != 0) {
                 set_diag(diag, "out of memory appending va_start");
                 return -1;
             }
-            return vars[dst_idx].value;
+            va_start_dst = in.dst;
+            if (emit_local_var_scalar_store(sf, &vars[dst_idx], va_start_dst, diag) != 0) {
+                return -1;
+            }
+            return va_start_dst;
         }
         if (bk == BUILTIN_VA_END) {
             return emit_const_i64_instr(sf, 0);
@@ -3483,11 +3839,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 srcv = copy_dst;
             }
-            if (emit_mov_instr(sf, vars[dst_idx].value, srcv) != 0) {
-                set_diag(diag, "out of memory appending va_copy move");
+            if (emit_local_var_scalar_store(sf, &vars[dst_idx], srcv, diag) != 0) {
+                set_diag(diag, "out of memory appending va_copy");
                 return -1;
             }
-            return vars[dst_idx].value;
+            return srcv;
         }
         if (bk == BUILTIN_VA_ARG) {
             int ap_idx;
@@ -3545,7 +3901,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 int is_agg = (e->aux_type == CC_TYPE_VOID && e->aux_struct_id >= 0) ? 1 : 0;
                 cc_value_type_t dst_ty = is_agg ? CC_VAL_I64 : type_to_val(e->aux_type);
 
-                ap_ptr = cast_value(sf, vars[ap_idx].value, CC_VAL_I64, diag);
+                ap_ptr = emit_local_var_scalar_load(sf, &vars[ap_idx], diag);
+                if (ap_ptr < 0) {
+                    return -1;
+                }
+                ap_ptr = cast_value(sf, ap_ptr, CC_VAL_I64, diag);
                 if (ap_ptr < 0) {
                     return -1;
                 }
@@ -3783,7 +4143,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return dstv;
             }
 
-            cur_ap = cast_value(sf, vars[ap_idx].value, CC_VAL_I64, diag);
+            cur_ap = emit_local_var_scalar_load(sf, &vars[ap_idx], diag);
+            if (cur_ap < 0) {
+                return -1;
+            }
+            cur_ap = cast_value(sf, cur_ap, CC_VAL_I64, diag);
             if (cur_ap < 0) {
                 return -1;
             }
@@ -3835,7 +4199,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 return -1;
             }
             next_ap = in.dst;
-            if (emit_mov_instr(sf, vars[ap_idx].value, next_ap) != 0) {
+            if (emit_local_var_scalar_store(sf, &vars[ap_idx], next_ap, diag) != 0) {
                 set_diag(diag, "out of memory appending va_arg pointer update");
                 return -1;
             }
@@ -4569,16 +4933,26 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return call_in.dst;
         }
-        if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ) {
+        if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ || bk == BUILTIN_FFS) {
+            const char *builtin_name = "__builtin_clz";
+            if (bk == BUILTIN_CTZ) {
+                builtin_name = "__builtin_ctz";
+            } else if (bk == BUILTIN_FFS) {
+                builtin_name = "__builtin_ffs";
+            }
             if (e->arg_count != 1 || e->args[0] == NULL) {
-                set_diag(diag, bk == BUILTIN_CLZ ? "__builtin_clz lowering expects 1 argument"
-                                                 : "__builtin_ctz lowering expects 1 argument");
+                char msg[112];
+                snprintf(msg, sizeof(msg), "%s lowering expects 1 argument", builtin_name);
+                set_diag(diag, msg);
                 return -1;
             }
             if (bk == BUILTIN_CLZ) {
                 return lower_builtin_clz(tu, sf, ctx, vars, var_count, depth, e, diag);
             }
-            return lower_builtin_ctz(tu, sf, ctx, vars, var_count, depth, e, diag);
+            if (bk == BUILTIN_CTZ) {
+                return lower_builtin_ctz(tu, sf, ctx, vars, var_count, depth, e, diag);
+            }
+            return lower_builtin_ffs(tu, sf, ctx, vars, var_count, depth, e, diag);
         }
         if (bk == BUILTIN_SYNC_SYNCHRONIZE) {
             if (emit_atomic_full_barrier(sf, diag) != 0) {
@@ -5021,9 +5395,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return res;
         }
-        if (e->ident == NULL || (e->ident != NULL && callee == NULL && bk == BUILTIN_NONE && bswap_bits == 0 &&
-                                 (var_find_visible(vars, var_count, e->ident, depth) >= 0 ||
-                                  find_global(tu, e->ident) != NULL))) {
+        in.rhs = -1;
+        if (e->ident == NULL ||
+            (e->ident != NULL && callee == NULL && bk == BUILTIN_NONE && bswap_bits == 0 &&
+             (ident_var_idx >= 0 || (ident_global != NULL && ident_global->array_ndim <= 0 &&
+                                      cc_type_is_pointer(ident_global->type))))) {
             if (e->ident == NULL) {
                 const cc_expr_t *callee_expr = e->lhs;
                 cc_expr_t callee_tmp;
@@ -5115,18 +5491,65 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             want = value_type(sf, av);
             if (e->ident != NULL && callee != NULL && callee->has_prototype && i < callee->param_count) {
-                want = type_to_val(callee->params[i].type);
-                av = cast_value(sf, av, want, diag);
-                if (av < 0) {
-                    free(in.sym);
-                    free(in.args);
-                    return -1;
+                if (callee->params[i].type == CC_TYPE_VOID && callee->params[i].type_struct_id >= 0) {
+                    long agg_size = type_size_bytes_with_struct(tu, callee->params[i].type, callee->params[i].type_struct_id);
+                    av = cast_value(sf, av, CC_VAL_I64, diag);
+                    if (av < 0) {
+                        free(in.sym);
+                        free(in.args);
+                        return -1;
+                    }
+                    if (agg_size > 0 && agg_size <= g_pointer_size_bytes) {
+                        cc_ssa_instr_t load_in;
+                        memset(&load_in, 0, sizeof(load_in));
+                        load_in.op = CC_SSA_LOAD;
+                        load_in.dst = new_value(sf, CC_VAL_I64);
+                        load_in.lhs = av;
+                        load_in.rhs = -1;
+                        load_in.imm = agg_size;
+                        load_in.is_unsigned = 1;
+                        if (load_in.dst < 0 || push_instr(sf, load_in) != 0) {
+                            free(in.sym);
+                            free(in.args);
+                            set_diag(diag, "out of memory lowering small aggregate call argument");
+                            return -1;
+                        }
+                        av = load_in.dst;
+                    }
+                    want = CC_VAL_I64;
+                } else {
+                    want = type_to_val(callee->params[i].type);
+                    av = cast_value(sf, av, want, diag);
+                    if (av < 0) {
+                        free(in.sym);
+                        free(in.args);
+                        return -1;
+                    }
                 }
             }
             in.args[i] = av;
         }
 
-        if (e->value_type == CC_TYPE_VOID) {
+        if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
+            long agg_size = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
+            int agg_addr;
+            if (agg_size <= 0) {
+                free(in.sym);
+                free(in.args);
+                set_diag(diag, "unsupported aggregate return size in call lowering");
+                return -1;
+            }
+            agg_addr = emit_local_storage_alloc(sf, agg_size, diag);
+            if (agg_addr < 0) {
+                free(in.sym);
+                free(in.args);
+                return -1;
+            }
+            in.dst = agg_addr;
+            in.rhs = agg_addr;
+            in.imm = agg_size;
+            in.is_unsigned = 1;
+        } else if (e->value_type == CC_TYPE_VOID) {
             in.dst = new_value(sf, CC_VAL_I64);
             in.imm = g_pointer_size_bytes;
             in.is_unsigned = 1;
@@ -5199,6 +5622,32 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                             set_diag(diag, "out of memory appending static local assignment store");
                             return -1;
                         }
+                    }
+                    return rhs;
+                }
+                if (vars[idx].addr_value >= 0 && !var_is_aggregate_or_array(tu, &vars[idx])) {
+                    long mem_size = vars[idx].addr_size > 0 ? vars[idx].addr_size : var_object_size_bytes(tu, &vars[idx]);
+                    if (mem_size <= 0) {
+                        set_diag(diag, "unsupported address-taken local assignment type");
+                        return -1;
+                    }
+                    rhs = normalize_float_value(sf, rhs, vars[idx].type, diag);
+                    if (rhs < 0) {
+                        return -1;
+                    }
+                    rhs = normalize_integral_value(sf, rhs, vars[idx].type, diag);
+                    if (rhs < 0) {
+                        return -1;
+                    }
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_STORE;
+                    in.dst = -1;
+                    in.lhs = vars[idx].addr_value;
+                    in.rhs = rhs;
+                    in.imm = mem_size;
+                    if (push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory appending address-taken assignment store");
+                        return -1;
                     }
                     return rhs;
                 }
@@ -5378,6 +5827,24 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         return -1;
                     }
                     cur = in.dst;
+                } else if (vars[idx].addr_value >= 0 && !var_is_aggregate_or_array(tu, &vars[idx])) {
+                    long mem_size = vars[idx].addr_size > 0 ? vars[idx].addr_size : var_object_size_bytes(tu, &vars[idx]);
+                    if (mem_size <= 0) {
+                        set_diag(diag, "unsupported address-taken local ++/-- type");
+                        return -1;
+                    }
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_LOAD;
+                    in.dst = new_value(sf, want);
+                    in.lhs = vars[idx].addr_value;
+                    in.rhs = -1;
+                    in.imm = mem_size;
+                    in.is_unsigned = is_unsigned_load_type(vars[idx].type) ? 1 : 0;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory loading address-taken local for ++/--");
+                        return -1;
+                    }
+                    cur = in.dst;
                 } else {
                     cur = cast_value(sf, vars[idx].value, want, diag);
                     if (cur < 0) {
@@ -5450,13 +5917,29 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         set_diag(diag, "out of memory storing static local ++/-- result");
                         return -1;
                     }
+                } else if (vars[idx].addr_value >= 0 && !var_is_aggregate_or_array(tu, &vars[idx])) {
+                    long mem_size = vars[idx].addr_size > 0 ? vars[idx].addr_size : var_object_size_bytes(tu, &vars[idx]);
+                    if (mem_size <= 0) {
+                        set_diag(diag, "unsupported address-taken local ++/-- store type");
+                        return -1;
+                    }
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_STORE;
+                    in.dst = -1;
+                    in.lhs = vars[idx].addr_value;
+                    in.rhs = nextv;
+                    in.imm = mem_size;
+                    if (push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory storing address-taken local ++/-- result");
+                        return -1;
+                    }
                 } else if (emit_mov_instr(sf, vars[idx].value, nextv) != 0) {
                     return -1;
                 }
                 if (e->update_postfix) {
                     return cur;
                 }
-                if (vars[idx].is_static_storage) {
+                if (vars[idx].is_static_storage || vars[idx].addr_value >= 0) {
                     return nextv;
                 }
                 return vars[idx].value;
@@ -5799,7 +6282,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (e->lhs != NULL) {
             n = sizeof_expr_bytes(tu, vars, var_count, depth, e->lhs);
         } else {
-            n = type_size_bytes_struct(tu, e->aux_type, e->aux_struct_id);
+            n = array_type_size_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
         }
         if (n < 0) {
             set_diag(diag, "unsupported sizeof operand in lowering");
@@ -6918,7 +7401,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             int have_const_init = 0;
             int needs_runtime_init = 0;
             int is_array_obj = is_array_object_decl(s->type, s->array_len, s->array_ndim);
-            int is_struct_obj = (s->type == CC_TYPE_VOID && s->type_struct_id >= 0);
+            int is_struct_obj = is_complete_struct_object_type(tu, s->type, s->type_struct_id);
             cc_type_t elem_type = CC_TYPE_VOID;
             long elem_size = 0;
             long arr_elems = 1;
@@ -7347,7 +7830,7 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             }
             return 0;
         }
-        if (s->type == CC_TYPE_VOID && s->type_struct_id >= 0) {
+        if (is_complete_struct_object_type(tu, s->type, s->type_struct_id)) {
             long sz = type_size_bytes_with_struct(tu, s->type, s->type_struct_id);
             int prealloc = lower_find_hoisted_alloc(ctx, s);
             if (sz <= 0) {
@@ -7380,6 +7863,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (var_define(vars, var_count, s->decl_name, s->type, s->type_struct_id, -1, 0, NULL, varv, depth, 0,
                            NULL) != 0) {
                 set_diag(diag, "out of memory defining local struct variable");
+                return -1;
+            }
+            if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
                 return -1;
             }
             return 0;
@@ -7637,6 +8123,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 set_diag(diag, "out of memory defining local array variable");
                 return -1;
             }
+            if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
+                return -1;
+            }
             return 0;
         }
         varv = new_value(sf, type_to_val(s->type));
@@ -7680,6 +8169,9 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                 return -1;
             }
         }
+        if (ensure_local_var_addressable(tu, sf, &(*vars)[*var_count - 1], diag) < 0) {
+            return -1;
+        }
         return 0;
     }
 
@@ -7692,7 +8184,12 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
 
     if (s->kind == CC_STMT_ASM) {
         cc_ssa_instr_t in;
+        int pushed = 0;
         size_t i4;
+        int *asm_out_store_ptr = NULL;
+        long *asm_out_store_size = NULL;
+        cc_type_t *asm_out_store_type = NULL;
+        int *asm_out_store_sid = NULL;
         memset(&in, 0, sizeof(in));
         in.op = CC_SSA_ASM;
         in.dst = -1;
@@ -7711,20 +8208,41 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
         }
         if (in.asm_out_count > 0) {
             in.asm_out_values = (int *)calloc(in.asm_out_count, sizeof(*in.asm_out_values));
+            in.asm_out_sizes = (unsigned char *)calloc(in.asm_out_count, sizeof(*in.asm_out_sizes));
             in.asm_out_constraints = (char **)calloc(in.asm_out_count, sizeof(*in.asm_out_constraints));
             in.asm_out_names = (char **)calloc(in.asm_out_count, sizeof(*in.asm_out_names));
-            if (in.asm_out_values == NULL || in.asm_out_constraints == NULL || in.asm_out_names == NULL) {
+            asm_out_store_ptr = (int *)malloc(in.asm_out_count * sizeof(*asm_out_store_ptr));
+            asm_out_store_size = (long *)calloc(in.asm_out_count, sizeof(*asm_out_store_size));
+            asm_out_store_type = (cc_type_t *)calloc(in.asm_out_count, sizeof(*asm_out_store_type));
+            asm_out_store_sid = (int *)calloc(in.asm_out_count, sizeof(*asm_out_store_sid));
+            if (in.asm_out_values == NULL || in.asm_out_sizes == NULL || in.asm_out_constraints == NULL ||
+                in.asm_out_names == NULL || asm_out_store_ptr == NULL || asm_out_store_size == NULL ||
+                asm_out_store_type == NULL || asm_out_store_sid == NULL) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm outputs");
                 return -1;
+            }
+            for (i4 = 0; i4 < in.asm_out_count; ++i4) {
+                asm_out_store_ptr[i4] = -1;
+                asm_out_store_sid[i4] = -1;
             }
         }
         if (in.asm_in_count > 0) {
             in.asm_in_values = (int *)calloc(in.asm_in_count, sizeof(*in.asm_in_values));
+            in.asm_in_sizes = (unsigned char *)calloc(in.asm_in_count, sizeof(*in.asm_in_sizes));
             in.asm_in_constraints = (char **)calloc(in.asm_in_count, sizeof(*in.asm_in_constraints));
             in.asm_in_names = (char **)calloc(in.asm_in_count, sizeof(*in.asm_in_names));
-            if (in.asm_in_values == NULL || in.asm_in_constraints == NULL || in.asm_in_names == NULL) {
+            if (in.asm_in_values == NULL || in.asm_in_sizes == NULL || in.asm_in_constraints == NULL ||
+                in.asm_in_names == NULL) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm inputs");
                 return -1;
             }
@@ -7733,6 +8251,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             in.asm_clobbers = (char **)calloc(in.asm_clobber_count, sizeof(*in.asm_clobbers));
             if (in.asm_clobbers == NULL) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm clobbers");
                 return -1;
             }
@@ -7742,28 +8264,60 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             in.asm_goto_names = (char **)calloc(in.asm_goto_count, sizeof(*in.asm_goto_names));
             if (in.asm_goto_labels == NULL || in.asm_goto_names == NULL) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm goto labels");
                 return -1;
             }
         }
         for (i4 = 0; i4 < in.asm_out_count; ++i4) {
             int vidx = -1;
+            int out_v = -1;
             const cc_asm_operand_t *op = &s->asm_outputs[i4];
+            long out_sz = 0;
+            int is_mem_only = asm_constraint_is_memory_only(op->constraint);
+            if (op->expr == NULL) {
+                free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
+                set_diag(diag, "asm output is missing expression");
+                return -1;
+            }
+            out_sz = type_size_bytes_with_struct(tu, op->expr->value_type, op->expr->struct_id);
+            if (out_sz <= 0) {
+                out_sz = g_pointer_size_bytes;
+            }
+            if (out_sz > 255) {
+                out_sz = 255;
+            }
+            in.asm_out_sizes[i4] = (unsigned char)out_sz;
             if (op->expr != NULL && op->expr->kind == CC_EXPR_IDENT && op->expr->ident != NULL) {
                 vidx = var_find_visible(*vars, *var_count, op->expr->ident, depth);
                 if (vidx >= 0) {
-                    in.asm_out_values[i4] = (*vars)[vidx].value;
-                } else if (asm_constraint_is_memory_only(op->constraint)) {
+                    out_v = (*vars)[vidx].value;
+                } else if (is_mem_only) {
                     const cc_global_t *g = find_global(tu, op->expr->ident);
                     if (g != NULL) {
                         int addrv = emit_global_addr(sf, g->name, diag);
                         if (addrv < 0) {
                             free_asm_instr_fields(&in);
+                            free(asm_out_store_ptr);
+                            free(asm_out_store_size);
+                            free(asm_out_store_type);
+                            free(asm_out_store_sid);
                             return -1;
                         }
-                        in.asm_out_values[i4] = CC_SSA_ASM_MEM_INDIRECT_ENCODE(addrv);
+                        out_v = CC_SSA_ASM_MEM_INDIRECT_ENCODE(addrv);
                     } else {
                         free_asm_instr_fields(&in);
+                        free(asm_out_store_ptr);
+                        free(asm_out_store_size);
+                        free(asm_out_store_type);
+                        free(asm_out_store_sid);
                         set_diag(diag, "asm output target must reference a local or global lvalue");
                         return -1;
                     }
@@ -7771,47 +8325,121 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
                     int av = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr, diag);
                     if (av < 0) {
                         free_asm_instr_fields(&in);
+                        free(asm_out_store_ptr);
+                        free(asm_out_store_size);
+                        free(asm_out_store_type);
+                        free(asm_out_store_sid);
                         return -1;
                     }
-                    in.asm_out_values[i4] = av;
+                    out_v = av;
                 }
-            } else if (op->expr != NULL && op->expr->kind == CC_EXPR_DEREF && op->expr->lhs != NULL &&
-                       asm_constraint_is_memory_only(op->constraint)) {
-                int addrv = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr->lhs, diag);
-                if (addrv < 0) {
+            } else if (op->expr->kind == CC_EXPR_DEREF || op->expr->kind == CC_EXPR_MEMBER) {
+                int ptrv = -1;
+                if (op->expr->kind == CC_EXPR_DEREF) {
+                    if (op->expr->lhs == NULL) {
+                        free_asm_instr_fields(&in);
+                        free(asm_out_store_ptr);
+                        free(asm_out_store_size);
+                        free(asm_out_store_type);
+                        free(asm_out_store_sid);
+                        set_diag(diag, "malformed asm output dereference target");
+                        return -1;
+                    }
+                    ptrv = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr->lhs, diag);
+                } else {
+                    ptrv = lower_member_addr(tu, sf, ctx, *vars, *var_count, depth, op->expr, diag);
+                }
+                if (ptrv < 0) {
                     free_asm_instr_fields(&in);
+                    free(asm_out_store_ptr);
+                    free(asm_out_store_size);
+                    free(asm_out_store_type);
+                    free(asm_out_store_sid);
                     return -1;
                 }
-                in.asm_out_values[i4] = CC_SSA_ASM_MEM_INDIRECT_ENCODE(addrv);
+                ptrv = cast_value(sf, ptrv, CC_VAL_I64, diag);
+                if (ptrv < 0) {
+                    free_asm_instr_fields(&in);
+                    free(asm_out_store_ptr);
+                    free(asm_out_store_size);
+                    free(asm_out_store_type);
+                    free(asm_out_store_sid);
+                    return -1;
+                }
+                if (is_mem_only) {
+                    out_v = CC_SSA_ASM_MEM_INDIRECT_ENCODE(ptrv);
+                } else {
+                    int tmpv = new_value(sf, type_to_val(op->expr->value_type));
+                    if (tmpv < 0) {
+                        free_asm_instr_fields(&in);
+                        free(asm_out_store_ptr);
+                        free(asm_out_store_size);
+                        free(asm_out_store_type);
+                        free(asm_out_store_sid);
+                        set_diag(diag, "out of memory allocating asm output temporary");
+                        return -1;
+                    }
+                    out_v = tmpv;
+                    asm_out_store_ptr[i4] = ptrv;
+                    asm_out_store_size[i4] = out_sz;
+                    asm_out_store_type[i4] = op->expr->value_type;
+                    asm_out_store_sid[i4] = op->expr->struct_id;
+                }
             } else {
                 free_asm_instr_fields(&in);
-                set_diag(diag, "unsupported asm output target (requires local identifier or memory dereference)");
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
+                set_diag(diag, "unsupported asm output target (requires identifier, dereference, or member lvalue)");
                 return -1;
             }
+            in.asm_out_values[i4] = out_v;
             in.asm_out_constraints[i4] = xstrdup(op->constraint != NULL ? op->constraint : "");
             if (op->name != NULL) {
                 in.asm_out_names[i4] = xstrdup(op->name);
             }
             if (in.asm_out_constraints[i4] == NULL || (op->name != NULL && in.asm_out_names[i4] == NULL)) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm output operand");
                 return -1;
             }
         }
         for (i4 = 0; i4 < in.asm_in_count; ++i4) {
             const cc_asm_operand_t *op = &s->asm_inputs[i4];
+            long in_sz = 0;
             int av = lower_expr(tu, sf, ctx, *vars, *var_count, depth, op->expr, diag);
             if (av < 0) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 return -1;
             }
             in.asm_in_values[i4] = av;
+            in_sz = type_size_bytes_with_struct(tu, op->expr->value_type, op->expr->struct_id);
+            if (in_sz <= 0) {
+                in_sz = g_pointer_size_bytes;
+            }
+            if (in_sz > 255) {
+                in_sz = 255;
+            }
+            in.asm_in_sizes[i4] = (unsigned char)in_sz;
             in.asm_in_constraints[i4] = xstrdup(op->constraint != NULL ? op->constraint : "");
             if (op->name != NULL) {
                 in.asm_in_names[i4] = xstrdup(op->name);
             }
             if (in.asm_in_constraints[i4] == NULL || (op->name != NULL && in.asm_in_names[i4] == NULL)) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm input operand");
                 return -1;
             }
@@ -7820,6 +8448,10 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             in.asm_clobbers[i4] = xstrdup(s->asm_clobbers[i4] != NULL ? s->asm_clobbers[i4] : "");
             if (in.asm_clobbers[i4] == NULL) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm clobber");
                 return -1;
             }
@@ -7829,12 +8461,20 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             const char *lname = s->asm_goto_labels[i4];
             if (ctx == NULL || lname == NULL || lname[0] == '\0') {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 set_diag(diag, "asm goto label is malformed");
                 return -1;
             }
             l = lower_find_label(ctx, lname);
             if (l < 0) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 if (diag != NULL && diag->message[0] == '\0') {
                     snprintf(diag->message, sizeof(diag->message), "asm goto references unknown label: %s", lname);
                 }
@@ -7844,30 +8484,218 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             in.asm_goto_names[i4] = xstrdup(lname);
             if (in.asm_goto_names[i4] == NULL) {
                 free_asm_instr_fields(&in);
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
                 set_diag(diag, "out of memory storing asm goto label name");
                 return -1;
             }
         }
         if (push_instr(sf, in) != 0) {
             free_asm_instr_fields(&in);
+            free(asm_out_store_ptr);
+            free(asm_out_store_size);
+            free(asm_out_store_type);
+            free(asm_out_store_sid);
             set_diag(diag, "out of memory appending SSA asm instruction");
             return -1;
         }
+        pushed = 1;
+        for (i4 = 0; i4 < in.asm_out_count; ++i4) {
+            cc_ssa_instr_t st;
+            int rhs;
+            if (asm_out_store_ptr == NULL || asm_out_store_ptr[i4] < 0) {
+                continue;
+            }
+            if (asm_out_store_size[i4] <= 0) {
+                set_diag(diag, "asm output storeback has invalid size");
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
+                return -1;
+            }
+            if (asm_out_store_type[i4] == CC_TYPE_VOID && asm_out_store_sid[i4] >= 0) {
+                set_diag(diag, "aggregate asm register outputs are not supported");
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
+                return -1;
+            }
+            rhs = in.asm_out_values[i4];
+            rhs = normalize_float_value(sf, rhs, asm_out_store_type[i4], diag);
+            if (rhs < 0) {
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
+                return -1;
+            }
+            rhs = normalize_integral_value(sf, rhs, asm_out_store_type[i4], diag);
+            if (rhs < 0) {
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
+                return -1;
+            }
+            memset(&st, 0, sizeof(st));
+            st.op = CC_SSA_STORE;
+            st.dst = -1;
+            st.lhs = asm_out_store_ptr[i4];
+            st.rhs = rhs;
+            st.imm = asm_out_store_size[i4];
+            if (push_instr(sf, st) != 0) {
+                set_diag(diag, "out of memory appending asm output storeback");
+                free(asm_out_store_ptr);
+                free(asm_out_store_size);
+                free(asm_out_store_type);
+                free(asm_out_store_sid);
+                return -1;
+            }
+        }
+        (void)pushed;
+        free(asm_out_store_ptr);
+        free(asm_out_store_size);
+        free(asm_out_store_type);
+        free(asm_out_store_sid);
         return 0;
     }
 
     if (s->kind == CC_STMT_RETURN) {
         cc_ssa_instr_t ret_in;
         int rv = -1;
+        int is_void_return = 0;
+
+        if (ctx != NULL && ctx->fn != NULL && ctx->fn->ret_type == CC_TYPE_VOID && ctx->fn->ret_struct_id < 0) {
+            is_void_return = 1;
+        }
 
         if (s->expr != NULL) {
             rv = lower_expr(tu, sf, ctx, *vars, *var_count, depth, s->expr, diag);
             if (rv < 0) {
                 return -1;
             }
-            rv = cast_value(sf, rv, sf->ret_type, diag);
-            if (rv < 0) {
-                return -1;
+            if (!is_void_return && ctx != NULL && ctx->fn != NULL &&
+                ctx->fn->ret_type == CC_TYPE_VOID && ctx->fn->ret_struct_id >= 0) {
+                long ret_size = type_size_bytes_with_struct(tu, ctx->fn->ret_type, ctx->fn->ret_struct_id);
+                if (ret_size <= 0) {
+                    set_diag(diag, "unsupported aggregate return size in return lowering");
+                    return -1;
+                }
+                rv = cast_value(sf, rv, CC_VAL_I64, diag);
+                if (rv < 0) {
+                    return -1;
+                }
+                if (ret_size <= g_pointer_size_bytes) {
+                    cc_ssa_instr_t load_in;
+                    memset(&load_in, 0, sizeof(load_in));
+                    load_in.op = CC_SSA_LOAD;
+                    load_in.dst = new_value(sf, CC_VAL_I64);
+                    load_in.lhs = rv;
+                    load_in.rhs = -1;
+                    load_in.imm = ret_size;
+                    load_in.is_unsigned = 1;
+                    if (load_in.dst < 0 || push_instr(sf, load_in) != 0) {
+                        set_diag(diag, "out of memory lowering small aggregate return");
+                        return -1;
+                    }
+                    rv = load_in.dst;
+                    memset(&ret_in, 0, sizeof(ret_in));
+                    ret_in.op = CC_SSA_RET;
+                    ret_in.dst = -1;
+                    ret_in.lhs = rv;
+                    ret_in.rhs = -1;
+                    ret_in.imm = ret_size;
+                    ret_in.param_index = -1;
+                    if (push_instr(sf, ret_in) != 0) {
+                        set_diag(diag, "out of memory appending aggregate return");
+                        return -1;
+                    }
+                    *saw_ret = 1;
+                    return 0;
+                }
+                if (ret_size <= 16) {
+                    cc_ssa_instr_t c8;
+                    cc_ssa_instr_t add8;
+                    cc_ssa_instr_t lo;
+                    cc_ssa_instr_t hi;
+                    long hi_size = ret_size - 8;
+
+                    memset(&lo, 0, sizeof(lo));
+                    lo.op = CC_SSA_LOAD;
+                    lo.dst = new_value(sf, CC_VAL_I64);
+                    lo.lhs = rv;
+                    lo.rhs = -1;
+                    lo.imm = 8;
+                    lo.is_unsigned = 1;
+                    if (lo.dst < 0 || push_instr(sf, lo) != 0) {
+                        set_diag(diag, "out of memory lowering aggregate return low part");
+                        return -1;
+                    }
+
+                    memset(&c8, 0, sizeof(c8));
+                    c8.op = CC_SSA_CONST;
+                    c8.dst = new_value(sf, CC_VAL_I64);
+                    c8.imm = 8;
+                    if (c8.dst < 0 || push_instr(sf, c8) != 0) {
+                        set_diag(diag, "out of memory lowering aggregate return offset");
+                        return -1;
+                    }
+
+                    memset(&add8, 0, sizeof(add8));
+                    add8.op = CC_SSA_ADD;
+                    add8.dst = new_value(sf, CC_VAL_I64);
+                    add8.lhs = rv;
+                    add8.rhs = c8.dst;
+                    if (add8.dst < 0 || push_instr(sf, add8) != 0) {
+                        set_diag(diag, "out of memory lowering aggregate return high address");
+                        return -1;
+                    }
+
+                    memset(&hi, 0, sizeof(hi));
+                    hi.op = CC_SSA_LOAD;
+                    hi.dst = new_value(sf, CC_VAL_I64);
+                    hi.lhs = add8.dst;
+                    hi.rhs = -1;
+                    hi.imm = hi_size;
+                    hi.is_unsigned = 1;
+                    if (hi.dst < 0 || push_instr(sf, hi) != 0) {
+                        set_diag(diag, "out of memory lowering aggregate return high part");
+                        return -1;
+                    }
+
+                    memset(&ret_in, 0, sizeof(ret_in));
+                    ret_in.op = CC_SSA_RET;
+                    ret_in.dst = -1;
+                    ret_in.lhs = lo.dst;
+                    ret_in.rhs = hi.dst;
+                    ret_in.imm = ret_size;
+                    ret_in.param_index = -1;
+                    if (push_instr(sf, ret_in) != 0) {
+                        set_diag(diag, "out of memory appending aggregate return");
+                        return -1;
+                    }
+                    *saw_ret = 1;
+                    return 0;
+                }
+                /*
+                 * >16-byte aggregate return still uses the older pointer-return
+                 * convention in this lowering path.
+                 */
+                rv = cast_value(sf, rv, sf->ret_type, diag);
+                if (rv < 0) {
+                    return -1;
+                }
+            } else if (!is_void_return) {
+                rv = cast_value(sf, rv, sf->ret_type, diag);
+                if (rv < 0) {
+                    return -1;
+                }
+            } else {
+                rv = -1;
             }
         }
 
@@ -8779,7 +9607,7 @@ static int eval_global_init_expr(const cc_translation_unit_t *tu, const cc_expr_
         if (e->lhs != NULL) {
             n = sizeof_expr_bytes(tu, NULL, 0, 0, e->lhs);
         } else {
-            n = type_size_bytes_struct(tu, e->aux_type, e->aux_struct_id);
+            n = array_type_size_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
         }
         if (n < 0) {
             return -1;
@@ -10900,7 +11728,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
 
         for (j = 0; j < af->param_count; ++j) {
             cc_ssa_instr_t in;
-            int v;
+            long param_size;
 
             memset(&in, 0, sizeof(in));
             in.op = CC_SSA_PARAM;
@@ -10908,6 +11736,12 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             in.lhs = -1;
             in.rhs = -1;
             in.param_index = (int)j;
+            param_size = type_size_bytes_with_struct(tu, af->params[j].type, af->params[j].type_struct_id);
+            if (param_size <= 0) {
+                param_size = g_pointer_size_bytes;
+            }
+            in.imm = param_size;
+            in.is_unsigned = is_unsigned_load_type(af->params[j].type) ? 1 : 0;
             if (in.dst < 0) {
                 set_diag(diag, "out of memory assigning param SSA value");
                 cc_ssa_module_free(out);
@@ -10920,11 +11754,50 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 cc_ssa_module_free(out);
                 return -1;
             }
-
-            v = in.dst;
+        }
+        for (j = 0; j < af->param_count; ++j) {
+            int v = sf->param_values[j];
+            int is_aggregate_param = (af->params[j].type == CC_TYPE_VOID && af->params[j].type_struct_id >= 0);
+            if (is_aggregate_param) {
+                long agg_size = type_size_bytes_with_struct(tu, af->params[j].type, af->params[j].type_struct_id);
+                int agg_addr;
+                if (agg_size <= 0) {
+                    set_diag(diag, "unsupported aggregate parameter size");
+                    cc_ssa_module_free(out);
+                    return -1;
+                }
+                agg_addr = emit_local_storage_alloc(sf, agg_size, diag);
+                if (agg_addr < 0) {
+                    cc_ssa_module_free(out);
+                    return -1;
+                }
+                if (agg_size <= g_pointer_size_bytes) {
+                    cc_ssa_instr_t st;
+                    memset(&st, 0, sizeof(st));
+                    st.op = CC_SSA_STORE;
+                    st.dst = -1;
+                    st.lhs = agg_addr;
+                    st.rhs = v;
+                    st.imm = agg_size;
+                    if (push_instr(sf, st) != 0) {
+                        set_diag(diag, "out of memory materializing aggregate parameter");
+                        cc_ssa_module_free(out);
+                        return -1;
+                    }
+                } else if (emit_memcpy_instr(sf, agg_addr, v, agg_size, diag) != 0) {
+                    cc_ssa_module_free(out);
+                    return -1;
+                }
+                v = agg_addr;
+                sf->param_values[j] = v;
+            }
             if (var_define(&vars, &var_count, af->params[j].name, af->params[j].type, af->params[j].type_struct_id,
                            -1, 0, NULL, v, 0, 0, NULL) != 0) {
                 set_diag(diag, "out of memory defining parameter variable");
+                cc_ssa_module_free(out);
+                return -1;
+            }
+            if (ensure_local_var_addressable(tu, sf, &vars[var_count - 1], diag) < 0) {
                 cc_ssa_module_free(out);
                 return -1;
             }

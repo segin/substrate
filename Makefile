@@ -51,8 +51,9 @@ host_dist_install: host_dist
 	@test -n "$(HOST_DIST_PREFIX)"
 	@test "$(HOST_DIST_PREFIX)" != "/"
 	@mkdir -p "$(HOST_DIST_PREFIX)"
+	@find "$(HOST_DIST_PREFIX)" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
 	@cp -a host_dist/. "$(HOST_DIST_PREFIX)/"
-	@echo ">>> Host tools installed to $(HOST_DIST_PREFIX)"
+	@echo ">>> Host tools synchronized to $(HOST_DIST_PREFIX)"
 
 host_install: host_dist_install
 

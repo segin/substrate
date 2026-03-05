@@ -1,0 +1,119 @@
+.TH JOIN 1 "March 2026" "Substrate" "User Commands"
+.SH NAME
+join \- relational database operator
+.SH SYNOPSIS
+.B join
+.RB [ \-a
+.IR file_number
+|
+.B \-v
+.IR file_number ]
+.RB [ \-e
+.IR string ]
+.RB [ \-o
+.IR list ]
+.RB [ \-t
+.IR char ]
+.RB [ \-1
+.IR field ]
+.RB [ \-2
+.IR field ]
+.RB [ \-\-check-order | \-\-nocheck-order ]
+.RB [ \-\-header ]
+.RB [ \-i | \-\-ignore-case ]
+.RB [ \-o auto ]
+.RB [ \-z | \-\-zero-terminated ]
+.IR file1
+.IR file2
+.SH DESCRIPTION
+The
+.B join
+utility performs an "equality join" on the specified files and writes the result
+to standard output.
+.PP
+A field must be specified for each file as the "join field" on which the files are
+compared. The files must be sorted on the join field, using the collating sequence
+specified by the appropriate locale.
+.PP
+By default, the fields are separated by blanks, with leading blanks ignored.
+If the
+.B \-t
+option is specified, then the fields are separated by the specified character.
+.SH OPTIONS
+.TP
+.BR \-a " " \fIfile_number\fP
+In addition to the default output, produce a line for each unpairable line in file
+.IR file_number ,
+where
+.I file_number
+is 1 or 2.
+As a BSD extension, if
+.B \-a
+is specified with no argument, unpairable lines from both files are printed.
+.TP
+.BR \-v " " \fIfile_number\fP
+Instead of the default output, produce a line only for each unpairable line in file
+.IR file_number ,
+where
+.I file_number
+is 1 or 2.
+.TP
+.BR \-e " " \fIstring\fP
+Replace empty output fields with
+.IR string .
+.TP
+.BR \-o " " \fIlist\fP
+Construct each output line according to the format specified by
+.IR list .
+Each element in
+.I list
+must be either the character '0' (representing the join field), or have the form
+.IR file_number.field ,
+where
+.I file_number
+is a file number and
+.I field
+is a decimal integer field number.
+.TP
+.BR \-t " " \fIchar\fP
+Use character
+.I char
+as a field delimiter for both input and output.
+.TP
+.BR \-1 " " \fIfield\fP
+Join on the
+.IR field Nth
+field of file 1.
+.TP
+.BR \-2 " " \fIfield\fP
+Join on the
+.IR field Nth
+field of file 2.
+.TP
+.B \-\-check-order
+Check that the input files are sorted. If they are not, exit with a non-zero status.
+.TP
+.B \-\-nocheck-order
+Do not check that the input files are sorted. This is the default.
+.TP
+.B \-\-header
+Treat the first line in each file as field headers, print them without trying to pair them,
+and do not check their ordering.
+.TP
+.BR \-i ", " \-\-ignore-case
+Ignore differences in case when comparing keys.
+.TP
+.BR \-z ", " \-\-zero-terminated
+End lines with 0 byte (NUL), not newline.
+.SH EXTENSIONS
+GNU and BSD extensions are supported natively. When
+.B \-a
+is provided without arguments, this implementation falls back to BSD precedence
+by printing unpaired lines from both files. GNU long-opts and zero-delimiter
+semantics are fully adopted.
+.SH EXIT STATUS
+The
+.B join
+utility exits 0 on success, and >0 if an error occurs.
+.SH SEE ALSO
+sort(1), awk(1)

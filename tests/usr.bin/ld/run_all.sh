@@ -16,6 +16,11 @@ echo "== ld test dashboard =="
 echo "root: $ROOT"
 echo
 
+echo "Building libelfobj (NATIVE_BUILD=1)..."
+make -C "$ROOT/usr.lib/elfobj" NATIVE_BUILD=1 -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)" >/dev/null
+echo "libelfobj: PASS"
+echo
+
 echo "Building ld (NATIVE_BUILD=1)..."
 make -C "$ROOT/usr.bin/ld" NATIVE_BUILD=1 -j"$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)" >/dev/null
 echo "Build: PASS"
@@ -43,12 +48,35 @@ while IFS= read -r line; do
 done <<'EOF'
 test_link_32_64.sh|LD-U-002 LD-U-003
 test_mode_parser.sh|LD-U-010 LD-E-007
+test_host_mode_dual_arch.sh|LD-U-002 LD-U-003
 test_unsupported_option_policy.sh|LD-U-010 LD-W-003
 test_entry_option.sh|LD-U-001 LD-U-009
 test_library_search_modes.sh|LD-U-004
 test_group_and_whole_archive.sh|LD-S-001 LD-U-004
 test_as_needed.sh|LD-E-005
 test_tooling_options.sh|LD-U-011 LD-U-010
+test_toolchain_build_sh_native.sh|LD-U-001
+test_no_backend_forwarding.sh|LD-W-001
+test_script_parser_include_ok.sh|LD-U-010
+test_script_parser_include_diag.sh|LD-U-010
+test_script_ast_constructs.sh|LD-S-004
+test_script_expr_eval.sh|LD-S-004
+test_script_builtin_sections.sh|LD-S-004
+test_script_directive_semantics.sh|LD-S-004 LD-E-004
+test_script_section_order.sh|LD-S-004 LD-U-009
+test_script_phdr_assignment.sh|LD-U-009 LD-S-004
+test_script_compat_corpus.sh|LD-U-007 LD-S-004
+test_plugin_handshake.sh|LD-O-004 LD-U-004
+test_plugin_materialize_archive_loop.sh|LD-S-001 LD-O-004
+test_lto_integration_c_cpp.sh|LD-U-007 LD-O-004
+test_diagnostics_structured.sh|LD-U-010
+test_map_parity_fields.sh|LD-U-011
+test_reproduce_bundle.sh|LD-U-007
+test_diag_parser_compat.sh|LD-U-010 LD-W-003
+test_deterministic_repro.sh|LD-U-007
+test_limits_safety.sh|LD-R-002
+test_fuzz_frontends_smoke.sh|LD-R-004
+test_integer_overflow_guards.sh|LD-R-003
 test_warning_policies.sh|LD-W-003 LD-E-001
 test_input_validation_basic.sh|LD-U-012 LD-R-001
 test_reloc_symbol_parsing.sh|LD-U-005 LD-U-006
@@ -57,6 +85,12 @@ test_archive_formats.sh|LD-U-004 LD-R-002
 test_archive_parser_sanitization.sh|LD-R-004
 test_dso_import_only.sh|LD-U-004 LD-U-005
 test_dynamic_needed_as_needed.sh|LD-E-005 LD-S-003
+test_dynsym_dynstr_exports.sh|LD-S-003
+test_dynamic_tag_invariants.sh|LD-S-003
+test_gnu_versym_basic.sh|LD-S-003
+test_gnu_verdef_from_symver.sh|LD-U-005 LD-S-003
+test_gnu_verneed_from_symver.sh|LD-U-005 LD-S-003
+test_hash_style_matrix.sh|LD-U-001 LD-S-003
 test_symbol_precedence.sh|LD-U-005 LD-E-003
 test_unresolved_matrix.sh|LD-E-001 LD-E-002
 test_visibility_resolution.sh|LD-U-005 LD-S-003
@@ -71,6 +105,10 @@ test_icf_safe.sh|LD-O-004 LD-U-007
 test_icf_all_data.sh|LD-O-004 LD-R-003
 test_layout_page_congruence.sh|LD-U-009 LD-S-004
 test_layout_base_defaults.sh|LD-U-001 LD-U-009
+test_substrate_ld_note.sh|LD-U-009
+test_phdr_generation.sh|LD-U-009 LD-U-010
+test_gnu_stack_flags.sh|LD-U-009 LD-W-003
+test_z_text_notext.sh|LD-U-009 LD-W-003
 test_defsym_undefined.sh|LD-U-005
 test_unresolved_provenance.sh|LD-U-010 LD-E-001
 test_symbol_resolution_diff.sh|LD-U-007 LD-E-003
@@ -82,8 +120,14 @@ test_i386_reloc_suite.sh|LD-U-007 LD-U-006
 test_entry_fallback_matrix.sh|LD-U-001 LD-E-001 LD-U-007
 test_x64_gotpcrelx_relax.sh|LD-U-006
 test_x64_tls_reloc_basic.sh|LD-U-006 LD-S-003
+test_x64_tls_external_models.sh|LD-U-006 LD-S-003
+test_x64_tls_segment_dynamic_tags.sh|LD-U-009 LD-S-003
 test_x64_ifunc_basic.sh|LD-U-006
+test_x64_got_plt_runtime_sections.sh|LD-U-006 LD-S-003
 test_i386_tls_reloc_basic.sh|LD-U-006 LD-S-003
+test_i386_tls_external_models.sh|LD-U-006 LD-S-003
+test_i386_tls_segment_dynamic_tags.sh|LD-U-009 LD-S-003
+test_i386_got_plt_runtime_sections.sh|LD-U-006 LD-S-003
 EOF
 
 echo

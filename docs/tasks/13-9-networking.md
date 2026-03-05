@@ -1,0 +1,420 @@
+# 9. Networking (Future)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 8981-9063.
+
+## Reimplemented Checklist (All Open)
+
+### 9. Networking (Future)
+- [ ] **Layer 0: Driver Framework (Hardware Abstraction):**
+    - [ ] **Interface Structure (`struct ifnet`):**
+        - [ ] Common fields: Name (`eth0`), MTU, Flags (UP, BROADCAST, PROMISC), Hardware Address.
+        - [ ] **Methods:** `init`, `start` (tx), `stop`, `ioctl` (config), `watchdog`.
+    - [ ] **Buffer Management (`mbuf` / `sk_buff`):**
+        - [ ] Chainable buffer structures for zero-copy handling.
+        - [ ] Header/Data split for localized protocol processing.
+    - [ ] **Device Registry:** Central list of attached network devices.
+        - [ ] **DevFS Exposure:** Publish interfaces as `/dev/network/ifname` (e.g., `ne0`, `bge0`).
+- [ ] **Layer 1: Network Interface Drivers (Kernel):**
+    - [ ] **Driver Compliance:** All drivers must implement `struct ifnet` methods.
+    - [ ] **Loopback:** Virtual interface implementation.
+    - [ ] **NE2000:**
+        - [ ] ISA/PCI attachment.
+        - [ ] 8390 NIC core logic (Ring buffer management).
+        - [ ] PIO data transfer (ports 0x10, 0x300).
+        - [ ] IRQ handling (ISR/IMR).
+    - [ ] **RTL8139:**
+        - [ ] PCI Bus Mastering.
+        - [ ] C+ Mode (Descriptor-based) optimized support.
+        - [ ] Rx/Tx DMA integration.
+    - [ ] **E1000 (Intel Pro/1000):**
+        - [ ] PCI/PCI-X/PCIe support.
+        - [ ] Advanced Descriptor rings.
+        - [ ] Interrupt Throttling.
+    - [ ] **VirtIO Net:**
+        - [ ] Virtqueue setup (Rx/Tx/Control).
+        - [ ] Feature negotiation (CSUM, TSO, etc.).
+- [ ] **Layer 2: Packet Interface Layer**
+    - [ ] Define abstract packet structure (`mbuf`).
+    - [ ] Implement packet queuing (`if_snd`, `if_fastq`) and dispatching.
+    - [ ] Implement `ifconfig` style interface management (up/down/flags/mtu).
+- [ ] **Layer 3: Protocol Drivers (Kernel Stack)**
+    - [ ] **Ethernet (L2):**
+        - [ ] Frame parsing (EtherType dispatch).
+        - [ ] ARP/RARP encapsulation.
+    - [ ] **ARP (L2.5):**
+        - [ ] Resolution (IP -> MAC).
+        - [ ] Caching (Hash table with timeout).
+        - [ ] Gratuitous ARP on up.
+    - [ ] **IPv4 (L3):**
+        - [ ] Packet validation (Checksum, Version, HL).
+        - [ ] Routing table lookup (LPM - Longest Prefix Match).
+        - [ ] Fragmentation/Reassembly logic.
+    - [ ] **IPv6 (L3):**
+        - [ ] Packet parsing and extension headers.
+        - [ ] NDP (Neighbor Discovery) state machine.
+        - [ ] SLAAC autoconfiguration.
+    - [ ] **ICMPv4/v6 (L3):**
+        - [ ] Echo Request/Reply (Ping).
+        - [ ] Destination Unreachable / Time Exceeded.
+    - [ ] **UDP (L4):**
+        - [ ] PCB list (Port binding).
+        - [ ] Datagram sending/receiving.
+    - [ ] **TCP (L4):**
+        - [ ] **State Machine:** LISTEN, SYN_SENT, SYN_RCVD, ESTABLISHED, FIN_WAIT...
+        - [ ] **Window Management:** Sliding window, Flow control.
+        - [ ] **Congestion Control:** Slow Start, Congestion Avoidance.
+        - [ ] **Timers:** Retransmission, Keepalive, TIME_WAIT.
+- [ ] **Layer 4: Socket API**
+    - [ ] **VFS Integration:** Map sockets to file descriptors.
+    - [ ] **Syscalls:** `socket`, `bind`, `connect`, `listen`, `accept`, `setsockopt`.
+    - [ ] **I/O:** `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg`.
+    - [ ] **Multiplexing:** `select`/`poll`/`epoll`.
+- [ ] **Supplemental: Userspace & Extensibility**
+    - [ ] **NetUSE API:** Interface for running NIC drivers in userspace.
+    - [ ] **Userspace Stacks:** TUN/TAP style interface.
+- [ ] **Userland Tools**
+    - [ ] **Diagnostic:**
+        - [ ] `ping`
+        - [ ] `ping6`
+        - [ ] `traceroute`
+        - [ ] `tracepath`
+    - [ ] **Configuration:**
+        - [ ] `ifconfig`
+        - [ ] `ip` (Netlink-style)
+        - [ ] `route`
+    - [ ] **Clients:**
+        - [ ] `dhcp` (custom DHCP client)
+        - [ ] basic `netcat`
+    - [ ] **Analysis:** `tcpdump` (requires BPF or raw socket support).
+
+
+## User Stories
+
+- **US-13-0001**: As a Substrate contributor working on 9. Networking (Future), I want to layer 0: Driver Framework (Hardware Abstraction): so that this capability is implemented with clear verification evidence.
+- **US-13-0002**: As a Substrate contributor working on 9. Networking (Future), I want to interface Structure (struct ifnet): so that this capability is implemented with clear verification evidence.
+- **US-13-0003**: As a Substrate contributor working on 9. Networking (Future), I want to common fields: Name (eth0), MTU, Flags (UP, BROADCAST, PROMISC), Hardware Address so that this capability is implemented with clear verification evidence.
+- **US-13-0004**: As a Substrate contributor working on 9. Networking (Future), I want to methods: init, start (tx), stop, ioctl (config), watchdog so that this capability is implemented with clear verification evidence.
+- **US-13-0005**: As a Substrate contributor working on 9. Networking (Future), I want to buffer Management (mbuf / sk_buff): so that this capability is implemented with clear verification evidence.
+- **US-13-0006**: As a Substrate contributor working on 9. Networking (Future), I want to chainable buffer structures for zero-copy handling so that this capability is implemented with clear verification evidence.
+- **US-13-0007**: As a Substrate contributor working on 9. Networking (Future), I want to header/Data split for localized protocol processing so that this capability is implemented with clear verification evidence.
+- **US-13-0008**: As a Substrate contributor working on 9. Networking (Future), I want to device Registry: Central list of attached network devices so that this capability is implemented with clear verification evidence.
+- **US-13-0009**: As a Substrate contributor working on 9. Networking (Future), I want to devFS Exposure: Publish interfaces as /dev/network/ifname (e.g., ne0, bge0) so that this capability is implemented with clear verification evidence.
+- **US-13-0010**: As a Substrate contributor working on 9. Networking (Future), I want to layer 1: Network Interface Drivers (Kernel): so that this capability is implemented with clear verification evidence.
+- **US-13-0011**: As a Substrate contributor working on 9. Networking (Future), I want to driver Compliance: All drivers must implement struct ifnet methods so that this capability is implemented with clear verification evidence.
+- **US-13-0012**: As a Substrate contributor working on 9. Networking (Future), I want to loopback: Virtual interface implementation so that this capability is implemented with clear verification evidence.
+- **US-13-0013**: As a Substrate contributor working on 9. Networking (Future), I want to nE2000: so that this capability is implemented with clear verification evidence.
+- **US-13-0014**: As a Substrate contributor working on 9. Networking (Future), I want to iSA/PCI attachment so that this capability is implemented with clear verification evidence.
+- **US-13-0015**: As a Substrate contributor working on 9. Networking (Future), I want to 8390 NIC core logic (Ring buffer management) so that this capability is implemented with clear verification evidence.
+- **US-13-0016**: As a Substrate contributor working on 9. Networking (Future), I want to pIO data transfer (ports 0x10, 0x300) so that this capability is implemented with clear verification evidence.
+- **US-13-0017**: As a Substrate contributor working on 9. Networking (Future), I want to iRQ handling (ISR/IMR) so that this capability is implemented with clear verification evidence.
+- **US-13-0018**: As a Substrate contributor working on 9. Networking (Future), I want to rTL8139: so that this capability is implemented with clear verification evidence.
+- **US-13-0019**: As a Substrate contributor working on 9. Networking (Future), I want to pCI Bus Mastering so that this capability is implemented with clear verification evidence.
+- **US-13-0020**: As a Substrate contributor working on 9. Networking (Future), I want to c+ Mode (Descriptor-based) optimized support so that this capability is implemented with clear verification evidence.
+- **US-13-0021**: As a Substrate contributor working on 9. Networking (Future), I want to rx/Tx DMA integration so that this capability is implemented with clear verification evidence.
+- **US-13-0022**: As a Substrate contributor working on 9. Networking (Future), I want to e1000 (Intel Pro/1000): so that this capability is implemented with clear verification evidence.
+- **US-13-0023**: As a Substrate contributor working on 9. Networking (Future), I want to pCI/PCI-X/PCIe support so that this capability is implemented with clear verification evidence.
+- **US-13-0024**: As a Substrate contributor working on 9. Networking (Future), I want to advanced Descriptor rings so that this capability is implemented with clear verification evidence.
+- **US-13-0025**: As a Substrate contributor working on 9. Networking (Future), I want to interrupt Throttling so that this capability is implemented with clear verification evidence.
+- **US-13-0026**: As a Substrate contributor working on 9. Networking (Future), I want to virtIO Net: so that this capability is implemented with clear verification evidence.
+- **US-13-0027**: As a Substrate contributor working on 9. Networking (Future), I want to virtqueue setup (Rx/Tx/Control) so that this capability is implemented with clear verification evidence.
+- **US-13-0028**: As a Substrate contributor working on 9. Networking (Future), I want to feature negotiation (CSUM, TSO, etc.) so that this capability is implemented with clear verification evidence.
+- **US-13-0029**: As a Substrate contributor working on 9. Networking (Future), I want to layer 2: Packet Interface Layer so that this capability is implemented with clear verification evidence.
+- **US-13-0030**: As a Substrate contributor working on 9. Networking (Future), I want to define abstract packet structure (mbuf) so that this capability is implemented with clear verification evidence.
+- **US-13-0031**: As a Substrate contributor working on 9. Networking (Future), I want to implement packet queuing (if_snd, if_fastq) and dispatching so that this capability is implemented with clear verification evidence.
+- **US-13-0032**: As a Substrate contributor working on 9. Networking (Future), I want to implement ifconfig style interface management (up/down/flags/mtu) so that this capability is implemented with clear verification evidence.
+- **US-13-0033**: As a Substrate contributor working on 9. Networking (Future), I want to layer 3: Protocol Drivers (Kernel Stack) so that this capability is implemented with clear verification evidence.
+- **US-13-0034**: As a Substrate contributor working on 9. Networking (Future), I want to ethernet (L2): so that this capability is implemented with clear verification evidence.
+- **US-13-0035**: As a Substrate contributor working on 9. Networking (Future), I want to frame parsing (EtherType dispatch) so that this capability is implemented with clear verification evidence.
+- **US-13-0036**: As a Substrate contributor working on 9. Networking (Future), I want to aRP/RARP encapsulation so that this capability is implemented with clear verification evidence.
+- **US-13-0037**: As a Substrate contributor working on 9. Networking (Future), I want to aRP (L2.5): so that this capability is implemented with clear verification evidence.
+- **US-13-0038**: As a Substrate contributor working on 9. Networking (Future), I want to resolution (IP -> MAC) so that this capability is implemented with clear verification evidence.
+- **US-13-0039**: As a Substrate contributor working on 9. Networking (Future), I want to caching (Hash table with timeout) so that this capability is implemented with clear verification evidence.
+- **US-13-0040**: As a Substrate contributor working on 9. Networking (Future), I want to gratuitous ARP on up so that this capability is implemented with clear verification evidence.
+- **US-13-0041**: As a Substrate contributor working on 9. Networking (Future), I want to iPv4 (L3): so that this capability is implemented with clear verification evidence.
+- **US-13-0042**: As a Substrate contributor working on 9. Networking (Future), I want to packet validation (Checksum, Version, HL) so that this capability is implemented with clear verification evidence.
+- **US-13-0043**: As a Substrate contributor working on 9. Networking (Future), I want to routing table lookup (LPM - Longest Prefix Match) so that this capability is implemented with clear verification evidence.
+- **US-13-0044**: As a Substrate contributor working on 9. Networking (Future), I want to fragmentation/Reassembly logic so that this capability is implemented with clear verification evidence.
+- **US-13-0045**: As a Substrate contributor working on 9. Networking (Future), I want to iPv6 (L3): so that this capability is implemented with clear verification evidence.
+- **US-13-0046**: As a Substrate contributor working on 9. Networking (Future), I want to packet parsing and extension headers so that this capability is implemented with clear verification evidence.
+- **US-13-0047**: As a Substrate contributor working on 9. Networking (Future), I want to nDP (Neighbor Discovery) state machine so that this capability is implemented with clear verification evidence.
+- **US-13-0048**: As a Substrate contributor working on 9. Networking (Future), I want to sLAAC autoconfiguration so that this capability is implemented with clear verification evidence.
+- **US-13-0049**: As a Substrate contributor working on 9. Networking (Future), I want to iCMPv4/v6 (L3): so that this capability is implemented with clear verification evidence.
+- **US-13-0050**: As a Substrate contributor working on 9. Networking (Future), I want to echo Request/Reply (Ping) so that this capability is implemented with clear verification evidence.
+- **US-13-0051**: As a Substrate contributor working on 9. Networking (Future), I want to destination Unreachable / Time Exceeded so that this capability is implemented with clear verification evidence.
+- **US-13-0052**: As a Substrate contributor working on 9. Networking (Future), I want to uDP (L4): so that this capability is implemented with clear verification evidence.
+- **US-13-0053**: As a Substrate contributor working on 9. Networking (Future), I want to pCB list (Port binding) so that this capability is implemented with clear verification evidence.
+- **US-13-0054**: As a Substrate contributor working on 9. Networking (Future), I want to datagram sending/receiving so that this capability is implemented with clear verification evidence.
+- **US-13-0055**: As a Substrate contributor working on 9. Networking (Future), I want to tCP (L4): so that this capability is implemented with clear verification evidence.
+- **US-13-0056**: As a Substrate contributor working on 9. Networking (Future), I want to state Machine: LISTEN, SYN_SENT, SYN_RCVD, ESTABLISHED, FIN_WAIT so that this capability is implemented with clear verification evidence.
+- **US-13-0057**: As a Substrate contributor working on 9. Networking (Future), I want to window Management: Sliding window, Flow control so that this capability is implemented with clear verification evidence.
+- **US-13-0058**: As a Substrate contributor working on 9. Networking (Future), I want to congestion Control: Slow Start, Congestion Avoidance so that this capability is implemented with clear verification evidence.
+- **US-13-0059**: As a Substrate contributor working on 9. Networking (Future), I want to timers: Retransmission, Keepalive, TIME_WAIT so that this capability is implemented with clear verification evidence.
+- **US-13-0060**: As a Substrate contributor working on 9. Networking (Future), I want to layer 4: Socket API so that this capability is implemented with clear verification evidence.
+- **US-13-0061**: As a Substrate contributor working on 9. Networking (Future), I want to vFS Integration: Map sockets to file descriptors so that this capability is implemented with clear verification evidence.
+- **US-13-0062**: As a Substrate contributor working on 9. Networking (Future), I want to syscalls: socket, bind, connect, listen, accept, setsockopt so that this capability is implemented with clear verification evidence.
+- **US-13-0063**: As a Substrate contributor working on 9. Networking (Future), I want to i/O: send, recv, sendto, recvfrom, sendmsg, recvmsg so that this capability is implemented with clear verification evidence.
+- **US-13-0064**: As a Substrate contributor working on 9. Networking (Future), I want to multiplexing: select/poll/epoll so that this capability is implemented with clear verification evidence.
+- **US-13-0065**: As a Substrate contributor working on 9. Networking (Future), I want to supplemental: Userspace & Extensibility so that this capability is implemented with clear verification evidence.
+- **US-13-0066**: As a Substrate contributor working on 9. Networking (Future), I want to netUSE API: Interface for running NIC drivers in userspace so that this capability is implemented with clear verification evidence.
+- **US-13-0067**: As a Substrate contributor working on 9. Networking (Future), I want to userspace Stacks: TUN/TAP style interface so that this capability is implemented with clear verification evidence.
+- **US-13-0068**: As a Substrate contributor working on 9. Networking (Future), I want to userland Tools so that this capability is implemented with clear verification evidence.
+- **US-13-0069**: As a Substrate contributor working on 9. Networking (Future), I want to diagnostic: so that this capability is implemented with clear verification evidence.
+- **US-13-0070**: As a Substrate contributor working on 9. Networking (Future), I want to ping so that this capability is implemented with clear verification evidence.
+- **US-13-0071**: As a Substrate contributor working on 9. Networking (Future), I want to ping6 so that this capability is implemented with clear verification evidence.
+- **US-13-0072**: As a Substrate contributor working on 9. Networking (Future), I want to traceroute so that this capability is implemented with clear verification evidence.
+- **US-13-0073**: As a Substrate contributor working on 9. Networking (Future), I want to tracepath so that this capability is implemented with clear verification evidence.
+- **US-13-0074**: As a Substrate contributor working on 9. Networking (Future), I want to configuration: so that this capability is implemented with clear verification evidence.
+- **US-13-0075**: As a Substrate contributor working on 9. Networking (Future), I want to ifconfig so that this capability is implemented with clear verification evidence.
+- **US-13-0076**: As a Substrate contributor working on 9. Networking (Future), I want to ip (Netlink-style) so that this capability is implemented with clear verification evidence.
+- **US-13-0077**: As a Substrate contributor working on 9. Networking (Future), I want to route so that this capability is implemented with clear verification evidence.
+- **US-13-0078**: As a Substrate contributor working on 9. Networking (Future), I want to clients: so that this capability is implemented with clear verification evidence.
+- **US-13-0079**: As a Substrate contributor working on 9. Networking (Future), I want to dhcp (custom DHCP client) so that this capability is implemented with clear verification evidence.
+- **US-13-0080**: As a Substrate contributor working on 9. Networking (Future), I want to basic netcat so that this capability is implemented with clear verification evidence.
+- **US-13-0081**: As a Substrate contributor working on 9. Networking (Future), I want to analysis: tcpdump (requires BPF or raw socket support) so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-13-0001** (EARS/Ubiquitous): The Substrate system shall layer 0: Driver Framework (Hardware Abstraction):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0002** (EARS/Ubiquitous): The Substrate system shall interface Structure (struct ifnet):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0003** (EARS/Ubiquitous): The Substrate system shall common fields: Name (eth0), MTU, Flags (UP, BROADCAST, PROMISC), Hardware Address.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0004** (EARS/Ubiquitous): The Substrate system shall methods: init, start (tx), stop, ioctl (config), watchdog.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0005** (EARS/Ubiquitous): The Substrate system shall buffer Management (mbuf / sk_buff):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0006** (EARS/Ubiquitous): The Substrate system shall chainable buffer structures for zero-copy handling.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0007** (EARS/Ubiquitous): The Substrate system shall header/Data split for localized protocol processing.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0008** (EARS/Ubiquitous): The Substrate system shall device Registry: Central list of attached network devices.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0009** (EARS/Ubiquitous): The Substrate system shall devFS Exposure: Publish interfaces as /dev/network/ifname (e.g., ne0, bge0).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0010** (EARS/Ubiquitous): The Substrate system shall layer 1: Network Interface Drivers (Kernel):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0011** (EARS/Ubiquitous): The Substrate system shall driver Compliance: All drivers must implement struct ifnet methods.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0012** (EARS/Ubiquitous): The Substrate system shall loopback: Virtual interface implementation.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0013** (EARS/Ubiquitous): The Substrate system shall nE2000:.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0014** (EARS/Ubiquitous): The Substrate system shall iSA/PCI attachment.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0015** (EARS/Ubiquitous): The Substrate system shall 8390 NIC core logic (Ring buffer management).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0016** (EARS/Ubiquitous): The Substrate system shall pIO data transfer (ports 0x10, 0x300).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0017** (EARS/Ubiquitous): The Substrate system shall iRQ handling (ISR/IMR).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0018** (EARS/Ubiquitous): The Substrate system shall rTL8139:.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0019** (EARS/Ubiquitous): The Substrate system shall pCI Bus Mastering.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0020** (EARS/Ubiquitous): The Substrate system shall c+ Mode (Descriptor-based) optimized support.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0021** (EARS/Ubiquitous): The Substrate system shall rx/Tx DMA integration.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0022** (EARS/Ubiquitous): The Substrate system shall e1000 (Intel Pro/1000):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0023** (EARS/Ubiquitous): The Substrate system shall pCI/PCI-X/PCIe support.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0024** (EARS/Ubiquitous): The Substrate system shall advanced Descriptor rings.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0025** (EARS/Ubiquitous): The Substrate system shall interrupt Throttling.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0026** (EARS/Ubiquitous): The Substrate system shall virtIO Net:.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0027** (EARS/Ubiquitous): The Substrate system shall virtqueue setup (Rx/Tx/Control).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0028** (EARS/Ubiquitous): The Substrate system shall feature negotiation (CSUM, TSO, etc.).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0029** (EARS/Ubiquitous): The Substrate system shall layer 2: Packet Interface Layer.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0030** (EARS/Ubiquitous): The Substrate system shall define abstract packet structure (mbuf).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0031** (EARS/Ubiquitous): The Substrate system shall implement packet queuing (if_snd, if_fastq) and dispatching.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0032** (EARS/Ubiquitous): The Substrate system shall implement ifconfig style interface management (up/down/flags/mtu).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0033** (EARS/Ubiquitous): The Substrate system shall layer 3: Protocol Drivers (Kernel Stack).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0034** (EARS/Ubiquitous): The Substrate system shall ethernet (L2):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0035** (EARS/Ubiquitous): The Substrate system shall frame parsing (EtherType dispatch).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0036** (EARS/Ubiquitous): The Substrate system shall aRP/RARP encapsulation.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0037** (EARS/Ubiquitous): The Substrate system shall aRP (L2.5):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0038** (EARS/Ubiquitous): The Substrate system shall resolution (IP -> MAC).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0039** (EARS/Ubiquitous): The Substrate system shall caching (Hash table with timeout).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0040** (EARS/Ubiquitous): The Substrate system shall gratuitous ARP on up.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0041** (EARS/Ubiquitous): The Substrate system shall iPv4 (L3):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0042** (EARS/Ubiquitous): The Substrate system shall packet validation (Checksum, Version, HL).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0043** (EARS/Ubiquitous): The Substrate system shall routing table lookup (LPM - Longest Prefix Match).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0044** (EARS/Ubiquitous): The Substrate system shall fragmentation/Reassembly logic.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0045** (EARS/Ubiquitous): The Substrate system shall iPv6 (L3):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0046** (EARS/Ubiquitous): The Substrate system shall packet parsing and extension headers.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0047** (EARS/Ubiquitous): The Substrate system shall nDP (Neighbor Discovery) state machine.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0048** (EARS/Ubiquitous): The Substrate system shall sLAAC autoconfiguration.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0049** (EARS/Ubiquitous): The Substrate system shall iCMPv4/v6 (L3):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0050** (EARS/Ubiquitous): The Substrate system shall echo Request/Reply (Ping).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0051** (EARS/Ubiquitous): The Substrate system shall destination Unreachable / Time Exceeded.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0052** (EARS/Ubiquitous): The Substrate system shall uDP (L4):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0053** (EARS/Ubiquitous): The Substrate system shall pCB list (Port binding).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0054** (EARS/Ubiquitous): The Substrate system shall datagram sending/receiving.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0055** (EARS/Ubiquitous): The Substrate system shall tCP (L4):.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0056** (EARS/Ubiquitous): The Substrate system shall state Machine: LISTEN, SYN_SENT, SYN_RCVD, ESTABLISHED, FIN_WAIT.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0057** (EARS/Ubiquitous): The Substrate system shall window Management: Sliding window, Flow control.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0058** (EARS/Ubiquitous): The Substrate system shall congestion Control: Slow Start, Congestion Avoidance.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0059** (EARS/Ubiquitous): The Substrate system shall timers: Retransmission, Keepalive, TIME_WAIT.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0060** (EARS/Ubiquitous): The Substrate system shall layer 4: Socket API.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0061** (EARS/Ubiquitous): The Substrate system shall vFS Integration: Map sockets to file descriptors.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0062** (EARS/Ubiquitous): The Substrate system shall syscalls: socket, bind, connect, listen, accept, setsockopt.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0063** (EARS/Ubiquitous): The Substrate system shall i/O: send, recv, sendto, recvfrom, sendmsg, recvmsg.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0064** (EARS/Ubiquitous): The Substrate system shall multiplexing: select/poll/epoll.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0065** (EARS/Ubiquitous): The Substrate system shall supplemental: Userspace & Extensibility.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0066** (EARS/Ubiquitous): The Substrate system shall netUSE API: Interface for running NIC drivers in userspace.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0067** (EARS/Ubiquitous): The Substrate system shall userspace Stacks: TUN/TAP style interface.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0068** (EARS/Ubiquitous): The Substrate system shall userland Tools.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0069** (EARS/Ubiquitous): The Substrate system shall diagnostic:.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0070** (EARS/Ubiquitous): The Substrate system shall ping.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0071** (EARS/Ubiquitous): The Substrate system shall ping6.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0072** (EARS/Ubiquitous): The Substrate system shall traceroute.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0073** (EARS/Ubiquitous): The Substrate system shall tracepath.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0074** (EARS/Ubiquitous): The Substrate system shall configuration:.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0075** (EARS/Ubiquitous): The Substrate system shall ifconfig.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0076** (EARS/Ubiquitous): The Substrate system shall ip (Netlink-style).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0077** (EARS/Ubiquitous): The Substrate system shall route.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0078** (EARS/Ubiquitous): The Substrate system shall clients:.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0079** (EARS/Ubiquitous): The Substrate system shall dhcp (custom DHCP client).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0080** (EARS/Ubiquitous): The Substrate system shall basic netcat.
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-13-0081** (EARS/Ubiquitous): The Substrate system shall analysis: tcpdump (requires BPF or raw socket support).
+  - Context: 9. Networking (Future)
+  - Verification: design review + implementation evidence + test/doc update.
