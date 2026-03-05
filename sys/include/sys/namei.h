@@ -93,6 +93,7 @@ struct nameidata {
 
 /* Name Cache functions */
 void nchinit(void);
+void namei_init(void);
 void cache_enter(struct vnode *dvp, struct vnode *vp, const char *name, size_t len);
 int  cache_lookup(struct vnode *dvp, struct vnode **vpp, const char *name, size_t len);
 void cache_purge(struct vnode *vp);

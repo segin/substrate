@@ -1,0 +1,154 @@
+# 6. Userspace/Tools (`usr.bin/yacc`)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 10811-10839.
+
+## Reimplemented Checklist (All Open)
+
+### 6. Userspace/Tools (`usr.bin/yacc`)
+- [ ] **Yacc Implementation (POSIX-Compliant):**
+    - [ ] **1. Infrastructure & Symbol Table:**
+        - [ ] Create `usr.bin/yacc` directory and Makefile.
+        - [ ] Implement `main.c` argument parsing (POSIX options `-d`, `-l`, `-t`, `-v`, `-b`, `-p`).
+        - [ ] Implement Symbol Table (buckets, hashing) for tokens and non-terminals.
+    - [ ] **2. Grammar Reader (`reader.c`):**
+        - [ ] Implement Lexical Analyzer for Yacc input (C code vs Declarations vs Rules).
+        - [ ] Parse Declarations (`%token`, `%type`, `%union`, `%start`, precedence).
+        - [ ] Parse Grammar Rules and Actions (handling `{}` blocks).
+    - [ ] **3. LR(0) Construction (`lr0.c`, `closure.c`):**
+        - [ ] Implement Item Set computation.
+        - [ ] Implement Closure algorithm.
+        - [ ] Implement GOTO graph construction.
+    - [ ] **4. LALR(1) Lookahead (`lalr.c`):**
+        - [ ] Compute DR (Direct Read) and READ (Relation) sets.
+        - [ ] Compute Lookaheads for each kernel item (Digraph algorithm).
+    - [ ] **5. Tables & Conflicts (`mkpar.c`):**
+        - [ ] Generate ACTION and GOTO tables.
+        - [ ] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
+        - [ ] Generate Default Reductions.
+    - [ ] **6. Code Generation (`output.c`):**
+        - [ ] generate `y.tab.c` (parser skeleton + user actions).
+        - [ ] generate `y.tab.h` (token defines, `YYSTYPE`).
+        - [ ] generate `y.output` (verbose state descriptions).
+    - [ ] **7. Validation & Tests:**
+        - [ ] Basic Calculator Test (Precedence/Associativity).
+        - [ ] Conflict Reporting Test.
+        - [ ] Error Recovery Test (`error` token).
+
+## User Stories
+
+- **US-21-0001**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to yacc Implementation (POSIX-Compliant): so that this capability is implemented with clear verification evidence.
+- **US-21-0002**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to 1. Infrastructure & Symbol Table: so that this capability is implemented with clear verification evidence.
+- **US-21-0003**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to create usr.bin/yacc directory and Makefile so that this capability is implemented with clear verification evidence.
+- **US-21-0004**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to implement main.c argument parsing (POSIX options -d, -l, -t, -v, -b, -p) so that this capability is implemented with clear verification evidence.
+- **US-21-0005**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to implement Symbol Table (buckets, hashing) for tokens and non-terminals so that this capability is implemented with clear verification evidence.
+- **US-21-0006**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to 2. Grammar Reader (reader.c): so that this capability is implemented with clear verification evidence.
+- **US-21-0007**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to implement Lexical Analyzer for Yacc input (C code vs Declarations vs Rules) so that this capability is implemented with clear verification evidence.
+- **US-21-0008**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to parse Declarations (%token, %type, %union, %start, precedence) so that this capability is implemented with clear verification evidence.
+- **US-21-0009**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to parse Grammar Rules and Actions (handling {} blocks) so that this capability is implemented with clear verification evidence.
+- **US-21-0010**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to 3. LR(0) Construction (lr0.c, closure.c): so that this capability is implemented with clear verification evidence.
+- **US-21-0011**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to implement Item Set computation so that this capability is implemented with clear verification evidence.
+- **US-21-0012**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to implement Closure algorithm so that this capability is implemented with clear verification evidence.
+- **US-21-0013**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to implement GOTO graph construction so that this capability is implemented with clear verification evidence.
+- **US-21-0014**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to 4. LALR(1) Lookahead (lalr.c): so that this capability is implemented with clear verification evidence.
+- **US-21-0015**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to compute DR (Direct Read) and READ (Relation) sets so that this capability is implemented with clear verification evidence.
+- **US-21-0016**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to compute Lookaheads for each kernel item (Digraph algorithm) so that this capability is implemented with clear verification evidence.
+- **US-21-0017**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to 5. Tables & Conflicts (mkpar.c): so that this capability is implemented with clear verification evidence.
+- **US-21-0018**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to generate ACTION and GOTO tables so that this capability is implemented with clear verification evidence.
+- **US-21-0019**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence so that this capability is implemented with clear verification evidence.
+- **US-21-0020**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to generate Default Reductions so that this capability is implemented with clear verification evidence.
+- **US-21-0021**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to 6. Code Generation (output.c): so that this capability is implemented with clear verification evidence.
+- **US-21-0022**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to generate y.tab.c (parser skeleton + user actions) so that this capability is implemented with clear verification evidence.
+- **US-21-0023**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to generate y.tab.h (token defines, YYSTYPE) so that this capability is implemented with clear verification evidence.
+- **US-21-0024**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to generate y.output (verbose state descriptions) so that this capability is implemented with clear verification evidence.
+- **US-21-0025**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to 7. Validation & Tests: so that this capability is implemented with clear verification evidence.
+- **US-21-0026**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to basic Calculator Test (Precedence/Associativity) so that this capability is implemented with clear verification evidence.
+- **US-21-0027**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to conflict Reporting Test so that this capability is implemented with clear verification evidence.
+- **US-21-0028**: As a Substrate contributor working on 6. Userspace/Tools (`usr.bin/yacc`), I want to error Recovery Test (error token) so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-21-0001** (EARS/Ubiquitous): The Substrate system shall yacc Implementation (POSIX-Compliant):.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0002** (EARS/Ubiquitous): The Substrate system shall 1. Infrastructure & Symbol Table:.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0003** (EARS/Ubiquitous): The Substrate system shall create usr.bin/yacc directory and Makefile.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0004** (EARS/Ubiquitous): The Substrate system shall implement main.c argument parsing (POSIX options -d, -l, -t, -v, -b, -p).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0005** (EARS/Ubiquitous): The Substrate system shall implement Symbol Table (buckets, hashing) for tokens and non-terminals.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0006** (EARS/Ubiquitous): The Substrate system shall 2. Grammar Reader (reader.c):.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0007** (EARS/Ubiquitous): The Substrate system shall implement Lexical Analyzer for Yacc input (C code vs Declarations vs Rules).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0008** (EARS/Ubiquitous): The Substrate system shall parse Declarations (%token, %type, %union, %start, precedence).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0009** (EARS/Ubiquitous): The Substrate system shall parse Grammar Rules and Actions (handling {} blocks).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0010** (EARS/Ubiquitous): The Substrate system shall 3. LR(0) Construction (lr0.c, closure.c):.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0011** (EARS/Ubiquitous): The Substrate system shall implement Item Set computation.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0012** (EARS/Ubiquitous): The Substrate system shall implement Closure algorithm.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0013** (EARS/Ubiquitous): The Substrate system shall implement GOTO graph construction.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0014** (EARS/Ubiquitous): The Substrate system shall 4. LALR(1) Lookahead (lalr.c):.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0015** (EARS/Ubiquitous): The Substrate system shall compute DR (Direct Read) and READ (Relation) sets.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0016** (EARS/Ubiquitous): The Substrate system shall compute Lookaheads for each kernel item (Digraph algorithm).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0017** (EARS/Ubiquitous): The Substrate system shall 5. Tables & Conflicts (mkpar.c):.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0018** (EARS/Ubiquitous): The Substrate system shall generate ACTION and GOTO tables.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0019** (EARS/Ubiquitous): The Substrate system shall implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0020** (EARS/Ubiquitous): The Substrate system shall generate Default Reductions.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0021** (EARS/Ubiquitous): The Substrate system shall 6. Code Generation (output.c):.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0022** (EARS/Ubiquitous): The Substrate system shall generate y.tab.c (parser skeleton + user actions).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0023** (EARS/Ubiquitous): The Substrate system shall generate y.tab.h (token defines, YYSTYPE).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0024** (EARS/Ubiquitous): The Substrate system shall generate y.output (verbose state descriptions).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0025** (EARS/Ubiquitous): The Substrate system shall 7. Validation & Tests:.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0026** (EARS/Ubiquitous): The Substrate system shall basic Calculator Test (Precedence/Associativity).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0027** (EARS/Ubiquitous): The Substrate system shall conflict Reporting Test.
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-21-0028** (EARS/Ubiquitous): The Substrate system shall error Recovery Test (error token).
+  - Context: 6. Userspace/Tools (`usr.bin/yacc`)
+  - Verification: design review + implementation evidence + test/doc update.

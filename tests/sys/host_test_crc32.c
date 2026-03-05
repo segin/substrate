@@ -135,6 +135,30 @@ void test_large_buffer(void) {
     printf("PASS\n");
 }
 
+void test_unaligned_access(void) {
+    printf("Testing unaligned memory access...\n");
+
+    uint8_t data[33];
+    memset(data, 0, sizeof(data));
+    data[1] = '1';
+    data[2] = '2';
+    data[3] = '3';
+    data[4] = '4';
+    data[5] = '5';
+    data[6] = '6';
+    data[7] = '7';
+    data[8] = '8';
+    data[9] = '9';
+
+    // We pass data+1 which is unaligned
+    uint32_t expected = 0xCBF43926;
+    uint32_t actual = crc32(data + 1, 9);
+
+    TEST_ASSERT_EQ_HEX(actual, expected, "Unaligned memory access CRC32 result");
+
+    printf("PASS\n");
+}
+
 void test_auto_initialization_internal(void) {
     printf("Testing auto-initialization in crc32()...\n");
 
@@ -163,6 +187,7 @@ int main(void) {
     test_auto_initialization();
     test_vectors();
     test_large_buffer();
+    test_unaligned_access();
     test_auto_initialization_internal();
 
     printf("=== All Tests Passed ===\n");
