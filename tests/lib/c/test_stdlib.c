@@ -257,6 +257,21 @@ void test_getopt_end_of_options(void) {
     printf("test_getopt_end_of_options passed\n");
 }
 
+void test_realloc_edge_cases(void) {
+    // Test realloc(NULL, size) behaves like malloc
+    void *ptr1 = tested_realloc(NULL, 128);
+    assert(ptr1 != NULL);
+    struct block_meta *block1 = (struct block_meta *)ptr1 - 1;
+    assert(block1->free == 0);
+
+    // Test realloc(ptr, 0) behaves like free and returns NULL
+    void *ptr2 = tested_realloc(ptr1, 0);
+    assert(ptr2 == NULL);
+    assert(block1->free == 1);
+
+    printf("test_realloc_edge_cases passed\n");
+}
+
 int main(void) {
     printf("Running stdlib tests...\n");
     test_atoi_basic();
@@ -272,6 +287,7 @@ int main(void) {
     test_getopt_with_args();
     test_getopt_errors();
     test_getopt_end_of_options();
+    test_realloc_edge_cases();
     printf("All tests passed!\n");
     return 0;
 }
