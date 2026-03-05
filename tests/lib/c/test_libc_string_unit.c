@@ -470,8 +470,49 @@ bool test_libc_memcpy(void) {
     return true;
 }
 
+void run_strncasecmp_tests(void) {
+    printf("Running strncasecmp tests...\n");
+
+    // Equal strings, same casing
+    ASSERT_EQ(libc_strncasecmp("abc", "abc", 3), 0, "Equal strings same casing");
+    ASSERT_EQ(libc_strncasecmp("abc", "abc", 5), 0, "Equal strings same casing n>len");
+
+    // Equal strings, different casing
+    ASSERT_EQ(libc_strncasecmp("AbC", "aBc", 3), 0, "Equal strings different casing");
+    ASSERT_EQ(libc_strncasecmp("ABC", "abc", 3), 0, "Equal strings different casing");
+    ASSERT_EQ(libc_strncasecmp("abc", "ABC", 3), 0, "Equal strings different casing");
+
+    // Differing strings
+    ASSERT_TRUE(libc_strncasecmp("abc", "abd", 3) < 0, "abc < abd");
+    ASSERT_TRUE(libc_strncasecmp("abd", "abc", 3) > 0, "abd > abc");
+    ASSERT_TRUE(libc_strncasecmp("AbC", "aBd", 3) < 0, "AbC < aBd");
+
+    // Differing strings, matching prefix up to n
+    ASSERT_EQ(libc_strncasecmp("abcd", "abce", 3), 0, "Matching prefix up to n");
+    ASSERT_EQ(libc_strncasecmp("aBcD", "AbCe", 3), 0, "Matching prefix up to n different casing");
+
+    // Test with n=0
+    ASSERT_EQ(libc_strncasecmp("abc", "def", 0), 0, "Differing strings n=0");
+    ASSERT_EQ(libc_strncasecmp("", "", 0), 0, "Empty strings n=0");
+
+    // Empty strings
+    ASSERT_EQ(libc_strncasecmp("", "", 1), 0, "Empty strings n=1");
+    ASSERT_TRUE(libc_strncasecmp("a", "", 1) > 0, "a > empty string");
+    ASSERT_TRUE(libc_strncasecmp("", "a", 1) < 0, "empty string < a");
+
+    // Sign verification with large values (ensure unsigned char comparison)
+    unsigned char c1[] = {0xff, '\0'};
+    unsigned char c2[] = {0x7f, '\0'};
+    ASSERT_TRUE(libc_strncasecmp((char*)c1, (char*)c2, 1) > 0, "0xff > 0x7f (unsigned)");
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
+    return true;
+}
+
+bool test_libc_strncasecmp(void) {
+    run_strncasecmp_tests();
     return true;
 }
 
@@ -674,6 +715,7 @@ int main(void) {
     run_strtok_tests();
     run_memset_tests();
     run_memcmp_tests();
+    run_strncasecmp_tests();
     run_strchr_tests();
     run_strstr_tests();
     run_strrchr_tests();
