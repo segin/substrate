@@ -31,6 +31,7 @@
 #include <sys/smp.h>
 #include <sys/lock.h>
 #include <sys/types.h>
+#include <sys/param.h>
 #include <sys/stat.h>
 #include <sys/errno.h>
 #include <sys/reboot.h>
@@ -762,6 +763,9 @@ int sys_ioctl(int fd, uint32_t request, void *arg) {
     // However, many ioctls use small structs.
     // This is hard to fix generically without a table.
     // For now, at least validate the pointer if it looks like one.
+    if ((uintptr_t)arg >= KERN_BASE) {
+        return -EFAULT;
+    }
     return kern_ioctl(fd, request, arg);
 }
 
