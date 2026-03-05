@@ -257,6 +257,17 @@ void test_getopt_end_of_options(void) {
     printf("test_getopt_end_of_options passed\n");
 }
 
+void test_realloc(void) {
+    void *ptr = tested_malloc(10);
+    assert(ptr != NULL);
+
+    // realloc with size 0 should free the pointer and return NULL
+    void *new_ptr = tested_realloc(ptr, 0);
+    assert(new_ptr == NULL);
+
+    printf("test_realloc passed\n");
+}
+
 int main(void) {
     printf("Running stdlib tests...\n");
     test_atoi_basic();
@@ -272,6 +283,7 @@ int main(void) {
     test_getopt_with_args();
     test_getopt_errors();
     test_getopt_end_of_options();
+    test_realloc();
     printf("All tests passed!\n");
     return 0;
 }
