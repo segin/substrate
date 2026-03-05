@@ -347,5 +347,3 @@ void sched_get_loadavg(unsigned long loads[3]) { loads[0] = loads[1] = loads[2] 
 uint32_t sched_count_runnable(void) { return 0; }
 uint32_t sched_count_threads(void) { return 0; }
 int sys_pmap_stats(struct pmap_stats *stats) { return 0; }
-
-void namei_init(void) {}
