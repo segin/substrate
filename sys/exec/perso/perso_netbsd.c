@@ -14,10 +14,11 @@
 #include <exec/perso/netbsd/netbsd_syscalls.h>
 #include <sys/resource.h>
 #include <sys/times.h>
+#include <sys/errno.h>
 #include <string.h>
 
 int netbsd_sys_getrusage(int who, struct rusage *rusage) {
-    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -1;
+    if (who != RUSAGE_SELF && who != RUSAGE_CHILDREN) return -EINVAL;
 
     struct tms t;
     if ((clock_t)kern_times(&t) == (clock_t)-1) return -1;
@@ -39,6 +40,8 @@ int netbsd_sys_getrusage(int who, struct rusage *rusage) {
     if (copyout(&kr, rusage, sizeof(struct rusage)) != 0) return -14;
     return 0;
 }
+
+#ifndef HOST_TEST
 
 /* NetBSD syscall table - based on i386 column */
 static void *netbsd_syscalls[MAX_SYSCALLS] = {
@@ -368,3 +371,5 @@ struct personality personality_netbsd = {
     .sigreturn = netbsd_sys_sigreturn,
     .rt_sigreturn = NULL
 };
+
+#endif /* HOST_TEST */

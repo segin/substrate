@@ -247,8 +247,7 @@ static void gtoa(char *buf, double val, int precision, int uppercase, int altern
     }
 }
 
-
-enum length_modifier {
+enum format_length {
     LEN_NONE,
     LEN_HH,
     LEN_H,
@@ -261,7 +260,7 @@ enum length_modifier {
     LEN_LONG_DOUBLE
 };
 
-struct printf_info {
+struct format_flags {
     int left_align;
     int force_sign;
     int space_prefix;
@@ -269,31 +268,44 @@ struct printf_info {
     int pad_zero;
     int width;
     int precision;
-    enum length_modifier length;
-    char specifier;
+    enum format_length length;
 };
 
-struct printf_ctx {
-    char *s;
+struct format_state {
+    char *str;
     size_t remaining;
     size_t len;
+    size_t total_size;
 };
 
-#define EMIT_CTX(ctx, c) do { \
-    if ((ctx)->remaining > 1) { \
-        *(ctx)->s++ = (c); \
-        (ctx)->remaining--; \
-    } \
-    (ctx)->len++; \
-} while (0)
+static void emit_char(struct format_state *state, char c) {
+    if (state->remaining > 1) {
+        *state->str++ = c;
+        state->remaining--;
+    }
+    state->len++;
+}
 
+static void emit_string(struct format_state *state, const char *s, int len) {
+    for (int i = 0; i < len; i++) {
+        emit_char(state, s[i]);
+    }
+}
 
-static void format_integer(struct printf_ctx *ctx, struct printf_info *info, int64_t val) {
+static void emit_padding(struct format_state *state, int count, char pad_char) {
+    for (int i = 0; i < count; i++) {
+        emit_char(state, pad_char);
+    }
+}
+
+static void format_int(struct format_state *state, struct format_flags *flags, int64_t val) {
+    if (flags->precision != -1) flags->pad_zero = 0;
+
     char digits[64];
     int is_negative = (val < 0);
     uint64_t uval = (is_negative) ? (uint64_t)-val : (uint64_t)val;
 
-    if (uval == 0 && info->precision == 0) {
+    if (uval == 0 && flags->precision == 0) {
         digits[0] = '\0';
     } else {
         char b[64];
@@ -307,37 +319,39 @@ static void format_integer(struct printf_ctx *ctx, struct printf_info *info, int
     }
 
     int digits_len = strlen(digits);
-    int precision_fill = (info->precision > digits_len) ? (info->precision - digits_len) : 0;
+    int precision_fill = (flags->precision > digits_len) ? (flags->precision - digits_len) : 0;
 
     const char *prefix = "";
     if (is_negative) prefix = "-";
-    else if (info->force_sign) prefix = "+";
-    else if (info->space_prefix) prefix = " ";
+    else if (flags->force_sign) prefix = "+";
+    else if (flags->space_prefix) prefix = " ";
     int prefix_len = strlen(prefix);
 
     int total_len = prefix_len + precision_fill + digits_len;
 
-    if (!info->left_align && info->pad_zero) {
-        for (int i = 0; prefix[i]; i++) EMIT_CTX(ctx, prefix[i]);
-        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, '0');
-        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
-        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
-    } else if (!info->left_align) {
-        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
-        for (int i = 0; prefix[i]; i++) EMIT_CTX(ctx, prefix[i]);
-        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
-        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
+    if (!flags->left_align && flags->pad_zero) {
+        emit_string(state, prefix, prefix_len);
+        emit_padding(state, flags->width - total_len, '0');
+        emit_padding(state, precision_fill, '0');
+        emit_string(state, digits, digits_len);
+    } else if (!flags->left_align) {
+        emit_padding(state, flags->width - total_len, ' ');
+        emit_string(state, prefix, prefix_len);
+        emit_padding(state, precision_fill, '0');
+        emit_string(state, digits, digits_len);
     } else {
-        for (int i = 0; prefix[i]; i++) EMIT_CTX(ctx, prefix[i]);
-        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
-        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
-        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+        emit_string(state, prefix, prefix_len);
+        emit_padding(state, precision_fill, '0');
+        emit_string(state, digits, digits_len);
+        emit_padding(state, flags->width - total_len, ' ');
     }
 }
 
-static void format_unsigned(struct printf_ctx *ctx, struct printf_info *info, uint64_t val) {
+static void format_uint(struct format_state *state, struct format_flags *flags, uint64_t val) {
+    if (flags->precision != -1) flags->pad_zero = 0;
+
     char digits[64];
-    if (val == 0 && info->precision == 0) {
+    if (val == 0 && flags->precision == 0) {
         digits[0] = '\0';
     } else {
         char b[64];
@@ -352,98 +366,110 @@ static void format_unsigned(struct printf_ctx *ctx, struct printf_info *info, ui
     }
 
     int digits_len = strlen(digits);
-    int precision_fill = (info->precision > digits_len) ? (info->precision - digits_len) : 0;
+    int precision_fill = (flags->precision > digits_len) ? (flags->precision - digits_len) : 0;
     int total_len = precision_fill + digits_len;
 
-    if (!info->left_align && info->pad_zero) {
-         for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, '0');
-         for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
-         for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
-    } else if (info->left_align) {
-        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
-        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
-        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+    if (!flags->left_align && flags->pad_zero) {
+        emit_padding(state, flags->width - total_len, '0');
+        emit_padding(state, precision_fill, '0');
+        emit_string(state, digits, digits_len);
+    } else if (flags->left_align) {
+        emit_padding(state, precision_fill, '0');
+        emit_string(state, digits, digits_len);
+        emit_padding(state, flags->width - total_len, ' ');
     } else {
-        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
-        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
-        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
+        emit_padding(state, flags->width - total_len, ' ');
+        emit_padding(state, precision_fill, '0');
+        emit_string(state, digits, digits_len);
     }
 }
 
-static void format_octal(struct printf_ctx *ctx, struct printf_info *info, uint64_t val) {
+static void format_oct(struct format_state *state, struct format_flags *flags, uint64_t val) {
     char tmp[64];
     char *ptr = tmp;
-    if (info->alternate_form && val != 0) *ptr++ = '0';
+    if (flags->alternate_form && val != 0) *ptr++ = '0';
     utoa_oct(ptr, val);
     int tmp_len = strlen(tmp);
 
-    if (info->width > tmp_len) {
-        if (info->pad_zero) {
-             for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, '0');
-             for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
-        } else if (info->left_align) {
-            for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
-            for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, ' ');
+    if (flags->width > tmp_len) {
+        if (flags->pad_zero) {
+            emit_padding(state, flags->width - tmp_len, '0');
+            emit_string(state, tmp, tmp_len);
+        } else if (flags->left_align) {
+            emit_string(state, tmp, tmp_len);
+            emit_padding(state, flags->width - tmp_len, ' ');
         } else {
-            for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, ' ');
-            for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
+            emit_padding(state, flags->width - tmp_len, ' ');
+            emit_string(state, tmp, tmp_len);
         }
     } else {
-        for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
+        emit_string(state, tmp, tmp_len);
     }
 }
 
-static void format_hex(struct printf_ctx *ctx, struct printf_info *info, uint64_t val, int uppercase) {
+static void format_hex(struct format_state *state, struct format_flags *flags, uint64_t val, int uppercase) {
     char tmp[64];
     utoa_hex(tmp, val, uppercase);
     int len_val = strlen(tmp);
-    int prefix_len = (info->alternate_form && val != 0) ? 2 : 0;
+    int prefix_len = (flags->alternate_form && val != 0) ? 2 : 0;
     int total_len = len_val + prefix_len;
 
-    if (info->width > total_len) {
-        if (info->pad_zero && !info->left_align) {
+    if (flags->width > total_len) {
+        if (flags->pad_zero && !flags->left_align) {
             if (prefix_len) {
-                EMIT_CTX(ctx, '0');
-                EMIT_CTX(ctx, uppercase ? 'X' : 'x');
+                emit_char(state, '0');
+                emit_char(state, uppercase ? 'X' : 'x');
             }
-            for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, '0');
-            for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
-        } else if (info->left_align) {
+            emit_padding(state, flags->width - total_len, '0');
+            emit_string(state, tmp, len_val);
+        } else if (flags->left_align) {
             if (prefix_len) {
-                EMIT_CTX(ctx, '0');
-                EMIT_CTX(ctx, uppercase ? 'X' : 'x');
+                emit_char(state, '0');
+                emit_char(state, uppercase ? 'X' : 'x');
             }
-            for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
-            for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+            emit_string(state, tmp, len_val);
+            emit_padding(state, flags->width - total_len, ' ');
         } else {
-            for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+            emit_padding(state, flags->width - total_len, ' ');
             if (prefix_len) {
-                EMIT_CTX(ctx, '0');
-                EMIT_CTX(ctx, uppercase ? 'X' : 'x');
+                emit_char(state, '0');
+                emit_char(state, uppercase ? 'X' : 'x');
             }
-            for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
+            emit_string(state, tmp, len_val);
         }
     } else {
         if (prefix_len) {
-            EMIT_CTX(ctx, '0');
-            EMIT_CTX(ctx, uppercase ? 'X' : 'x');
+            emit_char(state, '0');
+            emit_char(state, uppercase ? 'X' : 'x');
         }
-        for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
+        emit_string(state, tmp, len_val);
     }
 }
 
-static void format_float_helper(struct printf_ctx *ctx, struct printf_info *info, const char *tmp) {
+static void format_float(struct format_state *state, struct format_flags *flags, double val, char specifier) {
+    char tmp[128];
+    if (specifier == 'f' || specifier == 'F') {
+        ftoa(tmp, val, flags->precision, (specifier == 'F'));
+    } else if (specifier == 'e' || specifier == 'E') {
+        etoa(tmp, val, flags->precision, (specifier == 'E'));
+    } else if (specifier == 'g' || specifier == 'G') {
+        gtoa(tmp, val, flags->precision, (specifier == 'G'), flags->alternate_form);
+    } else if (specifier == 'a' || specifier == 'A') {
+        strcpy(tmp, (specifier == 'A') ? "0X1.0P+0" : "0x1.0p+0");
+    }
+
     int tmp_len = strlen(tmp);
-    if (info->width > tmp_len && !info->left_align) {
-        for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, ' ');
+
+    if (flags->width > tmp_len && !flags->left_align) {
+        emit_padding(state, flags->width - tmp_len, ' ');
     }
-    for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
-    if (info->width > tmp_len && info->left_align) {
-        for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, ' ');
+    emit_string(state, tmp, tmp_len);
+    if (flags->width > tmp_len && flags->left_align) {
+        emit_padding(state, flags->width - tmp_len, ' ');
     }
 }
 
-static void format_pointer(struct printf_ctx *ctx, struct printf_info *info, unsigned int val) {
+static void format_ptr(struct format_state *state, struct format_flags *flags, unsigned int val) {
     char tmp[32];
     utoa_hex(tmp, val, 0); // digits only
     int len_val = strlen(tmp);
@@ -452,50 +478,60 @@ static void format_pointer(struct printf_ctx *ctx, struct printf_info *info, uns
 
     int total_len = 2 + zeros + len_val; // 0x + zeros + digits
 
-    if (info->width > total_len && !info->left_align) {
-        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+    if (flags->width > total_len && !flags->left_align) {
+        emit_padding(state, flags->width - total_len, ' ');
     }
 
-    EMIT_CTX(ctx, '0'); EMIT_CTX(ctx, 'x');
-    for (int i = 0; i < zeros; i++) EMIT_CTX(ctx, '0');
-    for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
+    emit_char(state, '0'); emit_char(state, 'x');
+    emit_padding(state, zeros, '0');
+    emit_string(state, tmp, len_val);
 
-    if (info->width > total_len && info->left_align) {
-        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+    if (flags->width > total_len && flags->left_align) {
+        emit_padding(state, flags->width - total_len, ' ');
     }
 }
 
-static void format_string(struct printf_ctx *ctx, struct printf_info *info, const char *val) {
+static void format_string(struct format_state *state, struct format_flags *flags, const char *val) {
     if (!val) val = "(null)";
 
     int s_len = 0;
     const char *p = val;
-    while (*p && (info->precision == -1 || s_len < info->precision)) {
+    while (*p && (flags->precision == -1 || s_len < flags->precision)) {
         s_len++;
         p++;
     }
 
-    if (!info->left_align && info->width > s_len) {
-        for (int i = 0; i < info->width - s_len; i++) EMIT_CTX(ctx, ' ');
+    if (!flags->left_align && flags->width > s_len) {
+        emit_padding(state, flags->width - s_len, ' ');
     }
 
-    for (int i = 0; i < s_len; i++) EMIT_CTX(ctx, val[i]);
+    emit_string(state, val, s_len);
 
-    if (info->left_align && info->width > s_len) {
-         for (int i = 0; i < info->width - s_len; i++) EMIT_CTX(ctx, ' ');
+    if (flags->left_align && flags->width > s_len) {
+        emit_padding(state, flags->width - s_len, ' ');
     }
 }
 
+static void format_char(struct format_state *state, struct format_flags *flags, char c) {
+    (void)flags;
+    emit_char(state, c);
+}
 
 int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
-    struct printf_ctx ctx = { .s = str, .remaining = size, .len = 0 };
+    struct format_state state = {
+        .str = str,
+        .remaining = size,
+        .len = 0,
+        .total_size = size
+    };
+
     const char *f = format;
 
     while (*f) {
         if (*f == '%') {
             f++;
             
-            struct printf_info info = {
+            struct format_flags flags = {
                 .left_align = 0,
                 .force_sign = 0,
                 .space_prefix = 0,
@@ -503,198 +539,220 @@ int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
                 .pad_zero = 0,
                 .width = 0,
                 .precision = -1,
-                .length = LEN_NONE,
-                .specifier = 0
+                .length = LEN_NONE
             };
             
+            // Parse flags
             while (1) {
-                if (*f == '-') { info.left_align = 1; info.pad_zero = 0; f++; }
-                else if (*f == '+') { info.force_sign = 1; info.space_prefix = 0; f++; }
-                else if (*f == ' ') { if (!info.force_sign) info.space_prefix = 1; f++; }
-                else if (*f == '#') { info.alternate_form = 1; f++; }
-                else if (*f == '0') { if (!info.left_align) info.pad_zero = 1; f++; }
-                else break;
-            }
-
-            if (*f == '*') {
-                info.width = va_arg(ap, int);
-                if (info.width < 0) { info.left_align = 1; info.width = -info.width; }
-                f++;
-            } else {
-                while (*f >= '0' && *f <= '9') { info.width = info.width * 10 + (*f - '0'); f++; }
-            }
-
-            if (info.left_align) info.pad_zero = 0;
-
-            if (*f == '.') {
-                f++;
-                if (*f == '*') {
-                    info.precision = va_arg(ap, int);
-                    if (info.precision < 0) info.precision = -1;
+                if (*f == '-') {
+                    flags.left_align = 1;
+                    flags.pad_zero = 0;
+                    f++;
+                } else if (*f == '+') {
+                    flags.force_sign = 1;
+                    flags.space_prefix = 0;
+                    f++;
+                } else if (*f == ' ') {
+                    if (!flags.force_sign) flags.space_prefix = 1;
+                    f++;
+                } else if (*f == '#') {
+                    flags.alternate_form = 1;
+                    f++;
+                } else if (*f == '0') {
+                    if (!flags.left_align) flags.pad_zero = 1;
                     f++;
                 } else {
-                    info.precision = 0;
-                    while (*f >= '0' && *f <= '9') { info.precision = info.precision * 10 + (*f - '0'); f++; }
+                    break;
                 }
             }
 
+            // Parse width
+            if (*f == '*') {
+                flags.width = va_arg(ap, int);
+                if (flags.width < 0) {
+                    flags.left_align = 1;
+                    flags.width = -flags.width;
+                }
+                f++;
+            } else {
+                while (*f >= '0' && *f <= '9') {
+                    flags.width = flags.width * 10 + (*f - '0');
+                    f++;
+                }
+            }
+
+            if (flags.left_align) flags.pad_zero = 0;
+
+            // Parse precision
+            if (*f == '.') {
+                f++;
+                if (*f == '*') {
+                    flags.precision = va_arg(ap, int);
+                    if (flags.precision < 0) flags.precision = -1;
+                    f++;
+                } else {
+                    flags.precision = 0;
+                    while (*f >= '0' && *f <= '9') {
+                        flags.precision = flags.precision * 10 + (*f - '0');
+                        f++;
+                    }
+                }
+            }
+
+            // Parse length modifier
             if (*f == 'h') {
                 f++;
-                if (*f == 'h') { info.length = LEN_HH; f++; }
-                else info.length = LEN_H;
+                if (*f == 'h') {
+                    flags.length = LEN_HH;
+                    f++;
+                } else {
+                    flags.length = LEN_H;
+                }
             } else if (*f == 'l') {
                 f++;
-                if (*f == 'l') { info.length = LEN_LL; f++; }
-                else info.length = LEN_L;
-            } else if (*f == 'j') { info.length = LEN_J; f++;
-            } else if (*f == 'z') { info.length = LEN_Z; f++;
-            } else if (*f == 't') { info.length = LEN_T; f++;
-            } else if (*f == 'L') { info.length = LEN_LONG_DOUBLE; f++; }
-
-            info.specifier = *f;
+                if (*f == 'l') {
+                    flags.length = LEN_LL;
+                    f++;
+                } else {
+                    flags.length = LEN_L;
+                }
+            } else if (*f == 'j') {
+                flags.length = LEN_J;
+                f++;
+            } else if (*f == 'z') {
+                flags.length = LEN_Z;
+                f++;
+            } else if (*f == 't') {
+                flags.length = LEN_T;
+                f++;
+            } else if (*f == 'L') {
+                flags.length = LEN_LONG_DOUBLE;
+                f++;
+            }
             
             switch (*f) {
                 case 'd':
                 case 'i': {
                     int64_t val;
-                    if (info.length == LEN_LL || info.length == LEN_J) val = va_arg(ap, long long);
-                    else if (info.length == LEN_L) val = va_arg(ap, long);
-                    else if (info.length == LEN_H) val = (short)va_arg(ap, int);
-                    else if (info.length == LEN_HH) val = (signed char)va_arg(ap, int);
-                    else if (info.length == LEN_Z) val = va_arg(ap, ssize_t);
-                    else if (info.length == LEN_T) val = va_arg(ap, ptrdiff_t);
+                    if (flags.length == LEN_LL || flags.length == LEN_J) val = va_arg(ap, long long);
+                    else if (flags.length == LEN_L) val = va_arg(ap, long);
+                    else if (flags.length == LEN_H) val = (short)va_arg(ap, int);
+                    else if (flags.length == LEN_HH) val = (signed char)va_arg(ap, int);
+                    else if (flags.length == LEN_Z) val = va_arg(ap, ssize_t);
+                    else if (flags.length == LEN_T) val = va_arg(ap, ptrdiff_t);
                     else val = va_arg(ap, int);
-
-                    if (info.precision != -1) info.pad_zero = 0;
-                    format_integer(&ctx, &info, val);
+                    format_int(&state, &flags, val);
                     break;
                 }
                 case 'u': {
                     uint64_t val;
-                    if (info.length == LEN_LL || info.length == LEN_J) val = va_arg(ap, unsigned long long);
-                    else if (info.length == LEN_L) val = va_arg(ap, unsigned long);
-                    else if (info.length == LEN_H) val = (unsigned short)va_arg(ap, unsigned int);
-                    else if (info.length == LEN_HH) val = (unsigned char)va_arg(ap, unsigned int);
-                    else if (info.length == LEN_Z) val = va_arg(ap, size_t);
-                    else if (info.length == LEN_T) val = va_arg(ap, ptrdiff_t);
+                    if (flags.length == LEN_LL || flags.length == LEN_J) val = va_arg(ap, unsigned long long);
+                    else if (flags.length == LEN_L) val = va_arg(ap, unsigned long);
+                    else if (flags.length == LEN_H) val = (unsigned short)va_arg(ap, unsigned int);
+                    else if (flags.length == LEN_HH) val = (unsigned char)va_arg(ap, unsigned int);
+                    else if (flags.length == LEN_Z) val = va_arg(ap, size_t);
+                    else if (flags.length == LEN_T) val = va_arg(ap, ptrdiff_t);
                     else val = va_arg(ap, unsigned int);
-
-                    if (info.precision != -1) info.pad_zero = 0;
-                    format_unsigned(&ctx, &info, val);
+                    format_uint(&state, &flags, val);
                     break;
                 }
                 case 'o': {
                     uint64_t val;
-                    if (info.length == LEN_LL || info.length == LEN_J) val = va_arg(ap, unsigned long long);
-                    else if (info.length == LEN_L) val = va_arg(ap, unsigned long);
-                    else if (info.length == LEN_H) val = (unsigned short)va_arg(ap, unsigned int);
-                    else if (info.length == LEN_HH) val = (unsigned char)va_arg(ap, unsigned int);
-                    else if (info.length == LEN_Z) val = va_arg(ap, size_t);
-                    else if (info.length == LEN_T) val = va_arg(ap, ptrdiff_t);
+                    if (flags.length == LEN_LL || flags.length == LEN_J) val = va_arg(ap, unsigned long long);
+                    else if (flags.length == LEN_L) val = va_arg(ap, unsigned long);
+                    else if (flags.length == LEN_H) val = (unsigned short)va_arg(ap, unsigned int);
+                    else if (flags.length == LEN_HH) val = (unsigned char)va_arg(ap, unsigned int);
+                    else if (flags.length == LEN_Z) val = va_arg(ap, size_t);
+                    else if (flags.length == LEN_T) val = va_arg(ap, ptrdiff_t);
                     else val = va_arg(ap, unsigned int);
-                    format_octal(&ctx, &info, val);
+                    format_oct(&state, &flags, val);
                     break;
                 }
                 case 'x':
                 case 'X': {
                     uint64_t val;
-                    if (info.length == LEN_LL || info.length == LEN_J) val = va_arg(ap, unsigned long long);
-                    else if (info.length == LEN_L) val = va_arg(ap, unsigned long);
-                    else if (info.length == LEN_H) val = (unsigned short)va_arg(ap, unsigned int);
-                    else if (info.length == LEN_HH) val = (unsigned char)va_arg(ap, unsigned int);
-                    else if (info.length == LEN_Z) val = va_arg(ap, size_t);
-                    else if (info.length == LEN_T) val = va_arg(ap, ptrdiff_t);
+                    if (flags.length == LEN_LL || flags.length == LEN_J) val = va_arg(ap, unsigned long long);
+                    else if (flags.length == LEN_L) val = va_arg(ap, unsigned long);
+                    else if (flags.length == LEN_H) val = (unsigned short)va_arg(ap, unsigned int);
+                    else if (flags.length == LEN_HH) val = (unsigned char)va_arg(ap, unsigned int);
+                    else if (flags.length == LEN_Z) val = va_arg(ap, size_t);
+                    else if (flags.length == LEN_T) val = va_arg(ap, ptrdiff_t);
                     else val = va_arg(ap, unsigned int);
-                    format_hex(&ctx, &info, val, (*f == 'X'));
+                    format_hex(&state, &flags, val, (*f == 'X'));
                     break;
                 }
                 case 'f':
-                case 'F': {
-                    double val = (info.length == LEN_LONG_DOUBLE) ? (double)va_arg(ap, long double) : va_arg(ap, double);
-                    char tmp[128];
-                    ftoa(tmp, val, info.precision, (*f == 'F'));
-                    format_float_helper(&ctx, &info, tmp);
-                    break;
-                }
+                case 'F':
                 case 'e':
-                case 'E': {
-                    double val = (info.length == LEN_LONG_DOUBLE) ? (double)va_arg(ap, long double) : va_arg(ap, double);
-                    char tmp[128];
-                    etoa(tmp, val, info.precision, (*f == 'E'));
-                    format_float_helper(&ctx, &info, tmp);
-                    break;
-                }
+                case 'E':
                 case 'g':
-                case 'G': {
-                    double val = (info.length == LEN_LONG_DOUBLE) ? (double)va_arg(ap, long double) : va_arg(ap, double);
-                    char tmp[128];
-                    gtoa(tmp, val, info.precision, (*f == 'G'), info.alternate_form);
-                    format_float_helper(&ctx, &info, tmp);
-                    break;
-                }
+                case 'G':
                 case 'a':
                 case 'A': {
-                    double val = va_arg(ap, double);
-                    (void)val;
-                    char tmp[128];
-                    strcpy(tmp, (*f == 'A') ? "0X1.0P+0" : "0x1.0p+0");
-                    format_float_helper(&ctx, &info, tmp);
+                    double val;
+                    if (flags.length == LEN_LONG_DOUBLE) val = (double)va_arg(ap, long double);
+                    else val = va_arg(ap, double);
+                    format_float(&state, &flags, val, *f);
                     break;
                 }
                 case 'p': {
                     unsigned int val = (unsigned int)(uintptr_t)va_arg(ap, void*);
-                    format_pointer(&ctx, &info, val);
+                    format_ptr(&state, &flags, val);
                     break;
                 }
                 case 's': {
-                    const char *val = (info.length == LEN_L) ? (const char *)va_arg(ap, void *) : va_arg(ap, const char *);
-                    format_string(&ctx, &info, val);
+                    const char *val;
+                    if (flags.length == LEN_L) val = (const char *)va_arg(ap, void *);
+                    else val = va_arg(ap, const char *);
+                    format_string(&state, &flags, val);
                     break;
                 }
                 case 'c': {
                     char c = (char)va_arg(ap, int);
-                    EMIT_CTX(&ctx, c);
+                    format_char(&state, &flags, c);
                     break;
                 }
                 case 'n': {
                     void *ptr = va_arg(ap, void*);
                     if (ptr) {
-                        if (info.length == LEN_LL) *(long long *)ptr = (long long)ctx.len;
-                        else if (info.length == LEN_L) *(long *)ptr = (long)ctx.len;
-                        else if (info.length == LEN_HH) *(signed char *)ptr = (signed char)ctx.len;
-                        else if (info.length == LEN_H) *(short *)ptr = (short)ctx.len;
-                        else if (info.length == LEN_J) *(intmax_t *)ptr = (intmax_t)ctx.len;
-                        else if (info.length == LEN_Z) *(ssize_t *)ptr = (ssize_t)ctx.len;
-                        else if (info.length == LEN_T) *(ptrdiff_t *)ptr = (ptrdiff_t)ctx.len;
-                        else *(int *)ptr = (int)ctx.len;
+                        if (flags.length == LEN_LL) *(long long *)ptr = (long long)state.len;
+                        else if (flags.length == LEN_L) *(long *)ptr = (long)state.len;
+                        else if (flags.length == LEN_HH) *(signed char *)ptr = (signed char)state.len;
+                        else if (flags.length == LEN_H) *(short *)ptr = (short)state.len;
+                        else if (flags.length == LEN_J) *(intmax_t *)ptr = (intmax_t)state.len;
+                        else if (flags.length == LEN_Z) *(ssize_t *)ptr = (ssize_t)state.len;
+                        else if (flags.length == LEN_T) *(ptrdiff_t *)ptr = (ptrdiff_t)state.len;
+                        else *(int *)ptr = (int)state.len;
                     }
                     break;
                 }
                 case '%':
-                    EMIT_CTX(&ctx, '%');
+                    emit_char(&state, '%');
                     break;
                 default:
-                    EMIT_CTX(&ctx, '%');
-                    EMIT_CTX(&ctx, *f);
+                    emit_char(&state, '%');
+                    emit_char(&state, *f);
                     break;
             }
             f++;
         } else {
-            EMIT_CTX(&ctx, *f);
+            emit_char(&state, *f);
             f++;
         }
     }
 
     if (size > 0) {
-        if (ctx.remaining > 0) {
-            *ctx.s = '\0';
+        if (state.remaining > 0) {
+            *state.str = '\0';
         } else {
             str[size - 1] = '\0';
         }
     }
 
-    return ctx.len;
+    return state.len;
 }
+
+
 int snprintf(char *str, size_t size, const char *format, ...) {
     va_list ap;
     va_start(ap, format);

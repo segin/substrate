@@ -476,7 +476,8 @@ static struct dirent *udf_vfs_readdir(fs_node_t *node, uint64_t index) {
         if (!(fid->characteristics & UDF_FID_DELETED)) {
             if (cur_idx == index) {
                 if (fid->characteristics & UDF_FID_PARENT) {
-                    strcpy(udf_dirent.d_name, "..");
+                    strncpy(udf_dirent.d_name, "..", sizeof(udf_dirent.d_name) - 1);
+                    udf_dirent.d_name[sizeof(udf_dirent.d_name) - 1] = '\0';
                 } else {
                     /* Extract filename (after impl_use) */
                     char *name = (char *)fid + 38 + fid->impl_use_length;
@@ -712,7 +713,8 @@ static fs_node_t *udf_mount(const char *device, uint32_t flags, void *data) {
     memcpy(&udf_root_ctx.fe, &root_fe, sizeof(struct udf_fe));
     
     memset(&udf_root, 0, sizeof(fs_node_t));
-    strcpy(udf_root.name, "/");
+    strncpy(udf_root.name, "/", sizeof(udf_root.name) - 1);
+    udf_root.name[sizeof(udf_root.name) - 1] = '\0';
     udf_root.flags = FS_DIRECTORY;
     udf_root.length = (uint32_t)root_fe.info_length;
     udf_root.impl = (uintptr_t)&udf_root_ctx;

@@ -28,6 +28,12 @@ extern void tss_flush(void);
 extern void gdt_flush(uint32_t);
 
 #define P2V(x) ((void*)((uintptr_t)(x) + 0xC0000000))
+/*
+ * Early boot page tables in boot.S map only the first 16MB into the higher
+ * half direct-map window (0xC0000000 + phys). ACPI pointers outside this
+ * range must not be dereferenced during early SMP discovery.
+ */
+#define EARLY_DIRECTMAP_LIMIT 0x01000000u
 
 cpu_info_t cpus[MAX_CPUS];
 int cpu_count = 0;
@@ -98,6 +104,10 @@ void smp_discover_cores(void) {
 
     // 2. Locate MADT
     // rsdp->rsdt_addr is physical, convert to virtual
+    if (rsdp->rsdt_addr >= EARLY_DIRECTMAP_LIMIT) {
+        early_uart_print("SMP: RSDT above early map, falling back to UP.\n");
+        return;
+    }
     struct acpi_header *rsdt = (struct acpi_header*)P2V(rsdp->rsdt_addr);
 
     // Validate RSDT signature
@@ -111,6 +121,9 @@ void smp_discover_cores(void) {
     struct acpi_header *madt = NULL;
     for (int i = 0; i < entries; i++) {
         // ptrs[i] contains physical address of a table
+        if (ptrs[i] >= EARLY_DIRECTMAP_LIMIT) {
+            continue;
+        }
         struct acpi_header *h = (struct acpi_header*)P2V(ptrs[i]);
         if (memcmp(h->signature, "APIC", 4) == 0) {
             madt = h;
