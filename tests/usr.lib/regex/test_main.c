@@ -7,6 +7,7 @@ int test_dos_limits(void);
 int test_streaming_basic(void);
 int test_utf8_literal(void);
 int test_unicode_case(void);
+int test_ascii_toupper(void);
 
 int main(void) {
     int failures = 0;
@@ -17,6 +18,8 @@ int main(void) {
     failures += test_streaming_basic();
     failures += test_utf8_literal();
     failures += test_unicode_case();
+    failures += test_unicode_case();
+    failures += test_ascii_toupper();
 
     if (failures) {
         fprintf(stderr, "regex tests: %d failures\n", failures);

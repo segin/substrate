@@ -1,0 +1,1233 @@
+# 13. Bus Enumeration & Driver Model
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 9665-10344.
+
+## Reimplemented Checklist (All Open)
+
+### 13. Bus Enumeration & Driver Model
+
+> [!NOTE]
+> Enterprise-grade device driver model and bus enumeration framework.
+> Each checklist item is implementable as a single commit (code + tests + docs).
+
+#### 13.1. Kernel Driver Model & Device Lifecycle
+
+- [ ] **Core Data Structures (Headers):**
+    - [ ] Define `struct device` in `sys/kern/device.h`.
+        - Note: Implemented struct device with hierarchical and resource fields.
+        - Files: `sys/kern/device.h` (new)
+        - Fields: `vendor_id`, `device_id`, `class`, `subclass`, `progif`, `serial[32]`, `guid[16]`, `parent`, `children`, `resources`, `power_state`, `ref_count`, `driver`, `bus`, `flags`
+        - Tests: unit (struct layout, alignment)
+        - Docs: `device.9` manpage
+        - Acceptance: Header compiles, struct size verified
+    - [ ] Define `struct driver` in `sys/kern/driver.h`.
+        - Note: Implemented struct driver with full lifecycle callbacks and bus binding.
+        - Files: `sys/kern/driver.h` (new)
+        - Fields: `name`, `bus_type`, `id_table`, `probe`, `attach`, `detach`, `suspend`, `resume`, `shutdown`, `reset`, `match_func`, `priority`, `flags`
+        - Tests: unit (callback signature validation)
+        - Docs: `driver.9` manpage
+        - Acceptance: Header compiles, all callbacks defined
+    - [ ] Define `struct bus_type` in `sys/kern/bus.h`.
+        - Note: Implemented struct bus_type with device/driver lists and spinlock protection.
+        - Files: `sys/kern/bus.h` (new)
+        - Fields: `name`, `match`, `probe`, `remove`, `devices_list`, `drivers_list`, `lock`
+        - Tests: unit (struct layout)
+        - Docs: `bus.9` manpage
+        - Acceptance: Header compiles with list/lock fields
+    - [ ] Define `struct resource` in `sys/kern/resource.h`.
+        - Note: Implemented struct resource with types, hierarchy, and static inline overlap helpers.
+        - Files: `sys/kern/resource.h` (new)
+        - Types: `RES_IO`, `RES_MEM`, `RES_IRQ`, `RES_DMA`
+        - Fields: `type`, `start`, `end`, `flags`, `parent`, `children`, `owner`
+        - Tests: unit (range overlap detection helpers)
+        - Docs: `resource.9` manpage
+        - Acceptance: Resource types enumerated, range helpers compile
+
+- [ ] **Device Registration API:**
+    - [ ] Implement `device_create()` allocator.
+        - Note: Implemented device_create with name storage, parent linking, and refcount initialization.
+        - Files: `sys/kern/device.c` (new)
+        - API: `device_t *device_create(const char *name, device_t *parent)`
+        - Tests: unit (allocation, parent linking, refcount init)
+        - Docs: `device_create.9`
+        - Acceptance: Returns valid device, parent->children updated
+    - [ ] Implement `device_register()` into bus.
+        - Note: Implemented device_register with duplicate pointer/name detection and spinlock protection.
+        - Files: `sys/kern/device.c`
+        - API: `int device_register(device_t *dev, bus_type_t *bus)`
+        - Tests: unit (bus list insertion, duplicate detection)
+        - Docs: `device_register.9`
+        - Acceptance: Device appears in bus->devices_list
+    - [ ] Implement `device_unregister()` removal.
+        - Note: Implemented device_unregister with safe bus detachment, parent list removal, and child orphaning.
+        - Files: `sys/kern/device.c`
+        - API: `int device_unregister(device_t *dev)`
+        - Tests: unit (list removal, children orphaning check)
+        - Docs: `device_unregister.9`
+        - Acceptance: Device removed, children handled
+    - [ ] Implement `device_get()` / `device_put()` refcounting.
+        - Note: Implemented device_get/device_put with kfree on zero refcount.
+        - Files: `sys/kern/device.c`
+        - API: `void device_get(device_t *dev)`, `void device_put(device_t *dev)`
+        - Tests: unit (refcount increment/decrement, free on zero)
+        - Docs: `device_refcount.9`
+        - Acceptance: Refcount properly tracks, frees at zero
+    - [ ] Implement `device_find_child()` lookup.
+        - Note: Implemented device_find_child by iterating parent's sibling list.
+        - Files: `sys/kern/device.c`
+        - API: `device_t *device_find_child(device_t *parent, const char *name)`
+        - Tests: unit (find existing, not found cases)
+        - Docs: `device_find_child.9`
+        - Acceptance: Returns correct child or NULL
+
+- [ ] **Driver Registration API:**
+    - [ ] Implement `driver_register()`.
+        - Note: Implemented driver_register with duplicate detection and probe auto-trigger.
+        - Files: `sys/kern/driver.c` (new)
+        - API: `int driver_register(driver_t *drv, bus_type_t *bus)`
+        - Tests: unit (registration, probe auto-trigger on existing devices)
+        - Docs: `driver_register.9`
+        - Acceptance: Driver in bus->drivers_list, probes called
+    - [ ] Implement `driver_unregister()`.
+        - Note: Implemented driver_unregister which detaches devices and removes driver from bus.
+        - Files: `sys/kern/driver.c`
+        - API: `int driver_unregister(driver_t *drv)`
+        - Tests: unit (detach all bound devices, list removal)
+        - Docs: `driver_unregister.9`
+        - Acceptance: All devices detached, driver removed
+    - [ ] Implement `driver_attach()` binding.
+        - Files: `sys/kern/driver.c`
+        - API: `int driver_attach(driver_t *drv, device_t *dev)`
+        - Tests: unit (successful attach, already-bound rejection)
+        - Docs: `driver_attach.9`
+        - Acceptance: dev->driver set, attach() callback invoked
+    - [ ] Implement `driver_detach()` unbinding.
+        - Files: `sys/kern/driver.c`
+        - API: `int driver_detach(device_t *dev)`
+        - Tests: unit (detach callback, driver pointer cleared)
+        - Docs: `driver_detach.9`
+        - Acceptance: detach() called, dev->driver = NULL
+
+- [ ] **Matching and Binding Logic:**
+    - [ ] Implement `bus_match_device()` generic matcher.
+        - Files: `sys/kern/bus.c` (new)
+        - API: `driver_t *bus_match_device(bus_type_t *bus, device_t *dev)`
+        - Logic: Iterate drivers, call match() or compare id_table, return highest priority match
+        - Tests: unit (exact match, class match, priority ordering)
+        - Docs: `bus_match.9`
+        - Acceptance: Correct driver selected by priority
+    - [ ] Implement ID table matching for vendor/device/class.
+        - Files: `sys/kern/bus.c`
+        - API: `int bus_id_match(const device_id_t *id, device_t *dev)`
+        - Wildcards: 0xFFFF for any vendor/device, class mask support
+        - Tests: unit (wildcard match, specific match, no match)
+        - Docs: `bus_id_match.9`
+        - Acceptance: Wildcard and specific IDs match correctly
+    - [ ] Implement `compatible` string matching (DT/ACPI style).
+        - Files: `sys/kern/bus.c`
+        - API: `int bus_compatible_match(const char *compat, device_t *dev)`
+        - Tests: unit (exact string, multi-value compat)
+        - Docs: `bus_compatible_match.9`
+        - Acceptance: String list matching works
+    - [ ] Implement driver blacklist/override mechanism.
+        - Files: `sys/kern/driver.c`
+        - API: `void driver_blacklist_add(const char *name)`, `void driver_override(device_t *dev, const char *name)`
+        - Tests: unit (blacklisted driver skipped, override forces binding)
+        - Docs: `driver_override.9`
+        - Acceptance: Blacklist prevents probe, override forces it
+
+- [ ] **Device Lifecycle Callbacks:**
+    - [ ] Implement `device_probe()` wrapper with error handling.
+        - Files: `sys/kern/device.c`
+        - API: `int device_probe(device_t *dev)`
+        - Logic: Find matching driver, call probe(), handle deferred probe
+        - Tests: unit (success, failure, -EDEFER handling)
+        - Docs: `device_probe.9`
+        - Acceptance: Probe succeeds or defers correctly
+    - [ ] Implement deferred probe queue.
+        - Files: `sys/kern/device.c`
+        - API: `void device_defer_probe(device_t *dev)`, `void device_retry_deferred(void)`
+        - Tests: unit (defer adds to queue, retry re-probes)
+        - Docs: `deferred_probe.9`
+        - Acceptance: Deferred devices re-probed after dependencies ready
+    - [ ] Implement `device_suspend()` / `device_resume()`.
+        - Files: `sys/kern/device.c`
+        - API: `int device_suspend(device_t *dev, pm_state_t state)`, `int device_resume(device_t *dev)`
+        - Logic: Call driver callbacks, handle parent-child ordering
+        - Tests: unit (suspend children first, resume parents first)
+        - Docs: `device_pm.9`
+        - Acceptance: PM ordering correct, callbacks invoked
+    - [ ] Implement `device_shutdown()` callback.
+        - Files: `sys/kern/device.c`
+        - API: `void device_shutdown(device_t *dev)`
+        - Tests: unit (shutdown callback invoked)
+        - Docs: `device_shutdown.9`
+        - Acceptance: All devices shutdown on system halt
+    - [ ] Implement `device_reset()` callback.
+        - Files: `sys/kern/device.c`
+        - API: `int device_reset(device_t *dev)`
+        - Tests: unit (reset callback, device state cleared)
+        - Docs: `device_reset.9`
+        - Acceptance: Device reset to initial state
+
+- [ ] **Refactor Existing Drivers:**
+    - [ ] Refactor `ide.c` to use new driver model.
+        - Files: `sys/drivers/storage/ide/ide.c`
+        - Changes: Register as PCI driver, use device_t for state.
+        - Note: Ensure ISA-based IDE (e.g., SB16 PnP secondary channels) allows for non-PCI attachment.
+        - Tests: integration (IDE still works after refactor)
+        - Docs: Update ide.4 manpage
+        - Acceptance: IDE enumerated via PCI bus, same functionality
+    - [ ] Refactor `virtio_blk.c` to use new driver model.
+        - Files: `sys/drivers/virtio/virtio_blk.c`
+        - Changes: Register as PCI driver with VirtIO vendor/device IDs
+        - Tests: integration (VirtIO block still works)
+        - Docs: Update virtio.4 manpage
+        - Acceptance: VirtIO devices bound via driver model
+
+---
+
+#### 13.2. PCI / PCIe Enumerator
+
+- [ ] **PCI Config Space Access:**
+    - [ ] Implement `pci_read_config8/16/32()` primitives.
+        - Files: `sys/arch/i386/pci.c`, `sys/kern/pci.h`
+        - API: `uint32_t pci_read_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset)`
+        - Tests: unit (known device read, boundary checks)
+        - Docs: `pci_config.9`
+        - Acceptance: Reads correct values from QEMU PCI devices
+    - [ ] Implement `pci_write_config8/16/32()` primitives.
+        - Files: `sys/arch/i386/pci.c`
+        - API: `void pci_write_config32(uint8_t bus, uint8_t slot, uint8_t func, uint8_t offset, uint32_t val)`
+        - Tests: unit (write and readback verification)
+        - Docs: `pci_config.9`
+        - Acceptance: Written values persist
+    - [ ] Implement MMIO config access for PCIe (ECAM).
+        - Files: `sys/arch/i386/pci.c`
+        - API: `void *pci_ecam_map(uint16_t segment, uint8_t bus, uint8_t slot, uint8_t func)`
+        - Tests: integration (PCIe extended config access)
+        - Docs: `pci_ecam.9`
+        - Acceptance: Extended config space accessible
+
+- [ ] **Bus Enumeration:**
+    - [ ] Implement `pci_scan_bus()` recursive scanner.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_scan_bus(uint8_t bus)`
+        - Logic: Iterate slots 0-31, functions 0-7, detect multifunction
+        - Tests: unit (empty bus, populated bus, multifunction device)
+        - Docs: `pci_scan.9`
+        - Acceptance: All QEMU PCI devices discovered
+    - [ ] Implement bridge detection and subordinate bus scan.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_scan_bridge(pci_device_t *bridge)`
+        - Tests: integration (PCI-to-PCI bridge hierarchy)
+        - Docs: `pci_bridge.9`
+        - Acceptance: Devices behind bridges discovered
+    - [ ] Implement `pci_device_t` creation and registration.
+        - Files: `sys/kern/pci.c`
+        - API: `pci_device_t *pci_device_create(uint8_t bus, uint8_t slot, uint8_t func)`
+        - Tests: unit (device struct populated correctly)
+        - Docs: `pci_device.9`
+        - Acceptance: Device registered with driver model
+
+- [ ] **BAR Parsing and Resource Allocation:**
+    - [ ] Implement BAR type detection (I/O vs MMIO, 32/64-bit).
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_bar_type(pci_device_t *dev, int bar)`
+        - Tests: unit (I/O BAR, 32-bit MMIO, 64-bit MMIO)
+        - Docs: `pci_bar.9`
+        - Acceptance: Correctly identifies BAR types
+    - [ ] Implement BAR size probing.
+        - Files: `sys/kern/pci.c`
+        - API: `size_t pci_bar_size(pci_device_t *dev, int bar)`
+        - Tests: unit (known device BAR sizes)
+        - Docs: `pci_bar.9`
+        - Acceptance: Correct sizes reported
+    - [ ] Implement `pci_request_region()` resource reservation.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_request_region(pci_device_t *dev, int bar, const char *name)`
+        - Tests: unit (reservation, conflict detection)
+        - Docs: `pci_request_region.9`
+        - Acceptance: Region reserved, conflict returns error
+    - [ ] Implement `pci_iomap()` MMIO mapping.
+        - Files: `sys/kern/pci.c`
+        - API: `void *pci_iomap(pci_device_t *dev, int bar, size_t max_len)`
+        - Tests: unit (map and read test pattern)
+        - Docs: `pci_iomap.9`
+        - Acceptance: Returns valid mapped pointer
+
+- [ ] **Capability List Parsing:**
+    - [ ] Implement capability list walker.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_find_capability(pci_device_t *dev, uint8_t cap_id)`
+        - Tests: unit (find MSI, find PM, not found)
+        - Docs: `pci_find_capability.9`
+        - Acceptance: Returns offset of capability
+    - [ ] Implement extended capability walker (PCIe).
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_find_ext_capability(pci_device_t *dev, uint16_t cap_id)`
+        - Tests: unit (find AER, find SR-IOV)
+        - Docs: `pci_find_ext_capability.9`
+        - Acceptance: Extended capabilities found
+
+- [ ] **Interrupt Support:**
+    - [ ] Implement legacy PCI interrupt routing.
+        - Files: `sys/kern/pci.c`
+        - API: `int pci_get_irq(pci_device_t *dev)`
+        - Tests: integration (IRQ matches expected)
+        - Docs: `pci_irq.9`
+        - Acceptance: Correct IRQ returned
+    - [ ] Implement MSI capability setup.
+        - Files: `sys/kern/pci_msi.c` (new)
+        - API: `int pci_enable_msi(pci_device_t *dev)`, `int pci_disable_msi(pci_device_t *dev)`
+        - Tests: integration (MSI interrupt fires)
+        - Docs: `pci_msi.9`
+        - Acceptance: MSI interrupts work
+    - [ ] Implement MSI-X capability setup.
+        - Files: `sys/kern/pci_msi.c`
+        - API: `int pci_enable_msix(pci_device_t *dev, int nvec)`
+        - Tests: integration (MSI-X with multiple vectors)
+        - Docs: `pci_msix.9`
+        - Acceptance: Multiple MSI-X vectors work
+
+- [ ] **Hotplug Support:**
+    - [ ] Implement PCI hotplug event detection.
+        - Files: `sys/kern/pci_hotplug.c` (new)
+        - API: `void pci_hotplug_poll(void)`
+        - Tests: integration (QEMU hotplug simulation)
+        - Docs: `pci_hotplug.9`
+        - Acceptance: Hotplug events detected
+    - [ ] Implement device add on hotplug.
+        - Files: `sys/kern/pci_hotplug.c`
+        - API: `int pci_hotplug_add(uint8_t bus, uint8_t slot)`
+        - Tests: integration (device added, driver bound)
+        - Docs: `pci_hotplug.9`
+        - Acceptance: Device usable after hotplug
+    - [ ] Implement device remove on hotplug.
+        - Files: `sys/kern/pci_hotplug.c`
+        - API: `int pci_hotplug_remove(pci_device_t *dev)`
+        - Tests: integration (device removed cleanly)
+        - Docs: `pci_hotplug.9`
+        - Acceptance: Resources freed, no crashes
+
+---
+
+#### 13.3. ISA Plug-and-Play Enumerator
+
+- [ ] **ISA-PnP Protocol:**
+    - [ ] Implement ISA-PnP isolation protocol.
+        - Files: `sys/kern/isapnp.c` (new), `sys/kern/isapnp.h` (new)
+        - API: `int isapnp_isolate(void)`
+        - Tests: unit (protocol state machine)
+        - Docs: `isapnp.9`
+        - Acceptance: Cards isolated and CSN assigned
+    - [ ] Implement resource descriptor parsing.
+        - Files: `sys/kern/isapnp.c`
+        - API: `int isapnp_read_resources(uint8_t csn, isapnp_device_t *dev)`
+        - Tests: unit (parse IO, IRQ, DMA, MEM descriptors)
+        - Docs: `isapnp_resources.9`
+        - Acceptance: All resource types parsed
+    - [ ] Implement resource assignment/activation.
+        - Files: `sys/kern/isapnp.c`
+        - API: `int isapnp_activate(isapnp_device_t *dev)`
+        - Tests: integration (card activated)
+        - Docs: `isapnp_activate.9`
+        - Acceptance: Card responds at assigned resources
+
+- [ ] **Legacy ISA Probing:**
+    - [ ] Implement legacy ISA device table.
+        - Files: `sys/kern/isa.c` (new)
+        - API: `void isa_probe_legacy(void)`
+        - Tests: unit (probe returns present devices)
+        - Docs: `isa_legacy.9`
+        - Acceptance: Standard ports probed
+    - [ ] Implement port liveness detection.
+        - Files: `sys/kern/isa.c`
+        - API: `int isa_port_alive(uint16_t port)`
+        - Tests: unit (present vs absent ports)
+        - Docs: `isa_port_alive.9`
+        - Acceptance: Distinguishes active from dead ports
+
+---
+
+#### 13.4. USB Host-Side Enumerator
+
+- [ ] **Host Controller Abstraction:**
+    - [ ] Define `struct usb_hcd` HCD abstraction.
+        - Files: `sys/kern/usb/usb_hcd.h` (new)
+        - Tests: unit (struct layout)
+        - Docs: `usb_hcd.9`
+        - Acceptance: Abstraction compiles
+    - [ ] Define `struct urb` USB Request Block.
+        - Files: `sys/kern/usb/urb.h` (new)
+        - Tests: unit (field access)
+        - Docs: `urb.9`
+        - Acceptance: URB struct defined
+
+- [ ] **UHCI Driver:**
+    - [ ] Implement UHCI register access.
+        - Files: `sys/drivers/usb/uhci.c` (new)
+        - Tests: integration (register read from QEMU UHCI)
+        - Docs: `uhci.4`
+        - Acceptance: Controller detected
+    - [ ] Implement UHCI frame list setup.
+        - Files: `sys/drivers/usb/uhci.c`
+        - Tests: integration (frame list operational)
+        - Docs: `uhci.4`
+        - Acceptance: HC starts processing
+    - [ ] Implement UHCI transfer descriptor handling.
+        - Files: `sys/drivers/usb/uhci.c`
+        - Tests: integration (control transfer completes)
+        - Docs: `uhci.4`
+        - Acceptance: GET_DESCRIPTOR works
+
+- [ ] **OHCI Driver:**
+    - [ ] Implement OHCI register access.
+        - Files: `sys/drivers/usb/ohci.c` (new)
+        - Tests: integration (register read)
+        - Docs: `ohci.4`
+        - Acceptance: Controller detected
+    - [ ] Implement OHCI HCCA and ED/TD setup.
+        - Files: `sys/drivers/usb/ohci.c`
+        - Tests: integration (lists operational)
+        - Docs: `ohci.4`
+        - Acceptance: HC starts
+    - [ ] Implement OHCI transfer handling.
+        - Files: `sys/drivers/usb/ohci.c`
+        - Tests: integration (control transfer)
+        - Docs: `ohci.4`
+        - Acceptance: Transfers complete
+
+- [ ] **EHCI Driver:**
+    - [ ] Implement EHCI capability and operational register access.
+        - Files: `sys/drivers/usb/ehci.c` (new)
+        - Tests: integration (register read)
+        - Docs: `ehci.4`
+        - Acceptance: Controller detected
+    - [ ] Implement EHCI async schedule (QH/qTD).
+        - Files: `sys/drivers/usb/ehci.c`
+        - Tests: integration (async schedule active)
+        - Docs: `ehci.4`
+        - Acceptance: Async active bit set
+    - [ ] Implement EHCI periodic schedule.
+        - Files: `sys/drivers/usb/ehci.c`
+        - Tests: integration (periodic schedule)
+        - Docs: `ehci.4`
+        - Acceptance: Periodic transfers work
+    - [ ] Implement EHCI transfer handling.
+        - Files: `sys/drivers/usb/ehci.c`
+        - Tests: integration (bulk/control/interrupt)
+        - Docs: `ehci.4`
+        - Acceptance: All transfer types work
+
+- [ ] **xHCI Driver:**
+    - [ ] Implement xHCI capability structure parsing.
+        - Files: `sys/drivers/usb/xhci.c` (new)
+        - Tests: integration (register read)
+        - Docs: `xhci.4`
+        - Acceptance: Controller caps parsed
+    - [ ] Implement xHCI ring management.
+        - Files: `sys/drivers/usb/xhci.c`
+        - Tests: unit (ring wrap, link handling)
+        - Docs: `xhci.4`
+        - Acceptance: Rings operational
+    - [ ] Implement xHCI device context management.
+        - Files: `sys/drivers/usb/xhci.c`
+        - Tests: integration (device addressed)
+        - Docs: `xhci.4`
+        - Acceptance: Device slot allocated
+    - [ ] Implement xHCI transfer handling.
+        - Files: `sys/drivers/usb/xhci.c`
+        - Tests: integration (all transfer types)
+        - Docs: `xhci.4`
+        - Acceptance: Transfers complete
+
+- [ ] **USB Core Enumeration:**
+    - [ ] Implement USB device state machine.
+        - Files: `sys/kern/usb/usb_core.c` (new)
+        - Tests: integration (device enumerated)
+        - Docs: `usb_core.9`
+        - Acceptance: Device reaches CONFIGURED
+    - [ ] Implement SET_ADDRESS control transfer.
+        - Files: `sys/kern/usb/usb_core.c`
+        - Tests: integration (address assigned)
+        - Docs: `usb_set_address.9`
+        - Acceptance: Device responds at new address
+    - [ ] Implement descriptor parsing.
+        - Files: `sys/kern/usb/usb_desc.c` (new)
+        - Tests: unit (parse valid), fuzzer (malformed)
+        - Docs: `usb_descriptor.9`
+        - Acceptance: Descriptors parsed correctly
+    - [ ] Implement configuration selection.
+        - Files: `sys/kern/usb/usb_core.c`
+        - Tests: integration (configuration set)
+        - Docs: `usb_set_configuration.9`
+        - Acceptance: Device active
+
+- [ ] **USB Hub Driver:**
+    - [ ] Implement hub descriptor parsing.
+        - Files: `sys/drivers/usb/hub.c` (new)
+        - Tests: unit (hub descriptor fields)
+        - Docs: `usb_hub.4`
+        - Acceptance: Hub type/ports detected
+    - [ ] Implement port status change handling.
+        - Files: `sys/drivers/usb/hub.c`
+        - Tests: integration (device plug detected)
+        - Docs: `usb_hub.4`
+        - Acceptance: Port changes handled
+    - [ ] Implement port reset and device attachment.
+        - Files: `sys/drivers/usb/hub.c`
+        - Tests: integration (device enumerated after reset)
+        - Docs: `usb_hub.4`
+        - Acceptance: New device usable
+
+- [ ] **USB Mass Storage (SCSI Transport):**
+    - [ ] Implement Bulk-Only Transport (BOT) protocol.
+        - Files: `sys/drivers/usb/usb_storage.c` (new)
+        - Tests: integration (SCSI commands work)
+        - Docs: `usb_storage.4`
+        - Acceptance: Block device accessible
+    - [ ] Implement Command Block Wrapper (CBW) building.
+        - Files: `sys/drivers/usb/usb_storage.c`
+        - Tests: unit (CBW structure correct)
+        - Docs: `usb_storage.4`
+        - Acceptance: CBW sent successfully
+    - [ ] Implement Command Status Wrapper (CSW) parsing.
+        - Files: `sys/drivers/usb/usb_storage.c`
+        - Tests: unit (CSW parsing, error detection)
+        - Docs: `usb_storage.4`
+        - Acceptance: CSW parsed, errors detected
+    - [ ] Integrate with SCSI mid-layer.
+        - Files: `sys/drivers/usb/usb_storage.c`
+        - Tests: integration (SCSI enumeration via USB)
+        - Docs: `usb_storage.4`
+        - Acceptance: USB storage appears as SCSI device
+
+---
+
+#### 13.5. Resource Conflict Resolution & Arbitration
+
+- [ ] **Resource Manager Core:**
+    - [ ] Implement global resource tree.
+        - Files: `sys/kern/resource.c` (new)
+        - Tests: unit (root initialization)
+        - Docs: `resource.9`
+        - Acceptance: Root resources created
+    - [ ] Implement `request_region()` for I/O ports.
+        - Files: `sys/kern/resource.c`
+        - Tests: unit (allocation, conflict detection)
+        - Docs: `request_region.9`
+        - Acceptance: Region reserved or conflict reported
+    - [ ] Implement `release_region()`.
+        - Files: `sys/kern/resource.c`
+        - Tests: unit (release, reallocation)
+        - Docs: `release_region.9`
+        - Acceptance: Region freed
+    - [ ] Implement `request_mem_region()` for MMIO.
+        - Files: `sys/kern/resource.c`
+        - Tests: unit (MMIO allocation)
+        - Docs: `request_mem_region.9`
+        - Acceptance: MMIO regions tracked
+    - [ ] Implement `ioremap()` / `iounmap()`.
+        - Files: `sys/kern/ioremap.c` (new)
+        - Tests: unit (map/unmap, cached flags)
+        - Docs: `ioremap.9`
+        - Acceptance: MMIO accessible
+
+- [ ] **IRQ Allocation:**
+    - [ ] Implement `request_irq()`.
+        - Files: `sys/kern/irq.c` (new)
+        - Tests: unit (register, shared IRQ)
+        - Docs: `request_irq.9`
+        - Acceptance: Handler invoked on interrupt
+    - [ ] Implement `free_irq()`.
+        - Files: `sys/kern/irq.c`
+        - Tests: unit (free, shared unregister)
+        - Docs: `free_irq.9`
+        - Acceptance: Handler removed
+    - [ ] Implement shared interrupt handling.
+        - Files: `sys/kern/irq.c`
+        - Tests: integration (two drivers share IRQ)
+        - Docs: `irq_shared.9`
+        - Acceptance: Both handlers called
+
+- [ ] **DMA Mapping:**
+    - [ ] Implement `dma_map_single()`.
+        - Files: `sys/kern/dma.c` (new)
+        - Tests: unit (map returns valid address)
+        - Docs: `dma_map.9`
+        - Acceptance: DMA address returned
+    - [ ] Implement `dma_unmap_single()`.
+        - Files: `sys/kern/dma.c`
+        - Tests: unit (unmap)
+        - Docs: `dma_map.9`
+        - Acceptance: No leaks
+    - [ ] Implement `dma_alloc_coherent()`.
+        - Files: `sys/kern/dma.c`
+        - Tests: unit (allocation, alignment)
+        - Docs: `dma_alloc_coherent.9`
+        - Acceptance: Usable DMA buffer returned
+
+---
+
+#### 13.6. Hotplug, DevFS Integration & Power Management
+
+- [ ] **Device Notification System:**
+    - [ ] Implement kernel device event queue.
+        - Files: `sys/kern/kobject.c`
+        - Tests: unit (event generation)
+        - Docs: `kobject_uevent.9`
+        - Acceptance: Events queued
+    - [ ] Implement uevent socket for userspace.
+        - Files: `sys/kern/netlink_kobject_uevent.c` (new)
+        - Tests: integration (userspace receives events)
+        - Docs: `uevent.9`
+        - Acceptance: udev-compatible events
+
+- [ ] **DevFS Auto-Population:**
+    - [ ] Implement automatic device node creation on ADD.
+        - Files: `sys/fs/devfs.c`
+        - Tests: integration (device appears in /dev)
+        - Docs: `devfs_hotplug.9`
+        - Acceptance: Node created on device add
+    - [ ] Implement automatic device node removal on REMOVE.
+        - Files: `sys/fs/devfs.c`
+        - Tests: integration (device disappears from /dev)
+        - Docs: `devfs_hotplug.9`
+        - Acceptance: Node removed on device remove
+    - [ ] Implement persistent naming via device serial/GUID.
+        - Files: `sys/fs/devfs.c`
+        - Tests: integration (symlinks stable)
+        - Docs: `devfs_naming.9`
+        - Acceptance: Symlinks correct
+
+- [ ] **Power Management:**
+    - [ ] Implement system suspend orchestration.
+        - Files: `sys/kern/pm/suspend.c` (new)
+        - Tests: integration (suspend/resume cycle)
+        - Docs: `pm_suspend.9`
+        - Acceptance: System suspends and resumes
+    - [ ] Implement runtime PM hooks.
+        - Files: `sys/kern/device.c`
+        - Tests: unit (idle timeout)
+        - Docs: `pm_runtime.9`
+        - Acceptance: Device auto-suspends
+
+---
+
+#### 13.7. Diagnostics & Tools
+
+- [ ] **Device Listing Tools:**
+    - [ ] Implement `lspci` command.
+        - Files: `bin/lspci.c` (new)
+        - Tests: integration (output matches QEMU)
+        - Docs: `lspci.1`
+        - Acceptance: All PCI devices listed
+    - [ ] Implement `lsusb` command.
+        - Files: `bin/lsusb.c` (new)
+        - Tests: integration (output matches QEMU USB)
+        - Docs: `lsusb.1`
+        - Acceptance: All USB devices listed
+    - [ ] Implement kernel device tree dump.
+        - Files: `bin/devtree.c` (new)
+        - Tests: integration (shows device hierarchy)
+        - Docs: `devtree.1`
+        - Acceptance: Device tree displayed
+
+- [ ] **Debug Interfaces:**
+    - [ ] Implement `/proc/ioports`.
+        - Files: `sys/fs/procfs.c`
+        - Tests: integration (shows allocated regions)
+        - Docs: `proc.5`
+        - Acceptance: Accurate I/O port map
+    - [ ] Implement `/proc/iomem`.
+        - Files: `sys/fs/procfs.c`
+        - Tests: integration (shows MMIO regions)
+        - Docs: `proc.5`
+        - Acceptance: Accurate MMIO map
+    - [ ] Implement driver probe failure logging.
+        - Files: `sys/kern/driver.c`
+        - Tests: integration (failure reason in dmesg)
+        - Docs: `driver_debug.9`
+        - Acceptance: Probe failures explained
+
+---
+
+#### 13.8. Security & Migration
+
+- [ ] **Privilege Enforcement:**
+    - [ ] Restrict raw I/O access to privileged processes.
+        - Files: `sys/kern/resource.c`
+        - Tests: unit (unprivileged failure)
+        - Docs: `capabilities.7`
+        - Acceptance: Unprivileged access denied
+    - [ ] Implement device permission model for devfs.
+        - Files: `sys/fs/devfs.c`
+        - Tests: integration (permissions correct)
+        - Docs: `devfs_permissions.9`
+        - Acceptance: Correct permissions
+
+- [ ] **Migrate Existing Drivers:**
+    - [ ] Audit `pci.c` and migrate to new bus model.
+        - Files: `sys/arch/i386/pci.c`
+        - Tests: integration (PCI devices still work)
+        - Docs: Update developer guide
+        - Acceptance: Same devices discovered
+    - [ ] Audit VirtIO drivers and use pci_driver registration.
+        - Files: `sys/drivers/virtio/*.c`
+        - Tests: integration (VirtIO still works)
+        - Docs: Update virtio.4
+        - Acceptance: VirtIO bound via driver model
+    - [ ] Remove legacy detection code after migration.
+        - Files: Various drivers
+        - Tests: regression (no functionality lost)
+        - Docs: Migration notes
+        - Acceptance: Codebase cleaner, tests pass
+
+
+## User Stories
+
+- **US-17-0001**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to core Data Structures (Headers): so that this capability is implemented with clear verification evidence.
+- **US-17-0002**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to define struct device in sys/kern/device.h so that this capability is implemented with clear verification evidence.
+- **US-17-0003**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to define struct driver in sys/kern/driver.h so that this capability is implemented with clear verification evidence.
+- **US-17-0004**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to define struct bus_type in sys/kern/bus.h so that this capability is implemented with clear verification evidence.
+- **US-17-0005**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to define struct resource in sys/kern/resource.h so that this capability is implemented with clear verification evidence.
+- **US-17-0006**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to device Registration API: so that this capability is implemented with clear verification evidence.
+- **US-17-0007**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_create() allocator so that this capability is implemented with clear verification evidence.
+- **US-17-0008**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_register() into bus so that this capability is implemented with clear verification evidence.
+- **US-17-0009**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_unregister() removal so that this capability is implemented with clear verification evidence.
+- **US-17-0010**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_get() / device_put() refcounting so that this capability is implemented with clear verification evidence.
+- **US-17-0011**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_find_child() lookup so that this capability is implemented with clear verification evidence.
+- **US-17-0012**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to driver Registration API: so that this capability is implemented with clear verification evidence.
+- **US-17-0013**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement driver_register() so that this capability is implemented with clear verification evidence.
+- **US-17-0014**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement driver_unregister() so that this capability is implemented with clear verification evidence.
+- **US-17-0015**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement driver_attach() binding so that this capability is implemented with clear verification evidence.
+- **US-17-0016**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement driver_detach() unbinding so that this capability is implemented with clear verification evidence.
+- **US-17-0017**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to matching and Binding Logic: so that this capability is implemented with clear verification evidence.
+- **US-17-0018**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement bus_match_device() generic matcher so that this capability is implemented with clear verification evidence.
+- **US-17-0019**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement ID table matching for vendor/device/class so that this capability is implemented with clear verification evidence.
+- **US-17-0020**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement compatible string matching (DT/ACPI style) so that this capability is implemented with clear verification evidence.
+- **US-17-0021**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement driver blacklist/override mechanism so that this capability is implemented with clear verification evidence.
+- **US-17-0022**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to device Lifecycle Callbacks: so that this capability is implemented with clear verification evidence.
+- **US-17-0023**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_probe() wrapper with error handling so that this capability is implemented with clear verification evidence.
+- **US-17-0024**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement deferred probe queue so that this capability is implemented with clear verification evidence.
+- **US-17-0025**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_suspend() / device_resume() so that this capability is implemented with clear verification evidence.
+- **US-17-0026**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_shutdown() callback so that this capability is implemented with clear verification evidence.
+- **US-17-0027**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to implement device_reset() callback so that this capability is implemented with clear verification evidence.
+- **US-17-0028**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to refactor Existing Drivers: so that this capability is implemented with clear verification evidence.
+- **US-17-0029**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to refactor ide.c to use new driver model so that this capability is implemented with clear verification evidence.
+- **US-17-0030**: As a Substrate contributor working on 13.1. Kernel Driver Model & Device Lifecycle, I want to refactor virtio_blk.c to use new driver model so that this capability is implemented with clear verification evidence.
+- **US-17-0031**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to pCI Config Space Access: so that this capability is implemented with clear verification evidence.
+- **US-17-0032**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement pci_read_config8/16/32() primitives so that this capability is implemented with clear verification evidence.
+- **US-17-0033**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement pci_write_config8/16/32() primitives so that this capability is implemented with clear verification evidence.
+- **US-17-0034**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement MMIO config access for PCIe (ECAM) so that this capability is implemented with clear verification evidence.
+- **US-17-0035**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to bus Enumeration: so that this capability is implemented with clear verification evidence.
+- **US-17-0036**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement pci_scan_bus() recursive scanner so that this capability is implemented with clear verification evidence.
+- **US-17-0037**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement bridge detection and subordinate bus scan so that this capability is implemented with clear verification evidence.
+- **US-17-0038**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement pci_device_t creation and registration so that this capability is implemented with clear verification evidence.
+- **US-17-0039**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to bAR Parsing and Resource Allocation: so that this capability is implemented with clear verification evidence.
+- **US-17-0040**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement BAR type detection (I/O vs MMIO, 32/64-bit) so that this capability is implemented with clear verification evidence.
+- **US-17-0041**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement BAR size probing so that this capability is implemented with clear verification evidence.
+- **US-17-0042**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement pci_request_region() resource reservation so that this capability is implemented with clear verification evidence.
+- **US-17-0043**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement pci_iomap() MMIO mapping so that this capability is implemented with clear verification evidence.
+- **US-17-0044**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to capability List Parsing: so that this capability is implemented with clear verification evidence.
+- **US-17-0045**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement capability list walker so that this capability is implemented with clear verification evidence.
+- **US-17-0046**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement extended capability walker (PCIe) so that this capability is implemented with clear verification evidence.
+- **US-17-0047**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to interrupt Support: so that this capability is implemented with clear verification evidence.
+- **US-17-0048**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement legacy PCI interrupt routing so that this capability is implemented with clear verification evidence.
+- **US-17-0049**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement MSI capability setup so that this capability is implemented with clear verification evidence.
+- **US-17-0050**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement MSI-X capability setup so that this capability is implemented with clear verification evidence.
+- **US-17-0051**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to hotplug Support: so that this capability is implemented with clear verification evidence.
+- **US-17-0052**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement PCI hotplug event detection so that this capability is implemented with clear verification evidence.
+- **US-17-0053**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement device add on hotplug so that this capability is implemented with clear verification evidence.
+- **US-17-0054**: As a Substrate contributor working on 13.2. PCI / PCIe Enumerator, I want to implement device remove on hotplug so that this capability is implemented with clear verification evidence.
+- **US-17-0055**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to iSA-PnP Protocol: so that this capability is implemented with clear verification evidence.
+- **US-17-0056**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement ISA-PnP isolation protocol so that this capability is implemented with clear verification evidence.
+- **US-17-0057**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement resource descriptor parsing so that this capability is implemented with clear verification evidence.
+- **US-17-0058**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement resource assignment/activation so that this capability is implemented with clear verification evidence.
+- **US-17-0059**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to legacy ISA Probing: so that this capability is implemented with clear verification evidence.
+- **US-17-0060**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement legacy ISA device table so that this capability is implemented with clear verification evidence.
+- **US-17-0061**: As a Substrate contributor working on 13.3. ISA Plug-and-Play Enumerator, I want to implement port liveness detection so that this capability is implemented with clear verification evidence.
+- **US-17-0062**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to host Controller Abstraction: so that this capability is implemented with clear verification evidence.
+- **US-17-0063**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to define struct usb_hcd HCD abstraction so that this capability is implemented with clear verification evidence.
+- **US-17-0064**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to define struct urb USB Request Block so that this capability is implemented with clear verification evidence.
+- **US-17-0065**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to uHCI Driver: so that this capability is implemented with clear verification evidence.
+- **US-17-0066**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement UHCI register access so that this capability is implemented with clear verification evidence.
+- **US-17-0067**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement UHCI frame list setup so that this capability is implemented with clear verification evidence.
+- **US-17-0068**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement UHCI transfer descriptor handling so that this capability is implemented with clear verification evidence.
+- **US-17-0069**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to oHCI Driver: so that this capability is implemented with clear verification evidence.
+- **US-17-0070**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement OHCI register access so that this capability is implemented with clear verification evidence.
+- **US-17-0071**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement OHCI HCCA and ED/TD setup so that this capability is implemented with clear verification evidence.
+- **US-17-0072**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement OHCI transfer handling so that this capability is implemented with clear verification evidence.
+- **US-17-0073**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to eHCI Driver: so that this capability is implemented with clear verification evidence.
+- **US-17-0074**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement EHCI capability and operational register access so that this capability is implemented with clear verification evidence.
+- **US-17-0075**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement EHCI async schedule (QH/qTD) so that this capability is implemented with clear verification evidence.
+- **US-17-0076**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement EHCI periodic schedule so that this capability is implemented with clear verification evidence.
+- **US-17-0077**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement EHCI transfer handling so that this capability is implemented with clear verification evidence.
+- **US-17-0078**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to xHCI Driver: so that this capability is implemented with clear verification evidence.
+- **US-17-0079**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement xHCI capability structure parsing so that this capability is implemented with clear verification evidence.
+- **US-17-0080**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement xHCI ring management so that this capability is implemented with clear verification evidence.
+- **US-17-0081**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement xHCI device context management so that this capability is implemented with clear verification evidence.
+- **US-17-0082**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement xHCI transfer handling so that this capability is implemented with clear verification evidence.
+- **US-17-0083**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to uSB Core Enumeration: so that this capability is implemented with clear verification evidence.
+- **US-17-0084**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement USB device state machine so that this capability is implemented with clear verification evidence.
+- **US-17-0085**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement SET_ADDRESS control transfer so that this capability is implemented with clear verification evidence.
+- **US-17-0086**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement descriptor parsing so that this capability is implemented with clear verification evidence.
+- **US-17-0087**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement configuration selection so that this capability is implemented with clear verification evidence.
+- **US-17-0088**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to uSB Hub Driver: so that this capability is implemented with clear verification evidence.
+- **US-17-0089**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement hub descriptor parsing so that this capability is implemented with clear verification evidence.
+- **US-17-0090**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement port status change handling so that this capability is implemented with clear verification evidence.
+- **US-17-0091**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement port reset and device attachment so that this capability is implemented with clear verification evidence.
+- **US-17-0092**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to uSB Mass Storage (SCSI Transport): so that this capability is implemented with clear verification evidence.
+- **US-17-0093**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement Bulk-Only Transport (BOT) protocol so that this capability is implemented with clear verification evidence.
+- **US-17-0094**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement Command Block Wrapper (CBW) building so that this capability is implemented with clear verification evidence.
+- **US-17-0095**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to implement Command Status Wrapper (CSW) parsing so that this capability is implemented with clear verification evidence.
+- **US-17-0096**: As a Substrate contributor working on 13.4. USB Host-Side Enumerator, I want to integrate with SCSI mid-layer so that this capability is implemented with clear verification evidence.
+- **US-17-0097**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to resource Manager Core: so that this capability is implemented with clear verification evidence.
+- **US-17-0098**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement global resource tree so that this capability is implemented with clear verification evidence.
+- **US-17-0099**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement request_region() for I/O ports so that this capability is implemented with clear verification evidence.
+- **US-17-0100**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement release_region() so that this capability is implemented with clear verification evidence.
+- **US-17-0101**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement request_mem_region() for MMIO so that this capability is implemented with clear verification evidence.
+- **US-17-0102**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement ioremap() / iounmap() so that this capability is implemented with clear verification evidence.
+- **US-17-0103**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to iRQ Allocation: so that this capability is implemented with clear verification evidence.
+- **US-17-0104**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement request_irq() so that this capability is implemented with clear verification evidence.
+- **US-17-0105**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement free_irq() so that this capability is implemented with clear verification evidence.
+- **US-17-0106**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement shared interrupt handling so that this capability is implemented with clear verification evidence.
+- **US-17-0107**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to dMA Mapping: so that this capability is implemented with clear verification evidence.
+- **US-17-0108**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement dma_map_single() so that this capability is implemented with clear verification evidence.
+- **US-17-0109**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement dma_unmap_single() so that this capability is implemented with clear verification evidence.
+- **US-17-0110**: As a Substrate contributor working on 13.5. Resource Conflict Resolution & Arbitration, I want to implement dma_alloc_coherent() so that this capability is implemented with clear verification evidence.
+- **US-17-0111**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to device Notification System: so that this capability is implemented with clear verification evidence.
+- **US-17-0112**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement kernel device event queue so that this capability is implemented with clear verification evidence.
+- **US-17-0113**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement uevent socket for userspace so that this capability is implemented with clear verification evidence.
+- **US-17-0114**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to devFS Auto-Population: so that this capability is implemented with clear verification evidence.
+- **US-17-0115**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement automatic device node creation on ADD so that this capability is implemented with clear verification evidence.
+- **US-17-0116**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement automatic device node removal on REMOVE so that this capability is implemented with clear verification evidence.
+- **US-17-0117**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement persistent naming via device serial/GUID so that this capability is implemented with clear verification evidence.
+- **US-17-0118**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to power Management: so that this capability is implemented with clear verification evidence.
+- **US-17-0119**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement system suspend orchestration so that this capability is implemented with clear verification evidence.
+- **US-17-0120**: As a Substrate contributor working on 13.6. Hotplug, DevFS Integration & Power Management, I want to implement runtime PM hooks so that this capability is implemented with clear verification evidence.
+- **US-17-0121**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to device Listing Tools: so that this capability is implemented with clear verification evidence.
+- **US-17-0122**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement lspci command so that this capability is implemented with clear verification evidence.
+- **US-17-0123**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement lsusb command so that this capability is implemented with clear verification evidence.
+- **US-17-0124**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement kernel device tree dump so that this capability is implemented with clear verification evidence.
+- **US-17-0125**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to debug Interfaces: so that this capability is implemented with clear verification evidence.
+- **US-17-0126**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement /proc/ioports so that this capability is implemented with clear verification evidence.
+- **US-17-0127**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement /proc/iomem so that this capability is implemented with clear verification evidence.
+- **US-17-0128**: As a Substrate contributor working on 13.7. Diagnostics & Tools, I want to implement driver probe failure logging so that this capability is implemented with clear verification evidence.
+- **US-17-0129**: As a Substrate contributor working on 13.8. Security & Migration, I want to privilege Enforcement: so that this capability is implemented with clear verification evidence.
+- **US-17-0130**: As a Substrate contributor working on 13.8. Security & Migration, I want to restrict raw I/O access to privileged processes so that this capability is implemented with clear verification evidence.
+- **US-17-0131**: As a Substrate contributor working on 13.8. Security & Migration, I want to implement device permission model for devfs so that this capability is implemented with clear verification evidence.
+- **US-17-0132**: As a Substrate contributor working on 13.8. Security & Migration, I want to migrate Existing Drivers: so that this capability is implemented with clear verification evidence.
+- **US-17-0133**: As a Substrate contributor working on 13.8. Security & Migration, I want to audit pci.c and migrate to new bus model so that this capability is implemented with clear verification evidence.
+- **US-17-0134**: As a Substrate contributor working on 13.8. Security & Migration, I want to audit VirtIO drivers and use pci_driver registration so that this capability is implemented with clear verification evidence.
+- **US-17-0135**: As a Substrate contributor working on 13.8. Security & Migration, I want to remove legacy detection code after migration so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-17-0001** (EARS/Ubiquitous): The Substrate system shall core Data Structures (Headers):.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0002** (EARS/Ubiquitous): The Substrate system shall define struct device in sys/kern/device.h.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0003** (EARS/Ubiquitous): The Substrate system shall define struct driver in sys/kern/driver.h.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0004** (EARS/Ubiquitous): The Substrate system shall define struct bus_type in sys/kern/bus.h.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0005** (EARS/Ubiquitous): The Substrate system shall define struct resource in sys/kern/resource.h.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0006** (EARS/Ubiquitous): The Substrate system shall device Registration API:.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0007** (EARS/Ubiquitous): The Substrate system shall implement device_create() allocator.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0008** (EARS/Ubiquitous): The Substrate system shall implement device_register() into bus.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0009** (EARS/Ubiquitous): The Substrate system shall implement device_unregister() removal.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0010** (EARS/Ubiquitous): The Substrate system shall implement device_get() / device_put() refcounting.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0011** (EARS/Ubiquitous): The Substrate system shall implement device_find_child() lookup.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0012** (EARS/Ubiquitous): The Substrate system shall driver Registration API:.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0013** (EARS/Ubiquitous): The Substrate system shall implement driver_register().
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0014** (EARS/Ubiquitous): The Substrate system shall implement driver_unregister().
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0015** (EARS/Ubiquitous): The Substrate system shall implement driver_attach() binding.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0016** (EARS/Ubiquitous): The Substrate system shall implement driver_detach() unbinding.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0017** (EARS/Ubiquitous): The Substrate system shall matching and Binding Logic:.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0018** (EARS/Ubiquitous): The Substrate system shall implement bus_match_device() generic matcher.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0019** (EARS/Ubiquitous): The Substrate system shall implement ID table matching for vendor/device/class.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0020** (EARS/Ubiquitous): The Substrate system shall implement compatible string matching (DT/ACPI style).
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0021** (EARS/Ubiquitous): The Substrate system shall implement driver blacklist/override mechanism.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0022** (EARS/Ubiquitous): The Substrate system shall device Lifecycle Callbacks:.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0023** (EARS/Ubiquitous): The Substrate system shall implement device_probe() wrapper with error handling.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0024** (EARS/Ubiquitous): The Substrate system shall implement deferred probe queue.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0025** (EARS/Ubiquitous): The Substrate system shall implement device_suspend() / device_resume().
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0026** (EARS/Ubiquitous): The Substrate system shall implement device_shutdown() callback.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0027** (EARS/Ubiquitous): The Substrate system shall implement device_reset() callback.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0028** (EARS/Ubiquitous): The Substrate system shall refactor Existing Drivers:.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0029** (EARS/Ubiquitous): The Substrate system shall refactor ide.c to use new driver model.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0030** (EARS/Ubiquitous): The Substrate system shall refactor virtio_blk.c to use new driver model.
+  - Context: 13.1. Kernel Driver Model & Device Lifecycle
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0031** (EARS/Ubiquitous): The Substrate system shall pCI Config Space Access:.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0032** (EARS/Ubiquitous): The Substrate system shall implement pci_read_config8/16/32() primitives.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0033** (EARS/Ubiquitous): The Substrate system shall implement pci_write_config8/16/32() primitives.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0034** (EARS/Ubiquitous): The Substrate system shall implement MMIO config access for PCIe (ECAM).
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0035** (EARS/Ubiquitous): The Substrate system shall bus Enumeration:.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0036** (EARS/Ubiquitous): The Substrate system shall implement pci_scan_bus() recursive scanner.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0037** (EARS/Ubiquitous): The Substrate system shall implement bridge detection and subordinate bus scan.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0038** (EARS/Ubiquitous): The Substrate system shall implement pci_device_t creation and registration.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0039** (EARS/Ubiquitous): The Substrate system shall bAR Parsing and Resource Allocation:.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0040** (EARS/Ubiquitous): The Substrate system shall implement BAR type detection (I/O vs MMIO, 32/64-bit).
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0041** (EARS/Ubiquitous): The Substrate system shall implement BAR size probing.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0042** (EARS/Ubiquitous): The Substrate system shall implement pci_request_region() resource reservation.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0043** (EARS/Ubiquitous): The Substrate system shall implement pci_iomap() MMIO mapping.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0044** (EARS/Ubiquitous): The Substrate system shall capability List Parsing:.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0045** (EARS/Ubiquitous): The Substrate system shall implement capability list walker.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0046** (EARS/Ubiquitous): The Substrate system shall implement extended capability walker (PCIe).
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0047** (EARS/Ubiquitous): The Substrate system shall interrupt Support:.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0048** (EARS/Ubiquitous): The Substrate system shall implement legacy PCI interrupt routing.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0049** (EARS/Ubiquitous): The Substrate system shall implement MSI capability setup.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0050** (EARS/Ubiquitous): The Substrate system shall implement MSI-X capability setup.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0051** (EARS/Ubiquitous): The Substrate system shall hotplug Support:.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0052** (EARS/Ubiquitous): The Substrate system shall implement PCI hotplug event detection.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0053** (EARS/Ubiquitous): The Substrate system shall implement device add on hotplug.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0054** (EARS/Ubiquitous): The Substrate system shall implement device remove on hotplug.
+  - Context: 13.2. PCI / PCIe Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0055** (EARS/Ubiquitous): The Substrate system shall iSA-PnP Protocol:.
+  - Context: 13.3. ISA Plug-and-Play Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0056** (EARS/Ubiquitous): The Substrate system shall implement ISA-PnP isolation protocol.
+  - Context: 13.3. ISA Plug-and-Play Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0057** (EARS/Ubiquitous): The Substrate system shall implement resource descriptor parsing.
+  - Context: 13.3. ISA Plug-and-Play Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0058** (EARS/Ubiquitous): The Substrate system shall implement resource assignment/activation.
+  - Context: 13.3. ISA Plug-and-Play Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0059** (EARS/Ubiquitous): The Substrate system shall legacy ISA Probing:.
+  - Context: 13.3. ISA Plug-and-Play Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0060** (EARS/Ubiquitous): The Substrate system shall implement legacy ISA device table.
+  - Context: 13.3. ISA Plug-and-Play Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0061** (EARS/Ubiquitous): The Substrate system shall implement port liveness detection.
+  - Context: 13.3. ISA Plug-and-Play Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0062** (EARS/Ubiquitous): The Substrate system shall host Controller Abstraction:.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0063** (EARS/Ubiquitous): The Substrate system shall define struct usb_hcd HCD abstraction.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0064** (EARS/Ubiquitous): The Substrate system shall define struct urb USB Request Block.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0065** (EARS/Ubiquitous): The Substrate system shall uHCI Driver:.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0066** (EARS/Ubiquitous): The Substrate system shall implement UHCI register access.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0067** (EARS/Ubiquitous): The Substrate system shall implement UHCI frame list setup.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0068** (EARS/Ubiquitous): The Substrate system shall implement UHCI transfer descriptor handling.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0069** (EARS/Ubiquitous): The Substrate system shall oHCI Driver:.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0070** (EARS/Ubiquitous): The Substrate system shall implement OHCI register access.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0071** (EARS/Ubiquitous): The Substrate system shall implement OHCI HCCA and ED/TD setup.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0072** (EARS/Ubiquitous): The Substrate system shall implement OHCI transfer handling.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0073** (EARS/Ubiquitous): The Substrate system shall eHCI Driver:.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0074** (EARS/Ubiquitous): The Substrate system shall implement EHCI capability and operational register access.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0075** (EARS/Ubiquitous): The Substrate system shall implement EHCI async schedule (QH/qTD).
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0076** (EARS/Ubiquitous): The Substrate system shall implement EHCI periodic schedule.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0077** (EARS/Ubiquitous): The Substrate system shall implement EHCI transfer handling.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0078** (EARS/Ubiquitous): The Substrate system shall xHCI Driver:.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0079** (EARS/Ubiquitous): The Substrate system shall implement xHCI capability structure parsing.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0080** (EARS/Ubiquitous): The Substrate system shall implement xHCI ring management.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0081** (EARS/Ubiquitous): The Substrate system shall implement xHCI device context management.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0082** (EARS/Ubiquitous): The Substrate system shall implement xHCI transfer handling.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0083** (EARS/Ubiquitous): The Substrate system shall uSB Core Enumeration:.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0084** (EARS/Ubiquitous): The Substrate system shall implement USB device state machine.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0085** (EARS/Ubiquitous): The Substrate system shall implement SET_ADDRESS control transfer.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0086** (EARS/Ubiquitous): The Substrate system shall implement descriptor parsing.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0087** (EARS/Ubiquitous): The Substrate system shall implement configuration selection.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0088** (EARS/Ubiquitous): The Substrate system shall uSB Hub Driver:.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0089** (EARS/Ubiquitous): The Substrate system shall implement hub descriptor parsing.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0090** (EARS/Ubiquitous): The Substrate system shall implement port status change handling.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0091** (EARS/Ubiquitous): The Substrate system shall implement port reset and device attachment.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0092** (EARS/Ubiquitous): The Substrate system shall uSB Mass Storage (SCSI Transport):.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0093** (EARS/Ubiquitous): The Substrate system shall implement Bulk-Only Transport (BOT) protocol.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0094** (EARS/Ubiquitous): The Substrate system shall implement Command Block Wrapper (CBW) building.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0095** (EARS/Ubiquitous): The Substrate system shall implement Command Status Wrapper (CSW) parsing.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0096** (EARS/Ubiquitous): The Substrate system shall integrate with SCSI mid-layer.
+  - Context: 13.4. USB Host-Side Enumerator
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0097** (EARS/Ubiquitous): The Substrate system shall resource Manager Core:.
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0098** (EARS/Ubiquitous): The Substrate system shall implement global resource tree.
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0099** (EARS/Ubiquitous): The Substrate system shall implement request_region() for I/O ports.
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0100** (EARS/Ubiquitous): The Substrate system shall implement release_region().
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0101** (EARS/Ubiquitous): The Substrate system shall implement request_mem_region() for MMIO.
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0102** (EARS/Ubiquitous): The Substrate system shall implement ioremap() / iounmap().
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0103** (EARS/Ubiquitous): The Substrate system shall iRQ Allocation:.
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0104** (EARS/Ubiquitous): The Substrate system shall implement request_irq().
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0105** (EARS/Ubiquitous): The Substrate system shall implement free_irq().
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0106** (EARS/Ubiquitous): The Substrate system shall implement shared interrupt handling.
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0107** (EARS/Ubiquitous): The Substrate system shall dMA Mapping:.
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0108** (EARS/Ubiquitous): The Substrate system shall implement dma_map_single().
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0109** (EARS/Ubiquitous): The Substrate system shall implement dma_unmap_single().
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0110** (EARS/Ubiquitous): The Substrate system shall implement dma_alloc_coherent().
+  - Context: 13.5. Resource Conflict Resolution & Arbitration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0111** (EARS/Ubiquitous): The Substrate system shall device Notification System:.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0112** (EARS/Ubiquitous): The Substrate system shall implement kernel device event queue.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0113** (EARS/Ubiquitous): The Substrate system shall implement uevent socket for userspace.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0114** (EARS/Ubiquitous): The Substrate system shall devFS Auto-Population:.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0115** (EARS/Ubiquitous): The Substrate system shall implement automatic device node creation on ADD.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0116** (EARS/Ubiquitous): The Substrate system shall implement automatic device node removal on REMOVE.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0117** (EARS/Ubiquitous): The Substrate system shall implement persistent naming via device serial/GUID.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0118** (EARS/Ubiquitous): The Substrate system shall power Management:.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0119** (EARS/Ubiquitous): The Substrate system shall implement system suspend orchestration.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0120** (EARS/Ubiquitous): The Substrate system shall implement runtime PM hooks.
+  - Context: 13.6. Hotplug, DevFS Integration & Power Management
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0121** (EARS/Ubiquitous): The Substrate system shall device Listing Tools:.
+  - Context: 13.7. Diagnostics & Tools
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0122** (EARS/Ubiquitous): The Substrate system shall implement lspci command.
+  - Context: 13.7. Diagnostics & Tools
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0123** (EARS/Ubiquitous): The Substrate system shall implement lsusb command.
+  - Context: 13.7. Diagnostics & Tools
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0124** (EARS/Ubiquitous): The Substrate system shall implement kernel device tree dump.
+  - Context: 13.7. Diagnostics & Tools
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0125** (EARS/Ubiquitous): The Substrate system shall debug Interfaces:.
+  - Context: 13.7. Diagnostics & Tools
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0126** (EARS/Ubiquitous): The Substrate system shall implement /proc/ioports.
+  - Context: 13.7. Diagnostics & Tools
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0127** (EARS/Ubiquitous): The Substrate system shall implement /proc/iomem.
+  - Context: 13.7. Diagnostics & Tools
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0128** (EARS/Ubiquitous): The Substrate system shall implement driver probe failure logging.
+  - Context: 13.7. Diagnostics & Tools
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0129** (EARS/Ubiquitous): The Substrate system shall privilege Enforcement:.
+  - Context: 13.8. Security & Migration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0130** (EARS/Ubiquitous): The Substrate system shall restrict raw I/O access to privileged processes.
+  - Context: 13.8. Security & Migration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0131** (EARS/Ubiquitous): The Substrate system shall implement device permission model for devfs.
+  - Context: 13.8. Security & Migration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0132** (EARS/Ubiquitous): The Substrate system shall migrate Existing Drivers:.
+  - Context: 13.8. Security & Migration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0133** (EARS/Ubiquitous): The Substrate system shall audit pci.c and migrate to new bus model.
+  - Context: 13.8. Security & Migration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0134** (EARS/Ubiquitous): The Substrate system shall audit VirtIO drivers and use pci_driver registration.
+  - Context: 13.8. Security & Migration
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-17-0135** (EARS/Ubiquitous): The Substrate system shall remove legacy detection code after migration.
+  - Context: 13.8. Security & Migration
+  - Verification: design review + implementation evidence + test/doc update.

@@ -13,11 +13,35 @@ int compare(const void *a, const void *b) {
 char lines[MAX_LINES][MAX_LEN];
 
 int main(int argc, char *argv[]) {
-    (void)argc; (void)argv; // TODO: file args
-    
     int count = 0;
-    while (fgets(lines[count], MAX_LEN, stdin) && count < MAX_LINES) {
-        count++;
+    int exit_status = 0;
+
+    if (argc > 1) {
+        for (int i = 1; i < argc; i++) {
+            FILE *f;
+            if (strcmp(argv[i], "-") == 0) {
+                f = stdin;
+            } else {
+                f = fopen(argv[i], "r");
+                if (!f) {
+                    perror(argv[i]);
+                    exit_status = 1;
+                    continue;
+                }
+            }
+
+            while (count < MAX_LINES && fgets(lines[count], MAX_LEN, f)) {
+                count++;
+            }
+
+            if (f != stdin) {
+                fclose(f);
+            }
+        }
+    } else {
+        while (count < MAX_LINES && fgets(lines[count], MAX_LEN, stdin)) {
+            count++;
+        }
     }
     
     qsort(lines, count, MAX_LEN, compare);
@@ -25,5 +49,5 @@ int main(int argc, char *argv[]) {
     for (int i = 0; i < count; i++) {
         printf("%s", lines[i]);
     }
-    return 0;
+    return exit_status;
 }
