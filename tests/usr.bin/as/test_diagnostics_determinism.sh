@@ -36,14 +36,14 @@ SRC
 cat > "$TMP/inc/stack1.inc" <<'SRC'
 #include "stack2.inc"
 SRC
-cat > "$TMP/include_stack.s" <<'SRC'
+cat > "$TMP/include_stack.S" <<'SRC'
 #include "stack1.inc"
 .text
 .globl include_stack
 include_stack:
     ret
 SRC
-if "$AS" -64 -I "$TMP/inc" -o "$TMP/include_stack.o" "$TMP/include_stack.s" >"$TMP/istack.out" 2>"$TMP/istack.err"; then
+if "$AS" -64 -I "$TMP/inc" -o "$TMP/include_stack.o" "$TMP/include_stack.S" >"$TMP/istack.out" 2>"$TMP/istack.err"; then
     echo "expected include stack failure"
     exit 1
 fi
@@ -120,10 +120,10 @@ d3:
     ret
 .size d3, .-d3
 SRC
-cat > "$TMP/inc_depth.s" <<'SRC'
+cat > "$TMP/inc_depth.S" <<'SRC'
 #include "d1.inc"
 SRC
-if "$AS" --max-include-depth 1 -I "$TMP/inc" -o "$TMP/id.o" "$TMP/inc_depth.s" >"$TMP/id.out" 2>"$TMP/id.err"; then
+if "$AS" --max-include-depth 1 -I "$TMP/inc" -o "$TMP/id.o" "$TMP/inc_depth.S" >"$TMP/id.out" 2>"$TMP/id.err"; then
     echo "expected max-include-depth failure"
     exit 1
 fi

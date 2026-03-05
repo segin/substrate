@@ -18,7 +18,8 @@ all: kernel.bin kernel.efi kernel.multiboot kernel.freebsd kernel.zimage
 	@echo "Kernel build complete (all formats)."
 
 kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
-	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.bin \
+	# First pass: link kernel without ksyms
+	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.tmp \
 		arch/$(ARCH)/kernel.o \
 		lib/lib.o \
 		kern/kern.o \
@@ -36,6 +37,29 @@ kernel.bin: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		exec/perso/perso.o \
 		vm/vm.o \
 	../tests/sys/tests.o
+	# Generate ksyms table
+	nm kernel.tmp | python3 mkksyms.py > ksyms_table.c
+	$(CC) $(KERNEL_CFLAGS) -c ksyms_table.c -o ksyms_table.o
+	# Second pass: link kernel with ksyms
+	$(LD) -m elf_i386 -T arch/$(ARCH)/linker.ld -o kernel.bin \
+		arch/$(ARCH)/kernel.o \
+		lib/lib.o \
+		kern/kern.o \
+		pm/pm.o \
+		drivers/video/video.o \
+		drivers/input/input.o \
+		drivers/console/console_subsys.o \
+		drivers/console/uart/uart_drv.o \
+		drivers/storage/storage.o \
+		drivers/devices/devices.o \
+		drivers/virtio/virtio_drv.o \
+		vfs/vfs_subsys.o \
+		fs/fs.o \
+		exec/formats/exec.o \
+		exec/perso/perso.o \
+		vm/vm.o \
+	../tests/sys/tests.o \
+	ksyms_table.o
 	@echo "Linked kernel.bin"
 
 kernel.multiboot: kernel.bin
@@ -52,6 +76,30 @@ kernel.zimage: kernel.bin
 	rm -f kernel.raw
 
 kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
+	# First pass for EFI kernel
+	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.tmp \
+		arch/$(ARCH)/kernel.o \
+		lib/lib.o \
+		kern/kern.o \
+		pm/pm.o \
+		drivers/video/video.o \
+		drivers/input/input.o \
+		drivers/console/console_subsys.o \
+		drivers/console/uart/uart_drv.o \
+		drivers/storage/storage.o \
+		drivers/devices/devices.o \
+		drivers/virtio/virtio_drv.o \
+		vfs/vfs_subsys.o \
+		fs/fs.o \
+		exec/formats/exec.o \
+		exec/perso/perso.o \
+		vm/vm.o \
+	../tests/sys/tests.o \
+		$(LIBGCC)
+	# Generate ksyms table
+	nm kernel_efi.tmp | python3 mkksyms.py > ksyms_efi_table.c
+	$(CC) $(KERNEL_CFLAGS) -c ksyms_efi_table.c -o ksyms_efi_table.o
+	# Second pass for EFI kernel
 	$(LD) -m elf_i386 -T arch/$(ARCH)/efi.ld -o kernel_efi.elf \
 		arch/$(ARCH)/kernel.o \
 		lib/lib.o \
@@ -70,6 +118,7 @@ kernel.efi: arch_kernel klib kern pm drivers fs exec vfs exec_perso vm tests
 		exec/perso/perso.o \
 		vm/vm.o \
 	../tests/sys/tests.o \
+	ksyms_efi_table.o \
 		$(LIBGCC)
 	objcopy -O pe-i386 $(EFI_OBJCOPY_FLAGS) kernel_efi.elf kernel.efi
 	@echo "Linked kernel.efi"
@@ -143,7 +192,7 @@ clean:
 	$(MAKE) -C exec/perso clean
 	$(MAKE) -C vm clean
 	$(MAKE) -C lib clean
-	rm -f kernel.bin kernel.zimage
+	rm -f kernel.bin kernel.zimage kernel.tmp kernel_efi.tmp ksyms_table.c ksyms_table.o ksyms_efi_table.c ksyms_efi_table.o kernel_efi.elf kernel.efi kernel.multiboot kernel.freebsd
 
 tests:
 	$(MAKE) -C ../tests/sys tests.o
