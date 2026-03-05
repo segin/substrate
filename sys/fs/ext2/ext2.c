@@ -478,6 +478,10 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     ctx->last_readdir_idx = (uint64_t)-1;
     ctx->last_readdir_pos = 0;
 
+    // Initialize dcache
+    ctx->dcache_idx = 0;
+    memset(ctx->dcache, 0, sizeof(ctx->dcache));
+
     // If this cache slot was previously used, it might have allocated buffers.
     // We should free them to avoid leaks when reusing the slot for a new inode.
     // In a more sophisticated cache, we might reuse them, but here we prioritize correctness.
@@ -658,6 +662,29 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     
     mutex_lock(&ctx->lock);
 
+    fs_node_t *result_node = NULL;
+
+    // 1. Check dcache
+    for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
+        if (ctx->dcache[k].inode_num != 0 &&
+            ctx->dcache[k].name_len == name_len &&
+            memcmp(ctx->dcache[k].name, name, name_len) == 0) {
+
+            ext2_inode_t inode;
+            if (ext2_read_inode(fs, ctx->dcache[k].inode_num, &inode) == 0) {
+                result_node = ext2_alloc_node(fs, ctx->dcache[k].inode_num, &inode);
+                // Copy name
+                size_t len = name_len;
+                if (len >= sizeof(result_node->name)) {
+                    len = sizeof(result_node->name) - 1;
+                }
+                memcpy(result_node->name, name, len);
+                result_node->name[len] = '\0';
+                goto cleanup;
+            }
+        }
+    }
+
     // Lazy allocate
     uint32_t block_size = fs->block_size;
     if (!ctx->block_buf) ctx->block_buf = kmalloc(block_size);
@@ -674,8 +701,6 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     uint32_t *indirect = ctx->indirect_buf;
     uint32_t *dindirect = ctx->dindirect_buf;
     uint32_t *tindirect = ctx->tindirect_buf;
-
-    fs_node_t *result_node = NULL;
 
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
@@ -703,6 +728,16 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
                         }
                         memcpy(result_node->name, de->name, len);
                         result_node->name[len] = '\0';
+
+                        // Add to dcache only if name fits
+                        if (len < sizeof(ctx->dcache[0].name)) {
+                            uint32_t idx = ctx->dcache_idx++ % EXT2_DCACHE_SIZE;
+                            ctx->dcache[idx].inode_num = de->inode;
+                            ctx->dcache[idx].name_len = len;
+                            memcpy(ctx->dcache[idx].name, de->name, len);
+                            ctx->dcache[idx].name[len] = '\0';
+                        }
+
                         goto cleanup;
                     }
                 }
@@ -1053,6 +1088,16 @@ int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode) {
     
     mutex_lock(&ctx->lock);
 
+    // Invalidate dcache entry if it matches
+    for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
+        if (ctx->dcache[k].inode_num != 0 &&
+            ctx->dcache[k].name_len == name_len &&
+            memcmp(ctx->dcache[k].name, name, name_len) == 0) {
+            ctx->dcache[k].inode_num = 0;
+            // No break, clear all possible duplicates just in case
+        }
+    }
+
     // Lazy allocate
     uint32_t block_size = fs->block_size;
     if (!ctx->block_buf) ctx->block_buf = kmalloc(block_size);
@@ -1184,6 +1229,16 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     size_t name_len = strlen(name);
 
     mutex_lock(&ctx->lock);
+
+    // Invalidate dcache entry if it matches
+    for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
+        if (ctx->dcache[k].inode_num != 0 &&
+            ctx->dcache[k].name_len == name_len &&
+            memcmp(ctx->dcache[k].name, name, name_len) == 0) {
+            ctx->dcache[k].inode_num = 0;
+            // No break, clear all possible duplicates just in case
+        }
+    }
 
     // Lazy allocate
     uint32_t block_size = fs->block_size;
