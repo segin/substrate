@@ -1,0 +1,240 @@
+# 15. Personality Driver Audit & Refactor
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 10440-10550.
+
+## Reimplemented Checklist (All Open)
+
+### 15. Personality Driver Audit & Refactor
+Reference: User Request (Step 30690)
+
+- [ ] **Audit & Inventory:**
+    - [ ] Scan all personality drivers for syscall wrappers, legacy ABI usage, and hacks.
+        - Files: `sys/exec/perso/*.c`
+        - Tests: N/A
+        - Docs: `docs/personality_audit.md` (Inventory Report)
+        - Acceptance: Complete list of functions needing refactor.
+
+- [ ] **Linux Personality Refactor:**
+    - [ ] Update Linux syscall shims to translate personality types to Native 64-bit ABI.
+        - Files: `sys/exec/perso/perso_linux.c`
+        - Tests: integration (stat/lstat/fstat on Linux binaries)
+        - Docs: `linux_compat.md`
+        - Acceptance: Linux stat64 structs correctly mapped to native 64-bit stat.
+    - [ ] Refactor Linux drivers to remove legacy stat usage.
+        - Files: `sys/exec/perso/perso_linux.c`
+        - Tests: unit (driver functions)
+        - Acceptance: No dependency on 32-bit native types.
+    - [ ] Add explicit validation tests for file metadata and permission semantics.
+        - Files: `tests/perso/linux_test.c`
+        - Tests: integration (chown/chmod/utimes simulation)
+        - Acceptance: Semantics match Linux 5.x expectations.
+
+- [ ] **FreeBSD Personality Refactor:**
+    - [ ] Update FreeBSD syscall shims to translate personality types to Native 64-bit ABI.
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: integration (FreeBSD 14.x binary compatibility)
+        - Docs: `freebsd_compat.md`
+        - Acceptance: FreeBSD stat structure correctly populated.
+    - [ ] Refactor FreeBSD drivers to remove legacy dependencies.
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: unit
+        - Acceptance: Clean separation from legacy native types.
+    - [ ] Add explicit validation tests for FreeBSD semantics.
+        - Files: `tests/perso/freebsd_test.c`
+        - Tests: integration
+        - Acceptance: Pass canonical FreeBSD compliance checks (mini-suite).
+
+- [ ] **SVR4 / SVR3 Personality Refactor:**
+    - [ ] Update SVR4/SVR3 syscall shims for Native 64-bit ABI translation.
+        - Files: `sys/exec/perso/perso_svr4.c`, `sys/exec/perso/perso_svr3.c`
+        - Tests: integration (legacy binary support)
+        - Acceptance: Correct metadata reporting for legacy formats.
+    - [ ] Implement SVR3/SVR4 segment register validation for 286/386 protected mode binaries.
+        - Files: `sys/exec/perso/perso_svr3.c`, `sys/exec/perso/perso_svr4.c`
+        - Tests: unit (segment descriptor validation)
+        - Acceptance: Reject invalid segment configurations; log warnings for suspicious setups.
+    - [ ] Add SVR3 x.out (Xenix) binary format recognition and loader hooks.
+        - Files: `sys/fs/exec/xout.c`, `sys/exec/perso/perso_svr3.c`
+        - Tests: integration (load sample Xenix binary)
+        - Docs: `svr3_xout.md`
+        - Acceptance: Correctly identify x.out magic and dispatch to SVR3 personality.
+    - [ ] Implement SVR4 /dev/zero and /dev/null personality expectations.
+        - Files: `sys/exec/perso/perso_svr4.c`, `sys/drivers/char/mem.c`
+        - Tests: integration (mmap /dev/zero)
+        - Acceptance: SVR4 binaries can use /dev/zero for anonymous mappings.
+    - [ ] Add SVR3 signal number translation (SVR3 uses different signal numbers).
+        - Files: `sys/exec/perso/perso_svr3.c`
+        - Tests: unit (signal mapping table)
+        - Acceptance: SIGTERM/SIGKILL/SIGCHLD correctly translated between ABIs.
+    - [ ] Validation tests for SVR compat layers.
+        - Files: `tests/perso/svr_test.c`
+        - Tests: integration
+        - Acceptance: Basic file operations work correctly.
+
+- [ ] **FreeBSD Personality Enhancements:**
+    - [ ] Implement FreeBSD-specific sysctl namespace for personality queries.
+        - Files: `sys/exec/perso/perso_freebsd.c`, `sys/kern/sysctl.c`
+        - Tests: integration (sysctl kern.ostype)
+        - Acceptance: FreeBSD binaries see "FreeBSD" as ostype.
+    - [ ] Add FreeBSD capsicum(4) syscall stubs (return ENOSYS with log).
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: unit (verify ENOSYS)
+        - Docs: Add capsicum notes to `freebsd_compat.md`
+        - Acceptance: Capsicum calls fail gracefully without crashing.
+    - [ ] Implement FreeBSD jail(2) detection stub (return ENOSYS).
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: unit
+        - Acceptance: jail(2) returns ENOSYS, does not panic.
+
+- [ ] **Infrastructural Reconciliation:**
+    - [ ] Reconcile personality-specific `/proc` and `/dev` expectations.
+        - Files: `sys/fs/procfs.c`, `sys/fs/devfs.c`
+        - Tests: integration (cat /proc/cpuinfo, ls -l /dev)
+        - Docs: `compat_fs_layer.md`
+        - Acceptance: Pseudo-filesystems return expected format per-personality OR robust adaptation layer exists.
+
+- [ ] **Quality & Regression:**
+    - [ ] Regression tests for third-party modules / sample drivers.
+        - Files: `tests/modules/*.c`
+        - Tests: regression
+        - Acceptance: Personality changes do not break external native modules.
+    - [ ] Refactor "minimal" shims to production quality (error handling, locking).
+        - Files: All `perso_*.c` files
+        - Tests: stress/edge-case
+        - Acceptance: Robust error propagation, no race conditions in translation layers.
+    - [ ] Audit perso_svr3.c for unchecked pointer dereferences and add null guards.
+        - Files: `sys/exec/perso/perso_svr3.c`
+        - Tests: fuzz (malformed syscall args)
+        - Acceptance: No kernel panics on invalid arguments.
+    - [ ] Audit perso_svr4.c for unchecked pointer dereferences and add null guards.
+        - Files: `sys/exec/perso/perso_svr4.c`
+        - Tests: fuzz (malformed syscall args)
+        - Acceptance: No kernel panics on invalid arguments.
+    - [ ] Audit perso_freebsd.c for unchecked pointer dereferences and add null guards.
+        - Files: `sys/exec/perso/perso_freebsd.c`
+        - Tests: fuzz (malformed syscall args)
+        - Acceptance: No kernel panics on invalid arguments.
+
+
+## User Stories
+
+- **US-19-0001**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to audit & Inventory: so that this capability is implemented with clear verification evidence.
+- **US-19-0002**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to scan all personality drivers for syscall wrappers, legacy ABI usage, and hacks so that this capability is implemented with clear verification evidence.
+- **US-19-0003**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to linux Personality Refactor: so that this capability is implemented with clear verification evidence.
+- **US-19-0004**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to update Linux syscall shims to translate personality types to Native 64-bit ABI so that this capability is implemented with clear verification evidence.
+- **US-19-0005**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to refactor Linux drivers to remove legacy stat usage so that this capability is implemented with clear verification evidence.
+- **US-19-0006**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to add explicit validation tests for file metadata and permission semantics so that this capability is implemented with clear verification evidence.
+- **US-19-0007**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to freeBSD Personality Refactor: so that this capability is implemented with clear verification evidence.
+- **US-19-0008**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to update FreeBSD syscall shims to translate personality types to Native 64-bit ABI so that this capability is implemented with clear verification evidence.
+- **US-19-0009**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to refactor FreeBSD drivers to remove legacy dependencies so that this capability is implemented with clear verification evidence.
+- **US-19-0010**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to add explicit validation tests for FreeBSD semantics so that this capability is implemented with clear verification evidence.
+- **US-19-0011**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to sVR4 / SVR3 Personality Refactor: so that this capability is implemented with clear verification evidence.
+- **US-19-0012**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to update SVR4/SVR3 syscall shims for Native 64-bit ABI translation so that this capability is implemented with clear verification evidence.
+- **US-19-0013**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to implement SVR3/SVR4 segment register validation for 286/386 protected mode binaries so that this capability is implemented with clear verification evidence.
+- **US-19-0014**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to add SVR3 x.out (Xenix) binary format recognition and loader hooks so that this capability is implemented with clear verification evidence.
+- **US-19-0015**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to implement SVR4 /dev/zero and /dev/null personality expectations so that this capability is implemented with clear verification evidence.
+- **US-19-0016**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to add SVR3 signal number translation (SVR3 uses different signal numbers) so that this capability is implemented with clear verification evidence.
+- **US-19-0017**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to validation tests for SVR compat layers so that this capability is implemented with clear verification evidence.
+- **US-19-0018**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to freeBSD Personality Enhancements: so that this capability is implemented with clear verification evidence.
+- **US-19-0019**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to implement FreeBSD-specific sysctl namespace for personality queries so that this capability is implemented with clear verification evidence.
+- **US-19-0020**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to add FreeBSD capsicum(4) syscall stubs (return ENOSYS with log) so that this capability is implemented with clear verification evidence.
+- **US-19-0021**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to implement FreeBSD jail(2) detection stub (return ENOSYS) so that this capability is implemented with clear verification evidence.
+- **US-19-0022**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to infrastructural Reconciliation: so that this capability is implemented with clear verification evidence.
+- **US-19-0023**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to reconcile personality-specific /proc and /dev expectations so that this capability is implemented with clear verification evidence.
+- **US-19-0024**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to quality & Regression: so that this capability is implemented with clear verification evidence.
+- **US-19-0025**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to regression tests for third-party modules / sample drivers so that this capability is implemented with clear verification evidence.
+- **US-19-0026**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to refactor "minimal" shims to production quality (error handling, locking) so that this capability is implemented with clear verification evidence.
+- **US-19-0027**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to audit perso_svr3.c for unchecked pointer dereferences and add null guards so that this capability is implemented with clear verification evidence.
+- **US-19-0028**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to audit perso_svr4.c for unchecked pointer dereferences and add null guards so that this capability is implemented with clear verification evidence.
+- **US-19-0029**: As a Substrate contributor working on 15. Personality Driver Audit & Refactor, I want to audit perso_freebsd.c for unchecked pointer dereferences and add null guards so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-19-0001** (EARS/Ubiquitous): The Substrate system shall audit & Inventory:.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0002** (EARS/Ubiquitous): The Substrate system shall scan all personality drivers for syscall wrappers, legacy ABI usage, and hacks.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0003** (EARS/Ubiquitous): The Substrate system shall linux Personality Refactor:.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0004** (EARS/Ubiquitous): The Substrate system shall update Linux syscall shims to translate personality types to Native 64-bit ABI.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0005** (EARS/Ubiquitous): The Substrate system shall refactor Linux drivers to remove legacy stat usage.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0006** (EARS/Ubiquitous): The Substrate system shall add explicit validation tests for file metadata and permission semantics.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0007** (EARS/Ubiquitous): The Substrate system shall freeBSD Personality Refactor:.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0008** (EARS/Ubiquitous): The Substrate system shall update FreeBSD syscall shims to translate personality types to Native 64-bit ABI.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0009** (EARS/Ubiquitous): The Substrate system shall refactor FreeBSD drivers to remove legacy dependencies.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0010** (EARS/Ubiquitous): The Substrate system shall add explicit validation tests for FreeBSD semantics.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0011** (EARS/Ubiquitous): The Substrate system shall sVR4 / SVR3 Personality Refactor:.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0012** (EARS/Ubiquitous): The Substrate system shall update SVR4/SVR3 syscall shims for Native 64-bit ABI translation.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0013** (EARS/Ubiquitous): The Substrate system shall implement SVR3/SVR4 segment register validation for 286/386 protected mode binaries.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0014** (EARS/Ubiquitous): The Substrate system shall add SVR3 x.out (Xenix) binary format recognition and loader hooks.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0015** (EARS/Ubiquitous): The Substrate system shall implement SVR4 /dev/zero and /dev/null personality expectations.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0016** (EARS/Ubiquitous): The Substrate system shall add SVR3 signal number translation (SVR3 uses different signal numbers).
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0017** (EARS/Ubiquitous): The Substrate system shall validation tests for SVR compat layers.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0018** (EARS/Ubiquitous): The Substrate system shall freeBSD Personality Enhancements:.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0019** (EARS/Ubiquitous): The Substrate system shall implement FreeBSD-specific sysctl namespace for personality queries.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0020** (EARS/Ubiquitous): The Substrate system shall add FreeBSD capsicum(4) syscall stubs (return ENOSYS with log).
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0021** (EARS/Ubiquitous): The Substrate system shall implement FreeBSD jail(2) detection stub (return ENOSYS).
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0022** (EARS/Ubiquitous): The Substrate system shall infrastructural Reconciliation:.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0023** (EARS/Ubiquitous): The Substrate system shall reconcile personality-specific /proc and /dev expectations.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0024** (EARS/Ubiquitous): The Substrate system shall quality & Regression:.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0025** (EARS/Ubiquitous): The Substrate system shall regression tests for third-party modules / sample drivers.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0026** (EARS/Ubiquitous): The Substrate system shall refactor "minimal" shims to production quality (error handling, locking).
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0027** (EARS/Ubiquitous): The Substrate system shall audit perso_svr3.c for unchecked pointer dereferences and add null guards.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0028** (EARS/Ubiquitous): The Substrate system shall audit perso_svr4.c for unchecked pointer dereferences and add null guards.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-19-0029** (EARS/Ubiquitous): The Substrate system shall audit perso_freebsd.c for unchecked pointer dereferences and add null guards.
+  - Context: 15. Personality Driver Audit & Refactor
+  - Verification: design review + implementation evidence + test/doc update.
