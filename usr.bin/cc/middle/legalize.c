@@ -34,10 +34,15 @@ static int legalize_function(cc_ssa_function_t *f, cc_diag_t *diag) {
     terminated = 0;
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_t *in = &f->instrs[i];
-        if (terminated && in->op != CC_SSA_LABEL) {
-            dropped = 1;
-            cc_ssa_instr_free(in);
-            continue;
+        if (terminated) {
+            if (in->op == CC_SSA_LABEL) {
+                /* A label starts a new block after a terminator. */
+                terminated = 0;
+            } else {
+                dropped = 1;
+                cc_ssa_instr_free(in);
+                continue;
+            }
         }
         if (w != i) {
             f->instrs[w] = f->instrs[i];
