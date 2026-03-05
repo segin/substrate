@@ -88,7 +88,7 @@ int pthread_create(pthread_t *thread, const pthread_attr_t *attr,
     param.parent_tid = NULL;
     param.flags = 0;
     
-    int ret = (int)syscall(SYS_THR_NEW, (int)&param, sizeof(param));
+    int ret = (int)syscall(SYS_THR_NEW, (intptr_t)&param, sizeof(param));
     
     if (ret != 0) {
         free(ta);
