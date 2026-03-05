@@ -15,6 +15,10 @@ int main(void) {
 		return 2;
 	if (__builtin_ctz(8) != 3)
 		return 3;
+	if (__builtin_ffs(0) != 0 || __builtin_ffs(8) != 4)
+		return 31;
+	if (__builtin_ffsl(16L) != 5 || __builtin_ffsll(1LL << 40) != 41)
+		return 32;
 	if (__builtin_bswap32(0x11223344u) != 0x44332211u)
 		return 4;
 	if (__builtin_offsetof(struct pair, b) != 8)

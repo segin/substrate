@@ -20,6 +20,7 @@ typedef struct {
 
 typedef struct {
     const as_parser_cfg_t *cfg;
+    int syntax_intel;
     as_parse_result_t *out;
     char *errbuf;
     size_t errbuf_sz;
@@ -295,9 +296,49 @@ static int is_x86_register_text(const char *s) {
         streq_ci(s, "esi") || streq_ci(s, "edi") || streq_ci(s, "esp") || streq_ci(s, "ebp") ||
         streq_ci(s, "ax") || streq_ci(s, "bx") || streq_ci(s, "cx") || streq_ci(s, "dx") ||
         streq_ci(s, "al") || streq_ci(s, "bl") || streq_ci(s, "cl") || streq_ci(s, "dl") ||
+        streq_ci(s, "sil") || streq_ci(s, "dil") || streq_ci(s, "spl") || streq_ci(s, "bpl") ||
         streq_ci(s, "cs") || streq_ci(s, "ds") || streq_ci(s, "es") || streq_ci(s, "fs") || streq_ci(s, "gs") ||
         streq_ci(s, "ss") || streq_ci(s, "rip") || streq_ci(s, "eip")) {
         return 1;
+    }
+    return 0;
+}
+
+static int is_x86_segment_text(const char *s) {
+    if (s == NULL || s[0] == '\0') {
+        return 0;
+    }
+    if (s[0] == '%') {
+        s++;
+    }
+    return streq_ci(s, "cs") || streq_ci(s, "ds") || streq_ci(s, "es") || streq_ci(s, "fs") || streq_ci(s, "gs") ||
+           streq_ci(s, "ss");
+}
+
+static int intel_mem_size_bits(const char *s) {
+    if (s == NULL) {
+        return 0;
+    }
+    if (streq_ci(s, "byte")) {
+        return 8;
+    }
+    if (streq_ci(s, "word")) {
+        return 16;
+    }
+    if (streq_ci(s, "dword")) {
+        return 32;
+    }
+    if (streq_ci(s, "qword")) {
+        return 64;
+    }
+    if (streq_ci(s, "xmmword")) {
+        return 128;
+    }
+    if (streq_ci(s, "ymmword")) {
+        return 256;
+    }
+    if (streq_ci(s, "zmmword")) {
+        return 512;
     }
     return 0;
 }
@@ -829,6 +870,7 @@ static int find_punct(const as_token_t *tokv, size_t n, const char *punct) {
 static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *out_op) {
     int lparen;
     int rparen;
+    int disp_start;
     as_mem_operand_t mem;
     int comp_starts[4];
     int comp_ends[4];
@@ -837,6 +879,7 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
 
     memset(&mem, 0, sizeof(mem));
     mem.scale = 1;
+    disp_start = 0;
 
     lparen = find_punct(tokv, n, "(");
     rparen = find_punct(tokv, n, ")");
@@ -844,9 +887,64 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
         return -1;
     }
 
-    if (lparen > 0) {
-        mem.disp = parse_expression_from_tokens(ctx, tokv, (size_t)lparen);
+    /*
+     * AT&T segment-prefixed memory form:
+     *   %gs:4(%ebx)
+     */
+    if (lparen >= 2 &&
+        (tokv[0].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[0].text)) &&
+        strcmp(tokv[1].text, ":") == 0) {
+        mem.segment_reg = strip_register_prefix(tokv[0].text);
+        if (mem.segment_reg == NULL) {
+            return -1;
+        }
+        disp_start = 2;
+    } else if (lparen >= 1) {
+        size_t seglen = strlen(tokv[0].text);
+        const char *colon = strchr(tokv[0].text, ':');
+        if (seglen > 1 && tokv[0].text[seglen - 1] == ':') {
+            char *tmp = (char *)malloc(seglen);
+            if (tmp == NULL) {
+                return -1;
+            }
+            memcpy(tmp, tokv[0].text, seglen - 1);
+            tmp[seglen - 1] = '\0';
+            mem.segment_reg = strip_register_prefix(tmp);
+            free(tmp);
+            if (mem.segment_reg == NULL) {
+                return -1;
+            }
+            disp_start = 1;
+        } else if (lparen == 1 && colon != NULL && colon != tokv[0].text) {
+            size_t left_n = (size_t)(colon - tokv[0].text);
+            char *tmp = (char *)malloc(left_n + 1);
+            if (tmp == NULL) {
+                return -1;
+            }
+            memcpy(tmp, tokv[0].text, left_n);
+            tmp[left_n] = '\0';
+            mem.segment_reg = strip_register_prefix(tmp);
+            free(tmp);
+            if (mem.segment_reg == NULL) {
+                return -1;
+            }
+            if (colon[1] != '\0') {
+                as_token_t fake = tokv[0];
+                fake.text = (char *)(colon + 1);
+                mem.disp = parse_expression_from_tokens(ctx, &fake, 1);
+                if (mem.disp == NULL) {
+                    free(mem.segment_reg);
+                    return -1;
+                }
+            }
+            disp_start = lparen;
+        }
+    }
+
+    if (lparen > disp_start) {
+        mem.disp = parse_expression_from_tokens(ctx, tokv + disp_start, (size_t)(lparen - disp_start));
         if (mem.disp == NULL) {
+            free(mem.segment_reg);
             return -1;
         }
     }
@@ -878,6 +976,7 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
             free_expr(sc);
             free(mem.base_reg);
             free(mem.index_reg);
+            free(mem.segment_reg);
             free_expr(mem.disp);
             return -1;
         }
@@ -890,9 +989,65 @@ static int parse_att_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, 
     return 0;
 }
 
+static int parse_intel_index_scale_token(parse_ctx_t *ctx, const as_token_t *tok, char **index_reg_out, int *scale_out) {
+    const char *s;
+    const char *star;
+    size_t left_n;
+    char *left;
+    as_token_t fake;
+    as_expr_t *sc;
+
+    if (ctx == NULL || tok == NULL || tok->text == NULL || index_reg_out == NULL || scale_out == NULL) {
+        return -1;
+    }
+    s = tok->text;
+    star = strchr(s, '*');
+    if (star == NULL || star == s || star[1] == '\0' || strchr(star + 1, '*') != NULL) {
+        return -1;
+    }
+
+    left_n = (size_t)(star - s);
+    left = (char *)malloc(left_n + 1);
+    if (left == NULL) {
+        return -1;
+    }
+    memcpy(left, s, left_n);
+    left[left_n] = '\0';
+    if (!is_x86_register_text(left) && !is_arm_register_text(left)) {
+        free(left);
+        return -1;
+    }
+
+    memset(&fake, 0, sizeof(fake));
+    fake.kind = AS_TOK_IDENTIFIER;
+    fake.text = (char *)(star + 1);
+    fake.file = tok->file;
+    fake.line = tok->line;
+    fake.col = tok->col;
+    sc = parse_expression_from_tokens(ctx, &fake, 1);
+    if (sc == NULL || sc->kind != AS_EXPR_CONST) {
+        free_expr(sc);
+        free(left);
+        return -1;
+    }
+    if (sc->value != 1 && sc->value != 2 && sc->value != 4 && sc->value != 8) {
+        free_expr(sc);
+        free(left);
+        return -1;
+    }
+
+    *index_reg_out = strip_register_prefix(left);
+    *scale_out = (int)sc->value;
+    free_expr(sc);
+    free(left);
+    return *index_reg_out != NULL ? 0 : -1;
+}
+
 static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *out_op) {
     int lbr;
     int rbr;
+    int seg_tok;
+    int saw_ptr = 0;
     as_mem_operand_t mem;
     as_token_t *disp_toks = NULL;
     size_t disp_count = 0;
@@ -904,13 +1059,47 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     lbr = find_punct(tokv, n, "[");
     rbr = find_punct(tokv, n, "]");
     if (lbr < 0 || rbr < 0 || rbr <= lbr) {
+        set_err(ctx, "%s:%u: malformed Intel memory operand", tokv[0].file, tokv[0].line);
         return -1;
     }
 
-    if (lbr > 0) {
+    for (i = 0; i < (size_t)lbr; ++i) {
+        if (streq_ci(tokv[i].text, "ptr")) {
+            int bits;
+            saw_ptr = 1;
+            if (i == 0) {
+                set_err(ctx, "%s:%u: malformed Intel size qualifier", tokv[0].file, tokv[0].line);
+                return -1;
+            }
+            bits = intel_mem_size_bits(tokv[i - 1].text);
+            if (bits == 0) {
+                set_err(ctx, "%s:%u: unsupported Intel size qualifier '%s'", tokv[0].file, tokv[0].line, tokv[i - 1].text);
+                return -1;
+            }
+            if (mem.size_bits != 0 && mem.size_bits != bits) {
+                set_err(ctx, "%s:%u: malformed Intel size qualifier", tokv[0].file, tokv[0].line);
+                return -1;
+            }
+            mem.size_bits = bits;
+        }
+    }
+    if (!saw_ptr && lbr > 0) {
+        int bits = intel_mem_size_bits(tokv[0].text);
+        if (bits != 0) {
+            mem.size_bits = bits;
+        }
+    }
+
+    seg_tok = -1;
+    if (lbr >= 2 && strcmp(tokv[lbr - 1].text, ":") == 0 &&
+        (tokv[lbr - 2].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[lbr - 2].text))) {
+        seg_tok = lbr - 2;
+    } else if (lbr >= 1) {
         const char *seg = tokv[lbr - 1].text;
         size_t len = strlen(seg);
-        if (len > 1 && seg[len - 1] == ':') {
+        if (tokv[lbr - 1].kind == AS_TOK_LABEL && is_x86_segment_text(tokv[lbr - 1].text)) {
+            seg_tok = lbr - 1;
+        } else if (len > 1 && seg[len - 1] == ':') {
             char *tmp = (char *)malloc(len);
             if (tmp == NULL) {
                 return -1;
@@ -919,10 +1108,24 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             tmp[len - 1] = '\0';
             mem.segment_reg = strip_register_prefix(tmp);
             free(tmp);
+            if (mem.segment_reg == NULL) {
+                return -1;
+            }
+            seg_tok = lbr - 1;
+        }
+    }
+    if (seg_tok >= 0 && mem.segment_reg == NULL) {
+        mem.segment_reg = strip_register_prefix(tokv[seg_tok].text);
+        if (mem.segment_reg == NULL) {
+            return -1;
         }
     }
 
     for (i = (size_t)lbr + 1; i < (size_t)rbr; ++i) {
+        if (mem.index_reg == NULL && tokv[i].kind != AS_TOK_PUNCT &&
+            parse_intel_index_scale_token(ctx, &tokv[i], &mem.index_reg, &mem.scale) == 0) {
+            continue;
+        }
         if ((tokv[i].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[i].text) || is_arm_register_text(tokv[i].text)) &&
             i + 2 < (size_t)rbr && tokv[i + 1].kind == AS_TOK_OPERATOR && strcmp(tokv[i + 1].text, "*") == 0) {
             if (mem.index_reg == NULL) {
@@ -955,6 +1158,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             free(mem.base_reg);
             free(mem.index_reg);
             free(mem.segment_reg);
+            set_err(ctx, "%s:%u: out of memory", tokv[0].file, tokv[0].line);
             return -1;
         }
         disp_toks[disp_count++] = tokv[i];
@@ -967,6 +1171,7 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
             free(mem.base_reg);
             free(mem.index_reg);
             free(mem.segment_reg);
+            set_err(ctx, "%s:%u: malformed Intel memory displacement", tokv[0].file, tokv[0].line);
             return -1;
         }
     }
@@ -976,7 +1181,6 @@ static int parse_intel_memory(parse_ctx_t *ctx, const as_token_t *tokv, size_t n
     out_op->u.mem = mem;
     return 0;
 }
-
 static int parse_register_list(const as_token_t *tokv, size_t n, as_operand_t *op) {
     size_t i;
 
@@ -1052,6 +1256,8 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
     int has_lparen;
     int has_lbr;
     as_expr_t *e;
+    int star_separate;
+    int star_attached;
 
     if (n == 0) {
         return -1;
@@ -1060,6 +1266,49 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
     op->raw = join_tokens(tokv, n, 0);
     if (op->raw == NULL) {
         return -1;
+    }
+
+    /*
+     * AT&T indirect operands may be prefixed with '*', e.g. call *%r11 or
+     * jmp *foo(%rip). Parse the inner operand normally.
+     */
+    star_separate = (n > 1 &&
+                     (tokv[0].kind == AS_TOK_OPERATOR || tokv[0].kind == AS_TOK_PUNCT) &&
+                     strcmp(tokv[0].text, "*") == 0);
+    star_attached = (tokv[0].text != NULL && tokv[0].text[0] == '*' && tokv[0].text[1] != '\0');
+    if (star_separate || star_attached) {
+        as_operand_t inner;
+        as_token_t *tmp = NULL;
+        const as_token_t *inner_tokv;
+        size_t inner_n;
+
+        if (star_separate) {
+            inner_tokv = tokv + 1;
+            inner_n = n - 1;
+        } else {
+            tmp = (as_token_t *)malloc(n * sizeof(*tmp));
+            if (tmp == NULL) {
+                return -1;
+            }
+            memcpy(tmp, tokv, n * sizeof(*tmp));
+            tmp[0].text = tokv[0].text + 1;
+            inner_tokv = tmp;
+            inner_n = n;
+        }
+
+        memset(&inner, 0, sizeof(inner));
+        if (parse_operand_slice(ctx, inner_tokv, inner_n, &inner) != 0) {
+            free(tmp);
+            return -1;
+        }
+        free(tmp);
+        free(op->raw);
+        *op = inner;
+        op->raw = join_tokens(tokv, n, 0);
+        if (op->raw == NULL) {
+            return -1;
+        }
+        return 0;
     }
 
     if (parse_register_list(tokv, n, op) == 0) {
@@ -1086,6 +1335,90 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
         op->kind = AS_OPERAND_COPROCESSOR;
         op->u.coproc = xstrdup(tokv[0].text);
         return op->u.coproc != NULL ? 0 : -1;
+    }
+
+    /*
+     * x87 stack-register operand spelling used by AT&T syntax, e.g. %st(0).
+     */
+    if (n == 4 &&
+        (tokv[0].kind == AS_TOK_REGISTER || tokv[0].kind == AS_TOK_IDENTIFIER) &&
+        (streq_ci(tokv[0].text, "%st") || streq_ci(tokv[0].text, "st")) &&
+        tokv[1].kind == AS_TOK_PUNCT && strcmp(tokv[1].text, "(") == 0 &&
+        (tokv[2].kind == AS_TOK_IMMEDIATE || tokv[2].kind == AS_TOK_IDENTIFIER) &&
+        tokv[3].kind == AS_TOK_PUNCT && strcmp(tokv[3].text, ")") == 0) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "st(%s)", tokv[2].text);
+        op->kind = AS_OPERAND_COPROCESSOR;
+        op->u.coproc = xstrdup(buf);
+        return op->u.coproc != NULL ? 0 : -1;
+    }
+
+    /*
+     * Segment-prefixed absolute memory operand, e.g. %gs:0.
+     */
+    if (n >= 3 &&
+        (tokv[0].kind == AS_TOK_REGISTER || is_x86_register_text(tokv[0].text)) &&
+        (tokv[1].kind == AS_TOK_OPERATOR || tokv[1].kind == AS_TOK_PUNCT) && strcmp(tokv[1].text, ":") == 0) {
+        as_mem_operand_t mem;
+        memset(&mem, 0, sizeof(mem));
+        mem.scale = 1;
+        mem.segment_reg = strip_register_prefix(tokv[0].text);
+        if (mem.segment_reg == NULL) {
+            return -1;
+        }
+        mem.disp = parse_expression_from_tokens(ctx, tokv + 2, n - 2);
+        if (mem.disp == NULL) {
+            free(mem.segment_reg);
+            return -1;
+        }
+        op->kind = AS_OPERAND_MEMORY;
+        op->u.mem = mem;
+        return 0;
+    }
+
+    if (n == 1) {
+        const char *c = strchr(tokv[0].text, ':');
+        if (c != NULL) {
+            size_t left_len = (size_t)(c - tokv[0].text);
+            const char *rhs = c + 1;
+            char *lhs = NULL;
+            as_mem_operand_t mem;
+            as_token_t fake;
+
+            if (left_len > 0 && rhs[0] != '\0') {
+                lhs = (char *)malloc(left_len + 1);
+                if (lhs == NULL) {
+                    return -1;
+                }
+                memcpy(lhs, tokv[0].text, left_len);
+                lhs[left_len] = '\0';
+                if (is_x86_register_text(lhs)) {
+                    memset(&mem, 0, sizeof(mem));
+                    mem.scale = 1;
+                    mem.segment_reg = strip_register_prefix(lhs);
+                    if (mem.segment_reg == NULL) {
+                        free(lhs);
+                        return -1;
+                    }
+                    memset(&fake, 0, sizeof(fake));
+                    fake.kind = AS_TOK_IDENTIFIER;
+                    fake.text = (char *)rhs;
+                    fake.file = tokv[0].file;
+                    fake.line = tokv[0].line;
+                    mem.disp = parse_expression_from_tokens(ctx, &fake, 1);
+                    if (mem.disp == NULL) {
+                        free(mem.segment_reg);
+                        free(lhs);
+                        return -1;
+                    }
+                    op->kind = AS_OPERAND_MEMORY;
+                    op->u.mem = mem;
+                    free(lhs);
+                    return 0;
+                }
+                free(lhs);
+            }
+        }
     }
 
     if (tokv[0].text[0] == '$' || tokv[0].text[0] == '#') {
@@ -1232,6 +1565,7 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     int depth = 0;
 
     memset(&in, 0, sizeof(in));
+    in.syntax_intel = (unsigned)(ctx != NULL && ctx->syntax_intel ? 1 : 0);
 
     i = 0;
     while (i < n) {
@@ -1289,6 +1623,12 @@ static int parse_instruction(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
                     /* Shift suffix consumed by previous operand. */
                 } else {
                     if (parse_operand_slice(ctx, tokv + start, i - start, &op) != 0) {
+                        char *bad = join_tokens(tokv + start, i - start, 0);
+                        set_err(ctx, "%s:%u: invalid operand '%s'",
+                                tokv[start].file != NULL ? tokv[start].file : "<input>",
+                                tokv[start].line,
+                                bad != NULL ? bad : "<unknown>");
+                        free(bad);
                         free(in.mnemonic);
                         free(in.arm_condition);
                         free(in.segment_override);
@@ -1350,6 +1690,13 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
     if (tokv[i].kind == AS_TOK_DIRECTIVE) {
         if (parse_directive(tokv + i, n - i, st) != 0) {
             return -1;
+        }
+        if (st->u.directive.name != NULL) {
+            if (streq_ci(st->u.directive.name, ".intel_syntax")) {
+                ctx->syntax_intel = 1;
+            } else if (streq_ci(st->u.directive.name, ".att_syntax")) {
+                ctx->syntax_intel = 0;
+            }
         }
         return 0;
     }
@@ -1437,6 +1784,7 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
 
     memset(&ctx, 0, sizeof(ctx));
     ctx.cfg = cfg;
+    ctx.syntax_intel = (cfg != NULL && cfg->intel_syntax) ? 1 : 0;
     ctx.out = out;
     ctx.errbuf = errbuf;
     ctx.errbuf_sz = errbuf_sz;
@@ -1455,7 +1803,9 @@ int as_parse_tokens(const as_token_vec_t *tokens, const as_parser_cfg_t *cfg,
         }
 
         if (parse_line_tokens(&ctx, tokens->items + i, j - i, &st) != 0) {
-            set_err(&ctx, "%s:%u: parse error", tokens->items[i].file, tokens->items[i].line);
+            if (ctx.errbuf != NULL && ctx.errbuf_sz > 0 && ctx.errbuf[0] == '\0') {
+                set_err(&ctx, "%s:%u: parse error", tokens->items[i].file, tokens->items[i].line);
+            }
             free_stmt(&st);
             free_local_defs(&ctx.local_defs);
             return -1;
