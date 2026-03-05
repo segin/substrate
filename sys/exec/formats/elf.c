@@ -442,7 +442,8 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             if (len > remaining) {
                 ret = -7; // E2BIG
             } else {
-                strcpy(p_buf, uarg);
+                strncpy(p_buf, uarg, remaining);
+                p_buf[remaining - 1] = '\0';
                 copied_len = len;
                 ret = 0;
             }
@@ -478,7 +479,8 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
             if (len > remaining) {
                 ret = -7; // E2BIG
             } else {
-                strcpy(p_buf, uarg);
+                strncpy(p_buf, uarg, remaining);
+                p_buf[remaining - 1] = '\0';
                 copied_len = len;
                 ret = 0;
             }
