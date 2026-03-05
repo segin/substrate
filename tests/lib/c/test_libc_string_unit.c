@@ -220,6 +220,23 @@ void run_memcmp_tests(void) {
     ASSERT_EQ(libc_memcmp(large1, large2, 1024), 0, "Large equal buffers");
     large2[1023] = 'B';
     ASSERT_TRUE(libc_memcmp(large1, large2, 1024) < 0, "Large buffers differ at end");
+
+    // Identical pointers
+    ASSERT_EQ(libc_memcmp(large1, large1, 1024), 0, "Identical pointers");
+    ASSERT_EQ(libc_memcmp("abc", "abc", 3), 0, "Identical string pointers");
+
+    // Null pointers with n=0
+    ASSERT_EQ(libc_memcmp(NULL, NULL, 0), 0, "NULL pointers n=0");
+    ASSERT_EQ(libc_memcmp("abc", NULL, 0), 0, "First pointer valid, second NULL n=0");
+    ASSERT_EQ(libc_memcmp(NULL, "abc", 0), 0, "First pointer NULL, second valid n=0");
+
+    // Exact difference values
+    ASSERT_EQ(libc_memcmp("a", "b", 1), 'a' - 'b', "Exact numeric diff 'a' - 'b'");
+    ASSERT_EQ(libc_memcmp("b", "a", 1), 'b' - 'a', "Exact numeric diff 'b' - 'a'");
+
+    unsigned char x[] = {255};
+    unsigned char y[] = {127};
+    ASSERT_EQ(libc_memcmp(x, y, 1), 255 - 127, "Exact numeric diff 255 - 127");
 }
 
 void run_strdup_tests(void) {
