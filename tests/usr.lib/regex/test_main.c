@@ -5,6 +5,8 @@ int test_api_match(void);
 int test_util_toupper(void);
 int test_util_tolower(void);
 int test_util_is_newline(void);
+int test_unicode_tolower(void);
+int test_unicode_toupper(void);
 int test_replace_basic(void);
 int test_split_basic(void);
 int test_dos_limits(void);
@@ -21,6 +23,8 @@ int main(void) {
     failures += test_util_toupper();
     failures += test_util_tolower();
     failures += test_util_is_newline();
+    failures += test_unicode_tolower();
+    failures += test_unicode_toupper();
     failures += test_replace_basic();
     failures += test_split_basic();
     failures += test_dos_limits();
