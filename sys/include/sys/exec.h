@@ -28,7 +28,7 @@ struct exec_binary_handler {
      * Load the binary.
      * Returns: 0 on success, negative error code on failure.
      */
-    int (*load)(const char *path, int fd, char *const argv[], char *const envp[]);
+    int (*load)(int fd, const char *path, char *const argv[], char *const envp[]);
     
     struct exec_binary_handler *next;
 };

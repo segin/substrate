@@ -1,0 +1,154 @@
+.TH TAIL 1 "March 2026" "Substrate" "User Commands"
+.SH NAME
+tail \- output the last part of files
+.SH SYNOPSIS
+.B tail
+.RB [ \-F | \-f | \-r ]
+.RB [ \-q | \-v ]
+.RB [ \-b " \fInumber\fP | " \-c " \fInumber\fP | " \-n " \fInumber\fP ]
+.RI [ file ...]
+.br
+.B tail
+.RB [ \-\-lines= \fIN\fP ]
+.RB [ \-\-bytes= \fIN\fP ]
+.RB [ \-\-blocks= \fIN\fP ]
+.RB [ \-\-follow [=\fIname\fP|\fIdescriptor\fP] ]
+.RB [ \-\-retry ]
+.RB [ \-\-sleep\-interval= \fIN\fP ]
+.RB [ \-\-pid= \fIPID\fP ]
+.RB [ \-\-max\-unchanged\-stats= \fIN\fP ]
+.RB [ \-\-quiet | \-\-silent | \-\-verbose ]
+.RB [ \-\-zero\-terminated ]
+.RI [ file ...]
+.SH DESCRIPTION
+Print the last 10 lines of each
+.I file
+to standard output.
+With more than one
+.IR file ,
+precede each with a header giving the file name.
+With no
+.IR file ,
+or when
+.I file
+is
+.BR \- ,
+read standard input.
+.PP
+Numbers may have a multiplier suffix:
+.TP
+.B b
+512
+.TP
+.BR kB , " " K , " " KiB
+1024 (BSD preference for kB)
+.TP
+.BR MB , " " M , " " MiB
+1048576 (BSD preference for MB)
+.TP
+.BR GB , " " G , " " GiB
+1073741824
+.PP
+If the first character of
+.I number
+is a
+.BR + ,
+starting with the corresponding line, byte, or block from the beginning
+of the file.
+.SH OPTIONS
+.TP
+.BR \-c ", " \-\-bytes = \fIN\fP
+output the last
+.I N
+bytes; or use
+.BI \-c " +N"
+to output starting with byte
+.I N
+of each file
+.TP
+.BR \-n ", " \-\-lines = \fIN\fP
+output the last
+.I N
+lines, instead of the last 10; or use
+.BI \-n " +N"
+to output starting with line
+.I N
+.TP
+.BR \-b ", " \-\-blocks = \fIN\fP
+output the last
+.I N
+512-byte blocks; or use
+.BI \-b " +N"
+to output starting with block
+.I N
+.TP
+.BR \-f ", " \-\-follow [=\fIname\fP|\fIdescriptor\fP]
+output appended data as the file grows; an absent option argument means
+.B descriptor
+.TP
+.B \-F
+same as
+.BR \-\-follow=name " " \-\-retry
+.TP
+.B \-\-retry
+keep trying to open a file if it is inaccessible
+.TP
+.BR \-r
+output lines in reverse order; by default, all lines are output unless
+.BR \-n ,
+.BR \-c ,
+or
+.BR \-b
+is specified. This option is incompatible with
+.BR \-f " and " \-F .
+.TP
+.BR \-q ", " \-\-quiet ", " \-\-silent
+never output headers giving file names
+.TP
+.BR \-v ", " \-\-verbose
+always output headers giving file names
+.TP
+.BR \-z ", " \-\-zero\-terminated
+line delimiter is NUL, not newline
+.TP
+.BI \-s ", " \-\-sleep\-interval= S
+with
+.BR \-f ,
+sleep for approximately
+.I S
+seconds (default 1.0) between iterations
+.TP
+.BI \-\-pid= PID
+with
+.BR \-f ,
+terminate after process ID, PID dies
+.TP
+.BI \-\-max\-unchanged\-stats= N
+with
+.BR \-\-follow=name ,
+reopen a FILE which has not changed size after N (default 5) iterations
+to see if it has been unlinked or renamed
+.TP
+.B \-\-help
+display this help and exit
+.TP
+.B \-\-version
+output version information and exit
+.SH LEGACY SYNTAX
+.B tail
+supports the obsolete syntax
+.B \-NUM[bcl][qv]
+for specifying counts and multipliers, as well as the historic BSD usage of
+.B \-NUMBER
+for line counts.
+.SH EXIT STATUS
+.TP
+.B 0
+on success
+.TP
+.B >0
+if an error occurs. When processing multiple files, an error encountered while
+opening or reading one file will not impede the processing of subsequent files,
+but the final exit status will be non-zero.
+.SH SEE ALSO
+.BR head (1)

@@ -1,0 +1,385 @@
+# 2. Architecture (`sys/arch`)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 1102-1177.
+
+## Reimplemented Checklist (All Open)
+
+### 2. Architecture (`sys/arch`)
+- [ ] **i386:**
+    - [ ] Complete GDT/TSS setup for user-mode switching.
+    - [ ] **Verification:**
+        - [ ] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
+        - [ ] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies -->
+    - [ ] Implement Exception Handling (Page Fault, GPF, etc.).
+    - [ ] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
+    - [ ] **Advanced Diagnostics (Missing):** <!-- All items complete -->
+        - [ ] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it -->
+        - [ ] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() -->
+        - [ ] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() -->
+        - [ ] **Invalid Opcode Decoding:** Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 -->
+    - [ ] **VM86 Mode (i386 only):** <!-- All items complete -->
+        - [ ] **Initialization:** <!-- All items complete -->
+            - [ ] Set `EFLAGS.VM` bit. <!-- vm86.c:47 sets 0x20000 -->
+            - [ ] Setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range -->
+        - [ ] **GPF Handler:** <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler -->
+            - [ ] Detect if fault occurred in VM86 mode. <!-- idt.c:192 checks (regs->eflags & 0x20000) -->
+            - [ ] **Opcode Emulation:** <!-- All items complete -->
+                - [ ] Emulate `CLI` / `STI` (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF -->
+                - [ ] Emulate `PUSHF` / `POPF`. <!-- vm86.c: 0x9C/0x9D -->
+                - [ ] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) -->
+                - [ ] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE -->
+        - [ ] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() -->
+    - [ ] **LDT & 16-bit Support:**
+        - [ ] **Baseline Audit + Scope Freeze (existing code path):**
+            - [ ] Audit current implementation in `sys/arch/i386/ldt.c`, scheduler hook in `sys/arch/i386/sched.c`, and tests in `tests/sys/test_ldt.c`.
+            - [ ] Produce gap list: what is already implemented vs missing for production-safe 16-bit support.
+            - [ ] Freeze ownership model (per-process LDT attached to `process_t`) and locking policy.
+            - [ ] **Acceptance:** Gap report merged and this checklist updated with resolved scope.
+        - [ ] **API, ABI, and Privilege Model:**
+            - [ ] Unify `struct user_desc` definitions (`sys/include/sys/ldt.h` vs `sys/arch/i386/syscall.h`) into one authoritative ABI header.
+            - [ ] Define supported `modify_ldt` operations and exact return semantics (`LDT_READ`, `LDT_WRITE`, `LDT_READ_DEFAULT`).
+            - [ ] Define permission model:
+                - [ ] Current kernel policy (root/euid checks) for privileged operations.
+                - [ ] Forward-compatible mapping to `CAP_SYS_ADMIN` once capability framework lands.
+            - [ ] Define hard rejection rules (system descriptors, kernel DPL, invalid type bits, malformed 16-bit flags).
+            - [ ] Document ABI and errors (`EINVAL`, `EFAULT`, `EPERM`, `ENOMEM`, `ENOSYS`) in `ARCHITECTURE.md` and `man/man2/modify_ldt.2`.
+            - [ ] **Acceptance:** Header/API contract is single-sourced and syscall behavior is documented.
+        - [ ] **Kernel LDT Core Hardening (`sys/arch/i386/ldt.c`):**
+            - [ ] Refactor into explicit helpers (`ldt_alloc`, `ldt_set`, `ldt_clear`, `ldt_free`) with one validation entry point.
+            - [ ] Add strict descriptor validation for 16-bit semantics (`seg_32bit=0`, granularity/type constraints, DPL=3 only for user).
+            - [ ] Ensure all pointer arguments use safe `copyin`/`copyout` handling and bounded lengths.
+            - [ ] Add bounds checks for index/count and reject partial/ambiguous user_desc payloads.
+            - [ ] Add internal diagnostics/counters for validation failures and allocation failures.
+            - [ ] **Acceptance:** Invalid descriptors are deterministically rejected and stress alloc/set/free has no leaks/corruption.
+        - [ ] **Syscall + Personality + `lib/sys` Integration:**
+            - [ ] Keep native personality (`perso_native.c`) wired to hardened `sys_modify_ldt`.
+            - [ ] Add Linux personality wiring for `modify_ldt` compatibility path (or explicit `ENOSYS` until complete).
+            - [ ] Add userspace wrapper in `lib/sys/` (`modify_ldt.c`) and include it in `lib/sys/Makefile`.
+            - [ ] Add public userspace declaration in `include/sys/ldt.h` (or equivalent exported syscall header).
+            - [ ] Ensure syscall prototypes come from headers only (no manual file-local `extern` declarations).
+            - [ ] **Acceptance:** `libsys` exposes `modify_ldt()` and personality behavior is explicit/tested.
+        - [ ] **Lifecycle Safety (switch/fork/exec/exit/SMP):**
+            - [ ] Ensure context switch path loads/clears `LDTR` correctly for LDT and no-LDT processes.
+            - [ ] Add LDT inheritance policy in `proc_fork` (`sys/pm/process.c`) with explicit copy/reference behavior.
+            - [ ] Add LDT replacement/cleanup in exec path (`exec_dispatch`/ELF load path) so stale LDT state cannot survive exec.
+            - [ ] Add guaranteed LDT cleanup in process exit path (`proc_exit`) and process teardown.
+            - [ ] Define SMP safety for LDT updates (reload rules for running thread vs remote CPUs).
+            - [ ] **Acceptance:** fork/exec/exit stress shows no stale selectors, no cross-process bleed, no double-free.
+        - [ ] **Verification Matrix (expand existing LDT tests):**
+            - [ ] Extend `tests/sys/test_ldt.c` with negative cases (bad DPL/type/system descriptors/index overflow).
+            - [ ] Add unit/property tests for descriptor encode/decode invariants (host-friendly where possible).
+            - [ ] Add fuzz target for `sys_modify_ldt` argument space (size, flags, malformed descriptors, race sequences).
+            - [ ] Add integration test with 16-bit path (VM86 and/or ELKS personality) validating CS/DS/SS behavior.
+            - [ ] Add regression tests for lifecycle events (fork inheritance, exec replacement, exit cleanup).
+            - [ ] Wire tests into regular test targets (`make -C tests/sys`, CI scripts) with pass/fail gates.
+            - [ ] **Acceptance:** All LDT unit/property/fuzz/integration tests pass and no existing suites regress.
+- [ ] **x86_64:** <!-- boot/, gdt.c, idt.c, isr.S, switch.S -->
+    - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup -->
+    - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks -->
+    - [ ] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC -->
+    - [ ] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub -->
+    - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 -->
+
+
+## User Stories
+
+- **US-02-0001**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to i386: so that this capability is implemented with clear verification evidence.
+- **US-02-0002**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to complete GDT/TSS setup for user-mode switching so that this capability is implemented with clear verification evidence.
+- **US-02-0003**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to verification: so that this capability is implemented with clear verification evidence.
+- **US-02-0004**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33 so that this capability is implemented with clear verification evidence.
+- **US-02-0005**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies --> so that this capability is implemented with clear verification evidence.
+- **US-02-0006**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to implement Exception Handling (Page Fault, GPF, etc.) so that this capability is implemented with clear verification evidence.
+- **US-02-0007**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to diagnostics: Full register dumps and visual panic banners matching requirements so that this capability is implemented with clear verification evidence.
+- **US-02-0008**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to advanced Diagnostics (Missing): <!-- All items complete --> so that this capability is implemented with clear verification evidence.
+- **US-02-0009**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to stack Trace: Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it --> so that this capability is implemented with clear verification evidence.
+- **US-02-0010**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to symbol Resolution: Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() --> so that this capability is implemented with clear verification evidence.
+- **US-02-0011**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to nULL Protection: Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() --> so that this capability is implemented with clear verification evidence.
+- **US-02-0012**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to invalid Opcode Decoding: Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 --> so that this capability is implemented with clear verification evidence.
+- **US-02-0013**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to vM86 Mode (i386 only): <!-- All items complete --> so that this capability is implemented with clear verification evidence.
+- **US-02-0014**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to initialization: <!-- All items complete --> so that this capability is implemented with clear verification evidence.
+- **US-02-0015**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to set EFLAGS.VM bit. <!-- vm86.c:47 sets 0x20000 --> so that this capability is implemented with clear verification evidence.
+- **US-02-0016**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range --> so that this capability is implemented with clear verification evidence.
+- **US-02-0017**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to gPF Handler: <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler --> so that this capability is implemented with clear verification evidence.
+- **US-02-0018**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to detect if fault occurred in VM86 mode. <!-- idt.c:192 checks (regs->eflags & 0x20000) --> so that this capability is implemented with clear verification evidence.
+- **US-02-0019**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to opcode Emulation: <!-- All items complete --> so that this capability is implemented with clear verification evidence.
+- **US-02-0020**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to emulate CLI / STI (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF --> so that this capability is implemented with clear verification evidence.
+- **US-02-0021**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to emulate PUSHF / POPF. <!-- vm86.c: 0x9C/0x9D --> so that this capability is implemented with clear verification evidence.
+- **US-02-0022**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to emulate INT n / IRET. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) --> so that this capability is implemented with clear verification evidence.
+- **US-02-0023**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to emulate IN / OUT instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE --> so that this capability is implemented with clear verification evidence.
+- **US-02-0024**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to monitor: V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() --> so that this capability is implemented with clear verification evidence.
+- **US-02-0025**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to lDT & 16-bit Support: so that this capability is implemented with clear verification evidence.
+- **US-02-0026**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to baseline Audit + Scope Freeze (existing code path): so that this capability is implemented with clear verification evidence.
+- **US-02-0027**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to audit current implementation in sys/arch/i386/ldt.c, scheduler hook in sys/arch/i386/sched.c, and tests in tests/sys/test_ldt.c so that this capability is implemented with clear verification evidence.
+- **US-02-0028**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to produce gap list: what is already implemented vs missing for production-safe 16-bit support so that this capability is implemented with clear verification evidence.
+- **US-02-0029**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to freeze ownership model (per-process LDT attached to process_t) and locking policy so that this capability is implemented with clear verification evidence.
+- **US-02-0030**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to acceptance: Gap report merged and this checklist updated with resolved scope so that this capability is implemented with clear verification evidence.
+- **US-02-0031**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to aPI, ABI, and Privilege Model: so that this capability is implemented with clear verification evidence.
+- **US-02-0032**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to unify struct user_desc definitions (sys/include/sys/ldt.h vs sys/arch/i386/syscall.h) into one authoritative ABI header so that this capability is implemented with clear verification evidence.
+- **US-02-0033**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to define supported modify_ldt operations and exact return semantics (LDT_READ, LDT_WRITE, LDT_READ_DEFAULT) so that this capability is implemented with clear verification evidence.
+- **US-02-0034**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to define permission model: so that this capability is implemented with clear verification evidence.
+- **US-02-0035**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to current kernel policy (root/euid checks) for privileged operations so that this capability is implemented with clear verification evidence.
+- **US-02-0036**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to forward-compatible mapping to CAP_SYS_ADMIN once capability framework lands so that this capability is implemented with clear verification evidence.
+- **US-02-0037**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to define hard rejection rules (system descriptors, kernel DPL, invalid type bits, malformed 16-bit flags) so that this capability is implemented with clear verification evidence.
+- **US-02-0038**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to document ABI and errors (EINVAL, EFAULT, EPERM, ENOMEM, ENOSYS) in ARCHITECTURE.md and man/man2/modify_ldt.2 so that this capability is implemented with clear verification evidence.
+- **US-02-0039**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to acceptance: Header/API contract is single-sourced and syscall behavior is documented so that this capability is implemented with clear verification evidence.
+- **US-02-0040**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to kernel LDT Core Hardening (sys/arch/i386/ldt.c): so that this capability is implemented with clear verification evidence.
+- **US-02-0041**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to refactor into explicit helpers (ldt_alloc, ldt_set, ldt_clear, ldt_free) with one validation entry point so that this capability is implemented with clear verification evidence.
+- **US-02-0042**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add strict descriptor validation for 16-bit semantics (seg_32bit=0, granularity/type constraints, DPL=3 only for user) so that this capability is implemented with clear verification evidence.
+- **US-02-0043**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to ensure all pointer arguments use safe copyin/copyout handling and bounded lengths so that this capability is implemented with clear verification evidence.
+- **US-02-0044**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add bounds checks for index/count and reject partial/ambiguous user_desc payloads so that this capability is implemented with clear verification evidence.
+- **US-02-0045**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add internal diagnostics/counters for validation failures and allocation failures so that this capability is implemented with clear verification evidence.
+- **US-02-0046**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to acceptance: Invalid descriptors are deterministically rejected and stress alloc/set/free has no leaks/corruption so that this capability is implemented with clear verification evidence.
+- **US-02-0047**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to syscall + Personality + lib/sys Integration: so that this capability is implemented with clear verification evidence.
+- **US-02-0048**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to keep native personality (perso_native.c) wired to hardened sys_modify_ldt so that this capability is implemented with clear verification evidence.
+- **US-02-0049**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add Linux personality wiring for modify_ldt compatibility path (or explicit ENOSYS until complete) so that this capability is implemented with clear verification evidence.
+- **US-02-0050**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add userspace wrapper in lib/sys/ (modify_ldt.c) and include it in lib/sys/Makefile so that this capability is implemented with clear verification evidence.
+- **US-02-0051**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add public userspace declaration in include/sys/ldt.h (or equivalent exported syscall header) so that this capability is implemented with clear verification evidence.
+- **US-02-0052**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to ensure syscall prototypes come from headers only (no manual file-local extern declarations) so that this capability is implemented with clear verification evidence.
+- **US-02-0053**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to acceptance: libsys exposes modify_ldt() and personality behavior is explicit/tested so that this capability is implemented with clear verification evidence.
+- **US-02-0054**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to lifecycle Safety (switch/fork/exec/exit/SMP): so that this capability is implemented with clear verification evidence.
+- **US-02-0055**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to ensure context switch path loads/clears LDTR correctly for LDT and no-LDT processes so that this capability is implemented with clear verification evidence.
+- **US-02-0056**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add LDT inheritance policy in proc_fork (sys/pm/process.c) with explicit copy/reference behavior so that this capability is implemented with clear verification evidence.
+- **US-02-0057**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add LDT replacement/cleanup in exec path (exec_dispatch/ELF load path) so stale LDT state cannot survive exec so that this capability is implemented with clear verification evidence.
+- **US-02-0058**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add guaranteed LDT cleanup in process exit path (proc_exit) and process teardown so that this capability is implemented with clear verification evidence.
+- **US-02-0059**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to define SMP safety for LDT updates (reload rules for running thread vs remote CPUs) so that this capability is implemented with clear verification evidence.
+- **US-02-0060**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to acceptance: fork/exec/exit stress shows no stale selectors, no cross-process bleed, no double-free so that this capability is implemented with clear verification evidence.
+- **US-02-0061**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to verification Matrix (expand existing LDT tests): so that this capability is implemented with clear verification evidence.
+- **US-02-0062**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to extend tests/sys/test_ldt.c with negative cases (bad DPL/type/system descriptors/index overflow) so that this capability is implemented with clear verification evidence.
+- **US-02-0063**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add unit/property tests for descriptor encode/decode invariants (host-friendly where possible) so that this capability is implemented with clear verification evidence.
+- **US-02-0064**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add fuzz target for sys_modify_ldt argument space (size, flags, malformed descriptors, race sequences) so that this capability is implemented with clear verification evidence.
+- **US-02-0065**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add integration test with 16-bit path (VM86 and/or ELKS personality) validating CS/DS/SS behavior so that this capability is implemented with clear verification evidence.
+- **US-02-0066**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to add regression tests for lifecycle events (fork inheritance, exec replacement, exit cleanup) so that this capability is implemented with clear verification evidence.
+- **US-02-0067**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to wire tests into regular test targets (make -C tests/sys, CI scripts) with pass/fail gates so that this capability is implemented with clear verification evidence.
+- **US-02-0068**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to acceptance: All LDT unit/property/fuzz/integration tests pass and no existing suites regress so that this capability is implemented with clear verification evidence.
+- **US-02-0069**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to x86_64: <!-- boot/, gdt.c, idt.c, isr.S, switch.S --> so that this capability is implemented with clear verification evidence.
+- **US-02-0070**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to bootstrap: Implement Long Mode entry (boot.S). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup --> so that this capability is implemented with clear verification evidence.
+- **US-02-0071**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to gDT/TSS: Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks --> so that this capability is implemented with clear verification evidence.
+- **US-02-0072**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to iDT/Exceptions: Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC --> so that this capability is implemented with clear verification evidence.
+- **US-02-0073**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to syscall Entry: Implement syscall/sysret (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub --> so that this capability is implemented with clear verification evidence.
+- **US-02-0074**: As a Substrate contributor working on 2. Architecture (`sys/arch`), I want to context Switching: Implement switch_to for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 --> so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-02-0001** (EARS/Ubiquitous): The Substrate system shall i386:.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0002** (EARS/Ubiquitous): The Substrate system shall complete GDT/TSS setup for user-mode switching.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0003** (EARS/Ubiquitous): The Substrate system shall verification:.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0004** (EARS/Ubiquitous): The Substrate system shall verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0005** (EARS/Ubiquitous): The Substrate system shall ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0006** (EARS/Ubiquitous): The Substrate system shall implement Exception Handling (Page Fault, GPF, etc.).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0007** (EARS/Ubiquitous): The Substrate system shall diagnostics: Full register dumps and visual panic banners matching requirements.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0008** (EARS/Ubiquitous): The Substrate system shall advanced Diagnostics (Missing): <!-- All items complete -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0009** (EARS/Ubiquitous): The Substrate system shall stack Trace: Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0010** (EARS/Ubiquitous): The Substrate system shall symbol Resolution: Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0011** (EARS/Ubiquitous): The Substrate system shall nULL Protection: Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0012** (EARS/Ubiquitous): The Substrate system shall invalid Opcode Decoding: Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0013** (EARS/Ubiquitous): The Substrate system shall vM86 Mode (i386 only): <!-- All items complete -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0014** (EARS/Ubiquitous): The Substrate system shall initialization: <!-- All items complete -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0015** (EARS/Ubiquitous): The Substrate system shall set EFLAGS.VM bit. <!-- vm86.c:47 sets 0x20000 -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0016** (EARS/Ubiquitous): The Substrate system shall setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0017** (EARS/Ubiquitous): The Substrate system shall gPF Handler: <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0018** (EARS/Ubiquitous): The Substrate system shall detect if fault occurred in VM86 mode. <!-- idt.c:192 checks (regs->eflags & 0x20000) -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0019** (EARS/Ubiquitous): The Substrate system shall opcode Emulation: <!-- All items complete -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0020** (EARS/Ubiquitous): The Substrate system shall emulate CLI / STI (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0021** (EARS/Ubiquitous): The Substrate system shall emulate PUSHF / POPF. <!-- vm86.c: 0x9C/0x9D -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0022** (EARS/Ubiquitous): The Substrate system shall emulate INT n / IRET. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0023** (EARS/Ubiquitous): The Substrate system shall emulate IN / OUT instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0024** (EARS/Ubiquitous): The Substrate system shall monitor: V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0025** (EARS/Ubiquitous): The Substrate system shall lDT & 16-bit Support:.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0026** (EARS/Ubiquitous): The Substrate system shall baseline Audit + Scope Freeze (existing code path):.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0027** (EARS/Ubiquitous): The Substrate system shall audit current implementation in sys/arch/i386/ldt.c, scheduler hook in sys/arch/i386/sched.c, and tests in tests/sys/test_ldt.c.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0028** (EARS/Ubiquitous): The Substrate system shall produce gap list: what is already implemented vs missing for production-safe 16-bit support.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0029** (EARS/Ubiquitous): The Substrate system shall freeze ownership model (per-process LDT attached to process_t) and locking policy.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0030** (EARS/Ubiquitous): The Substrate system shall acceptance: Gap report merged and this checklist updated with resolved scope.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0031** (EARS/Ubiquitous): The Substrate system shall aPI, ABI, and Privilege Model:.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0032** (EARS/Ubiquitous): The Substrate system shall unify struct user_desc definitions (sys/include/sys/ldt.h vs sys/arch/i386/syscall.h) into one authoritative ABI header.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0033** (EARS/Ubiquitous): The Substrate system shall define supported modify_ldt operations and exact return semantics (LDT_READ, LDT_WRITE, LDT_READ_DEFAULT).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0034** (EARS/Ubiquitous): The Substrate system shall define permission model:.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0035** (EARS/Ubiquitous): The Substrate system shall current kernel policy (root/euid checks) for privileged operations.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0036** (EARS/Ubiquitous): The Substrate system shall forward-compatible mapping to CAP_SYS_ADMIN once capability framework lands.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0037** (EARS/Ubiquitous): The Substrate system shall define hard rejection rules (system descriptors, kernel DPL, invalid type bits, malformed 16-bit flags).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0038** (EARS/Ubiquitous): The Substrate system shall document ABI and errors (EINVAL, EFAULT, EPERM, ENOMEM, ENOSYS) in ARCHITECTURE.md and man/man2/modify_ldt.2.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0039** (EARS/Ubiquitous): The Substrate system shall acceptance: Header/API contract is single-sourced and syscall behavior is documented.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0040** (EARS/Ubiquitous): The Substrate system shall kernel LDT Core Hardening (sys/arch/i386/ldt.c):.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0041** (EARS/Ubiquitous): The Substrate system shall refactor into explicit helpers (ldt_alloc, ldt_set, ldt_clear, ldt_free) with one validation entry point.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0042** (EARS/Ubiquitous): The Substrate system shall add strict descriptor validation for 16-bit semantics (seg_32bit=0, granularity/type constraints, DPL=3 only for user).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0043** (EARS/Ubiquitous): The Substrate system shall ensure all pointer arguments use safe copyin/copyout handling and bounded lengths.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0044** (EARS/Ubiquitous): The Substrate system shall add bounds checks for index/count and reject partial/ambiguous user_desc payloads.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0045** (EARS/Ubiquitous): The Substrate system shall add internal diagnostics/counters for validation failures and allocation failures.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0046** (EARS/Ubiquitous): The Substrate system shall acceptance: Invalid descriptors are deterministically rejected and stress alloc/set/free has no leaks/corruption.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0047** (EARS/Ubiquitous): The Substrate system shall syscall + Personality + lib/sys Integration:.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0048** (EARS/Ubiquitous): The Substrate system shall keep native personality (perso_native.c) wired to hardened sys_modify_ldt.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0049** (EARS/Ubiquitous): The Substrate system shall add Linux personality wiring for modify_ldt compatibility path (or explicit ENOSYS until complete).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0050** (EARS/Ubiquitous): The Substrate system shall add userspace wrapper in lib/sys/ (modify_ldt.c) and include it in lib/sys/Makefile.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0051** (EARS/Ubiquitous): The Substrate system shall add public userspace declaration in include/sys/ldt.h (or equivalent exported syscall header).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0052** (EARS/Ubiquitous): The Substrate system shall ensure syscall prototypes come from headers only (no manual file-local extern declarations).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0053** (EARS/Ubiquitous): The Substrate system shall acceptance: libsys exposes modify_ldt() and personality behavior is explicit/tested.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0054** (EARS/Ubiquitous): The Substrate system shall lifecycle Safety (switch/fork/exec/exit/SMP):.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0055** (EARS/Ubiquitous): The Substrate system shall ensure context switch path loads/clears LDTR correctly for LDT and no-LDT processes.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0056** (EARS/Ubiquitous): The Substrate system shall add LDT inheritance policy in proc_fork (sys/pm/process.c) with explicit copy/reference behavior.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0057** (EARS/Ubiquitous): The Substrate system shall add LDT replacement/cleanup in exec path (exec_dispatch/ELF load path) so stale LDT state cannot survive exec.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0058** (EARS/Ubiquitous): The Substrate system shall add guaranteed LDT cleanup in process exit path (proc_exit) and process teardown.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0059** (EARS/Ubiquitous): The Substrate system shall define SMP safety for LDT updates (reload rules for running thread vs remote CPUs).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0060** (EARS/Ubiquitous): The Substrate system shall acceptance: fork/exec/exit stress shows no stale selectors, no cross-process bleed, no double-free.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0061** (EARS/Ubiquitous): The Substrate system shall verification Matrix (expand existing LDT tests):.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0062** (EARS/Ubiquitous): The Substrate system shall extend tests/sys/test_ldt.c with negative cases (bad DPL/type/system descriptors/index overflow).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0063** (EARS/Ubiquitous): The Substrate system shall add unit/property tests for descriptor encode/decode invariants (host-friendly where possible).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0064** (EARS/Ubiquitous): The Substrate system shall add fuzz target for sys_modify_ldt argument space (size, flags, malformed descriptors, race sequences).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0065** (EARS/Ubiquitous): The Substrate system shall add integration test with 16-bit path (VM86 and/or ELKS personality) validating CS/DS/SS behavior.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0066** (EARS/Ubiquitous): The Substrate system shall add regression tests for lifecycle events (fork inheritance, exec replacement, exit cleanup).
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0067** (EARS/Ubiquitous): The Substrate system shall wire tests into regular test targets (make -C tests/sys, CI scripts) with pass/fail gates.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0068** (EARS/Ubiquitous): The Substrate system shall acceptance: All LDT unit/property/fuzz/integration tests pass and no existing suites regress.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0069** (EARS/Ubiquitous): The Substrate system shall x86_64: <!-- boot/, gdt.c, idt.c, isr.S, switch.S -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0070** (EARS/Ubiquitous): The Substrate system shall bootstrap: Implement Long Mode entry (boot.S). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0071** (EARS/Ubiquitous): The Substrate system shall gDT/TSS: Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0072** (EARS/Ubiquitous): The Substrate system shall iDT/Exceptions: Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0073** (EARS/Ubiquitous): The Substrate system shall syscall Entry: Implement syscall/sysret (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-02-0074** (EARS/Ubiquitous): The Substrate system shall context Switching: Implement switch_to for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 -->.
+  - Context: 2. Architecture (`sys/arch`)
+  - Verification: design review + implementation evidence + test/doc update.

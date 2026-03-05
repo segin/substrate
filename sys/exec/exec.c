@@ -11,6 +11,7 @@
 #include <sys/file.h>
 #include <vfs/vfs.h>
 #include <sys/types.h>
+#include <sys/proc.h>
 #include <sys/stat.h>
 #include <kern/console.h>
 struct thr_param;
@@ -37,14 +38,21 @@ void exec_register_handler(struct exec_binary_handler *handler) {
 int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
     if (!path) return -ENOENT;
 
-    // 0. Check execute permissions
-    if (kern_access(path, X_OK) != 0) {
-        return -EACCES;
-    }
-
     // 1. Open the file to read the header
     int fd = kern_open(path, O_RDONLY, 0);
     if (fd < 0) return fd; // Propagate error (ENOENT, EACCES)
+
+    file_t *f = current_process->fds[fd];
+    if (!f || !f->f_data) {
+        kern_close(fd);
+        return -ENOENT;
+    }
+
+    fs_node_t *node = (fs_node_t *)f->f_data;
+    if (vfs_check_permissions(node, current_process->uid, current_process->gid, X_OK) != 0) {
+        kern_close(fd);
+        return -EACCES;
+    }
 
     // 3. Read the header (magic bytes)
     char header_buf[256];
@@ -61,9 +69,7 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
         if (h->check && h->check(path, header_buf, len) == 0) {
             // Match found!
             if (h->load) {
-                int ret = h->load(path, fd, argv, envp);
-                kern_close(fd);
-                return ret;
+                return h->load(fd, path, argv, envp);
             }
         }
         h = h->next;

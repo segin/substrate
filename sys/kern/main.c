@@ -218,7 +218,7 @@ void kinit_task(void *arg) {
         kprint("kinit: Trying ");
         kprint(init_path);
         kprint("\n");
-        if (elf_execve(init_path, -1, NULL, NULL) == 0) {
+        if (elf_execve(-1, init_path, NULL, NULL) == 0) {
             goto exec_success;
         }
         panic("kinit: Requested init failed.");
@@ -226,10 +226,10 @@ void kinit_task(void *arg) {
 
     // Default paths
     kprint("kinit: Trying default init paths...\n");
-    if (elf_execve("/sbin/init", -1, NULL, NULL) == 0) goto exec_success;
-    if (elf_execve("/etc/init", -1, NULL, NULL) == 0) goto exec_success;
-    if (elf_execve("/bin/init", -1, NULL, NULL) == 0) goto exec_success;
-    if (elf_execve("/bin/sh", -1, NULL, NULL) == 0) goto exec_success;
+    if (elf_execve(-1, "/sbin/init", NULL, NULL) == 0) goto exec_success;
+    if (elf_execve(-1, "/etc/init", NULL, NULL) == 0) goto exec_success;
+    if (elf_execve(-1, "/bin/init", NULL, NULL) == 0) goto exec_success;
+    if (elf_execve(-1, "/bin/sh", NULL, NULL) == 0) goto exec_success;
 
     panic("kinit: No init found. Try passing init= option to kernel.");
 
