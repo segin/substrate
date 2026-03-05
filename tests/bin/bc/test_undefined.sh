@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# Test evaluation of undefined variables to ensure get_var null check works
 # Find bc binary
 if [ -x "bin/bc/bc_host" ]; then
     BC="bin/bc/bc_host"

@@ -49,6 +49,7 @@ void ir_module_init(ir_module_t *m) {
 
 void ir_module_free(ir_module_t *m) {
     size_t i;
+    if (!m) return;
     free(m->name);
     free(m->target);
     for (i = 0; i < m->func_count; ++i) {
