@@ -817,6 +817,12 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
         ext2_fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
     }
 
+    // Initialize active inode bitmap cache
+    ext2_fs.active_inode_bg_group = (uint32_t)-1;
+    if (!ext2_fs.active_inode_bg_bitmap) {
+        ext2_fs.active_inode_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    }
+
     // Setup root node
     ext2_root_ctx.fs = &ext2_fs;
     ext2_root_ctx.inode_num = EXT2_ROOT_INO;
@@ -958,18 +964,21 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
 uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
     if (!fs) return 0;
     
-    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
-    if (!bitmap_buf) return 0;
-    
     // Search each block group for a free inode
     for (uint32_t group = 0; group < fs->group_count; group++) {
         if (fs->bgd[group].bg_free_inodes_count == 0) continue;
         
-        // Read the inode bitmap
-        if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf) != fs->block_size) {
-            continue;
+        // Read the inode bitmap if it's not cached
+        if (fs->active_inode_bg_group != group) {
+            fs->active_inode_bg_group = (uint32_t)-1;
+            if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_inode_bg_bitmap) != fs->block_size) {
+                continue;
+            }
+            fs->active_inode_bg_group = group;
         }
         
+        uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
+
         // Find the first free bit (skip reserved inodes in first group)
         uint32_t start = (group == 0) ? fs->sb.s_first_ino : 0;
         uint32_t bits_in_group = fs->inodes_per_group;
@@ -1023,13 +1032,11 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 
                 ext2_write_inode(fs, inode_num, &inode);
                 
-                uma_zfree(ext2_block_cache, bitmap_buf);
                 return inode_num;
             }
         }
     }
     
-    uma_zfree(ext2_block_cache, bitmap_buf);
     return 0; // No free inodes
 }
 
@@ -1043,15 +1050,17 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     
     if (group >= fs->group_count) return;
     
-    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
-    if (!bitmap_buf) return;
-    
-    // Read the inode bitmap
-    if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf) != fs->block_size) {
-        uma_zfree(ext2_block_cache, bitmap_buf);
-        return;
+    // Read the inode bitmap if it's not cached
+    if (fs->active_inode_bg_group != group) {
+        fs->active_inode_bg_group = (uint32_t)-1;
+        if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_inode_bg_bitmap) != fs->block_size) {
+            return;
+        }
+        fs->active_inode_bg_group = group;
     }
     
+    uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
+
     uint32_t byte_idx = index / 8;
     uint32_t bit_idx = index % 8;
     
@@ -1069,8 +1078,6 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     
     // Update superblock
     fs->sb.s_free_inodes_count++;
-
-    uma_zfree(ext2_block_cache, bitmap_buf);
 }
 
 // Add directory entry
