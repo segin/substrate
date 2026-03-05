@@ -823,7 +823,8 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     memcpy(&ext2_root_ctx.inode, &root_inode, sizeof(ext2_inode_t));
     
     memset(&ext2_root, 0, sizeof(fs_node_t));
-    strcpy(ext2_root.name, "/");
+    strncpy(ext2_root.name, "/", sizeof(ext2_root.name) - 1);
+    ext2_root.name[sizeof(ext2_root.name) - 1] = '\0';
     ext2_root.flags = FS_DIRECTORY;
     ext2_root.inode = EXT2_ROOT_INO;
     ext2_root.length = root_inode.i_size;
