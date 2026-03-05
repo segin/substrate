@@ -257,6 +257,43 @@ void test_getopt_end_of_options(void) {
     printf("test_getopt_end_of_options passed\n");
 }
 
+void test_calloc_overflow(void) {
+    // Normal allocation
+    size_t num = 10;
+    size_t size = sizeof(int);
+    int *ptr = (int *)tested_calloc(num, size);
+    assert(ptr != NULL);
+
+    // Verify memory is zeroed
+    for (size_t i = 0; i < num; i++) {
+        assert(ptr[i] == 0);
+    }
+    tested_free(ptr);
+
+    // Overflow allocation
+    void *ptr2 = tested_calloc(SIZE_MAX, 2);
+    assert(ptr2 == NULL);
+
+    void *ptr3 = tested_calloc(2, SIZE_MAX);
+    assert(ptr3 == NULL);
+
+    size_t half_max = SIZE_MAX / 2;
+    void *ptr4 = tested_calloc(half_max + 1, 2);
+    assert(ptr4 == NULL);
+
+    void *ptr5 = tested_calloc(2, half_max + 1);
+    assert(ptr5 == NULL);
+
+    // Zero allocations
+    void *ptr6 = tested_calloc(0, 10);
+    assert(ptr6 == NULL); // implementation returns NULL for 0 size
+
+    void *ptr7 = tested_calloc(10, 0);
+    assert(ptr7 == NULL); // implementation returns NULL for 0 size
+
+    printf("test_calloc_overflow passed\n");
+}
+
 int main(void) {
     printf("Running stdlib tests...\n");
     test_atoi_basic();
@@ -272,6 +309,7 @@ int main(void) {
     test_getopt_with_args();
     test_getopt_errors();
     test_getopt_end_of_options();
+    test_calloc_overflow();
     printf("All tests passed!\n");
     return 0;
 }
