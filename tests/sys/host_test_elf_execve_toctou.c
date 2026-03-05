@@ -273,7 +273,7 @@ int main() {
     // Initialize fs_root
     fs_root = vfs_lookup(NULL, "/");
 
-    int ret = elf_execve("/bin/prog", u_argv, u_envp);
+    int ret = elf_execve("/bin/prog", -1, u_argv, u_envp);
 
     // If we reach here, it means failure (because success exits in jump_to_userspace)
     if (ret != 0) {
