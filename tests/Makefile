@@ -30,7 +30,7 @@ UNIT_OBJS = $(notdir $(UNIT_SRCS:.c=.o))
 
 MOCKS_OBJ = mocks.o
 
-all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex
+all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_libedit
 	./test_runner
 	./test_minix
 	./test_ext2_perf
@@ -42,8 +42,12 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./test_ext2_remove_perf
 	./bench_ext2_readdir
 	./test_libpthread_mutex
+	./test_libedit
 
 # Duplicate rule removed
+
+test_libedit: lib/edit/test_editline.c ../lib/edit/editline.c
+	$(CC) $(CFLAGS_COMMON) -I../include -I../lib/edit $< ../lib/edit/editline.c -o $@
 
 test_libpthread_mutex: lib/test_pthread_mutex.c ../lib/pthreads/pthread.c
 	$(CC) $(CFLAGS_COMMON) -I../include -I../sys/include -I../sys $< -o $@
@@ -154,7 +158,7 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_libedit
 	$(MAKE) -C sys clean
 
 bench_vm_map: bench_vm_map.o mocks_vm.o vm_map.o
