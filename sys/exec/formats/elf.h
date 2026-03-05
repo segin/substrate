@@ -325,6 +325,6 @@ typedef struct {
 // New ELF loading interface
 struct fs_node; // Forward declaration
 uint32_t elf_load(struct fs_node *file, uint32_t load_base, char *interp_path, uint32_t *interp_len);
-int elf_execve(const char *path, char *const argv[], char *const envp[]);
+int elf_execve(int fd, const char *path, char *const argv[], char *const envp[]);
 
 #endif

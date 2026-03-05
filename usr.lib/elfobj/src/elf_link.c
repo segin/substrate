@@ -724,7 +724,8 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
 
 static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                                    const struct elf_link_input *input,
-                                   const uint64_t *sec_bases, const uint8_t *sec_included) {
+                                   const uint64_t *sec_bases, const uint8_t *sec_included,
+                                   size_t input_index) {
     size_t i;
     (void)plan;
 
@@ -750,14 +751,49 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
             return ELF_ERR_BOUNDS;
         }
 
-        if (r->symbol == NULL || r->symbol->name == NULL || r->symbol->name[0] == '\0') {
+        if (r->symbol == NULL) {
             continue;
         }
-        dst_sym = elf_find_symbol(out, r->symbol->name);
-        if (dst_sym == NULL) {
-            elf__set_err(out, ELF_ERR_RELOC, "unresolved relocation symbol during link");
-            (void)elf__append_diag(out, r->symbol->name);
-            return ELF_ERR_RELOC;
+        if (r->symbol->name == NULL || r->symbol->name[0] == '\0') {
+            char anon_name[96];
+            uint64_t anon_value = r->symbol->value;
+            uint16_t anon_shndx = r->symbol->shndx;
+            uint8_t anon_type = STT_NOTYPE;
+            size_t sym_src_sec = 0;
+
+            if (resolve_src_sec_index(input->obj, r->symbol->shndx, &sym_src_sec)) {
+                struct elf_section *src_sym_sec = input->obj->sections[sym_src_sec];
+                struct elf_section *dst_sym_sec;
+
+                if (src_sym_sec == NULL || !sec_included[sym_src_sec]) {
+                    continue;
+                }
+                dst_sym_sec = elf_find_section(out, src_sym_sec->name);
+                if (dst_sym_sec == NULL) {
+                    continue;
+                }
+                if (!elf__u64_add(r->symbol->value, sec_bases[sym_src_sec], &anon_value)) {
+                    return ELF_ERR_BOUNDS;
+                }
+                anon_shndx = (uint16_t)(dst_sym_sec->index + 1);
+                anon_type = STT_SECTION;
+            }
+
+            if (snprintf(anon_name, sizeof(anon_name), "__elfobj_reloc_%zu_%zu", input_index, i) < 0) {
+                return ELF_ERR_STATE;
+            }
+            dst_sym = elf_add_symbol(out, anon_name, anon_value, 0, STB_LOCAL, anon_type);
+            if (dst_sym == NULL) {
+                return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
+            }
+            dst_sym->shndx = anon_shndx;
+        } else {
+            dst_sym = elf_find_symbol(out, r->symbol->name);
+            if (dst_sym == NULL) {
+                elf__set_err(out, ELF_ERR_RELOC, "unresolved relocation symbol during link");
+                (void)elf__append_diag(out, r->symbol->name);
+                return ELF_ERR_RELOC;
+            }
         }
         if (elf_add_relocation(dst_sec, off, dst_sym, r->type, r->addend) != ELF_OK) {
             return ELF_ERR_RELOC;
@@ -926,7 +962,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
             err = merge_symbols(plan, out, in, sec_bases, sec_included, i);
         }
         if (err == ELF_OK) {
-            err = merge_relocations(plan, out, in, sec_bases, sec_included);
+            err = merge_relocations(plan, out, in, sec_bases, sec_included, i);
         }
         free(sec_bases);
         free(sec_included);

@@ -354,8 +354,17 @@ int vn_lock(struct vnode *vp, int flags)
                 }
                 /* Not owner, wait for exclusive lock or waiting writers (writer preference) */
             } else {
-                /* Not exclusively locked and no writers waiting */
-                 break;
+                /* Not exclusively locked.
+                 * If there are writers waiting (VXWANT), we might want to wait (writer preference)
+                 * OR we can just grab it if we are implementing reader preference or weak writer preference.
+                 * Let's stick to simple logic: Block only if VXLOCK is held.
+                 * TODO: Check VXWANT to prevent writer starvation.
+                 */
+                 if ((vp->v_flag & VXWANT) && vp->v_lockstate > 0) {
+                     /* Writers are waiting and lock is held shared. Wait to prevent writer starvation. */
+                 } else {
+                     break;
+                 }
             }
 
             if (flags & LK_NOWAIT) {
