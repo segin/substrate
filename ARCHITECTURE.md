@@ -110,6 +110,7 @@ Userland is split by role:
 Libraries:
 - `lib/`: target runtime libraries (Substrate ABI contracts)
 - `usr.lib/`: reusable libraries for tools and runtime components
+  - `usr.lib/link`: reusable link-plumbing library used by `bin/ln` for POSIX/BSD/GNU option and destination-resolution semantics
 
 Headers in `include/` define userspace-facing ABI/API surfaces.
 
