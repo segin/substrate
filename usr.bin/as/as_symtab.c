@@ -67,6 +67,23 @@ static char *trim_copy(const char *s) {
     return out;
 }
 
+static void strip_reloc_modifier(char *name) {
+    char *at;
+
+    if (name == NULL) {
+        return;
+    }
+    at = strchr(name, '@');
+    if (at == NULL || at[1] == '\0') {
+        return;
+    }
+    if (strcasecmp(at + 1, "PLT") == 0 ||
+        strcasecmp(at + 1, "GOTPCREL") == 0 ||
+        strcasecmp(at + 1, "GOTTPOFF") == 0) {
+        *at = '\0';
+    }
+}
+
 void as_symtab_init(as_symtab_t *tab) {
     if (tab == NULL) {
         return;
@@ -136,6 +153,16 @@ static as_symbol_t *get_or_create_symbol(sym_ctx_t *ctx, const char *name) {
     return sym;
 }
 
+static int is_local_temp_symbol_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (name[0] == '.' && name[1] == 'L') {
+        return 1;
+    }
+    return 0;
+}
+
 static int parse_u64_arg(const char *s, unsigned long long *out) {
     char *tmp;
     char *end;
@@ -163,7 +190,63 @@ static int parse_u64_arg(const char *s, unsigned long long *out) {
     return 0;
 }
 
+static int parse_size_arg(const char *expr, const char *sym_name, unsigned long long *out) {
+    char *tmp;
+    char *dash;
+
+    if (expr == NULL || out == NULL) {
+        return -1;
+    }
+    if (parse_u64_arg(expr, out) == 0) {
+        return 0;
+    }
+
+    tmp = trim_copy(expr);
+    if (tmp == NULL) {
+        return -1;
+    }
+
+    /*
+     * Accept common symbolic forms emitted by C compilers:
+     *   .size foo, .-foo
+     *   .size foo, .Lend-foo
+     * We record size as 0 here when symbolic.
+     */
+    if (sym_name != NULL) {
+        if (strncmp(tmp, ".-", 2) == 0 && strcmp(tmp + 2, sym_name) == 0) {
+            free(tmp);
+            *out = 0;
+            return 0;
+        }
+        dash = strrchr(tmp, '-');
+        if (dash != NULL) {
+            char *rhs = trim_copy(dash + 1);
+            if (rhs == NULL) {
+                free(tmp);
+                return -1;
+            }
+            if (strcmp(rhs, sym_name) == 0) {
+                free(rhs);
+                free(tmp);
+                *out = 0;
+                return 0;
+            }
+            free(rhs);
+        }
+    }
+
+    free(tmp);
+    return -1;
+}
+
 static int symbol_set_definition(as_symbol_t *sym, const char *file, unsigned line) {
+    if (sym->defined) {
+        if ((sym->def_file != NULL && file != NULL && strcmp(sym->def_file, file) == 0 && sym->def_line == line) ||
+            (sym->def_file == NULL && file == NULL && sym->def_line == line)) {
+            return 0;
+        }
+        return 1;
+    }
     if (!sym->defined) {
         sym->def_file = xstrdup(file);
         if (sym->def_file == NULL) {
@@ -346,13 +429,15 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
             return -1;
         }
         sym = get_or_create_symbol(ctx, name);
-        free(name);
         if (sym == NULL) {
+            free(name);
             return -1;
         }
-        if (parse_u64_arg(d->args[1], &nsize) != 0) {
+        if (parse_size_arg(d->args[1], name, &nsize) != 0) {
+            free(name);
             return -1;
         }
+        free(name);
         sym->size = nsize;
         return 0;
     }
@@ -404,7 +489,13 @@ static int visit_expr_ref(sym_ctx_t *ctx, const as_expr_t *e, const char *file, 
     }
 
     if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL) {
-        sym = get_or_create_symbol(ctx, e->symbol);
+        char *name = trim_copy(e->symbol);
+        if (name == NULL) {
+            return -1;
+        }
+        strip_reloc_modifier(name);
+        sym = get_or_create_symbol(ctx, name);
+        free(name);
         if (sym == NULL) {
             return -1;
         }
@@ -479,7 +570,17 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
         for (j = 0; j < st->label_count; ++j) {
             const as_label_def_t *l = &st->labels[j];
             as_symbol_t *sym = get_or_create_symbol(&ctx, l->name);
-            if (sym == NULL || symbol_set_definition(sym, l->file, l->line) != 0) {
+            int rc;
+            if (sym == NULL) {
+                set_err(&ctx, "%s:%u: out of memory", st->file, st->line);
+                return -1;
+            }
+            rc = symbol_set_definition(sym, l->file, l->line);
+            if (rc == 1) {
+                set_err(&ctx, "%s:%u: redefinition of symbol %s", l->file, l->line, l->name);
+                return -1;
+            }
+            if (rc != 0) {
                 set_err(&ctx, "%s:%u: out of memory", st->file, st->line);
                 return -1;
             }
@@ -507,6 +608,10 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
     for (i = 0; i < tab->count; ++i) {
         as_symbol_t *sym = &tab->items[i];
         sym->unresolved = (!sym->defined && !sym->is_common && sym->reference_count > 0) ? 1 : 0;
+        if (sym->unresolved && sym->bind == AS_SYM_BIND_LOCAL && !is_local_temp_symbol_name(sym->name)) {
+            /* GAS-compatible default: unresolved non-temporary symbols are extern/global. */
+            sym->bind = AS_SYM_BIND_GLOBAL;
+        }
     }
 
     return 0;

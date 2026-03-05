@@ -247,544 +247,454 @@ static void gtoa(char *buf, double val, int precision, int uppercase, int altern
     }
 }
 
+
+enum length_modifier {
+    LEN_NONE,
+    LEN_HH,
+    LEN_H,
+    LEN_L,
+    LEN_LL,
+    LEN_J,
+    LEN_Z,
+    LEN_T,
+    LEN_PTR,
+    LEN_LONG_DOUBLE
+};
+
+struct printf_info {
+    int left_align;
+    int force_sign;
+    int space_prefix;
+    int alternate_form;
+    int pad_zero;
+    int width;
+    int precision;
+    enum length_modifier length;
+    char specifier;
+};
+
+struct printf_ctx {
+    char *s;
+    size_t remaining;
+    size_t len;
+};
+
+#define EMIT_CTX(ctx, c) do { \
+    if ((ctx)->remaining > 1) { \
+        *(ctx)->s++ = (c); \
+        (ctx)->remaining--; \
+    } \
+    (ctx)->len++; \
+} while (0)
+
+
+static void format_integer(struct printf_ctx *ctx, struct printf_info *info, int64_t val) {
+    char digits[64];
+    int is_negative = (val < 0);
+    uint64_t uval = (is_negative) ? (uint64_t)-val : (uint64_t)val;
+
+    if (uval == 0 && info->precision == 0) {
+        digits[0] = '\0';
+    } else {
+        char b[64];
+        int i = 0;
+        if (uval == 0) b[i++] = '0';
+        else {
+            while (uval > 0) { b[i++] = (uval % 10) + '0'; uval /= 10; }
+        }
+        for (int j = 0; j < i; j++) digits[j] = b[i - j - 1];
+        digits[i] = '\0';
+    }
+
+    int digits_len = strlen(digits);
+    int precision_fill = (info->precision > digits_len) ? (info->precision - digits_len) : 0;
+
+    const char *prefix = "";
+    if (is_negative) prefix = "-";
+    else if (info->force_sign) prefix = "+";
+    else if (info->space_prefix) prefix = " ";
+    int prefix_len = strlen(prefix);
+
+    int total_len = prefix_len + precision_fill + digits_len;
+
+    if (!info->left_align && info->pad_zero) {
+        for (int i = 0; prefix[i]; i++) EMIT_CTX(ctx, prefix[i]);
+        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, '0');
+        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
+        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
+    } else if (!info->left_align) {
+        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+        for (int i = 0; prefix[i]; i++) EMIT_CTX(ctx, prefix[i]);
+        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
+        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
+    } else {
+        for (int i = 0; prefix[i]; i++) EMIT_CTX(ctx, prefix[i]);
+        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
+        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
+        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+    }
+}
+
+static void format_unsigned(struct printf_ctx *ctx, struct printf_info *info, uint64_t val) {
+    char digits[64];
+    if (val == 0 && info->precision == 0) {
+        digits[0] = '\0';
+    } else {
+        char b[64];
+        int i = 0;
+        uint64_t uval = val;
+        if (uval == 0) b[i++] = '0';
+        else {
+            while (uval > 0) { b[i++] = (uval % 10) + '0'; uval /= 10; }
+        }
+        for (int j = 0; j < i; j++) digits[j] = b[i - j - 1];
+        digits[i] = '\0';
+    }
+
+    int digits_len = strlen(digits);
+    int precision_fill = (info->precision > digits_len) ? (info->precision - digits_len) : 0;
+    int total_len = precision_fill + digits_len;
+
+    if (!info->left_align && info->pad_zero) {
+         for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, '0');
+         for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
+         for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
+    } else if (info->left_align) {
+        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
+        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
+        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+    } else {
+        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+        for (int i = 0; i < precision_fill; i++) EMIT_CTX(ctx, '0');
+        for (int i = 0; i < digits_len; i++) EMIT_CTX(ctx, digits[i]);
+    }
+}
+
+static void format_octal(struct printf_ctx *ctx, struct printf_info *info, uint64_t val) {
+    char tmp[64];
+    char *ptr = tmp;
+    if (info->alternate_form && val != 0) *ptr++ = '0';
+    utoa_oct(ptr, val);
+    int tmp_len = strlen(tmp);
+
+    if (info->width > tmp_len) {
+        if (info->pad_zero) {
+             for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, '0');
+             for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
+        } else if (info->left_align) {
+            for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
+            for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, ' ');
+        } else {
+            for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, ' ');
+            for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
+        }
+    } else {
+        for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
+    }
+}
+
+static void format_hex(struct printf_ctx *ctx, struct printf_info *info, uint64_t val, int uppercase) {
+    char tmp[64];
+    utoa_hex(tmp, val, uppercase);
+    int len_val = strlen(tmp);
+    int prefix_len = (info->alternate_form && val != 0) ? 2 : 0;
+    int total_len = len_val + prefix_len;
+
+    if (info->width > total_len) {
+        if (info->pad_zero && !info->left_align) {
+            if (prefix_len) {
+                EMIT_CTX(ctx, '0');
+                EMIT_CTX(ctx, uppercase ? 'X' : 'x');
+            }
+            for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, '0');
+            for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
+        } else if (info->left_align) {
+            if (prefix_len) {
+                EMIT_CTX(ctx, '0');
+                EMIT_CTX(ctx, uppercase ? 'X' : 'x');
+            }
+            for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
+            for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+        } else {
+            for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+            if (prefix_len) {
+                EMIT_CTX(ctx, '0');
+                EMIT_CTX(ctx, uppercase ? 'X' : 'x');
+            }
+            for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
+        }
+    } else {
+        if (prefix_len) {
+            EMIT_CTX(ctx, '0');
+            EMIT_CTX(ctx, uppercase ? 'X' : 'x');
+        }
+        for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
+    }
+}
+
+static void format_float_helper(struct printf_ctx *ctx, struct printf_info *info, const char *tmp) {
+    int tmp_len = strlen(tmp);
+    if (info->width > tmp_len && !info->left_align) {
+        for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, ' ');
+    }
+    for (int i = 0; i < tmp_len; i++) EMIT_CTX(ctx, tmp[i]);
+    if (info->width > tmp_len && info->left_align) {
+        for (int i = 0; i < info->width - tmp_len; i++) EMIT_CTX(ctx, ' ');
+    }
+}
+
+static void format_pointer(struct printf_ctx *ctx, struct printf_info *info, unsigned int val) {
+    char tmp[32];
+    utoa_hex(tmp, val, 0); // digits only
+    int len_val = strlen(tmp);
+    int zeros = 8 - len_val;
+    if (zeros < 0) zeros = 0;
+
+    int total_len = 2 + zeros + len_val; // 0x + zeros + digits
+
+    if (info->width > total_len && !info->left_align) {
+        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+    }
+
+    EMIT_CTX(ctx, '0'); EMIT_CTX(ctx, 'x');
+    for (int i = 0; i < zeros; i++) EMIT_CTX(ctx, '0');
+    for (int i = 0; i < len_val; i++) EMIT_CTX(ctx, tmp[i]);
+
+    if (info->width > total_len && info->left_align) {
+        for (int i = 0; i < info->width - total_len; i++) EMIT_CTX(ctx, ' ');
+    }
+}
+
+static void format_string(struct printf_ctx *ctx, struct printf_info *info, const char *val) {
+    if (!val) val = "(null)";
+
+    int s_len = 0;
+    const char *p = val;
+    while (*p && (info->precision == -1 || s_len < info->precision)) {
+        s_len++;
+        p++;
+    }
+
+    if (!info->left_align && info->width > s_len) {
+        for (int i = 0; i < info->width - s_len; i++) EMIT_CTX(ctx, ' ');
+    }
+
+    for (int i = 0; i < s_len; i++) EMIT_CTX(ctx, val[i]);
+
+    if (info->left_align && info->width > s_len) {
+         for (int i = 0; i < info->width - s_len; i++) EMIT_CTX(ctx, ' ');
+    }
+}
+
+
 int vsnprintf(char *str, size_t size, const char *format, va_list ap) {
-    char *s = str;
+    struct printf_ctx ctx = { .s = str, .remaining = size, .len = 0 };
     const char *f = format;
-    size_t remaining = size;
-
-    // Helper to emit a character
-    #define EMIT(c) do { \
-        if (remaining > 1) { \
-            *s++ = (c); \
-            remaining--; \
-        } \
-        len++; \
-    } while (0)
-
-    size_t len = 0; // Total characters that would be written
 
     while (*f) {
         if (*f == '%') {
             f++;
             
-            // Parse flags
-            int left_align = 0;
-            int force_sign = 0;
-            int space_prefix = 0;
-            int alternate_form = 0;
-            int pad_zero = 0;
+            struct printf_info info = {
+                .left_align = 0,
+                .force_sign = 0,
+                .space_prefix = 0,
+                .alternate_form = 0,
+                .pad_zero = 0,
+                .width = 0,
+                .precision = -1,
+                .length = LEN_NONE,
+                .specifier = 0
+            };
             
             while (1) {
-                if (*f == '-') {
-                    left_align = 1;
-                    pad_zero = 0;
-                    f++;
-                } else if (*f == '+') {
-                    force_sign = 1;
-                    space_prefix = 0;
-                    f++;
-                } else if (*f == ' ') {
-                    if (!force_sign) space_prefix = 1;
-                    f++;
-                } else if (*f == '#') {
-                    alternate_form = 1;
-                    f++;
-                } else if (*f == '0') {
-                    if (!left_align) pad_zero = 1;
-                    f++;
-                } else {
-                    break;
-                }
+                if (*f == '-') { info.left_align = 1; info.pad_zero = 0; f++; }
+                else if (*f == '+') { info.force_sign = 1; info.space_prefix = 0; f++; }
+                else if (*f == ' ') { if (!info.force_sign) info.space_prefix = 1; f++; }
+                else if (*f == '#') { info.alternate_form = 1; f++; }
+                else if (*f == '0') { if (!info.left_align) info.pad_zero = 1; f++; }
+                else break;
             }
 
-            // Parse width
-            int width = 0;
             if (*f == '*') {
-                width = va_arg(ap, int);
-                if (width < 0) {
-                    left_align = 1;
-                    width = -width;
-                }
+                info.width = va_arg(ap, int);
+                if (info.width < 0) { info.left_align = 1; info.width = -info.width; }
                 f++;
             } else {
-                while (*f >= '0' && *f <= '9') {
-                    width = width * 10 + (*f - '0');
-                    f++;
-                }
+                while (*f >= '0' && *f <= '9') { info.width = info.width * 10 + (*f - '0'); f++; }
             }
 
-            // Standard: the '0' flag is ignored if the '-' flag is present.
-            if (left_align) pad_zero = 0;
+            if (info.left_align) info.pad_zero = 0;
 
-            // Parse length modifier
-            int precision = -1;
             if (*f == '.') {
                 f++;
                 if (*f == '*') {
-                    precision = va_arg(ap, int);
-                    if (precision < 0) precision = -1;
+                    info.precision = va_arg(ap, int);
+                    if (info.precision < 0) info.precision = -1;
                     f++;
                 } else {
-                    precision = 0;
-                    while (*f >= '0' && *f <= '9') {
-                        precision = precision * 10 + (*f - '0');
-                        f++;
-                    }
+                    info.precision = 0;
+                    while (*f >= '0' && *f <= '9') { info.precision = info.precision * 10 + (*f - '0'); f++; }
                 }
             }
-
-            // Parse length modifier
-            enum {
-                LEN_NONE,
-                LEN_HH,
-                LEN_H,
-                LEN_L,
-                LEN_LL,
-                LEN_J,
-                LEN_Z,
-                LEN_T,
-                LEN_PTR,
-                LEN_LONG_DOUBLE
-            } length = LEN_NONE;
 
             if (*f == 'h') {
                 f++;
-                if (*f == 'h') {
-                    length = LEN_HH;
-                    f++;
-                } else {
-                    length = LEN_H;
-                }
+                if (*f == 'h') { info.length = LEN_HH; f++; }
+                else info.length = LEN_H;
             } else if (*f == 'l') {
                 f++;
-                if (*f == 'l') {
-                    length = LEN_LL;
-                    f++;
-                } else {
-                    length = LEN_L;
-                }
-            } else if (*f == 'j') {
-                length = LEN_J;
-                f++;
-            } else if (*f == 'z') {
-                length = LEN_Z;
-                f++;
-            } else if (*f == 't') {
-                length = LEN_T;
-                f++;
-            } else if (*f == 'L') {
-                length = LEN_LONG_DOUBLE;
-                f++;
-            }
+                if (*f == 'l') { info.length = LEN_LL; f++; }
+                else info.length = LEN_L;
+            } else if (*f == 'j') { info.length = LEN_J; f++;
+            } else if (*f == 'z') { info.length = LEN_Z; f++;
+            } else if (*f == 't') { info.length = LEN_T; f++;
+            } else if (*f == 'L') { info.length = LEN_LONG_DOUBLE; f++; }
+
+            info.specifier = *f;
             
             switch (*f) {
                 case 'd':
                 case 'i': {
                     int64_t val;
-                    if (length == LEN_LL || length == LEN_J) {
-                        val = va_arg(ap, long long);
-                    } else if (length == LEN_L) {
-                        val = va_arg(ap, long);
-                    } else if (length == LEN_H) {
-                        val = (short)va_arg(ap, int);
-                    } else if (length == LEN_HH) {
-                        val = (signed char)va_arg(ap, int);
-                    } else if (length == LEN_Z) {
-                        val = va_arg(ap, ssize_t);
-                    } else if (length == LEN_T) {
-                        val = va_arg(ap, ptrdiff_t);
-                    } else {
-                        val = va_arg(ap, int);
-                    }
+                    if (info.length == LEN_LL || info.length == LEN_J) val = va_arg(ap, long long);
+                    else if (info.length == LEN_L) val = va_arg(ap, long);
+                    else if (info.length == LEN_H) val = (short)va_arg(ap, int);
+                    else if (info.length == LEN_HH) val = (signed char)va_arg(ap, int);
+                    else if (info.length == LEN_Z) val = va_arg(ap, ssize_t);
+                    else if (info.length == LEN_T) val = va_arg(ap, ptrdiff_t);
+                    else val = va_arg(ap, int);
 
-                    // Standard: for integer conversions, '0' flag is ignored if precision is specified.
-                    if (precision != -1) pad_zero = 0;
-
-                    char digits[64];
-                    int is_negative = (val < 0);
-                    uint64_t uval = (is_negative) ? (uint64_t)-val : (uint64_t)val;
-                    
-                    if (uval == 0 && precision == 0) {
-                        digits[0] = '\0';
-                    } else {
-                        // Minimal itoa-like for digits only
-                        char b[64];
-                        int i = 0;
-                        if (uval == 0) b[i++] = '0';
-                        else {
-                            while (uval > 0) { b[i++] = (uval % 10) + '0'; uval /= 10; }
-                        }
-                        for (int j = 0; j < i; j++) digits[j] = b[i - j - 1];
-                        digits[i] = '\0';
-                    }
-
-                    int digits_len = strlen(digits);
-                    int precision_fill = (precision > digits_len) ? (precision - digits_len) : 0;
-                    
-                    const char *prefix = "";
-                    if (is_negative) prefix = "-";
-                    else if (force_sign) prefix = "+";
-                    else if (space_prefix) prefix = " ";
-                    int prefix_len = strlen(prefix);
-
-                    int total_len = prefix_len + precision_fill + digits_len;
-                    
-                    if (!left_align && pad_zero) {
-                        for (int i = 0; prefix[i]; i++) EMIT(prefix[i]);
-                        for (int i = 0; i < width - total_len; i++) EMIT('0');
-                        for (int i = 0; i < precision_fill; i++) EMIT('0');
-                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
-                    } else if (!left_align) {
-                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
-                        for (int i = 0; prefix[i]; i++) EMIT(prefix[i]);
-                        for (int i = 0; i < precision_fill; i++) EMIT('0');
-                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
-                    } else {
-                        for (int i = 0; prefix[i]; i++) EMIT(prefix[i]);
-                        for (int i = 0; i < precision_fill; i++) EMIT('0');
-                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
-                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
-                    }
+                    if (info.precision != -1) info.pad_zero = 0;
+                    format_integer(&ctx, &info, val);
                     break;
                 }
                 case 'u': {
                     uint64_t val;
-                    if (length == LEN_LL || length == LEN_J) {
-                        val = va_arg(ap, unsigned long long);
-                    } else if (length == LEN_L) {
-                        val = va_arg(ap, unsigned long);
-                    } else if (length == LEN_H) {
-                        val = (unsigned short)va_arg(ap, unsigned int);
-                    } else if (length == LEN_HH) {
-                        val = (unsigned char)va_arg(ap, unsigned int);
-                    } else if (length == LEN_Z) {
-                        val = va_arg(ap, size_t);
-                    } else if (length == LEN_T) {
-                        val = va_arg(ap, ptrdiff_t);
-                    } else {
-                        val = va_arg(ap, unsigned int);
-                    }
+                    if (info.length == LEN_LL || info.length == LEN_J) val = va_arg(ap, unsigned long long);
+                    else if (info.length == LEN_L) val = va_arg(ap, unsigned long);
+                    else if (info.length == LEN_H) val = (unsigned short)va_arg(ap, unsigned int);
+                    else if (info.length == LEN_HH) val = (unsigned char)va_arg(ap, unsigned int);
+                    else if (info.length == LEN_Z) val = va_arg(ap, size_t);
+                    else if (info.length == LEN_T) val = va_arg(ap, ptrdiff_t);
+                    else val = va_arg(ap, unsigned int);
 
-                    // Standard: for integer conversions, '0' flag is ignored if precision is specified.
-                    if (precision != -1) pad_zero = 0;
-
-                    char digits[64];
-                    if (val == 0 && precision == 0) {
-                        digits[0] = '\0';
-                    } else {
-                        char b[64];
-                        int i = 0;
-                        uint64_t uval = val;
-                        if (uval == 0) b[i++] = '0';
-                        else {
-                            while (uval > 0) { b[i++] = (uval % 10) + '0'; uval /= 10; }
-                        }
-                        for (int j = 0; j < i; j++) digits[j] = b[i - j - 1];
-                        digits[i] = '\0';
-                    }
-
-                    int digits_len = strlen(digits);
-                    int precision_fill = (precision > digits_len) ? (precision - digits_len) : 0;
-                    int total_len = precision_fill + digits_len;
-
-                    if (!left_align && pad_zero) {
-                         for (int i = 0; i < width - total_len; i++) EMIT('0');
-                         for (int i = 0; i < precision_fill; i++) EMIT('0');
-                         for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
-                    } else if (left_align) {
-                        for (int i = 0; i < precision_fill; i++) EMIT('0');
-                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
-                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
-                    } else {
-                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
-                        for (int i = 0; i < precision_fill; i++) EMIT('0');
-                        for (int i = 0; i < digits_len; i++) EMIT(digits[i]);
-                    }
+                    if (info.precision != -1) info.pad_zero = 0;
+                    format_unsigned(&ctx, &info, val);
                     break;
                 }
                 case 'o': {
                     uint64_t val;
-                    if (length == LEN_LL || length == LEN_J) {
-                        val = va_arg(ap, unsigned long long);
-                    } else if (length == LEN_L) {
-                        val = va_arg(ap, unsigned long);
-                    } else if (length == LEN_H) {
-                        val = (unsigned short)va_arg(ap, unsigned int);
-                    } else if (length == LEN_HH) {
-                        val = (unsigned char)va_arg(ap, unsigned int);
-                    } else if (length == LEN_Z) {
-                        val = va_arg(ap, size_t);
-                    } else if (length == LEN_T) {
-                        val = va_arg(ap, ptrdiff_t);
-                    } else {
-                        val = va_arg(ap, unsigned int);
-                    }
-                    char tmp[64];
-                    char *ptr = tmp;
-                    if (alternate_form && val != 0) *ptr++ = '0';
-                    utoa_oct(ptr, val);
-                    int tmp_len = strlen(tmp);
-
-                    if (width > tmp_len) {
-                        if (pad_zero) {
-                             for (int i = 0; i < width - tmp_len; i++) EMIT('0');
-                             for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                        } else if (left_align) {
-                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                        } else {
-                            for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                            for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                        }
-                    } else {
-                        for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                    }
+                    if (info.length == LEN_LL || info.length == LEN_J) val = va_arg(ap, unsigned long long);
+                    else if (info.length == LEN_L) val = va_arg(ap, unsigned long);
+                    else if (info.length == LEN_H) val = (unsigned short)va_arg(ap, unsigned int);
+                    else if (info.length == LEN_HH) val = (unsigned char)va_arg(ap, unsigned int);
+                    else if (info.length == LEN_Z) val = va_arg(ap, size_t);
+                    else if (info.length == LEN_T) val = va_arg(ap, ptrdiff_t);
+                    else val = va_arg(ap, unsigned int);
+                    format_octal(&ctx, &info, val);
                     break;
                 }
                 case 'x':
                 case 'X': {
                     uint64_t val;
-                    if (length == LEN_LL || length == LEN_J) {
-                        val = va_arg(ap, unsigned long long);
-                    } else if (length == LEN_L) {
-                        val = va_arg(ap, unsigned long);
-                    } else if (length == LEN_H) {
-                        val = (unsigned short)va_arg(ap, unsigned int);
-                    } else if (length == LEN_HH) {
-                        val = (unsigned char)va_arg(ap, unsigned int);
-                    } else if (length == LEN_Z) {
-                        val = va_arg(ap, size_t);
-                    } else if (length == LEN_T) {
-                        val = va_arg(ap, ptrdiff_t);
-                    } else {
-                        val = va_arg(ap, unsigned int);
-                    }
-                    char tmp[64];
-                    utoa_hex(tmp, val, (*f == 'X'));
-                    int len_val = strlen(tmp);
-                    int prefix_len = (alternate_form && val != 0) ? 2 : 0;
-                    int total_len = len_val + prefix_len;
-
-                    if (width > total_len) {
-                        if (pad_zero && !left_align) {
-                            // Zero padding: prefix -> zeros -> value
-                            if (prefix_len) {
-                                EMIT('0');
-                                EMIT((*f == 'X') ? 'X' : 'x');
-                            }
-                            for (int i = 0; i < width - total_len; i++) EMIT('0');
-                            for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
-                        } else if (left_align) {
-                            // Left align: prefix -> value -> spaces
-                            if (prefix_len) {
-                                EMIT('0');
-                                EMIT((*f == 'X') ? 'X' : 'x');
-                            }
-                            for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
-                            for (int i = 0; i < width - total_len; i++) EMIT(' ');
-                        } else {
-                            // Right align: spaces -> prefix -> value
-                            for (int i = 0; i < width - total_len; i++) EMIT(' ');
-                            if (prefix_len) {
-                                EMIT('0');
-                                EMIT((*f == 'X') ? 'X' : 'x');
-                            }
-                            for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
-                        }
-                    } else {
-                        // No padding needed
-                        if (prefix_len) {
-                            EMIT('0');
-                            EMIT((*f == 'X') ? 'X' : 'x');
-                        }
-                        for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
-                    }
+                    if (info.length == LEN_LL || info.length == LEN_J) val = va_arg(ap, unsigned long long);
+                    else if (info.length == LEN_L) val = va_arg(ap, unsigned long);
+                    else if (info.length == LEN_H) val = (unsigned short)va_arg(ap, unsigned int);
+                    else if (info.length == LEN_HH) val = (unsigned char)va_arg(ap, unsigned int);
+                    else if (info.length == LEN_Z) val = va_arg(ap, size_t);
+                    else if (info.length == LEN_T) val = va_arg(ap, ptrdiff_t);
+                    else val = va_arg(ap, unsigned int);
+                    format_hex(&ctx, &info, val, (*f == 'X'));
                     break;
                 }
                 case 'f':
                 case 'F': {
-                    double val;
-                    if (length == LEN_LONG_DOUBLE) {
-                        val = (double)va_arg(ap, long double);
-                    } else {
-                        val = va_arg(ap, double);
-                    }
+                    double val = (info.length == LEN_LONG_DOUBLE) ? (double)va_arg(ap, long double) : va_arg(ap, double);
                     char tmp[128];
-                    ftoa(tmp, val, precision, (*f == 'F'));
-                    int tmp_len = strlen(tmp);
-
-                    if (width > tmp_len && !left_align) {
-                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                    }
-                    for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                    if (width > tmp_len && left_align) {
-                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                    }
+                    ftoa(tmp, val, info.precision, (*f == 'F'));
+                    format_float_helper(&ctx, &info, tmp);
                     break;
                 }
                 case 'e':
                 case 'E': {
-                    double val;
-                    if (length == LEN_LONG_DOUBLE) {
-                        val = (double)va_arg(ap, long double);
-                    } else {
-                        val = va_arg(ap, double);
-                    }
+                    double val = (info.length == LEN_LONG_DOUBLE) ? (double)va_arg(ap, long double) : va_arg(ap, double);
                     char tmp[128];
-                    etoa(tmp, val, precision, (*f == 'E'));
-                    int tmp_len = strlen(tmp);
-
-                    if (width > tmp_len && !left_align) {
-                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                    }
-                    for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                    if (width > tmp_len && left_align) {
-                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                    }
+                    etoa(tmp, val, info.precision, (*f == 'E'));
+                    format_float_helper(&ctx, &info, tmp);
                     break;
                 }
                 case 'g':
                 case 'G': {
-                    double val;
-                    if (length == LEN_LONG_DOUBLE) {
-                        val = (double)va_arg(ap, long double);
-                    } else {
-                        val = va_arg(ap, double);
-                    }
+                    double val = (info.length == LEN_LONG_DOUBLE) ? (double)va_arg(ap, long double) : va_arg(ap, double);
                     char tmp[128];
-                    gtoa(tmp, val, precision, (*f == 'G'), alternate_form);
-                    int tmp_len = strlen(tmp);
-
-                    if (width > tmp_len && !left_align) {
-                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                    }
-                    for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                    if (width > tmp_len && left_align) {
-                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                    }
+                    gtoa(tmp, val, info.precision, (*f == 'G'), info.alternate_form);
+                    format_float_helper(&ctx, &info, tmp);
                     break;
                 }
                 case 'a':
                 case 'A': {
-                    // Simplistic hex float placeholder
                     double val = va_arg(ap, double);
                     (void)val;
                     char tmp[128];
                     strcpy(tmp, (*f == 'A') ? "0X1.0P+0" : "0x1.0p+0");
-                    int tmp_len = strlen(tmp);
-                    if (width > tmp_len && !left_align) {
-                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                    }
-                    for (int i = 0; i < tmp_len; i++) EMIT(tmp[i]);
-                    if (width > tmp_len && left_align) {
-                        for (int i = 0; i < width - tmp_len; i++) EMIT(' ');
-                    }
+                    format_float_helper(&ctx, &info, tmp);
                     break;
                 }
                 case 'p': {
                     unsigned int val = (unsigned int)(uintptr_t)va_arg(ap, void*);
-                    char tmp[32];
-                    utoa_hex(tmp, val, 0); // digits only
-                    int len_val = strlen(tmp);
-                    int zeros = 8 - len_val;
-                    if (zeros < 0) zeros = 0;
-
-                    int total_len = 2 + zeros + len_val; // 0x + zeros + digits
-
-                    if (width > total_len && !left_align) {
-                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
-                    }
-
-                    EMIT('0'); EMIT('x');
-                    for (int i = 0; i < zeros; i++) EMIT('0');
-                    for (int i = 0; i < len_val; i++) EMIT(tmp[i]);
-
-                    if (width > total_len && left_align) {
-                        for (int i = 0; i < width - total_len; i++) EMIT(' ');
-                    }
+                    format_pointer(&ctx, &info, val);
                     break;
                 }
                 case 's': {
-                    const char *val;
-                    if (length == LEN_L) {
-                        // Wide string (wchar_t*) - simplistic ASCII cast
-                        val = (const char *)va_arg(ap, void *);
-                    } else {
-                        val = va_arg(ap, const char *);
-                    }
-                    if (!val) val = "(null)";
-                    
-                    int s_len = 0;
-                    const char *p = val;
-                    while (*p && (precision == -1 || s_len < precision)) {
-                        s_len++;
-                        p++;
-                    }
-                    
-                    if (!left_align && width > s_len) {
-                        for (int i = 0; i < width - s_len; i++) EMIT(' ');
-                    }
-                    
-                    for (int i = 0; i < s_len; i++) EMIT(val[i]);
-                    
-                    if (left_align && width > s_len) {
-                         for (int i = 0; i < width - s_len; i++) EMIT(' ');
-                    }
+                    const char *val = (info.length == LEN_L) ? (const char *)va_arg(ap, void *) : va_arg(ap, const char *);
+                    format_string(&ctx, &info, val);
                     break;
                 }
                 case 'c': {
-                    if (length == LEN_L) {
-                        // Wide character (wint_t) - simplistic ASCII cast
-                        char c = (char)va_arg(ap, int);
-                        EMIT(c);
-                    } else {
-                        char c = (char)va_arg(ap, int);
-                        EMIT(c);
-                    }
+                    char c = (char)va_arg(ap, int);
+                    EMIT_CTX(&ctx, c);
                     break;
                 }
                 case 'n': {
-                    // Store written characters count
                     void *ptr = va_arg(ap, void*);
                     if (ptr) {
-                        if (length == LEN_LL) *(long long *)ptr = (long long)len;
-                        else if (length == LEN_L) *(long *)ptr = (long)len;
-                        else if (length == LEN_HH) *(signed char *)ptr = (signed char)len;
-                        else if (length == LEN_H) *(short *)ptr = (short)len;
-                        else if (length == LEN_J) *(intmax_t *)ptr = (intmax_t)len;
-                        else if (length == LEN_Z) *(ssize_t *)ptr = (ssize_t)len;
-                        else if (length == LEN_T) *(ptrdiff_t *)ptr = (ptrdiff_t)len;
-                        else *(int *)ptr = (int)len;
+                        if (info.length == LEN_LL) *(long long *)ptr = (long long)ctx.len;
+                        else if (info.length == LEN_L) *(long *)ptr = (long)ctx.len;
+                        else if (info.length == LEN_HH) *(signed char *)ptr = (signed char)ctx.len;
+                        else if (info.length == LEN_H) *(short *)ptr = (short)ctx.len;
+                        else if (info.length == LEN_J) *(intmax_t *)ptr = (intmax_t)ctx.len;
+                        else if (info.length == LEN_Z) *(ssize_t *)ptr = (ssize_t)ctx.len;
+                        else if (info.length == LEN_T) *(ptrdiff_t *)ptr = (ptrdiff_t)ctx.len;
+                        else *(int *)ptr = (int)ctx.len;
                     }
                     break;
                 }
                 case '%':
-                    EMIT('%');
+                    EMIT_CTX(&ctx, '%');
                     break;
                 default:
-                    EMIT('%');
-                    EMIT(*f);
+                    EMIT_CTX(&ctx, '%');
+                    EMIT_CTX(&ctx, *f);
                     break;
             }
             f++;
         } else {
-            EMIT(*f);
+            EMIT_CTX(&ctx, *f);
             f++;
         }
     }
 
     if (size > 0) {
-        if (remaining > 0) {
-            *s = '\0';
+        if (ctx.remaining > 0) {
+            *ctx.s = '\0';
         } else {
-            // Buffer full, ensure null termination at end
             str[size - 1] = '\0';
         }
     }
 
-    return len;
+    return ctx.len;
 }
-
 int snprintf(char *str, size_t size, const char *format, ...) {
     va_list ap;
     va_start(ap, format);

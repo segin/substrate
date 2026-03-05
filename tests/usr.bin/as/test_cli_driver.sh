@@ -61,8 +61,8 @@ include_fn:
 SRC
 "$AS" -32 -I "$TMP/inc" -o "$TMP/include.o" "$TMP/include.s"
 
-# 6) -D predefine handling (cpp path)
-cat > "$TMP/define.s" <<'SRC'
+# 6) -D predefine handling (cpp path requires .S)
+cat > "$TMP/define.S" <<'SRC'
 #ifndef VALUE
 #error VALUE must be defined
 #endif
@@ -74,7 +74,20 @@ define_fn:
     ret
 .size define_fn, .-define_fn
 SRC
-"$AS" -32 -DVALUE=11 -o "$TMP/define.o" "$TMP/define.s"
+"$AS" -32 -DVALUE=11 -o "$TMP/define.o" "$TMP/define.S"
+
+# 6b) .s is treated as already-preprocessed input (no cpp pass)
+cat > "$TMP/nocpp.s" <<'SRC'
+#error should_not_fire_in_dot_s
+.text
+.globl nocpp_fn
+.type nocpp_fn,@function
+nocpp_fn:
+    mov $0, %eax
+    ret
+.size nocpp_fn, .-nocpp_fn
+SRC
+"$AS" -32 -o "$TMP/nocpp.o" "$TMP/nocpp.s"
 
 # 7) -Wa passthrough
 "$AS" -64 -Wa,--gdwarf-2 -o "$TMP/wa.o" "$TMP/debug.s"
