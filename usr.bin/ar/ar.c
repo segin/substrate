@@ -67,6 +67,7 @@ static size_t gnu_name_table_size = 0;
 struct ar_memb {
     struct ar_hdr hdr;
     char *name;
+    size_t name_len;
     void *data;
     char *thin_path;
     size_t size;
@@ -806,6 +807,7 @@ static void read_archive(const char *path) {
                 name_len--;
             }
             m->name[name_len] = 0;
+            m->name_len = name_len;
             size_t payload_size = size - raw_name_len;
             if (archive_is_thin &&
                 strcmp(m->name, RANLIBMAG) != 0 &&
@@ -848,6 +850,7 @@ static void read_archive(const char *path) {
             if (m->name == NULL) {
                 errx(1, "out of memory while parsing member name");
             }
+            m->name_len = strlen(m->name);
             if (archive_is_thin &&
                 strcmp(m->name, RANLIBMAG) != 0 &&
                 strcmp(m->name, RANLIBSORT) != 0 &&
@@ -1014,6 +1017,7 @@ static void append_files(char **files, int count) {
         m->data = thin_mode ? NULL : data;
         m->size = (size_t)st.st_size;
         m->name = strdup(base);
+        m->name_len = strlen(m->name);
         m->thin_ref = thin_mode;
         m->thin_path = thin_mode ? strdup(fname) : NULL;
         if (thin_mode && m->thin_path == NULL) {
@@ -1531,6 +1535,7 @@ static void ranlib(void) {
 
     struct ar_memb *m = malloc(sizeof(struct ar_memb));
     m->name = strdup(archive_format == ARFMT_GNU ? "/" : RANLIBSORT);
+    m->name_len = strlen(m->name);
     m->data = data;
     m->size = total_size;
     m->thin_path = NULL;
@@ -1668,7 +1673,7 @@ static void write_archive(const char *path) {
                     s_head = next;
                 }
 
-                int name_len = strlen(m->name);
+                int name_len = m->name_len;
                 size_t payload_size = m->thin_ref && m->thin_path != NULL ? strlen(m->thin_path) : m->size;
                 bool extended = (name_len > 15 || strchr(m->name, ' '));
                 long m_size = (long)payload_size;
@@ -1713,6 +1718,7 @@ static void write_archive(const char *path) {
                     symdef->size = total;
                     free(symdef->name);
                     symdef->name = strdup("/SYM64/");
+                    symdef->name_len = strlen("/SYM64/");
                     p = (unsigned char *)symdef->data;
                     store_be64(p, (uint64_t)count);
                     p += sizeof(uint64_t);
@@ -1738,6 +1744,7 @@ static void write_archive(const char *path) {
                     symdef->size = total;
                     free(symdef->name);
                     symdef->name = strdup("/");
+                    symdef->name_len = strlen("/");
                     p = (unsigned char *)symdef->data;
                     store_be32(p, (uint32_t)count);
                     p += sizeof(uint32_t);
@@ -1843,7 +1850,7 @@ static void write_archive(const char *path) {
             wrote_gnu_table = true;
         }
 
-        int name_len = strlen(cur->name);
+        int name_len = cur->name_len;
         size_t payload_size = cur->thin_ref && cur->thin_path != NULL ? strlen(cur->thin_path) : cur->size;
         bool extended = (name_len > 15 || strchr(cur->name, ' '));
         bool gnu_special = strcmp(cur->name, "/") == 0 || strcmp(cur->name, "/SYM64/") == 0;
