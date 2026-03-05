@@ -60,7 +60,7 @@ static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_si
             
             /* Create partition name: ide0p5, ide0p6, etc. */
             char part_name[32];
-            sprintf("%sp%d", base_name, *part_num);
+            snprintf(part_name, sizeof(part_name), "%sp%d", base_name, *part_num);
             (*part_num)++;
             
             /* Determine if this is a container type */
@@ -168,7 +168,7 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
             first = 0;
             
             char pname[32];
-            sprintf("%sp%d", prefix, i + 1);
+            snprintf(pname, sizeof(pname), "%sp%d", prefix, i + 1);
             kprint(pname);
         }
     }
@@ -186,7 +186,7 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         uint64_t part_size = entry->lba_size;
         
         char part_name[32];
-        sprintf("%sp%d", prefix, i + 1);
+        snprintf(part_name, sizeof(part_name), "%sp%d", prefix, i + 1);
         
         /* Determine flags */
         uint32_t flags = 0;
