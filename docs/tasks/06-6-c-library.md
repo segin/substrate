@@ -1,0 +1,6575 @@
+# 6. C Library (`lib/c`)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 3752-5365.
+
+## Reimplemented Checklist (All Open)
+
+### 6. C Library (`lib/c`)
+- [ ] **`sysctl` Userspace API (`lib/c`):**
+    - [ ] **Headers & ABI Contracts:**
+        - [ ] Define and export canonical declarations in `include/sys/sysctl.h`.
+        - [ ] Define and export stable userspace data types for MIB paths and metadata results.
+        - [ ] Add compile-time guards for structure size/alignment ABI stability.
+        - [ ] Document thread-safety guarantees and reentrancy expectations in headers.
+    - [ ] **Core libc Entry Points:**
+        - [ ] Implement `sysctl()` libc wrapper with strict argument validation.
+        - [ ] Implement `sysctlbyname()` using name-to-MIB translation helper flow.
+        - [ ] Implement `sysctlnametomib()` with deterministic retry behavior.
+        - [ ] Implement helper for dynamic buffer sizing/retry loop (`ENOMEM` growth pattern).
+        - [ ] Implement typed convenience helpers (`int`, `uint`, `quad`, `string`) with explicit bounds checks.
+    - [ ] **Thread Safety & Robustness:**
+        - [ ] Ensure no static mutable buffers in libc `sysctl` helpers.
+        - [ ] Ensure all helpers preserve `errno` semantics consistently on failure.
+        - [ ] Add cancellation-safety review for wrappers used in multi-threaded callers.
+        - [ ] Add overflow-safe arithmetic helpers for buffer growth and MIB conversion.
+    - [ ] **Testing (libc Side):**
+        - [ ] Add unit tests for wrapper argument validation and errno behavior.
+        - [ ] Add unit tests for name-to-MIB and MIB-to-name translation helpers.
+        - [ ] Add integration tests for size-probe + retry loops across changing kernel values.
+        - [ ] Add thread-stress tests for concurrent wrapper usage.
+        - [ ] Add fuzz tests for malformed dotted names and oversized MIB arrays.
+    - [ ] **Manpages & Usage Guidance:**
+        - [ ] Add `man/man3/sysctl.3` documenting libc contract and thread-safety.
+        - [ ] Add `man/man3/sysctlbyname.3` with buffer sizing examples.
+        - [ ] Add `man/man3/sysctlnametomib.3` with name/MIB conversion examples.
+        - [ ] Update `man/man2/sysctl.2` to align kernel syscall semantics with libc helper behavior.
+        - [ ] Add `SEE ALSO` cross-links between `sysctl(2)` and `sysctl(3)` pages.
+- [ ] **Stdio:**
+    - [ ] **`FILE` Structure & Buffer Management (`lib/c/src/stdio/`):**
+        - [ ] Define internal `FILE` structure (`_flags`, `_buf`, `_bufsiz`, `_cnt`, `_ptr`, `_fd`, `_lbfsize`, `_close`/`_read`/`_write`/`_seek` function pointers).
+        - [ ] Implement three buffer modes:
+            - [ ] `_IOFBF` (fully buffered): flush on buffer full or explicit `fflush()`.
+            - [ ] `_IOLBF` (line buffered): flush on newline or buffer full.
+            - [ ] `_IONBF` (unbuffered): every `fputc()`/`fwrite()` calls `write()` immediately.
+        - [ ] Implement `setvbuf(FILE *stream, char *buf, int mode, size_t size)`:
+            - [ ] Validate `mode` is `_IOFBF`, `_IOLBF`, or `_IONBF`.
+            - [ ] Allow user-supplied buffer or `NULL` for auto-allocation.
+            - [ ] Must be called after `fopen()` but before any I/O.
+            - [ ] Return 0 on success, non-zero on failure.
+        - [ ] Implement `setbuf(FILE *stream, char *buf)` as wrapper for `setvbuf()`.
+        - [ ] Implement `setlinebuf(FILE *stream)` (BSD extension).
+        - [ ] Implement `fflush(FILE *stream)`:
+            - [ ] Write buffered output data via `write()` syscall.
+            - [ ] Handle partial writes (retry loop).
+            - [ ] If `stream == NULL`, flush all open output streams.
+            - [ ] Return 0 on success, `EOF` on error (set `errno`).
+        - [ ] Pre-allocate `stdin`, `stdout`, `stderr` `FILE` objects:
+            - [ ] `stdin`: fd 0, `_IOLBF` default.
+            - [ ] `stdout`: fd 1, `_IOLBF` if `isatty()`, else `_IOFBF`.
+            - [ ] `stderr`: fd 2, `_IONBF` always.
+        - [ ] Implement `__sinit()` / stream initialization on first use (lazy init pattern).
+    - [ ] **File Open/Close Operations:**
+        - [ ] `fopen(const char *path, const char *mode)`:
+            - [ ] Parse mode string: `"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, with `"b"` (binary, no-op on POSIX) and `"x"` (C11 exclusive create).
+            - [ ] Map to `open()` flags: `O_RDONLY`, `O_WRONLY|O_CREAT|O_TRUNC`, `O_WRONLY|O_CREAT|O_APPEND`, etc.
+            - [ ] Allocate `FILE`, assign fd, set default buffer.
+            - [ ] Return `NULL` on failure (set `errno`).
+        - [ ] `fdopen(int fd, const char *mode)`: wrap existing fd in `FILE`.
+        - [ ] `freopen(const char *path, const char *mode, FILE *stream)`:
+            - [ ] Flush and close existing fd.
+            - [ ] Re-open with new path/mode, reuse `FILE` object.
+            - [ ] If `path == NULL`, change mode of existing fd (C99 extension).
+        - [ ] `fclose(FILE *stream)`:
+            - [ ] Flush output buffer via `fflush()`.
+            - [ ] Free allocated buffer (if library-allocated).
+            - [ ] `close()` underlying fd.
+            - [ ] Free `FILE` structure.
+            - [ ] Return 0 on success, `EOF` on error.
+        - [ ] `fcloseall()` (extension): close all open streams.
+    - [ ] **Character & Line I/O:**
+        - [ ] `fgetc(FILE *stream)` / `getc()` macro: read one byte from buffer or refill.
+        - [ ] `fputc(int c, FILE *stream)` / `putc()` macro: write one byte to buffer or flush.
+        - [ ] `getchar()` / `putchar()`: wrappers for `stdin`/`stdout`.
+        - [ ] `ungetc(int c, FILE *stream)`: push back one character (at least 1 byte guaranteed).
+        - [ ] `fgets(char *s, int n, FILE *stream)`: read line up to `n-1` chars or newline.
+        - [ ] `fputs(const char *s, FILE *stream)`: write string (no trailing newline).
+        - [ ] `gets_s()` (C11 bounds-checked, optional) — or `gets()` removed per C11.
+        - [ ] `puts(const char *s)`: write string + newline to `stdout`.
+    - [ ] **Block I/O:**
+        - [ ] `fread(void *ptr, size_t size, size_t nmemb, FILE *stream)`:
+            - [ ] Read `size * nmemb` bytes, buffered.
+            - [ ] Handle partial reads, return number of complete elements.
+            - [ ] Set EOF/error indicators on short read.
+        - [ ] `fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)`:
+            - [ ] Write `size * nmemb` bytes through buffer.
+            - [ ] Return number of complete elements written.
+    - [ ] **File Positioning:**
+        - [ ] `fseek(FILE *stream, long offset, int whence)`:
+            - [ ] Flush output buffer before seeking.
+            - [ ] Discard input buffer on seek.
+            - [ ] `whence`: `SEEK_SET`, `SEEK_CUR`, `SEEK_END`.
+            - [ ] Return 0 on success, -1 on error.
+        - [ ] `ftell(FILE *stream)`: return current position (accounting for buffer offset).
+        - [ ] `rewind(FILE *stream)`: `fseek(stream, 0, SEEK_SET)` + clear error indicator.
+        - [ ] `fgetpos(FILE *stream, fpos_t *pos)` / `fsetpos(FILE *stream, const fpos_t *pos)`: opaque position save/restore.
+        - [ ] `fseeko()` / `ftello()` (POSIX): `off_t` variants for large file support.
+    - [ ] **Error & EOF Handling:**
+        - [ ] `feof(FILE *stream)`: return non-zero if EOF indicator set.
+        - [ ] `ferror(FILE *stream)`: return non-zero if error indicator set.
+        - [ ] `clearerr(FILE *stream)`: clear both EOF and error indicators.
+        - [ ] `perror(const char *s)`: print `s: strerror(errno)\n` to `stderr`.
+    - [ ] **Temporary Files:**
+        - [ ] `tmpfile()`: create anonymous temporary `FILE` (deleted on close).
+        - [ ] `tmpnam(char *s)` (deprecated) / `mkstemp()` integration.
+    - [ ] **Complete `printf` Family Implementation (User & Kernel):**
+        - [ ] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
+        - [ ] **User:** `lib/c` implementation.
+        - [ ] **Flags:**
+            - [ ] `-` (Left-align within field width).
+            - [ ] `+` (Force sign for positive numbers).
+            - [ ] ` ` (Space prefix for positive numbers).
+            - [ ] `#` (Alternate form: 0x for hex, force decimal point).
+            - [ ] `0` (Zero-padding).
+        - [ ] **Width & Precision:**
+            - [ ] Numeric width (e.g., `%5d`).
+            - [ ] Dynamic width `*` (from argument).
+            - [ ] Numeric precision (e.g., `%.5d`).
+            - [ ] Dynamic precision `.*`(from argument).
+            - [ ] Combined width/precision (e.g., `%5.2f`).
+            - [ ] Negative width logic (treat as `-` flag + positive width).
+        - [ ] **Length Modifiers:**
+            - [ ] `hh` (signed/unsigned char).
+            - [ ] `h` (signed/unsigned short).
+            - [ ] `l` (long, wint_t).
+            - [ ] `ll` (long long).
+            - [ ] `j` (intmax_t, uintmax_t).
+            - [ ] `z` (size_t, ssize_t).
+            - [ ] `t` (ptrdiff_t).
+            - [ ] `L` (long double).
+        - [ ] **Conversion Specifiers:**
+            - [ ] **Integers:** `d`, `i` (signed decimal).
+            - [ ] **Unsigned:** `u` (decimal), `o` (octal).
+            - [ ] **Hex:** `x`, `X` (lower/upper case).
+            - [ ] **Floating Point (Basic):** `f`, `F` (decimal notation).
+            - [ ] **Scientific:** `e`, `E` (exponential notation).
+            - [ ] **Significant:** `g`, `G` (shortest representation).
+            - [ ] **Hex Float:** `a`, `A` (C99 hex float - placeholder).
+            - [ ] **Characters:** `c` (char), `lc` (wint_t).
+            - [ ] **Strings:** `s` (char*), `ls` (wchar_t*).
+            - [ ] **Pointer:** `p` (implementation defined, usually %08x or %016x).
+            - [ ] **Count:** `n` (store number of chars written to int*).
+            - [ ] **Literal:** `%` (print percent sign).
+        - [ ] **Complex/Compound Cases:**
+            - [ ] Prefix combinations (e.g., `%20#llx`).
+            - [ ] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).
+            - [ ] "0" flag ignored if "-" is present.
+            - [ ] "0" flag ignored if precision is specified for integers.
+            - [ ] Space ignored if "+" is present.
+        - [ ] **`printf` Family Wrappers:**
+            - [ ] `fprintf(FILE *stream, const char *fmt, ...)`: output to `FILE` via buffer.
+            - [ ] `printf(const char *fmt, ...)`: wrapper for `fprintf(stdout, ...)`.
+            - [ ] `sprintf(char *str, const char *fmt, ...)`: output to string (no bounds check).
+            - [ ] `snprintf(char *str, size_t size, const char *fmt, ...)`: bounded output to string.
+            - [ ] `dprintf(int fd, const char *fmt, ...)` (POSIX): output to fd directly.
+            - [ ] `asprintf(char **ret, const char *fmt, ...)` (BSD extension): auto-allocating sprintf.
+            - [ ] `vfprintf()`, `vprintf()`, `vsprintf()`, `vsnprintf()`, `vdprintf()`, `vasprintf()`: `va_list` variants.
+    - [ ] **Complete `scanf` Family Implementation:**
+        - [ ] **Core `vfscanf()` Engine:**
+            - [ ] Literal character matching (non-`%` characters, whitespace collapsing).
+            - [ ] `%%` literal percent matching.
+            - [ ] Assignment suppression (`*` flag).
+            - [ ] Maximum field width.
+            - [ ] **Length Modifiers:** `hh`, `h`, `l`, `ll`, `j`, `z`, `t`, `L`.
+            - [ ] **Conversion Specifiers:**
+                - [ ] `d` (decimal integer), `i` (auto-detect base: 0x/0/decimal).
+                - [ ] `u` (unsigned decimal), `o` (octal), `x`/`X` (hex).
+                - [ ] `f`, `e`, `g`, `a` (floating-point input parsing).
+                - [ ] `c` (character, no whitespace skip), `s` (string, whitespace-delimited).
+                - [ ] `[` (scanset): character class matching, `^` negation, `]` as first char.
+                - [ ] `p` (pointer), `n` (store chars consumed).
+            - [ ] Return number of successfully assigned items, or `EOF`.
+            - [ ] Handle input exhaustion mid-conversion.
+        - [ ] **`scanf` Family Wrappers:**
+            - [ ] `fscanf(FILE *stream, const char *fmt, ...)`.
+            - [ ] `scanf(const char *fmt, ...)`: wrapper for `fscanf(stdin, ...)`.
+            - [ ] `sscanf(const char *str, const char *fmt, ...)`: scan from string.
+            - [ ] `vfscanf()`, `vscanf()`, `vsscanf()`: `va_list` variants.
+    - [ ] **Testing:**
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_stdio.c`):**
+            - [ ] Test `fopen()`/`fclose()` for all mode strings (`"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, `"wx"`).
+            - [ ] Test `fopen()` returns `NULL` for non-existent file in `"r"` mode.
+            - [ ] Test `fdopen()` wraps existing fd correctly.
+            - [ ] Test `freopen()` changes mode and reuses `FILE`.
+            - [ ] Test `fread()`/`fwrite()` round-trip: write data, rewind, read back, compare.
+            - [ ] Test `fread()` partial read at EOF returns correct element count.
+            - [ ] Test `fwrite()` returns correct element count on success.
+            - [ ] Test `fgetc()`/`fputc()` byte-by-byte I/O.
+            - [ ] Test `ungetc()`: push back one char, re-read it.
+            - [ ] Test `ungetc(EOF)` is a no-op.
+            - [ ] Test `fgets()` reads up to newline, NUL-terminates.
+            - [ ] Test `fgets()` with buffer smaller than line.
+            - [ ] Test `fputs()`/`puts()` output correctness.
+            - [ ] Test `fseek()`/`ftell()` positioning in all `SEEK_*` modes.
+            - [ ] Test `rewind()` resets position and clears error.
+            - [ ] Test `fgetpos()`/`fsetpos()` round-trip.
+            - [ ] Test `feof()` returns non-zero only after read past end.
+            - [ ] Test `ferror()`/`clearerr()` flag management.
+            - [ ] Test `fflush(stdout)` forces write.
+            - [ ] Test `fflush(NULL)` flushes all streams.
+            - [ ] Test `setvbuf()` with `_IONBF` causes immediate writes.
+            - [ ] Test `setvbuf()` with `_IOLBF` flushes on newline.
+            - [ ] Test `setvbuf()` with `_IOFBF` accumulates until buffer full.
+            - [ ] Test `tmpfile()` returns valid `FILE` that is auto-deleted.
+            - [ ] Test `perror()` output format.
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_printf.c`):**
+            - [ ] Test `sprintf()` all integer conversions with all length modifiers.
+            - [ ] Test `sprintf()` all floating-point conversions: `%f`, `%e`, `%g`, `%a`.
+            - [ ] Test `snprintf()` truncation: verify NUL-termination and returned count.
+            - [ ] Test `snprintf()` with `size == 0` returns required length without writing.
+            - [ ] Test `fprintf()` to file, then read back and compare.
+            - [ ] Test `dprintf()` to pipe fd.
+            - [ ] Test `asprintf()` allocates correct buffer size.
+            - [ ] Test `%n` conversion stores correct count.
+            - [ ] Test width, precision, flag combinations exhaustively.
+            - [ ] Test `%%` literal output.
+            - [ ] Test `NULL` string argument to `%s` (implementation-defined, should not crash).
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_scanf.c`):**
+            - [ ] Test `sscanf()` integer conversions: `%d`, `%i`, `%u`, `%o`, `%x`.
+            - [ ] Test `sscanf()` `%i` auto-base detection: `0x` (hex), `0` (octal), decimal.
+            - [ ] Test `sscanf()` floating-point: `%f`, `%e`, `%g`.
+            - [ ] Test `sscanf()` `%c` reads exact count (no whitespace skip).
+            - [ ] Test `sscanf()` `%s` reads whitespace-delimited token.
+            - [ ] Test `sscanf()` `%[` scanset: `%[a-z]`, `%[^0-9]`, `%[]abc]`.
+            - [ ] Test `sscanf()` `%n` stores chars consumed.
+            - [ ] Test `sscanf()` assignment suppression: `%*d` skips but doesn't assign.
+            - [ ] Test `sscanf()` field width limits.
+            - [ ] Test `sscanf()` return value: count of successful assignments.
+            - [ ] Test `sscanf()` returns `EOF` on immediate input failure.
+            - [ ] Test `fscanf()` from file.
+            - [ ] Test `scanf()` length modifiers: `%hhd`, `%hd`, `%ld`, `%lld`, `%jd`, `%zd`, `%td`.
+        - [ ] **Property Tests (`tests/lib/c/property/prop_stdio.c`):**
+            - [ ] Property: `sprintf(buf, "%d", x); sscanf(buf, "%d", &y)` ⇒ `x == y` for all `int x`.
+            - [ ] Property: `sprintf(buf, "%u", x); sscanf(buf, "%u", &y)` ⇒ `x == y` for all `unsigned x`.
+            - [ ] Property: `snprintf(buf, n, fmt, ...)` return value ≥ 0 and ≤ what `sprintf` would produce.
+            - [ ] Property: `snprintf(buf, n, ...)` always NUL-terminates if `n > 0`.
+            - [ ] Property: `fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f)` ⇒ `memcmp(data, out, n) == 0`.
+            - [ ] Property: `ftell()` after `fseek(f, off, SEEK_SET)` returns `off`.
+            - [ ] Property: `ungetc(c, f); fgetc(f)` returns `c` for any valid `c` ≠ `EOF`.
+        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_printf.c`):**
+            - [ ] Fuzz `snprintf()` with random format strings and random arguments.
+            - [ ] Verify no buffer overflows (write to bounded buffer, check sentinel bytes).
+            - [ ] Verify return value consistency (re-call with larger buffer, compare output).
+            - [ ] Fuzz `vsnprintf()` with extreme widths/precisions.
+        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_scanf.c`):**
+            - [ ] Fuzz `sscanf()` with random format strings and random input strings.
+            - [ ] Verify no crashes, no buffer overflows, return value ≥ 0 or `EOF`.
+            - [ ] Fuzz scanset patterns (`%[...]`) with adversarial character classes.
+    - [ ] **Man Pages:**
+        - [ ] `man/man3/fopen.3` — File open. Covers `fopen()`, `fdopen()`, `freopen()`. Mode string parsing, `"x"` flag. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/fclose.3` — File close. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/fread.3` — Block I/O. Covers `fread()` and `fwrite()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/fgets.3` — Line input. Covers `fgets()`, `fputs()`, `gets()` removal note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/fgetc.3` — Character I/O. Covers `fgetc()`, `getc()`, `getchar()`, `fputc()`, `putc()`, `putchar()`, `ungetc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [ ] `man/man3/fseek.3` — File positioning. Covers `fseek()`, `ftell()`, `rewind()`, `fgetpos()`, `fsetpos()`, `fseeko()`, `ftello()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/fflush.3` — Flush stream. Document `NULL` argument behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/setvbuf.3` — Set stream buffering. Covers `setvbuf()`, `setbuf()`, `setlinebuf()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/feof.3` — Stream status. Covers `feof()`, `ferror()`, `clearerr()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [ ] `man/man3/perror.3` — Print error message. SYNOPSIS, DESCRIPTION, SEE ALSO.
+        - [ ] `man/man3/tmpfile.3` — Temporary files. Covers `tmpfile()` and `tmpnam()` deprecation note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [ ] `man/man3/printf.3` — Formatted output. Covers `printf()`, `fprintf()`, `sprintf()`, `snprintf()`, `dprintf()`, `asprintf()` and `v*` variants. Full format specification. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] `man/man3/scanf.3` — Formatted input. Covers `scanf()`, `fscanf()`, `sscanf()` and `v*` variants. Full format specification including scansets. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+- [ ] **String/Mem:**
+    - [ ] Optimize `memcpy`, `memset`, `memmove`.
+    - [/] **Math Library (`lib/m/`):**
+        - [/] **Architecture & Environment:**
+            - [ ] `math.h` header definition.
+            - [ ] `math_errhandling` (errno support).
+            - [ ] `__fpclassify` internal helper.
+            - [ ] **FENV (Floating-Point Environment):**
+                - [ ] **Header (`include/fenv.h`) Definition (C99/POSIX):**
+                    - [ ] Define `fenv_t` type (full x87 environment: CW, SW, TW, FIP, FCS, FDP, FDS, MXCSR on SSE-capable).
+                    - [ ] Define `fexcept_t` type (exception status word snapshot).
+                    - [ ] Define exception flag macros:
+                        - [ ] `FE_INVALID` (bit 0, x87 IE).
+                        - [ ] `FE_DENORMAL` (bit 1, x87 DE — non-standard extension, guard with `#ifdef`).
+                        - [ ] `FE_DIVBYZERO` (bit 2, x87 ZE).
+                        - [ ] `FE_OVERFLOW` (bit 3, x87 OE).
+                        - [ ] `FE_UNDERFLOW` (bit 4, x87 UE).
+                        - [ ] `FE_INEXACT` (bit 5, x87 PE).
+                        - [ ] `FE_ALL_EXCEPT` (bitwise OR of all supported exception flags).
+                    - [ ] Define rounding mode macros:
+                        - [ ] `FE_TONEAREST` (CW bits 10-11 = 00).
+                        - [ ] `FE_DOWNWARD` (CW bits 10-11 = 01).
+                        - [ ] `FE_UPWARD` (CW bits 10-11 = 10).
+                        - [ ] `FE_TOWARDZERO` (CW bits 10-11 = 11).
+                    - [ ] Define `FE_DFL_ENV` macro (pointer to default environment, `((const fenv_t *)-1)` or static).
+                    - [ ] Provide function prototypes for all `fe*` functions.
+                    - [ ] Include guard (`_FENV_H`) and C++ `extern "C"` wrapper.
+                - [ ] **Exception Handling Functions:**
+                    - [ ] `feclearexcept(int excepts)`:
+                        - [ ] Read x87 status word via `fnstsw`.
+                        - [ ] Clear requested exception bits.
+                        - [ ] Restore via `fldenv` (requires full env save/modify/restore cycle).
+                        - [ ] If SSE present, also clear bits in MXCSR via `ldmxcsr`.
+                        - [ ] Return 0 on success, non-zero on failure.
+                    - [ ] `fegetexceptflag(fexcept_t *flagp, int excepts)`:
+                        - [ ] Read x87 status word via `fnstsw`.
+                        - [ ] Mask with `excepts`, store into `*flagp`.
+                        - [ ] If SSE present, OR in MXCSR exception bits.
+                        - [ ] Return 0 on success.
+                    - [ ] `feraiseexcept(int excepts)`:
+                        - [ ] Raise specified exceptions by performing operations that trigger them (e.g., divide-by-zero for `FE_DIVBYZERO`, 0.0/0.0 for `FE_INVALID`).
+                        - [ ] Alternatively: save env, set SW bits, load env, then `fwait` to trigger trap.
+                        - [ ] Ensure `FE_OVERFLOW` and `FE_UNDERFLOW` also set `FE_INEXACT` per C99 7.6.2.3.
+                        - [ ] Return 0 on success.
+                    - [ ] `fesetexceptflag(const fexcept_t *flagp, int excepts)`:
+                        - [ ] Save full x87 environment via `fnstenv`.
+                        - [ ] Replace status word exception bits (masked by `excepts`) from `*flagp`.
+                        - [ ] Restore via `fldenv` — must NOT raise exceptions (set bits only).
+                        - [ ] If SSE present, update MXCSR accordingly.
+                        - [ ] Return 0 on success.
+                    - [ ] `fetestexcept(int excepts)`:
+                        - [ ] Read x87 status word via `fnstsw`.
+                        - [ ] If SSE present, OR in MXCSR sticky bits.
+                        - [ ] Return bitwise AND of current exceptions with `excepts`.
+                - [ ] **Rounding Mode Functions:**
+                    - [ ] `fegetround()`:
+                        - [ ] Read x87 control word via `fnstcw`.
+                        - [ ] Extract rounding mode bits (bits 10-11).
+                        - [ ] Return corresponding `FE_*` rounding constant.
+                    - [ ] `fesetround(int rdir)`:
+                        - [ ] Validate `rdir` is one of `FE_TONEAREST`, `FE_DOWNWARD`, `FE_UPWARD`, `FE_TOWARDZERO`.
+                        - [ ] Read x87 control word via `fnstcw`.
+                        - [ ] Modify rounding mode bits (bits 10-11).
+                        - [ ] Write back via `fldcw`.
+                        - [ ] If SSE present, also update MXCSR rounding bits (bits 13-14).
+                        - [ ] Return 0 on success, non-zero for invalid `rdir`.
+                - [ ] **Environment Save/Restore Functions:**
+                    - [ ] `fegetenv(fenv_t *envp)`:
+                        - [ ] Save full x87 environment via `fnstenv` into `*envp`.
+                        - [ ] Restore control word afterwards (x87 `fnstenv` masks all exceptions as side effect, so re-load CW).
+                        - [ ] If SSE present, also save MXCSR into `*envp`.
+                        - [ ] Return 0 on success.
+                    - [ ] `feholdexcept(fenv_t *envp)`:
+                        - [ ] Save current environment into `*envp` via `fnstenv`.
+                        - [ ] Clear all exception flags in status word.
+                        - [ ] Mask all exceptions in control word (set exception mask bits 0-5).
+                        - [ ] Install this non-stop environment via `fldenv`.
+                        - [ ] If SSE present, save and mask MXCSR similarly.
+                        - [ ] Return 0 on success.
+                        - [ ] This enables non-stop (non-trapping) FP mode for temporary computation.
+                    - [ ] `fesetenv(const fenv_t *envp)`:
+                        - [ ] If `envp == FE_DFL_ENV`, load default environment (e.g., `fninit` then adjust, or load a static default).
+                        - [ ] Else, load full x87 environment from `*envp` via `fldenv`.
+                        - [ ] If SSE present, also restore MXCSR from `*envp`.
+                        - [ ] Must NOT raise exceptions — install state silently.
+                        - [ ] Return 0 on success.
+                    - [ ] `feupdateenv(const fenv_t *envp)`:
+                        - [ ] Read currently raised exceptions via `fetestexcept(FE_ALL_EXCEPT)`.
+                        - [ ] Install `*envp` (or default) via `fesetenv(envp)`.
+                        - [ ] Re-raise the previously pending exceptions via `feraiseexcept()`.
+                        - [ ] Return 0 on success.
+                        - [ ] This is the "merge exceptions then restore" primitive.
+                - [ ] **`FENV_ACCESS` Pragma Support:**
+                    - [ ] Document compiler interaction: `#pragma STDC FENV_ACCESS ON` advisory.
+                    - [ ] Ensure `fenv.h` includes comment noting GCC `#pragma GCC optimize ("no-fast-math")` equivalent.
+                    - [ ] Add `FENV_ACCESS` documentation in header and man pages.
+                - [ ] **Implementation Details (i386/x87 Backend — `lib/m/src/fenv.c`):**
+                    - [ ] All functions implemented as i386 inline assembly or `.S` file for x87 `fnstcw`/`fldcw`/`fnstsw`/`fnstenv`/`fldenv`/`fnclex`/`fwait`.
+                    - [ ] SSE/MXCSR path gated by runtime or compile-time `__SSE__` check.
+                    - [ ] `fenv_t` layout must match x87 `fnstenv`/`fldenv` 28-byte block (+ optional MXCSR field).
+                    - [ ] Ensure `fninit` is used (not `finit`) to avoid waiting for pending exceptions during default-env setup.
+                    - [ ] All functions are `__attribute__((noinline))` to prevent optimizer from reordering FP state access.
+                - [ ] **Testing:**
+                    - [ ] **Unit Tests (`tests/lib/m/unit/test_fenv.c`):**
+                        - [ ] Test `feclearexcept()`: raise each exception, clear it, verify via `fetestexcept()`.
+                        - [ ] Test `feclearexcept(FE_ALL_EXCEPT)`: clear all, verify none pending.
+                        - [ ] Test `feclearexcept(0)`: no-op, verify no side effects.
+                        - [ ] Test `fegetexceptflag()` / `fesetexceptflag()`: round-trip flag save/restore.
+                        - [ ] Test `fesetexceptflag()` does NOT raise exceptions (just sets sticky bits).
+                        - [ ] Test `feraiseexcept()`: raise individual exceptions, verify via `fetestexcept()`.
+                        - [ ] Test `feraiseexcept(FE_OVERFLOW)` also sets `FE_INEXACT` (C99 requirement).
+                        - [ ] Test `feraiseexcept(FE_UNDERFLOW)` also sets `FE_INEXACT`.
+                        - [ ] Test `feraiseexcept()` with multiple flags ORed together.
+                        - [ ] Test `fetestexcept()`: verify returns only requested bits.
+                        - [ ] Test `fegetround()` default is `FE_TONEAREST`.
+                        - [ ] Test `fesetround()` / `fegetround()` round-trip for all four modes.
+                        - [ ] Test `fesetround()` with invalid argument returns non-zero.
+                        - [ ] Test `fesetround()` actually affects rounding: add 1.0 + tiny value and check direction.
+                        - [ ] Test `fegetenv()` / `fesetenv()` round-trip preserves full state.
+                        - [ ] Test `fesetenv(FE_DFL_ENV)` resets to default (no exceptions, `FE_TONEAREST`).
+                        - [ ] Test `feholdexcept()`: saves state, clears exceptions, masks all traps.
+                        - [ ] Test `feholdexcept()` followed by exception-raising operations don't trap.
+                        - [ ] Test `feupdateenv()`: merges pending exceptions from non-stop region back after restore.
+                        - [ ] Test `feupdateenv()` re-raises exceptions from before `feholdexcept()` was called.
+                        - [ ] Test interaction: `feholdexcept()` → compute with exceptions → `feupdateenv()` → verify merged.
+                    - [ ] **Property Tests (`tests/lib/m/property/prop_fenv.c`):**
+                        - [ ] Property: `fesetround(m); fegetround() == m` for all valid `m`.
+                        - [ ] Property: `fesetround(invalid)` returns non-zero and does not change mode.
+                        - [ ] Property: `feclearexcept(e); fetestexcept(e) == 0` for any valid exception mask `e`.
+                        - [ ] Property: `feraiseexcept(e); (fetestexcept(e) & e) == e` for any valid `e`.
+                        - [ ] Property: `fegetexceptflag(&f, e); feclearexcept(FE_ALL_EXCEPT); fesetexceptflag(&f, e); fetestexcept(e)` equals original.
+                        - [ ] Property: `fegetenv(&env); /* modify state */; fesetenv(&env)` restores original rounding and exceptions.
+                        - [ ] Property: `fesetenv(FE_DFL_ENV); fegetround() == FE_TONEAREST && fetestexcept(FE_ALL_EXCEPT) == 0`.
+                        - [ ] Property: `feholdexcept()` results in `fetestexcept(FE_ALL_EXCEPT) == 0` and non-stop mode.
+                        - [ ] Property: `feupdateenv()` preserves exceptions raised during non-stop region.
+                        - [ ] Property: exception flags are sticky — `feraiseexcept(e)` followed by unrelated FP ops retains `e`.
+                    - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_fenv.c`):**
+                        - [ ] Fuzz random combinations of exception flag bits to `feclearexcept()` / `feraiseexcept()` / `fetestexcept()`.
+                        - [ ] Fuzz random rounding mode values to `fesetround()` (including invalid values).
+                        - [ ] Fuzz random sequences of `fegetenv()`/`fesetenv()`/`feholdexcept()`/`feupdateenv()` interleaved with FP operations.
+                        - [ ] Fuzz random `fexcept_t` values through `fegetexceptflag()`/`fesetexceptflag()` round-trips.
+                        - [ ] Verify no crashes, no undefined behavior, status word consistency after each fuzzed sequence.
+                - [ ] **Man Pages:**
+                    - [ ] `man/man7/fenv.7` — Overview of floating-point environment, x87/SSE interaction, `FENV_ACCESS` pragma, and usage patterns.
+                    - [ ] `man/man3/feclearexcept.3` — Clear floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fegetexceptflag.3` — Get floating-point exception flags. Covers `fegetexceptflag()` and `fesetexceptflag()` together (paired save/restore API). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/feraiseexcept.3` — Raise floating-point exceptions. Document `FE_OVERFLOW`/`FE_UNDERFLOW` implying `FE_INEXACT`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fetestexcept.3` — Test floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fegetround.3` — Get/set floating-point rounding mode. Covers `fegetround()` and `fesetround()` together. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/fegetenv.3` — Get/set floating-point environment. Covers `fegetenv()` and `fesetenv()`. SYNOPSIS, DESCRIPTION (document `FE_DFL_ENV`), RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                    - [ ] `man/man3/feholdexcept.3` — Save environment and enter non-stop mode. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES (show `feholdexcept()` → compute → `feupdateenv()` pattern), SEE ALSO.
+                    - [ ] `man/man3/feupdateenv.3` — Restore environment and re-raise saved exceptions. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+            - [ ] **Type Variants (f, l suffixes):**
+                - [ ] **Float Variants (`f` suffix — `lib/m/src/mathf.c`):**
+                    - [ ] Implement `sinf()`, `cosf()`, `tanf()`, `asinf()`, `acosf()`, `atanf()`, `atan2f()`.
+                    - [ ] Implement `sinhf()`, `coshf()`, `tanhf()`, `asinhf()`, `acoshf()`, `atanhf()`.
+                    - [ ] Implement `expf()`, `exp2f()`, `expm1f()`, `logf()`, `log2f()`, `log10f()`, `log1pf()`.
+                    - [ ] Implement `powf()`, `sqrtf()`, `cbrtf()`, `hypotf()`.
+                    - [ ] Implement `fabsf()`, `fmodf()`, `remainderf()`, `remquof()`, `fmaf()`.
+                    - [ ] Implement `fmaxf()`, `fminf()`, `fdimf()`.
+                    - [ ] Implement `ceilf()`, `floorf()`, `truncf()`, `roundf()`, `rintf()`, `nearbyintf()`.
+                    - [ ] Implement `lroundf()`, `llroundf()`, `lrintf()`, `llrintf()`.
+                    - [ ] Implement `frexpf()`, `ldexpf()`, `modff()`, `scalbnf()`, `scalblnf()`.
+                    - [ ] Implement `ilogbf()`, `logbf()`, `nextafterf()`, `nexttowardf()`, `copysignf()`, `nanf()`.
+                    - [ ] Implement `erff()`, `erfcf()`, `tgammaf()`, `lgammaf()`.
+                    - [ ] Implement `sincosf()`.
+                - [ ] **Long Double Variants (`l` suffix — `lib/m/src/mathl.c`):**
+                    - [ ] Implement `sinl()`, `cosl()`, `tanl()`, `asinl()`, `acosl()`, `atanl()`, `atan2l()`.
+                    - [ ] Implement `sinhl()`, `coshl()`, `tanhl()`, `asinhl()`, `acoshl()`, `atanhl()`.
+                    - [ ] Implement `expl()`, `exp2l()`, `expm1l()`, `logl()`, `log2l()`, `log10l()`, `log1pl()`.
+                    - [ ] Implement `powl()`, `sqrtl()`, `cbrtl()`, `hypotl()`.
+                    - [ ] Implement `fabsl()`, `fmodl()`, `remainderl()`, `remquol()`, `fmal()`.
+                    - [ ] Implement `fmaxl()`, `fminl()`, `fdiml()`.
+                    - [ ] Implement `ceill()`, `floorl()`, `truncl()`, `roundl()`, `rintl()`, `nearbyintl()`.
+                    - [ ] Implement `lroundl()`, `llroundl()`, `lrintl()`, `llrintl()`.
+                    - [ ] Implement `frexpl()`, `ldexpl()`, `modfl()`, `scalbnl()`, `scalblnl()`.
+                    - [ ] Implement `ilogbl()`, `logbl()`, `nextafterl()`, `nexttowardl()`, `copysignl()`, `nanl()`.
+                    - [ ] Implement `erfl()`, `erfcl()`, `tgammal()`, `lgammal()`.
+                    - [ ] Implement `sincosl()`.
+                - [ ] **i386 Note:** On x87, `long double` is 80-bit extended precision (native FPU format). `float`/`double` variants should use x87 internally and truncate on return.
+            - [ ] **Generic Math (`<tgmath.h>`):**
+                - [ ] Implement C99/C11 `<tgmath.h>` type-generic macros:
+                    - [ ] Dispatch to `f`, ` `, or `l` suffix based on argument type via `_Generic` (C11) or `__builtin_choose_expr` + `__builtin_types_compatible_p` (GCC extension).
+                    - [ ] Cover all math functions with type-generic wrappers: trig, hyperbolic, exp/log, pow/sqrt, rounding, manipulation, fenv-interacting.
+                    - [ ] Include complex variants dispatch (if/when `<complex.h>` is implemented).
+                    - [ ] Ensure macro expansion does not evaluate arguments multiple times (use statement expressions if needed).
+                - [ ] **Testing (`tests/lib/m/unit/test_tgmath.c`):**
+                    - [ ] Test type dispatch: `sin((float)x)` calls `sinf()`, `sin((double)x)` calls `sin()`, `sin((long double)x)` calls `sinl()`.
+                    - [ ] Test all covered function families dispatch correctly.
+                    - [ ] Test no double-evaluation of arguments with side effects.
+                - [ ] **Man Pages:**
+                    - [ ] `man/man7/tgmath.7` — Type-generic math macros overview, dispatch rules, C11 `_Generic` usage. SYNOPSIS, DESCRIPTION, EXAMPLES, SEE ALSO.
+        - [/] **Classification & Comparison (C99/C23/POSIX):**
+            - [ ] `fpclassify()`
+            - [ ] `isfinite()`
+            - [ ] `isinf()`
+            - [ ] `isnan()`
+            - [ ] `isnormal()`
+            - [ ] `signbit()`
+            - [ ] `isgreater()`, `isgreaterequal()`, `isless()`, `islessequal()`, `islessgreater()`, `isunordered()`:
+                - [ ] Implement as macros using `__builtin_isgreater` etc. (GCC) or manual quiet-NaN-safe comparisons.
+                - [ ] Must not raise `FE_INVALID` on unordered operands (unlike plain `<`/`>`).
+            - [ ] `iseqsig()`, `issignaling()` (C23):
+                - [ ] `iseqsig()`: equality comparison that DOES raise `FE_INVALID` on NaN.
+                - [ ] `issignaling()`: detect signaling NaN via bit pattern inspection.
+            - [ ] `iscanonical()`, `issubnormal()`, `iszero()` (C23):
+                - [ ] `iscanonical()`: always 1 for IEEE 754 binary formats (all values canonical).
+                - [ ] `issubnormal()`: `fpclassify(x) == FP_SUBNORMAL`.
+                - [ ] `iszero()`: `fpclassify(x) == FP_ZERO`.
+            - [ ] **Testing (`tests/lib/m/unit/test_classify.c`):**
+                - [ ] Test `fpclassify()` returns correct category for: `+0.0`, `-0.0`, `1.0`, `-1.0`, `INFINITY`, `-INFINITY`, `NAN`, `DBL_MIN/2` (denorm), `DBL_MAX`.
+                - [ ] Test `isfinite()` true for normals/denormals/zeros, false for inf/nan.
+                - [ ] Test `isinf()` true for `±INFINITY` only.
+                - [ ] Test `isnan()` true for `NAN`, quiet NaN, signaling NaN.
+                - [ ] Test `isnormal()` false for zero, denormal, inf, nan.
+                - [ ] Test `signbit()` for `+0.0`, `-0.0`, `+1.0`, `-1.0`, `+INFINITY`, `-INFINITY`, `NAN`, `-NAN`.
+                - [ ] Test `isgreater()` etc. do NOT raise `FE_INVALID` when one operand is NaN.
+                - [ ] Test `isunordered()` true iff either operand is NaN.
+                - [ ] Test `iseqsig()` raises `FE_INVALID` on NaN operand.
+                - [ ] Test `issignaling()` detects sNaN bit pattern.
+                - [ ] Test float, double, and long double variants.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_classify.c`):**
+                - [ ] Property: exactly one of `isinf(x)`, `isnan(x)`, `isfinite(x)` is true for any `x`.
+                - [ ] Property: `isnormal(x)` implies `isfinite(x)`.
+                - [ ] Property: `issubnormal(x)` implies `isfinite(x) && !isnormal(x) && !iszero(x)`.
+                - [ ] Property: `signbit(-x) != signbit(x)` for all non-NaN `x`.
+                - [ ] Property: `isunordered(x, y)` iff `isnan(x) || isnan(y)`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/fpclassify.3` — Floating-point classification. Covers `fpclassify()`, `isfinite()`, `isinf()`, `isnan()`, `isnormal()`, `signbit()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/isgreater.3` — Quiet comparison macros. Covers `isgreater()` through `isunordered()`. Document non-signaling NaN behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [/] **Basic Arithmetic:**
+            - [ ] `fabs()`
+            - [ ] `fmod()`
+            - [ ] `remainder()`
+            - [ ] `remquo()`:
+                - [ ] Compute remainder AND store low-order bits of quotient in `*quo`.
+                - [ ] Sign of `*quo` is sign of `x/y`.
+                - [ ] At least 3 bits of quotient stored.
+            - [ ] `fmax()`
+            - [ ] `fmin()`
+            - [ ] `fdim()`
+            - [ ] `fma()` (Fused Multiply-Add):
+                - [ ] Compute `(x * y) + z` with single rounding (as if infinite precision intermediate).
+                - [ ] Critical for numerical accuracy in dot-products, compensated summation.
+                - [ ] On x87: no hardware FMA — use software double-double decomposition or Dekker's algorithm.
+                - [ ] Raise `FE_INEXACT`/`FE_OVERFLOW`/`FE_UNDERFLOW` appropriately.
+            - [ ] `fmaximum()`, `fminimum()`, `fmaximum_num()`, `fminimum_num()`, `fmaximum_mag()`, `fminimum_mag()` (C23):
+                - [ ] `fmaximum()`/`fminimum()`: NaN-propagating (NaN if either operand is NaN).
+                - [ ] `fmaximum_num()`/`fminimum_num()`: NaN-ignoring (return the non-NaN operand).
+                - [ ] `fmaximum_mag()`/`fminimum_mag()`: Compare absolute values, NaN-propagating.
+                - [ ] All distinguish `+0.0` from `-0.0`: `fmaximum(+0.0, -0.0) == +0.0`.
+            - [ ] **Testing (`tests/lib/m/unit/test_arith.c`):**
+                - [ ] Test `fabs()`: positive, negative, zero, -0.0, ∞, -∞, NaN.
+                - [ ] Test `fmod()`: basic cases, sign of result matches dividend, zero dividend, NaN propagation.
+                - [ ] Test `remainder()`: IEEE remainder (can be negative), ties to even quotient.
+                - [ ] Test `remquo()`: remainder matches `remainder()`, quotient low bits correct.
+                - [ ] Test `fma()`: `fma(a, b, c)` vs naive `a*b+c` — detect cases where single rounding differs.
+                - [ ] Test `fma()` special values: 0×∞+NaN, ∞×finite±∞.
+                - [ ] Test `fmax()`/`fmin()`: NaN handling (return non-NaN), ±0.0 distinction.
+                - [ ] Test `fdim()`: positive difference, zero when x ≤ y, NaN propagation.
+                - [ ] Test C23 `fmaximum()`/`fminimum()` NaN propagation vs `fmax()`/`fmin()` NaN-ignoring.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_arith.c`):**
+                - [ ] Property: `fabs(x) >= 0` for all `x` (including `-0.0` → `+0.0`).
+                - [ ] Property: `fmod(x, y)` has same sign as `x` and `|fmod(x,y)| < |y|`.
+                - [ ] Property: `fma(x, y, 0.0) == x * y` for exact products (no rounding needed).
+                - [ ] Property: `fmax(x, y) >= x && fmax(x, y) >= y` for non-NaN inputs.
+                - [ ] Property: `fdim(x, y) + y >= x` for finite non-NaN inputs.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/fabs.3` — Absolute value. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/fmod.3` — Floating-point remainder. Covers `fmod()` and `remainder()` with IEEE semantics differences. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/remquo.3` — Remainder with quotient. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/fma.3` — Fused multiply-add. Document precision advantage. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/fmax.3` — Maximum/minimum. Covers `fmax()`, `fmin()`, `fdim()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+        - [/] **Rounding:**
+            - [ ] `ceil()`
+            - [ ] `floor()`
+            - [ ] `trunc()`
+            - [ ] `round()`
+            - [ ] `rint()`
+            - [ ] `nearbyint()`:
+                - [ ] Same as `rint()` but does NOT raise `FE_INEXACT`.
+                - [ ] On x87: save/mask inexact exception, call `frndint`, restore flags.
+            - [ ] `lround()`, `llround()`:
+                - [ ] Round to nearest, ties away from zero (like `round()`), return `long`/`long long`.
+                - [ ] Raise `FE_INVALID` and return `LONG_MIN`/`LONG_MAX` on overflow or NaN.
+            - [ ] `lrint()`, `llrint()`:
+                - [ ] Round using current rounding mode (like `rint()`), return `long`/`long long`.
+                - [ ] On x87: `fistp` stores directly to integer.
+                - [ ] Raise `FE_INVALID` on overflow/NaN, `FE_INEXACT` if value was not integer.
+            - [ ] `roundeven()` (C23):
+                - [ ] Round to nearest, ties to even (same as default `FE_TONEAREST` `rint()`).
+                - [ ] Explicit function — does not depend on current rounding mode.
+            - [ ] `fromfp()`, `fromfpx()`, `ufromfp()`, `ufromfpx()` (C23):
+                - [ ] Convert to integer type with explicit rounding mode and width.
+                - [ ] `fromfp()`: signed, `ufromfp()`: unsigned.
+                - [ ] `*x` variants raise `FE_INEXACT` on non-integer input; non-`x` variants do not.
+            - [ ] **Testing (`tests/lib/m/unit/test_round.c`):**
+                - [ ] Test `ceil()`: `ceil(1.1)==2.0`, `ceil(-1.1)==-1.0`, `ceil(0.0)==0.0`, `ceil(-0.0)==-0.0`.
+                - [ ] Test `floor()`: `floor(1.9)==1.0`, `floor(-1.1)==-2.0`.
+                - [ ] Test `trunc()`: `trunc(1.9)==1.0`, `trunc(-1.9)==-1.0`.
+                - [ ] Test `round()`: ties away from zero: `round(0.5)==1.0`, `round(-0.5)==-1.0`.
+                - [ ] Test `rint()`: honors current rounding mode (test with `fesetround()`).
+                - [ ] Test `nearbyint()`: same as `rint()` but does NOT raise `FE_INEXACT` (verify via `fetestexcept()`).
+                - [ ] Test `lround()`/`llround()`: overflow → `LONG_MAX`/`LONG_MIN` + `FE_INVALID`.
+                - [ ] Test `lrint()`/`llrint()`: current rounding mode, `FE_INEXACT` on non-integer.
+                - [ ] Test `roundeven()`: `roundeven(0.5)==0.0`, `roundeven(1.5)==2.0` (ties to even).
+                - [ ] Test all rounding functions with: ±0.0, ±∞, NaN, ±0.5, ±1.5, large values.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_round.c`):**
+                - [ ] Property: `ceil(x) >= x` for all finite `x`.
+                - [ ] Property: `floor(x) <= x` for all finite `x`.
+                - [ ] Property: `|trunc(x)| <= |x|` for all finite `x`.
+                - [ ] Property: `floor(x) <= round(x) <= ceil(x)` for all `x` where the three are defined.
+                - [ ] Property: `rint(x) == x` for integer values of `x`.
+                - [ ] Property: rounding functions are idempotent: `ceil(ceil(x)) == ceil(x)`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/ceil.3` — Round upward. Covers `ceil()`, `ceilf()`, `ceill()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/floor.3` — Round downward. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/round.3` — Round to nearest, ties away from zero. Covers `round()`, `lround()`, `llround()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/rint.3` — Round to nearest integer using current mode. Covers `rint()`, `nearbyint()`, `lrint()`, `llrint()`. Document `FE_INEXACT` difference. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/trunc.3` — Round toward zero. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+        - [/] **Exponential, Logarithmic & Power:**
+            - [ ] `exp()`
+            - [ ] `exp2()`
+            - [ ] `expm1()`
+            - [ ] `exp10()`, `exp10m1()`, `exp2m1()` (C23):
+                - [ ] `exp10(x)`: compute `10^x`. On x87: `x * log2(10)` → `f2xm1`/`fscale`.
+                - [ ] `exp10m1(x)`: compute `10^x - 1` accurately for small `x`.
+                - [ ] `exp2m1(x)`: compute `2^x - 1` accurately for small `x` (direct `f2xm1` for |x| < 1).
+            - [ ] `log()`
+            - [ ] `log2()`
+            - [ ] `log10()`
+            - [ ] `log1p()`
+            - [ ] `log10p1()`, `log2p1()`, `logp1()` (C23):
+                - [ ] `logp1(x)`: alias for `log1p(x)` — compute `ln(1+x)` accurately for small `x`.
+                - [ ] `log2p1(x)`: compute `log2(1+x)` accurately. On x87: use `fyl2xp1` for |x| < 1-√2/2.
+                - [ ] `log10p1(x)`: compute `log10(1+x)` accurately.
+            - [ ] `pow()`
+            - [ ] `pown()`, `powr()`, `rootn()`, `compound()` (C23):
+                - [ ] `pown(x, n)`: `x` raised to integer power `n` (`intmax_t`). Binary exponentiation.
+                - [ ] `powr(x, y)`: `e^(y * ln(x))`, domain x ≥ 0. Different NaN/±0 semantics from `pow()`.
+                - [ ] `rootn(x, n)`: n-th root of `x`. `rootn(x, 2) == sqrt(x)`, `rootn(x, 3) == cbrt(x)`.
+                - [ ] `compound(x, n)`: `(1+x)^n` computed stably for small `x`.
+            - [ ] `sqrt()`
+            - [ ] `rsqrt()` (C23):
+                - [ ] Reciprocal square root: `1/sqrt(x)`.
+                - [ ] On x87: `fsqrt` then `fdivr` with 1.0.
+            - [ ] `cbrt()`
+            - [ ] `hypot()`
+            - [ ] **Testing (`tests/lib/m/unit/test_explog.c`):**
+                - [ ] Test `exp(0)==1`, `exp(1)≈M_E`, `exp(-∞)==0`, `exp(+∞)==+∞`, `exp(NaN)==NaN`.
+                - [ ] Test `exp2(0)==1`, `exp2(10)==1024`.
+                - [ ] Test `expm1(0)==0`, `expm1(tiny)≈tiny` (accuracy for small x vs naive `exp(x)-1`).
+                - [ ] Test `log(1)==0`, `log(M_E)≈1`, `log(0)==-∞`, `log(-1)==NaN` + `FE_INVALID`, `log(+∞)==+∞`.
+                - [ ] Test `log2(1)==0`, `log2(1024)==10`.
+                - [ ] Test `log10(1)==0`, `log10(1000)==3`.
+                - [ ] Test `log1p(0)==0`, `log1p(tiny)≈tiny` (accuracy for small x).
+                - [ ] Test `pow(2,10)==1024`, `pow(-1,2)==1`, `pow(0,0)==1` (C99 convention).
+                - [ ] Test `pow(x, 0)==1` for all x (including ∞, NaN per C99 F.9.4.4).
+                - [ ] Test `sqrt(4)==2`, `sqrt(0)==0`, `sqrt(-1)==NaN`, `sqrt(+∞)==+∞`.
+                - [ ] Test `cbrt(-8)==-2`, `cbrt(0)==0`.
+                - [ ] Test `hypot(3,4)==5`, `hypot(x,0)==fabs(x)`, `hypot(∞,NaN)==∞`.
+                - [ ] Test `rsqrt(4)==0.5`, `rsqrt(0)==+∞`, `rsqrt(-1)==NaN`.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_explog.c`):**
+                - [ ] Property: `exp(log(x)) ≈ x` for positive finite `x` (within ULP tolerance).
+                - [ ] Property: `log(exp(x)) ≈ x` for moderate `x` (no overflow/underflow).
+                - [ ] Property: `exp2(log2(x)) ≈ x` for positive finite `x`.
+                - [ ] Property: `sqrt(x) * sqrt(x) ≈ x` for positive `x`.
+                - [ ] Property: `hypot(x,y) >= fabs(x) && hypot(x,y) >= fabs(y)`.
+                - [ ] Property: `pow(x, 1.0) == x` for all `x`.
+                - [ ] Property: `expm1(x) + 1 ≈ exp(x)` for all `x` (accuracy comparison, not equality).
+                - [ ] Property: `log1p(expm1(x)) ≈ x` for moderate `x`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/exp.3` — Exponential functions. Covers `exp()`, `exp2()`, `expm1()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/log.3` — Logarithmic functions. Covers `log()`, `log2()`, `log10()`, `log1p()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/pow.3` — Power functions. Covers `pow()`, `sqrt()`, `cbrt()`, `hypot()`. Document special value semantics extensively (C99 Annex F). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [/] **Trigonometric:**
+            - [ ] `sin()`
+            - [ ] `cos()`
+            - [ ] `tan()`
+            - [ ] `asin()`
+            - [ ] `acos()`
+            - [ ] `atan()`
+            - [ ] `atan2()`
+            - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23):
+                - [ ] `sinpi(x)`: compute `sin(π·x)` exactly at integer and half-integer points.
+                - [ ] `cospi(x)`: compute `cos(π·x)` exactly at integer and half-integer points.
+                - [ ] `tanpi(x)`: compute `tan(π·x)` exactly, including singularity at half-integers.
+                - [ ] Key benefit: exact values without `M_PI` multiplication error.
+            - [ ] `asinpi()`, `acospi()`, `atanpi()`, `atan2pi()` (C23):
+                - [ ] Inverse functions returning result in units of π (i.e., divided by π).
+                - [ ] `asinpi(x)` ∈ [-0.5, 0.5], `acospi(x)` ∈ [0, 1], `atanpi(x)` ∈ [-0.5, 0.5].
+                - [ ] `atan2pi(y, x)` ∈ [-1, 1].
+            - [ ] **Testing (`tests/lib/m/unit/test_trig.c`):**
+                - [ ] Test `sin(0)==0`, `sin(π/2)≈1`, `sin(π)≈0`, `sin(NaN)==NaN`.
+                - [ ] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`.
+                - [ ] Test `tan(0)==0`, `tan(π/4)≈1`.
+                - [ ] Test `asin(0)==0`, `asin(1)≈π/2`, `asin(2)==NaN` (domain error).
+                - [ ] Test `acos(1)==0`, `acos(0)≈π/2`, `acos(-1)≈π`.
+                - [ ] Test `atan(0)==0`, `atan(1)≈π/4`, `atan(+∞)≈π/2`.
+                - [ ] Test `atan2(0,1)==0`, `atan2(1,0)≈π/2`, `atan2(0,-1)≈π`, `atan2(-1,0)≈-π/2`.
+                - [ ] Test `sinpi(0.5)==1`, `sinpi(1)==0`, `sinpi(0)==0` (exact).
+                - [ ] Test `cospi(0)==1`, `cospi(0.5)==0`, `cospi(1)==-1` (exact).
+                - [ ] Test large argument accuracy: `sin(1e15)` — verify range reduction correctness.
+                - [ ] Test `sincos()` agrees with individual `sin()` and `cos()` calls.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_trig.c`):**
+                - [ ] Property: `sin(x)² + cos(x)² ≈ 1` (Pythagorean identity) for all finite `x`.
+                - [ ] Property: `sin(-x) == -sin(x)` (odd function).
+                - [ ] Property: `cos(-x) == cos(x)` (even function).
+                - [ ] Property: `asin(sin(x)) ≈ x` for `x ∈ [-π/2, π/2]`.
+                - [ ] Property: `|sin(x)| <= 1` and `|cos(x)| <= 1` for all finite `x`.
+                - [ ] Property: `atan2(sin(x), cos(x)) ≈ x` for `x ∈ (-π, π]`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/sin.3` — Trigonometric functions. Covers `sin()`, `cos()`, `tan()`, `sincos()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/asin.3` — Inverse trigonometric functions. Covers `asin()`, `acos()`, `atan()`, `atan2()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] **Hyperbolic:**
+            - [ ] `sinh()`
+            - [ ] `cosh()`
+            - [ ] `tanh()`
+            - [ ] `asinh()`
+            - [ ] `acosh()`
+            - [ ] `atanh()`
+            - [ ] **Testing (`tests/lib/m/unit/test_hyper.c`):**
+                - [ ] Test `sinh(0)==0`, `cosh(0)==1`, `tanh(0)==0`.
+                - [ ] Test `sinh(1)≈1.1752`, `cosh(1)≈1.5431`, `tanh(1)≈0.7616`.
+                - [ ] Test `sinh(+∞)==+∞`, `cosh(+∞)==+∞`, `tanh(+∞)==1`.
+                - [ ] Test `asinh(0)==0`, `acosh(1)==0`, `atanh(0)==0`.
+                - [ ] Test `acosh(x)` domain: `acosh(0.5)` → NaN/domain error.
+                - [ ] Test `atanh(±1)` → ±∞ (pole error).
+                - [ ] Test NaN propagation for all hyperbolic functions.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_hyper.c`):**
+                - [ ] Property: `cosh(x)² - sinh(x)² ≈ 1` (hyperbolic Pythagorean identity).
+                - [ ] Property: `sinh(-x) == -sinh(x)` (odd).
+                - [ ] Property: `cosh(-x) == cosh(x)` (even).
+                - [ ] Property: `tanh(x) == sinh(x)/cosh(x)` for moderate `x`.
+                - [ ] Property: `asinh(sinh(x)) ≈ x` for all `x`.
+                - [ ] Property: `|tanh(x)| < 1` for all finite `x`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/sinh.3` — Hyperbolic functions. Covers `sinh()`, `cosh()`, `tanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/asinh.3` — Inverse hyperbolic functions. Covers `asinh()`, `acosh()`, `atanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+        - [/] **Manipulation:**
+            - [ ] `frexp()`
+            - [ ] `ldexp()`
+            - [ ] `modf()`
+            - [ ] `scalbn()`
+            - [ ] `scalbln()`:
+                - [ ] Same as `scalbn()` but exponent is `long` instead of `int`.
+            - [ ] `ilogb()`, `logb()`:
+                - [ ] `ilogb(x)`: extract unbiased exponent as `int`. `ilogb(0)` → `FP_ILOGB0`, `ilogb(∞)` → `INT_MAX`, `ilogb(NaN)` → `FP_ILOGBNAN`.
+                - [ ] `logb(x)`: extract unbiased exponent as `double`. `logb(0)` → `-∞` (pole), `logb(±∞)` → `+∞`.
+            - [ ] `nextafter()`
+            - [ ] `nexttoward()`:
+                - [ ] Like `nextafter()` but second argument is `long double` for direction.
+            - [ ] `nextup()`, `nextdown()` (C23):
+                - [ ] `nextup(x)`: next representable value toward +∞.
+                - [ ] `nextdown(x)`: next representable value toward -∞.
+            - [ ] `copysign()`
+            - [ ] `nan()`:
+                - [ ] `nan(tagp)`: convert string tag to quiet NaN. `nan("") == NAN`, `nan("123")` → NaN with tag payload.
+            - [ ] **Testing (`tests/lib/m/unit/test_manip.c`):**
+                - [ ] Test `frexp()` / `ldexp()` round-trip: `ldexp(frexp(x, &e), e) == x`.
+                - [ ] Test `frexp()` result ∈ [0.5, 1.0) for positive normals.
+                - [ ] Test `frexp(0.0)` returns 0.0 with exponent 0.
+                - [ ] Test `modf()`: integer + fractional parts sum to original.
+                - [ ] Test `scalbn(x, n) == x * 2^n` for moderate `n`.
+                - [ ] Test `ilogb()`: `ilogb(1.0)==0`, `ilogb(2.0)==1`, `ilogb(0.5)==-1`.
+                - [ ] Test `ilogb(0)` returns `FP_ILOGB0`, `ilogb(NaN)` returns `FP_ILOGBNAN`.
+                - [ ] Test `logb()`: `logb(1.0)==0`, `logb(0)==-∞`.
+                - [ ] Test `nextafter(1.0, 2.0)` returns next representable above 1.0.
+                - [ ] Test `nextafter(0.0, 1.0)` returns smallest denormal.
+                - [ ] Test `nextafter(x, x) == x` for all `x`.
+                - [ ] Test `copysign(1.0, -1.0) == -1.0`.
+                - [ ] Test `nan("")` returns NaN, `isnan(nan("tag"))` is true.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_manip.c`):**
+                - [ ] Property: `ldexp(frexp(x, &e), e) == x` for all finite non-zero `x`.
+                - [ ] Property: `modf(x, &i); (i + frac) == x` for finite `x`.
+                - [ ] Property: `copysign(fabs(x), y)` has sign of `y` and magnitude of `x`.
+                - [ ] Property: `nextafter(x, y) != x` when `x != y` (for finite `x`, `y`).
+                - [ ] Property: `scalbn(x, 0) == x`.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/frexp.3` — Extract mantissa and exponent. Covers `frexp()` and `ldexp()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/modf.3` — Decompose to integer and fractional parts. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/scalbn.3` — Scale by power of radix. Covers `scalbn()` and `scalbln()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/ilogb.3` — Extract exponent. Covers `ilogb()` and `logb()`. Document special return values. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/nextafter.3` — Next representable value. Covers `nextafter()`, `nexttoward()`, `nextup()`, `nextdown()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+                - [ ] `man/man3/copysign.3` — Copy sign of a number. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+                - [ ] `man/man3/nan.3` — Generate quiet NaN. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+        - [ ] **Error & Gamma Functions (POSIX/C11):**
+            - [ ] `erf()`, `erfc()`:
+                - [ ] `erf(x)`: error function, `2/√π · ∫₀ˣ e^{-t²} dt`. Range: [-1, 1].
+                - [ ] `erfc(x)`: complementary error function, `1 - erf(x)`. More accurate than `1 - erf(x)` for large `x`.
+                - [ ] Implementation: rational polynomial approximation (Cody's or Abramowitz & Stegun).
+                - [ ] `erf(0)==0`, `erf(+∞)==1`, `erf(-∞)==-1`, `erfc(0)==1`, `erfc(+∞)==0`.
+            - [ ] `tgamma()`, `lgamma()` (with `signgam`):
+                - [ ] `tgamma(x)`: true Gamma function, `Γ(x)`.
+                - [ ] `tgamma(n) == (n-1)!` for positive integers.
+                - [ ] Poles at non-positive integers: `tgamma(0)` → ±∞, `tgamma(-1)` → NaN + `FE_INVALID`.
+                - [ ] `lgamma(x)`: natural log of absolute value of Gamma: `ln|Γ(x)|`.
+                - [ ] Set external `signgam` to sign of `Γ(x)` (+1 or -1).
+                - [ ] `lgamma_r(x, &signp)`: reentrant variant (BSD extension).
+                - [ ] Implementation: Stirling's approximation for large x, Lanczos or rational approximation for small x.
+            - [ ] **Testing (`tests/lib/m/unit/test_gamma.c`):**
+                - [ ] Test `erf(0)==0`, `erf(1)≈0.8427`, `erf(+∞)==1`, `erf(-∞)==-1`.
+                - [ ] Test `erfc(0)==1`, `erfc(+∞)==0`, `erfc(x) + erf(x) ≈ 1`.
+                - [ ] Test `tgamma(1)==1`, `tgamma(2)==1`, `tgamma(5)==24`, `tgamma(0.5)≈√π`.
+                - [ ] Test `tgamma(0)` → ±∞ (pole), `tgamma(-1)` → NaN.
+                - [ ] Test `lgamma(1)==0`, `lgamma(2)==0`, `lgamma(5)≈ln(24)`.
+                - [ ] Test `signgam` is set correctly after `lgamma()` calls.
+                - [ ] Test NaN propagation for all error/gamma functions.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_gamma.c`):**
+                - [ ] Property: `erfc(x) + erf(x) ≈ 1.0` for all finite `x`.
+                - [ ] Property: `erf(-x) == -erf(x)` (odd function).
+                - [ ] Property: `exp(lgamma(x)) ≈ |tgamma(x)|` for `x` where `tgamma(x)` is finite.
+                - [ ] Property: `tgamma(x+1) ≈ x * tgamma(x)` for positive `x` (recurrence relation).
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/erf.3` — Error functions. Covers `erf()` and `erfc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+                - [ ] `man/man3/tgamma.3` — Gamma functions. Covers `tgamma()`, `lgamma()`, `lgamma_r()`, `signgam`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+        - [ ] **Bessel Functions (POSIX/XSI):**
+            - [ ] `j0()`, `j1()`, `jn()`:
+                - [ ] Bessel functions of the first kind: `J₀(x)`, `J₁(x)`, `Jₙ(x)`.
+                - [ ] `j0(0)==1`, `j1(0)==0`, `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`.
+                - [ ] Implementation: polynomial/rational approximation for small x, asymptotic expansion for large x, Miller's backward recurrence for `jn()`.
+            - [ ] `y0()`, `y1()`, `yn()`:
+                - [ ] Bessel functions of the second kind: `Y₀(x)`, `Y₁(x)`, `Yₙ(x)`.
+                - [ ] Singular at `x=0`: `y0(0)==-∞`, `y1(0)==-∞`.
+                - [ ] Domain: `x > 0` only. `y0(-1)` → NaN + `FE_INVALID`.
+            - [ ] **Testing (`tests/lib/m/unit/test_bessel.c`):**
+                - [ ] Test `j0(0)==1`, `j1(0)==0`.
+                - [ ] Test `j0(x)` known values: `j0(2.4048...)≈0` (first zero).
+                - [ ] Test `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`.
+                - [ ] Test `y0(x)`, `y1(x)` known values.
+                - [ ] Test `y0(0)==-∞`, `y1(0)==-∞`.
+                - [ ] Test domain: `y0(-1)` → NaN, `y1(-1)` → NaN.
+                - [ ] Test NaN propagation.
+            - [ ] **Property Tests (`tests/lib/m/property/prop_bessel.c`):**
+                - [ ] Property: `jn(n, x)` satisfies Bessel recurrence: `J_{n-1}(x) + J_{n+1}(x) = (2n/x) * J_n(x)`.
+                - [ ] Property: `|j0(x)| <= 1` for all `x >= 0`.
+                - [ ] Property: `yn(n, x)` satisfies same recurrence.
+            - [ ] **Man Pages:**
+                - [ ] `man/man3/j0.3` — Bessel functions. Covers `j0()`, `j1()`, `jn()`, `y0()`, `y1()`, `yn()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+    - [ ] **Comprehensive Math Library Tests (Cross-Cutting):**
+        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_math.c`):**
+            - [ ] Fuzz all implemented math functions with random `double` inputs (including denormals, ±0, ±∞, NaN, max/min values).
+            - [ ] Verify no crashes, no SIGFPE (unless expected), consistent NaN propagation.
+            - [ ] Verify errno is set correctly for domain/range errors.
+            - [ ] Verify `fetestexcept()` flags raised appropriately.
+        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_mathf.c`):**
+            - [ ] Same as above but for all `float` variant functions.
+        - [ ] **Accuracy Tests (`tests/lib/m/unit/test_accuracy.c`):**
+            - [ ] Compare all math functions against known high-precision reference values (MPFR or hardcoded tables).
+            - [ ] Verify results within 1 ULP for correctly-rounded functions, 2-3 ULP for faithfully-rounded.
+            - [ ] Test at boundary values: smallest/largest normal, smallest denormal, values near singularities.
+    - [ ] **Optimizations (i386/x87 Inline Assembly):**
+        - [ ] **Trigonometric Functions:**
+            - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.
+            - [ ] `sincos()`: Use `fsincos` if supported, else combine.
+            - [ ] `tan()`: Use `fptan`; push `1.0` then `fptan`, ignore the 1.0.
+            - [ ] `atan2()`: Use `fpatan`.
+            - [ ] **Range Reduction:** Implement `fprem1` loop for arguments > 2^63 (Intel Manual reduction).
+        - [ ] **Logarithms & Exponentials:**
+            - [ ] `log2(x)`: Load 1.0, load x, use `fyl2x`.
+            - [ ] `log(x)`: Load ln(2), load x, use `fyl2x`.
+            - [ ] `log10(x)`: Load log10(2), load x, use `fyl2x`.
+            - [ ] `pow(x, y)`:
+                - [ ] If y is integer, use binary exponentiation.
+                - [ ] Else: `y * log2(x)` -> `frndint` -> `f2xm1` -> `fscale`.
+            - [ ] `exp2(x)`: `f2xm1` (for -1 < x < 1) with `fscale` for integer part.
+        - [ ] **Basic Arithmetic:**
+            - [ ] `sqrt()`: `fsqrt`.
+            - [ ] `fabs()`: `fabs`.
+            - [ ] `fmod()`: `fprem`.
+            - [ ] `remainder()`: `fprem1` (IEEE compliant remainder).
+        - [ ] **Rounding & Manipulation:**
+            - [ ] `rint()`: `frndint` (honors current CW rounding mode).
+            - [ ] `nearbyint()`: `frndint` (without raising inexact exception).
+            - [ ] `scalbn(x, n)`: Load x, load n, `fscale`.
+            - [ ] `lrint()` / `llrint()`: `fistp` (store integer).
+        - [ ] **Testing (`tests/lib/m/unit/test_x87_opt.c`):**
+            - [ ] Verify x87-optimized functions produce identical results to generic C implementations.
+            - [ ] Test x87 range reduction: `sin(x)` for `x > 2^63` matches software range reduction.
+            - [ ] Test `fprem` loop termination (C1 flag check).
+            - [ ] Benchmark x87 vs generic: verify speedup for core functions.
+            - [ ] Test `nearbyint()` x87 path does NOT raise `FE_INEXACT` (vs `rint()` which does).
+            - [ ] Test `fistp` path for `lrint()`/`llrint()` matches current rounding mode.
+        - [ ] **Man Pages:**
+            - [ ] `man/man7/math_x87.7` — i386/x87 math optimizations overview. Document which functions use hardware instructions, range reduction strategy, accuracy guarantees, and when generic fallback is used. SYNOPSIS, DESCRIPTION, NOTES, SEE ALSO.
+- [ ] **Dynamic Linker (`/libexec/ld.so`) - Production Quality BSD-Style Implementation:**
+    - [ ] **Implementation Checklist (Commit-Atomic, Production Gate):**
+        - **1. Specification & Design**
+            - [ ] Freeze `ld.so` scope, ABI targets, and unsupported-feature policy.
+                - Files/Headers: `docs/ld.so-design.md`, `docs/abi/elf-rtld-scope.md`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/spec/test_scope_matrix.c`; property `tests/libexec/ld.so/property/prop_feature_matrix.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_parser.c`.
+                - Docs: define supported/deferred/rejected feature matrix in `docs/ld.so-design.md`.
+                - Acceptance: scope matrix exists and every targeted ELF feature has a disposition and rationale.
+            - [ ] Publish architecture relocation matrix for i386 now and x86_64 stub policy.
+                - Files/Headers: `docs/ld.so-reloc-matrix.md`, `libexec/ld.so/rtld_reloc_types.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_matrix_sync.c`; property `tests/libexec/ld.so/property/prop_reloc_matrix_totality.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_type_decoder.c`.
+                - Docs: add architecture matrix and unsupported relocation behavior.
+                - Acceptance: each relocation used by targeted ABIs maps to an implemented or explicitly rejected handler.
+            - [ ] Specify deterministic symbol-resolution precedence and scope graph rules.
+                - Files/Headers: `docs/ld.so-symbol-resolution.md`, `libexec/ld.so/rtld_scope.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_scope_precedence.c`; property `tests/libexec/ld.so/property/prop_deterministic_lookup.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_inputs.c`.
+                - Docs: document preload/executable/dependency/path precedence and tie-breakers.
+                - Acceptance: two identical dependency graphs produce identical resolution results across runs.
+            - [ ] Specify DT_RPATH/DT_RUNPATH, DT_SONAME, and versioning policy.
+                - Files/Headers: `docs/ld.so-path-and-version-policy.md`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_runpath_policy.c`; property `tests/libexec/ld.so/property/prop_soname_identity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_runpath_tokens.c`.
+                - Docs: define RPATH vs RUNPATH behavior, SONAME matching, and versioned symbol policy.
+                - Acceptance: policy doc is authoritative and referenced by loader manpages.
+        - **2. Loader Core: ELF Parsing & Mapping**
+            - [ ] Implement hardened ELF header/program-header parser with overflow guards.
+                - Files/Headers: `libexec/ld.so/elf_parse.c`, `libexec/ld.so/elf_parse.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_elf_parse_headers.c`; property `tests/libexec/ld.so/property/prop_header_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_elf_headers.c`.
+                - Docs: document parser invariants and rejection reasons in `docs/ld.so-design.md`.
+                - Acceptance: malformed/truncated headers are rejected without crash or out-of-bounds access.
+            - [ ] Implement dynamic table parser for required `DT_*` entries with strict bounds checking.
+                - Files/Headers: `libexec/ld.so/elf_dynamic.c`, `libexec/ld.so/elf_dynamic.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dynamic_table_parse.c`; property `tests/libexec/ld.so/property/prop_dt_tag_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dynamic_table.c`.
+                - Docs: add required/optional `DT_*` tag table.
+                - Acceptance: loader extracts required dynamic metadata and rejects conflicting/invalid tables.
+            - [ ] Implement page-aligned segment mapping with exact `PROT_*` transitions.
+                - Files/Headers: `libexec/ld.so/elf_map.c`, `libexec/ld.so/elf_map.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_segment_mapping.c`; property `tests/libexec/ld.so/property/prop_mapping_alignment.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_segment_layouts.c`.
+                - Docs: document mapping/protection lifecycle and W^X constraints.
+                - Acceptance: mapped segment permissions match ELF flags and pass integration probes.
+            - [ ] Implement fallback read-into-memory path for unsupported mmap edge cases.
+                - Files/Headers: `libexec/ld.so/elf_map_fallback.c`, `libexec/ld.so/elf_map.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_map_fallback.c`; property `tests/libexec/ld.so/property/prop_fallback_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_map_fallback_inputs.c`.
+                - Docs: describe when fallback mode is used and performance/security tradeoffs.
+                - Acceptance: fallback path loads valid DSOs with identical runtime behavior to mmap path.
+        - **3. Dependency Resolution & Loading Order**
+            - [ ] Implement recursive `DT_NEEDED` graph construction with cycle detection metadata.
+                - Files/Headers: `libexec/ld.so/rtld_dep.c`, `libexec/ld.so/rtld_dep.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dep_graph.c`; property `tests/libexec/ld.so/property/prop_cycle_termination.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_needed_graph.c`.
+                - Docs: describe cycle handling and graph node states.
+                - Acceptance: cyclic dependency sets terminate and produce deterministic load plans.
+            - [ ] Implement topological load-order planner for reloc/init phases.
+                - Files/Headers: `libexec/ld.so/rtld_order.c`, `libexec/ld.so/rtld_order.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_load_order.c`; property `tests/libexec/ld.so/property/prop_topo_validity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_order_inputs.c`.
+                - Docs: define ordering differences for relocation and constructor traversal.
+                - Acceptance: planned order always satisfies dependency-before-dependent invariant.
+            - [ ] Implement per-process DSO registry with SONAME identity and refcounts.
+                - Files/Headers: `libexec/ld.so/rtld_obj.c`, `libexec/ld.so/rtld_obj.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dso_registry.c`; property `tests/libexec/ld.so/property/prop_refcount_balance.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dso_identity.c`.
+                - Docs: document object lifecycle states and refcount semantics.
+                - Acceptance: duplicate loads reuse existing objects and maintain correct reference counts.
+            - [ ] Implement full search policy (`LD_PRELOAD`, `LD_LIBRARY_PATH`, RUNPATH/RPATH, cache, defaults).
+                - Files/Headers: `libexec/ld.so/rtld_search.c`, `libexec/ld.so/rtld_search.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_search_policy.c`; property `tests/libexec/ld.so/property/prop_search_precedence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_search_tokens.c`.
+                - Docs: add path precedence algorithm and token expansion rules.
+                - Acceptance: lookup order matches specification for all precedence edge cases.
+        - **4. Relocations & Binding**
+            - [ ] Implement REL/RELA dispatcher and relocation pass sequencing.
+                - Files/Headers: `libexec/ld.so/rtld_reloc.c`, `libexec/ld.so/rtld_reloc.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_dispatch.c`; property `tests/libexec/ld.so/property/prop_reloc_idempotence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_records.c`.
+                - Docs: document relocation pipeline and ordering guarantees.
+                - Acceptance: required relocation records execute in deterministic order without corruption.
+            - [ ] Implement core i386 relocation handlers (relative, absolute, pc-relative, glob-dat, jmp-slot).
+                - Files/Headers: `libexec/ld.so/rtld_reloc_i386.c`, `libexec/ld.so/rtld_reloc_i386.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_i386_core.c`; property `tests/libexec/ld.so/property/prop_i386_reloc_equations.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_i386_relocs.c`.
+                - Docs: enumerate implemented relocation formulas and constraints.
+                - Acceptance: relocation outputs match expected addresses for all supported i386 test fixtures.
+            - [ ] Implement copy relocation support with explicit executable-only safety checks.
+                - Files/Headers: `libexec/ld.so/rtld_copyreloc.c`, `libexec/ld.so/rtld_copyreloc.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_copy_reloc.c`; property `tests/libexec/ld.so/property/prop_copy_reloc_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_copy_reloc.c`.
+                - Docs: document copy-reloc constraints and rejection cases.
+                - Acceptance: data symbols requiring copy relocations initialize correctly without out-of-bounds copies.
+            - [ ] Implement lazy PLT resolver and GOT patch path.
+                - Files/Headers: `libexec/ld.so/rtld_plt.S`, `libexec/ld.so/rtld_bind.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_lazy_bind.c`; property `tests/libexec/ld.so/property/prop_bind_fixpoint.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_plt_indices.c`.
+                - Docs: describe PLT0 calling convention and resolver contract.
+                - Acceptance: first call resolves symbol and subsequent calls bypass resolver.
+            - [ ] Implement eager binding path for `RTLD_NOW` and `LD_BIND_NOW`.
+                - Files/Headers: `libexec/ld.so/rtld_now.c`, `libexec/ld.so/rtld_bind.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_bind_now.c`; property `tests/libexec/ld.so/property/prop_now_equals_lazy_endstate.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_bind_modes.c`.
+                - Docs: document lazy vs eager behavioral differences.
+                - Acceptance: eager mode resolves all bindable PLT relocations before control transfer.
+            - [ ] Add atomic GOT patching and locking for concurrent lazy binding.
+                - Files/Headers: `libexec/ld.so/rtld_bind_lock.c`, `libexec/ld.so/rtld_lock.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_atomic_got_patch.c`; property `tests/libexec/ld.so/property/prop_no_double_patch.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_concurrent_bind.c`.
+                - Docs: define lock/atomic invariants for runtime binding.
+                - Acceptance: concurrent first-call binding is race-free and resolves exactly once per slot.
+        - **5. Symbol Resolution & Interposition**
+            - [ ] Implement SYSV `DT_HASH` and GNU `DT_GNU_HASH` lookup backends.
+                - Files/Headers: `libexec/ld.so/rtld_hash.c`, `libexec/ld.so/rtld_hash.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_hash_lookup.c`; property `tests/libexec/ld.so/property/prop_hash_backend_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_hash_tables.c`.
+                - Docs: document hash backend selection and fallback.
+                - Acceptance: symbol lookup returns identical results across supported hash table variants.
+            - [ ] Implement weak/strong, visibility, and undefined-weak rules.
+                - Files/Headers: `libexec/ld.so/rtld_sym.c`, `libexec/ld.so/rtld_sym.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_symbol_strength.c`; property `tests/libexec/ld.so/property/prop_visibility_rules.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_symbol_attrs.c`.
+                - Docs: add symbol binding and visibility decision table.
+                - Acceptance: symbol selection follows ABI rules for weak/strong and visibility combinations.
+            - [ ] Implement preload-based interposition and global/local scope boundaries.
+                - Files/Headers: `libexec/ld.so/rtld_scope.c`, `libexec/ld.so/rtld_scope.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_interposition.c`; property `tests/libexec/ld.so/property/prop_scope_isolation.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_graphs.c`.
+                - Docs: document interposition precedence with `LD_PRELOAD`.
+                - Acceptance: preload libraries can override eligible global symbols without leaking local scope symbols.
+            - [ ] Implement versioned symbol matching (`DT_VERSYM`, `DT_VERNEED`, `DT_VERDEF`) when present.
+                - Files/Headers: `libexec/ld.so/rtld_versym.c`, `libexec/ld.so/rtld_versym.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_symbol_versions.c`; property `tests/libexec/ld.so/property/prop_version_match_totality.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_version_sections.c`.
+                - Docs: describe version requirement matching and failure messages.
+                - Acceptance: loader resolves only symbols satisfying requested versions and emits deterministic errors otherwise.
+        - **6. TLS (Thread-Local Storage)**
+            - [ ] Implement `PT_TLS` parsing and per-module TLS metadata registration.
+                - Files/Headers: `libexec/ld.so/rtld_tls.c`, `libexec/ld.so/rtld_tls.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_metadata.c`; property `tests/libexec/ld.so/property/prop_tls_layout_valid.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_segments.c`.
+                - Docs: document TLS metadata fields and invariants.
+                - Acceptance: each loaded module has validated TLS metadata with aligned sizes and offsets.
+            - [ ] Implement static TLS layout computation for startup objects.
+                - Files/Headers: `libexec/ld.so/rtld_tls_layout.c`, `libexec/ld.so/rtld_tls_layout.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_static_tls_layout.c`; property `tests/libexec/ld.so/property/prop_tls_alignment.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_layout.c`.
+                - Docs: describe layout algorithm and alignment constraints.
+                - Acceptance: static TLS blocks are non-overlapping, aligned, and accessible for all startup modules.
+            - [ ] Implement dynamic TLS allocation and `__tls_get_addr()` resolver.
+                - Files/Headers: `libexec/ld.so/rtld_tls_get_addr.S`, `libexec/ld.so/rtld_tls_dyn.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_get_addr.c`; property `tests/libexec/ld.so/property/prop_tls_addr_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_get_addr.c`.
+                - Docs: define `__tls_get_addr` ABI contract and failure modes.
+                - Acceptance: dynamic TLS lookups return correct per-thread addresses across repeated calls.
+            - [ ] Integrate TLS module lifecycle with `dlopen`/`dlclose` and pthread creation.
+                - Files/Headers: `libexec/ld.so/rtld_tls_lifecycle.c`, `lib/pthreads/pthread_tls_hooks.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_dlopen.c`; property `tests/libexec/ld.so/property/prop_tls_isolation_threads.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_lifecycle.c`.
+                - Docs: document TLS lifecycle events and teardown rules.
+                - Acceptance: TLS data is isolated per thread and modules loaded after startup are usable from all threads.
+        - **7. Constructors / Destructors / Initialization Order**
+            - [ ] Implement parser for `DT_PREINIT_ARRAY`, `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI`, `DT_FINI_ARRAY`.
+                - Files/Headers: `libexec/ld.so/rtld_init.c`, `libexec/ld.so/rtld_init.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_init_fini_parse.c`; property `tests/libexec/ld.so/property/prop_init_entry_validity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_init_arrays.c`.
+                - Docs: document supported initializer/finalizer sources.
+                - Acceptance: loader discovers all supported constructor/destructor entry points in fixtures.
+            - [ ] Implement dependency-respecting constructor execution order.
+                - Files/Headers: `libexec/ld.so/rtld_init_order.c`, `libexec/ld.so/rtld_order.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ctor_order.c`; property `tests/libexec/ld.so/property/prop_ctor_partial_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ctor_graphs.c`.
+                - Docs: define constructor ordering algorithm and corner cases.
+                - Acceptance: constructors run once and in dependency-correct order for complex graphs.
+            - [ ] Implement reverse-order destructor execution for process exit and `dlclose`.
+                - Files/Headers: `libexec/ld.so/rtld_fini.c`, `libexec/ld.so/rtld_fini.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dtor_order.c`; property `tests/libexec/ld.so/property/prop_dtor_reverse_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dtor_sequences.c`.
+                - Docs: describe exit vs unload finalization semantics.
+                - Acceptance: destructors run once in reverse dependency order under exit and unload paths.
+        - **8. `dlopen` / `dlsym` / `dlclose` Runtime API**
+            - [ ] Implement `dlfcn.h` ABI surface and libdl entry points skeleton.
+                - Files/Headers: `include/dlfcn.h`, `lib/dl/Makefile`, `lib/dl/dl_api.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlfcn_header.c`; property `tests/lib/dl/property/prop_flag_roundtrip.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlfcn_inputs.c`.
+                - Docs: document exported API and flag support matrix.
+                - Acceptance: headers and exported symbols compile and link for target userland.
+            - [ ] Implement `dlopen()` with `RTLD_LAZY`, `RTLD_NOW`, `RTLD_LOCAL`, and `RTLD_GLOBAL`.
+                - Files/Headers: `lib/dl/dlopen.c`, `libexec/ld.so/rtld_dlopen.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlopen_flags.c`; property `tests/lib/dl/property/prop_scope_visibility_flags.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlopen_flags.c`.
+                - Docs: add `dlopen(3)` flag semantics and examples.
+                - Acceptance: requested flags change scope and binding behavior exactly as documented.
+            - [ ] Implement `dlsym()` with `RTLD_DEFAULT`, `RTLD_NEXT`, and handle-scoped lookups.
+                - Files/Headers: `lib/dl/dlsym.c`, `libexec/ld.so/rtld_dlsym.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlsym_handles.c`; property `tests/lib/dl/property/prop_dlsym_deterministic.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlsym_names.c`.
+                - Docs: define lookup origin and pseudo-handle behavior.
+                - Acceptance: pseudo-handle and explicit-handle lookups return expected symbols in precedence order.
+            - [ ] Implement `dlclose()` refcounting, unload decision, and `RTLD_NODELETE` behavior.
+                - Files/Headers: `lib/dl/dlclose.c`, `libexec/ld.so/rtld_dlclose.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlclose_refcount.c`; property `tests/lib/dl/property/prop_refcount_never_negative.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlclose_sequences.c`.
+                - Docs: document unload eligibility and nodelete semantics.
+                - Acceptance: unload occurs only when allowed and references are balanced.
+            - [ ] Implement `dlerror()` with thread-local last-error storage semantics.
+                - Files/Headers: `lib/dl/dlerror.c`, `libexec/ld.so/rtld_error.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlerror_tls.c`; property `tests/lib/dl/property/prop_dlerror_clear_once.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlerror_messages.c`.
+                - Docs: specify error lifecycle and thread safety guarantees.
+                - Acceptance: each thread observes independent last-error state that clears on retrieval.
+            - [ ] Implement `dladdr()` and `dlinfo()` for common tooling requests.
+                - Files/Headers: `lib/dl/dladdr.c`, `lib/dl/dlinfo.c`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dladdr_dlinfo.c`; property `tests/lib/dl/property/prop_addr_to_object.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlinfo_requests.c`.
+                - Docs: add `dladdr(3)` and `dlinfo(3)` request coverage table.
+                - Acceptance: tooling-visible metadata is stable and accurate for loaded objects.
+        - **9. Environment, Configuration & Security**
+            - [ ] Implement parser for supported `LD_*` variables with strict token validation.
+                - Files/Headers: `libexec/ld.so/rtld_env.c`, `libexec/ld.so/rtld_env.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_env_parse.c`; property `tests/libexec/ld.so/property/prop_env_parse_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ld_env.c`.
+                - Docs: enumerate accepted variables and parse rules.
+                - Acceptance: malformed env values are rejected safely with deterministic errors.
+            - [ ] Enforce secure-exec mode to ignore all unsafe `LD_*` inputs.
+                - Files/Headers: `libexec/ld.so/rtld_secure.c`, `libexec/ld.so/rtld_secure.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_ignore_env.c`; property `tests/libexec/ld.so/property/prop_secure_env_zero_effect.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_secure_env.c`.
+                - Docs: document secure-exec behavior in design and manpages.
+                - Acceptance: setuid/setgid/secure mode ignores user-controlled `LD_*` knobs.
+            - [ ] Enforce secure preload policy (deny user-controlled preload paths and objects).
+                - Files/Headers: `libexec/ld.so/rtld_preload_secure.c`, `libexec/ld.so/rtld_search.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_preload.c`; property `tests/libexec/ld.so/property/prop_preload_secure_rejection.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_preload_secure.c`.
+                - Docs: specify trusted preload directories and rejection reasons.
+                - Acceptance: secure mode never loads preloads from untrusted/user-writable locations.
+            - [ ] Validate ownership and permissions of DSOs before secure-mode use.
+                - Files/Headers: `libexec/ld.so/rtld_fs_secure.c`, `libexec/ld.so/rtld_fs_secure.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_permissions.c`; property `tests/libexec/ld.so/property/prop_secure_path_monotonicity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_secure_stat.c`.
+                - Docs: document permission and ownership checks for secure execution.
+                - Acceptance: libraries failing secure ownership/permission checks are rejected with explicit diagnostics.
+            - [ ] Implement `PT_GNU_RELRO` finalization and read-only remap after relocations.
+                - Files/Headers: `libexec/ld.so/rtld_relro.c`, `libexec/ld.so/rtld_relro.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_relro_apply.c`; property `tests/libexec/ld.so/property/prop_relro_write_blocked.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_relro_ranges.c`.
+                - Docs: add RELRO requirements and interaction with `BIND_NOW`.
+                - Acceptance: RELRO pages become read-only after relocation and remain non-writable.
+            - [ ] Implement sysroot/chroot-aware path canonicalization for loader lookups.
+                - Files/Headers: `libexec/ld.so/rtld_path.c`, `libexec/ld.so/rtld_path.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_sysroot_paths.c`; property `tests/libexec/ld.so/property/prop_no_escape_from_sysroot.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_path_canon.c`.
+                - Docs: define path resolution behavior in chroot/container contexts.
+                - Acceptance: resolved library paths cannot escape configured root boundaries.
+        - **10. Caching & `ldconfig`**
+            - [ ] Define `ld.so.cache` binary format and versioning contract.
+                - Files/Headers: `include/ldso_cache.h`, `docs/ld.so-cache-format.md`.
+                - Tests (unit/property/fuzz): unit `tests/sbin/ldconfig/unit/test_cache_format.c`; property `tests/sbin/ldconfig/property/prop_cache_roundtrip.c`; fuzz `tests/sbin/ldconfig/fuzz/fuzz_cache_parser.c`.
+                - Docs: publish cache format, endianness, and compatibility policy.
+                - Acceptance: cache format spec is versioned and parser compatibility rules are explicit.
+            - [ ] Implement secure cache reader in loader with ownership/permission validation.
+                - Files/Headers: `libexec/ld.so/rtld_cache.c`, `libexec/ld.so/rtld_cache.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_cache_reader_secure.c`; property `tests/libexec/ld.so/property/prop_cache_lookup_consistency.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_cache_reader.c`.
+                - Docs: document cache trust model and fallback policy.
+                - Acceptance: untrusted/stale/corrupt cache is ignored safely and lookup falls back to path search.
+            - [ ] Implement `ldconfig(8)` cache writer and SONAME symlink management.
+                - Files/Headers: `sbin/ldconfig/ldconfig.c`, `sbin/ldconfig/Makefile`.
+                - Tests (unit/property/fuzz): unit `tests/sbin/ldconfig/unit/test_ldconfig_scan.c`; property `tests/sbin/ldconfig/property/prop_soname_link_consistency.c`; fuzz `tests/sbin/ldconfig/fuzz/fuzz_ldconfig_inputs.c`.
+                - Docs: add `man/man8/ldconfig.8`.
+                - Acceptance: `ldconfig` generates a valid cache and expected SONAME symlinks for configured dirs.
+        - **11. Performance & Optimizations**
+            - [ ] Optimize hash lookup fast path with GNU hash bloom prefilter.
+                - Files/Headers: `libexec/ld.so/rtld_hash_gnu.c`, `libexec/ld.so/rtld_hash.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_gnu_hash_bloom.c`; property `tests/libexec/ld.so/property/prop_hash_false_positive_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_gnu_hash.c`.
+                - Docs: record algorithm and expected complexity.
+                - Acceptance: lookup fast path is measurably faster than SYSV-only baseline on benchmark corpus.
+            - [ ] Batch relocations by page locality to reduce protection flips and page faults.
+                - Files/Headers: `libexec/ld.so/rtld_reloc_batch.c`, `libexec/ld.so/rtld_reloc.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_batch.c`; property `tests/libexec/ld.so/property/prop_batch_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_batch.c`.
+                - Docs: document batching constraints and correctness invariants.
+                - Acceptance: batched relocation mode preserves correctness and reduces startup cost in benchmarks.
+            - [ ] Add optional prebinding/prelink experiment behind explicit build flag.
+                - Files/Headers: `libexec/ld.so/rtld_prebind.c`, `libexec/ld.so/config.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_prebind_flag.c`; property `tests/libexec/ld.so/property/prop_prebind_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_prebind_metadata.c`.
+                - Docs: document prebinding as experimental and disabled by default.
+                - Acceptance: prebind mode is off by default and does not change default correctness guarantees.
+        - **12. Diagnostics, Auditing & Tracing**
+            - [ ] Implement `LD_DEBUG` category parser and structured debug logger.
+                - Files/Headers: `libexec/ld.so/rtld_debug.c`, `libexec/ld.so/rtld_debug.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ld_debug_categories.c`; property `tests/libexec/ld.so/property/prop_debug_filtering.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_debug_env.c`.
+                - Docs: document debug categories and output format.
+                - Acceptance: selected debug categories produce stable, parseable logs without leaking unrelated events.
+            - [ ] Implement `r_debug` / `_dl_debug_state` updates for debugger attach flow.
+                - Files/Headers: `libexec/ld.so/rtld_gdb.c`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_r_debug_states.c`; property `tests/libexec/ld.so/property/prop_debug_state_transitions.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_link_map_lists.c`.
+                - Docs: describe debugger handshake and state transitions.
+                - Acceptance: debugger-visible link-map state transitions are correct for add/remove events.
+            - [ ] Implement optional audit hook interface for load/bind events.
+                - Files/Headers: `libexec/ld.so/rtld_audit.c`, `libexec/ld.so/rtld_audit.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_audit_callbacks.c`; property `tests/libexec/ld.so/property/prop_audit_event_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_audit_modules.c`.
+                - Docs: publish audit hook ABI and safety caveats.
+                - Acceptance: enabled audit modules receive deterministic callbacks without changing default behavior.
+            - [ ] Add trace-friendly one-line event mode for ktrace/strace correlation.
+                - Files/Headers: `libexec/ld.so/rtld_trace.c`, `libexec/ld.so/rtld_trace.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_trace_format.c`; property `tests/libexec/ld.so/property/prop_trace_event_completeness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_trace_strings.c`.
+                - Docs: define stable trace keys and field semantics.
+                - Acceptance: trace mode emits machine-parseable events with stable keys.
+        - **13. Error Handling & Robustness**
+            - [ ] Define centralized loader error catalog with stable error codes.
+                - Files/Headers: `libexec/ld.so/rtld_errcodes.h`, `libexec/ld.so/rtld_error.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_error_catalog.c`; property `tests/libexec/ld.so/property/prop_error_code_uniqueness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_error_format.c`.
+                - Docs: document error code meanings and operator guidance.
+                - Acceptance: each fatal/non-fatal condition maps to a unique, documented loader error code.
+            - [ ] Implement high-context unresolved-symbol and relocation-failure diagnostics.
+                - Files/Headers: `libexec/ld.so/rtld_diag.c`, `libexec/ld.so/rtld_error.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_diag_unresolved.c`; property `tests/libexec/ld.so/property/prop_diag_contains_context.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_diag_tokens.c`.
+                - Docs: specify diagnostic format including SONAME/path/reloc offset.
+                - Acceptance: failures report symbol, requester, candidate scope, and failing location deterministically.
+            - [ ] Add fault-injection hooks for OOM, short-read, and mprotect failures.
+                - Files/Headers: `libexec/ld.so/rtld_faultinject.c`, `libexec/ld.so/rtld_faultinject.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fault_injection.c`; property `tests/libexec/ld.so/property/prop_fault_paths_no_leak.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_fault_sequences.c`.
+                - Docs: document fault-injection controls for test-only builds.
+                - Acceptance: injected failures exit cleanly without deadlock, memory corruption, or descriptor leaks.
+            - [ ] Add malformed-DSO fuzzing harnesses for parser, relocator, and resolver subsystems.
+                - Files/Headers: `tests/libexec/ld.so/fuzz/BUILD.md`, `tests/libexec/ld.so/fuzz/fuzz_rtld_driver.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fuzz_seed_regression.c`; property `tests/libexec/ld.so/property/prop_fuzz_seed_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_rtld_driver.c`.
+                - Docs: publish fuzz seed corpus management and crash triage workflow.
+                - Acceptance: fuzz targets run continuously in CI without known crashing seeds.
+        - **14. Thread Safety & Concurrency**
+            - [ ] Implement documented loader lock hierarchy and invariants.
+                - Files/Headers: `libexec/ld.so/rtld_lock.c`, `libexec/ld.so/rtld_lock.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_lock_hierarchy.c`; property `tests/libexec/ld.so/property/prop_lock_order_no_cycle.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_lock_sequences.c`.
+                - Docs: add lock-order and reentrancy rules to design docs.
+                - Acceptance: lock acquisition graph is acyclic and validated by stress tests.
+            - [ ] Make `dlopen`/`dlsym`/`dlclose` reentrant-safe under concurrent callers.
+                - Files/Headers: `libexec/ld.so/rtld_api_locking.c`, `lib/dl/dl_thread.c`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_api_thread_safety.c`; property `tests/lib/dl/property/prop_parallel_api_equivalence.c`; fuzz `tests/lib/dl/fuzz/fuzz_parallel_api.c`.
+                - Docs: define API-level thread-safety guarantees and caveats.
+                - Acceptance: high-concurrency stress suite shows no deadlocks or data races.
+            - [ ] Add concurrent lazy-bind stress runner with race-detection instrumentation.
+                - Files/Headers: `tests/libexec/ld.so/integration/test_lazy_bind_race.c`, `tests/ci/test-ldso-race.sh`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_bind_race_guards.c`; property `tests/libexec/ld.so/property/prop_lazy_bind_single_winner.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_lazy_bind_interleave.c`.
+                - Docs: document race-stress methodology and expected invariants.
+                - Acceptance: resolver races are absent across repeated high-thread-count runs.
+        - **15. Unloading & Resource Cleanup**
+            - [ ] Implement unload-eligibility analysis for reference graph and static TLS constraints.
+                - Files/Headers: `libexec/ld.so/rtld_unload.c`, `libexec/ld.so/rtld_unload.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_unload_eligibility.c`; property `tests/libexec/ld.so/property/prop_no_unload_if_referenced.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_unload_graphs.c`.
+                - Docs: document reasons unloading can be denied.
+                - Acceptance: loader unloads only safe modules and reports explicit denial reason otherwise.
+            - [ ] Implement module teardown pipeline (dtors, TLS teardown, unmap, registry removal).
+                - Files/Headers: `libexec/ld.so/rtld_teardown.c`, `libexec/ld.so/rtld_obj.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_teardown_pipeline.c`; property `tests/libexec/ld.so/property/prop_teardown_no_dangling.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_teardown_paths.c`.
+                - Docs: define teardown ordering guarantees.
+                - Acceptance: successful unload leaves no mapped segments, live TLS entries, or stale link-map entries.
+            - [ ] Add long-run load/unload churn leak tests under sanitizers.
+                - Files/Headers: `tests/libexec/ld.so/integration/test_churn_leaks.c`, `tests/ci/test-ldso-leaks.sh`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_leak_accounting.c`; property `tests/libexec/ld.so/property/prop_churn_stable_memory.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_churn_sequences.c`.
+                - Docs: document churn-test thresholds and failure triage.
+                - Acceptance: leak and UAF checks remain clean after sustained churn workload.
+        - **16. ABI & Tooling Compatibility**
+            - [ ] Implement `dl_iterate_phdr()` and stable `dl_phdr_info` traversal semantics.
+                - Files/Headers: `lib/dl/dl_iterate_phdr.c`, `include/link.h`.
+                - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dl_iterate_phdr.c`; property `tests/lib/dl/property/prop_phdr_iteration_complete.c`; fuzz `tests/lib/dl/fuzz/fuzz_phdr_callbacks.c`.
+                - Docs: add `man/man3/dl_iterate_phdr.3`.
+                - Acceptance: callbacks observe all loaded objects in a deterministic order.
+            - [ ] Export and maintain `link_map`/`r_debug` ABI for debuggers and unwinders.
+                - Files/Headers: `include/link.h`, `libexec/ld.so/rtld_linkmap.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_link_map_layout.c`; property `tests/libexec/ld.so/property/prop_link_map_consistency.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_link_map_ops.c`.
+                - Docs: define stable fields and compatibility guarantees.
+                - Acceptance: debugger and unwinder smoke tests consume exported link-map structures successfully.
+            - [ ] Add compatibility shims and behavioral toggles required by common third-party software.
+                - Files/Headers: `libexec/ld.so/rtld_compat.c`, `libexec/ld.so/rtld_compat.h`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_compat_modes.c`; property `tests/libexec/ld.so/property/prop_compat_toggle_isolation.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_compat_knobs.c`.
+                - Docs: document each shim, rationale, and default state.
+                - Acceptance: designated compatibility test corpus passes without regressing default semantics.
+        - **17. Installer & Packaging**
+            - [ ] Define and enforce interpreter install path and `PT_INTERP` contract.
+                - Files/Headers: `Makefile.inc`, `sys/exec/elf_interp.c`, `docs/ld.so-install-layout.md`.
+                - Tests (unit/property/fuzz): unit `tests/sys/exec/unit/test_interp_path.c`; property `tests/sys/exec/property/prop_interp_path_stability.c`; fuzz `tests/sys/exec/fuzz/fuzz_interp_strings.c`.
+                - Docs: specify canonical interpreter path and compatibility symlink policy.
+                - Acceptance: built executables reference installed loader path consistently.
+            - [ ] Add packaging rules for `ld.so`, `libdl.so`, symlinks, ownership, and mode bits.
+                - Files/Headers: `Makefile`, `lib/dl/Makefile`, `tools/pkg/ldso.manifest`.
+                - Tests (unit/property/fuzz): unit `tests/tools/pkg/unit/test_ldso_manifest.c`; property `tests/tools/pkg/property/prop_symlink_chain_valid.c`; fuzz `tests/tools/pkg/fuzz/fuzz_pkg_manifest.c`.
+                - Docs: document package contents and upgrade path.
+                - Acceptance: packaging output installs runtime linker assets with correct paths and permissions.
+            - [ ] Add upgrade/rollback safety checks for loader and cache transitions.
+                - Files/Headers: `tools/pkg/ldso-upgrade.sh`, `tools/pkg/ldso-rollback.sh`.
+                - Tests (unit/property/fuzz): unit `tests/tools/pkg/unit/test_upgrade_checks.c`; property `tests/tools/pkg/property/prop_upgrade_rollback_inverse.c`; fuzz `tests/tools/pkg/fuzz/fuzz_upgrade_metadata.c`.
+                - Docs: document operational playbook for loader upgrades.
+                - Acceptance: upgrade and rollback scripts preserve bootability and loader consistency.
+        - **18. Tests & CI**
+            - [ ] Create dedicated `ld.so` unit-test targets in build system.
+                - Files/Headers: `tests/libexec/ld.so/Makefile`, `tests/Makefile`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_smoke_runner.c`; property `tests/libexec/ld.so/property/prop_runner_inputs.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_runner_bootstrap.c`.
+                - Docs: document test target names and invocation.
+                - Acceptance: `make` targets execute loader unit suites reliably in CI and local runs.
+            - [ ] Add property-test harness for symbol resolution and relocation invariants.
+                - Files/Headers: `tests/libexec/ld.so/property/prop_harness.c`, `tests/libexec/ld.so/property/fixtures/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_property_seed_replay.c`; property `tests/libexec/ld.so/property/prop_harness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_property_inputs.c`.
+                - Docs: describe property generation strategy and shrinking/repro workflow.
+                - Acceptance: property suite consistently exercises randomized dependency/relocation scenarios with reproducible seeds.
+            - [ ] Add coverage-guided fuzz targets and corpus minimization workflow.
+                - Files/Headers: `tests/libexec/ld.so/fuzz/CMakeLists.txt`, `tests/libexec/ld.so/fuzz/corpus/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fuzz_harness_build.c`; property `tests/libexec/ld.so/property/prop_corpus_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_elf_fullstack.c`.
+                - Docs: define fuzz runtime budgets and crash-handling policy.
+                - Acceptance: fuzz jobs run in CI with a managed corpus and no untriaged crashes.
+            - [ ] Add sanitizer CI matrix (ASAN/UBSAN required; optional TSAN where supported).
+                - Files/Headers: `tests/ci/test-ldso.sh`, `.github/workflows/ci.yml`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_sanitizer_smoke.c`; property `tests/libexec/ld.so/property/prop_sanitizer_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_sanitizer_mode.c`.
+                - Docs: document sanitizer expectations and suppression policy.
+                - Acceptance: all loader tests pass under required sanitizers in CI.
+            - [ ] Add multi-arch job plan (i386 active, x86_64 gated) and regression baseline snapshots.
+                - Files/Headers: `tests/ci/test-ldso-matrix.sh`, `tests/libexec/ld.so/regressions/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_matrix_config.c`; property `tests/libexec/ld.so/property/prop_regression_snapshot_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_matrix_inputs.c`.
+                - Docs: document CI matrix and architecture readiness criteria.
+                - Acceptance: CI records stable regression baselines and gates changes by architecture policy.
+        - **19. Documentation & Manpages**
+            - [ ] Write `ld.so(8)` covering runtime behavior, search paths, env vars, secure mode, and diagnostics.
+                - Files/Headers: `man/man8/ld.so.8`.
+                - Tests (unit/property/fuzz): unit `tests/man/unit/test_ldso_man_sections.c`; property `tests/man/property/prop_ldso_man_examples_build.c`; fuzz `tests/man/fuzz/fuzz_man_escape_sequences.c`.
+                - Docs: ensure required sections include DESCRIPTION, SECURITY, ENVIRONMENT, FILES, SEE ALSO.
+                - Acceptance: manpage is complete, reviewable, and matches implemented behavior.
+            - [ ] Write `dlopen(3)`, `dlsym(3)`, `dlclose(3)`, and `dlerror(3)` with error semantics and examples.
+                - Files/Headers: `man/man3/dlopen.3`, `man/man3/dlsym.3`, `man/man3/dlclose.3`, `man/man3/dlerror.3`.
+                - Tests (unit/property/fuzz): unit `tests/man/unit/test_dlfcn_man_sections.c`; property `tests/man/property/prop_dlfcn_examples_compile.c`; fuzz `tests/man/fuzz/fuzz_dlfcn_man_tokens.c`.
+                - Docs: include LIBRARY, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO sections.
+                - Acceptance: API manpages compile with documentation checks and reflect runtime flags accurately.
+            - [ ] Write `dladdr(3)`, `dlinfo(3)`, and `dl_iterate_phdr(3)` tooling-focused documentation.
+                - Files/Headers: `man/man3/dladdr.3`, `man/man3/dlinfo.3`, `man/man3/dl_iterate_phdr.3`.
+                - Tests (unit/property/fuzz): unit `tests/man/unit/test_linker_tooling_man_sections.c`; property `tests/man/property/prop_tooling_examples_compile.c`; fuzz `tests/man/fuzz/fuzz_tooling_man_markup.c`.
+                - Docs: document supported requests, callbacks, and structure fields.
+                - Acceptance: tooling manpages align with exported headers and runtime behavior.
+            - [ ] Publish loader security threat model and operational hardening guide.
+                - Files/Headers: `docs/security/ldso-threat-model.md`, `docs/security/ldso-hardening.md`.
+                - Tests (unit/property/fuzz): unit `tests/docs/unit/test_security_doc_links.c`; property `tests/docs/property/prop_security_rule_coverage.c`; fuzz `tests/docs/fuzz/fuzz_security_doc_parser.c`.
+                - Docs: include trust boundaries, attack surfaces, and mitigation checklist.
+                - Acceptance: threat model is reviewed and maps to implemented safeguards and tests.
+        - **20. Refactor & Audit Directive**
+            - [ ] Audit existing loader/runtime code and record reuse/refactor/delete decisions per file.
+                - Files/Headers: `docs/ldso-audit-inventory.md`, `libexec/ld.so/`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_audit_inventory_sync.c`; property `tests/libexec/ld.so/property/prop_inventory_complete.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_inventory_parser.c`.
+                - Docs: maintain decision log with risk classification for each legacy file.
+                - Acceptance: inventory lists all relevant files and assigns an explicit action with rationale.
+            - [ ] Convert loader-related TODO/FIXME markers into standalone commit-atomic tasks.
+                - Files/Headers: `TASKS.md`, `libexec/ld.so/*.c`, `lib/dl/*.c`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_no_untracked_todos.c`; property `tests/libexec/ld.so/property/prop_todo_to_task_bijection.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_todo_scanner_input.c`.
+                - Docs: update audit inventory with TODO migration status.
+                - Acceptance: no loader TODO/FIXME remains without a corresponding tracked checklist item.
+            - [ ] Add final ship gate checklist for correctness, security, performance, docs, and CI sign-off.
+                - Files/Headers: `docs/ldso-ship-gate.md`, `tests/ci/test-ldso-ship-gate.sh`.
+                - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ship_gate_schema.c`; property `tests/libexec/ld.so/property/prop_ship_gate_all_required.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ship_gate_yaml.c`.
+                - Docs: define required sign-off artifacts and rollback criteria.
+                - Acceptance: release is blocked until all ship-gate checks are green and documented.
+- [ ] **System Interface Libraries:**
+
+    - [ ] **Native Kernel Introspection (`libsys` / `libkernel`):**
+
+        > **Files:** `lib/sys/`, `lib/sys/include/sys/sysinfo.h`.
+        >
+        > **Architecture:** Thin wrapper over syscalls + structured parsing
+        > of `/proc` and `/sys`. Thread-safe with per-thread error state.
+
+        - [ ] **Core Architecture:**
+            - [ ] Define `libsys` as the canonical native interface to kernel internals.
+            - [ ] Thin wrapper over syscalls + structured `/proc` and `/sys` parsing.
+            - [ ] Sync and async query modes (for monitoring tools).
+            - [ ] Thread-safe design with per-thread error state (`errno`-like).
+            - [ ] Versioned ABI with `libsys.so.1` soname.
+        - [ ] **Data Sources:**
+            - [ ] **`sysctl` MIBs (System Control):**
+                - [ ] **`kern` (Kernel):**
+                    - [ ] `kern.ostype` (string): OS name (e.g., "Substrate").
+                    - [ ] `kern.osrelease` (string): release version.
+                    - [ ] `kern.osrevision` (int): revision number.
+                    - [ ] `kern.version` (string): full version string.
+                    - [ ] `kern.hostname` (string): system hostname (RW).
+                    - [ ] `kern.domainname` (string): NIS domain name (RW).
+                    - [ ] `kern.boottime` (struct timeval): boot timestamp.
+                    - [ ] `kern.maxproc` (int): maximum processes.
+                    - [ ] `kern.maxfiles` (int): maximum open files system-wide.
+                    - [ ] `kern.securelevel` (int): security level (RW, monotonically increasing).
+                    - [ ] `kern.argmax` (int): maximum `exec` argument length.
+                    - [ ] `kern.ngroups` (int): maximum supplementary groups.
+                - [ ] **`hw` (Hardware):**
+                    - [ ] `hw.machine` (string): machine architecture (e.g., "i386").
+                    - [ ] `hw.model` (string): CPU model name.
+                    - [ ] `hw.ncpu` (int): number of active CPUs.
+                    - [ ] `hw.ncpuonline` (int): number of online CPUs.
+                    - [ ] `hw.byteorder` (int): 4321 (big) or 1234 (little).
+                    - [ ] `hw.physmem` (long): total physical memory bytes.
+                    - [ ] `hw.usermem` (long): non-kernel memory bytes.
+                    - [ ] `hw.pagesize` (int): system page size (4096).
+                    - [ ] `hw.disknames` (string): comma-separated disk device names.
+                    - [ ] `hw.sensors` (struct): hardware sensor data (temperature, fan, voltage).
+                - [ ] **`vm` (Virtual Memory):**
+                    - [ ] `vm.loadavg` (struct loadavg): 1, 5, 15 min load averages.
+                    - [ ] `vm.swap_usage` (struct swap_stat): swap total/used/free.
+                    - [ ] `vm.vmtotal` (struct vmtotal): system-wide VM statistics.
+                    - [ ] `vm.overcommit` (int): memory overcommit policy.
+                    - [ ] `vm.swappiness` (int): page-out aggressiveness.
+                    - [ ] `vm.vfs_cache_pressure` (int): VFS inode/dentry cache reclaim pressure.
+                - [ ] **`net` (Network):**
+                    - [ ] `net.inet.ip.stats` (struct ipstat): IP packet counters.
+                    - [ ] `net.inet.ip.forwarding` (int): IPv4 forwarding enabled.
+                    - [ ] `net.inet.tcp.stats` (struct tcpstat): TCP connection stats.
+                    - [ ] `net.inet.udp.stats` (struct udpstat): UDP packet stats.
+                    - [ ] `net.link.generic.system.ifcount` (int): interface count.
+                    - [ ] `net.inet.icmp.stats` (struct icmpstat): ICMP packet stats.
+                - [ ] **`debug` (Debugging):**
+                    - [ ] `debug.klog` (string): kernel log ring buffer.
+                    - [ ] `debug.traceflags` (int): kernel tracing flags.
+            - [ ] **`procfs` Structures (Process Filesystem):**
+                - [ ] `/proc/[pid]/stat`: process state, stats, metrics (Linux-compatible format).
+                - [ ] `/proc/[pid]/status`: human-readable status info.
+                - [ ] `/proc/[pid]/maps`: memory map regions and permissions.
+                - [ ] `/proc/[pid]/cmdline`: command line arguments (NUL-separated).
+                - [ ] `/proc/[pid]/environ`: environment variables (NUL-separated).
+                - [ ] `/proc/[pid]/fd/`: open file descriptors (symlinks to paths).
+                - [ ] `/proc/[pid]/cwd`: symlink to current working directory.
+                - [ ] `/proc/[pid]/exe`: symlink to executable.
+                - [ ] `/proc/[pid]/root`: symlink to root directory.
+                - [ ] `/proc/[pid]/task/`: per-thread subdirectories.
+                - [ ] `/proc/meminfo`: global memory usage.
+                - [ ] `/proc/cpuinfo`: CPU capabilities and model info.
+                - [ ] `/proc/uptime`: system uptime and idle time.
+                - [ ] `/proc/loadavg`: load averages and process counts.
+                - [ ] `/proc/vmstat`: VM statistics counters.
+                - [ ] `/proc/self`: symlink to calling process's `/proc/[pid]`.
+            - [ ] **`sysfs` Structures (System Filesystem):**
+                - [ ] `/sys/class/net/`: network interface properties.
+                - [ ] `/sys/block/`: block device attributes (`size`, `stat`, `queue/`).
+                - [ ] `/sys/devices/system/cpu/`: CPU topology and frequency scaling.
+                - [ ] `/sys/devices/system/memory/`: memory block hotplug.
+                - [ ] `/sys/kernel/`: misc kernel tunables.
+            - [ ] **Netlink Sockets (Linux Compatibility):**
+                - [ ] `NETLINK_ROUTE`: interface/address/route management (`RTM_*` messages).
+                - [ ] `NETLINK_KOBJECT_UEVENT`: hotplug/device events.
+                - [ ] `NETLINK_GENERIC`: generic netlink families.
+            - [ ] **Direct Standard Syscalls:**
+                - [ ] `sysinfo()`: system uptime, total RAM, free RAM, procs.
+                - [ ] `uname()`: system identification (sysname, nodename, release, version, machine).
+                - [ ] `getrlimit()` / `setrlimit()`: process resource limits.
+                - [ ] `clock_gettime()`: high-resolution system clocks.
+                - [ ] `sysctl()`: generic MIB interface.
+        - [ ] **Process Information API (`lib/sys`):**
+            - [ ] `sys_proc_count()`: total number of processes.
+            - [ ] `sys_proc_list(pid_t *pids, size_t *count)`: list all PIDs.
+            - [ ] `sys_proc_info(pid_t pid, sys_procinfo_t *info)`: detailed process info (incl. `bitness`).
+            - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)`: list threads.
+            - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)`: list open FDs.
+            - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)`: memory mappings.
+            - [ ] `sys_proc_cwd(pid_t pid, char *buf, size_t len)`: current working directory.
+            - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)`: executable path.
+            - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)`: command line.
+            - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)`: environment.
+        - [ ] **Memory Statistics API (`lib/sys`):**
+            - [ ] `sys_vm_stats(sys_vmstat_t *stats)`: global VM statistics.
+            - [ ] `sys_vm_info(sys_vminfo_t *info)`: memory zone info (DMA, Normal, HighMem).
+            - [ ] `sys_vm_swap(sys_swapinfo_t *swap)`: swap usage statistics.
+            - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)`: buffer cache statistics.
+            - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)`: slab allocator stats.
+        - [ ] **CPU Information API (`lib/sys`):**
+            - [ ] `sys_cpu_count()`: number of CPUs (online/possible/present).
+            - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)`: per-CPU info (model, MHz, cache).
+            - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)`: per-CPU time accounting.
+            - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)`: load averages.
+            - [ ] `sys_cpu_topology(int cpu, sys_cputopo_t *topo)`: socket/core/thread topology.
+        - [ ] **System Information API (`lib/sys`):**
+            - [ ] `sys_uptime(struct timespec *ts)`: system uptime.
+            - [ ] `sys_boottime(struct timespec *ts)`: boot timestamp.
+            - [ ] `sys_hostname(char *buf, size_t len)`: system hostname.
+            - [ ] `sys_domainname(char *buf, size_t len)`: NIS/YP domain name.
+            - [ ] `sys_kernel_version(sys_version_t *ver)`: kernel version info.
+        - [ ] **Network Information API (`lib/sys`):**
+            - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)`: list interfaces.
+            - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)`: addresses.
+            - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)`: interface statistics.
+            - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)`: routing table.
+            - [ ] `sys_net_arp(sys_arpentry_t *entries, size_t *count)`: ARP table.
+        - [ ] **Disk / Storage Information API (`lib/sys`):**
+            - [ ] `sys_disk_list(sys_diskinfo_t *disks, size_t *count)`: list block devices.
+            - [ ] `sys_disk_stats(const char *dev, sys_diskstat_t *stats)`: I/O stats per device.
+            - [ ] `sys_mount_list(sys_mountinfo_t *mounts, size_t *count)`: mounted filesystems.
+        - [ ] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
+            - [ ] `sys_procinfo_t`: pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
+            - [ ] `sys_vmstat_t`: total, free, available, buffers, cached, swap_total, swap_free.
+            - [ ] `sys_cpuinfo_t`: vendor, model, family, stepping, mhz, cache_size, flags.
+            - [ ] `sys_cputopo_t`: socket_id, core_id, thread_id, numa_node.
+            - [ ] `sys_netif_t`: name, index, flags, mtu, hwaddr, type.
+            - [ ] `sys_diskinfo_t`: name, size, sector_size, model, serial.
+            - [ ] `sys_mountinfo_t`: device, mountpoint, fstype, flags.
+
+    - [ ] **BSD Compatibility Shim (`libkvm`):**
+
+        > **Architecture:** Userspace-only implementation using `libsys` —
+        > no `/dev/kmem` access. Source-level compatibility with FreeBSD/
+        > NetBSD/OpenBSD `libkvm` API.
+
+        - [ ] **Design Goals:**
+            - [ ] FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility.
+            - [ ] Implement entirely in userspace using `libsys`.
+            - [ ] Support `kinfo_proc`, `kinfo_vmentry`, `kinfo_file` structures.
+            - [ ] Maintain BSD ABI for source-level portability.
+        - [ ] **Wrapper Layer:**
+            - [ ] Map `kvm_*` calls to equivalent `libsys` functions.
+            - [ ] Structure translation between native `sys_procinfo_t` and BSD `kinfo_proc`.
+            - [ ] Error message buffering (`kvm_geterr`).
+        - [ ] **Core Functions:**
+            - [ ] `kvm_open(execfile, corefile, swapfile, flags, errstr)`: initialize context.
+            - [ ] `kvm_openfiles(...)`: extended open.
+            - [ ] `kvm_close(kd)`: close and free.
+            - [ ] `kvm_geterr(kd)`: error message from last failure.
+        - [ ] **Process Functions:**
+            - [ ] `kvm_getprocs(kd, op, arg, cnt)`: process list as `kinfo_proc` array.
+                - [ ] `KERN_PROC_ALL`: all processes.
+                - [ ] `KERN_PROC_PID`: specific PID.
+                - [ ] `KERN_PROC_PGRP`: by process group.
+                - [ ] `KERN_PROC_SESSION`: by session.
+                - [ ] `KERN_PROC_UID`: by user ID.
+                - [ ] `KERN_PROC_RUID`: by real user ID.
+                - [ ] `KERN_PROC_TTY`: by controlling terminal.
+            - [ ] `kvm_getargv(kd, kp, nchr)`: command line arguments.
+            - [ ] `kvm_getenvv(kd, kp, nchr)`: environment variables.
+            - [ ] `kvm_getproc2(kd, op, arg, elem_size, cnt)`: extended proc info.
+        - [ ] **Virtual Memory Functions:**
+            - [ ] `kvm_getfiles(kd, op, arg, cnt)`: open file list.
+            - [ ] `kvm_getvmmap(kd, kp, cnt)`: VM mappings for process.
+        - [ ] **Kernel Symbol Functions:**
+            - [ ] `kvm_nlist(kd, nl)`: look up kernel symbols from `/proc/kallsyms` or kernel ELF.
+            - [ ] `kvm_read(kd, addr, buf, len)`: read kernel memory (via `/proc/kcore`).
+            - [ ] `kvm_write(kd, addr, buf, len)`: write kernel memory (privileged).
+        - [ ] **Data Structures (BSD-compatible):**
+            - [ ] `struct kinfo_proc`: BSD process info (ki_pid, ki_ppid, ki_pgid, ki_uid, ki_comm, ki_stat, etc.).
+            - [ ] `struct kinfo_vmentry`: BSD VM mapping (kve_start, kve_end, kve_protection, kve_path).
+            - [ ] `struct kinfo_file`: BSD open file (kf_fd, kf_type, kf_offset, kf_path).
+            - [ ] `struct nlist`: symbol lookup request/response (n_name, n_type, n_value).
+
+    - [ ] **Linux Compatibility Shim (`libproc`):**
+
+        > **Architecture:** `libprocps`/`procps-ng` compatible API backed by
+        > `libsys` and `/proc` parsing.
+
+        - [ ] `openproc(flags, ...)`: process enumeration context with filtering.
+            - [ ] `PROC_FILLMEM`: fill memory statistics.
+            - [ ] `PROC_FILLCOM`: fill command name.
+            - [ ] `PROC_FILLARG`: fill command line arguments.
+            - [ ] `PROC_FILLENV`: fill environment.
+            - [ ] `PROC_FILLSTATUS`: fill status info.
+            - [ ] `PROC_FILLUSR`: fill user/group names.
+            - [ ] `PROC_PID`: filter by PID list.
+            - [ ] `PROC_UID`: filter by UID list.
+        - [ ] `closeproc(pt)`: close context and free resources.
+        - [ ] `readproc(pt, p)`: read next process entry.
+        - [ ] `readproctab(flags, ...)`: read all processes into array.
+        - [ ] `look_up_our_self(p)`: get info about calling process.
+        - [ ] `get_proc_stats(pid, ps)`: per-process `/proc/[pid]/stat` parsing.
+        - [ ] **`proc_t` Structure:**
+            - [ ] PID, PPID, PGID, SID, TPGID.
+            - [ ] State, priority, nice.
+            - [ ] User/system/start times.
+            - [ ] RSS, VSize, shared, text, data.
+            - [ ] Command name, command line.
+        - [ ] **System-wide:**
+            - [ ] `meminfo()`: parse `/proc/meminfo`.
+            - [ ] `cpuinfo()`: parse `/proc/cpuinfo`.
+            - [ ] `uptime(uptime, idle)`: parse `/proc/uptime`.
+            - [ ] `loadavg(av1, av5, av15)`: parse `/proc/loadavg`.
+
+    - [ ] **Dependencies:**
+        - [ ] Kernel syscall interfaces for introspection (no `/dev/kmem`).
+        - [ ] `/proc` filesystem with Linux-compatible structure.
+        - [ ] `/sys` filesystem for hardware introspection.
+        - [ ] Kernel symbol export mechanism for `kvm_nlist()`.
+
+    - [ ] **Testing:**
+        - [ ] **libsys:**
+            - [ ] Unit: each `sys_proc_*` function against known process state.
+            - [ ] Unit: each `sys_vm_*` function returns sane values.
+            - [ ] Unit: each `sys_cpu_*` function with multi-CPU QEMU.
+            - [ ] Unit: each `sys_net_*` function with loopback interface.
+            - [ ] Unit: `sysctl` MIB reads for all `kern.*`, `hw.*`, `vm.*` nodes.
+            - [ ] Property: `sys_proc_list` count matches `sys_proc_count`.
+            - [ ] Thread safety: concurrent calls from 8 threads.
+            - [ ] Performance: 10000 `sys_proc_info` calls latency benchmark.
+        - [ ] **libkvm:**
+            - [ ] Unit: `kvm_open` / `kvm_close` lifecycle.
+            - [ ] Unit: `kvm_getprocs` with each `KERN_PROC_*` filter.
+            - [ ] Unit: `kvm_getargv` / `kvm_getenvv` string retrieval.
+            - [ ] Unit: `kvm_nlist` symbol lookup.
+            - [ ] Compatibility: compile and run BSD `top`, `ps`, `fstat` against libkvm.
+        - [ ] **libproc:**
+            - [ ] Unit: `openproc` / `readproc` / `closeproc` cycle.
+            - [ ] Unit: filter flags (PROC_PID, PROC_UID) correctness.
+            - [ ] Compatibility: compile and run `procps-ng` tools (ps, top, free, vmstat).
+    - [ ] **Documentation:**
+        - [ ] Man pages: `libsys(3)`, `sysctl(3)`, `kvm_open(3)`, `kvm_getprocs(3)`.
+        - [ ] Man pages: `openproc(3)`, `readproc(3)`, `readproctab(3)`.
+        - [ ] Internal doc: libsys → libkvm → libproc layering.
+
+    - [ ] **User Authentication Library (`lib/auth/`):**
+
+        > **Files:** `lib/auth/passwd.c`, `lib/auth/shadow.c`,
+        > `lib/auth/crypt.c`, `lib/auth/group.c`, `lib/auth/auth.c`.
+
+        - [ ] **Password Database (`/etc/passwd`):**
+            - [ ] **Structures:** `struct passwd` (pw_name, pw_passwd, pw_uid, pw_gid, pw_gecos, pw_dir, pw_shell).
+            - [ ] **Parser:** tokenize `user:pwd:uid:gid:gecos:home:shell` (colon-delimited).
+            - [ ] **Lookup API:**
+                - [ ] `getpwnam(const char *name)`: look up by name.
+                - [ ] `getpwuid(uid_t uid)`: look up by UID.
+            - [ ] **Iteration API:**
+                - [ ] `setpwent()`: open/rewind passwd database.
+                - [ ] `getpwent()`: get next entry.
+                - [ ] `endpwent()`: close database.
+            - [ ] **Thread Safety:**
+                - [ ] `getpwnam_r(name, pwd, buf, buflen, result)`: reentrant variant.
+                - [ ] `getpwuid_r(uid, pwd, buf, buflen, result)`: reentrant variant.
+                - [ ] `getpwent_r(pwd, buf, buflen, result)`: reentrant variant.
+            - [ ] **Edge Cases:**
+                - [ ] Handle malformed lines (missing fields, non-numeric uid/gid).
+                - [ ] Handle NIS/YP `+` entries (stub or pass-through).
+                - [ ] Handle entries with empty gecos or shell fields.
+
+        - [ ] **Group Database (`/etc/group`):**
+            - [ ] **Structures:** `struct group` (gr_name, gr_passwd, gr_gid, gr_mem).
+            - [ ] **Parser:** tokenize `name:passwd:gid:member1,member2,...`.
+            - [ ] **Lookup API:**
+                - [ ] `getgrnam(const char *name)`: look up by name.
+                - [ ] `getgrgid(gid_t gid)`: look up by GID.
+            - [ ] **Iteration API:** `setgrent()`, `getgrent()`, `endgrent()`.
+            - [ ] **Thread Safety:** `getgrnam_r()`, `getgrgid_r()`, `getgrent_r()`.
+            - [ ] **Supplementary Groups:**
+                - [ ] `getgrouplist(user, group, groups, ngroups)`: enumerate memberships.
+                - [ ] `initgroups(user, group)`: set supplementary groups for process.
+
+        - [ ] **Shadow Database (`/etc/shadow`):**
+            - [ ] **Structures:** `struct spwd` (sp_namp, sp_pwdp, sp_lstchg, sp_min, sp_max, sp_warn, sp_inact, sp_expire, sp_flag).
+            - [ ] **Parser:** tokenize `user:hash:lastchg:min:max:warn:inact:expire:flag`.
+            - [ ] **API:** `getspnam(name)`, `setspent()`, `getspent()`, `endspent()`.
+            - [ ] **Thread Safety:** `getspnam_r()`, `getspent_r()`.
+            - [ ] **Security:**
+                - [ ] File permissions: readable only by root (mode 0600).
+                - [ ] Refuse to open if euid ≠ 0.
+                - [ ] Lock file during writes (advisory locking).
+
+        - [ ] **Cryptography (Password Hashing):**
+            - [ ] **`crypt(key, salt)` Interface:**
+                - [ ] Detect hash type by salt prefix (`$1$`, `$5$`, `$6$`, `$2b$`).
+                - [ ] Legacy DES for salts without `$` prefix.
+                - [ ] Return hash string in thread-local static buffer.
+            - [ ] **`crypt_r(key, salt, data)` Reentrant:**
+                - [ ] Thread-safe version with caller-provided `struct crypt_data`.
+            - [ ] **Algorithms:**
+                - [ ] **DES:** legacy support (8-char key limit, 2-char salt).
+                - [ ] **MD5 (`$1$`):** BSD/Linux standard, 1000 rounds.
+                - [ ] **SHA-256 (`$5$`):** configurable rounds (default 5000).
+                - [ ] **SHA-512 (`$6$`):** configurable rounds (default 5000), preferred.
+                - [ ] **Bcrypt (`$2b$`):** cost-factor based, memory-hard (optional).
+            - [ ] **Salt Generation:**
+                - [ ] `crypt_gensalt(prefix, count, rbytes, nrbytes)`: generate random salt.
+                - [ ] Use `/dev/urandom` for entropy.
+                - [ ] Base64 encoding for salt string.
+
+        - [ ] **High-Level Authentication:**
+            - [ ] `auth_verify_password(user, clear_text)`:
+                - [ ] Retrieve shadow entry (requires root or shadow group).
+                - [ ] Extract salt from stored hash.
+                - [ ] Hash clear_text with extracted salt via `crypt()`.
+                - [ ] Constant-time comparison of computed vs stored hash.
+                - [ ] Return 0 on success, -1 on failure (no timing leak).
+            - [ ] `auth_check_expiry(user)`:
+                - [ ] Check password expiry (`sp_max`, `sp_lstchg`).
+                - [ ] Check account expiry (`sp_expire`).
+                - [ ] Check inactive days (`sp_inact`).
+                - [ ] Return status: OK, WARN, EXPIRED, LOCKED.
+
+        - [ ] **PAM Integration (future):**
+            - [ ] Define PAM module interface (`pam_sm_authenticate`, etc.).
+            - [ ] Implement `pam_unix.so` using `lib/auth` functions.
+            - [ ] Configuration via `/etc/pam.d/` or `/etc/pam.conf`.
+
+        - [ ] **Testing:**
+            - [ ] Unit: `getpwnam` / `getpwuid` with known `/etc/passwd` content.
+            - [ ] Unit: `getgrnam` / `getgrgid` with known `/etc/group` content.
+            - [ ] Unit: `getspnam` with known `/etc/shadow` content.
+            - [ ] Unit: `crypt()` produces correct hash for each algorithm ($1$, $5$, $6$).
+            - [ ] Unit: `crypt_gensalt` produces valid salts.
+            - [ ] Unit: `auth_verify_password` correct + incorrect passwords.
+            - [ ] Unit: `auth_check_expiry` for OK, WARN, EXPIRED, LOCKED states.
+            - [ ] Unit: reentrant `_r` variants are thread-safe.
+            - [ ] Property: `getpwent` iteration covers all entries in `/etc/passwd`.
+            - [ ] Property: constant-time comparison — timing does not vary with input.
+            - [ ] Security: `getspnam` fails if euid ≠ 0.
+            - [ ] Fuzz: parser handles malformed `/etc/passwd`, `/etc/group`, `/etc/shadow`.
+        - [ ] **Documentation:**
+            - [ ] Man pages: `getpwnam(3)`, `getpwuid(3)`, `getpwent(3)`.
+            - [ ] Man pages: `getgrnam(3)`, `getgrgid(3)`, `getgrent(3)`.
+            - [ ] Man pages: `getspnam(3)`, `shadow(5)`.
+            - [ ] Man pages: `crypt(3)`, `crypt_gensalt(3)`.
+            - [ ] Man pages: `passwd(5)`, `group(5)`.
+
+
+## User Stories
+
+- **US-06-0001**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sysctl Userspace API (lib/c): so that this capability is implemented with clear verification evidence.
+- **US-06-0002**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to headers & ABI Contracts: so that this capability is implemented with clear verification evidence.
+- **US-06-0003**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define and export canonical declarations in include/sys/sysctl.h so that this capability is implemented with clear verification evidence.
+- **US-06-0004**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define and export stable userspace data types for MIB paths and metadata results so that this capability is implemented with clear verification evidence.
+- **US-06-0005**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add compile-time guards for structure size/alignment ABI stability so that this capability is implemented with clear verification evidence.
+- **US-06-0006**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to document thread-safety guarantees and reentrancy expectations in headers so that this capability is implemented with clear verification evidence.
+- **US-06-0007**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to core libc Entry Points: so that this capability is implemented with clear verification evidence.
+- **US-06-0008**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sysctl() libc wrapper with strict argument validation so that this capability is implemented with clear verification evidence.
+- **US-06-0009**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sysctlbyname() using name-to-MIB translation helper flow so that this capability is implemented with clear verification evidence.
+- **US-06-0010**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sysctlnametomib() with deterministic retry behavior so that this capability is implemented with clear verification evidence.
+- **US-06-0011**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement helper for dynamic buffer sizing/retry loop (ENOMEM growth pattern) so that this capability is implemented with clear verification evidence.
+- **US-06-0012**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement typed convenience helpers (int, uint, quad, string) with explicit bounds checks so that this capability is implemented with clear verification evidence.
+- **US-06-0013**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to thread Safety & Robustness: so that this capability is implemented with clear verification evidence.
+- **US-06-0014**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ensure no static mutable buffers in libc sysctl helpers so that this capability is implemented with clear verification evidence.
+- **US-06-0015**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ensure all helpers preserve errno semantics consistently on failure so that this capability is implemented with clear verification evidence.
+- **US-06-0016**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add cancellation-safety review for wrappers used in multi-threaded callers so that this capability is implemented with clear verification evidence.
+- **US-06-0017**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add overflow-safe arithmetic helpers for buffer growth and MIB conversion so that this capability is implemented with clear verification evidence.
+- **US-06-0018**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (libc Side): so that this capability is implemented with clear verification evidence.
+- **US-06-0019**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add unit tests for wrapper argument validation and errno behavior so that this capability is implemented with clear verification evidence.
+- **US-06-0020**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add unit tests for name-to-MIB and MIB-to-name translation helpers so that this capability is implemented with clear verification evidence.
+- **US-06-0021**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add integration tests for size-probe + retry loops across changing kernel values so that this capability is implemented with clear verification evidence.
+- **US-06-0022**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add thread-stress tests for concurrent wrapper usage so that this capability is implemented with clear verification evidence.
+- **US-06-0023**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add fuzz tests for malformed dotted names and oversized MIB arrays so that this capability is implemented with clear verification evidence.
+- **US-06-0024**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to manpages & Usage Guidance: so that this capability is implemented with clear verification evidence.
+- **US-06-0025**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add man/man3/sysctl.3 documenting libc contract and thread-safety so that this capability is implemented with clear verification evidence.
+- **US-06-0026**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add man/man3/sysctlbyname.3 with buffer sizing examples so that this capability is implemented with clear verification evidence.
+- **US-06-0027**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add man/man3/sysctlnametomib.3 with name/MIB conversion examples so that this capability is implemented with clear verification evidence.
+- **US-06-0028**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to update man/man2/sysctl.2 to align kernel syscall semantics with libc helper behavior so that this capability is implemented with clear verification evidence.
+- **US-06-0029**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add SEE ALSO cross-links between sysctl(2) and sysctl(3) pages so that this capability is implemented with clear verification evidence.
+- **US-06-0030**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to stdio: so that this capability is implemented with clear verification evidence.
+- **US-06-0031**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fILE Structure & Buffer Management (lib/c/src/stdio/): so that this capability is implemented with clear verification evidence.
+- **US-06-0032**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define internal FILE structure (_flags, _buf, _bufsiz, _cnt, _ptr, _fd, _lbfsize, _close/_read/_write/_seek function pointers) so that this capability is implemented with clear verification evidence.
+- **US-06-0033**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement three buffer modes: so that this capability is implemented with clear verification evidence.
+- **US-06-0034**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to _IOFBF (fully buffered): flush on buffer full or explicit fflush() so that this capability is implemented with clear verification evidence.
+- **US-06-0035**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to _IOLBF (line buffered): flush on newline or buffer full so that this capability is implemented with clear verification evidence.
+- **US-06-0036**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to _IONBF (unbuffered): every fputc()/fwrite() calls write() immediately so that this capability is implemented with clear verification evidence.
+- **US-06-0037**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement setvbuf(FILE *stream, char *buf, int mode, size_t size): so that this capability is implemented with clear verification evidence.
+- **US-06-0038**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to validate mode is _IOFBF, _IOLBF, or _IONBF so that this capability is implemented with clear verification evidence.
+- **US-06-0039**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to allow user-supplied buffer or NULL for auto-allocation so that this capability is implemented with clear verification evidence.
+- **US-06-0040**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to must be called after fopen() but before any I/O so that this capability is implemented with clear verification evidence.
+- **US-06-0041**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success, non-zero on failure so that this capability is implemented with clear verification evidence.
+- **US-06-0042**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement setbuf(FILE *stream, char *buf) as wrapper for setvbuf() so that this capability is implemented with clear verification evidence.
+- **US-06-0043**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement setlinebuf(FILE *stream) (BSD extension) so that this capability is implemented with clear verification evidence.
+- **US-06-0044**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement fflush(FILE *stream): so that this capability is implemented with clear verification evidence.
+- **US-06-0045**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to write buffered output data via write() syscall so that this capability is implemented with clear verification evidence.
+- **US-06-0046**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to handle partial writes (retry loop) so that this capability is implemented with clear verification evidence.
+- **US-06-0047**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if stream == NULL, flush all open output streams so that this capability is implemented with clear verification evidence.
+- **US-06-0048**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success, EOF on error (set errno) so that this capability is implemented with clear verification evidence.
+- **US-06-0049**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pre-allocate stdin, stdout, stderr FILE objects: so that this capability is implemented with clear verification evidence.
+- **US-06-0050**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to stdin: fd 0, _IOLBF default so that this capability is implemented with clear verification evidence.
+- **US-06-0051**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to stdout: fd 1, _IOLBF if isatty(), else _IOFBF so that this capability is implemented with clear verification evidence.
+- **US-06-0052**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to stderr: fd 2, _IONBF always so that this capability is implemented with clear verification evidence.
+- **US-06-0053**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement __sinit() / stream initialization on first use (lazy init pattern) so that this capability is implemented with clear verification evidence.
+- **US-06-0054**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to file Open/Close Operations: so that this capability is implemented with clear verification evidence.
+- **US-06-0055**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fopen(const char *path, const char *mode): so that this capability is implemented with clear verification evidence.
+- **US-06-0056**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to parse mode string: "r", "w", "a", "r+", "w+", "a+", with "b" (binary, no-op on POSIX) and "x" (C11 exclusive create) so that this capability is implemented with clear verification evidence.
+- **US-06-0057**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to map to open() flags: O_RDONLY, O_WRONLY|O_CREAT|O_TRUNC, O_WRONLY|O_CREAT|O_APPEND, etc so that this capability is implemented with clear verification evidence.
+- **US-06-0058**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to allocate FILE, assign fd, set default buffer so that this capability is implemented with clear verification evidence.
+- **US-06-0059**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return NULL on failure (set errno) so that this capability is implemented with clear verification evidence.
+- **US-06-0060**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fdopen(int fd, const char *mode): wrap existing fd in FILE so that this capability is implemented with clear verification evidence.
+- **US-06-0061**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to freopen(const char *path, const char *mode, FILE *stream): so that this capability is implemented with clear verification evidence.
+- **US-06-0062**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to flush and close existing fd so that this capability is implemented with clear verification evidence.
+- **US-06-0063**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to re-open with new path/mode, reuse FILE object so that this capability is implemented with clear verification evidence.
+- **US-06-0064**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if path == NULL, change mode of existing fd (C99 extension) so that this capability is implemented with clear verification evidence.
+- **US-06-0065**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fclose(FILE *stream): so that this capability is implemented with clear verification evidence.
+- **US-06-0066**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to flush output buffer via fflush() so that this capability is implemented with clear verification evidence.
+- **US-06-0067**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to free allocated buffer (if library-allocated) so that this capability is implemented with clear verification evidence.
+- **US-06-0068**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to close() underlying fd so that this capability is implemented with clear verification evidence.
+- **US-06-0069**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to free FILE structure so that this capability is implemented with clear verification evidence.
+- **US-06-0070**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success, EOF on error so that this capability is implemented with clear verification evidence.
+- **US-06-0071**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fcloseall() (extension): close all open streams so that this capability is implemented with clear verification evidence.
+- **US-06-0072**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to character & Line I/O: so that this capability is implemented with clear verification evidence.
+- **US-06-0073**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fgetc(FILE *stream) / getc() macro: read one byte from buffer or refill so that this capability is implemented with clear verification evidence.
+- **US-06-0074**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fputc(int c, FILE *stream) / putc() macro: write one byte to buffer or flush so that this capability is implemented with clear verification evidence.
+- **US-06-0075**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getchar() / putchar(): wrappers for stdin/stdout so that this capability is implemented with clear verification evidence.
+- **US-06-0076**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ungetc(int c, FILE *stream): push back one character (at least 1 byte guaranteed) so that this capability is implemented with clear verification evidence.
+- **US-06-0077**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fgets(char *s, int n, FILE *stream): read line up to n-1 chars or newline so that this capability is implemented with clear verification evidence.
+- **US-06-0078**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fputs(const char *s, FILE *stream): write string (no trailing newline) so that this capability is implemented with clear verification evidence.
+- **US-06-0079**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to gets_s() (C11 bounds-checked, optional) - or gets() removed per C11 so that this capability is implemented with clear verification evidence.
+- **US-06-0080**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to puts(const char *s): write string + newline to stdout so that this capability is implemented with clear verification evidence.
+- **US-06-0081**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to block I/O: so that this capability is implemented with clear verification evidence.
+- **US-06-0082**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fread(void *ptr, size_t size, size_t nmemb, FILE *stream): so that this capability is implemented with clear verification evidence.
+- **US-06-0083**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to read size * nmemb bytes, buffered so that this capability is implemented with clear verification evidence.
+- **US-06-0084**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to handle partial reads, return number of complete elements so that this capability is implemented with clear verification evidence.
+- **US-06-0085**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to set EOF/error indicators on short read so that this capability is implemented with clear verification evidence.
+- **US-06-0086**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream): so that this capability is implemented with clear verification evidence.
+- **US-06-0087**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to write size * nmemb bytes through buffer so that this capability is implemented with clear verification evidence.
+- **US-06-0088**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return number of complete elements written so that this capability is implemented with clear verification evidence.
+- **US-06-0089**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to file Positioning: so that this capability is implemented with clear verification evidence.
+- **US-06-0090**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fseek(FILE *stream, long offset, int whence): so that this capability is implemented with clear verification evidence.
+- **US-06-0091**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to flush output buffer before seeking so that this capability is implemented with clear verification evidence.
+- **US-06-0092**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to discard input buffer on seek so that this capability is implemented with clear verification evidence.
+- **US-06-0093**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to whence: SEEK_SET, SEEK_CUR, SEEK_END so that this capability is implemented with clear verification evidence.
+- **US-06-0094**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success, -1 on error so that this capability is implemented with clear verification evidence.
+- **US-06-0095**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ftell(FILE *stream): return current position (accounting for buffer offset) so that this capability is implemented with clear verification evidence.
+- **US-06-0096**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to rewind(FILE *stream): fseek(stream, 0, SEEK_SET) + clear error indicator so that this capability is implemented with clear verification evidence.
+- **US-06-0097**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fgetpos(FILE *stream, fpos_t *pos) / fsetpos(FILE *stream, const fpos_t *pos): opaque position save/restore so that this capability is implemented with clear verification evidence.
+- **US-06-0098**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fseeko() / ftello() (POSIX): off_t variants for large file support so that this capability is implemented with clear verification evidence.
+- **US-06-0099**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to error & EOF Handling: so that this capability is implemented with clear verification evidence.
+- **US-06-0100**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to feof(FILE *stream): return non-zero if EOF indicator set so that this capability is implemented with clear verification evidence.
+- **US-06-0101**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ferror(FILE *stream): return non-zero if error indicator set so that this capability is implemented with clear verification evidence.
+- **US-06-0102**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to clearerr(FILE *stream): clear both EOF and error indicators so that this capability is implemented with clear verification evidence.
+- **US-06-0103**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to perror(const char *s): print s: strerror(errno)\n to stderr so that this capability is implemented with clear verification evidence.
+- **US-06-0104**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to temporary Files: so that this capability is implemented with clear verification evidence.
+- **US-06-0105**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to tmpfile(): create anonymous temporary FILE (deleted on close) so that this capability is implemented with clear verification evidence.
+- **US-06-0106**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to tmpnam(char *s) (deprecated) / mkstemp() integration so that this capability is implemented with clear verification evidence.
+- **US-06-0107**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to complete printf Family Implementation (User & Kernel): so that this capability is implemented with clear verification evidence.
+- **US-06-0108**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kernel: Migrate sys/kern/lib.c simplistic sprintf to full implementation so that this capability is implemented with clear verification evidence.
+- **US-06-0109**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to user: lib/c implementation so that this capability is implemented with clear verification evidence.
+- **US-06-0110**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to flags: so that this capability is implemented with clear verification evidence.
+- **US-06-0111**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to - (Left-align within field width) so that this capability is implemented with clear verification evidence.
+- **US-06-0112**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to + (Force sign for positive numbers) so that this capability is implemented with clear verification evidence.
+- **US-06-0113**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to (Space prefix for positive numbers) so that this capability is implemented with clear verification evidence.
+- **US-06-0114**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to # (Alternate form: 0x for hex, force decimal point) so that this capability is implemented with clear verification evidence.
+- **US-06-0115**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to 0 (Zero-padding) so that this capability is implemented with clear verification evidence.
+- **US-06-0116**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to width & Precision: so that this capability is implemented with clear verification evidence.
+- **US-06-0117**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to numeric width (e.g., %5d) so that this capability is implemented with clear verification evidence.
+- **US-06-0118**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to dynamic width * (from argument) so that this capability is implemented with clear verification evidence.
+- **US-06-0119**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to numeric precision (e.g., %.5d) so that this capability is implemented with clear verification evidence.
+- **US-06-0120**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to dynamic precision .*(from argument) so that this capability is implemented with clear verification evidence.
+- **US-06-0121**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to combined width/precision (e.g., %5.2f) so that this capability is implemented with clear verification evidence.
+- **US-06-0122**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to negative width logic (treat as - flag + positive width) so that this capability is implemented with clear verification evidence.
+- **US-06-0123**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to length Modifiers: so that this capability is implemented with clear verification evidence.
+- **US-06-0124**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hh (signed/unsigned char) so that this capability is implemented with clear verification evidence.
+- **US-06-0125**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to h (signed/unsigned short) so that this capability is implemented with clear verification evidence.
+- **US-06-0126**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to l (long, wint_t) so that this capability is implemented with clear verification evidence.
+- **US-06-0127**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ll (long long) so that this capability is implemented with clear verification evidence.
+- **US-06-0128**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to j (intmax_t, uintmax_t) so that this capability is implemented with clear verification evidence.
+- **US-06-0129**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to z (size_t, ssize_t) so that this capability is implemented with clear verification evidence.
+- **US-06-0130**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to t (ptrdiff_t) so that this capability is implemented with clear verification evidence.
+- **US-06-0131**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to l (long double) so that this capability is implemented with clear verification evidence.
+- **US-06-0132**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to conversion Specifiers: so that this capability is implemented with clear verification evidence.
+- **US-06-0133**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to integers: d, i (signed decimal) so that this capability is implemented with clear verification evidence.
+- **US-06-0134**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unsigned: u (decimal), o (octal) so that this capability is implemented with clear verification evidence.
+- **US-06-0135**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hex: x, X (lower/upper case) so that this capability is implemented with clear verification evidence.
+- **US-06-0136**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to floating Point (Basic): f, F (decimal notation) so that this capability is implemented with clear verification evidence.
+- **US-06-0137**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to scientific: e, E (exponential notation) so that this capability is implemented with clear verification evidence.
+- **US-06-0138**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to significant: g, G (shortest representation) so that this capability is implemented with clear verification evidence.
+- **US-06-0139**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hex Float: a, A (C99 hex float - placeholder) so that this capability is implemented with clear verification evidence.
+- **US-06-0140**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to characters: c (char), lc (wint_t) so that this capability is implemented with clear verification evidence.
+- **US-06-0141**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to strings: s (char*), ls (wchar_t*) so that this capability is implemented with clear verification evidence.
+- **US-06-0142**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pointer: p (implementation defined, usually %08x or %016x) so that this capability is implemented with clear verification evidence.
+- **US-06-0143**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to count: n (store number of chars written to int*) so that this capability is implemented with clear verification evidence.
+- **US-06-0144**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to literal: % (print percent sign) so that this capability is implemented with clear verification evidence.
+- **US-06-0145**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to complex/Compound Cases: so that this capability is implemented with clear verification evidence.
+- **US-06-0146**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to prefix combinations (e.g., %20#llx) so that this capability is implemented with clear verification evidence.
+- **US-06-0147**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to leading zeroes with precision (e.g., %03d vs %.3d) so that this capability is implemented with clear verification evidence.
+- **US-06-0148**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to "0" flag ignored if "-" is present so that this capability is implemented with clear verification evidence.
+- **US-06-0149**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to "0" flag ignored if precision is specified for integers so that this capability is implemented with clear verification evidence.
+- **US-06-0150**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to space ignored if "+" is present so that this capability is implemented with clear verification evidence.
+- **US-06-0151**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to printf Family Wrappers: so that this capability is implemented with clear verification evidence.
+- **US-06-0152**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fprintf(FILE *stream, const char *fmt, ...): output to FILE via buffer so that this capability is implemented with clear verification evidence.
+- **US-06-0153**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to printf(const char *fmt, ...): wrapper for fprintf(stdout, ...) so that this capability is implemented with clear verification evidence.
+- **US-06-0154**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sprintf(char *str, const char *fmt, ...): output to string (no bounds check) so that this capability is implemented with clear verification evidence.
+- **US-06-0155**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to snprintf(char *str, size_t size, const char *fmt, ...): bounded output to string so that this capability is implemented with clear verification evidence.
+- **US-06-0156**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to dprintf(int fd, const char *fmt, ...) (POSIX): output to fd directly so that this capability is implemented with clear verification evidence.
+- **US-06-0157**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to asprintf(char **ret, const char *fmt, ...) (BSD extension): auto-allocating sprintf so that this capability is implemented with clear verification evidence.
+- **US-06-0158**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to vfprintf(), vprintf(), vsprintf(), vsnprintf(), vdprintf(), vasprintf(): va_list variants so that this capability is implemented with clear verification evidence.
+- **US-06-0159**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to complete scanf Family Implementation: so that this capability is implemented with clear verification evidence.
+- **US-06-0160**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to core vfscanf() Engine: so that this capability is implemented with clear verification evidence.
+- **US-06-0161**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to literal character matching (non-% characters, whitespace collapsing) so that this capability is implemented with clear verification evidence.
+- **US-06-0162**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to %% literal percent matching so that this capability is implemented with clear verification evidence.
+- **US-06-0163**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to assignment suppression (* flag) so that this capability is implemented with clear verification evidence.
+- **US-06-0164**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to maximum field width so that this capability is implemented with clear verification evidence.
+- **US-06-0165**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to length Modifiers: hh, h, l, ll, j, z, t, L so that this capability is implemented with clear verification evidence.
+- **US-06-0166**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to conversion Specifiers: so that this capability is implemented with clear verification evidence.
+- **US-06-0167**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to d (decimal integer), i (auto-detect base: 0x/0/decimal) so that this capability is implemented with clear verification evidence.
+- **US-06-0168**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to u (unsigned decimal), o (octal), x/X (hex) so that this capability is implemented with clear verification evidence.
+- **US-06-0169**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to f, e, g, a (floating-point input parsing) so that this capability is implemented with clear verification evidence.
+- **US-06-0170**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to c (character, no whitespace skip), s (string, whitespace-delimited) so that this capability is implemented with clear verification evidence.
+- **US-06-0171**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to [ (scanset): character class matching, ^ negation, ] as first char so that this capability is implemented with clear verification evidence.
+- **US-06-0172**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to p (pointer), n (store chars consumed) so that this capability is implemented with clear verification evidence.
+- **US-06-0173**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return number of successfully assigned items, or EOF so that this capability is implemented with clear verification evidence.
+- **US-06-0174**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to handle input exhaustion mid-conversion so that this capability is implemented with clear verification evidence.
+- **US-06-0175**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to scanf Family Wrappers: so that this capability is implemented with clear verification evidence.
+- **US-06-0176**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fscanf(FILE *stream, const char *fmt, ...) so that this capability is implemented with clear verification evidence.
+- **US-06-0177**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to scanf(const char *fmt, ...): wrapper for fscanf(stdin, ...) so that this capability is implemented with clear verification evidence.
+- **US-06-0178**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sscanf(const char *str, const char *fmt, ...): scan from string so that this capability is implemented with clear verification evidence.
+- **US-06-0179**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to vfscanf(), vscanf(), vsscanf(): va_list variants so that this capability is implemented with clear verification evidence.
+- **US-06-0180**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-06-0181**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit Tests (tests/lib/c/unit/test_stdio.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0182**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fopen()/fclose() for all mode strings ("r", "w", "a", "r+", "w+", "a+", "wx") so that this capability is implemented with clear verification evidence.
+- **US-06-0183**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fopen() returns NULL for non-existent file in "r" mode so that this capability is implemented with clear verification evidence.
+- **US-06-0184**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fdopen() wraps existing fd correctly so that this capability is implemented with clear verification evidence.
+- **US-06-0185**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test freopen() changes mode and reuses FILE so that this capability is implemented with clear verification evidence.
+- **US-06-0186**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fread()/fwrite() round-trip: write data, rewind, read back, compare so that this capability is implemented with clear verification evidence.
+- **US-06-0187**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fread() partial read at EOF returns correct element count so that this capability is implemented with clear verification evidence.
+- **US-06-0188**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fwrite() returns correct element count on success so that this capability is implemented with clear verification evidence.
+- **US-06-0189**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fgetc()/fputc() byte-by-byte I/O so that this capability is implemented with clear verification evidence.
+- **US-06-0190**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test ungetc(): push back one char, re-read it so that this capability is implemented with clear verification evidence.
+- **US-06-0191**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test ungetc(EOF) is a no-op so that this capability is implemented with clear verification evidence.
+- **US-06-0192**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fgets() reads up to newline, NUL-terminates so that this capability is implemented with clear verification evidence.
+- **US-06-0193**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fgets() with buffer smaller than line so that this capability is implemented with clear verification evidence.
+- **US-06-0194**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fputs()/puts() output correctness so that this capability is implemented with clear verification evidence.
+- **US-06-0195**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fseek()/ftell() positioning in all SEEK_* modes so that this capability is implemented with clear verification evidence.
+- **US-06-0196**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test rewind() resets position and clears error so that this capability is implemented with clear verification evidence.
+- **US-06-0197**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fgetpos()/fsetpos() round-trip so that this capability is implemented with clear verification evidence.
+- **US-06-0198**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feof() returns non-zero only after read past end so that this capability is implemented with clear verification evidence.
+- **US-06-0199**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test ferror()/clearerr() flag management so that this capability is implemented with clear verification evidence.
+- **US-06-0200**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fflush(stdout) forces write so that this capability is implemented with clear verification evidence.
+- **US-06-0201**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fflush(NULL) flushes all streams so that this capability is implemented with clear verification evidence.
+- **US-06-0202**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test setvbuf() with _IONBF causes immediate writes so that this capability is implemented with clear verification evidence.
+- **US-06-0203**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test setvbuf() with _IOLBF flushes on newline so that this capability is implemented with clear verification evidence.
+- **US-06-0204**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test setvbuf() with _IOFBF accumulates until buffer full so that this capability is implemented with clear verification evidence.
+- **US-06-0205**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test tmpfile() returns valid FILE that is auto-deleted so that this capability is implemented with clear verification evidence.
+- **US-06-0206**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test perror() output format so that this capability is implemented with clear verification evidence.
+- **US-06-0207**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit Tests (tests/lib/c/unit/test_printf.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0208**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sprintf() all integer conversions with all length modifiers so that this capability is implemented with clear verification evidence.
+- **US-06-0209**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sprintf() all floating-point conversions: %f, %e, %g, %a so that this capability is implemented with clear verification evidence.
+- **US-06-0210**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test snprintf() truncation: verify NUL-termination and returned count so that this capability is implemented with clear verification evidence.
+- **US-06-0211**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test snprintf() with size == 0 returns required length without writing so that this capability is implemented with clear verification evidence.
+- **US-06-0212**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fprintf() to file, then read back and compare so that this capability is implemented with clear verification evidence.
+- **US-06-0213**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test dprintf() to pipe fd so that this capability is implemented with clear verification evidence.
+- **US-06-0214**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test asprintf() allocates correct buffer size so that this capability is implemented with clear verification evidence.
+- **US-06-0215**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test %n conversion stores correct count so that this capability is implemented with clear verification evidence.
+- **US-06-0216**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test width, precision, flag combinations exhaustively so that this capability is implemented with clear verification evidence.
+- **US-06-0217**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test %% literal output so that this capability is implemented with clear verification evidence.
+- **US-06-0218**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test NULL string argument to %s (implementation-defined, should not crash) so that this capability is implemented with clear verification evidence.
+- **US-06-0219**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit Tests (tests/lib/c/unit/test_scanf.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0220**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() integer conversions: %d, %i, %u, %o, %x so that this capability is implemented with clear verification evidence.
+- **US-06-0221**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() %i auto-base detection: 0x (hex), 0 (octal), decimal so that this capability is implemented with clear verification evidence.
+- **US-06-0222**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() floating-point: %f, %e, %g so that this capability is implemented with clear verification evidence.
+- **US-06-0223**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() %c reads exact count (no whitespace skip) so that this capability is implemented with clear verification evidence.
+- **US-06-0224**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() %s reads whitespace-delimited token so that this capability is implemented with clear verification evidence.
+- **US-06-0225**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() %[ scanset: %[a-z], %[^0-9], %[]abc] so that this capability is implemented with clear verification evidence.
+- **US-06-0226**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() %n stores chars consumed so that this capability is implemented with clear verification evidence.
+- **US-06-0227**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() assignment suppression: %*d skips but doesn't assign so that this capability is implemented with clear verification evidence.
+- **US-06-0228**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() field width limits so that this capability is implemented with clear verification evidence.
+- **US-06-0229**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() return value: count of successful assignments so that this capability is implemented with clear verification evidence.
+- **US-06-0230**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sscanf() returns EOF on immediate input failure so that this capability is implemented with clear verification evidence.
+- **US-06-0231**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fscanf() from file so that this capability is implemented with clear verification evidence.
+- **US-06-0232**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test scanf() length modifiers: %hhd, %hd, %ld, %lld, %jd, %zd, %td so that this capability is implemented with clear verification evidence.
+- **US-06-0233**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/c/property/prop_stdio.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0234**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: sprintf(buf, "%d", x); sscanf(buf, "%d", &y) ⇒ x == y for all int x so that this capability is implemented with clear verification evidence.
+- **US-06-0235**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: sprintf(buf, "%u", x); sscanf(buf, "%u", &y) ⇒ x == y for all unsigned x so that this capability is implemented with clear verification evidence.
+- **US-06-0236**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: snprintf(buf, n, fmt, ...) return value ≥ 0 and ≤ what sprintf would produce so that this capability is implemented with clear verification evidence.
+- **US-06-0237**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: snprintf(buf, n, ...) always NUL-terminates if n > 0 so that this capability is implemented with clear verification evidence.
+- **US-06-0238**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f) ⇒ memcmp(data, out, n) == 0 so that this capability is implemented with clear verification evidence.
+- **US-06-0239**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: ftell() after fseek(f, off, SEEK_SET) returns off so that this capability is implemented with clear verification evidence.
+- **US-06-0240**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: ungetc(c, f); fgetc(f) returns c for any valid c ≠ EOF so that this capability is implemented with clear verification evidence.
+- **US-06-0241**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz Tests (tests/lib/c/fuzz/fuzz_printf.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0242**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz snprintf() with random format strings and random arguments so that this capability is implemented with clear verification evidence.
+- **US-06-0243**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to verify no buffer overflows (write to bounded buffer, check sentinel bytes) so that this capability is implemented with clear verification evidence.
+- **US-06-0244**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to verify return value consistency (re-call with larger buffer, compare output) so that this capability is implemented with clear verification evidence.
+- **US-06-0245**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz vsnprintf() with extreme widths/precisions so that this capability is implemented with clear verification evidence.
+- **US-06-0246**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz Tests (tests/lib/c/fuzz/fuzz_scanf.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0247**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz sscanf() with random format strings and random input strings so that this capability is implemented with clear verification evidence.
+- **US-06-0248**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to verify no crashes, no buffer overflows, return value ≥ 0 or EOF so that this capability is implemented with clear verification evidence.
+- **US-06-0249**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz scanset patterns (%[...]) with adversarial character classes so that this capability is implemented with clear verification evidence.
+- **US-06-0250**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0251**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fopen.3 - File open. Covers fopen(), fdopen(), freopen(). Mode string parsing, "x" flag. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0252**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fclose.3 - File close. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0253**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fread.3 - Block I/O. Covers fread() and fwrite(). SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0254**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fgets.3 - Line input. Covers fgets(), fputs(), gets() removal note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0255**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fgetc.3 - Character I/O. Covers fgetc(), getc(), getchar(), fputc(), putc(), putchar(), ungetc(). SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0256**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fseek.3 - File positioning. Covers fseek(), ftell(), rewind(), fgetpos(), fsetpos(), fseeko(), ftello(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0257**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fflush.3 - Flush stream. Document NULL argument behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0258**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/setvbuf.3 - Set stream buffering. Covers setvbuf(), setbuf(), setlinebuf(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0259**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/feof.3 - Stream status. Covers feof(), ferror(), clearerr(). SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0260**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/perror.3 - Print error message. SYNOPSIS, DESCRIPTION, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0261**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/tmpfile.3 - Temporary files. Covers tmpfile() and tmpnam() deprecation note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0262**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/printf.3 - Formatted output. Covers printf(), fprintf(), sprintf(), snprintf(), dprintf(), asprintf() and v* variants. Full format specification. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0263**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/scanf.3 - Formatted input. Covers scanf(), fscanf(), sscanf() and v* variants. Full format specification including scansets. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0264**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to string/Mem: so that this capability is implemented with clear verification evidence.
+- **US-06-0265**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to optimize memcpy, memset, memmove so that this capability is implemented with clear verification evidence.
+- **US-06-0266**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to math.h header definition so that this capability is implemented with clear verification evidence.
+- **US-06-0267**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to math_errhandling (errno support) so that this capability is implemented with clear verification evidence.
+- **US-06-0268**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to __fpclassify internal helper so that this capability is implemented with clear verification evidence.
+- **US-06-0269**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fENV (Floating-Point Environment): so that this capability is implemented with clear verification evidence.
+- **US-06-0270**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to header (include/fenv.h) Definition (C99/POSIX): so that this capability is implemented with clear verification evidence.
+- **US-06-0271**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define fenv_t type (full x87 environment: CW, SW, TW, FIP, FCS, FDP, FDS, MXCSR on SSE-capable) so that this capability is implemented with clear verification evidence.
+- **US-06-0272**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define fexcept_t type (exception status word snapshot) so that this capability is implemented with clear verification evidence.
+- **US-06-0273**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define exception flag macros: so that this capability is implemented with clear verification evidence.
+- **US-06-0274**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_INVALID (bit 0, x87 IE) so that this capability is implemented with clear verification evidence.
+- **US-06-0275**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_DENORMAL (bit 1, x87 DE - non-standard extension, guard with #ifdef) so that this capability is implemented with clear verification evidence.
+- **US-06-0276**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_DIVBYZERO (bit 2, x87 ZE) so that this capability is implemented with clear verification evidence.
+- **US-06-0277**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_OVERFLOW (bit 3, x87 OE) so that this capability is implemented with clear verification evidence.
+- **US-06-0278**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_UNDERFLOW (bit 4, x87 UE) so that this capability is implemented with clear verification evidence.
+- **US-06-0279**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_INEXACT (bit 5, x87 PE) so that this capability is implemented with clear verification evidence.
+- **US-06-0280**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_ALL_EXCEPT (bitwise OR of all supported exception flags) so that this capability is implemented with clear verification evidence.
+- **US-06-0281**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define rounding mode macros: so that this capability is implemented with clear verification evidence.
+- **US-06-0282**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_TONEAREST (CW bits 10-11 = 00) so that this capability is implemented with clear verification evidence.
+- **US-06-0283**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_DOWNWARD (CW bits 10-11 = 01) so that this capability is implemented with clear verification evidence.
+- **US-06-0284**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_UPWARD (CW bits 10-11 = 10) so that this capability is implemented with clear verification evidence.
+- **US-06-0285**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fE_TOWARDZERO (CW bits 10-11 = 11) so that this capability is implemented with clear verification evidence.
+- **US-06-0286**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define FE_DFL_ENV macro (pointer to default environment, ((const fenv_t *)-1) or static) so that this capability is implemented with clear verification evidence.
+- **US-06-0287**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to provide function prototypes for all fe* functions so that this capability is implemented with clear verification evidence.
+- **US-06-0288**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to include guard (_FENV_H) and C++ extern "C" wrapper so that this capability is implemented with clear verification evidence.
+- **US-06-0289**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to exception Handling Functions: so that this capability is implemented with clear verification evidence.
+- **US-06-0290**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to feclearexcept(int excepts): so that this capability is implemented with clear verification evidence.
+- **US-06-0291**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to read x87 status word via fnstsw so that this capability is implemented with clear verification evidence.
+- **US-06-0292**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to clear requested exception bits so that this capability is implemented with clear verification evidence.
+- **US-06-0293**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to restore via fldenv (requires full env save/modify/restore cycle) so that this capability is implemented with clear verification evidence.
+- **US-06-0294**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if SSE present, also clear bits in MXCSR via ldmxcsr so that this capability is implemented with clear verification evidence.
+- **US-06-0295**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success, non-zero on failure so that this capability is implemented with clear verification evidence.
+- **US-06-0296**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fegetexceptflag(fexcept_t *flagp, int excepts): so that this capability is implemented with clear verification evidence.
+- **US-06-0297**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to read x87 status word via fnstsw so that this capability is implemented with clear verification evidence.
+- **US-06-0298**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to mask with excepts, store into *flagp so that this capability is implemented with clear verification evidence.
+- **US-06-0299**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if SSE present, OR in MXCSR exception bits so that this capability is implemented with clear verification evidence.
+- **US-06-0300**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success so that this capability is implemented with clear verification evidence.
+- **US-06-0301**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to feraiseexcept(int excepts): so that this capability is implemented with clear verification evidence.
+- **US-06-0302**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to raise specified exceptions by performing operations that trigger them (e.g., divide-by-zero for FE_DIVBYZERO, 0.0/0.0 for FE_INVALID) so that this capability is implemented with clear verification evidence.
+- **US-06-0303**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to alternatively: save env, set SW bits, load env, then fwait to trigger trap so that this capability is implemented with clear verification evidence.
+- **US-06-0304**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ensure FE_OVERFLOW and FE_UNDERFLOW also set FE_INEXACT per C99 7.6.2.3 so that this capability is implemented with clear verification evidence.
+- **US-06-0305**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success so that this capability is implemented with clear verification evidence.
+- **US-06-0306**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fesetexceptflag(const fexcept_t *flagp, int excepts): so that this capability is implemented with clear verification evidence.
+- **US-06-0307**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to save full x87 environment via fnstenv so that this capability is implemented with clear verification evidence.
+- **US-06-0308**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to replace status word exception bits (masked by excepts) from *flagp so that this capability is implemented with clear verification evidence.
+- **US-06-0309**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to restore via fldenv - must NOT raise exceptions (set bits only) so that this capability is implemented with clear verification evidence.
+- **US-06-0310**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if SSE present, update MXCSR accordingly so that this capability is implemented with clear verification evidence.
+- **US-06-0311**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success so that this capability is implemented with clear verification evidence.
+- **US-06-0312**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fetestexcept(int excepts): so that this capability is implemented with clear verification evidence.
+- **US-06-0313**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to read x87 status word via fnstsw so that this capability is implemented with clear verification evidence.
+- **US-06-0314**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if SSE present, OR in MXCSR sticky bits so that this capability is implemented with clear verification evidence.
+- **US-06-0315**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return bitwise AND of current exceptions with excepts so that this capability is implemented with clear verification evidence.
+- **US-06-0316**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to rounding Mode Functions: so that this capability is implemented with clear verification evidence.
+- **US-06-0317**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fegetround(): so that this capability is implemented with clear verification evidence.
+- **US-06-0318**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to read x87 control word via fnstcw so that this capability is implemented with clear verification evidence.
+- **US-06-0319**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to extract rounding mode bits (bits 10-11) so that this capability is implemented with clear verification evidence.
+- **US-06-0320**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return corresponding FE_* rounding constant so that this capability is implemented with clear verification evidence.
+- **US-06-0321**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fesetround(int rdir): so that this capability is implemented with clear verification evidence.
+- **US-06-0322**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to validate rdir is one of FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO so that this capability is implemented with clear verification evidence.
+- **US-06-0323**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to read x87 control word via fnstcw so that this capability is implemented with clear verification evidence.
+- **US-06-0324**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to modify rounding mode bits (bits 10-11) so that this capability is implemented with clear verification evidence.
+- **US-06-0325**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to write back via fldcw so that this capability is implemented with clear verification evidence.
+- **US-06-0326**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if SSE present, also update MXCSR rounding bits (bits 13-14) so that this capability is implemented with clear verification evidence.
+- **US-06-0327**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success, non-zero for invalid rdir so that this capability is implemented with clear verification evidence.
+- **US-06-0328**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to environment Save/Restore Functions: so that this capability is implemented with clear verification evidence.
+- **US-06-0329**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fegetenv(fenv_t *envp): so that this capability is implemented with clear verification evidence.
+- **US-06-0330**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to save full x87 environment via fnstenv into *envp so that this capability is implemented with clear verification evidence.
+- **US-06-0331**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to restore control word afterwards (x87 fnstenv masks all exceptions as side effect, so re-load CW) so that this capability is implemented with clear verification evidence.
+- **US-06-0332**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if SSE present, also save MXCSR into *envp so that this capability is implemented with clear verification evidence.
+- **US-06-0333**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success so that this capability is implemented with clear verification evidence.
+- **US-06-0334**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to feholdexcept(fenv_t *envp): so that this capability is implemented with clear verification evidence.
+- **US-06-0335**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to save current environment into *envp via fnstenv so that this capability is implemented with clear verification evidence.
+- **US-06-0336**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to clear all exception flags in status word so that this capability is implemented with clear verification evidence.
+- **US-06-0337**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to mask all exceptions in control word (set exception mask bits 0-5) so that this capability is implemented with clear verification evidence.
+- **US-06-0338**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to install this non-stop environment via fldenv so that this capability is implemented with clear verification evidence.
+- **US-06-0339**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if SSE present, save and mask MXCSR similarly so that this capability is implemented with clear verification evidence.
+- **US-06-0340**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success so that this capability is implemented with clear verification evidence.
+- **US-06-0341**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to this enables non-stop (non-trapping) FP mode for temporary computation so that this capability is implemented with clear verification evidence.
+- **US-06-0342**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fesetenv(const fenv_t *envp): so that this capability is implemented with clear verification evidence.
+- **US-06-0343**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if envp == FE_DFL_ENV, load default environment (e.g., fninit then adjust, or load a static default) so that this capability is implemented with clear verification evidence.
+- **US-06-0344**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to else, load full x87 environment from *envp via fldenv so that this capability is implemented with clear verification evidence.
+- **US-06-0345**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if SSE present, also restore MXCSR from *envp so that this capability is implemented with clear verification evidence.
+- **US-06-0346**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to must NOT raise exceptions - install state silently so that this capability is implemented with clear verification evidence.
+- **US-06-0347**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success so that this capability is implemented with clear verification evidence.
+- **US-06-0348**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to feupdateenv(const fenv_t *envp): so that this capability is implemented with clear verification evidence.
+- **US-06-0349**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to read currently raised exceptions via fetestexcept(FE_ALL_EXCEPT) so that this capability is implemented with clear verification evidence.
+- **US-06-0350**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to install *envp (or default) via fesetenv(envp) so that this capability is implemented with clear verification evidence.
+- **US-06-0351**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to re-raise the previously pending exceptions via feraiseexcept() so that this capability is implemented with clear verification evidence.
+- **US-06-0352**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success so that this capability is implemented with clear verification evidence.
+- **US-06-0353**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to this is the "merge exceptions then restore" primitive so that this capability is implemented with clear verification evidence.
+- **US-06-0354**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fENV_ACCESS Pragma Support: so that this capability is implemented with clear verification evidence.
+- **US-06-0355**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to document compiler interaction: #pragma STDC FENV_ACCESS ON advisory so that this capability is implemented with clear verification evidence.
+- **US-06-0356**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ensure fenv.h includes comment noting GCC #pragma GCC optimize ("no-fast-math") equivalent so that this capability is implemented with clear verification evidence.
+- **US-06-0357**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add FENV_ACCESS documentation in header and man pages so that this capability is implemented with clear verification evidence.
+- **US-06-0358**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implementation Details (i386/x87 Backend - lib/m/src/fenv.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0359**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to all functions implemented as i386 inline assembly or .S file for x87 fnstcw/fldcw/fnstsw/fnstenv/fldenv/fnclex/fwait so that this capability is implemented with clear verification evidence.
+- **US-06-0360**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sSE/MXCSR path gated by runtime or compile-time SSE check so that this capability is implemented with clear verification evidence.
+- **US-06-0361**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fenv_t layout must match x87 fnstenv/fldenv 28-byte block (+ optional MXCSR field) so that this capability is implemented with clear verification evidence.
+- **US-06-0362**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ensure fninit is used (not finit) to avoid waiting for pending exceptions during default-env setup so that this capability is implemented with clear verification evidence.
+- **US-06-0363**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to all functions are attribute((noinline)) to prevent optimizer from reordering FP state access so that this capability is implemented with clear verification evidence.
+- **US-06-0364**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-06-0365**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit Tests (tests/lib/m/unit/test_fenv.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0366**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feclearexcept(): raise each exception, clear it, verify via fetestexcept() so that this capability is implemented with clear verification evidence.
+- **US-06-0367**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feclearexcept(FE_ALL_EXCEPT): clear all, verify none pending so that this capability is implemented with clear verification evidence.
+- **US-06-0368**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feclearexcept(0): no-op, verify no side effects so that this capability is implemented with clear verification evidence.
+- **US-06-0369**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fegetexceptflag() / fesetexceptflag(): round-trip flag save/restore so that this capability is implemented with clear verification evidence.
+- **US-06-0370**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fesetexceptflag() does NOT raise exceptions (just sets sticky bits) so that this capability is implemented with clear verification evidence.
+- **US-06-0371**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feraiseexcept(): raise individual exceptions, verify via fetestexcept() so that this capability is implemented with clear verification evidence.
+- **US-06-0372**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feraiseexcept(FE_OVERFLOW) also sets FE_INEXACT (C99 requirement) so that this capability is implemented with clear verification evidence.
+- **US-06-0373**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feraiseexcept(FE_UNDERFLOW) also sets FE_INEXACT so that this capability is implemented with clear verification evidence.
+- **US-06-0374**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feraiseexcept() with multiple flags ORed together so that this capability is implemented with clear verification evidence.
+- **US-06-0375**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fetestexcept(): verify returns only requested bits so that this capability is implemented with clear verification evidence.
+- **US-06-0376**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fegetround() default is FE_TONEAREST so that this capability is implemented with clear verification evidence.
+- **US-06-0377**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fesetround() / fegetround() round-trip for all four modes so that this capability is implemented with clear verification evidence.
+- **US-06-0378**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fesetround() with invalid argument returns non-zero so that this capability is implemented with clear verification evidence.
+- **US-06-0379**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fesetround() actually affects rounding: add 1.0 + tiny value and check direction so that this capability is implemented with clear verification evidence.
+- **US-06-0380**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fegetenv() / fesetenv() round-trip preserves full state so that this capability is implemented with clear verification evidence.
+- **US-06-0381**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fesetenv(FE_DFL_ENV) resets to default (no exceptions, FE_TONEAREST) so that this capability is implemented with clear verification evidence.
+- **US-06-0382**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feholdexcept(): saves state, clears exceptions, masks all traps so that this capability is implemented with clear verification evidence.
+- **US-06-0383**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feholdexcept() followed by exception-raising operations don't trap so that this capability is implemented with clear verification evidence.
+- **US-06-0384**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feupdateenv(): merges pending exceptions from non-stop region back after restore so that this capability is implemented with clear verification evidence.
+- **US-06-0385**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test feupdateenv() re-raises exceptions from before feholdexcept() was called so that this capability is implemented with clear verification evidence.
+- **US-06-0386**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test interaction: feholdexcept() → compute with exceptions → feupdateenv() → verify merged so that this capability is implemented with clear verification evidence.
+- **US-06-0387**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_fenv.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0388**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fesetround(m); fegetround() == m for all valid m so that this capability is implemented with clear verification evidence.
+- **US-06-0389**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fesetround(invalid) returns non-zero and does not change mode so that this capability is implemented with clear verification evidence.
+- **US-06-0390**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: feclearexcept(e); fetestexcept(e) == 0 for any valid exception mask e so that this capability is implemented with clear verification evidence.
+- **US-06-0391**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: feraiseexcept(e); (fetestexcept(e) & e) == e for any valid e so that this capability is implemented with clear verification evidence.
+- **US-06-0392**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fegetexceptflag(&f, e); feclearexcept(FE_ALL_EXCEPT); fesetexceptflag(&f, e); fetestexcept(e) equals original so that this capability is implemented with clear verification evidence.
+- **US-06-0393**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fegetenv(&env); /* modify state */; fesetenv(&env) restores original rounding and exceptions so that this capability is implemented with clear verification evidence.
+- **US-06-0394**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fesetenv(FE_DFL_ENV); fegetround() == FE_TONEAREST && fetestexcept(FE_ALL_EXCEPT) == 0 so that this capability is implemented with clear verification evidence.
+- **US-06-0395**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: feholdexcept() results in fetestexcept(FE_ALL_EXCEPT) == 0 and non-stop mode so that this capability is implemented with clear verification evidence.
+- **US-06-0396**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: feupdateenv() preserves exceptions raised during non-stop region so that this capability is implemented with clear verification evidence.
+- **US-06-0397**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: exception flags are sticky - feraiseexcept(e) followed by unrelated FP ops retains e so that this capability is implemented with clear verification evidence.
+- **US-06-0398**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz Tests (tests/lib/m/fuzz/fuzz_fenv.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0399**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz random combinations of exception flag bits to feclearexcept() / feraiseexcept() / fetestexcept() so that this capability is implemented with clear verification evidence.
+- **US-06-0400**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz random rounding mode values to fesetround() (including invalid values) so that this capability is implemented with clear verification evidence.
+- **US-06-0401**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz random sequences of fegetenv()/fesetenv()/feholdexcept()/feupdateenv() interleaved with FP operations so that this capability is implemented with clear verification evidence.
+- **US-06-0402**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz random fexcept_t values through fegetexceptflag()/fesetexceptflag() round-trips so that this capability is implemented with clear verification evidence.
+- **US-06-0403**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to verify no crashes, no undefined behavior, status word consistency after each fuzzed sequence so that this capability is implemented with clear verification evidence.
+- **US-06-0404**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0405**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man7/fenv.7 - Overview of floating-point environment, x87/SSE interaction, FENV_ACCESS pragma, and usage patterns so that this capability is implemented with clear verification evidence.
+- **US-06-0406**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/feclearexcept.3 - Clear floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0407**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fegetexceptflag.3 - Get floating-point exception flags. Covers fegetexceptflag() and fesetexceptflag() together (paired save/restore API). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0408**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/feraiseexcept.3 - Raise floating-point exceptions. Document FE_OVERFLOW/FE_UNDERFLOW implying FE_INEXACT. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0409**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fetestexcept.3 - Test floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0410**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fegetround.3 - Get/set floating-point rounding mode. Covers fegetround() and fesetround() together. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0411**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fegetenv.3 - Get/set floating-point environment. Covers fegetenv() and fesetenv(). SYNOPSIS, DESCRIPTION (document FE_DFL_ENV), RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0412**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/feholdexcept.3 - Save environment and enter non-stop mode. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES (show feholdexcept() → compute → feupdateenv() pattern), SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0413**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/feupdateenv.3 - Restore environment and re-raise saved exceptions. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0414**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to type Variants (f, l suffixes): so that this capability is implemented with clear verification evidence.
+- **US-06-0415**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to float Variants (f suffix - lib/m/src/mathf.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0416**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sinf(), cosf(), tanf(), asinf(), acosf(), atanf(), atan2f() so that this capability is implemented with clear verification evidence.
+- **US-06-0417**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sinhf(), coshf(), tanhf(), asinhf(), acoshf(), atanhf() so that this capability is implemented with clear verification evidence.
+- **US-06-0418**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement expf(), exp2f(), expm1f(), logf(), log2f(), log10f(), log1pf() so that this capability is implemented with clear verification evidence.
+- **US-06-0419**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement powf(), sqrtf(), cbrtf(), hypotf() so that this capability is implemented with clear verification evidence.
+- **US-06-0420**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement fabsf(), fmodf(), remainderf(), remquof(), fmaf() so that this capability is implemented with clear verification evidence.
+- **US-06-0421**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement fmaxf(), fminf(), fdimf() so that this capability is implemented with clear verification evidence.
+- **US-06-0422**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement ceilf(), floorf(), truncf(), roundf(), rintf(), nearbyintf() so that this capability is implemented with clear verification evidence.
+- **US-06-0423**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement lroundf(), llroundf(), lrintf(), llrintf() so that this capability is implemented with clear verification evidence.
+- **US-06-0424**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement frexpf(), ldexpf(), modff(), scalbnf(), scalblnf() so that this capability is implemented with clear verification evidence.
+- **US-06-0425**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement ilogbf(), logbf(), nextafterf(), nexttowardf(), copysignf(), nanf() so that this capability is implemented with clear verification evidence.
+- **US-06-0426**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement erff(), erfcf(), tgammaf(), lgammaf() so that this capability is implemented with clear verification evidence.
+- **US-06-0427**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sincosf() so that this capability is implemented with clear verification evidence.
+- **US-06-0428**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to long Double Variants (l suffix - lib/m/src/mathl.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0429**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sinl(), cosl(), tanl(), asinl(), acosl(), atanl(), atan2l() so that this capability is implemented with clear verification evidence.
+- **US-06-0430**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sinhl(), coshl(), tanhl(), asinhl(), acoshl(), atanhl() so that this capability is implemented with clear verification evidence.
+- **US-06-0431**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement expl(), exp2l(), expm1l(), logl(), log2l(), log10l(), log1pl() so that this capability is implemented with clear verification evidence.
+- **US-06-0432**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement powl(), sqrtl(), cbrtl(), hypotl() so that this capability is implemented with clear verification evidence.
+- **US-06-0433**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement fabsl(), fmodl(), remainderl(), remquol(), fmal() so that this capability is implemented with clear verification evidence.
+- **US-06-0434**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement fmaxl(), fminl(), fdiml() so that this capability is implemented with clear verification evidence.
+- **US-06-0435**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement ceill(), floorl(), truncl(), roundl(), rintl(), nearbyintl() so that this capability is implemented with clear verification evidence.
+- **US-06-0436**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement lroundl(), llroundl(), lrintl(), llrintl() so that this capability is implemented with clear verification evidence.
+- **US-06-0437**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement frexpl(), ldexpl(), modfl(), scalbnl(), scalblnl() so that this capability is implemented with clear verification evidence.
+- **US-06-0438**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement ilogbl(), logbl(), nextafterl(), nexttowardl(), copysignl(), nanl() so that this capability is implemented with clear verification evidence.
+- **US-06-0439**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement erfl(), erfcl(), tgammal(), lgammal() so that this capability is implemented with clear verification evidence.
+- **US-06-0440**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sincosl() so that this capability is implemented with clear verification evidence.
+- **US-06-0441**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to i386 Note: On x87, long double is 80-bit extended precision (native FPU format). float/double variants should use x87 internally and truncate on return so that this capability is implemented with clear verification evidence.
+- **US-06-0442**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to generic Math (<tgmath.h>): so that this capability is implemented with clear verification evidence.
+- **US-06-0443**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement C99/C11 <tgmath.h> type-generic macros: so that this capability is implemented with clear verification evidence.
+- **US-06-0444**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to dispatch to f, , or l suffix based on argument type via _Generic (C11) or __builtin_choose_expr + __builtin_types_compatible_p (GCC extension) so that this capability is implemented with clear verification evidence.
+- **US-06-0445**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to cover all math functions with type-generic wrappers: trig, hyperbolic, exp/log, pow/sqrt, rounding, manipulation, fenv-interacting so that this capability is implemented with clear verification evidence.
+- **US-06-0446**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to include complex variants dispatch (if/when <complex.h> is implemented) so that this capability is implemented with clear verification evidence.
+- **US-06-0447**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ensure macro expansion does not evaluate arguments multiple times (use statement expressions if needed) so that this capability is implemented with clear verification evidence.
+- **US-06-0448**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_tgmath.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0449**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test type dispatch: sin((float)x) calls sinf(), sin((double)x) calls sin(), sin((long double)x) calls sinl() so that this capability is implemented with clear verification evidence.
+- **US-06-0450**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test all covered function families dispatch correctly so that this capability is implemented with clear verification evidence.
+- **US-06-0451**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test no double-evaluation of arguments with side effects so that this capability is implemented with clear verification evidence.
+- **US-06-0452**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0453**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man7/tgmath.7 - Type-generic math macros overview, dispatch rules, C11 _Generic usage. SYNOPSIS, DESCRIPTION, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0454**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fpclassify() so that this capability is implemented with clear verification evidence.
+- **US-06-0455**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to isfinite() so that this capability is implemented with clear verification evidence.
+- **US-06-0456**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to isinf() so that this capability is implemented with clear verification evidence.
+- **US-06-0457**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to isnan() so that this capability is implemented with clear verification evidence.
+- **US-06-0458**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to isnormal() so that this capability is implemented with clear verification evidence.
+- **US-06-0459**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to signbit() so that this capability is implemented with clear verification evidence.
+- **US-06-0460**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to isgreater(), isgreaterequal(), isless(), islessequal(), islessgreater(), isunordered(): so that this capability is implemented with clear verification evidence.
+- **US-06-0461**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement as macros using __builtin_isgreater etc. (GCC) or manual quiet-NaN-safe comparisons so that this capability is implemented with clear verification evidence.
+- **US-06-0462**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to must not raise FE_INVALID on unordered operands (unlike plain </>) so that this capability is implemented with clear verification evidence.
+- **US-06-0463**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to iseqsig(), issignaling() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0464**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to iseqsig(): equality comparison that DOES raise FE_INVALID on NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0465**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to issignaling(): detect signaling NaN via bit pattern inspection so that this capability is implemented with clear verification evidence.
+- **US-06-0466**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to iscanonical(), issubnormal(), iszero() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0467**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to iscanonical(): always 1 for IEEE 754 binary formats (all values canonical) so that this capability is implemented with clear verification evidence.
+- **US-06-0468**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to issubnormal(): fpclassify(x) == FP_SUBNORMAL so that this capability is implemented with clear verification evidence.
+- **US-06-0469**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to iszero(): fpclassify(x) == FP_ZERO so that this capability is implemented with clear verification evidence.
+- **US-06-0470**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_classify.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0471**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fpclassify() returns correct category for: +0.0, -0.0, 1.0, -1.0, INFINITY, -INFINITY, NAN, DBL_MIN/2 (denorm), DBL_MAX so that this capability is implemented with clear verification evidence.
+- **US-06-0472**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test isfinite() true for normals/denormals/zeros, false for inf/nan so that this capability is implemented with clear verification evidence.
+- **US-06-0473**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test isinf() true for ±INFINITY only so that this capability is implemented with clear verification evidence.
+- **US-06-0474**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test isnan() true for NAN, quiet NaN, signaling NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0475**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test isnormal() false for zero, denormal, inf, nan so that this capability is implemented with clear verification evidence.
+- **US-06-0476**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test signbit() for +0.0, -0.0, +1.0, -1.0, +INFINITY, -INFINITY, NAN, -NAN so that this capability is implemented with clear verification evidence.
+- **US-06-0477**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test isgreater() etc. do NOT raise FE_INVALID when one operand is NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0478**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test isunordered() true iff either operand is NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0479**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test iseqsig() raises FE_INVALID on NaN operand so that this capability is implemented with clear verification evidence.
+- **US-06-0480**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test issignaling() detects sNaN bit pattern so that this capability is implemented with clear verification evidence.
+- **US-06-0481**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test float, double, and long double variants so that this capability is implemented with clear verification evidence.
+- **US-06-0482**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_classify.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0483**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: exactly one of isinf(x), isnan(x), isfinite(x) is true for any x so that this capability is implemented with clear verification evidence.
+- **US-06-0484**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: isnormal(x) implies isfinite(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0485**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: issubnormal(x) implies isfinite(x) && !isnormal(x) && !iszero(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0486**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: signbit(-x) != signbit(x) for all non-NaN x so that this capability is implemented with clear verification evidence.
+- **US-06-0487**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: isunordered(x, y) iff isnan(x) || isnan(y) so that this capability is implemented with clear verification evidence.
+- **US-06-0488**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0489**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fpclassify.3 - Floating-point classification. Covers fpclassify(), isfinite(), isinf(), isnan(), isnormal(), signbit(). SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0490**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/isgreater.3 - Quiet comparison macros. Covers isgreater() through isunordered(). Document non-signaling NaN behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0491**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fabs() so that this capability is implemented with clear verification evidence.
+- **US-06-0492**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fmod() so that this capability is implemented with clear verification evidence.
+- **US-06-0493**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to remainder() so that this capability is implemented with clear verification evidence.
+- **US-06-0494**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to remquo(): so that this capability is implemented with clear verification evidence.
+- **US-06-0495**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to compute remainder AND store low-order bits of quotient in *quo so that this capability is implemented with clear verification evidence.
+- **US-06-0496**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sign of *quo is sign of x/y so that this capability is implemented with clear verification evidence.
+- **US-06-0497**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to at least 3 bits of quotient stored so that this capability is implemented with clear verification evidence.
+- **US-06-0498**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fmax() so that this capability is implemented with clear verification evidence.
+- **US-06-0499**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fmin() so that this capability is implemented with clear verification evidence.
+- **US-06-0500**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fdim() so that this capability is implemented with clear verification evidence.
+- **US-06-0501**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fma() (Fused Multiply-Add): so that this capability is implemented with clear verification evidence.
+- **US-06-0502**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to compute (x * y) + z with single rounding (as if infinite precision intermediate) so that this capability is implemented with clear verification evidence.
+- **US-06-0503**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to critical for numerical accuracy in dot-products, compensated summation so that this capability is implemented with clear verification evidence.
+- **US-06-0504**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to on x87: no hardware FMA - use software double-double decomposition or Dekker's algorithm so that this capability is implemented with clear verification evidence.
+- **US-06-0505**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to raise FE_INEXACT/FE_OVERFLOW/FE_UNDERFLOW appropriately so that this capability is implemented with clear verification evidence.
+- **US-06-0506**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fmaximum(), fminimum(), fmaximum_num(), fminimum_num(), fmaximum_mag(), fminimum_mag() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0507**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fmaximum()/fminimum(): NaN-propagating (NaN if either operand is NaN) so that this capability is implemented with clear verification evidence.
+- **US-06-0508**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fmaximum_num()/fminimum_num(): NaN-ignoring (return the non-NaN operand) so that this capability is implemented with clear verification evidence.
+- **US-06-0509**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fmaximum_mag()/fminimum_mag(): Compare absolute values, NaN-propagating so that this capability is implemented with clear verification evidence.
+- **US-06-0510**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to all distinguish +0.0 from -0.0: fmaximum(+0.0, -0.0) == +0.0 so that this capability is implemented with clear verification evidence.
+- **US-06-0511**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_arith.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0512**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fabs(): positive, negative, zero, -0.0, ∞, -∞, NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0513**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fmod(): basic cases, sign of result matches dividend, zero dividend, NaN propagation so that this capability is implemented with clear verification evidence.
+- **US-06-0514**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test remainder(): IEEE remainder (can be negative), ties to even quotient so that this capability is implemented with clear verification evidence.
+- **US-06-0515**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test remquo(): remainder matches remainder(), quotient low bits correct so that this capability is implemented with clear verification evidence.
+- **US-06-0516**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fma(): fma(a, b, c) vs naive a*b+c - detect cases where single rounding differs so that this capability is implemented with clear verification evidence.
+- **US-06-0517**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fma() special values: 0×∞+NaN, ∞×finite±∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0518**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fmax()/fmin(): NaN handling (return non-NaN), ±0.0 distinction so that this capability is implemented with clear verification evidence.
+- **US-06-0519**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fdim(): positive difference, zero when x ≤ y, NaN propagation so that this capability is implemented with clear verification evidence.
+- **US-06-0520**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test C23 fmaximum()/fminimum() NaN propagation vs fmax()/fmin() NaN-ignoring so that this capability is implemented with clear verification evidence.
+- **US-06-0521**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_arith.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0522**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fabs(x) >= 0 for all x (including -0.0 → +0.0) so that this capability is implemented with clear verification evidence.
+- **US-06-0523**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fmod(x, y) has same sign as x and |fmod(x,y)| < |y| so that this capability is implemented with clear verification evidence.
+- **US-06-0524**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fma(x, y, 0.0) == x * y for exact products (no rounding needed) so that this capability is implemented with clear verification evidence.
+- **US-06-0525**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fmax(x, y) >= x && fmax(x, y) >= y for non-NaN inputs so that this capability is implemented with clear verification evidence.
+- **US-06-0526**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: fdim(x, y) + y >= x for finite non-NaN inputs so that this capability is implemented with clear verification evidence.
+- **US-06-0527**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0528**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fabs.3 - Absolute value. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0529**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fmod.3 - Floating-point remainder. Covers fmod() and remainder() with IEEE semantics differences. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0530**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/remquo.3 - Remainder with quotient. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0531**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fma.3 - Fused multiply-add. Document precision advantage. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0532**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/fmax.3 - Maximum/minimum. Covers fmax(), fmin(), fdim(). SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0533**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ceil() so that this capability is implemented with clear verification evidence.
+- **US-06-0534**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to floor() so that this capability is implemented with clear verification evidence.
+- **US-06-0535**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to trunc() so that this capability is implemented with clear verification evidence.
+- **US-06-0536**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to round() so that this capability is implemented with clear verification evidence.
+- **US-06-0537**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to rint() so that this capability is implemented with clear verification evidence.
+- **US-06-0538**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nearbyint(): so that this capability is implemented with clear verification evidence.
+- **US-06-0539**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to same as rint() but does NOT raise FE_INEXACT so that this capability is implemented with clear verification evidence.
+- **US-06-0540**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to on x87: save/mask inexact exception, call frndint, restore flags so that this capability is implemented with clear verification evidence.
+- **US-06-0541**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to lround(), llround(): so that this capability is implemented with clear verification evidence.
+- **US-06-0542**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to round to nearest, ties away from zero (like round()), return long/long long so that this capability is implemented with clear verification evidence.
+- **US-06-0543**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to raise FE_INVALID and return LONG_MIN/LONG_MAX on overflow or NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0544**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to lrint(), llrint(): so that this capability is implemented with clear verification evidence.
+- **US-06-0545**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to round using current rounding mode (like rint()), return long/long long so that this capability is implemented with clear verification evidence.
+- **US-06-0546**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to on x87: fistp stores directly to integer so that this capability is implemented with clear verification evidence.
+- **US-06-0547**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to raise FE_INVALID on overflow/NaN, FE_INEXACT if value was not integer so that this capability is implemented with clear verification evidence.
+- **US-06-0548**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to roundeven() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0549**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to round to nearest, ties to even (same as default FE_TONEAREST rint()) so that this capability is implemented with clear verification evidence.
+- **US-06-0550**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to explicit function - does not depend on current rounding mode so that this capability is implemented with clear verification evidence.
+- **US-06-0551**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fromfp(), fromfpx(), ufromfp(), ufromfpx() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0552**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to convert to integer type with explicit rounding mode and width so that this capability is implemented with clear verification evidence.
+- **US-06-0553**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fromfp(): signed, ufromfp(): unsigned so that this capability is implemented with clear verification evidence.
+- **US-06-0554**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to *x variants raise FE_INEXACT on non-integer input; non-x variants do not so that this capability is implemented with clear verification evidence.
+- **US-06-0555**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_round.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0556**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test ceil(): ceil(1.1)==2.0, ceil(-1.1)==-1.0, ceil(0.0)==0.0, ceil(-0.0)==-0.0 so that this capability is implemented with clear verification evidence.
+- **US-06-0557**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test floor(): floor(1.9)==1.0, floor(-1.1)==-2.0 so that this capability is implemented with clear verification evidence.
+- **US-06-0558**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test trunc(): trunc(1.9)==1.0, trunc(-1.9)==-1.0 so that this capability is implemented with clear verification evidence.
+- **US-06-0559**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test round(): ties away from zero: round(0.5)==1.0, round(-0.5)==-1.0 so that this capability is implemented with clear verification evidence.
+- **US-06-0560**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test rint(): honors current rounding mode (test with fesetround()) so that this capability is implemented with clear verification evidence.
+- **US-06-0561**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test nearbyint(): same as rint() but does NOT raise FE_INEXACT (verify via fetestexcept()) so that this capability is implemented with clear verification evidence.
+- **US-06-0562**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test lround()/llround(): overflow → LONG_MAX/LONG_MIN + FE_INVALID so that this capability is implemented with clear verification evidence.
+- **US-06-0563**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test lrint()/llrint(): current rounding mode, FE_INEXACT on non-integer so that this capability is implemented with clear verification evidence.
+- **US-06-0564**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test roundeven(): roundeven(0.5)==0.0, roundeven(1.5)==2.0 (ties to even) so that this capability is implemented with clear verification evidence.
+- **US-06-0565**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test all rounding functions with: ±0.0, ±∞, NaN, ±0.5, ±1.5, large values so that this capability is implemented with clear verification evidence.
+- **US-06-0566**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_round.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0567**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: ceil(x) >= x for all finite x so that this capability is implemented with clear verification evidence.
+- **US-06-0568**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: floor(x) <= x for all finite x so that this capability is implemented with clear verification evidence.
+- **US-06-0569**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: |trunc(x)| <= |x| for all finite x so that this capability is implemented with clear verification evidence.
+- **US-06-0570**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: floor(x) <= round(x) <= ceil(x) for all x where the three are defined so that this capability is implemented with clear verification evidence.
+- **US-06-0571**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: rint(x) == x for integer values of x so that this capability is implemented with clear verification evidence.
+- **US-06-0572**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: rounding functions are idempotent: ceil(ceil(x)) == ceil(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0573**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0574**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/ceil.3 - Round upward. Covers ceil(), ceilf(), ceill(). SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0575**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/floor.3 - Round downward. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0576**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/round.3 - Round to nearest, ties away from zero. Covers round(), lround(), llround(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0577**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/rint.3 - Round to nearest integer using current mode. Covers rint(), nearbyint(), lrint(), llrint(). Document FE_INEXACT difference. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0578**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/trunc.3 - Round toward zero. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0579**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to exp() so that this capability is implemented with clear verification evidence.
+- **US-06-0580**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to exp2() so that this capability is implemented with clear verification evidence.
+- **US-06-0581**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to expm1() so that this capability is implemented with clear verification evidence.
+- **US-06-0582**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to exp10(), exp10m1(), exp2m1() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0583**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to exp10(x): compute 10^x. On x87: x * log2(10) → f2xm1/fscale so that this capability is implemented with clear verification evidence.
+- **US-06-0584**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to exp10m1(x): compute 10^x - 1 accurately for small x so that this capability is implemented with clear verification evidence.
+- **US-06-0585**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to exp2m1(x): compute 2^x - 1 accurately for small x (direct f2xm1 for |x| < 1) so that this capability is implemented with clear verification evidence.
+- **US-06-0586**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log() so that this capability is implemented with clear verification evidence.
+- **US-06-0587**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log2() so that this capability is implemented with clear verification evidence.
+- **US-06-0588**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log10() so that this capability is implemented with clear verification evidence.
+- **US-06-0589**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log1p() so that this capability is implemented with clear verification evidence.
+- **US-06-0590**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log10p1(), log2p1(), logp1() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0591**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to logp1(x): alias for log1p(x) - compute ln(1+x) accurately for small x so that this capability is implemented with clear verification evidence.
+- **US-06-0592**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log2p1(x): compute log2(1+x) accurately. On x87: use fyl2xp1 for |x| < 1-√2/2 so that this capability is implemented with clear verification evidence.
+- **US-06-0593**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log10p1(x): compute log10(1+x) accurately so that this capability is implemented with clear verification evidence.
+- **US-06-0594**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pow() so that this capability is implemented with clear verification evidence.
+- **US-06-0595**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pown(), powr(), rootn(), compound() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0596**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pown(x, n): x raised to integer power n (intmax_t). Binary exponentiation so that this capability is implemented with clear verification evidence.
+- **US-06-0597**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to powr(x, y): e^(y * ln(x)), domain x ≥ 0. Different NaN/±0 semantics from pow() so that this capability is implemented with clear verification evidence.
+- **US-06-0598**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to rootn(x, n): n-th root of x. rootn(x, 2) == sqrt(x), rootn(x, 3) == cbrt(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0599**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to compound(x, n): (1+x)^n computed stably for small x so that this capability is implemented with clear verification evidence.
+- **US-06-0600**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sqrt() so that this capability is implemented with clear verification evidence.
+- **US-06-0601**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to rsqrt() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0602**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to reciprocal square root: 1/sqrt(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0603**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to on x87: fsqrt then fdivr with 1.0 so that this capability is implemented with clear verification evidence.
+- **US-06-0604**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to cbrt() so that this capability is implemented with clear verification evidence.
+- **US-06-0605**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hypot() so that this capability is implemented with clear verification evidence.
+- **US-06-0606**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_explog.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0607**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test exp(0)==1, exp(1)≈M_E, exp(-∞)==0, exp(+∞)==+∞, exp(NaN)==NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0608**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test exp2(0)==1, exp2(10)==1024 so that this capability is implemented with clear verification evidence.
+- **US-06-0609**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test expm1(0)==0, expm1(tiny)≈tiny (accuracy for small x vs naive exp(x)-1) so that this capability is implemented with clear verification evidence.
+- **US-06-0610**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test log(1)==0, log(M_E)≈1, log(0)==-∞, log(-1)==NaN + FE_INVALID, log(+∞)==+∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0611**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test log2(1)==0, log2(1024)==10 so that this capability is implemented with clear verification evidence.
+- **US-06-0612**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test log10(1)==0, log10(1000)==3 so that this capability is implemented with clear verification evidence.
+- **US-06-0613**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test log1p(0)==0, log1p(tiny)≈tiny (accuracy for small x) so that this capability is implemented with clear verification evidence.
+- **US-06-0614**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test pow(2,10)==1024, pow(-1,2)==1, pow(0,0)==1 (C99 convention) so that this capability is implemented with clear verification evidence.
+- **US-06-0615**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test pow(x, 0)==1 for all x (including ∞, NaN per C99 F.9.4.4) so that this capability is implemented with clear verification evidence.
+- **US-06-0616**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sqrt(4)==2, sqrt(0)==0, sqrt(-1)==NaN, sqrt(+∞)==+∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0617**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test cbrt(-8)==-2, cbrt(0)==0 so that this capability is implemented with clear verification evidence.
+- **US-06-0618**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test hypot(3,4)==5, hypot(x,0)==fabs(x), hypot(∞,NaN)==∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0619**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test rsqrt(4)==0.5, rsqrt(0)==+∞, rsqrt(-1)==NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0620**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_explog.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0621**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: exp(log(x)) ≈ x for positive finite x (within ULP tolerance) so that this capability is implemented with clear verification evidence.
+- **US-06-0622**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: log(exp(x)) ≈ x for moderate x (no overflow/underflow) so that this capability is implemented with clear verification evidence.
+- **US-06-0623**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: exp2(log2(x)) ≈ x for positive finite x so that this capability is implemented with clear verification evidence.
+- **US-06-0624**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: sqrt(x) * sqrt(x) ≈ x for positive x so that this capability is implemented with clear verification evidence.
+- **US-06-0625**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: hypot(x,y) >= fabs(x) && hypot(x,y) >= fabs(y) so that this capability is implemented with clear verification evidence.
+- **US-06-0626**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: pow(x, 1.0) == x for all x so that this capability is implemented with clear verification evidence.
+- **US-06-0627**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: expm1(x) + 1 ≈ exp(x) for all x (accuracy comparison, not equality) so that this capability is implemented with clear verification evidence.
+- **US-06-0628**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: log1p(expm1(x)) ≈ x for moderate x so that this capability is implemented with clear verification evidence.
+- **US-06-0629**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0630**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/exp.3 - Exponential functions. Covers exp(), exp2(), expm1(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0631**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/log.3 - Logarithmic functions. Covers log(), log2(), log10(), log1p(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0632**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/pow.3 - Power functions. Covers pow(), sqrt(), cbrt(), hypot(). Document special value semantics extensively (C99 Annex F). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0633**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sin() so that this capability is implemented with clear verification evidence.
+- **US-06-0634**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to cos() so that this capability is implemented with clear verification evidence.
+- **US-06-0635**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to tan() so that this capability is implemented with clear verification evidence.
+- **US-06-0636**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to asin() so that this capability is implemented with clear verification evidence.
+- **US-06-0637**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to acos() so that this capability is implemented with clear verification evidence.
+- **US-06-0638**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to atan() so that this capability is implemented with clear verification evidence.
+- **US-06-0639**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to atan2() so that this capability is implemented with clear verification evidence.
+- **US-06-0640**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sinpi(), cospi(), tanpi() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0641**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sinpi(x): compute sin(π·x) exactly at integer and half-integer points so that this capability is implemented with clear verification evidence.
+- **US-06-0642**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to cospi(x): compute cos(π·x) exactly at integer and half-integer points so that this capability is implemented with clear verification evidence.
+- **US-06-0643**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to tanpi(x): compute tan(π·x) exactly, including singularity at half-integers so that this capability is implemented with clear verification evidence.
+- **US-06-0644**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to key benefit: exact values without M_PI multiplication error so that this capability is implemented with clear verification evidence.
+- **US-06-0645**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to asinpi(), acospi(), atanpi(), atan2pi() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0646**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to inverse functions returning result in units of π (i.e., divided by π) so that this capability is implemented with clear verification evidence.
+- **US-06-0647**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to asinpi(x) ∈ [-0.5, 0.5], acospi(x) ∈ [0, 1], atanpi(x) ∈ [-0.5, 0.5] so that this capability is implemented with clear verification evidence.
+- **US-06-0648**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to atan2pi(y, x) ∈ [-1, 1] so that this capability is implemented with clear verification evidence.
+- **US-06-0649**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_trig.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0650**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sin(0)==0, sin(π/2)≈1, sin(π)≈0, sin(NaN)==NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0651**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test cos(0)==1, cos(π)≈-1, cos(π/2)≈0 so that this capability is implemented with clear verification evidence.
+- **US-06-0652**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test tan(0)==0, tan(π/4)≈1 so that this capability is implemented with clear verification evidence.
+- **US-06-0653**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test asin(0)==0, asin(1)≈π/2, asin(2)==NaN (domain error) so that this capability is implemented with clear verification evidence.
+- **US-06-0654**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test acos(1)==0, acos(0)≈π/2, acos(-1)≈π so that this capability is implemented with clear verification evidence.
+- **US-06-0655**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test atan(0)==0, atan(1)≈π/4, atan(+∞)≈π/2 so that this capability is implemented with clear verification evidence.
+- **US-06-0656**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test atan2(0,1)==0, atan2(1,0)≈π/2, atan2(0,-1)≈π, atan2(-1,0)≈-π/2 so that this capability is implemented with clear verification evidence.
+- **US-06-0657**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sinpi(0.5)==1, sinpi(1)==0, sinpi(0)==0 (exact) so that this capability is implemented with clear verification evidence.
+- **US-06-0658**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test cospi(0)==1, cospi(0.5)==0, cospi(1)==-1 (exact) so that this capability is implemented with clear verification evidence.
+- **US-06-0659**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test large argument accuracy: sin(1e15) - verify range reduction correctness so that this capability is implemented with clear verification evidence.
+- **US-06-0660**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sincos() agrees with individual sin() and cos() calls so that this capability is implemented with clear verification evidence.
+- **US-06-0661**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_trig.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0662**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: sin(x)² + cos(x)² ≈ 1 (Pythagorean identity) for all finite x so that this capability is implemented with clear verification evidence.
+- **US-06-0663**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: sin(-x) == -sin(x) (odd function) so that this capability is implemented with clear verification evidence.
+- **US-06-0664**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: cos(-x) == cos(x) (even function) so that this capability is implemented with clear verification evidence.
+- **US-06-0665**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: asin(sin(x)) ≈ x for x ∈ [-π/2, π/2] so that this capability is implemented with clear verification evidence.
+- **US-06-0666**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: |sin(x)| <= 1 and |cos(x)| <= 1 for all finite x so that this capability is implemented with clear verification evidence.
+- **US-06-0667**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: atan2(sin(x), cos(x)) ≈ x for x ∈ (-π, π] so that this capability is implemented with clear verification evidence.
+- **US-06-0668**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0669**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/sin.3 - Trigonometric functions. Covers sin(), cos(), tan(), sincos(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0670**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/asin.3 - Inverse trigonometric functions. Covers asin(), acos(), atan(), atan2(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0671**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hyperbolic: so that this capability is implemented with clear verification evidence.
+- **US-06-0672**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sinh() so that this capability is implemented with clear verification evidence.
+- **US-06-0673**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to cosh() so that this capability is implemented with clear verification evidence.
+- **US-06-0674**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to tanh() so that this capability is implemented with clear verification evidence.
+- **US-06-0675**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to asinh() so that this capability is implemented with clear verification evidence.
+- **US-06-0676**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to acosh() so that this capability is implemented with clear verification evidence.
+- **US-06-0677**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to atanh() so that this capability is implemented with clear verification evidence.
+- **US-06-0678**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_hyper.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0679**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sinh(0)==0, cosh(0)==1, tanh(0)==0 so that this capability is implemented with clear verification evidence.
+- **US-06-0680**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sinh(1)≈1.1752, cosh(1)≈1.5431, tanh(1)≈0.7616 so that this capability is implemented with clear verification evidence.
+- **US-06-0681**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test sinh(+∞)==+∞, cosh(+∞)==+∞, tanh(+∞)==1 so that this capability is implemented with clear verification evidence.
+- **US-06-0682**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test asinh(0)==0, acosh(1)==0, atanh(0)==0 so that this capability is implemented with clear verification evidence.
+- **US-06-0683**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test acosh(x) domain: acosh(0.5) → NaN/domain error so that this capability is implemented with clear verification evidence.
+- **US-06-0684**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test atanh(±1) → ±∞ (pole error) so that this capability is implemented with clear verification evidence.
+- **US-06-0685**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test NaN propagation for all hyperbolic functions so that this capability is implemented with clear verification evidence.
+- **US-06-0686**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_hyper.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0687**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: cosh(x)² - sinh(x)² ≈ 1 (hyperbolic Pythagorean identity) so that this capability is implemented with clear verification evidence.
+- **US-06-0688**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: sinh(-x) == -sinh(x) (odd) so that this capability is implemented with clear verification evidence.
+- **US-06-0689**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: cosh(-x) == cosh(x) (even) so that this capability is implemented with clear verification evidence.
+- **US-06-0690**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: tanh(x) == sinh(x)/cosh(x) for moderate x so that this capability is implemented with clear verification evidence.
+- **US-06-0691**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: asinh(sinh(x)) ≈ x for all x so that this capability is implemented with clear verification evidence.
+- **US-06-0692**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: |tanh(x)| < 1 for all finite x so that this capability is implemented with clear verification evidence.
+- **US-06-0693**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0694**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/sinh.3 - Hyperbolic functions. Covers sinh(), cosh(), tanh(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0695**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/asinh.3 - Inverse hyperbolic functions. Covers asinh(), acosh(), atanh(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0696**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to frexp() so that this capability is implemented with clear verification evidence.
+- **US-06-0697**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ldexp() so that this capability is implemented with clear verification evidence.
+- **US-06-0698**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to modf() so that this capability is implemented with clear verification evidence.
+- **US-06-0699**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to scalbn() so that this capability is implemented with clear verification evidence.
+- **US-06-0700**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to scalbln(): so that this capability is implemented with clear verification evidence.
+- **US-06-0701**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to same as scalbn() but exponent is long instead of int so that this capability is implemented with clear verification evidence.
+- **US-06-0702**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ilogb(), logb(): so that this capability is implemented with clear verification evidence.
+- **US-06-0703**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to ilogb(x): extract unbiased exponent as int. ilogb(0) → FP_ILOGB0, ilogb(∞) → INT_MAX, ilogb(NaN) → FP_ILOGBNAN so that this capability is implemented with clear verification evidence.
+- **US-06-0704**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to logb(x): extract unbiased exponent as double. logb(0) → -∞ (pole), logb(±∞) → +∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0705**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nextafter() so that this capability is implemented with clear verification evidence.
+- **US-06-0706**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nexttoward(): so that this capability is implemented with clear verification evidence.
+- **US-06-0707**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to like nextafter() but second argument is long double for direction so that this capability is implemented with clear verification evidence.
+- **US-06-0708**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nextup(), nextdown() (C23): so that this capability is implemented with clear verification evidence.
+- **US-06-0709**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nextup(x): next representable value toward +∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0710**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nextdown(x): next representable value toward -∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0711**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to copysign() so that this capability is implemented with clear verification evidence.
+- **US-06-0712**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nan(): so that this capability is implemented with clear verification evidence.
+- **US-06-0713**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nan(tagp): convert string tag to quiet NaN. nan("") == NAN, nan("123") → NaN with tag payload so that this capability is implemented with clear verification evidence.
+- **US-06-0714**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_manip.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0715**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test frexp() / ldexp() round-trip: ldexp(frexp(x, &e), e) == x so that this capability is implemented with clear verification evidence.
+- **US-06-0716**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test frexp() result ∈ [0.5, 1.0) for positive normals so that this capability is implemented with clear verification evidence.
+- **US-06-0717**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test frexp(0.0) returns 0.0 with exponent 0 so that this capability is implemented with clear verification evidence.
+- **US-06-0718**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test modf(): integer + fractional parts sum to original so that this capability is implemented with clear verification evidence.
+- **US-06-0719**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test scalbn(x, n) == x * 2^n for moderate n so that this capability is implemented with clear verification evidence.
+- **US-06-0720**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test ilogb(): ilogb(1.0)==0, ilogb(2.0)==1, ilogb(0.5)==-1 so that this capability is implemented with clear verification evidence.
+- **US-06-0721**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test ilogb(0) returns FP_ILOGB0, ilogb(NaN) returns FP_ILOGBNAN so that this capability is implemented with clear verification evidence.
+- **US-06-0722**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test logb(): logb(1.0)==0, logb(0)==-∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0723**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test nextafter(1.0, 2.0) returns next representable above 1.0 so that this capability is implemented with clear verification evidence.
+- **US-06-0724**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test nextafter(0.0, 1.0) returns smallest denormal so that this capability is implemented with clear verification evidence.
+- **US-06-0725**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test nextafter(x, x) == x for all x so that this capability is implemented with clear verification evidence.
+- **US-06-0726**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test copysign(1.0, -1.0) == -1.0 so that this capability is implemented with clear verification evidence.
+- **US-06-0727**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test nan("") returns NaN, isnan(nan("tag")) is true so that this capability is implemented with clear verification evidence.
+- **US-06-0728**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_manip.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0729**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: ldexp(frexp(x, &e), e) == x for all finite non-zero x so that this capability is implemented with clear verification evidence.
+- **US-06-0730**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: modf(x, &i); (i + frac) == x for finite x so that this capability is implemented with clear verification evidence.
+- **US-06-0731**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: copysign(fabs(x), y) has sign of y and magnitude of x so that this capability is implemented with clear verification evidence.
+- **US-06-0732**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: nextafter(x, y) != x when x != y (for finite x, y) so that this capability is implemented with clear verification evidence.
+- **US-06-0733**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: scalbn(x, 0) == x so that this capability is implemented with clear verification evidence.
+- **US-06-0734**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0735**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/frexp.3 - Extract mantissa and exponent. Covers frexp() and ldexp(). SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0736**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/modf.3 - Decompose to integer and fractional parts. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0737**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/scalbn.3 - Scale by power of radix. Covers scalbn() and scalbln(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0738**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/ilogb.3 - Extract exponent. Covers ilogb() and logb(). Document special return values. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0739**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/nextafter.3 - Next representable value. Covers nextafter(), nexttoward(), nextup(), nextdown(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0740**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/copysign.3 - Copy sign of a number. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0741**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/nan.3 - Generate quiet NaN. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0742**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to error & Gamma Functions (POSIX/C11): so that this capability is implemented with clear verification evidence.
+- **US-06-0743**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to erf(), erfc(): so that this capability is implemented with clear verification evidence.
+- **US-06-0744**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to erf(x): error function, 2/√π · ∫₀ˣ e^{-t²} dt. Range: [-1, 1] so that this capability is implemented with clear verification evidence.
+- **US-06-0745**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to erfc(x): complementary error function, 1 - erf(x). More accurate than 1 - erf(x) for large x so that this capability is implemented with clear verification evidence.
+- **US-06-0746**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implementation: rational polynomial approximation (Cody's or Abramowitz & Stegun) so that this capability is implemented with clear verification evidence.
+- **US-06-0747**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to erf(0)==0, erf(+∞)==1, erf(-∞)==-1, erfc(0)==1, erfc(+∞)==0 so that this capability is implemented with clear verification evidence.
+- **US-06-0748**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to tgamma(), lgamma() (with signgam): so that this capability is implemented with clear verification evidence.
+- **US-06-0749**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to tgamma(x): true Gamma function, Γ(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0750**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to tgamma(n) == (n-1)! for positive integers so that this capability is implemented with clear verification evidence.
+- **US-06-0751**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to poles at non-positive integers: tgamma(0) → ±∞, tgamma(-1) → NaN + FE_INVALID so that this capability is implemented with clear verification evidence.
+- **US-06-0752**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to lgamma(x): natural log of absolute value of Gamma: ln|Γ(x)| so that this capability is implemented with clear verification evidence.
+- **US-06-0753**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to set external signgam to sign of Γ(x) (+1 or -1) so that this capability is implemented with clear verification evidence.
+- **US-06-0754**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to lgamma_r(x, &signp): reentrant variant (BSD extension) so that this capability is implemented with clear verification evidence.
+- **US-06-0755**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implementation: Stirling's approximation for large x, Lanczos or rational approximation for small x so that this capability is implemented with clear verification evidence.
+- **US-06-0756**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_gamma.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0757**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test erf(0)==0, erf(1)≈0.8427, erf(+∞)==1, erf(-∞)==-1 so that this capability is implemented with clear verification evidence.
+- **US-06-0758**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test erfc(0)==1, erfc(+∞)==0, erfc(x) + erf(x) ≈ 1 so that this capability is implemented with clear verification evidence.
+- **US-06-0759**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test tgamma(1)==1, tgamma(2)==1, tgamma(5)==24, tgamma(0.5)≈√π so that this capability is implemented with clear verification evidence.
+- **US-06-0760**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test tgamma(0) → ±∞ (pole), tgamma(-1) → NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0761**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test lgamma(1)==0, lgamma(2)==0, lgamma(5)≈ln(24) so that this capability is implemented with clear verification evidence.
+- **US-06-0762**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test signgam is set correctly after lgamma() calls so that this capability is implemented with clear verification evidence.
+- **US-06-0763**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test NaN propagation for all error/gamma functions so that this capability is implemented with clear verification evidence.
+- **US-06-0764**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_gamma.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0765**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: erfc(x) + erf(x) ≈ 1.0 for all finite x so that this capability is implemented with clear verification evidence.
+- **US-06-0766**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: erf(-x) == -erf(x) (odd function) so that this capability is implemented with clear verification evidence.
+- **US-06-0767**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: exp(lgamma(x)) ≈ |tgamma(x)| for x where tgamma(x) is finite so that this capability is implemented with clear verification evidence.
+- **US-06-0768**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: tgamma(x+1) ≈ x * tgamma(x) for positive x (recurrence relation) so that this capability is implemented with clear verification evidence.
+- **US-06-0769**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0770**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/erf.3 - Error functions. Covers erf() and erfc(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0771**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/tgamma.3 - Gamma functions. Covers tgamma(), lgamma(), lgamma_r(), signgam. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0772**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to bessel Functions (POSIX/XSI): so that this capability is implemented with clear verification evidence.
+- **US-06-0773**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to j0(), j1(), jn(): so that this capability is implemented with clear verification evidence.
+- **US-06-0774**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to bessel functions of the first kind: J₀(x), J₁(x), Jₙ(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0775**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to j0(0)==1, j1(0)==0, jn(0, x)==j0(x), jn(1, x)==j1(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0776**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implementation: polynomial/rational approximation for small x, asymptotic expansion for large x, Miller's backward recurrence for jn() so that this capability is implemented with clear verification evidence.
+- **US-06-0777**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to y0(), y1(), yn(): so that this capability is implemented with clear verification evidence.
+- **US-06-0778**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to bessel functions of the second kind: Y₀(x), Y₁(x), Yₙ(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0779**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to singular at x=0: y0(0)==-∞, y1(0)==-∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0780**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to domain: x > 0 only. y0(-1) → NaN + FE_INVALID so that this capability is implemented with clear verification evidence.
+- **US-06-0781**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_bessel.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0782**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test j0(0)==1, j1(0)==0 so that this capability is implemented with clear verification evidence.
+- **US-06-0783**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test j0(x) known values: j0(2.4048...)≈0 (first zero) so that this capability is implemented with clear verification evidence.
+- **US-06-0784**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test jn(0, x)==j0(x), jn(1, x)==j1(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0785**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test y0(x), y1(x) known values so that this capability is implemented with clear verification evidence.
+- **US-06-0786**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test y0(0)==-∞, y1(0)==-∞ so that this capability is implemented with clear verification evidence.
+- **US-06-0787**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test domain: y0(-1) → NaN, y1(-1) → NaN so that this capability is implemented with clear verification evidence.
+- **US-06-0788**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test NaN propagation so that this capability is implemented with clear verification evidence.
+- **US-06-0789**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property Tests (tests/lib/m/property/prop_bessel.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0790**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: jn(n, x) satisfies Bessel recurrence: J_{n-1}(x) + J_{n+1}(x) = (2n/x) * J_n(x) so that this capability is implemented with clear verification evidence.
+- **US-06-0791**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: |j0(x)| <= 1 for all x >= 0 so that this capability is implemented with clear verification evidence.
+- **US-06-0792**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: yn(n, x) satisfies same recurrence so that this capability is implemented with clear verification evidence.
+- **US-06-0793**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0794**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man3/j0.3 - Bessel functions. Covers j0(), j1(), jn(), y0(), y1(), yn(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0795**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to comprehensive Math Library Tests (Cross-Cutting): so that this capability is implemented with clear verification evidence.
+- **US-06-0796**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz Tests (tests/lib/m/fuzz/fuzz_math.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0797**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz all implemented math functions with random double inputs (including denormals, ±0, ±∞, NaN, max/min values) so that this capability is implemented with clear verification evidence.
+- **US-06-0798**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to verify no crashes, no SIGFPE (unless expected), consistent NaN propagation so that this capability is implemented with clear verification evidence.
+- **US-06-0799**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to verify errno is set correctly for domain/range errors so that this capability is implemented with clear verification evidence.
+- **US-06-0800**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to verify fetestexcept() flags raised appropriately so that this capability is implemented with clear verification evidence.
+- **US-06-0801**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz Tests (tests/lib/m/fuzz/fuzz_mathf.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0802**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to same as above but for all float variant functions so that this capability is implemented with clear verification evidence.
+- **US-06-0803**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to accuracy Tests (tests/lib/m/unit/test_accuracy.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0804**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to compare all math functions against known high-precision reference values (MPFR or hardcoded tables) so that this capability is implemented with clear verification evidence.
+- **US-06-0805**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to verify results within 1 ULP for correctly-rounded functions, 2-3 ULP for faithfully-rounded so that this capability is implemented with clear verification evidence.
+- **US-06-0806**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test at boundary values: smallest/largest normal, smallest denormal, values near singularities so that this capability is implemented with clear verification evidence.
+- **US-06-0807**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to optimizations (i386/x87 Inline Assembly): so that this capability is implemented with clear verification evidence.
+- **US-06-0808**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to trigonometric Functions: so that this capability is implemented with clear verification evidence.
+- **US-06-0809**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sin() / cos(): Use fsin / fcos instructions so that this capability is implemented with clear verification evidence.
+- **US-06-0810**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sincos(): Use fsincos if supported, else combine so that this capability is implemented with clear verification evidence.
+- **US-06-0811**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to tan(): Use fptan; push 1.0 then fptan, ignore the 1.0 so that this capability is implemented with clear verification evidence.
+- **US-06-0812**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to atan2(): Use fpatan so that this capability is implemented with clear verification evidence.
+- **US-06-0813**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to range Reduction: Implement fprem1 loop for arguments > 2^63 (Intel Manual reduction) so that this capability is implemented with clear verification evidence.
+- **US-06-0814**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to logarithms & Exponentials: so that this capability is implemented with clear verification evidence.
+- **US-06-0815**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log2(x): Load 1.0, load x, use fyl2x so that this capability is implemented with clear verification evidence.
+- **US-06-0816**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log(x): Load ln(2), load x, use fyl2x so that this capability is implemented with clear verification evidence.
+- **US-06-0817**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to log10(x): Load log10(2), load x, use fyl2x so that this capability is implemented with clear verification evidence.
+- **US-06-0818**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pow(x, y): so that this capability is implemented with clear verification evidence.
+- **US-06-0819**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to if y is integer, use binary exponentiation so that this capability is implemented with clear verification evidence.
+- **US-06-0820**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to else: y * log2(x) -> frndint -> f2xm1 -> fscale so that this capability is implemented with clear verification evidence.
+- **US-06-0821**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to exp2(x): f2xm1 (for -1 < x < 1) with fscale for integer part so that this capability is implemented with clear verification evidence.
+- **US-06-0822**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to basic Arithmetic: so that this capability is implemented with clear verification evidence.
+- **US-06-0823**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sqrt(): fsqrt so that this capability is implemented with clear verification evidence.
+- **US-06-0824**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fabs(): fabs so that this capability is implemented with clear verification evidence.
+- **US-06-0825**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fmod(): fprem so that this capability is implemented with clear verification evidence.
+- **US-06-0826**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to remainder(): fprem1 (IEEE compliant remainder) so that this capability is implemented with clear verification evidence.
+- **US-06-0827**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to rounding & Manipulation: so that this capability is implemented with clear verification evidence.
+- **US-06-0828**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to rint(): frndint (honors current CW rounding mode) so that this capability is implemented with clear verification evidence.
+- **US-06-0829**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nearbyint(): frndint (without raising inexact exception) so that this capability is implemented with clear verification evidence.
+- **US-06-0830**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to scalbn(x, n): Load x, load n, fscale so that this capability is implemented with clear verification evidence.
+- **US-06-0831**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to lrint() / llrint(): fistp (store integer) so that this capability is implemented with clear verification evidence.
+- **US-06-0832**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing (tests/lib/m/unit/test_x87_opt.c): so that this capability is implemented with clear verification evidence.
+- **US-06-0833**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to verify x87-optimized functions produce identical results to generic C implementations so that this capability is implemented with clear verification evidence.
+- **US-06-0834**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test x87 range reduction: sin(x) for x > 2^63 matches software range reduction so that this capability is implemented with clear verification evidence.
+- **US-06-0835**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fprem loop termination (C1 flag check) so that this capability is implemented with clear verification evidence.
+- **US-06-0836**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to benchmark x87 vs generic: verify speedup for core functions so that this capability is implemented with clear verification evidence.
+- **US-06-0837**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test nearbyint() x87 path does NOT raise FE_INEXACT (vs rint() which does) so that this capability is implemented with clear verification evidence.
+- **US-06-0838**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to test fistp path for lrint()/llrint() matches current rounding mode so that this capability is implemented with clear verification evidence.
+- **US-06-0839**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-06-0840**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man/man7/math_x87.7 - i386/x87 math optimizations overview. Document which functions use hardware instructions, range reduction strategy, accuracy guarantees, and when generic fallback is used. SYNOPSIS, DESCRIPTION, NOTES, SEE ALSO so that this capability is implemented with clear verification evidence.
+- **US-06-0841**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to dynamic Linker (/libexec/ld.so) - Production Quality BSD-Style Implementation: so that this capability is implemented with clear verification evidence.
+- **US-06-0842**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implementation Checklist (Commit-Atomic, Production Gate): so that this capability is implemented with clear verification evidence.
+- **US-06-0843**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to freeze ld.so scope, ABI targets, and unsupported-feature policy so that this capability is implemented with clear verification evidence.
+- **US-06-0844**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to publish architecture relocation matrix for i386 now and x86_64 stub policy so that this capability is implemented with clear verification evidence.
+- **US-06-0845**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to specify deterministic symbol-resolution precedence and scope graph rules so that this capability is implemented with clear verification evidence.
+- **US-06-0846**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to specify DT_RPATH/DT_RUNPATH, DT_SONAME, and versioning policy so that this capability is implemented with clear verification evidence.
+- **US-06-0847**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement hardened ELF header/program-header parser with overflow guards so that this capability is implemented with clear verification evidence.
+- **US-06-0848**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dynamic table parser for required DT_* entries with strict bounds checking so that this capability is implemented with clear verification evidence.
+- **US-06-0849**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement page-aligned segment mapping with exact PROT_* transitions so that this capability is implemented with clear verification evidence.
+- **US-06-0850**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement fallback read-into-memory path for unsupported mmap edge cases so that this capability is implemented with clear verification evidence.
+- **US-06-0851**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement recursive DT_NEEDED graph construction with cycle detection metadata so that this capability is implemented with clear verification evidence.
+- **US-06-0852**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement topological load-order planner for reloc/init phases so that this capability is implemented with clear verification evidence.
+- **US-06-0853**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement per-process DSO registry with SONAME identity and refcounts so that this capability is implemented with clear verification evidence.
+- **US-06-0854**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement full search policy (LD_PRELOAD, LD_LIBRARY_PATH, RUNPATH/RPATH, cache, defaults) so that this capability is implemented with clear verification evidence.
+- **US-06-0855**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement REL/RELA dispatcher and relocation pass sequencing so that this capability is implemented with clear verification evidence.
+- **US-06-0856**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement core i386 relocation handlers (relative, absolute, pc-relative, glob-dat, jmp-slot) so that this capability is implemented with clear verification evidence.
+- **US-06-0857**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement copy relocation support with explicit executable-only safety checks so that this capability is implemented with clear verification evidence.
+- **US-06-0858**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement lazy PLT resolver and GOT patch path so that this capability is implemented with clear verification evidence.
+- **US-06-0859**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement eager binding path for RTLD_NOW and LD_BIND_NOW so that this capability is implemented with clear verification evidence.
+- **US-06-0860**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add atomic GOT patching and locking for concurrent lazy binding so that this capability is implemented with clear verification evidence.
+- **US-06-0861**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement SYSV DT_HASH and GNU DT_GNU_HASH lookup backends so that this capability is implemented with clear verification evidence.
+- **US-06-0862**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement weak/strong, visibility, and undefined-weak rules so that this capability is implemented with clear verification evidence.
+- **US-06-0863**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement preload-based interposition and global/local scope boundaries so that this capability is implemented with clear verification evidence.
+- **US-06-0864**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement versioned symbol matching (DT_VERSYM, DT_VERNEED, DT_VERDEF) when present so that this capability is implemented with clear verification evidence.
+- **US-06-0865**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement PT_TLS parsing and per-module TLS metadata registration so that this capability is implemented with clear verification evidence.
+- **US-06-0866**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement static TLS layout computation for startup objects so that this capability is implemented with clear verification evidence.
+- **US-06-0867**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dynamic TLS allocation and __tls_get_addr() resolver so that this capability is implemented with clear verification evidence.
+- **US-06-0868**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to integrate TLS module lifecycle with dlopen/dlclose and pthread creation so that this capability is implemented with clear verification evidence.
+- **US-06-0869**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement parser for DT_PREINIT_ARRAY, DT_INIT, DT_INIT_ARRAY, DT_FINI, DT_FINI_ARRAY so that this capability is implemented with clear verification evidence.
+- **US-06-0870**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dependency-respecting constructor execution order so that this capability is implemented with clear verification evidence.
+- **US-06-0871**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement reverse-order destructor execution for process exit and dlclose so that this capability is implemented with clear verification evidence.
+- **US-06-0872**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dlfcn.h ABI surface and libdl entry points skeleton so that this capability is implemented with clear verification evidence.
+- **US-06-0873**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dlopen() with RTLD_LAZY, RTLD_NOW, RTLD_LOCAL, and RTLD_GLOBAL so that this capability is implemented with clear verification evidence.
+- **US-06-0874**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dlsym() with RTLD_DEFAULT, RTLD_NEXT, and handle-scoped lookups so that this capability is implemented with clear verification evidence.
+- **US-06-0875**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dlclose() refcounting, unload decision, and RTLD_NODELETE behavior so that this capability is implemented with clear verification evidence.
+- **US-06-0876**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dlerror() with thread-local last-error storage semantics so that this capability is implemented with clear verification evidence.
+- **US-06-0877**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dladdr() and dlinfo() for common tooling requests so that this capability is implemented with clear verification evidence.
+- **US-06-0878**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement parser for supported LD_* variables with strict token validation so that this capability is implemented with clear verification evidence.
+- **US-06-0879**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to enforce secure-exec mode to ignore all unsafe LD_* inputs so that this capability is implemented with clear verification evidence.
+- **US-06-0880**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to enforce secure preload policy (deny user-controlled preload paths and objects) so that this capability is implemented with clear verification evidence.
+- **US-06-0881**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to validate ownership and permissions of DSOs before secure-mode use so that this capability is implemented with clear verification evidence.
+- **US-06-0882**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement PT_GNU_RELRO finalization and read-only remap after relocations so that this capability is implemented with clear verification evidence.
+- **US-06-0883**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement sysroot/chroot-aware path canonicalization for loader lookups so that this capability is implemented with clear verification evidence.
+- **US-06-0884**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define ld.so.cache binary format and versioning contract so that this capability is implemented with clear verification evidence.
+- **US-06-0885**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement secure cache reader in loader with ownership/permission validation so that this capability is implemented with clear verification evidence.
+- **US-06-0886**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement ldconfig(8) cache writer and SONAME symlink management so that this capability is implemented with clear verification evidence.
+- **US-06-0887**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to optimize hash lookup fast path with GNU hash bloom prefilter so that this capability is implemented with clear verification evidence.
+- **US-06-0888**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to batch relocations by page locality to reduce protection flips and page faults so that this capability is implemented with clear verification evidence.
+- **US-06-0889**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add optional prebinding/prelink experiment behind explicit build flag so that this capability is implemented with clear verification evidence.
+- **US-06-0890**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement LD_DEBUG category parser and structured debug logger so that this capability is implemented with clear verification evidence.
+- **US-06-0891**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement r_debug / _dl_debug_state updates for debugger attach flow so that this capability is implemented with clear verification evidence.
+- **US-06-0892**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement optional audit hook interface for load/bind events so that this capability is implemented with clear verification evidence.
+- **US-06-0893**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add trace-friendly one-line event mode for ktrace/strace correlation so that this capability is implemented with clear verification evidence.
+- **US-06-0894**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define centralized loader error catalog with stable error codes so that this capability is implemented with clear verification evidence.
+- **US-06-0895**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement high-context unresolved-symbol and relocation-failure diagnostics so that this capability is implemented with clear verification evidence.
+- **US-06-0896**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add fault-injection hooks for OOM, short-read, and mprotect failures so that this capability is implemented with clear verification evidence.
+- **US-06-0897**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add malformed-DSO fuzzing harnesses for parser, relocator, and resolver subsystems so that this capability is implemented with clear verification evidence.
+- **US-06-0898**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement documented loader lock hierarchy and invariants so that this capability is implemented with clear verification evidence.
+- **US-06-0899**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to make dlopen/dlsym/dlclose reentrant-safe under concurrent callers so that this capability is implemented with clear verification evidence.
+- **US-06-0900**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add concurrent lazy-bind stress runner with race-detection instrumentation so that this capability is implemented with clear verification evidence.
+- **US-06-0901**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement unload-eligibility analysis for reference graph and static TLS constraints so that this capability is implemented with clear verification evidence.
+- **US-06-0902**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement module teardown pipeline (dtors, TLS teardown, unmap, registry removal) so that this capability is implemented with clear verification evidence.
+- **US-06-0903**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add long-run load/unload churn leak tests under sanitizers so that this capability is implemented with clear verification evidence.
+- **US-06-0904**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement dl_iterate_phdr() and stable dl_phdr_info traversal semantics so that this capability is implemented with clear verification evidence.
+- **US-06-0905**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to export and maintain link_map/r_debug ABI for debuggers and unwinders so that this capability is implemented with clear verification evidence.
+- **US-06-0906**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add compatibility shims and behavioral toggles required by common third-party software so that this capability is implemented with clear verification evidence.
+- **US-06-0907**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define and enforce interpreter install path and PT_INTERP contract so that this capability is implemented with clear verification evidence.
+- **US-06-0908**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add packaging rules for ld.so, libdl.so, symlinks, ownership, and mode bits so that this capability is implemented with clear verification evidence.
+- **US-06-0909**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add upgrade/rollback safety checks for loader and cache transitions so that this capability is implemented with clear verification evidence.
+- **US-06-0910**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to create dedicated ld.so unit-test targets in build system so that this capability is implemented with clear verification evidence.
+- **US-06-0911**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add property-test harness for symbol resolution and relocation invariants so that this capability is implemented with clear verification evidence.
+- **US-06-0912**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add coverage-guided fuzz targets and corpus minimization workflow so that this capability is implemented with clear verification evidence.
+- **US-06-0913**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add sanitizer CI matrix (ASAN/UBSAN required; optional TSAN where supported) so that this capability is implemented with clear verification evidence.
+- **US-06-0914**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add multi-arch job plan (i386 active, x86_64 gated) and regression baseline snapshots so that this capability is implemented with clear verification evidence.
+- **US-06-0915**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to write ld.so(8) covering runtime behavior, search paths, env vars, secure mode, and diagnostics so that this capability is implemented with clear verification evidence.
+- **US-06-0916**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to write dlopen(3), dlsym(3), dlclose(3), and dlerror(3) with error semantics and examples so that this capability is implemented with clear verification evidence.
+- **US-06-0917**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to write dladdr(3), dlinfo(3), and dl_iterate_phdr(3) tooling-focused documentation so that this capability is implemented with clear verification evidence.
+- **US-06-0918**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to publish loader security threat model and operational hardening guide so that this capability is implemented with clear verification evidence.
+- **US-06-0919**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to audit existing loader/runtime code and record reuse/refactor/delete decisions per file so that this capability is implemented with clear verification evidence.
+- **US-06-0920**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to convert loader-related TODO/FIXME markers into standalone commit-atomic tasks so that this capability is implemented with clear verification evidence.
+- **US-06-0921**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to add final ship gate checklist for correctness, security, performance, docs, and CI sign-off so that this capability is implemented with clear verification evidence.
+- **US-06-0922**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to system Interface Libraries: so that this capability is implemented with clear verification evidence.
+- **US-06-0923**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to native Kernel Introspection (libsys / libkernel): so that this capability is implemented with clear verification evidence.
+- **US-06-0924**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to core Architecture: so that this capability is implemented with clear verification evidence.
+- **US-06-0925**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define libsys as the canonical native interface to kernel internals so that this capability is implemented with clear verification evidence.
+- **US-06-0926**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to thin wrapper over syscalls + structured /proc and /sys parsing so that this capability is implemented with clear verification evidence.
+- **US-06-0927**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sync and async query modes (for monitoring tools) so that this capability is implemented with clear verification evidence.
+- **US-06-0928**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to thread-safe design with per-thread error state (errno-like) so that this capability is implemented with clear verification evidence.
+- **US-06-0929**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to versioned ABI with libsys.so.1 soname so that this capability is implemented with clear verification evidence.
+- **US-06-0930**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to data Sources: so that this capability is implemented with clear verification evidence.
+- **US-06-0931**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sysctl MIBs (System Control): so that this capability is implemented with clear verification evidence.
+- **US-06-0932**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern (Kernel): so that this capability is implemented with clear verification evidence.
+- **US-06-0933**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.ostype (string): OS name (e.g., "Substrate") so that this capability is implemented with clear verification evidence.
+- **US-06-0934**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.osrelease (string): release version so that this capability is implemented with clear verification evidence.
+- **US-06-0935**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.osrevision (int): revision number so that this capability is implemented with clear verification evidence.
+- **US-06-0936**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.version (string): full version string so that this capability is implemented with clear verification evidence.
+- **US-06-0937**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.hostname (string): system hostname (RW) so that this capability is implemented with clear verification evidence.
+- **US-06-0938**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.domainname (string): NIS domain name (RW) so that this capability is implemented with clear verification evidence.
+- **US-06-0939**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.boottime (struct timeval): boot timestamp so that this capability is implemented with clear verification evidence.
+- **US-06-0940**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.maxproc (int): maximum processes so that this capability is implemented with clear verification evidence.
+- **US-06-0941**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.maxfiles (int): maximum open files system-wide so that this capability is implemented with clear verification evidence.
+- **US-06-0942**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.securelevel (int): security level (RW, monotonically increasing) so that this capability is implemented with clear verification evidence.
+- **US-06-0943**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.argmax (int): maximum exec argument length so that this capability is implemented with clear verification evidence.
+- **US-06-0944**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kern.ngroups (int): maximum supplementary groups so that this capability is implemented with clear verification evidence.
+- **US-06-0945**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw (Hardware): so that this capability is implemented with clear verification evidence.
+- **US-06-0946**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.machine (string): machine architecture (e.g., "i386") so that this capability is implemented with clear verification evidence.
+- **US-06-0947**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.model (string): CPU model name so that this capability is implemented with clear verification evidence.
+- **US-06-0948**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.ncpu (int): number of active CPUs so that this capability is implemented with clear verification evidence.
+- **US-06-0949**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.ncpuonline (int): number of online CPUs so that this capability is implemented with clear verification evidence.
+- **US-06-0950**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.byteorder (int): 4321 (big) or 1234 (little) so that this capability is implemented with clear verification evidence.
+- **US-06-0951**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.physmem (long): total physical memory bytes so that this capability is implemented with clear verification evidence.
+- **US-06-0952**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.usermem (long): non-kernel memory bytes so that this capability is implemented with clear verification evidence.
+- **US-06-0953**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.pagesize (int): system page size (4096) so that this capability is implemented with clear verification evidence.
+- **US-06-0954**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.disknames (string): comma-separated disk device names so that this capability is implemented with clear verification evidence.
+- **US-06-0955**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hw.sensors (struct): hardware sensor data (temperature, fan, voltage) so that this capability is implemented with clear verification evidence.
+- **US-06-0956**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to vm (Virtual Memory): so that this capability is implemented with clear verification evidence.
+- **US-06-0957**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to vm.loadavg (struct loadavg): 1, 5, 15 min load averages so that this capability is implemented with clear verification evidence.
+- **US-06-0958**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to vm.swap_usage (struct swap_stat): swap total/used/free so that this capability is implemented with clear verification evidence.
+- **US-06-0959**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to vm.vmtotal (struct vmtotal): system-wide VM statistics so that this capability is implemented with clear verification evidence.
+- **US-06-0960**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to vm.overcommit (int): memory overcommit policy so that this capability is implemented with clear verification evidence.
+- **US-06-0961**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to vm.swappiness (int): page-out aggressiveness so that this capability is implemented with clear verification evidence.
+- **US-06-0962**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to vm.vfs_cache_pressure (int): VFS inode/dentry cache reclaim pressure so that this capability is implemented with clear verification evidence.
+- **US-06-0963**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to net (Network): so that this capability is implemented with clear verification evidence.
+- **US-06-0964**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to net.inet.ip.stats (struct ipstat): IP packet counters so that this capability is implemented with clear verification evidence.
+- **US-06-0965**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to net.inet.ip.forwarding (int): IPv4 forwarding enabled so that this capability is implemented with clear verification evidence.
+- **US-06-0966**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to net.inet.tcp.stats (struct tcpstat): TCP connection stats so that this capability is implemented with clear verification evidence.
+- **US-06-0967**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to net.inet.udp.stats (struct udpstat): UDP packet stats so that this capability is implemented with clear verification evidence.
+- **US-06-0968**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to net.link.generic.system.ifcount (int): interface count so that this capability is implemented with clear verification evidence.
+- **US-06-0969**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to net.inet.icmp.stats (struct icmpstat): ICMP packet stats so that this capability is implemented with clear verification evidence.
+- **US-06-0970**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to debug (Debugging): so that this capability is implemented with clear verification evidence.
+- **US-06-0971**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to debug.klog (string): kernel log ring buffer so that this capability is implemented with clear verification evidence.
+- **US-06-0972**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to debug.traceflags (int): kernel tracing flags so that this capability is implemented with clear verification evidence.
+- **US-06-0973**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to procfs Structures (Process Filesystem): so that this capability is implemented with clear verification evidence.
+- **US-06-0974**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/stat: process state, stats, metrics (Linux-compatible format) so that this capability is implemented with clear verification evidence.
+- **US-06-0975**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/status: human-readable status info so that this capability is implemented with clear verification evidence.
+- **US-06-0976**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/maps: memory map regions and permissions so that this capability is implemented with clear verification evidence.
+- **US-06-0977**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/cmdline: command line arguments (NUL-separated) so that this capability is implemented with clear verification evidence.
+- **US-06-0978**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/environ: environment variables (NUL-separated) so that this capability is implemented with clear verification evidence.
+- **US-06-0979**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/fd/: open file descriptors (symlinks to paths) so that this capability is implemented with clear verification evidence.
+- **US-06-0980**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/cwd: symlink to current working directory so that this capability is implemented with clear verification evidence.
+- **US-06-0981**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/exe: symlink to executable so that this capability is implemented with clear verification evidence.
+- **US-06-0982**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/root: symlink to root directory so that this capability is implemented with clear verification evidence.
+- **US-06-0983**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/[pid]/task/: per-thread subdirectories so that this capability is implemented with clear verification evidence.
+- **US-06-0984**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/meminfo: global memory usage so that this capability is implemented with clear verification evidence.
+- **US-06-0985**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/cpuinfo: CPU capabilities and model info so that this capability is implemented with clear verification evidence.
+- **US-06-0986**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/uptime: system uptime and idle time so that this capability is implemented with clear verification evidence.
+- **US-06-0987**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/loadavg: load averages and process counts so that this capability is implemented with clear verification evidence.
+- **US-06-0988**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/vmstat: VM statistics counters so that this capability is implemented with clear verification evidence.
+- **US-06-0989**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc/self: symlink to calling process's /proc/[pid] so that this capability is implemented with clear verification evidence.
+- **US-06-0990**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sysfs Structures (System Filesystem): so that this capability is implemented with clear verification evidence.
+- **US-06-0991**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /sys/class/net/: network interface properties so that this capability is implemented with clear verification evidence.
+- **US-06-0992**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /sys/block/: block device attributes (size, stat, queue/) so that this capability is implemented with clear verification evidence.
+- **US-06-0993**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /sys/devices/system/cpu/: CPU topology and frequency scaling so that this capability is implemented with clear verification evidence.
+- **US-06-0994**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /sys/devices/system/memory/: memory block hotplug so that this capability is implemented with clear verification evidence.
+- **US-06-0995**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /sys/kernel/: misc kernel tunables so that this capability is implemented with clear verification evidence.
+- **US-06-0996**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to netlink Sockets (Linux Compatibility): so that this capability is implemented with clear verification evidence.
+- **US-06-0997**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nETLINK_ROUTE: interface/address/route management (RTM_* messages) so that this capability is implemented with clear verification evidence.
+- **US-06-0998**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nETLINK_KOBJECT_UEVENT: hotplug/device events so that this capability is implemented with clear verification evidence.
+- **US-06-0999**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to nETLINK_GENERIC: generic netlink families so that this capability is implemented with clear verification evidence.
+- **US-06-1000**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to direct Standard Syscalls: so that this capability is implemented with clear verification evidence.
+- **US-06-1001**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sysinfo(): system uptime, total RAM, free RAM, procs so that this capability is implemented with clear verification evidence.
+- **US-06-1002**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to uname(): system identification (sysname, nodename, release, version, machine) so that this capability is implemented with clear verification evidence.
+- **US-06-1003**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getrlimit() / setrlimit(): process resource limits so that this capability is implemented with clear verification evidence.
+- **US-06-1004**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to clock_gettime(): high-resolution system clocks so that this capability is implemented with clear verification evidence.
+- **US-06-1005**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sysctl(): generic MIB interface so that this capability is implemented with clear verification evidence.
+- **US-06-1006**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to process Information API (lib/sys): so that this capability is implemented with clear verification evidence.
+- **US-06-1007**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_count(): total number of processes so that this capability is implemented with clear verification evidence.
+- **US-06-1008**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_list(pid_t *pids, size_t *count): list all PIDs so that this capability is implemented with clear verification evidence.
+- **US-06-1009**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_info(pid_t pid, sys_procinfo_t *info): detailed process info (incl. bitness) so that this capability is implemented with clear verification evidence.
+- **US-06-1010**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_threads(pid_t pid, tid_t *tids, size_t *count): list threads so that this capability is implemented with clear verification evidence.
+- **US-06-1011**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count): list open FDs so that this capability is implemented with clear verification evidence.
+- **US-06-1012**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count): memory mappings so that this capability is implemented with clear verification evidence.
+- **US-06-1013**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_cwd(pid_t pid, char *buf, size_t len): current working directory so that this capability is implemented with clear verification evidence.
+- **US-06-1014**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_exe(pid_t pid, char *buf, size_t len): executable path so that this capability is implemented with clear verification evidence.
+- **US-06-1015**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_cmdline(pid_t pid, char **argv, size_t *argc): command line so that this capability is implemented with clear verification evidence.
+- **US-06-1016**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_proc_environ(pid_t pid, char **envp, size_t *envc): environment so that this capability is implemented with clear verification evidence.
+- **US-06-1017**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to memory Statistics API (lib/sys): so that this capability is implemented with clear verification evidence.
+- **US-06-1018**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_vm_stats(sys_vmstat_t *stats): global VM statistics so that this capability is implemented with clear verification evidence.
+- **US-06-1019**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_vm_info(sys_vminfo_t *info): memory zone info (DMA, Normal, HighMem) so that this capability is implemented with clear verification evidence.
+- **US-06-1020**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_vm_swap(sys_swapinfo_t *swap): swap usage statistics so that this capability is implemented with clear verification evidence.
+- **US-06-1021**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_vm_buffers(sys_bufinfo_t *buf): buffer cache statistics so that this capability is implemented with clear verification evidence.
+- **US-06-1022**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count): slab allocator stats so that this capability is implemented with clear verification evidence.
+- **US-06-1023**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to cPU Information API (lib/sys): so that this capability is implemented with clear verification evidence.
+- **US-06-1024**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_cpu_count(): number of CPUs (online/possible/present) so that this capability is implemented with clear verification evidence.
+- **US-06-1025**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_cpu_info(int cpu, sys_cpuinfo_t *info): per-CPU info (model, MHz, cache) so that this capability is implemented with clear verification evidence.
+- **US-06-1026**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_cpu_times(int cpu, sys_cputimes_t *times): per-CPU time accounting so that this capability is implemented with clear verification evidence.
+- **US-06-1027**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_cpu_loadavg(double *avg1, double *avg5, double *avg15): load averages so that this capability is implemented with clear verification evidence.
+- **US-06-1028**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_cpu_topology(int cpu, sys_cputopo_t *topo): socket/core/thread topology so that this capability is implemented with clear verification evidence.
+- **US-06-1029**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to system Information API (lib/sys): so that this capability is implemented with clear verification evidence.
+- **US-06-1030**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_uptime(struct timespec *ts): system uptime so that this capability is implemented with clear verification evidence.
+- **US-06-1031**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_boottime(struct timespec *ts): boot timestamp so that this capability is implemented with clear verification evidence.
+- **US-06-1032**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_hostname(char *buf, size_t len): system hostname so that this capability is implemented with clear verification evidence.
+- **US-06-1033**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_domainname(char *buf, size_t len): NIS/YP domain name so that this capability is implemented with clear verification evidence.
+- **US-06-1034**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_kernel_version(sys_version_t *ver): kernel version info so that this capability is implemented with clear verification evidence.
+- **US-06-1035**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to network Information API (lib/sys): so that this capability is implemented with clear verification evidence.
+- **US-06-1036**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_net_interfaces(sys_netif_t *ifs, size_t *count): list interfaces so that this capability is implemented with clear verification evidence.
+- **US-06-1037**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count): addresses so that this capability is implemented with clear verification evidence.
+- **US-06-1038**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_net_stats(const char *ifname, sys_netstats_t *stats): interface statistics so that this capability is implemented with clear verification evidence.
+- **US-06-1039**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_net_routes(sys_route_t *routes, size_t *count): routing table so that this capability is implemented with clear verification evidence.
+- **US-06-1040**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_net_arp(sys_arpentry_t *entries, size_t *count): ARP table so that this capability is implemented with clear verification evidence.
+- **US-06-1041**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to disk / Storage Information API (lib/sys): so that this capability is implemented with clear verification evidence.
+- **US-06-1042**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_disk_list(sys_diskinfo_t *disks, size_t *count): list block devices so that this capability is implemented with clear verification evidence.
+- **US-06-1043**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_disk_stats(const char *dev, sys_diskstat_t *stats): I/O stats per device so that this capability is implemented with clear verification evidence.
+- **US-06-1044**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_mount_list(sys_mountinfo_t *mounts, size_t *count): mounted filesystems so that this capability is implemented with clear verification evidence.
+- **US-06-1045**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to data Structures (lib/sys/include/sys/sysinfo.h): so that this capability is implemented with clear verification evidence.
+- **US-06-1046**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_procinfo_t: pid, ppid, pgid, sid, uid, gid, state, name, times, memory so that this capability is implemented with clear verification evidence.
+- **US-06-1047**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_vmstat_t: total, free, available, buffers, cached, swap_total, swap_free so that this capability is implemented with clear verification evidence.
+- **US-06-1048**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_cpuinfo_t: vendor, model, family, stepping, mhz, cache_size, flags so that this capability is implemented with clear verification evidence.
+- **US-06-1049**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_cputopo_t: socket_id, core_id, thread_id, numa_node so that this capability is implemented with clear verification evidence.
+- **US-06-1050**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_netif_t: name, index, flags, mtu, hwaddr, type so that this capability is implemented with clear verification evidence.
+- **US-06-1051**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_diskinfo_t: name, size, sector_size, model, serial so that this capability is implemented with clear verification evidence.
+- **US-06-1052**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sys_mountinfo_t: device, mountpoint, fstype, flags so that this capability is implemented with clear verification evidence.
+- **US-06-1053**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to bSD Compatibility Shim (libkvm): so that this capability is implemented with clear verification evidence.
+- **US-06-1054**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to design Goals: so that this capability is implemented with clear verification evidence.
+- **US-06-1055**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to freeBSD/NetBSD/OpenBSD libkvm API compatibility so that this capability is implemented with clear verification evidence.
+- **US-06-1056**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement entirely in userspace using libsys so that this capability is implemented with clear verification evidence.
+- **US-06-1057**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to support kinfo_proc, kinfo_vmentry, kinfo_file structures so that this capability is implemented with clear verification evidence.
+- **US-06-1058**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to maintain BSD ABI for source-level portability so that this capability is implemented with clear verification evidence.
+- **US-06-1059**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to wrapper Layer: so that this capability is implemented with clear verification evidence.
+- **US-06-1060**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to map kvm_* calls to equivalent libsys functions so that this capability is implemented with clear verification evidence.
+- **US-06-1061**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to structure translation between native sys_procinfo_t and BSD kinfo_proc so that this capability is implemented with clear verification evidence.
+- **US-06-1062**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to error message buffering (kvm_geterr) so that this capability is implemented with clear verification evidence.
+- **US-06-1063**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to core Functions: so that this capability is implemented with clear verification evidence.
+- **US-06-1064**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_open(execfile, corefile, swapfile, flags, errstr): initialize context so that this capability is implemented with clear verification evidence.
+- **US-06-1065**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_openfiles(...): extended open so that this capability is implemented with clear verification evidence.
+- **US-06-1066**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_close(kd): close and free so that this capability is implemented with clear verification evidence.
+- **US-06-1067**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_geterr(kd): error message from last failure so that this capability is implemented with clear verification evidence.
+- **US-06-1068**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to process Functions: so that this capability is implemented with clear verification evidence.
+- **US-06-1069**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_getprocs(kd, op, arg, cnt): process list as kinfo_proc array so that this capability is implemented with clear verification evidence.
+- **US-06-1070**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kERN_PROC_ALL: all processes so that this capability is implemented with clear verification evidence.
+- **US-06-1071**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kERN_PROC_PID: specific PID so that this capability is implemented with clear verification evidence.
+- **US-06-1072**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kERN_PROC_PGRP: by process group so that this capability is implemented with clear verification evidence.
+- **US-06-1073**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kERN_PROC_SESSION: by session so that this capability is implemented with clear verification evidence.
+- **US-06-1074**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kERN_PROC_UID: by user ID so that this capability is implemented with clear verification evidence.
+- **US-06-1075**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kERN_PROC_RUID: by real user ID so that this capability is implemented with clear verification evidence.
+- **US-06-1076**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kERN_PROC_TTY: by controlling terminal so that this capability is implemented with clear verification evidence.
+- **US-06-1077**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_getargv(kd, kp, nchr): command line arguments so that this capability is implemented with clear verification evidence.
+- **US-06-1078**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_getenvv(kd, kp, nchr): environment variables so that this capability is implemented with clear verification evidence.
+- **US-06-1079**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_getproc2(kd, op, arg, elem_size, cnt): extended proc info so that this capability is implemented with clear verification evidence.
+- **US-06-1080**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to virtual Memory Functions: so that this capability is implemented with clear verification evidence.
+- **US-06-1081**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_getfiles(kd, op, arg, cnt): open file list so that this capability is implemented with clear verification evidence.
+- **US-06-1082**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_getvmmap(kd, kp, cnt): VM mappings for process so that this capability is implemented with clear verification evidence.
+- **US-06-1083**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kernel Symbol Functions: so that this capability is implemented with clear verification evidence.
+- **US-06-1084**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_nlist(kd, nl): look up kernel symbols from /proc/kallsyms or kernel ELF so that this capability is implemented with clear verification evidence.
+- **US-06-1085**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_read(kd, addr, buf, len): read kernel memory (via /proc/kcore) so that this capability is implemented with clear verification evidence.
+- **US-06-1086**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kvm_write(kd, addr, buf, len): write kernel memory (privileged) so that this capability is implemented with clear verification evidence.
+- **US-06-1087**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to data Structures (BSD-compatible): so that this capability is implemented with clear verification evidence.
+- **US-06-1088**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to struct kinfo_proc: BSD process info (ki_pid, ki_ppid, ki_pgid, ki_uid, ki_comm, ki_stat, etc.) so that this capability is implemented with clear verification evidence.
+- **US-06-1089**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to struct kinfo_vmentry: BSD VM mapping (kve_start, kve_end, kve_protection, kve_path) so that this capability is implemented with clear verification evidence.
+- **US-06-1090**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to struct kinfo_file: BSD open file (kf_fd, kf_type, kf_offset, kf_path) so that this capability is implemented with clear verification evidence.
+- **US-06-1091**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to struct nlist: symbol lookup request/response (n_name, n_type, n_value) so that this capability is implemented with clear verification evidence.
+- **US-06-1092**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to linux Compatibility Shim (libproc): so that this capability is implemented with clear verification evidence.
+- **US-06-1093**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to openproc(flags, ...): process enumeration context with filtering so that this capability is implemented with clear verification evidence.
+- **US-06-1094**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pROC_FILLMEM: fill memory statistics so that this capability is implemented with clear verification evidence.
+- **US-06-1095**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pROC_FILLCOM: fill command name so that this capability is implemented with clear verification evidence.
+- **US-06-1096**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pROC_FILLARG: fill command line arguments so that this capability is implemented with clear verification evidence.
+- **US-06-1097**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pROC_FILLENV: fill environment so that this capability is implemented with clear verification evidence.
+- **US-06-1098**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pROC_FILLSTATUS: fill status info so that this capability is implemented with clear verification evidence.
+- **US-06-1099**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pROC_FILLUSR: fill user/group names so that this capability is implemented with clear verification evidence.
+- **US-06-1100**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pROC_PID: filter by PID list so that this capability is implemented with clear verification evidence.
+- **US-06-1101**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pROC_UID: filter by UID list so that this capability is implemented with clear verification evidence.
+- **US-06-1102**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to closeproc(pt): close context and free resources so that this capability is implemented with clear verification evidence.
+- **US-06-1103**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to readproc(pt, p): read next process entry so that this capability is implemented with clear verification evidence.
+- **US-06-1104**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to readproctab(flags, ...): read all processes into array so that this capability is implemented with clear verification evidence.
+- **US-06-1105**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to look_up_our_self(p): get info about calling process so that this capability is implemented with clear verification evidence.
+- **US-06-1106**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to get_proc_stats(pid, ps): per-process /proc/[pid]/stat parsing so that this capability is implemented with clear verification evidence.
+- **US-06-1107**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to proc_t Structure: so that this capability is implemented with clear verification evidence.
+- **US-06-1108**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pID, PPID, PGID, SID, TPGID so that this capability is implemented with clear verification evidence.
+- **US-06-1109**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to state, priority, nice so that this capability is implemented with clear verification evidence.
+- **US-06-1110**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to user/system/start times so that this capability is implemented with clear verification evidence.
+- **US-06-1111**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to rSS, VSize, shared, text, data so that this capability is implemented with clear verification evidence.
+- **US-06-1112**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to command name, command line so that this capability is implemented with clear verification evidence.
+- **US-06-1113**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to system-wide: so that this capability is implemented with clear verification evidence.
+- **US-06-1114**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to meminfo(): parse /proc/meminfo so that this capability is implemented with clear verification evidence.
+- **US-06-1115**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to cpuinfo(): parse /proc/cpuinfo so that this capability is implemented with clear verification evidence.
+- **US-06-1116**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to uptime(uptime, idle): parse /proc/uptime so that this capability is implemented with clear verification evidence.
+- **US-06-1117**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to loadavg(av1, av5, av15): parse /proc/loadavg so that this capability is implemented with clear verification evidence.
+- **US-06-1118**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to dependencies: so that this capability is implemented with clear verification evidence.
+- **US-06-1119**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kernel syscall interfaces for introspection (no /dev/kmem) so that this capability is implemented with clear verification evidence.
+- **US-06-1120**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /proc filesystem with Linux-compatible structure so that this capability is implemented with clear verification evidence.
+- **US-06-1121**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to /sys filesystem for hardware introspection so that this capability is implemented with clear verification evidence.
+- **US-06-1122**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to kernel symbol export mechanism for kvm_nlist() so that this capability is implemented with clear verification evidence.
+- **US-06-1123**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-06-1124**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to libsys: so that this capability is implemented with clear verification evidence.
+- **US-06-1125**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: each sys_proc_* function against known process state so that this capability is implemented with clear verification evidence.
+- **US-06-1126**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: each sys_vm_* function returns sane values so that this capability is implemented with clear verification evidence.
+- **US-06-1127**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: each sys_cpu_* function with multi-CPU QEMU so that this capability is implemented with clear verification evidence.
+- **US-06-1128**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: each sys_net_* function with loopback interface so that this capability is implemented with clear verification evidence.
+- **US-06-1129**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: sysctl MIB reads for all kern.*, hw.*, vm.* nodes so that this capability is implemented with clear verification evidence.
+- **US-06-1130**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: sys_proc_list count matches sys_proc_count so that this capability is implemented with clear verification evidence.
+- **US-06-1131**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to thread safety: concurrent calls from 8 threads so that this capability is implemented with clear verification evidence.
+- **US-06-1132**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to performance: 10000 sys_proc_info calls latency benchmark so that this capability is implemented with clear verification evidence.
+- **US-06-1133**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to libkvm: so that this capability is implemented with clear verification evidence.
+- **US-06-1134**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: kvm_open / kvm_close lifecycle so that this capability is implemented with clear verification evidence.
+- **US-06-1135**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: kvm_getprocs with each KERN_PROC_* filter so that this capability is implemented with clear verification evidence.
+- **US-06-1136**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: kvm_getargv / kvm_getenvv string retrieval so that this capability is implemented with clear verification evidence.
+- **US-06-1137**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: kvm_nlist symbol lookup so that this capability is implemented with clear verification evidence.
+- **US-06-1138**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to compatibility: compile and run BSD top, ps, fstat against libkvm so that this capability is implemented with clear verification evidence.
+- **US-06-1139**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to libproc: so that this capability is implemented with clear verification evidence.
+- **US-06-1140**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: openproc / readproc / closeproc cycle so that this capability is implemented with clear verification evidence.
+- **US-06-1141**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: filter flags (PROC_PID, PROC_UID) correctness so that this capability is implemented with clear verification evidence.
+- **US-06-1142**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to compatibility: compile and run procps-ng tools (ps, top, free, vmstat) so that this capability is implemented with clear verification evidence.
+- **US-06-1143**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-06-1144**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: libsys(3), sysctl(3), kvm_open(3), kvm_getprocs(3) so that this capability is implemented with clear verification evidence.
+- **US-06-1145**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: openproc(3), readproc(3), readproctab(3) so that this capability is implemented with clear verification evidence.
+- **US-06-1146**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to internal doc: libsys → libkvm → libproc layering so that this capability is implemented with clear verification evidence.
+- **US-06-1147**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to user Authentication Library (lib/auth/): so that this capability is implemented with clear verification evidence.
+- **US-06-1148**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to password Database (/etc/passwd): so that this capability is implemented with clear verification evidence.
+- **US-06-1149**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to structures: struct passwd (pw_name, pw_passwd, pw_uid, pw_gid, pw_gecos, pw_dir, pw_shell) so that this capability is implemented with clear verification evidence.
+- **US-06-1150**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to parser: tokenize user:pwd:uid:gid:gecos:home:shell (colon-delimited) so that this capability is implemented with clear verification evidence.
+- **US-06-1151**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to lookup API: so that this capability is implemented with clear verification evidence.
+- **US-06-1152**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getpwnam(const char *name): look up by name so that this capability is implemented with clear verification evidence.
+- **US-06-1153**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getpwuid(uid_t uid): look up by UID so that this capability is implemented with clear verification evidence.
+- **US-06-1154**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to iteration API: so that this capability is implemented with clear verification evidence.
+- **US-06-1155**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to setpwent(): open/rewind passwd database so that this capability is implemented with clear verification evidence.
+- **US-06-1156**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getpwent(): get next entry so that this capability is implemented with clear verification evidence.
+- **US-06-1157**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to endpwent(): close database so that this capability is implemented with clear verification evidence.
+- **US-06-1158**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to thread Safety: so that this capability is implemented with clear verification evidence.
+- **US-06-1159**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getpwnam_r(name, pwd, buf, buflen, result): reentrant variant so that this capability is implemented with clear verification evidence.
+- **US-06-1160**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getpwuid_r(uid, pwd, buf, buflen, result): reentrant variant so that this capability is implemented with clear verification evidence.
+- **US-06-1161**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getpwent_r(pwd, buf, buflen, result): reentrant variant so that this capability is implemented with clear verification evidence.
+- **US-06-1162**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to edge Cases: so that this capability is implemented with clear verification evidence.
+- **US-06-1163**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to handle malformed lines (missing fields, non-numeric uid/gid) so that this capability is implemented with clear verification evidence.
+- **US-06-1164**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to handle NIS/YP + entries (stub or pass-through) so that this capability is implemented with clear verification evidence.
+- **US-06-1165**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to handle entries with empty gecos or shell fields so that this capability is implemented with clear verification evidence.
+- **US-06-1166**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to group Database (/etc/group): so that this capability is implemented with clear verification evidence.
+- **US-06-1167**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to structures: struct group (gr_name, gr_passwd, gr_gid, gr_mem) so that this capability is implemented with clear verification evidence.
+- **US-06-1168**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to parser: tokenize name:passwd:gid:member1,member2, so that this capability is implemented with clear verification evidence.
+- **US-06-1169**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to lookup API: so that this capability is implemented with clear verification evidence.
+- **US-06-1170**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getgrnam(const char *name): look up by name so that this capability is implemented with clear verification evidence.
+- **US-06-1171**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getgrgid(gid_t gid): look up by GID so that this capability is implemented with clear verification evidence.
+- **US-06-1172**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to iteration API: setgrent(), getgrent(), endgrent() so that this capability is implemented with clear verification evidence.
+- **US-06-1173**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to thread Safety: getgrnam_r(), getgrgid_r(), getgrent_r() so that this capability is implemented with clear verification evidence.
+- **US-06-1174**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to supplementary Groups: so that this capability is implemented with clear verification evidence.
+- **US-06-1175**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to getgrouplist(user, group, groups, ngroups): enumerate memberships so that this capability is implemented with clear verification evidence.
+- **US-06-1176**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to initgroups(user, group): set supplementary groups for process so that this capability is implemented with clear verification evidence.
+- **US-06-1177**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to shadow Database (/etc/shadow): so that this capability is implemented with clear verification evidence.
+- **US-06-1178**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to structures: struct spwd (sp_namp, sp_pwdp, sp_lstchg, sp_min, sp_max, sp_warn, sp_inact, sp_expire, sp_flag) so that this capability is implemented with clear verification evidence.
+- **US-06-1179**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to parser: tokenize user:hash:lastchg:min:max:warn:inact:expire:flag so that this capability is implemented with clear verification evidence.
+- **US-06-1180**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to aPI: getspnam(name), setspent(), getspent(), endspent() so that this capability is implemented with clear verification evidence.
+- **US-06-1181**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to thread Safety: getspnam_r(), getspent_r() so that this capability is implemented with clear verification evidence.
+- **US-06-1182**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to security: so that this capability is implemented with clear verification evidence.
+- **US-06-1183**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to file permissions: readable only by root (mode 0600) so that this capability is implemented with clear verification evidence.
+- **US-06-1184**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to refuse to open if euid ≠ 0 so that this capability is implemented with clear verification evidence.
+- **US-06-1185**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to lock file during writes (advisory locking) so that this capability is implemented with clear verification evidence.
+- **US-06-1186**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to cryptography (Password Hashing): so that this capability is implemented with clear verification evidence.
+- **US-06-1187**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to crypt(key, salt) Interface: so that this capability is implemented with clear verification evidence.
+- **US-06-1188**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to detect hash type by salt prefix ($1$, $5$, $6$, $2b$) so that this capability is implemented with clear verification evidence.
+- **US-06-1189**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to legacy DES for salts without $ prefix so that this capability is implemented with clear verification evidence.
+- **US-06-1190**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return hash string in thread-local static buffer so that this capability is implemented with clear verification evidence.
+- **US-06-1191**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to crypt_r(key, salt, data) Reentrant: so that this capability is implemented with clear verification evidence.
+- **US-06-1192**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to thread-safe version with caller-provided struct crypt_data so that this capability is implemented with clear verification evidence.
+- **US-06-1193**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to algorithms: so that this capability is implemented with clear verification evidence.
+- **US-06-1194**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to dES: legacy support (8-char key limit, 2-char salt) so that this capability is implemented with clear verification evidence.
+- **US-06-1195**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to mD5 ($1$): BSD/Linux standard, 1000 rounds so that this capability is implemented with clear verification evidence.
+- **US-06-1196**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sHA-256 ($5$): configurable rounds (default 5000) so that this capability is implemented with clear verification evidence.
+- **US-06-1197**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to sHA-512 ($6$): configurable rounds (default 5000), preferred so that this capability is implemented with clear verification evidence.
+- **US-06-1198**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to bcrypt ($2b$): cost-factor based, memory-hard (optional) so that this capability is implemented with clear verification evidence.
+- **US-06-1199**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to salt Generation: so that this capability is implemented with clear verification evidence.
+- **US-06-1200**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to crypt_gensalt(prefix, count, rbytes, nrbytes): generate random salt so that this capability is implemented with clear verification evidence.
+- **US-06-1201**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to use /dev/urandom for entropy so that this capability is implemented with clear verification evidence.
+- **US-06-1202**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to base64 encoding for salt string so that this capability is implemented with clear verification evidence.
+- **US-06-1203**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to high-Level Authentication: so that this capability is implemented with clear verification evidence.
+- **US-06-1204**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to auth_verify_password(user, clear_text): so that this capability is implemented with clear verification evidence.
+- **US-06-1205**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to retrieve shadow entry (requires root or shadow group) so that this capability is implemented with clear verification evidence.
+- **US-06-1206**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to extract salt from stored hash so that this capability is implemented with clear verification evidence.
+- **US-06-1207**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to hash clear_text with extracted salt via crypt() so that this capability is implemented with clear verification evidence.
+- **US-06-1208**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to constant-time comparison of computed vs stored hash so that this capability is implemented with clear verification evidence.
+- **US-06-1209**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return 0 on success, -1 on failure (no timing leak) so that this capability is implemented with clear verification evidence.
+- **US-06-1210**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to auth_check_expiry(user): so that this capability is implemented with clear verification evidence.
+- **US-06-1211**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to check password expiry (sp_max, sp_lstchg) so that this capability is implemented with clear verification evidence.
+- **US-06-1212**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to check account expiry (sp_expire) so that this capability is implemented with clear verification evidence.
+- **US-06-1213**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to check inactive days (sp_inact) so that this capability is implemented with clear verification evidence.
+- **US-06-1214**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to return status: OK, WARN, EXPIRED, LOCKED so that this capability is implemented with clear verification evidence.
+- **US-06-1215**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to pAM Integration (future): so that this capability is implemented with clear verification evidence.
+- **US-06-1216**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to define PAM module interface (pam_sm_authenticate, etc.) so that this capability is implemented with clear verification evidence.
+- **US-06-1217**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to implement pam_unix.so using lib/auth functions so that this capability is implemented with clear verification evidence.
+- **US-06-1218**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to configuration via /etc/pam.d/ or /etc/pam.conf so that this capability is implemented with clear verification evidence.
+- **US-06-1219**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-06-1220**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: getpwnam / getpwuid with known /etc/passwd content so that this capability is implemented with clear verification evidence.
+- **US-06-1221**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: getgrnam / getgrgid with known /etc/group content so that this capability is implemented with clear verification evidence.
+- **US-06-1222**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: getspnam with known /etc/shadow content so that this capability is implemented with clear verification evidence.
+- **US-06-1223**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: crypt() produces correct hash for each algorithm ($1$, $5$, $6$) so that this capability is implemented with clear verification evidence.
+- **US-06-1224**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: crypt_gensalt produces valid salts so that this capability is implemented with clear verification evidence.
+- **US-06-1225**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: auth_verify_password correct + incorrect passwords so that this capability is implemented with clear verification evidence.
+- **US-06-1226**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: auth_check_expiry for OK, WARN, EXPIRED, LOCKED states so that this capability is implemented with clear verification evidence.
+- **US-06-1227**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to unit: reentrant _r variants are thread-safe so that this capability is implemented with clear verification evidence.
+- **US-06-1228**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: getpwent iteration covers all entries in /etc/passwd so that this capability is implemented with clear verification evidence.
+- **US-06-1229**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to property: constant-time comparison - timing does not vary with input so that this capability is implemented with clear verification evidence.
+- **US-06-1230**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to security: getspnam fails if euid ≠ 0 so that this capability is implemented with clear verification evidence.
+- **US-06-1231**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to fuzz: parser handles malformed /etc/passwd, /etc/group, /etc/shadow so that this capability is implemented with clear verification evidence.
+- **US-06-1232**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-06-1233**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: getpwnam(3), getpwuid(3), getpwent(3) so that this capability is implemented with clear verification evidence.
+- **US-06-1234**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: getgrnam(3), getgrgid(3), getgrent(3) so that this capability is implemented with clear verification evidence.
+- **US-06-1235**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: getspnam(3), shadow(5) so that this capability is implemented with clear verification evidence.
+- **US-06-1236**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: crypt(3), crypt_gensalt(3) so that this capability is implemented with clear verification evidence.
+- **US-06-1237**: As a Substrate contributor working on 6. C Library (`lib/c`), I want to man pages: passwd(5), group(5) so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-06-0001** (EARS/Ubiquitous): The Substrate system shall sysctl Userspace API (lib/c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0002** (EARS/Ubiquitous): The Substrate system shall headers & ABI Contracts:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0003** (EARS/Ubiquitous): The Substrate system shall define and export canonical declarations in include/sys/sysctl.h.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0004** (EARS/Ubiquitous): The Substrate system shall define and export stable userspace data types for MIB paths and metadata results.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0005** (EARS/Ubiquitous): The Substrate system shall add compile-time guards for structure size/alignment ABI stability.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0006** (EARS/Ubiquitous): The Substrate system shall document thread-safety guarantees and reentrancy expectations in headers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0007** (EARS/Ubiquitous): The Substrate system shall core libc Entry Points:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0008** (EARS/Ubiquitous): The Substrate system shall implement sysctl() libc wrapper with strict argument validation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0009** (EARS/Ubiquitous): The Substrate system shall implement sysctlbyname() using name-to-MIB translation helper flow.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0010** (EARS/Ubiquitous): The Substrate system shall implement sysctlnametomib() with deterministic retry behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0011** (EARS/Ubiquitous): The Substrate system shall implement helper for dynamic buffer sizing/retry loop (ENOMEM growth pattern).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0012** (EARS/Ubiquitous): The Substrate system shall implement typed convenience helpers (int, uint, quad, string) with explicit bounds checks.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0013** (EARS/Ubiquitous): The Substrate system shall thread Safety & Robustness:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0014** (EARS/Ubiquitous): The Substrate system shall ensure no static mutable buffers in libc sysctl helpers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0015** (EARS/Ubiquitous): The Substrate system shall ensure all helpers preserve errno semantics consistently on failure.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0016** (EARS/Ubiquitous): The Substrate system shall add cancellation-safety review for wrappers used in multi-threaded callers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0017** (EARS/Ubiquitous): The Substrate system shall add overflow-safe arithmetic helpers for buffer growth and MIB conversion.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0018** (EARS/Ubiquitous): The Substrate system shall testing (libc Side):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0019** (EARS/Ubiquitous): The Substrate system shall add unit tests for wrapper argument validation and errno behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0020** (EARS/Ubiquitous): The Substrate system shall add unit tests for name-to-MIB and MIB-to-name translation helpers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0021** (EARS/Ubiquitous): The Substrate system shall add integration tests for size-probe + retry loops across changing kernel values.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0022** (EARS/Ubiquitous): The Substrate system shall add thread-stress tests for concurrent wrapper usage.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0023** (EARS/Ubiquitous): The Substrate system shall add fuzz tests for malformed dotted names and oversized MIB arrays.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0024** (EARS/Ubiquitous): The Substrate system shall manpages & Usage Guidance:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0025** (EARS/Ubiquitous): The Substrate system shall add man/man3/sysctl.3 documenting libc contract and thread-safety.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0026** (EARS/Ubiquitous): The Substrate system shall add man/man3/sysctlbyname.3 with buffer sizing examples.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0027** (EARS/Ubiquitous): The Substrate system shall add man/man3/sysctlnametomib.3 with name/MIB conversion examples.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0028** (EARS/Ubiquitous): The Substrate system shall update man/man2/sysctl.2 to align kernel syscall semantics with libc helper behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0029** (EARS/Ubiquitous): The Substrate system shall add SEE ALSO cross-links between sysctl(2) and sysctl(3) pages.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0030** (EARS/Ubiquitous): The Substrate system shall stdio:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0031** (EARS/Ubiquitous): The Substrate system shall fILE Structure & Buffer Management (lib/c/src/stdio/):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0032** (EARS/Ubiquitous): The Substrate system shall define internal FILE structure (_flags, _buf, _bufsiz, _cnt, _ptr, _fd, _lbfsize, _close/_read/_write/_seek function pointers).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0033** (EARS/Ubiquitous): The Substrate system shall implement three buffer modes:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0034** (EARS/Ubiquitous): The Substrate system shall _IOFBF (fully buffered): flush on buffer full or explicit fflush().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0035** (EARS/Ubiquitous): The Substrate system shall _IOLBF (line buffered): flush on newline or buffer full.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0036** (EARS/Ubiquitous): The Substrate system shall _IONBF (unbuffered): every fputc()/fwrite() calls write() immediately.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0037** (EARS/Ubiquitous): The Substrate system shall implement setvbuf(FILE *stream, char *buf, int mode, size_t size):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0038** (EARS/Ubiquitous): The Substrate system shall validate mode is _IOFBF, _IOLBF, or _IONBF.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0039** (EARS/Ubiquitous): The Substrate system shall allow user-supplied buffer or NULL for auto-allocation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0040** (EARS/Ubiquitous): The Substrate system shall must be called after fopen() but before any I/O.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0041** (EARS/Ubiquitous): The Substrate system shall return 0 on success, non-zero on failure.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0042** (EARS/Ubiquitous): The Substrate system shall implement setbuf(FILE *stream, char *buf) as wrapper for setvbuf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0043** (EARS/Ubiquitous): The Substrate system shall implement setlinebuf(FILE *stream) (BSD extension).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0044** (EARS/Ubiquitous): The Substrate system shall implement fflush(FILE *stream):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0045** (EARS/Ubiquitous): The Substrate system shall write buffered output data via write() syscall.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0046** (EARS/Ubiquitous): The Substrate system shall handle partial writes (retry loop).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0047** (EARS/Ubiquitous): When stream == NULL, flush all open output streams, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0048** (EARS/Ubiquitous): The Substrate system shall return 0 on success, EOF on error (set errno).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0049** (EARS/Ubiquitous): The Substrate system shall pre-allocate stdin, stdout, stderr FILE objects:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0050** (EARS/Ubiquitous): The Substrate system shall stdin: fd 0, _IOLBF default.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0051** (EARS/Ubiquitous): The Substrate system shall stdout: fd 1, _IOLBF if isatty(), else _IOFBF.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0052** (EARS/Ubiquitous): The Substrate system shall stderr: fd 2, _IONBF always.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0053** (EARS/Ubiquitous): The Substrate system shall implement __sinit() / stream initialization on first use (lazy init pattern).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0054** (EARS/Ubiquitous): The Substrate system shall file Open/Close Operations:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0055** (EARS/Ubiquitous): The Substrate system shall fopen(const char *path, const char *mode):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0056** (EARS/Ubiquitous): The Substrate system shall parse mode string: "r", "w", "a", "r+", "w+", "a+", with "b" (binary, no-op on POSIX) and "x" (C11 exclusive create).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0057** (EARS/Ubiquitous): The Substrate system shall map to open() flags: O_RDONLY, O_WRONLY|O_CREAT|O_TRUNC, O_WRONLY|O_CREAT|O_APPEND, etc.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0058** (EARS/Ubiquitous): The Substrate system shall allocate FILE, assign fd, set default buffer.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0059** (EARS/Ubiquitous): The Substrate system shall return NULL on failure (set errno).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0060** (EARS/Ubiquitous): The Substrate system shall fdopen(int fd, const char *mode): wrap existing fd in FILE.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0061** (EARS/Ubiquitous): The Substrate system shall freopen(const char *path, const char *mode, FILE *stream):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0062** (EARS/Ubiquitous): The Substrate system shall flush and close existing fd.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0063** (EARS/Ubiquitous): The Substrate system shall re-open with new path/mode, reuse FILE object.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0064** (EARS/Ubiquitous): When path == NULL, change mode of existing fd (C99 extension), the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0065** (EARS/Ubiquitous): The Substrate system shall fclose(FILE *stream):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0066** (EARS/Ubiquitous): The Substrate system shall flush output buffer via fflush().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0067** (EARS/Ubiquitous): The Substrate system shall free allocated buffer (if library-allocated).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0068** (EARS/Ubiquitous): The Substrate system shall close() underlying fd.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0069** (EARS/Ubiquitous): The Substrate system shall free FILE structure.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0070** (EARS/Ubiquitous): The Substrate system shall return 0 on success, EOF on error.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0071** (EARS/Ubiquitous): The Substrate system shall fcloseall() (extension): close all open streams.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0072** (EARS/Ubiquitous): The Substrate system shall character & Line I/O:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0073** (EARS/Ubiquitous): The Substrate system shall fgetc(FILE *stream) / getc() macro: read one byte from buffer or refill.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0074** (EARS/Ubiquitous): The Substrate system shall fputc(int c, FILE *stream) / putc() macro: write one byte to buffer or flush.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0075** (EARS/Ubiquitous): The Substrate system shall getchar() / putchar(): wrappers for stdin/stdout.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0076** (EARS/Ubiquitous): The Substrate system shall ungetc(int c, FILE *stream): push back one character (at least 1 byte guaranteed).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0077** (EARS/Ubiquitous): The Substrate system shall fgets(char *s, int n, FILE *stream): read line up to n-1 chars or newline.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0078** (EARS/Ubiquitous): The Substrate system shall fputs(const char *s, FILE *stream): write string (no trailing newline).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0079** (EARS/Ubiquitous): The Substrate system shall gets_s() (C11 bounds-checked, optional) - or gets() removed per C11.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0080** (EARS/Ubiquitous): The Substrate system shall puts(const char *s): write string + newline to stdout.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0081** (EARS/Ubiquitous): The Substrate system shall block I/O:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0082** (EARS/Ubiquitous): The Substrate system shall fread(void *ptr, size_t size, size_t nmemb, FILE *stream):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0083** (EARS/Ubiquitous): The Substrate system shall read size * nmemb bytes, buffered.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0084** (EARS/Ubiquitous): The Substrate system shall handle partial reads, return number of complete elements.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0085** (EARS/Ubiquitous): The Substrate system shall set EOF/error indicators on short read.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0086** (EARS/Ubiquitous): The Substrate system shall fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0087** (EARS/Ubiquitous): The Substrate system shall write size * nmemb bytes through buffer.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0088** (EARS/Ubiquitous): The Substrate system shall return number of complete elements written.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0089** (EARS/Ubiquitous): The Substrate system shall file Positioning:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0090** (EARS/Ubiquitous): The Substrate system shall fseek(FILE *stream, long offset, int whence):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0091** (EARS/Ubiquitous): The Substrate system shall flush output buffer before seeking.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0092** (EARS/Ubiquitous): The Substrate system shall discard input buffer on seek.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0093** (EARS/Ubiquitous): The Substrate system shall whence: SEEK_SET, SEEK_CUR, SEEK_END.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0094** (EARS/Ubiquitous): The Substrate system shall return 0 on success, -1 on error.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0095** (EARS/Ubiquitous): The Substrate system shall ftell(FILE *stream): return current position (accounting for buffer offset).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0096** (EARS/Ubiquitous): The Substrate system shall rewind(FILE *stream): fseek(stream, 0, SEEK_SET) + clear error indicator.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0097** (EARS/Ubiquitous): The Substrate system shall fgetpos(FILE *stream, fpos_t *pos) / fsetpos(FILE *stream, const fpos_t *pos): opaque position save/restore.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0098** (EARS/Ubiquitous): The Substrate system shall fseeko() / ftello() (POSIX): off_t variants for large file support.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0099** (EARS/Ubiquitous): The Substrate system shall error & EOF Handling:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0100** (EARS/Ubiquitous): The Substrate system shall feof(FILE *stream): return non-zero if EOF indicator set.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0101** (EARS/Ubiquitous): The Substrate system shall ferror(FILE *stream): return non-zero if error indicator set.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0102** (EARS/Ubiquitous): The Substrate system shall clearerr(FILE *stream): clear both EOF and error indicators.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0103** (EARS/Ubiquitous): The Substrate system shall perror(const char *s): print s: strerror(errno)\n to stderr.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0104** (EARS/Ubiquitous): The Substrate system shall temporary Files:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0105** (EARS/Ubiquitous): The Substrate system shall tmpfile(): create anonymous temporary FILE (deleted on close).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0106** (EARS/Ubiquitous): The Substrate system shall tmpnam(char *s) (deprecated) / mkstemp() integration.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0107** (EARS/Ubiquitous): The Substrate system shall complete printf Family Implementation (User & Kernel):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0108** (EARS/Ubiquitous): The Substrate system shall kernel: Migrate sys/kern/lib.c simplistic sprintf to full implementation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0109** (EARS/Ubiquitous): The Substrate system shall user: lib/c implementation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0110** (EARS/Ubiquitous): The Substrate system shall flags:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0111** (EARS/Ubiquitous): The Substrate system shall - (Left-align within field width).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0112** (EARS/Ubiquitous): The Substrate system shall + (Force sign for positive numbers).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0113** (EARS/Ubiquitous): The Substrate system shall (Space prefix for positive numbers).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0114** (EARS/Ubiquitous): The Substrate system shall # (Alternate form: 0x for hex, force decimal point).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0115** (EARS/Ubiquitous): The Substrate system shall 0 (Zero-padding).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0116** (EARS/Ubiquitous): The Substrate system shall width & Precision:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0117** (EARS/Ubiquitous): The Substrate system shall numeric width (e.g., %5d).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0118** (EARS/Ubiquitous): The Substrate system shall dynamic width * (from argument).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0119** (EARS/Ubiquitous): The Substrate system shall numeric precision (e.g., %.5d).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0120** (EARS/Ubiquitous): The Substrate system shall dynamic precision .*(from argument).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0121** (EARS/Ubiquitous): The Substrate system shall combined width/precision (e.g., %5.2f).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0122** (EARS/Ubiquitous): The Substrate system shall negative width logic (treat as - flag + positive width).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0123** (EARS/Ubiquitous): The Substrate system shall length Modifiers:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0124** (EARS/Ubiquitous): The Substrate system shall hh (signed/unsigned char).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0125** (EARS/Ubiquitous): The Substrate system shall h (signed/unsigned short).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0126** (EARS/Ubiquitous): The Substrate system shall l (long, wint_t).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0127** (EARS/Ubiquitous): The Substrate system shall ll (long long).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0128** (EARS/Ubiquitous): The Substrate system shall j (intmax_t, uintmax_t).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0129** (EARS/Ubiquitous): The Substrate system shall z (size_t, ssize_t).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0130** (EARS/Ubiquitous): The Substrate system shall t (ptrdiff_t).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0131** (EARS/Ubiquitous): The Substrate system shall l (long double).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0132** (EARS/Ubiquitous): The Substrate system shall conversion Specifiers:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0133** (EARS/Ubiquitous): The Substrate system shall integers: d, i (signed decimal).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0134** (EARS/Ubiquitous): The Substrate system shall unsigned: u (decimal), o (octal).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0135** (EARS/Ubiquitous): The Substrate system shall hex: x, X (lower/upper case).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0136** (EARS/Ubiquitous): The Substrate system shall floating Point (Basic): f, F (decimal notation).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0137** (EARS/Ubiquitous): The Substrate system shall scientific: e, E (exponential notation).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0138** (EARS/Ubiquitous): The Substrate system shall significant: g, G (shortest representation).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0139** (EARS/Ubiquitous): The Substrate system shall hex Float: a, A (C99 hex float - placeholder).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0140** (EARS/Ubiquitous): The Substrate system shall characters: c (char), lc (wint_t).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0141** (EARS/Ubiquitous): The Substrate system shall strings: s (char*), ls (wchar_t*).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0142** (EARS/Ubiquitous): The Substrate system shall pointer: p (implementation defined, usually %08x or %016x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0143** (EARS/Ubiquitous): The Substrate system shall count: n (store number of chars written to int*).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0144** (EARS/Ubiquitous): The Substrate system shall literal: % (print percent sign).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0145** (EARS/Ubiquitous): The Substrate system shall complex/Compound Cases:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0146** (EARS/Ubiquitous): The Substrate system shall prefix combinations (e.g., %20#llx).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0147** (EARS/Ubiquitous): The Substrate system shall leading zeroes with precision (e.g., %03d vs %.3d).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0148** (EARS/Ubiquitous): The Substrate system shall "0" flag ignored if "-" is present.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0149** (EARS/Ubiquitous): The Substrate system shall "0" flag ignored if precision is specified for integers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0150** (EARS/Ubiquitous): The Substrate system shall space ignored if "+" is present.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0151** (EARS/Ubiquitous): The Substrate system shall printf Family Wrappers:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0152** (EARS/Ubiquitous): The Substrate system shall fprintf(FILE *stream, const char *fmt, ...): output to FILE via buffer.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0153** (EARS/Ubiquitous): The Substrate system shall printf(const char *fmt, ...): wrapper for fprintf(stdout, ...).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0154** (EARS/Ubiquitous): The Substrate system shall sprintf(char *str, const char *fmt, ...): output to string (no bounds check).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0155** (EARS/Ubiquitous): The Substrate system shall snprintf(char *str, size_t size, const char *fmt, ...): bounded output to string.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0156** (EARS/Ubiquitous): The Substrate system shall dprintf(int fd, const char *fmt, ...) (POSIX): output to fd directly.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0157** (EARS/Ubiquitous): The Substrate system shall asprintf(char **ret, const char *fmt, ...) (BSD extension): auto-allocating sprintf.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0158** (EARS/Ubiquitous): The Substrate system shall vfprintf(), vprintf(), vsprintf(), vsnprintf(), vdprintf(), vasprintf(): va_list variants.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0159** (EARS/Ubiquitous): The Substrate system shall complete scanf Family Implementation:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0160** (EARS/Ubiquitous): The Substrate system shall core vfscanf() Engine:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0161** (EARS/Ubiquitous): The Substrate system shall literal character matching (non-% characters, whitespace collapsing).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0162** (EARS/Ubiquitous): The Substrate system shall %% literal percent matching.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0163** (EARS/Ubiquitous): The Substrate system shall assignment suppression (* flag).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0164** (EARS/Ubiquitous): The Substrate system shall maximum field width.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0165** (EARS/Ubiquitous): The Substrate system shall length Modifiers: hh, h, l, ll, j, z, t, L.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0166** (EARS/Ubiquitous): The Substrate system shall conversion Specifiers:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0167** (EARS/Ubiquitous): The Substrate system shall d (decimal integer), i (auto-detect base: 0x/0/decimal).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0168** (EARS/Ubiquitous): The Substrate system shall u (unsigned decimal), o (octal), x/X (hex).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0169** (EARS/Ubiquitous): The Substrate system shall f, e, g, a (floating-point input parsing).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0170** (EARS/Ubiquitous): The Substrate system shall c (character, no whitespace skip), s (string, whitespace-delimited).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0171** (EARS/Ubiquitous): The Substrate system shall [ (scanset): character class matching, ^ negation, ] as first char.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0172** (EARS/Ubiquitous): The Substrate system shall p (pointer), n (store chars consumed).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0173** (EARS/Ubiquitous): The Substrate system shall return number of successfully assigned items, or EOF.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0174** (EARS/Ubiquitous): The Substrate system shall handle input exhaustion mid-conversion.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0175** (EARS/Ubiquitous): The Substrate system shall scanf Family Wrappers:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0176** (EARS/Ubiquitous): The Substrate system shall fscanf(FILE *stream, const char *fmt, ...).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0177** (EARS/Ubiquitous): The Substrate system shall scanf(const char *fmt, ...): wrapper for fscanf(stdin, ...).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0178** (EARS/Ubiquitous): The Substrate system shall sscanf(const char *str, const char *fmt, ...): scan from string.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0179** (EARS/Ubiquitous): The Substrate system shall vfscanf(), vscanf(), vsscanf(): va_list variants.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0180** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0181** (EARS/Ubiquitous): The Substrate system shall unit Tests (tests/lib/c/unit/test_stdio.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0182** (EARS/Ubiquitous): The Substrate system shall test fopen()/fclose() for all mode strings ("r", "w", "a", "r+", "w+", "a+", "wx").
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0183** (EARS/Ubiquitous): The Substrate system shall test fopen() returns NULL for non-existent file in "r" mode.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0184** (EARS/Ubiquitous): The Substrate system shall test fdopen() wraps existing fd correctly.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0185** (EARS/Ubiquitous): The Substrate system shall test freopen() changes mode and reuses FILE.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0186** (EARS/Ubiquitous): The Substrate system shall test fread()/fwrite() round-trip: write data, rewind, read back, compare.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0187** (EARS/Ubiquitous): The Substrate system shall test fread() partial read at EOF returns correct element count.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0188** (EARS/Ubiquitous): The Substrate system shall test fwrite() returns correct element count on success.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0189** (EARS/Ubiquitous): The Substrate system shall test fgetc()/fputc() byte-by-byte I/O.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0190** (EARS/Ubiquitous): The Substrate system shall test ungetc(): push back one char, re-read it.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0191** (EARS/Ubiquitous): The Substrate system shall test ungetc(EOF) is a no-op.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0192** (EARS/Ubiquitous): The Substrate system shall test fgets() reads up to newline, NUL-terminates.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0193** (EARS/Ubiquitous): The Substrate system shall test fgets() with buffer smaller than line.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0194** (EARS/Ubiquitous): The Substrate system shall test fputs()/puts() output correctness.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0195** (EARS/Ubiquitous): The Substrate system shall test fseek()/ftell() positioning in all SEEK_* modes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0196** (EARS/Ubiquitous): The Substrate system shall test rewind() resets position and clears error.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0197** (EARS/Ubiquitous): The Substrate system shall test fgetpos()/fsetpos() round-trip.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0198** (EARS/Ubiquitous): The Substrate system shall test feof() returns non-zero only after read past end.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0199** (EARS/Ubiquitous): The Substrate system shall test ferror()/clearerr() flag management.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0200** (EARS/Ubiquitous): The Substrate system shall test fflush(stdout) forces write.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0201** (EARS/Ubiquitous): The Substrate system shall test fflush(NULL) flushes all streams.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0202** (EARS/Ubiquitous): The Substrate system shall test setvbuf() with _IONBF causes immediate writes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0203** (EARS/Ubiquitous): The Substrate system shall test setvbuf() with _IOLBF flushes on newline.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0204** (EARS/Ubiquitous): The Substrate system shall test setvbuf() with _IOFBF accumulates until buffer full.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0205** (EARS/Ubiquitous): The Substrate system shall test tmpfile() returns valid FILE that is auto-deleted.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0206** (EARS/Ubiquitous): The Substrate system shall test perror() output format.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0207** (EARS/Ubiquitous): The Substrate system shall unit Tests (tests/lib/c/unit/test_printf.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0208** (EARS/Ubiquitous): The Substrate system shall test sprintf() all integer conversions with all length modifiers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0209** (EARS/Ubiquitous): The Substrate system shall test sprintf() all floating-point conversions: %f, %e, %g, %a.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0210** (EARS/Ubiquitous): The Substrate system shall test snprintf() truncation: verify NUL-termination and returned count.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0211** (EARS/Ubiquitous): The Substrate system shall test snprintf() with size == 0 returns required length without writing.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0212** (EARS/Ubiquitous): The Substrate system shall test fprintf() to file, then read back and compare.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0213** (EARS/Ubiquitous): The Substrate system shall test dprintf() to pipe fd.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0214** (EARS/Ubiquitous): The Substrate system shall test asprintf() allocates correct buffer size.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0215** (EARS/Ubiquitous): The Substrate system shall test %n conversion stores correct count.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0216** (EARS/Ubiquitous): The Substrate system shall test width, precision, flag combinations exhaustively.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0217** (EARS/Ubiquitous): The Substrate system shall test %% literal output.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0218** (EARS/Ubiquitous): The Substrate system shall test NULL string argument to %s (implementation-defined, should not crash).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0219** (EARS/Ubiquitous): The Substrate system shall unit Tests (tests/lib/c/unit/test_scanf.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0220** (EARS/Ubiquitous): The Substrate system shall test sscanf() integer conversions: %d, %i, %u, %o, %x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0221** (EARS/Ubiquitous): The Substrate system shall test sscanf() %i auto-base detection: 0x (hex), 0 (octal), decimal.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0222** (EARS/Ubiquitous): The Substrate system shall test sscanf() floating-point: %f, %e, %g.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0223** (EARS/Ubiquitous): The Substrate system shall test sscanf() %c reads exact count (no whitespace skip).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0224** (EARS/Ubiquitous): The Substrate system shall test sscanf() %s reads whitespace-delimited token.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0225** (EARS/Ubiquitous): The Substrate system shall test sscanf() %[ scanset: %[a-z], %[^0-9], %[]abc].
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0226** (EARS/Ubiquitous): The Substrate system shall test sscanf() %n stores chars consumed.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0227** (EARS/Ubiquitous): The Substrate system shall test sscanf() assignment suppression: %*d skips but doesn't assign.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0228** (EARS/Ubiquitous): The Substrate system shall test sscanf() field width limits.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0229** (EARS/Ubiquitous): The Substrate system shall test sscanf() return value: count of successful assignments.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0230** (EARS/Ubiquitous): The Substrate system shall test sscanf() returns EOF on immediate input failure.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0231** (EARS/Ubiquitous): The Substrate system shall test fscanf() from file.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0232** (EARS/Ubiquitous): The Substrate system shall test scanf() length modifiers: %hhd, %hd, %ld, %lld, %jd, %zd, %td.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0233** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/c/property/prop_stdio.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0234** (EARS/Ubiquitous): The Substrate system shall property: sprintf(buf, "%d", x); sscanf(buf, "%d", &y) ⇒ x == y for all int x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0235** (EARS/Ubiquitous): The Substrate system shall property: sprintf(buf, "%u", x); sscanf(buf, "%u", &y) ⇒ x == y for all unsigned x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0236** (EARS/Ubiquitous): The Substrate system shall property: snprintf(buf, n, fmt, ...) return value ≥ 0 and ≤ what sprintf would produce.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0237** (EARS/Ubiquitous): The Substrate system shall property: snprintf(buf, n, ...) always NUL-terminates if n > 0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0238** (EARS/Ubiquitous): The Substrate system shall property: fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f) ⇒ memcmp(data, out, n) == 0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0239** (EARS/Ubiquitous): The Substrate system shall property: ftell() after fseek(f, off, SEEK_SET) returns off.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0240** (EARS/Ubiquitous): The Substrate system shall property: ungetc(c, f); fgetc(f) returns c for any valid c ≠ EOF.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0241** (EARS/Ubiquitous): The Substrate system shall fuzz Tests (tests/lib/c/fuzz/fuzz_printf.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0242** (EARS/Ubiquitous): The Substrate system shall fuzz snprintf() with random format strings and random arguments.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0243** (EARS/Ubiquitous): The Substrate system shall verify no buffer overflows (write to bounded buffer, check sentinel bytes).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0244** (EARS/Ubiquitous): The Substrate system shall verify return value consistency (re-call with larger buffer, compare output).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0245** (EARS/Ubiquitous): The Substrate system shall fuzz vsnprintf() with extreme widths/precisions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0246** (EARS/Ubiquitous): The Substrate system shall fuzz Tests (tests/lib/c/fuzz/fuzz_scanf.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0247** (EARS/Ubiquitous): The Substrate system shall fuzz sscanf() with random format strings and random input strings.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0248** (EARS/Ubiquitous): The Substrate system shall verify no crashes, no buffer overflows, return value ≥ 0 or EOF.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0249** (EARS/Ubiquitous): The Substrate system shall fuzz scanset patterns (%[...]) with adversarial character classes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0250** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0251** (EARS/Ubiquitous): The Substrate system shall man/man3/fopen.3 - File open. Covers fopen(), fdopen(), freopen(). Mode string parsing, "x" flag. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0252** (EARS/Ubiquitous): The Substrate system shall man/man3/fclose.3 - File close. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0253** (EARS/Ubiquitous): The Substrate system shall man/man3/fread.3 - Block I/O. Covers fread() and fwrite(). SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0254** (EARS/Ubiquitous): The Substrate system shall man/man3/fgets.3 - Line input. Covers fgets(), fputs(), gets() removal note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0255** (EARS/Ubiquitous): The Substrate system shall man/man3/fgetc.3 - Character I/O. Covers fgetc(), getc(), getchar(), fputc(), putc(), putchar(), ungetc(). SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0256** (EARS/Ubiquitous): The Substrate system shall man/man3/fseek.3 - File positioning. Covers fseek(), ftell(), rewind(), fgetpos(), fsetpos(), fseeko(), ftello(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0257** (EARS/Ubiquitous): The Substrate system shall man/man3/fflush.3 - Flush stream. Document NULL argument behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0258** (EARS/Ubiquitous): The Substrate system shall man/man3/setvbuf.3 - Set stream buffering. Covers setvbuf(), setbuf(), setlinebuf(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0259** (EARS/Ubiquitous): The Substrate system shall man/man3/feof.3 - Stream status. Covers feof(), ferror(), clearerr(). SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0260** (EARS/Ubiquitous): The Substrate system shall man/man3/perror.3 - Print error message. SYNOPSIS, DESCRIPTION, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0261** (EARS/Ubiquitous): The Substrate system shall man/man3/tmpfile.3 - Temporary files. Covers tmpfile() and tmpnam() deprecation note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0262** (EARS/Ubiquitous): The Substrate system shall man/man3/printf.3 - Formatted output. Covers printf(), fprintf(), sprintf(), snprintf(), dprintf(), asprintf() and v* variants. Full format specification. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0263** (EARS/Ubiquitous): The Substrate system shall man/man3/scanf.3 - Formatted input. Covers scanf(), fscanf(), sscanf() and v* variants. Full format specification including scansets. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0264** (EARS/Ubiquitous): The Substrate system shall string/Mem:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0265** (EARS/Ubiquitous): The Substrate system shall optimize memcpy, memset, memmove.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0266** (EARS/Ubiquitous): The Substrate system shall math.h header definition.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0267** (EARS/Ubiquitous): The Substrate system shall math_errhandling (errno support).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0268** (EARS/Ubiquitous): The Substrate system shall __fpclassify internal helper.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0269** (EARS/Ubiquitous): The Substrate system shall fENV (Floating-Point Environment):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0270** (EARS/Ubiquitous): The Substrate system shall header (include/fenv.h) Definition (C99/POSIX):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0271** (EARS/Ubiquitous): The Substrate system shall define fenv_t type (full x87 environment: CW, SW, TW, FIP, FCS, FDP, FDS, MXCSR on SSE-capable).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0272** (EARS/Ubiquitous): The Substrate system shall define fexcept_t type (exception status word snapshot).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0273** (EARS/Ubiquitous): The Substrate system shall define exception flag macros:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0274** (EARS/Ubiquitous): The Substrate system shall fE_INVALID (bit 0, x87 IE).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0275** (EARS/Ubiquitous): The Substrate system shall fE_DENORMAL (bit 1, x87 DE - non-standard extension, guard with #ifdef).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0276** (EARS/Ubiquitous): The Substrate system shall fE_DIVBYZERO (bit 2, x87 ZE).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0277** (EARS/Ubiquitous): The Substrate system shall fE_OVERFLOW (bit 3, x87 OE).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0278** (EARS/Ubiquitous): The Substrate system shall fE_UNDERFLOW (bit 4, x87 UE).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0279** (EARS/Ubiquitous): The Substrate system shall fE_INEXACT (bit 5, x87 PE).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0280** (EARS/Ubiquitous): The Substrate system shall fE_ALL_EXCEPT (bitwise OR of all supported exception flags).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0281** (EARS/Ubiquitous): The Substrate system shall define rounding mode macros:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0282** (EARS/Ubiquitous): The Substrate system shall fE_TONEAREST (CW bits 10-11 = 00).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0283** (EARS/Ubiquitous): The Substrate system shall fE_DOWNWARD (CW bits 10-11 = 01).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0284** (EARS/Ubiquitous): The Substrate system shall fE_UPWARD (CW bits 10-11 = 10).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0285** (EARS/Ubiquitous): The Substrate system shall fE_TOWARDZERO (CW bits 10-11 = 11).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0286** (EARS/Ubiquitous): The Substrate system shall define FE_DFL_ENV macro (pointer to default environment, ((const fenv_t *)-1) or static).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0287** (EARS/Ubiquitous): The Substrate system shall provide function prototypes for all fe* functions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0288** (EARS/Ubiquitous): The Substrate system shall include guard (_FENV_H) and C++ extern "C" wrapper.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0289** (EARS/Ubiquitous): The Substrate system shall exception Handling Functions:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0290** (EARS/Ubiquitous): The Substrate system shall feclearexcept(int excepts):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0291** (EARS/Ubiquitous): The Substrate system shall read x87 status word via fnstsw.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0292** (EARS/Ubiquitous): The Substrate system shall clear requested exception bits.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0293** (EARS/Ubiquitous): The Substrate system shall restore via fldenv (requires full env save/modify/restore cycle).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0294** (EARS/Ubiquitous): When SSE present, also clear bits in MXCSR via ldmxcsr, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0295** (EARS/Ubiquitous): The Substrate system shall return 0 on success, non-zero on failure.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0296** (EARS/Ubiquitous): The Substrate system shall fegetexceptflag(fexcept_t *flagp, int excepts):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0297** (EARS/Ubiquitous): The Substrate system shall read x87 status word via fnstsw.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0298** (EARS/Ubiquitous): The Substrate system shall mask with excepts, store into *flagp.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0299** (EARS/Ubiquitous): When SSE present, OR in MXCSR exception bits, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0300** (EARS/Ubiquitous): The Substrate system shall return 0 on success.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0301** (EARS/Ubiquitous): The Substrate system shall feraiseexcept(int excepts):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0302** (EARS/Ubiquitous): The Substrate system shall raise specified exceptions by performing operations that trigger them (e.g., divide-by-zero for FE_DIVBYZERO, 0.0/0.0 for FE_INVALID).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0303** (EARS/Ubiquitous): The Substrate system shall alternatively: save env, set SW bits, load env, then fwait to trigger trap.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0304** (EARS/Ubiquitous): The Substrate system shall ensure FE_OVERFLOW and FE_UNDERFLOW also set FE_INEXACT per C99 7.6.2.3.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0305** (EARS/Ubiquitous): The Substrate system shall return 0 on success.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0306** (EARS/Ubiquitous): The Substrate system shall fesetexceptflag(const fexcept_t *flagp, int excepts):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0307** (EARS/Ubiquitous): The Substrate system shall save full x87 environment via fnstenv.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0308** (EARS/Ubiquitous): The Substrate system shall replace status word exception bits (masked by excepts) from *flagp.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0309** (EARS/Ubiquitous): The Substrate system shall restore via fldenv - must NOT raise exceptions (set bits only).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0310** (EARS/Ubiquitous): When SSE present, update MXCSR accordingly, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0311** (EARS/Ubiquitous): The Substrate system shall return 0 on success.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0312** (EARS/Ubiquitous): The Substrate system shall fetestexcept(int excepts):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0313** (EARS/Ubiquitous): The Substrate system shall read x87 status word via fnstsw.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0314** (EARS/Ubiquitous): When SSE present, OR in MXCSR sticky bits, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0315** (EARS/Ubiquitous): The Substrate system shall return bitwise AND of current exceptions with excepts.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0316** (EARS/Ubiquitous): The Substrate system shall rounding Mode Functions:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0317** (EARS/Ubiquitous): The Substrate system shall fegetround():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0318** (EARS/Ubiquitous): The Substrate system shall read x87 control word via fnstcw.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0319** (EARS/Ubiquitous): The Substrate system shall extract rounding mode bits (bits 10-11).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0320** (EARS/Ubiquitous): The Substrate system shall return corresponding FE_* rounding constant.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0321** (EARS/Ubiquitous): The Substrate system shall fesetround(int rdir):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0322** (EARS/Ubiquitous): The Substrate system shall validate rdir is one of FE_TONEAREST, FE_DOWNWARD, FE_UPWARD, FE_TOWARDZERO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0323** (EARS/Ubiquitous): The Substrate system shall read x87 control word via fnstcw.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0324** (EARS/Ubiquitous): The Substrate system shall modify rounding mode bits (bits 10-11).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0325** (EARS/Ubiquitous): The Substrate system shall write back via fldcw.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0326** (EARS/Ubiquitous): When SSE present, also update MXCSR rounding bits (bits 13-14), the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0327** (EARS/Ubiquitous): The Substrate system shall return 0 on success, non-zero for invalid rdir.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0328** (EARS/Ubiquitous): The Substrate system shall environment Save/Restore Functions:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0329** (EARS/Ubiquitous): The Substrate system shall fegetenv(fenv_t *envp):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0330** (EARS/Ubiquitous): The Substrate system shall save full x87 environment via fnstenv into *envp.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0331** (EARS/Ubiquitous): The Substrate system shall restore control word afterwards (x87 fnstenv masks all exceptions as side effect, so re-load CW).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0332** (EARS/Ubiquitous): When SSE present, also save MXCSR into *envp, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0333** (EARS/Ubiquitous): The Substrate system shall return 0 on success.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0334** (EARS/Ubiquitous): The Substrate system shall feholdexcept(fenv_t *envp):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0335** (EARS/Ubiquitous): The Substrate system shall save current environment into *envp via fnstenv.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0336** (EARS/Ubiquitous): The Substrate system shall clear all exception flags in status word.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0337** (EARS/Ubiquitous): The Substrate system shall mask all exceptions in control word (set exception mask bits 0-5).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0338** (EARS/Ubiquitous): The Substrate system shall install this non-stop environment via fldenv.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0339** (EARS/Ubiquitous): When SSE present, save and mask MXCSR similarly, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0340** (EARS/Ubiquitous): The Substrate system shall return 0 on success.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0341** (EARS/Ubiquitous): The Substrate system shall this enables non-stop (non-trapping) FP mode for temporary computation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0342** (EARS/Ubiquitous): The Substrate system shall fesetenv(const fenv_t *envp):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0343** (EARS/Ubiquitous): When envp == FE_DFL_ENV, load default environment (e.g., fninit then adjust, or load a static default), the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0344** (EARS/Ubiquitous): The Substrate system shall else, load full x87 environment from *envp via fldenv.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0345** (EARS/Ubiquitous): When SSE present, also restore MXCSR from *envp, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0346** (EARS/Ubiquitous): The Substrate system shall must NOT raise exceptions - install state silently.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0347** (EARS/Ubiquitous): The Substrate system shall return 0 on success.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0348** (EARS/Ubiquitous): The Substrate system shall feupdateenv(const fenv_t *envp):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0349** (EARS/Ubiquitous): The Substrate system shall read currently raised exceptions via fetestexcept(FE_ALL_EXCEPT).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0350** (EARS/Ubiquitous): The Substrate system shall install *envp (or default) via fesetenv(envp).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0351** (EARS/Ubiquitous): The Substrate system shall re-raise the previously pending exceptions via feraiseexcept().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0352** (EARS/Ubiquitous): The Substrate system shall return 0 on success.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0353** (EARS/Ubiquitous): The Substrate system shall this is the "merge exceptions then restore" primitive.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0354** (EARS/Ubiquitous): The Substrate system shall fENV_ACCESS Pragma Support:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0355** (EARS/Ubiquitous): The Substrate system shall document compiler interaction: #pragma STDC FENV_ACCESS ON advisory.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0356** (EARS/Ubiquitous): The Substrate system shall ensure fenv.h includes comment noting GCC #pragma GCC optimize ("no-fast-math") equivalent.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0357** (EARS/Ubiquitous): The Substrate system shall add FENV_ACCESS documentation in header and man pages.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0358** (EARS/Ubiquitous): The Substrate system shall implementation Details (i386/x87 Backend - lib/m/src/fenv.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0359** (EARS/Ubiquitous): The Substrate system shall all functions implemented as i386 inline assembly or .S file for x87 fnstcw/fldcw/fnstsw/fnstenv/fldenv/fnclex/fwait.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0360** (EARS/Ubiquitous): The Substrate system shall sSE/MXCSR path gated by runtime or compile-time SSE check.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0361** (EARS/Ubiquitous): The Substrate system shall fenv_t layout must match x87 fnstenv/fldenv 28-byte block (+ optional MXCSR field).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0362** (EARS/Ubiquitous): The Substrate system shall ensure fninit is used (not finit) to avoid waiting for pending exceptions during default-env setup.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0363** (EARS/Ubiquitous): The Substrate system shall all functions are attribute((noinline)) to prevent optimizer from reordering FP state access.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0364** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0365** (EARS/Ubiquitous): The Substrate system shall unit Tests (tests/lib/m/unit/test_fenv.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0366** (EARS/Ubiquitous): The Substrate system shall test feclearexcept(): raise each exception, clear it, verify via fetestexcept().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0367** (EARS/Ubiquitous): The Substrate system shall test feclearexcept(FE_ALL_EXCEPT): clear all, verify none pending.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0368** (EARS/Ubiquitous): The Substrate system shall test feclearexcept(0): no-op, verify no side effects.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0369** (EARS/Ubiquitous): The Substrate system shall test fegetexceptflag() / fesetexceptflag(): round-trip flag save/restore.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0370** (EARS/Ubiquitous): The Substrate system shall test fesetexceptflag() does NOT raise exceptions (just sets sticky bits).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0371** (EARS/Ubiquitous): The Substrate system shall test feraiseexcept(): raise individual exceptions, verify via fetestexcept().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0372** (EARS/Ubiquitous): The Substrate system shall test feraiseexcept(FE_OVERFLOW) also sets FE_INEXACT (C99 requirement).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0373** (EARS/Ubiquitous): The Substrate system shall test feraiseexcept(FE_UNDERFLOW) also sets FE_INEXACT.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0374** (EARS/Ubiquitous): The Substrate system shall test feraiseexcept() with multiple flags ORed together.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0375** (EARS/Ubiquitous): The Substrate system shall test fetestexcept(): verify returns only requested bits.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0376** (EARS/Ubiquitous): The Substrate system shall test fegetround() default is FE_TONEAREST.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0377** (EARS/Ubiquitous): The Substrate system shall test fesetround() / fegetround() round-trip for all four modes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0378** (EARS/Ubiquitous): The Substrate system shall test fesetround() with invalid argument returns non-zero.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0379** (EARS/Ubiquitous): The Substrate system shall test fesetround() actually affects rounding: add 1.0 + tiny value and check direction.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0380** (EARS/Ubiquitous): The Substrate system shall test fegetenv() / fesetenv() round-trip preserves full state.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0381** (EARS/Ubiquitous): The Substrate system shall test fesetenv(FE_DFL_ENV) resets to default (no exceptions, FE_TONEAREST).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0382** (EARS/Ubiquitous): The Substrate system shall test feholdexcept(): saves state, clears exceptions, masks all traps.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0383** (EARS/Ubiquitous): The Substrate system shall test feholdexcept() followed by exception-raising operations don't trap.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0384** (EARS/Ubiquitous): The Substrate system shall test feupdateenv(): merges pending exceptions from non-stop region back after restore.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0385** (EARS/Ubiquitous): The Substrate system shall test feupdateenv() re-raises exceptions from before feholdexcept() was called.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0386** (EARS/Ubiquitous): The Substrate system shall test interaction: feholdexcept() → compute with exceptions → feupdateenv() → verify merged.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0387** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_fenv.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0388** (EARS/Ubiquitous): The Substrate system shall property: fesetround(m); fegetround() == m for all valid m.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0389** (EARS/Ubiquitous): The Substrate system shall property: fesetround(invalid) returns non-zero and does not change mode.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0390** (EARS/Ubiquitous): The Substrate system shall property: feclearexcept(e); fetestexcept(e) == 0 for any valid exception mask e.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0391** (EARS/Ubiquitous): The Substrate system shall property: feraiseexcept(e); (fetestexcept(e) & e) == e for any valid e.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0392** (EARS/Ubiquitous): The Substrate system shall property: fegetexceptflag(&f, e); feclearexcept(FE_ALL_EXCEPT); fesetexceptflag(&f, e); fetestexcept(e) equals original.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0393** (EARS/Ubiquitous): The Substrate system shall property: fegetenv(&env); /* modify state */; fesetenv(&env) restores original rounding and exceptions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0394** (EARS/Ubiquitous): The Substrate system shall property: fesetenv(FE_DFL_ENV); fegetround() == FE_TONEAREST && fetestexcept(FE_ALL_EXCEPT) == 0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0395** (EARS/Ubiquitous): The Substrate system shall property: feholdexcept() results in fetestexcept(FE_ALL_EXCEPT) == 0 and non-stop mode.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0396** (EARS/Ubiquitous): The Substrate system shall property: feupdateenv() preserves exceptions raised during non-stop region.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0397** (EARS/Ubiquitous): The Substrate system shall property: exception flags are sticky - feraiseexcept(e) followed by unrelated FP ops retains e.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0398** (EARS/Ubiquitous): The Substrate system shall fuzz Tests (tests/lib/m/fuzz/fuzz_fenv.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0399** (EARS/Ubiquitous): The Substrate system shall fuzz random combinations of exception flag bits to feclearexcept() / feraiseexcept() / fetestexcept().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0400** (EARS/Ubiquitous): The Substrate system shall fuzz random rounding mode values to fesetround() (including invalid values).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0401** (EARS/Ubiquitous): The Substrate system shall fuzz random sequences of fegetenv()/fesetenv()/feholdexcept()/feupdateenv() interleaved with FP operations.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0402** (EARS/Ubiquitous): The Substrate system shall fuzz random fexcept_t values through fegetexceptflag()/fesetexceptflag() round-trips.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0403** (EARS/Ubiquitous): The Substrate system shall verify no crashes, no undefined behavior, status word consistency after each fuzzed sequence.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0404** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0405** (EARS/Ubiquitous): The Substrate system shall man/man7/fenv.7 - Overview of floating-point environment, x87/SSE interaction, FENV_ACCESS pragma, and usage patterns.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0406** (EARS/Ubiquitous): The Substrate system shall man/man3/feclearexcept.3 - Clear floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0407** (EARS/Ubiquitous): The Substrate system shall man/man3/fegetexceptflag.3 - Get floating-point exception flags. Covers fegetexceptflag() and fesetexceptflag() together (paired save/restore API). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0408** (EARS/Ubiquitous): The Substrate system shall man/man3/feraiseexcept.3 - Raise floating-point exceptions. Document FE_OVERFLOW/FE_UNDERFLOW implying FE_INEXACT. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0409** (EARS/Ubiquitous): The Substrate system shall man/man3/fetestexcept.3 - Test floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0410** (EARS/Ubiquitous): The Substrate system shall man/man3/fegetround.3 - Get/set floating-point rounding mode. Covers fegetround() and fesetround() together. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0411** (EARS/Ubiquitous): The Substrate system shall man/man3/fegetenv.3 - Get/set floating-point environment. Covers fegetenv() and fesetenv(). SYNOPSIS, DESCRIPTION (document FE_DFL_ENV), RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0412** (EARS/Ubiquitous): The Substrate system shall man/man3/feholdexcept.3 - Save environment and enter non-stop mode. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES (show feholdexcept() → compute → feupdateenv() pattern), SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0413** (EARS/Ubiquitous): The Substrate system shall man/man3/feupdateenv.3 - Restore environment and re-raise saved exceptions. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0414** (EARS/Ubiquitous): The Substrate system shall type Variants (f, l suffixes):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0415** (EARS/Ubiquitous): The Substrate system shall float Variants (f suffix - lib/m/src/mathf.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0416** (EARS/Ubiquitous): The Substrate system shall implement sinf(), cosf(), tanf(), asinf(), acosf(), atanf(), atan2f().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0417** (EARS/Ubiquitous): The Substrate system shall implement sinhf(), coshf(), tanhf(), asinhf(), acoshf(), atanhf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0418** (EARS/Ubiquitous): The Substrate system shall implement expf(), exp2f(), expm1f(), logf(), log2f(), log10f(), log1pf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0419** (EARS/Ubiquitous): The Substrate system shall implement powf(), sqrtf(), cbrtf(), hypotf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0420** (EARS/Ubiquitous): The Substrate system shall implement fabsf(), fmodf(), remainderf(), remquof(), fmaf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0421** (EARS/Ubiquitous): The Substrate system shall implement fmaxf(), fminf(), fdimf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0422** (EARS/Ubiquitous): The Substrate system shall implement ceilf(), floorf(), truncf(), roundf(), rintf(), nearbyintf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0423** (EARS/Ubiquitous): The Substrate system shall implement lroundf(), llroundf(), lrintf(), llrintf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0424** (EARS/Ubiquitous): The Substrate system shall implement frexpf(), ldexpf(), modff(), scalbnf(), scalblnf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0425** (EARS/Ubiquitous): The Substrate system shall implement ilogbf(), logbf(), nextafterf(), nexttowardf(), copysignf(), nanf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0426** (EARS/Ubiquitous): The Substrate system shall implement erff(), erfcf(), tgammaf(), lgammaf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0427** (EARS/Ubiquitous): The Substrate system shall implement sincosf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0428** (EARS/Ubiquitous): The Substrate system shall long Double Variants (l suffix - lib/m/src/mathl.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0429** (EARS/Ubiquitous): The Substrate system shall implement sinl(), cosl(), tanl(), asinl(), acosl(), atanl(), atan2l().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0430** (EARS/Ubiquitous): The Substrate system shall implement sinhl(), coshl(), tanhl(), asinhl(), acoshl(), atanhl().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0431** (EARS/Ubiquitous): The Substrate system shall implement expl(), exp2l(), expm1l(), logl(), log2l(), log10l(), log1pl().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0432** (EARS/Ubiquitous): The Substrate system shall implement powl(), sqrtl(), cbrtl(), hypotl().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0433** (EARS/Ubiquitous): The Substrate system shall implement fabsl(), fmodl(), remainderl(), remquol(), fmal().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0434** (EARS/Ubiquitous): The Substrate system shall implement fmaxl(), fminl(), fdiml().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0435** (EARS/Ubiquitous): The Substrate system shall implement ceill(), floorl(), truncl(), roundl(), rintl(), nearbyintl().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0436** (EARS/Ubiquitous): The Substrate system shall implement lroundl(), llroundl(), lrintl(), llrintl().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0437** (EARS/Ubiquitous): The Substrate system shall implement frexpl(), ldexpl(), modfl(), scalbnl(), scalblnl().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0438** (EARS/Ubiquitous): The Substrate system shall implement ilogbl(), logbl(), nextafterl(), nexttowardl(), copysignl(), nanl().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0439** (EARS/Ubiquitous): The Substrate system shall implement erfl(), erfcl(), tgammal(), lgammal().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0440** (EARS/Ubiquitous): The Substrate system shall implement sincosl().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0441** (EARS/Ubiquitous): The Substrate system shall i386 Note: On x87, long double is 80-bit extended precision (native FPU format). float/double variants should use x87 internally and truncate on return.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0442** (EARS/Ubiquitous): The Substrate system shall generic Math (<tgmath.h>):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0443** (EARS/Ubiquitous): The Substrate system shall implement C99/C11 <tgmath.h> type-generic macros:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0444** (EARS/Ubiquitous): The Substrate system shall dispatch to f, , or l suffix based on argument type via _Generic (C11) or __builtin_choose_expr + __builtin_types_compatible_p (GCC extension).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0445** (EARS/Ubiquitous): The Substrate system shall cover all math functions with type-generic wrappers: trig, hyperbolic, exp/log, pow/sqrt, rounding, manipulation, fenv-interacting.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0446** (EARS/Ubiquitous): The Substrate system shall include complex variants dispatch (if/when <complex.h> is implemented).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0447** (EARS/Ubiquitous): The Substrate system shall ensure macro expansion does not evaluate arguments multiple times (use statement expressions if needed).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0448** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_tgmath.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0449** (EARS/Ubiquitous): The Substrate system shall test type dispatch: sin((float)x) calls sinf(), sin((double)x) calls sin(), sin((long double)x) calls sinl().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0450** (EARS/Ubiquitous): The Substrate system shall test all covered function families dispatch correctly.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0451** (EARS/Ubiquitous): The Substrate system shall test no double-evaluation of arguments with side effects.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0452** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0453** (EARS/Ubiquitous): The Substrate system shall man/man7/tgmath.7 - Type-generic math macros overview, dispatch rules, C11 _Generic usage. SYNOPSIS, DESCRIPTION, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0454** (EARS/Ubiquitous): The Substrate system shall fpclassify().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0455** (EARS/Ubiquitous): The Substrate system shall isfinite().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0456** (EARS/Ubiquitous): The Substrate system shall isinf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0457** (EARS/Ubiquitous): The Substrate system shall isnan().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0458** (EARS/Ubiquitous): The Substrate system shall isnormal().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0459** (EARS/Ubiquitous): The Substrate system shall signbit().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0460** (EARS/Ubiquitous): The Substrate system shall isgreater(), isgreaterequal(), isless(), islessequal(), islessgreater(), isunordered():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0461** (EARS/Ubiquitous): The Substrate system shall implement as macros using __builtin_isgreater etc. (GCC) or manual quiet-NaN-safe comparisons.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0462** (EARS/Ubiquitous): The Substrate system shall must not raise FE_INVALID on unordered operands (unlike plain </>).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0463** (EARS/Ubiquitous): The Substrate system shall iseqsig(), issignaling() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0464** (EARS/Ubiquitous): The Substrate system shall iseqsig(): equality comparison that DOES raise FE_INVALID on NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0465** (EARS/Ubiquitous): The Substrate system shall issignaling(): detect signaling NaN via bit pattern inspection.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0466** (EARS/Ubiquitous): The Substrate system shall iscanonical(), issubnormal(), iszero() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0467** (EARS/Ubiquitous): The Substrate system shall iscanonical(): always 1 for IEEE 754 binary formats (all values canonical).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0468** (EARS/Ubiquitous): The Substrate system shall issubnormal(): fpclassify(x) == FP_SUBNORMAL.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0469** (EARS/Ubiquitous): The Substrate system shall iszero(): fpclassify(x) == FP_ZERO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0470** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_classify.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0471** (EARS/Ubiquitous): The Substrate system shall test fpclassify() returns correct category for: +0.0, -0.0, 1.0, -1.0, INFINITY, -INFINITY, NAN, DBL_MIN/2 (denorm), DBL_MAX.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0472** (EARS/Ubiquitous): The Substrate system shall test isfinite() true for normals/denormals/zeros, false for inf/nan.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0473** (EARS/Ubiquitous): The Substrate system shall test isinf() true for ±INFINITY only.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0474** (EARS/Ubiquitous): The Substrate system shall test isnan() true for NAN, quiet NaN, signaling NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0475** (EARS/Ubiquitous): The Substrate system shall test isnormal() false for zero, denormal, inf, nan.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0476** (EARS/Ubiquitous): The Substrate system shall test signbit() for +0.0, -0.0, +1.0, -1.0, +INFINITY, -INFINITY, NAN, -NAN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0477** (EARS/Ubiquitous): The Substrate system shall test isgreater() etc. do NOT raise FE_INVALID when one operand is NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0478** (EARS/Ubiquitous): The Substrate system shall test isunordered() true iff either operand is NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0479** (EARS/Ubiquitous): The Substrate system shall test iseqsig() raises FE_INVALID on NaN operand.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0480** (EARS/Ubiquitous): The Substrate system shall test issignaling() detects sNaN bit pattern.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0481** (EARS/Ubiquitous): The Substrate system shall test float, double, and long double variants.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0482** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_classify.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0483** (EARS/Ubiquitous): The Substrate system shall property: exactly one of isinf(x), isnan(x), isfinite(x) is true for any x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0484** (EARS/Ubiquitous): The Substrate system shall property: isnormal(x) implies isfinite(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0485** (EARS/Ubiquitous): The Substrate system shall property: issubnormal(x) implies isfinite(x) && !isnormal(x) && !iszero(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0486** (EARS/Ubiquitous): The Substrate system shall property: signbit(-x) != signbit(x) for all non-NaN x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0487** (EARS/Ubiquitous): The Substrate system shall property: isunordered(x, y) iff isnan(x) || isnan(y).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0488** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0489** (EARS/Ubiquitous): The Substrate system shall man/man3/fpclassify.3 - Floating-point classification. Covers fpclassify(), isfinite(), isinf(), isnan(), isnormal(), signbit(). SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0490** (EARS/Ubiquitous): The Substrate system shall man/man3/isgreater.3 - Quiet comparison macros. Covers isgreater() through isunordered(). Document non-signaling NaN behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0491** (EARS/Ubiquitous): The Substrate system shall fabs().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0492** (EARS/Ubiquitous): The Substrate system shall fmod().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0493** (EARS/Ubiquitous): The Substrate system shall remainder().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0494** (EARS/Ubiquitous): The Substrate system shall remquo():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0495** (EARS/Ubiquitous): The Substrate system shall compute remainder AND store low-order bits of quotient in *quo.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0496** (EARS/Ubiquitous): The Substrate system shall sign of *quo is sign of x/y.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0497** (EARS/Ubiquitous): The Substrate system shall at least 3 bits of quotient stored.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0498** (EARS/Ubiquitous): The Substrate system shall fmax().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0499** (EARS/Ubiquitous): The Substrate system shall fmin().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0500** (EARS/Ubiquitous): The Substrate system shall fdim().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0501** (EARS/Ubiquitous): The Substrate system shall fma() (Fused Multiply-Add):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0502** (EARS/Ubiquitous): The Substrate system shall compute (x * y) + z with single rounding (as if infinite precision intermediate).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0503** (EARS/Ubiquitous): The Substrate system shall critical for numerical accuracy in dot-products, compensated summation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0504** (EARS/Ubiquitous): When x87: no hardware FMA - use software double-double decomposition or Dekker's algorithm, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0505** (EARS/Ubiquitous): The Substrate system shall raise FE_INEXACT/FE_OVERFLOW/FE_UNDERFLOW appropriately.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0506** (EARS/Ubiquitous): The Substrate system shall fmaximum(), fminimum(), fmaximum_num(), fminimum_num(), fmaximum_mag(), fminimum_mag() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0507** (EARS/Ubiquitous): The Substrate system shall fmaximum()/fminimum(): NaN-propagating (NaN if either operand is NaN).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0508** (EARS/Ubiquitous): The Substrate system shall fmaximum_num()/fminimum_num(): NaN-ignoring (return the non-NaN operand).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0509** (EARS/Ubiquitous): The Substrate system shall fmaximum_mag()/fminimum_mag(): Compare absolute values, NaN-propagating.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0510** (EARS/Ubiquitous): The Substrate system shall all distinguish +0.0 from -0.0: fmaximum(+0.0, -0.0) == +0.0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0511** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_arith.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0512** (EARS/Ubiquitous): The Substrate system shall test fabs(): positive, negative, zero, -0.0, ∞, -∞, NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0513** (EARS/Ubiquitous): The Substrate system shall test fmod(): basic cases, sign of result matches dividend, zero dividend, NaN propagation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0514** (EARS/Ubiquitous): The Substrate system shall test remainder(): IEEE remainder (can be negative), ties to even quotient.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0515** (EARS/Ubiquitous): The Substrate system shall test remquo(): remainder matches remainder(), quotient low bits correct.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0516** (EARS/Ubiquitous): The Substrate system shall test fma(): fma(a, b, c) vs naive a*b+c - detect cases where single rounding differs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0517** (EARS/Ubiquitous): The Substrate system shall test fma() special values: 0×∞+NaN, ∞×finite±∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0518** (EARS/Ubiquitous): The Substrate system shall test fmax()/fmin(): NaN handling (return non-NaN), ±0.0 distinction.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0519** (EARS/Ubiquitous): The Substrate system shall test fdim(): positive difference, zero when x ≤ y, NaN propagation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0520** (EARS/Ubiquitous): The Substrate system shall test C23 fmaximum()/fminimum() NaN propagation vs fmax()/fmin() NaN-ignoring.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0521** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_arith.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0522** (EARS/Ubiquitous): The Substrate system shall property: fabs(x) >= 0 for all x (including -0.0 → +0.0).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0523** (EARS/Ubiquitous): The Substrate system shall property: fmod(x, y) has same sign as x and |fmod(x,y)| < |y|.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0524** (EARS/Ubiquitous): The Substrate system shall property: fma(x, y, 0.0) == x * y for exact products (no rounding needed).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0525** (EARS/Ubiquitous): The Substrate system shall property: fmax(x, y) >= x && fmax(x, y) >= y for non-NaN inputs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0526** (EARS/Ubiquitous): The Substrate system shall property: fdim(x, y) + y >= x for finite non-NaN inputs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0527** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0528** (EARS/Ubiquitous): The Substrate system shall man/man3/fabs.3 - Absolute value. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0529** (EARS/Ubiquitous): The Substrate system shall man/man3/fmod.3 - Floating-point remainder. Covers fmod() and remainder() with IEEE semantics differences. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0530** (EARS/Ubiquitous): The Substrate system shall man/man3/remquo.3 - Remainder with quotient. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0531** (EARS/Ubiquitous): The Substrate system shall man/man3/fma.3 - Fused multiply-add. Document precision advantage. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0532** (EARS/Ubiquitous): The Substrate system shall man/man3/fmax.3 - Maximum/minimum. Covers fmax(), fmin(), fdim(). SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0533** (EARS/Ubiquitous): The Substrate system shall ceil().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0534** (EARS/Ubiquitous): The Substrate system shall floor().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0535** (EARS/Ubiquitous): The Substrate system shall trunc().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0536** (EARS/Ubiquitous): The Substrate system shall round().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0537** (EARS/Ubiquitous): The Substrate system shall rint().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0538** (EARS/Ubiquitous): The Substrate system shall nearbyint():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0539** (EARS/Ubiquitous): The Substrate system shall same as rint() but does NOT raise FE_INEXACT.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0540** (EARS/Ubiquitous): When x87: save/mask inexact exception, call frndint, restore flags, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0541** (EARS/Ubiquitous): The Substrate system shall lround(), llround():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0542** (EARS/Ubiquitous): The Substrate system shall round to nearest, ties away from zero (like round()), return long/long long.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0543** (EARS/Ubiquitous): The Substrate system shall raise FE_INVALID and return LONG_MIN/LONG_MAX on overflow or NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0544** (EARS/Ubiquitous): The Substrate system shall lrint(), llrint():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0545** (EARS/Ubiquitous): The Substrate system shall round using current rounding mode (like rint()), return long/long long.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0546** (EARS/Ubiquitous): When x87: fistp stores directly to integer, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0547** (EARS/Ubiquitous): The Substrate system shall raise FE_INVALID on overflow/NaN, FE_INEXACT if value was not integer.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0548** (EARS/Ubiquitous): The Substrate system shall roundeven() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0549** (EARS/Ubiquitous): The Substrate system shall round to nearest, ties to even (same as default FE_TONEAREST rint()).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0550** (EARS/Ubiquitous): The Substrate system shall explicit function - does not depend on current rounding mode.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0551** (EARS/Ubiquitous): The Substrate system shall fromfp(), fromfpx(), ufromfp(), ufromfpx() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0552** (EARS/Ubiquitous): The Substrate system shall convert to integer type with explicit rounding mode and width.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0553** (EARS/Ubiquitous): The Substrate system shall fromfp(): signed, ufromfp(): unsigned.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0554** (EARS/Ubiquitous): The Substrate system shall *x variants raise FE_INEXACT on non-integer input; non-x variants do not.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0555** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_round.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0556** (EARS/Ubiquitous): The Substrate system shall test ceil(): ceil(1.1)==2.0, ceil(-1.1)==-1.0, ceil(0.0)==0.0, ceil(-0.0)==-0.0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0557** (EARS/Ubiquitous): The Substrate system shall test floor(): floor(1.9)==1.0, floor(-1.1)==-2.0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0558** (EARS/Ubiquitous): The Substrate system shall test trunc(): trunc(1.9)==1.0, trunc(-1.9)==-1.0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0559** (EARS/Ubiquitous): The Substrate system shall test round(): ties away from zero: round(0.5)==1.0, round(-0.5)==-1.0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0560** (EARS/Ubiquitous): The Substrate system shall test rint(): honors current rounding mode (test with fesetround()).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0561** (EARS/Ubiquitous): The Substrate system shall test nearbyint(): same as rint() but does NOT raise FE_INEXACT (verify via fetestexcept()).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0562** (EARS/Ubiquitous): The Substrate system shall test lround()/llround(): overflow → LONG_MAX/LONG_MIN + FE_INVALID.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0563** (EARS/Ubiquitous): The Substrate system shall test lrint()/llrint(): current rounding mode, FE_INEXACT on non-integer.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0564** (EARS/Ubiquitous): The Substrate system shall test roundeven(): roundeven(0.5)==0.0, roundeven(1.5)==2.0 (ties to even).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0565** (EARS/Ubiquitous): The Substrate system shall test all rounding functions with: ±0.0, ±∞, NaN, ±0.5, ±1.5, large values.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0566** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_round.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0567** (EARS/Ubiquitous): The Substrate system shall property: ceil(x) >= x for all finite x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0568** (EARS/Ubiquitous): The Substrate system shall property: floor(x) <= x for all finite x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0569** (EARS/Ubiquitous): The Substrate system shall property: |trunc(x)| <= |x| for all finite x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0570** (EARS/Ubiquitous): The Substrate system shall property: floor(x) <= round(x) <= ceil(x) for all x where the three are defined.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0571** (EARS/Ubiquitous): The Substrate system shall property: rint(x) == x for integer values of x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0572** (EARS/Ubiquitous): The Substrate system shall property: rounding functions are idempotent: ceil(ceil(x)) == ceil(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0573** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0574** (EARS/Ubiquitous): The Substrate system shall man/man3/ceil.3 - Round upward. Covers ceil(), ceilf(), ceill(). SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0575** (EARS/Ubiquitous): The Substrate system shall man/man3/floor.3 - Round downward. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0576** (EARS/Ubiquitous): The Substrate system shall man/man3/round.3 - Round to nearest, ties away from zero. Covers round(), lround(), llround(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0577** (EARS/Ubiquitous): The Substrate system shall man/man3/rint.3 - Round to nearest integer using current mode. Covers rint(), nearbyint(), lrint(), llrint(). Document FE_INEXACT difference. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0578** (EARS/Ubiquitous): The Substrate system shall man/man3/trunc.3 - Round toward zero. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0579** (EARS/Ubiquitous): The Substrate system shall exp().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0580** (EARS/Ubiquitous): The Substrate system shall exp2().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0581** (EARS/Ubiquitous): The Substrate system shall expm1().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0582** (EARS/Ubiquitous): The Substrate system shall exp10(), exp10m1(), exp2m1() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0583** (EARS/Ubiquitous): The Substrate system shall exp10(x): compute 10^x. On x87: x * log2(10) → f2xm1/fscale.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0584** (EARS/Ubiquitous): The Substrate system shall exp10m1(x): compute 10^x - 1 accurately for small x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0585** (EARS/Ubiquitous): The Substrate system shall exp2m1(x): compute 2^x - 1 accurately for small x (direct f2xm1 for |x| < 1).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0586** (EARS/Ubiquitous): The Substrate system shall log().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0587** (EARS/Ubiquitous): The Substrate system shall log2().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0588** (EARS/Ubiquitous): The Substrate system shall log10().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0589** (EARS/Ubiquitous): The Substrate system shall log1p().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0590** (EARS/Ubiquitous): The Substrate system shall log10p1(), log2p1(), logp1() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0591** (EARS/Ubiquitous): The Substrate system shall logp1(x): alias for log1p(x) - compute ln(1+x) accurately for small x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0592** (EARS/Ubiquitous): The Substrate system shall log2p1(x): compute log2(1+x) accurately. On x87: use fyl2xp1 for |x| < 1-√2/2.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0593** (EARS/Ubiquitous): The Substrate system shall log10p1(x): compute log10(1+x) accurately.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0594** (EARS/Ubiquitous): The Substrate system shall pow().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0595** (EARS/Ubiquitous): The Substrate system shall pown(), powr(), rootn(), compound() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0596** (EARS/Ubiquitous): The Substrate system shall pown(x, n): x raised to integer power n (intmax_t). Binary exponentiation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0597** (EARS/Ubiquitous): The Substrate system shall powr(x, y): e^(y * ln(x)), domain x ≥ 0. Different NaN/±0 semantics from pow().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0598** (EARS/Ubiquitous): The Substrate system shall rootn(x, n): n-th root of x. rootn(x, 2) == sqrt(x), rootn(x, 3) == cbrt(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0599** (EARS/Ubiquitous): The Substrate system shall compound(x, n): (1+x)^n computed stably for small x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0600** (EARS/Ubiquitous): The Substrate system shall sqrt().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0601** (EARS/Ubiquitous): The Substrate system shall rsqrt() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0602** (EARS/Ubiquitous): The Substrate system shall reciprocal square root: 1/sqrt(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0603** (EARS/Ubiquitous): When x87: fsqrt then fdivr with 1.0, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0604** (EARS/Ubiquitous): The Substrate system shall cbrt().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0605** (EARS/Ubiquitous): The Substrate system shall hypot().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0606** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_explog.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0607** (EARS/Ubiquitous): The Substrate system shall test exp(0)==1, exp(1)≈M_E, exp(-∞)==0, exp(+∞)==+∞, exp(NaN)==NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0608** (EARS/Ubiquitous): The Substrate system shall test exp2(0)==1, exp2(10)==1024.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0609** (EARS/Ubiquitous): The Substrate system shall test expm1(0)==0, expm1(tiny)≈tiny (accuracy for small x vs naive exp(x)-1).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0610** (EARS/Ubiquitous): The Substrate system shall test log(1)==0, log(M_E)≈1, log(0)==-∞, log(-1)==NaN + FE_INVALID, log(+∞)==+∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0611** (EARS/Ubiquitous): The Substrate system shall test log2(1)==0, log2(1024)==10.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0612** (EARS/Ubiquitous): The Substrate system shall test log10(1)==0, log10(1000)==3.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0613** (EARS/Ubiquitous): The Substrate system shall test log1p(0)==0, log1p(tiny)≈tiny (accuracy for small x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0614** (EARS/Ubiquitous): The Substrate system shall test pow(2,10)==1024, pow(-1,2)==1, pow(0,0)==1 (C99 convention).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0615** (EARS/Ubiquitous): The Substrate system shall test pow(x, 0)==1 for all x (including ∞, NaN per C99 F.9.4.4).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0616** (EARS/Ubiquitous): The Substrate system shall test sqrt(4)==2, sqrt(0)==0, sqrt(-1)==NaN, sqrt(+∞)==+∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0617** (EARS/Ubiquitous): The Substrate system shall test cbrt(-8)==-2, cbrt(0)==0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0618** (EARS/Ubiquitous): The Substrate system shall test hypot(3,4)==5, hypot(x,0)==fabs(x), hypot(∞,NaN)==∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0619** (EARS/Ubiquitous): The Substrate system shall test rsqrt(4)==0.5, rsqrt(0)==+∞, rsqrt(-1)==NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0620** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_explog.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0621** (EARS/Ubiquitous): The Substrate system shall property: exp(log(x)) ≈ x for positive finite x (within ULP tolerance).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0622** (EARS/Ubiquitous): The Substrate system shall property: log(exp(x)) ≈ x for moderate x (no overflow/underflow).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0623** (EARS/Ubiquitous): The Substrate system shall property: exp2(log2(x)) ≈ x for positive finite x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0624** (EARS/Ubiquitous): The Substrate system shall property: sqrt(x) * sqrt(x) ≈ x for positive x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0625** (EARS/Ubiquitous): The Substrate system shall property: hypot(x,y) >= fabs(x) && hypot(x,y) >= fabs(y).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0626** (EARS/Ubiquitous): The Substrate system shall property: pow(x, 1.0) == x for all x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0627** (EARS/Ubiquitous): The Substrate system shall property: expm1(x) + 1 ≈ exp(x) for all x (accuracy comparison, not equality).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0628** (EARS/Ubiquitous): The Substrate system shall property: log1p(expm1(x)) ≈ x for moderate x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0629** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0630** (EARS/Ubiquitous): The Substrate system shall man/man3/exp.3 - Exponential functions. Covers exp(), exp2(), expm1(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0631** (EARS/Ubiquitous): The Substrate system shall man/man3/log.3 - Logarithmic functions. Covers log(), log2(), log10(), log1p(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0632** (EARS/Ubiquitous): The Substrate system shall man/man3/pow.3 - Power functions. Covers pow(), sqrt(), cbrt(), hypot(). Document special value semantics extensively (C99 Annex F). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0633** (EARS/Ubiquitous): The Substrate system shall sin().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0634** (EARS/Ubiquitous): The Substrate system shall cos().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0635** (EARS/Ubiquitous): The Substrate system shall tan().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0636** (EARS/Ubiquitous): The Substrate system shall asin().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0637** (EARS/Ubiquitous): The Substrate system shall acos().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0638** (EARS/Ubiquitous): The Substrate system shall atan().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0639** (EARS/Ubiquitous): The Substrate system shall atan2().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0640** (EARS/Ubiquitous): The Substrate system shall sinpi(), cospi(), tanpi() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0641** (EARS/Ubiquitous): The Substrate system shall sinpi(x): compute sin(π·x) exactly at integer and half-integer points.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0642** (EARS/Ubiquitous): The Substrate system shall cospi(x): compute cos(π·x) exactly at integer and half-integer points.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0643** (EARS/Ubiquitous): The Substrate system shall tanpi(x): compute tan(π·x) exactly, including singularity at half-integers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0644** (EARS/Ubiquitous): The Substrate system shall key benefit: exact values without M_PI multiplication error.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0645** (EARS/Ubiquitous): The Substrate system shall asinpi(), acospi(), atanpi(), atan2pi() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0646** (EARS/Ubiquitous): The Substrate system shall inverse functions returning result in units of π (i.e., divided by π).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0647** (EARS/Ubiquitous): The Substrate system shall asinpi(x) ∈ [-0.5, 0.5], acospi(x) ∈ [0, 1], atanpi(x) ∈ [-0.5, 0.5].
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0648** (EARS/Ubiquitous): The Substrate system shall atan2pi(y, x) ∈ [-1, 1].
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0649** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_trig.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0650** (EARS/Ubiquitous): The Substrate system shall test sin(0)==0, sin(π/2)≈1, sin(π)≈0, sin(NaN)==NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0651** (EARS/Ubiquitous): The Substrate system shall test cos(0)==1, cos(π)≈-1, cos(π/2)≈0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0652** (EARS/Ubiquitous): The Substrate system shall test tan(0)==0, tan(π/4)≈1.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0653** (EARS/Ubiquitous): The Substrate system shall test asin(0)==0, asin(1)≈π/2, asin(2)==NaN (domain error).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0654** (EARS/Ubiquitous): The Substrate system shall test acos(1)==0, acos(0)≈π/2, acos(-1)≈π.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0655** (EARS/Ubiquitous): The Substrate system shall test atan(0)==0, atan(1)≈π/4, atan(+∞)≈π/2.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0656** (EARS/Ubiquitous): The Substrate system shall test atan2(0,1)==0, atan2(1,0)≈π/2, atan2(0,-1)≈π, atan2(-1,0)≈-π/2.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0657** (EARS/Ubiquitous): The Substrate system shall test sinpi(0.5)==1, sinpi(1)==0, sinpi(0)==0 (exact).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0658** (EARS/Ubiquitous): The Substrate system shall test cospi(0)==1, cospi(0.5)==0, cospi(1)==-1 (exact).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0659** (EARS/Ubiquitous): The Substrate system shall test large argument accuracy: sin(1e15) - verify range reduction correctness.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0660** (EARS/Ubiquitous): The Substrate system shall test sincos() agrees with individual sin() and cos() calls.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0661** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_trig.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0662** (EARS/Ubiquitous): The Substrate system shall property: sin(x)² + cos(x)² ≈ 1 (Pythagorean identity) for all finite x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0663** (EARS/Ubiquitous): The Substrate system shall property: sin(-x) == -sin(x) (odd function).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0664** (EARS/Ubiquitous): The Substrate system shall property: cos(-x) == cos(x) (even function).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0665** (EARS/Ubiquitous): The Substrate system shall property: asin(sin(x)) ≈ x for x ∈ [-π/2, π/2].
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0666** (EARS/Ubiquitous): The Substrate system shall property: |sin(x)| <= 1 and |cos(x)| <= 1 for all finite x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0667** (EARS/Ubiquitous): The Substrate system shall property: atan2(sin(x), cos(x)) ≈ x for x ∈ (-π, π].
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0668** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0669** (EARS/Ubiquitous): The Substrate system shall man/man3/sin.3 - Trigonometric functions. Covers sin(), cos(), tan(), sincos(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0670** (EARS/Ubiquitous): The Substrate system shall man/man3/asin.3 - Inverse trigonometric functions. Covers asin(), acos(), atan(), atan2(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0671** (EARS/Ubiquitous): The Substrate system shall hyperbolic:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0672** (EARS/Ubiquitous): The Substrate system shall sinh().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0673** (EARS/Ubiquitous): The Substrate system shall cosh().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0674** (EARS/Ubiquitous): The Substrate system shall tanh().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0675** (EARS/Ubiquitous): The Substrate system shall asinh().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0676** (EARS/Ubiquitous): The Substrate system shall acosh().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0677** (EARS/Ubiquitous): The Substrate system shall atanh().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0678** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_hyper.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0679** (EARS/Ubiquitous): The Substrate system shall test sinh(0)==0, cosh(0)==1, tanh(0)==0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0680** (EARS/Ubiquitous): The Substrate system shall test sinh(1)≈1.1752, cosh(1)≈1.5431, tanh(1)≈0.7616.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0681** (EARS/Ubiquitous): The Substrate system shall test sinh(+∞)==+∞, cosh(+∞)==+∞, tanh(+∞)==1.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0682** (EARS/Ubiquitous): The Substrate system shall test asinh(0)==0, acosh(1)==0, atanh(0)==0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0683** (EARS/Ubiquitous): The Substrate system shall test acosh(x) domain: acosh(0.5) → NaN/domain error.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0684** (EARS/Ubiquitous): The Substrate system shall test atanh(±1) → ±∞ (pole error).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0685** (EARS/Ubiquitous): The Substrate system shall test NaN propagation for all hyperbolic functions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0686** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_hyper.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0687** (EARS/Ubiquitous): The Substrate system shall property: cosh(x)² - sinh(x)² ≈ 1 (hyperbolic Pythagorean identity).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0688** (EARS/Ubiquitous): The Substrate system shall property: sinh(-x) == -sinh(x) (odd).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0689** (EARS/Ubiquitous): The Substrate system shall property: cosh(-x) == cosh(x) (even).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0690** (EARS/Ubiquitous): The Substrate system shall property: tanh(x) == sinh(x)/cosh(x) for moderate x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0691** (EARS/Ubiquitous): The Substrate system shall property: asinh(sinh(x)) ≈ x for all x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0692** (EARS/Ubiquitous): The Substrate system shall property: |tanh(x)| < 1 for all finite x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0693** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0694** (EARS/Ubiquitous): The Substrate system shall man/man3/sinh.3 - Hyperbolic functions. Covers sinh(), cosh(), tanh(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0695** (EARS/Ubiquitous): The Substrate system shall man/man3/asinh.3 - Inverse hyperbolic functions. Covers asinh(), acosh(), atanh(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0696** (EARS/Ubiquitous): The Substrate system shall frexp().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0697** (EARS/Ubiquitous): The Substrate system shall ldexp().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0698** (EARS/Ubiquitous): The Substrate system shall modf().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0699** (EARS/Ubiquitous): The Substrate system shall scalbn().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0700** (EARS/Ubiquitous): The Substrate system shall scalbln():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0701** (EARS/Ubiquitous): The Substrate system shall same as scalbn() but exponent is long instead of int.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0702** (EARS/Ubiquitous): The Substrate system shall ilogb(), logb():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0703** (EARS/Ubiquitous): The Substrate system shall ilogb(x): extract unbiased exponent as int. ilogb(0) → FP_ILOGB0, ilogb(∞) → INT_MAX, ilogb(NaN) → FP_ILOGBNAN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0704** (EARS/Ubiquitous): The Substrate system shall logb(x): extract unbiased exponent as double. logb(0) → -∞ (pole), logb(±∞) → +∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0705** (EARS/Ubiquitous): The Substrate system shall nextafter().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0706** (EARS/Ubiquitous): The Substrate system shall nexttoward():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0707** (EARS/Ubiquitous): The Substrate system shall like nextafter() but second argument is long double for direction.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0708** (EARS/Ubiquitous): The Substrate system shall nextup(), nextdown() (C23):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0709** (EARS/Ubiquitous): The Substrate system shall nextup(x): next representable value toward +∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0710** (EARS/Ubiquitous): The Substrate system shall nextdown(x): next representable value toward -∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0711** (EARS/Ubiquitous): The Substrate system shall copysign().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0712** (EARS/Ubiquitous): The Substrate system shall nan():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0713** (EARS/Ubiquitous): The Substrate system shall nan(tagp): convert string tag to quiet NaN. nan("") == NAN, nan("123") → NaN with tag payload.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0714** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_manip.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0715** (EARS/Ubiquitous): The Substrate system shall test frexp() / ldexp() round-trip: ldexp(frexp(x, &e), e) == x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0716** (EARS/Ubiquitous): The Substrate system shall test frexp() result ∈ [0.5, 1.0) for positive normals.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0717** (EARS/Ubiquitous): The Substrate system shall test frexp(0.0) returns 0.0 with exponent 0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0718** (EARS/Ubiquitous): The Substrate system shall test modf(): integer + fractional parts sum to original.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0719** (EARS/Ubiquitous): The Substrate system shall test scalbn(x, n) == x * 2^n for moderate n.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0720** (EARS/Ubiquitous): The Substrate system shall test ilogb(): ilogb(1.0)==0, ilogb(2.0)==1, ilogb(0.5)==-1.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0721** (EARS/Ubiquitous): The Substrate system shall test ilogb(0) returns FP_ILOGB0, ilogb(NaN) returns FP_ILOGBNAN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0722** (EARS/Ubiquitous): The Substrate system shall test logb(): logb(1.0)==0, logb(0)==-∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0723** (EARS/Ubiquitous): The Substrate system shall test nextafter(1.0, 2.0) returns next representable above 1.0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0724** (EARS/Ubiquitous): The Substrate system shall test nextafter(0.0, 1.0) returns smallest denormal.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0725** (EARS/Ubiquitous): The Substrate system shall test nextafter(x, x) == x for all x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0726** (EARS/Ubiquitous): The Substrate system shall test copysign(1.0, -1.0) == -1.0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0727** (EARS/Ubiquitous): The Substrate system shall test nan("") returns NaN, isnan(nan("tag")) is true.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0728** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_manip.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0729** (EARS/Ubiquitous): The Substrate system shall property: ldexp(frexp(x, &e), e) == x for all finite non-zero x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0730** (EARS/Ubiquitous): The Substrate system shall property: modf(x, &i); (i + frac) == x for finite x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0731** (EARS/Ubiquitous): The Substrate system shall property: copysign(fabs(x), y) has sign of y and magnitude of x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0732** (EARS/Ubiquitous): The Substrate system shall property: nextafter(x, y) != x when x != y (for finite x, y).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0733** (EARS/Ubiquitous): The Substrate system shall property: scalbn(x, 0) == x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0734** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0735** (EARS/Ubiquitous): The Substrate system shall man/man3/frexp.3 - Extract mantissa and exponent. Covers frexp() and ldexp(). SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0736** (EARS/Ubiquitous): The Substrate system shall man/man3/modf.3 - Decompose to integer and fractional parts. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0737** (EARS/Ubiquitous): The Substrate system shall man/man3/scalbn.3 - Scale by power of radix. Covers scalbn() and scalbln(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0738** (EARS/Ubiquitous): The Substrate system shall man/man3/ilogb.3 - Extract exponent. Covers ilogb() and logb(). Document special return values. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0739** (EARS/Ubiquitous): The Substrate system shall man/man3/nextafter.3 - Next representable value. Covers nextafter(), nexttoward(), nextup(), nextdown(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0740** (EARS/Ubiquitous): The Substrate system shall man/man3/copysign.3 - Copy sign of a number. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0741** (EARS/Ubiquitous): The Substrate system shall man/man3/nan.3 - Generate quiet NaN. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0742** (EARS/Ubiquitous): The Substrate system shall error & Gamma Functions (POSIX/C11):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0743** (EARS/Ubiquitous): The Substrate system shall erf(), erfc():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0744** (EARS/Ubiquitous): The Substrate system shall erf(x): error function, 2/√π · ∫₀ˣ e^{-t²} dt. Range: [-1, 1].
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0745** (EARS/Ubiquitous): The Substrate system shall erfc(x): complementary error function, 1 - erf(x). More accurate than 1 - erf(x) for large x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0746** (EARS/Ubiquitous): The Substrate system shall implementation: rational polynomial approximation (Cody's or Abramowitz & Stegun).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0747** (EARS/Ubiquitous): The Substrate system shall erf(0)==0, erf(+∞)==1, erf(-∞)==-1, erfc(0)==1, erfc(+∞)==0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0748** (EARS/Ubiquitous): The Substrate system shall tgamma(), lgamma() (with signgam):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0749** (EARS/Ubiquitous): The Substrate system shall tgamma(x): true Gamma function, Γ(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0750** (EARS/Ubiquitous): The Substrate system shall tgamma(n) == (n-1)! for positive integers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0751** (EARS/Ubiquitous): The Substrate system shall poles at non-positive integers: tgamma(0) → ±∞, tgamma(-1) → NaN + FE_INVALID.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0752** (EARS/Ubiquitous): The Substrate system shall lgamma(x): natural log of absolute value of Gamma: ln|Γ(x)|.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0753** (EARS/Ubiquitous): The Substrate system shall set external signgam to sign of Γ(x) (+1 or -1).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0754** (EARS/Ubiquitous): The Substrate system shall lgamma_r(x, &signp): reentrant variant (BSD extension).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0755** (EARS/Ubiquitous): The Substrate system shall implementation: Stirling's approximation for large x, Lanczos or rational approximation for small x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0756** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_gamma.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0757** (EARS/Ubiquitous): The Substrate system shall test erf(0)==0, erf(1)≈0.8427, erf(+∞)==1, erf(-∞)==-1.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0758** (EARS/Ubiquitous): The Substrate system shall test erfc(0)==1, erfc(+∞)==0, erfc(x) + erf(x) ≈ 1.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0759** (EARS/Ubiquitous): The Substrate system shall test tgamma(1)==1, tgamma(2)==1, tgamma(5)==24, tgamma(0.5)≈√π.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0760** (EARS/Ubiquitous): The Substrate system shall test tgamma(0) → ±∞ (pole), tgamma(-1) → NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0761** (EARS/Ubiquitous): The Substrate system shall test lgamma(1)==0, lgamma(2)==0, lgamma(5)≈ln(24).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0762** (EARS/Ubiquitous): The Substrate system shall test signgam is set correctly after lgamma() calls.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0763** (EARS/Ubiquitous): The Substrate system shall test NaN propagation for all error/gamma functions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0764** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_gamma.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0765** (EARS/Ubiquitous): The Substrate system shall property: erfc(x) + erf(x) ≈ 1.0 for all finite x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0766** (EARS/Ubiquitous): The Substrate system shall property: erf(-x) == -erf(x) (odd function).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0767** (EARS/Ubiquitous): The Substrate system shall property: exp(lgamma(x)) ≈ |tgamma(x)| for x where tgamma(x) is finite.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0768** (EARS/Ubiquitous): The Substrate system shall property: tgamma(x+1) ≈ x * tgamma(x) for positive x (recurrence relation).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0769** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0770** (EARS/Ubiquitous): The Substrate system shall man/man3/erf.3 - Error functions. Covers erf() and erfc(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0771** (EARS/Ubiquitous): The Substrate system shall man/man3/tgamma.3 - Gamma functions. Covers tgamma(), lgamma(), lgamma_r(), signgam. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0772** (EARS/Ubiquitous): The Substrate system shall bessel Functions (POSIX/XSI):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0773** (EARS/Ubiquitous): The Substrate system shall j0(), j1(), jn():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0774** (EARS/Ubiquitous): The Substrate system shall bessel functions of the first kind: J₀(x), J₁(x), Jₙ(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0775** (EARS/Ubiquitous): The Substrate system shall j0(0)==1, j1(0)==0, jn(0, x)==j0(x), jn(1, x)==j1(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0776** (EARS/Ubiquitous): The Substrate system shall implementation: polynomial/rational approximation for small x, asymptotic expansion for large x, Miller's backward recurrence for jn().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0777** (EARS/Ubiquitous): The Substrate system shall y0(), y1(), yn():.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0778** (EARS/Ubiquitous): The Substrate system shall bessel functions of the second kind: Y₀(x), Y₁(x), Yₙ(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0779** (EARS/Ubiquitous): The Substrate system shall singular at x=0: y0(0)==-∞, y1(0)==-∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0780** (EARS/Ubiquitous): The Substrate system shall domain: x > 0 only. y0(-1) → NaN + FE_INVALID.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0781** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_bessel.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0782** (EARS/Ubiquitous): The Substrate system shall test j0(0)==1, j1(0)==0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0783** (EARS/Ubiquitous): The Substrate system shall test j0(x) known values: j0(2.4048...)≈0 (first zero).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0784** (EARS/Ubiquitous): The Substrate system shall test jn(0, x)==j0(x), jn(1, x)==j1(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0785** (EARS/Ubiquitous): The Substrate system shall test y0(x), y1(x) known values.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0786** (EARS/Ubiquitous): The Substrate system shall test y0(0)==-∞, y1(0)==-∞.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0787** (EARS/Ubiquitous): The Substrate system shall test domain: y0(-1) → NaN, y1(-1) → NaN.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0788** (EARS/Ubiquitous): The Substrate system shall test NaN propagation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0789** (EARS/Ubiquitous): The Substrate system shall property Tests (tests/lib/m/property/prop_bessel.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0790** (EARS/Ubiquitous): The Substrate system shall property: jn(n, x) satisfies Bessel recurrence: J_{n-1}(x) + J_{n+1}(x) = (2n/x) * J_n(x).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0791** (EARS/Ubiquitous): The Substrate system shall property: |j0(x)| <= 1 for all x >= 0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0792** (EARS/Ubiquitous): The Substrate system shall property: yn(n, x) satisfies same recurrence.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0793** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0794** (EARS/Ubiquitous): The Substrate system shall man/man3/j0.3 - Bessel functions. Covers j0(), j1(), jn(), y0(), y1(), yn(). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0795** (EARS/Ubiquitous): The Substrate system shall comprehensive Math Library Tests (Cross-Cutting):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0796** (EARS/Ubiquitous): The Substrate system shall fuzz Tests (tests/lib/m/fuzz/fuzz_math.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0797** (EARS/Ubiquitous): The Substrate system shall fuzz all implemented math functions with random double inputs (including denormals, ±0, ±∞, NaN, max/min values).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0798** (EARS/Ubiquitous): The Substrate system shall verify no crashes, no SIGFPE (unless expected), consistent NaN propagation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0799** (EARS/Ubiquitous): The Substrate system shall verify errno is set correctly for domain/range errors.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0800** (EARS/Ubiquitous): The Substrate system shall verify fetestexcept() flags raised appropriately.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0801** (EARS/Ubiquitous): The Substrate system shall fuzz Tests (tests/lib/m/fuzz/fuzz_mathf.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0802** (EARS/Ubiquitous): The Substrate system shall same as above but for all float variant functions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0803** (EARS/Ubiquitous): The Substrate system shall accuracy Tests (tests/lib/m/unit/test_accuracy.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0804** (EARS/Ubiquitous): The Substrate system shall compare all math functions against known high-precision reference values (MPFR or hardcoded tables).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0805** (EARS/Ubiquitous): The Substrate system shall verify results within 1 ULP for correctly-rounded functions, 2-3 ULP for faithfully-rounded.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0806** (EARS/Ubiquitous): The Substrate system shall test at boundary values: smallest/largest normal, smallest denormal, values near singularities.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0807** (EARS/Ubiquitous): The Substrate system shall optimizations (i386/x87 Inline Assembly):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0808** (EARS/Ubiquitous): The Substrate system shall trigonometric Functions:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0809** (EARS/Ubiquitous): The Substrate system shall sin() / cos(): Use fsin / fcos instructions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0810** (EARS/Ubiquitous): The Substrate system shall sincos(): Use fsincos if supported, else combine.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0811** (EARS/Ubiquitous): The Substrate system shall tan(): Use fptan; push 1.0 then fptan, ignore the 1.0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0812** (EARS/Ubiquitous): The Substrate system shall atan2(): Use fpatan.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0813** (EARS/Ubiquitous): The Substrate system shall range Reduction: Implement fprem1 loop for arguments > 2^63 (Intel Manual reduction).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0814** (EARS/Ubiquitous): The Substrate system shall logarithms & Exponentials:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0815** (EARS/Ubiquitous): The Substrate system shall log2(x): Load 1.0, load x, use fyl2x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0816** (EARS/Ubiquitous): The Substrate system shall log(x): Load ln(2), load x, use fyl2x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0817** (EARS/Ubiquitous): The Substrate system shall log10(x): Load log10(2), load x, use fyl2x.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0818** (EARS/Ubiquitous): The Substrate system shall pow(x, y):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0819** (EARS/Ubiquitous): When y is integer, use binary exponentiation, the Substrate system shall satisfy the specified behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0820** (EARS/Ubiquitous): The Substrate system shall else: y * log2(x) -> frndint -> f2xm1 -> fscale.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0821** (EARS/Ubiquitous): The Substrate system shall exp2(x): f2xm1 (for -1 < x < 1) with fscale for integer part.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0822** (EARS/Ubiquitous): The Substrate system shall basic Arithmetic:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0823** (EARS/Ubiquitous): The Substrate system shall sqrt(): fsqrt.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0824** (EARS/Ubiquitous): The Substrate system shall fabs(): fabs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0825** (EARS/Ubiquitous): The Substrate system shall fmod(): fprem.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0826** (EARS/Ubiquitous): The Substrate system shall remainder(): fprem1 (IEEE compliant remainder).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0827** (EARS/Ubiquitous): The Substrate system shall rounding & Manipulation:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0828** (EARS/Ubiquitous): The Substrate system shall rint(): frndint (honors current CW rounding mode).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0829** (EARS/Ubiquitous): The Substrate system shall nearbyint(): frndint (without raising inexact exception).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0830** (EARS/Ubiquitous): The Substrate system shall scalbn(x, n): Load x, load n, fscale.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0831** (EARS/Ubiquitous): The Substrate system shall lrint() / llrint(): fistp (store integer).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0832** (EARS/Ubiquitous): The Substrate system shall testing (tests/lib/m/unit/test_x87_opt.c):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0833** (EARS/Ubiquitous): The Substrate system shall verify x87-optimized functions produce identical results to generic C implementations.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0834** (EARS/Ubiquitous): The Substrate system shall test x87 range reduction: sin(x) for x > 2^63 matches software range reduction.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0835** (EARS/Ubiquitous): The Substrate system shall test fprem loop termination (C1 flag check).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0836** (EARS/Ubiquitous): The Substrate system shall benchmark x87 vs generic: verify speedup for core functions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0837** (EARS/Ubiquitous): The Substrate system shall test nearbyint() x87 path does NOT raise FE_INEXACT (vs rint() which does).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0838** (EARS/Ubiquitous): The Substrate system shall test fistp path for lrint()/llrint() matches current rounding mode.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0839** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0840** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall man/man7/math_x87.7 - i386/x87 math optimizations overview. Document which functions use hardware instructions, range reduction strategy, accuracy guarantees, and when generic fallback is used. SYNOPSIS, DESCRIPTION, NOTES, SEE ALSO.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0841** (EARS/Ubiquitous): The Substrate system shall dynamic Linker (/libexec/ld.so) - Production Quality BSD-Style Implementation:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0842** (EARS/Ubiquitous): The Substrate system shall implementation Checklist (Commit-Atomic, Production Gate):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0843** (EARS/Ubiquitous): The Substrate system shall freeze ld.so scope, ABI targets, and unsupported-feature policy.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0844** (EARS/Ubiquitous): The Substrate system shall publish architecture relocation matrix for i386 now and x86_64 stub policy.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0845** (EARS/Ubiquitous): The Substrate system shall specify deterministic symbol-resolution precedence and scope graph rules.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0846** (EARS/Ubiquitous): The Substrate system shall specify DT_RPATH/DT_RUNPATH, DT_SONAME, and versioning policy.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0847** (EARS/Ubiquitous): The Substrate system shall implement hardened ELF header/program-header parser with overflow guards.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0848** (EARS/Ubiquitous): The Substrate system shall implement dynamic table parser for required DT_* entries with strict bounds checking.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0849** (EARS/Ubiquitous): The Substrate system shall implement page-aligned segment mapping with exact PROT_* transitions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0850** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall implement fallback read-into-memory path for unsupported mmap edge cases.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0851** (EARS/Ubiquitous): The Substrate system shall implement recursive DT_NEEDED graph construction with cycle detection metadata.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0852** (EARS/Ubiquitous): The Substrate system shall implement topological load-order planner for reloc/init phases.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0853** (EARS/Ubiquitous): The Substrate system shall implement per-process DSO registry with SONAME identity and refcounts.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0854** (EARS/Ubiquitous): The Substrate system shall implement full search policy (LD_PRELOAD, LD_LIBRARY_PATH, RUNPATH/RPATH, cache, defaults).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0855** (EARS/Ubiquitous): The Substrate system shall implement REL/RELA dispatcher and relocation pass sequencing.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0856** (EARS/Ubiquitous): The Substrate system shall implement core i386 relocation handlers (relative, absolute, pc-relative, glob-dat, jmp-slot).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0857** (EARS/Ubiquitous): The Substrate system shall implement copy relocation support with explicit executable-only safety checks.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0858** (EARS/Ubiquitous): The Substrate system shall implement lazy PLT resolver and GOT patch path.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0859** (EARS/Ubiquitous): The Substrate system shall implement eager binding path for RTLD_NOW and LD_BIND_NOW.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0860** (EARS/Ubiquitous): The Substrate system shall add atomic GOT patching and locking for concurrent lazy binding.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0861** (EARS/Ubiquitous): The Substrate system shall implement SYSV DT_HASH and GNU DT_GNU_HASH lookup backends.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0862** (EARS/Ubiquitous): The Substrate system shall implement weak/strong, visibility, and undefined-weak rules.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0863** (EARS/Ubiquitous): The Substrate system shall implement preload-based interposition and global/local scope boundaries.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0864** (EARS/Ubiquitous): The Substrate system shall implement versioned symbol matching (DT_VERSYM, DT_VERNEED, DT_VERDEF) when present.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0865** (EARS/Ubiquitous): The Substrate system shall implement PT_TLS parsing and per-module TLS metadata registration.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0866** (EARS/Ubiquitous): The Substrate system shall implement static TLS layout computation for startup objects.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0867** (EARS/Ubiquitous): The Substrate system shall implement dynamic TLS allocation and __tls_get_addr() resolver.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0868** (EARS/Ubiquitous): The Substrate system shall integrate TLS module lifecycle with dlopen/dlclose and pthread creation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0869** (EARS/Ubiquitous): The Substrate system shall implement parser for DT_PREINIT_ARRAY, DT_INIT, DT_INIT_ARRAY, DT_FINI, DT_FINI_ARRAY.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0870** (EARS/Ubiquitous): The Substrate system shall implement dependency-respecting constructor execution order.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0871** (EARS/Ubiquitous): The Substrate system shall implement reverse-order destructor execution for process exit and dlclose.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0872** (EARS/Ubiquitous): The Substrate system shall implement dlfcn.h ABI surface and libdl entry points skeleton.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0873** (EARS/Ubiquitous): The Substrate system shall implement dlopen() with RTLD_LAZY, RTLD_NOW, RTLD_LOCAL, and RTLD_GLOBAL.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0874** (EARS/Ubiquitous): The Substrate system shall implement dlsym() with RTLD_DEFAULT, RTLD_NEXT, and handle-scoped lookups.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0875** (EARS/Ubiquitous): The Substrate system shall implement dlclose() refcounting, unload decision, and RTLD_NODELETE behavior.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0876** (EARS/Ubiquitous): The Substrate system shall implement dlerror() with thread-local last-error storage semantics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0877** (EARS/Ubiquitous): The Substrate system shall implement dladdr() and dlinfo() for common tooling requests.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0878** (EARS/Ubiquitous): The Substrate system shall implement parser for supported LD_* variables with strict token validation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0879** (EARS/Ubiquitous): The Substrate system shall enforce secure-exec mode to ignore all unsafe LD_* inputs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0880** (EARS/Ubiquitous): The Substrate system shall enforce secure preload policy (deny user-controlled preload paths and objects).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0881** (EARS/Ubiquitous): The Substrate system shall validate ownership and permissions of DSOs before secure-mode use.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0882** (EARS/Ubiquitous): The Substrate system shall implement PT_GNU_RELRO finalization and read-only remap after relocations.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0883** (EARS/Ubiquitous): The Substrate system shall implement sysroot/chroot-aware path canonicalization for loader lookups.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0884** (EARS/Ubiquitous): The Substrate system shall define ld.so.cache binary format and versioning contract.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0885** (EARS/Ubiquitous): The Substrate system shall implement secure cache reader in loader with ownership/permission validation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0886** (EARS/Ubiquitous): The Substrate system shall implement ldconfig(8) cache writer and SONAME symlink management.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0887** (EARS/Ubiquitous): The Substrate system shall optimize hash lookup fast path with GNU hash bloom prefilter.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0888** (EARS/Ubiquitous): The Substrate system shall batch relocations by page locality to reduce protection flips and page faults.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0889** (EARS/Ubiquitous): The Substrate system shall add optional prebinding/prelink experiment behind explicit build flag.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0890** (EARS/Ubiquitous): The Substrate system shall implement LD_DEBUG category parser and structured debug logger.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0891** (EARS/Ubiquitous): The Substrate system shall implement r_debug / _dl_debug_state updates for debugger attach flow.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0892** (EARS/Ubiquitous): The Substrate system shall implement optional audit hook interface for load/bind events.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0893** (EARS/Ubiquitous): The Substrate system shall add trace-friendly one-line event mode for ktrace/strace correlation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0894** (EARS/Ubiquitous): The Substrate system shall define centralized loader error catalog with stable error codes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0895** (EARS/Ubiquitous): The Substrate system shall implement high-context unresolved-symbol and relocation-failure diagnostics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0896** (EARS/Ubiquitous): The Substrate system shall add fault-injection hooks for OOM, short-read, and mprotect failures.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0897** (EARS/Ubiquitous): The Substrate system shall add malformed-DSO fuzzing harnesses for parser, relocator, and resolver subsystems.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0898** (EARS/Ubiquitous): The Substrate system shall implement documented loader lock hierarchy and invariants.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0899** (EARS/Ubiquitous): The Substrate system shall make dlopen/dlsym/dlclose reentrant-safe under concurrent callers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0900** (EARS/Ubiquitous): The Substrate system shall add concurrent lazy-bind stress runner with race-detection instrumentation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0901** (EARS/Ubiquitous): The Substrate system shall implement unload-eligibility analysis for reference graph and static TLS constraints.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0902** (EARS/Ubiquitous): The Substrate system shall implement module teardown pipeline (dtors, TLS teardown, unmap, registry removal).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0903** (EARS/Ubiquitous): The Substrate system shall add long-run load/unload churn leak tests under sanitizers.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0904** (EARS/Ubiquitous): The Substrate system shall implement dl_iterate_phdr() and stable dl_phdr_info traversal semantics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0905** (EARS/Ubiquitous): The Substrate system shall export and maintain link_map/r_debug ABI for debuggers and unwinders.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0906** (EARS/Ubiquitous): The Substrate system shall add compatibility shims and behavioral toggles required by common third-party software.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0907** (EARS/Ubiquitous): The Substrate system shall define and enforce interpreter install path and PT_INTERP contract.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0908** (EARS/Ubiquitous): The Substrate system shall add packaging rules for ld.so, libdl.so, symlinks, ownership, and mode bits.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0909** (EARS/Ubiquitous): The Substrate system shall add upgrade/rollback safety checks for loader and cache transitions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0910** (EARS/Ubiquitous): The Substrate system shall create dedicated ld.so unit-test targets in build system.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0911** (EARS/Ubiquitous): The Substrate system shall add property-test harness for symbol resolution and relocation invariants.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0912** (EARS/Ubiquitous): The Substrate system shall add coverage-guided fuzz targets and corpus minimization workflow.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0913** (EARS/Ubiquitous): The Substrate system shall add sanitizer CI matrix (ASAN/UBSAN required; optional TSAN where supported).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0914** (EARS/Ubiquitous): The Substrate system shall add multi-arch job plan (i386 active, x86_64 gated) and regression baseline snapshots.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0915** (EARS/Ubiquitous): The Substrate system shall write ld.so(8) covering runtime behavior, search paths, env vars, secure mode, and diagnostics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0916** (EARS/Ubiquitous): The Substrate system shall write dlopen(3), dlsym(3), dlclose(3), and dlerror(3) with error semantics and examples.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0917** (EARS/Ubiquitous): The Substrate system shall write dladdr(3), dlinfo(3), and dl_iterate_phdr(3) tooling-focused documentation.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0918** (EARS/Ubiquitous): The Substrate system shall publish loader security threat model and operational hardening guide.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0919** (EARS/Ubiquitous): The Substrate system shall audit existing loader/runtime code and record reuse/refactor/delete decisions per file.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0920** (EARS/Ubiquitous): The Substrate system shall convert loader-related TODO/FIXME markers into standalone commit-atomic tasks.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0921** (EARS/Ubiquitous): The Substrate system shall add final ship gate checklist for correctness, security, performance, docs, and CI sign-off.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0922** (EARS/Ubiquitous): The Substrate system shall system Interface Libraries:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0923** (EARS/Ubiquitous): The Substrate system shall native Kernel Introspection (libsys / libkernel):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0924** (EARS/Ubiquitous): The Substrate system shall core Architecture:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0925** (EARS/Ubiquitous): The Substrate system shall define libsys as the canonical native interface to kernel internals.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0926** (EARS/Ubiquitous): The Substrate system shall thin wrapper over syscalls + structured /proc and /sys parsing.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0927** (EARS/Ubiquitous): The Substrate system shall sync and async query modes (for monitoring tools).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0928** (EARS/Ubiquitous): The Substrate system shall thread-safe design with per-thread error state (errno-like).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0929** (EARS/Ubiquitous): The Substrate system shall versioned ABI with libsys.so.1 soname.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0930** (EARS/Ubiquitous): The Substrate system shall data Sources:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0931** (EARS/Ubiquitous): The Substrate system shall sysctl MIBs (System Control):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0932** (EARS/Ubiquitous): The Substrate system shall kern (Kernel):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0933** (EARS/Ubiquitous): The Substrate system shall kern.ostype (string): OS name (e.g., "Substrate").
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0934** (EARS/Ubiquitous): The Substrate system shall kern.osrelease (string): release version.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0935** (EARS/Ubiquitous): The Substrate system shall kern.osrevision (int): revision number.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0936** (EARS/Ubiquitous): The Substrate system shall kern.version (string): full version string.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0937** (EARS/Ubiquitous): The Substrate system shall kern.hostname (string): system hostname (RW).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0938** (EARS/Ubiquitous): The Substrate system shall kern.domainname (string): NIS domain name (RW).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0939** (EARS/Ubiquitous): The Substrate system shall kern.boottime (struct timeval): boot timestamp.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0940** (EARS/Ubiquitous): The Substrate system shall kern.maxproc (int): maximum processes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0941** (EARS/Ubiquitous): The Substrate system shall kern.maxfiles (int): maximum open files system-wide.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0942** (EARS/Ubiquitous): The Substrate system shall kern.securelevel (int): security level (RW, monotonically increasing).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0943** (EARS/Ubiquitous): The Substrate system shall kern.argmax (int): maximum exec argument length.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0944** (EARS/Ubiquitous): The Substrate system shall kern.ngroups (int): maximum supplementary groups.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0945** (EARS/Ubiquitous): The Substrate system shall hw (Hardware):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0946** (EARS/Ubiquitous): The Substrate system shall hw.machine (string): machine architecture (e.g., "i386").
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0947** (EARS/Ubiquitous): The Substrate system shall hw.model (string): CPU model name.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0948** (EARS/Ubiquitous): The Substrate system shall hw.ncpu (int): number of active CPUs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0949** (EARS/Ubiquitous): The Substrate system shall hw.ncpuonline (int): number of online CPUs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0950** (EARS/Ubiquitous): The Substrate system shall hw.byteorder (int): 4321 (big) or 1234 (little).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0951** (EARS/Ubiquitous): The Substrate system shall hw.physmem (long): total physical memory bytes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0952** (EARS/Ubiquitous): The Substrate system shall hw.usermem (long): non-kernel memory bytes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0953** (EARS/Ubiquitous): The Substrate system shall hw.pagesize (int): system page size (4096).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0954** (EARS/Ubiquitous): The Substrate system shall hw.disknames (string): comma-separated disk device names.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0955** (EARS/Ubiquitous): The Substrate system shall hw.sensors (struct): hardware sensor data (temperature, fan, voltage).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0956** (EARS/Ubiquitous): The Substrate system shall vm (Virtual Memory):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0957** (EARS/Ubiquitous): The Substrate system shall vm.loadavg (struct loadavg): 1, 5, 15 min load averages.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0958** (EARS/Ubiquitous): The Substrate system shall vm.swap_usage (struct swap_stat): swap total/used/free.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0959** (EARS/Ubiquitous): The Substrate system shall vm.vmtotal (struct vmtotal): system-wide VM statistics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0960** (EARS/Ubiquitous): The Substrate system shall vm.overcommit (int): memory overcommit policy.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0961** (EARS/Ubiquitous): The Substrate system shall vm.swappiness (int): page-out aggressiveness.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0962** (EARS/Ubiquitous): The Substrate system shall vm.vfs_cache_pressure (int): VFS inode/dentry cache reclaim pressure.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0963** (EARS/Ubiquitous): The Substrate system shall net (Network):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0964** (EARS/Ubiquitous): The Substrate system shall net.inet.ip.stats (struct ipstat): IP packet counters.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0965** (EARS/Ubiquitous): The Substrate system shall net.inet.ip.forwarding (int): IPv4 forwarding enabled.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0966** (EARS/Ubiquitous): The Substrate system shall net.inet.tcp.stats (struct tcpstat): TCP connection stats.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0967** (EARS/Ubiquitous): The Substrate system shall net.inet.udp.stats (struct udpstat): UDP packet stats.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0968** (EARS/Ubiquitous): The Substrate system shall net.link.generic.system.ifcount (int): interface count.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0969** (EARS/Ubiquitous): The Substrate system shall net.inet.icmp.stats (struct icmpstat): ICMP packet stats.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0970** (EARS/Ubiquitous): The Substrate system shall debug (Debugging):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0971** (EARS/Ubiquitous): The Substrate system shall debug.klog (string): kernel log ring buffer.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0972** (EARS/Ubiquitous): The Substrate system shall debug.traceflags (int): kernel tracing flags.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0973** (EARS/Ubiquitous): The Substrate system shall procfs Structures (Process Filesystem):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0974** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/stat: process state, stats, metrics (Linux-compatible format).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0975** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/status: human-readable status info.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0976** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/maps: memory map regions and permissions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0977** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/cmdline: command line arguments (NUL-separated).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0978** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/environ: environment variables (NUL-separated).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0979** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/fd/: open file descriptors (symlinks to paths).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0980** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/cwd: symlink to current working directory.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0981** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/exe: symlink to executable.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0982** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/root: symlink to root directory.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0983** (EARS/Ubiquitous): The Substrate system shall /proc/[pid]/task/: per-thread subdirectories.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0984** (EARS/Ubiquitous): The Substrate system shall /proc/meminfo: global memory usage.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0985** (EARS/Ubiquitous): The Substrate system shall /proc/cpuinfo: CPU capabilities and model info.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0986** (EARS/Ubiquitous): The Substrate system shall /proc/uptime: system uptime and idle time.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0987** (EARS/Ubiquitous): The Substrate system shall /proc/loadavg: load averages and process counts.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0988** (EARS/Ubiquitous): The Substrate system shall /proc/vmstat: VM statistics counters.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0989** (EARS/Ubiquitous): The Substrate system shall /proc/self: symlink to calling process's /proc/[pid].
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0990** (EARS/Ubiquitous): The Substrate system shall sysfs Structures (System Filesystem):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0991** (EARS/Ubiquitous): The Substrate system shall /sys/class/net/: network interface properties.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0992** (EARS/Ubiquitous): The Substrate system shall /sys/block/: block device attributes (size, stat, queue/).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0993** (EARS/Ubiquitous): The Substrate system shall /sys/devices/system/cpu/: CPU topology and frequency scaling.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0994** (EARS/Ubiquitous): The Substrate system shall /sys/devices/system/memory/: memory block hotplug.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0995** (EARS/Ubiquitous): The Substrate system shall /sys/kernel/: misc kernel tunables.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0996** (EARS/Ubiquitous): The Substrate system shall netlink Sockets (Linux Compatibility):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0997** (EARS/Ubiquitous): The Substrate system shall nETLINK_ROUTE: interface/address/route management (RTM_* messages).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0998** (EARS/Ubiquitous): The Substrate system shall nETLINK_KOBJECT_UEVENT: hotplug/device events.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-0999** (EARS/Ubiquitous): The Substrate system shall nETLINK_GENERIC: generic netlink families.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1000** (EARS/Ubiquitous): The Substrate system shall direct Standard Syscalls:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1001** (EARS/Ubiquitous): The Substrate system shall sysinfo(): system uptime, total RAM, free RAM, procs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1002** (EARS/Ubiquitous): The Substrate system shall uname(): system identification (sysname, nodename, release, version, machine).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1003** (EARS/Ubiquitous): The Substrate system shall getrlimit() / setrlimit(): process resource limits.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1004** (EARS/Ubiquitous): The Substrate system shall clock_gettime(): high-resolution system clocks.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1005** (EARS/Ubiquitous): The Substrate system shall sysctl(): generic MIB interface.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1006** (EARS/Ubiquitous): The Substrate system shall process Information API (lib/sys):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1007** (EARS/Ubiquitous): The Substrate system shall sys_proc_count(): total number of processes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1008** (EARS/Ubiquitous): The Substrate system shall sys_proc_list(pid_t *pids, size_t *count): list all PIDs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1009** (EARS/Ubiquitous): The Substrate system shall sys_proc_info(pid_t pid, sys_procinfo_t *info): detailed process info (incl. bitness).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1010** (EARS/Ubiquitous): The Substrate system shall sys_proc_threads(pid_t pid, tid_t *tids, size_t *count): list threads.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1011** (EARS/Ubiquitous): The Substrate system shall sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count): list open FDs.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1012** (EARS/Ubiquitous): The Substrate system shall sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count): memory mappings.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1013** (EARS/Ubiquitous): The Substrate system shall sys_proc_cwd(pid_t pid, char *buf, size_t len): current working directory.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1014** (EARS/Ubiquitous): The Substrate system shall sys_proc_exe(pid_t pid, char *buf, size_t len): executable path.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1015** (EARS/Ubiquitous): The Substrate system shall sys_proc_cmdline(pid_t pid, char **argv, size_t *argc): command line.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1016** (EARS/Ubiquitous): The Substrate system shall sys_proc_environ(pid_t pid, char **envp, size_t *envc): environment.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1017** (EARS/Ubiquitous): The Substrate system shall memory Statistics API (lib/sys):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1018** (EARS/Ubiquitous): The Substrate system shall sys_vm_stats(sys_vmstat_t *stats): global VM statistics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1019** (EARS/Ubiquitous): The Substrate system shall sys_vm_info(sys_vminfo_t *info): memory zone info (DMA, Normal, HighMem).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1020** (EARS/Ubiquitous): The Substrate system shall sys_vm_swap(sys_swapinfo_t *swap): swap usage statistics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1021** (EARS/Ubiquitous): The Substrate system shall sys_vm_buffers(sys_bufinfo_t *buf): buffer cache statistics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1022** (EARS/Ubiquitous): The Substrate system shall sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count): slab allocator stats.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1023** (EARS/Ubiquitous): The Substrate system shall cPU Information API (lib/sys):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1024** (EARS/Ubiquitous): The Substrate system shall sys_cpu_count(): number of CPUs (online/possible/present).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1025** (EARS/Ubiquitous): The Substrate system shall sys_cpu_info(int cpu, sys_cpuinfo_t *info): per-CPU info (model, MHz, cache).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1026** (EARS/Ubiquitous): The Substrate system shall sys_cpu_times(int cpu, sys_cputimes_t *times): per-CPU time accounting.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1027** (EARS/Ubiquitous): The Substrate system shall sys_cpu_loadavg(double *avg1, double *avg5, double *avg15): load averages.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1028** (EARS/Ubiquitous): The Substrate system shall sys_cpu_topology(int cpu, sys_cputopo_t *topo): socket/core/thread topology.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1029** (EARS/Ubiquitous): The Substrate system shall system Information API (lib/sys):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1030** (EARS/Ubiquitous): The Substrate system shall sys_uptime(struct timespec *ts): system uptime.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1031** (EARS/Ubiquitous): The Substrate system shall sys_boottime(struct timespec *ts): boot timestamp.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1032** (EARS/Ubiquitous): The Substrate system shall sys_hostname(char *buf, size_t len): system hostname.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1033** (EARS/Ubiquitous): The Substrate system shall sys_domainname(char *buf, size_t len): NIS/YP domain name.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1034** (EARS/Ubiquitous): The Substrate system shall sys_kernel_version(sys_version_t *ver): kernel version info.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1035** (EARS/Ubiquitous): The Substrate system shall network Information API (lib/sys):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1036** (EARS/Ubiquitous): The Substrate system shall sys_net_interfaces(sys_netif_t *ifs, size_t *count): list interfaces.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1037** (EARS/Ubiquitous): The Substrate system shall sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count): addresses.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1038** (EARS/Ubiquitous): The Substrate system shall sys_net_stats(const char *ifname, sys_netstats_t *stats): interface statistics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1039** (EARS/Ubiquitous): The Substrate system shall sys_net_routes(sys_route_t *routes, size_t *count): routing table.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1040** (EARS/Ubiquitous): The Substrate system shall sys_net_arp(sys_arpentry_t *entries, size_t *count): ARP table.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1041** (EARS/Ubiquitous): The Substrate system shall disk / Storage Information API (lib/sys):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1042** (EARS/Ubiquitous): The Substrate system shall sys_disk_list(sys_diskinfo_t *disks, size_t *count): list block devices.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1043** (EARS/Ubiquitous): The Substrate system shall sys_disk_stats(const char *dev, sys_diskstat_t *stats): I/O stats per device.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1044** (EARS/Ubiquitous): The Substrate system shall sys_mount_list(sys_mountinfo_t *mounts, size_t *count): mounted filesystems.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1045** (EARS/Ubiquitous): The Substrate system shall data Structures (lib/sys/include/sys/sysinfo.h):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1046** (EARS/Ubiquitous): The Substrate system shall sys_procinfo_t: pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1047** (EARS/Ubiquitous): The Substrate system shall sys_vmstat_t: total, free, available, buffers, cached, swap_total, swap_free.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1048** (EARS/Ubiquitous): The Substrate system shall sys_cpuinfo_t: vendor, model, family, stepping, mhz, cache_size, flags.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1049** (EARS/Ubiquitous): The Substrate system shall sys_cputopo_t: socket_id, core_id, thread_id, numa_node.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1050** (EARS/Ubiquitous): The Substrate system shall sys_netif_t: name, index, flags, mtu, hwaddr, type.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1051** (EARS/Ubiquitous): The Substrate system shall sys_diskinfo_t: name, size, sector_size, model, serial.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1052** (EARS/Ubiquitous): The Substrate system shall sys_mountinfo_t: device, mountpoint, fstype, flags.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1053** (EARS/Ubiquitous): The Substrate system shall bSD Compatibility Shim (libkvm):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1054** (EARS/Ubiquitous): The Substrate system shall design Goals:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1055** (EARS/Ubiquitous): The Substrate system shall freeBSD/NetBSD/OpenBSD libkvm API compatibility.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1056** (EARS/Ubiquitous): The Substrate system shall implement entirely in userspace using libsys.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1057** (EARS/Ubiquitous): The Substrate system shall support kinfo_proc, kinfo_vmentry, kinfo_file structures.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1058** (EARS/Ubiquitous): The Substrate system shall maintain BSD ABI for source-level portability.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1059** (EARS/Ubiquitous): The Substrate system shall wrapper Layer:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1060** (EARS/Ubiquitous): The Substrate system shall map kvm_* calls to equivalent libsys functions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1061** (EARS/Ubiquitous): The Substrate system shall structure translation between native sys_procinfo_t and BSD kinfo_proc.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1062** (EARS/Ubiquitous): The Substrate system shall error message buffering (kvm_geterr).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1063** (EARS/Ubiquitous): The Substrate system shall core Functions:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1064** (EARS/Ubiquitous): The Substrate system shall kvm_open(execfile, corefile, swapfile, flags, errstr): initialize context.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1065** (EARS/Ubiquitous): The Substrate system shall kvm_openfiles(...): extended open.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1066** (EARS/Ubiquitous): The Substrate system shall kvm_close(kd): close and free.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1067** (EARS/Ubiquitous): The Substrate system shall kvm_geterr(kd): error message from last failure.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1068** (EARS/Ubiquitous): The Substrate system shall process Functions:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1069** (EARS/Ubiquitous): The Substrate system shall kvm_getprocs(kd, op, arg, cnt): process list as kinfo_proc array.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1070** (EARS/Ubiquitous): The Substrate system shall kERN_PROC_ALL: all processes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1071** (EARS/Ubiquitous): The Substrate system shall kERN_PROC_PID: specific PID.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1072** (EARS/Ubiquitous): The Substrate system shall kERN_PROC_PGRP: by process group.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1073** (EARS/Ubiquitous): The Substrate system shall kERN_PROC_SESSION: by session.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1074** (EARS/Ubiquitous): The Substrate system shall kERN_PROC_UID: by user ID.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1075** (EARS/Ubiquitous): The Substrate system shall kERN_PROC_RUID: by real user ID.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1076** (EARS/Ubiquitous): The Substrate system shall kERN_PROC_TTY: by controlling terminal.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1077** (EARS/Ubiquitous): The Substrate system shall kvm_getargv(kd, kp, nchr): command line arguments.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1078** (EARS/Ubiquitous): The Substrate system shall kvm_getenvv(kd, kp, nchr): environment variables.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1079** (EARS/Ubiquitous): The Substrate system shall kvm_getproc2(kd, op, arg, elem_size, cnt): extended proc info.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1080** (EARS/Ubiquitous): The Substrate system shall virtual Memory Functions:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1081** (EARS/Ubiquitous): The Substrate system shall kvm_getfiles(kd, op, arg, cnt): open file list.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1082** (EARS/Ubiquitous): The Substrate system shall kvm_getvmmap(kd, kp, cnt): VM mappings for process.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1083** (EARS/Ubiquitous): The Substrate system shall kernel Symbol Functions:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1084** (EARS/Ubiquitous): The Substrate system shall kvm_nlist(kd, nl): look up kernel symbols from /proc/kallsyms or kernel ELF.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1085** (EARS/Ubiquitous): The Substrate system shall kvm_read(kd, addr, buf, len): read kernel memory (via /proc/kcore).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1086** (EARS/Ubiquitous): The Substrate system shall kvm_write(kd, addr, buf, len): write kernel memory (privileged).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1087** (EARS/Ubiquitous): The Substrate system shall data Structures (BSD-compatible):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1088** (EARS/Ubiquitous): The Substrate system shall struct kinfo_proc: BSD process info (ki_pid, ki_ppid, ki_pgid, ki_uid, ki_comm, ki_stat, etc.).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1089** (EARS/Ubiquitous): The Substrate system shall struct kinfo_vmentry: BSD VM mapping (kve_start, kve_end, kve_protection, kve_path).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1090** (EARS/Ubiquitous): The Substrate system shall struct kinfo_file: BSD open file (kf_fd, kf_type, kf_offset, kf_path).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1091** (EARS/Ubiquitous): The Substrate system shall struct nlist: symbol lookup request/response (n_name, n_type, n_value).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1092** (EARS/Ubiquitous): The Substrate system shall linux Compatibility Shim (libproc):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1093** (EARS/Ubiquitous): The Substrate system shall openproc(flags, ...): process enumeration context with filtering.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1094** (EARS/Ubiquitous): The Substrate system shall pROC_FILLMEM: fill memory statistics.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1095** (EARS/Ubiquitous): The Substrate system shall pROC_FILLCOM: fill command name.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1096** (EARS/Ubiquitous): The Substrate system shall pROC_FILLARG: fill command line arguments.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1097** (EARS/Ubiquitous): The Substrate system shall pROC_FILLENV: fill environment.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1098** (EARS/Ubiquitous): The Substrate system shall pROC_FILLSTATUS: fill status info.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1099** (EARS/Ubiquitous): The Substrate system shall pROC_FILLUSR: fill user/group names.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1100** (EARS/Ubiquitous): The Substrate system shall pROC_PID: filter by PID list.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1101** (EARS/Ubiquitous): The Substrate system shall pROC_UID: filter by UID list.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1102** (EARS/Ubiquitous): The Substrate system shall closeproc(pt): close context and free resources.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1103** (EARS/Ubiquitous): The Substrate system shall readproc(pt, p): read next process entry.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1104** (EARS/Ubiquitous): The Substrate system shall readproctab(flags, ...): read all processes into array.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1105** (EARS/Ubiquitous): The Substrate system shall look_up_our_self(p): get info about calling process.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1106** (EARS/Ubiquitous): The Substrate system shall get_proc_stats(pid, ps): per-process /proc/[pid]/stat parsing.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1107** (EARS/Ubiquitous): The Substrate system shall proc_t Structure:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1108** (EARS/Ubiquitous): The Substrate system shall pID, PPID, PGID, SID, TPGID.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1109** (EARS/Ubiquitous): The Substrate system shall state, priority, nice.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1110** (EARS/Ubiquitous): The Substrate system shall user/system/start times.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1111** (EARS/Ubiquitous): The Substrate system shall rSS, VSize, shared, text, data.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1112** (EARS/Ubiquitous): The Substrate system shall command name, command line.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1113** (EARS/Ubiquitous): The Substrate system shall system-wide:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1114** (EARS/Ubiquitous): The Substrate system shall meminfo(): parse /proc/meminfo.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1115** (EARS/Ubiquitous): The Substrate system shall cpuinfo(): parse /proc/cpuinfo.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1116** (EARS/Ubiquitous): The Substrate system shall uptime(uptime, idle): parse /proc/uptime.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1117** (EARS/Ubiquitous): The Substrate system shall loadavg(av1, av5, av15): parse /proc/loadavg.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1118** (EARS/Ubiquitous): The Substrate system shall dependencies:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1119** (EARS/Ubiquitous): The Substrate system shall kernel syscall interfaces for introspection (no /dev/kmem).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1120** (EARS/Ubiquitous): The Substrate system shall /proc filesystem with Linux-compatible structure.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1121** (EARS/Ubiquitous): The Substrate system shall /sys filesystem for hardware introspection.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1122** (EARS/Ubiquitous): The Substrate system shall kernel symbol export mechanism for kvm_nlist().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1123** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1124** (EARS/Ubiquitous): The Substrate system shall libsys:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1125** (EARS/Ubiquitous): The Substrate system shall unit: each sys_proc_* function against known process state.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1126** (EARS/Ubiquitous): The Substrate system shall unit: each sys_vm_* function returns sane values.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1127** (EARS/Ubiquitous): The Substrate system shall unit: each sys_cpu_* function with multi-CPU QEMU.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1128** (EARS/Ubiquitous): The Substrate system shall unit: each sys_net_* function with loopback interface.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1129** (EARS/Ubiquitous): The Substrate system shall unit: sysctl MIB reads for all kern.*, hw.*, vm.* nodes.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1130** (EARS/Ubiquitous): The Substrate system shall property: sys_proc_list count matches sys_proc_count.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1131** (EARS/Ubiquitous): The Substrate system shall thread safety: concurrent calls from 8 threads.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1132** (EARS/Ubiquitous): The Substrate system shall performance: 10000 sys_proc_info calls latency benchmark.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1133** (EARS/Ubiquitous): The Substrate system shall libkvm:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1134** (EARS/Ubiquitous): The Substrate system shall unit: kvm_open / kvm_close lifecycle.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1135** (EARS/Ubiquitous): The Substrate system shall unit: kvm_getprocs with each KERN_PROC_* filter.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1136** (EARS/Ubiquitous): The Substrate system shall unit: kvm_getargv / kvm_getenvv string retrieval.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1137** (EARS/Ubiquitous): The Substrate system shall unit: kvm_nlist symbol lookup.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1138** (EARS/Ubiquitous): The Substrate system shall compatibility: compile and run BSD top, ps, fstat against libkvm.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1139** (EARS/Ubiquitous): The Substrate system shall libproc:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1140** (EARS/Ubiquitous): The Substrate system shall unit: openproc / readproc / closeproc cycle.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1141** (EARS/Ubiquitous): The Substrate system shall unit: filter flags (PROC_PID, PROC_UID) correctness.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1142** (EARS/Ubiquitous): The Substrate system shall compatibility: compile and run procps-ng tools (ps, top, free, vmstat).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1143** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1144** (EARS/Ubiquitous): The Substrate system shall man pages: libsys(3), sysctl(3), kvm_open(3), kvm_getprocs(3).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1145** (EARS/Ubiquitous): The Substrate system shall man pages: openproc(3), readproc(3), readproctab(3).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1146** (EARS/Ubiquitous): The Substrate system shall internal doc: libsys → libkvm → libproc layering.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1147** (EARS/Ubiquitous): The Substrate system shall user Authentication Library (lib/auth/):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1148** (EARS/Ubiquitous): The Substrate system shall password Database (/etc/passwd):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1149** (EARS/Ubiquitous): The Substrate system shall structures: struct passwd (pw_name, pw_passwd, pw_uid, pw_gid, pw_gecos, pw_dir, pw_shell).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1150** (EARS/Ubiquitous): The Substrate system shall parser: tokenize user:pwd:uid:gid:gecos:home:shell (colon-delimited).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1151** (EARS/Ubiquitous): The Substrate system shall lookup API:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1152** (EARS/Ubiquitous): The Substrate system shall getpwnam(const char *name): look up by name.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1153** (EARS/Ubiquitous): The Substrate system shall getpwuid(uid_t uid): look up by UID.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1154** (EARS/Ubiquitous): The Substrate system shall iteration API:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1155** (EARS/Ubiquitous): The Substrate system shall setpwent(): open/rewind passwd database.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1156** (EARS/Ubiquitous): The Substrate system shall getpwent(): get next entry.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1157** (EARS/Ubiquitous): The Substrate system shall endpwent(): close database.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1158** (EARS/Ubiquitous): The Substrate system shall thread Safety:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1159** (EARS/Ubiquitous): The Substrate system shall getpwnam_r(name, pwd, buf, buflen, result): reentrant variant.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1160** (EARS/Ubiquitous): The Substrate system shall getpwuid_r(uid, pwd, buf, buflen, result): reentrant variant.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1161** (EARS/Ubiquitous): The Substrate system shall getpwent_r(pwd, buf, buflen, result): reentrant variant.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1162** (EARS/Ubiquitous): The Substrate system shall edge Cases:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1163** (EARS/Ubiquitous): The Substrate system shall handle malformed lines (missing fields, non-numeric uid/gid).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1164** (EARS/Ubiquitous): The Substrate system shall handle NIS/YP + entries (stub or pass-through).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1165** (EARS/Ubiquitous): The Substrate system shall handle entries with empty gecos or shell fields.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1166** (EARS/Ubiquitous): The Substrate system shall group Database (/etc/group):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1167** (EARS/Ubiquitous): The Substrate system shall structures: struct group (gr_name, gr_passwd, gr_gid, gr_mem).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1168** (EARS/Ubiquitous): The Substrate system shall parser: tokenize name:passwd:gid:member1,member2,.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1169** (EARS/Ubiquitous): The Substrate system shall lookup API:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1170** (EARS/Ubiquitous): The Substrate system shall getgrnam(const char *name): look up by name.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1171** (EARS/Ubiquitous): The Substrate system shall getgrgid(gid_t gid): look up by GID.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1172** (EARS/Ubiquitous): The Substrate system shall iteration API: setgrent(), getgrent(), endgrent().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1173** (EARS/Ubiquitous): The Substrate system shall thread Safety: getgrnam_r(), getgrgid_r(), getgrent_r().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1174** (EARS/Ubiquitous): The Substrate system shall supplementary Groups:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1175** (EARS/Ubiquitous): The Substrate system shall getgrouplist(user, group, groups, ngroups): enumerate memberships.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1176** (EARS/Ubiquitous): The Substrate system shall initgroups(user, group): set supplementary groups for process.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1177** (EARS/Ubiquitous): The Substrate system shall shadow Database (/etc/shadow):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1178** (EARS/Ubiquitous): The Substrate system shall structures: struct spwd (sp_namp, sp_pwdp, sp_lstchg, sp_min, sp_max, sp_warn, sp_inact, sp_expire, sp_flag).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1179** (EARS/Ubiquitous): The Substrate system shall parser: tokenize user:hash:lastchg:min:max:warn:inact:expire:flag.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1180** (EARS/Ubiquitous): The Substrate system shall aPI: getspnam(name), setspent(), getspent(), endspent().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1181** (EARS/Ubiquitous): The Substrate system shall thread Safety: getspnam_r(), getspent_r().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1182** (EARS/Ubiquitous): The Substrate system shall security:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1183** (EARS/Ubiquitous): The Substrate system shall file permissions: readable only by root (mode 0600).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1184** (EARS/Ubiquitous): The Substrate system shall refuse to open if euid ≠ 0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1185** (EARS/Ubiquitous): The Substrate system shall lock file during writes (advisory locking).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1186** (EARS/Ubiquitous): The Substrate system shall cryptography (Password Hashing):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1187** (EARS/Ubiquitous): The Substrate system shall crypt(key, salt) Interface:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1188** (EARS/Ubiquitous): The Substrate system shall detect hash type by salt prefix ($1$, $5$, $6$, $2b$).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1189** (EARS/Ubiquitous): The Substrate system shall legacy DES for salts without $ prefix.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1190** (EARS/Ubiquitous): The Substrate system shall return hash string in thread-local static buffer.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1191** (EARS/Ubiquitous): The Substrate system shall crypt_r(key, salt, data) Reentrant:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1192** (EARS/Ubiquitous): The Substrate system shall thread-safe version with caller-provided struct crypt_data.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1193** (EARS/Ubiquitous): The Substrate system shall algorithms:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1194** (EARS/Ubiquitous): The Substrate system shall dES: legacy support (8-char key limit, 2-char salt).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1195** (EARS/Ubiquitous): The Substrate system shall mD5 ($1$): BSD/Linux standard, 1000 rounds.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1196** (EARS/Ubiquitous): The Substrate system shall sHA-256 ($5$): configurable rounds (default 5000).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1197** (EARS/Ubiquitous): The Substrate system shall sHA-512 ($6$): configurable rounds (default 5000), preferred.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1198** (EARS/Ubiquitous): The Substrate system shall bcrypt ($2b$): cost-factor based, memory-hard (optional).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1199** (EARS/Ubiquitous): The Substrate system shall salt Generation:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1200** (EARS/Ubiquitous): The Substrate system shall crypt_gensalt(prefix, count, rbytes, nrbytes): generate random salt.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1201** (EARS/Ubiquitous): The Substrate system shall use /dev/urandom for entropy.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1202** (EARS/Ubiquitous): The Substrate system shall base64 encoding for salt string.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1203** (EARS/Ubiquitous): The Substrate system shall high-Level Authentication:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1204** (EARS/Ubiquitous): The Substrate system shall auth_verify_password(user, clear_text):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1205** (EARS/Ubiquitous): The Substrate system shall retrieve shadow entry (requires root or shadow group).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1206** (EARS/Ubiquitous): The Substrate system shall extract salt from stored hash.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1207** (EARS/Ubiquitous): The Substrate system shall hash clear_text with extracted salt via crypt().
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1208** (EARS/Ubiquitous): The Substrate system shall constant-time comparison of computed vs stored hash.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1209** (EARS/Ubiquitous): The Substrate system shall return 0 on success, -1 on failure (no timing leak).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1210** (EARS/Ubiquitous): The Substrate system shall auth_check_expiry(user):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1211** (EARS/Ubiquitous): The Substrate system shall check password expiry (sp_max, sp_lstchg).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1212** (EARS/Ubiquitous): The Substrate system shall check account expiry (sp_expire).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1213** (EARS/Ubiquitous): The Substrate system shall check inactive days (sp_inact).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1214** (EARS/Ubiquitous): The Substrate system shall return status: OK, WARN, EXPIRED, LOCKED.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1215** (EARS/Ubiquitous): The Substrate system shall pAM Integration (future):.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1216** (EARS/Ubiquitous): The Substrate system shall define PAM module interface (pam_sm_authenticate, etc.).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1217** (EARS/Ubiquitous): The Substrate system shall implement pam_unix.so using lib/auth functions.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1218** (EARS/Ubiquitous): The Substrate system shall configuration via /etc/pam.d/ or /etc/pam.conf.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1219** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1220** (EARS/Ubiquitous): The Substrate system shall unit: getpwnam / getpwuid with known /etc/passwd content.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1221** (EARS/Ubiquitous): The Substrate system shall unit: getgrnam / getgrgid with known /etc/group content.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1222** (EARS/Ubiquitous): The Substrate system shall unit: getspnam with known /etc/shadow content.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1223** (EARS/Ubiquitous): The Substrate system shall unit: crypt() produces correct hash for each algorithm ($1$, $5$, $6$).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1224** (EARS/Ubiquitous): The Substrate system shall unit: crypt_gensalt produces valid salts.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1225** (EARS/Ubiquitous): The Substrate system shall unit: auth_verify_password correct + incorrect passwords.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1226** (EARS/Ubiquitous): The Substrate system shall unit: auth_check_expiry for OK, WARN, EXPIRED, LOCKED states.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1227** (EARS/Ubiquitous): The Substrate system shall unit: reentrant _r variants are thread-safe.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1228** (EARS/Ubiquitous): The Substrate system shall property: getpwent iteration covers all entries in /etc/passwd.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1229** (EARS/Ubiquitous): The Substrate system shall property: constant-time comparison - timing does not vary with input.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1230** (EARS/Ubiquitous): The Substrate system shall security: getspnam fails if euid ≠ 0.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1231** (EARS/Ubiquitous): The Substrate system shall fuzz: parser handles malformed /etc/passwd, /etc/group, /etc/shadow.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1232** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1233** (EARS/Ubiquitous): The Substrate system shall man pages: getpwnam(3), getpwuid(3), getpwent(3).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1234** (EARS/Ubiquitous): The Substrate system shall man pages: getgrnam(3), getgrgid(3), getgrent(3).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1235** (EARS/Ubiquitous): The Substrate system shall man pages: getspnam(3), shadow(5).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1236** (EARS/Ubiquitous): The Substrate system shall man pages: crypt(3), crypt_gensalt(3).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-06-1237** (EARS/Ubiquitous): The Substrate system shall man pages: passwd(5), group(5).
+  - Context: 6. C Library (`lib/c`)
+  - Verification: design review + implementation evidence + test/doc update.

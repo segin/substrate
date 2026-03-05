@@ -86,39 +86,91 @@ console_backend_t *uart_get_console(void) {
     return &uart_console;
 }
 
+#define UART_TX_BUF_SIZE 4096
+static volatile char uart_tx_buf[UART_TX_BUF_SIZE];
+static volatile uint32_t uart_tx_head = 0;
+static volatile uint32_t uart_tx_tail = 0;
+static volatile int uart_tx_active = 0;
+
 void uart_init(void) {
-    outb(UART_COM1 + 1, 0x01);    // Enable Received Data Available Interrupt (0x1)
+    outb(UART_COM1 + 1, 0x00);    // Disable all interrupts
     outb(UART_COM1 + 3, 0x80);    // Enable DLAB (set baud rate divisor)
     outb(UART_COM1 + 0, 0x03);    // Set divisor to 3 (lo byte) 38400 baud
     outb(UART_COM1 + 1, 0x00);    //                  (hi byte)
     outb(UART_COM1 + 3, 0x03);    // 8 bits, no parity, one stop bit
     outb(UART_COM1 + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
     outb(UART_COM1 + 4, 0x0B);    // IRQs enabled, RTS/DSR set
+
+    // Enable Receiver Data Available and Transmitter Holding Register Empty Interrupts
+    outb(UART_COM1 + 1, 0x03);
+}
+
+static void uart_tx_pump(void) {
+    // If transmitter is not empty, do nothing
+    if ((inb(UART_COM1 + 5) & 0x20) == 0) {
+        return;
+    }
+
+    // Write up to 16 bytes to fill the FIFO
+    int count = 0;
+    while (uart_tx_head != uart_tx_tail && count < 16) {
+        outb(UART_COM1 + 0, uart_tx_buf[uart_tx_tail]);
+        uart_tx_tail = (uart_tx_tail + 1) % UART_TX_BUF_SIZE;
+        count++;
+    }
+
+    if (uart_tx_head == uart_tx_tail) {
+        uart_tx_active = 0;
+    } else {
+        uart_tx_active = 1;
+    }
 }
 
 void uart_handler(registers_t *regs) {
     (void)regs;
-    // Check IIR (Interrupt Identity Register) to confirm it's RDA
-    // but usually we just check LSR bit 0
-    uart_received(); // To update status? 
     
-    // Read while data available
-    while (inb(UART_COM1 + 5) & 1) {
-        char c = inb(UART_COM1 + 0);
+    uint8_t iir;
+    while (1) {
+        iir = inb(UART_COM1 + 2);
+        if (iir & 1) {
+            break; // No more pending interrupts
+        }
 
-        // Debug triggers for Serial Console
-        if (c == 0x10) { // Ctrl+P - Process Dump
-            extern void debug_dump_processes(void);
-            debug_dump_processes();
-        } else if (c == 0x09) { // Ctrl+I - Info/State (Alternative)
-             // ...
-             // Pass through for now
-             extern void console_push_char(char c);
-             console_push_char(c);
-        } else {
-            // Push to TTY
-            extern void console_push_char(char c);
-            console_push_char(c);
+        uint8_t type = (iir >> 1) & 7;
+
+        if (type == 2) {
+            // Received Data Available
+            while (inb(UART_COM1 + 5) & 1) {
+                char c = inb(UART_COM1 + 0);
+
+                // Debug triggers for Serial Console
+                if (c == 0x10) { // Ctrl+P - Process Dump
+                    extern void debug_dump_processes(void);
+                    debug_dump_processes();
+                } else if (c == 0x09) { // Ctrl+I - Info/State (Alternative)
+                    extern void console_push_char(char c);
+                    console_push_char(c);
+                } else {
+                    extern void console_push_char(char c);
+                    console_push_char(c);
+                }
+            }
+        } else if (type == 1) {
+            // Transmitter Holding Register Empty
+            uart_tx_pump();
+        } else if (type == 6) {
+            // Character Timeout (handle like RDA)
+            while (inb(UART_COM1 + 5) & 1) {
+                char c = inb(UART_COM1 + 0);
+                extern void console_push_char(char c);
+                console_push_char(c);
+            }
+        } else if (type == 3) {
+            // Receiver Line Status (error)
+            inb(UART_COM1 + 5);
+        } else if (type == 0) {
+            // Modem Status
+            inb(UART_COM1 + 6);
         }
     }
 }
@@ -128,7 +180,11 @@ int uart_received(void) {
 }
 
 char uart_getc(void) {
-    while (uart_received() == 0);
+    uint32_t spins = 0;
+    while (uart_received() == 0) {
+        spins++;
+        if (spins > 100000) return 0; // Avoid hang
+    }
     return inb(UART_COM1 + 0);
 }
 
@@ -137,11 +193,41 @@ int uart_is_transmit_empty(void) {
 }
 
 void uart_putc(char c) {
-    while (uart_is_transmit_empty() == 0);
-    outb(UART_COM1 + 0, c);
+    // If running in interrupt context or early boot, just spin
+    // A proper implementation might disable interrupts, buffer it, then re-enable
+
+    // Disable interrupts locally for thread safety
+    uint32_t eflags;
+    __asm__ volatile("pushf; pop %0; cli" : "=r"(eflags));
+
+    uint32_t next_head = (uart_tx_head + 1) % UART_TX_BUF_SIZE;
+
+    // If buffer is full, busy wait until space frees up (interrupts must be enabled!)
+    while (next_head == uart_tx_tail) {
+        // We must re-enable interrupts briefly to let TX handler fire if we are not in an ISR
+        // If we are in an ISR, this will deadlock.
+        if (eflags & 0x200) {
+            __asm__ volatile("sti; nop; cli");
+        } else {
+            // Deadlock avoidance: manually pump if interrupts are permanently off
+            uart_tx_pump();
+        }
+    }
+
+    uart_tx_buf[uart_tx_head] = c;
+    uart_tx_head = next_head;
+
+    if (!uart_tx_active) {
+        uart_tx_pump();
+    }
+
+    if (eflags & 0x200) {
+        __asm__ volatile("sti");
+    }
 }
 
 void uart_write(const char* data, size_t size) {
-    for (size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < size; i++) {
         uart_putc(data[i]);
+    }
 }
