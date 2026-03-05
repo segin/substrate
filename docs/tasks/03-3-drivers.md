@@ -1,0 +1,5831 @@
+# 3. Drivers (`sys/drivers`)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 1178-2399.
+
+## Reimplemented Checklist (All Open)
+
+### 3. Drivers (`sys/drivers`)
+- [ ] **Storage Subsystem (Unified SCSI Stack):**
+
+    > **Files:** `sys/drivers/storage/scsi/scsi.h`, `scsi.c`, `scsi_dev.c`,
+    > `scsi_ctl.c`, `atapi_scsi.c`/`.h`, `virtio_scsi.c`.
+    >
+    > **Architecture:** CAM-inspired mid-layer with transport-independent
+    > command execution. No artificial sd/sr split — everything is a
+    > `scsi_device` with type-specific behavior.
+
+    - [ ] **Core Architecture (CAM/Mid-layer):**
+
+        - [ ] **Data Structures (`scsi.h`):**
+            - [ ] `scsi_request_t`: command execution context.
+                - [ ] CDB storage (up to `SCSI_MAX_CDB_LEN` = 16 bytes).
+                - [ ] `cdb_len`: actual CDB length (6, 10, 12, or 16).
+                - [ ] `data`/`data_len`: DMA buffer pointer and transfer length.
+                - [ ] `flags`: direction (`SCSI_REQ_READ`, `SCSI_REQ_WRITE`), and options.
+                - [ ] `status`: SCSI status byte (GOOD, CHECK CONDITION, BUSY, etc.).
+                - [ ] `sense_data[SCSI_SENSE_LEN]`: auto-sense buffer (32 bytes).
+                - [ ] `sense_len`: actual sense data returned.
+                - [ ] `timeout_ms`: per-command timeout.
+                - [ ] `retries` / `max_retries`: retry counters (default 3, media error = 0).
+                - [ ] `callback`: async completion function pointer.
+                - [ ] `submit_time` / `start_time` / `elapsed_ms`: timing instrumentation.
+                - [ ] Queue linkage (`next` pointer).
+            - [ ] `scsi_device_t`: target representation.
+                - [ ] Addressing: `bus`, `target` (0–15), `lun` (0–255).
+                - [ ] Identity from INQUIRY: `vendor[9]`, `product[17]`, `revision[5]`, `serial[21]`.
+                - [ ] `type`: peripheral device type (disk=0x00, tape=0x01, cdrom=0x05, etc.).
+                - [ ] `removable`: RMB bit from INQUIRY.
+                - [ ] `scsi_version`: SPC version from INQUIRY.
+                - [ ] `capacity`: total sectors (from READ CAPACITY).
+                - [ ] `sector_size`: bytes/sector (512 for disk, 2048 for CD-ROM).
+                - [ ] `flags`: online/offline, write-protected, supports TCQ.
+                - [ ] Command queue: `queue_head`/`queue_tail`, `queue_depth`, `max_queue_depth`.
+                - [ ] `link`: back-pointer to transport interface.
+                - [ ] Registry linkage (`next` pointer).
+            - [ ] `scsi_link_t`: transport adapter interface.
+                - [ ] `name[32]`: adapter name (e.g., `"atapi0"`, `"virtio-scsi0"`).
+                - [ ] `execute(link, request)`: function pointer — transport-specific command dispatch.
+                - [ ] `max_targets` / `max_luns`: bus topology limits.
+                - [ ] `adapter_queue_depth`: HBA-level parallelism.
+                - [ ] `flags`: DMA-capable, supports tagged queueing, ordered tags.
+                - [ ] Statistics: `cmds_completed`, `cmds_failed`, `bytes_read`, `bytes_written`.
+            - [ ] `scsi_sense_fixed`: SPC-3 fixed-format sense data (36 bytes).
+                - [ ] `response_code` (0x70 current, 0x71 deferred).
+                - [ ] `sense_key` (bits 0–3), `ILI` (bit 5), `EOM` (bit 6), `FileMark` (bit 7).
+                - [ ] `info[4]`: command-specific information.
+                - [ ] `asc` / `ascq`: Additional Sense Code / Qualifier.
+            - [ ] `scsi_inquiry_data`: standard INQUIRY response (36+ bytes).
+                - [ ] `device_type` (bits 0–4), `qualifier` (bits 5–7).
+                - [ ] `rmb` (bit 7), `version`, `response_format`.
+                - [ ] `additional_length`, `flags` (CmdQue, etc.).
+                - [ ] Vendor/Product/Revision strings (space-padded).
+            - [ ] `scsi_report_luns_data`: REPORT LUNS response (up to 64 LUNs).
+
+        - [ ] **Initialization (`scsi_init`):**
+            - [ ] Initialize device registry (pre-allocate pool of `scsi_device_t`, 64 max).
+            - [ ] Initialize request pool (pre-allocate `scsi_request_t`, 128 max).
+            - [ ] Initialize free lists for both pools.
+            - [ ] Call `scsi_dev_init()` and `scsi_ctl_init()`.
+
+        - [ ] **Transport Registration:**
+            - [ ] `scsi_register_link(link)`: register HBA/transport adapter.
+                - [ ] Validate `execute` callback is non-NULL.
+                - [ ] Add to global link list (max 8 links).
+                - [ ] Trigger bus scan on the new link.
+            - [ ] `scsi_unregister_link(link)`: unregister adapter.
+                - [ ] Detach all devices on this link.
+                - [ ] Free associated resources.
+
+        - [ ] **Device Discovery:**
+            - [ ] `scsi_scan_bus(link, bus)`: enumerate all targets on a bus.
+                - [ ] Iterate target IDs 0..`link->max_targets - 1`.
+                - [ ] For each target: INQUIRY at LUN 0, then REPORT LUNS for multi-LUN.
+                - [ ] Fallback: sequential LUN probing if REPORT LUNS fails (old devices).
+            - [ ] `scsi_probe_lun(link, bus, target, lun)`: probe a single LUN.
+                - [ ] Send TEST UNIT READY.
+                - [ ] Send INQUIRY; parse device type, vendor, product, revision.
+                - [ ] If device type is valid: `scsi_device_register()`.
+                - [ ] Send READ CAPACITY (10 or 16) for block devices.
+                - [ ] Trigger `scsi_auto_attach()` on success.
+            - [ ] `scsi_device_register(dev)`: add to global device list.
+                - [ ] Check for duplicate (same bus:target:lun).
+                - [ ] Assign monotonically increasing device number.
+                - [ ] Log discovery: `"scsi: B:T:L vendor product [type]"`.
+            - [ ] `scsi_device_unregister(dev)`: remove from list.
+            - [ ] `scsi_device_lookup(bus, target, lun)`: find registered device.
+
+        - [ ] **Command Execution:**
+            - [ ] **Request Lifecycle:**
+                - [ ] `scsi_request_alloc()`: allocate from pool (or return NULL if exhausted).
+                - [ ] `scsi_request_init(req, dev)`: zero fields, link to device, set default timeout (30s) and retries (3).
+                - [ ] `scsi_request_free(req)`: return to free pool.
+            - [ ] **Synchronous Execution:**
+                - [ ] `scsi_execute_sync(dev, cdb, cdb_len, data, data_len, flags, timeout_ms)`:
+                    - [ ] Allocate request, fill CDB/buffer, call `scsi_execute()`, block until complete, return status.
+            - [ ] **Core Execution (`scsi_execute`):**
+                - [ ] Record `submit_time` timestamp.
+                - [ ] Retry loop: attempt up to `max_retries + 1` times.
+                - [ ] Call `link->execute(link, req)` to dispatch to transport.
+                - [ ] Record `start_time`, measure `elapsed_ms`.
+                - [ ] On CHECK CONDITION: auto-request sense, parse sense key.
+                    - [ ] UNIT ATTENTION (sense key 6): retry automatically (medium changed).
+                    - [ ] NOT READY (sense key 2): retry with delay (device spinning up).
+                    - [ ] MEDIUM ERROR (sense key 3): no retry (data loss).
+                    - [ ] ABORTED COMMAND (sense key 0xB): retry.
+                - [ ] On BUSY / TASK SET FULL: backoff and retry.
+                - [ ] Update link statistics on completion.
+            - [ ] **Async Queue Management:**
+                - [ ] `scsi_queue_request(req)`: enqueue to device's command queue.
+                    - [ ] Respect `max_queue_depth` (drop or backpressure).
+                - [ ] `scsi_process_queue(dev)`: dequeue and execute pending requests.
+                - [ ] `scsi_abort_request(req)`: cancel pending request (remove from queue, invoke callback with error).
+                - [ ] `scsi_complete_request(req, status)`: mark done, invoke callback, trigger queue processing.
+
+        - [ ] **Sense Data Parsing:**
+            - [ ] `scsi_sense_key(sense, len)`: extract sense key from fixed or descriptor format.
+            - [ ] `scsi_sense_asc(sense, len)`: extract ASC (Additional Sense Code).
+            - [ ] `scsi_sense_ascq(sense, len)`: extract ASCQ (Additional Sense Code Qualifier).
+            - [ ] `scsi_sense_string(sense, len, buf, buflen)`: human-readable sense string.
+            - [ ] Sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED.
+            - [ ] Common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present).
+
+        - [ ] **CDB Builders:**
+            - [ ] `scsi_cdb_test_unit_ready(cdb)`: 6-byte TUR.
+            - [ ] `scsi_cdb_inquiry(cdb, len)`: 6-byte INQUIRY with allocation length.
+            - [ ] `scsi_cdb_request_sense(cdb, len)`: 6-byte REQUEST SENSE.
+            - [ ] `scsi_cdb_read_capacity_10(cdb)`: 10-byte READ CAPACITY.
+            - [ ] `scsi_cdb_read_10(cdb, lba, count)`: 10-byte READ.
+            - [ ] `scsi_cdb_write_10(cdb, lba, count)`: 10-byte WRITE.
+            - [ ] `scsi_cdb_read_16(cdb, lba, count)`: 16-byte READ (LBA > 2TB).
+            - [ ] `scsi_cdb_write_16(cdb, lba, count)`: 16-byte WRITE (LBA > 2TB).
+            - [ ] `scsi_cdb_mode_sense_6(cdb, page, len)` / `scsi_cdb_mode_sense_10(cdb, page, len)`.
+            - [ ] `scsi_cdb_start_stop(cdb, start, load_eject)`: START STOP UNIT.
+            - [ ] `scsi_cdb_sync_cache(cdb, lba, count)`: SYNCHRONIZE CACHE (10).
+            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`.
+
+        - [ ] **Standard Command Wrappers:**
+            - [ ] `scsi_test_unit_ready(dev)`: send TUR, return 0 on GOOD.
+            - [ ] `scsi_inquiry(dev, inq)`: send INQUIRY, fill `scsi_inquiry_data`.
+            - [ ] `scsi_read_capacity(dev, sectors, sector_size)`: READ CAPACITY (10 or 16), fill output.
+            - [ ] `scsi_request_sense(dev, sense, len)`: explicit REQUEST SENSE.
+            - [ ] `scsi_start_stop(dev, start, load_eject)`: START STOP UNIT.
+            - [ ] `scsi_report_luns(dev, luns)`: REPORT LUNS, parse big-endian LUN list.
+            - [ ] `scsi_synchronize_cache(dev)`: SYNCHRONIZE CACHE (write-back).
+            - [ ] `scsi_mode_sense(dev, page, buffer, len)`: MODE SENSE (for caching, geometry pages).
+
+    - [ ] **High-Level Device Driver (`scsi_dev.c`):**
+
+        - [ ] **Block Device Callbacks:**
+            - [ ] `scsi_blk_read(blkdev, sector, count, buffer)`: build READ(10) CDB, execute sync, return sector count or -1.
+            - [ ] `scsi_blk_write(blkdev, sector, count, buffer)`: build WRITE(10) CDB, execute sync; reject writes to CD-ROM.
+            - [ ] Handle sector size translation (512 vs 2048 for CD-ROM).
+            - [ ] Support READ(16)/WRITE(16) for devices with capacity > 2TB.
+        - [ ] **Device Type Handling:**
+            - [ ] **Direct Access (Type 0x00 — Disk):**
+                - [ ] READ CAPACITY for sector count and size.
+                - [ ] Cache flush via SYNCHRONIZE CACHE on unmount/shutdown.
+                - [ ] Device name: `scsiN` (sequential numbering).
+            - [ ] **CD-ROM / DVD (Type 0x05 — ROM):**
+                - [ ] `scsi_read_toc(dev, buffer, buflen)`: READ TOC/PMA/ATIP (CDB 0x43).
+                - [ ] `scsi_lock_door(dev, lock)`: PREVENT/ALLOW MEDIUM REMOVAL (CDB 0x1E).
+                - [ ] Sector size: 2048 bytes (data CD standard).
+                - [ ] Handle UNIT ATTENTION on media change: re-read capacity.
+            - [ ] **WORM / Optical (Types 0x04, 0x07):**
+                - [ ] Same as disk but write-once semantics; reject overwrites.
+            - [ ] **Sequential Access (Type 0x01 — Tape) — deferred.**
+        - [ ] **Attach / Detach:**
+            - [ ] `scsi_dev_attach(scsi_dev)`: create `scsi_blk_dev_t`, register block device.
+                - [ ] Only attach block-capable types (disk, cdrom, optical, worm).
+                - [ ] Set sector size based on device type.
+                - [ ] Log: `"scsi: attached scsiN (type) [vendor product]"`.
+            - [ ] `scsi_dev_detach(scsi_dev)`: unregister block device, remove from list.
+            - [ ] `scsi_dev_lookup(name)`: find block device by name (e.g., `"scsi0"`).
+            - [ ] `scsi_dev_init()`: initialize unified device subsystem.
+            - [ ] `scsi_auto_attach(dev)`: called on discovery — create generic node + block device.
+
+    - [ ] **Controller Interface (`scsi_ctl.c`):**
+
+        - [ ] **Device Node Hierarchy:**
+            - [ ] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`): generic SCSI pass-through node.
+                - [ ] `scsi_create_generic_node(dev)`: create DevFS entry.
+                - [ ] `sg_ioctl(node, request, arg)`: ioctl handler for generic nodes.
+            - [ ] `/dev/storage/scsi/B` (e.g., `0`): bus controller endpoint.
+                - [ ] `scsi_create_bus_node(link, bus_id)`: create DevFS entry.
+                - [ ] `bus_ioctl(node, request, arg)`: ioctl handler for bus operations.
+            - [ ] `/dev/storage/scsiN` (e.g., `scsi0`): high-level block device alias.
+        - [ ] **ioctl Operations:**
+            - [ ] `SCSI_IOCTL_SCAN` (0x5301): trigger bus rescan.
+            - [ ] `SCSI_IOCTL_GET_INFO` (0x5302): return `scsi_ioctl_info_t` (bus, target, lun, type, vendor, product, capacity).
+            - [ ] `SCSI_IOCTL_GET_IDLUN` (0x5303): return packed bus:target:lun.
+            - [ ] `SCSI_IOCTL_GET_COUNT` (0x5304): return device count on bus.
+            - [ ] `SCSI_IOCTL_SEND_CMD` (0x5305): pass-through raw SCSI CDB with data buffer.
+                - [ ] Copy CDB from userspace, validate length.
+                - [ ] Execute via `scsi_execute_sync()`, copy results back.
+                - [ ] Require appropriate privilege (root or CAP_SYS_RAWIO).
+
+    - [ ] **Transport/HBA Drivers (Low-Level):**
+
+        - [ ] **ATAPI Transport (`atapi_scsi.c`, `atapi_scsi.h`):**
+            - [ ] `atapi_link`: `scsi_link_t` instance for ATA secondary (ATAPI) devices.
+            - [ ] `atapi_execute(link, req)`: translate `scsi_request_t` to ATA PACKET command.
+                - [ ] Select drive (master/slave) via device register.
+                - [ ] Write PACKET command (0xA0) to command register.
+                - [ ] Wait for DRQ, then PIO-out the CDB (12 or 16 bytes, padded to 12).
+                - [ ] Wait for DRQ for data phase; PIO-in/out data buffer.
+                - [ ] Read status register for errors; auto-request sense on CHECK CONDITION.
+            - [ ] `atapi_init()`: register link, set max_targets=2 (master/slave per channel).
+            - [ ] Support: primary + secondary IDE channels (4 possible ATAPI devices).
+            - [ ] Support: tertiary + quaternary channels (if IDE driver supports them).
+
+        - [ ] **USB Mass Storage (deferred):**
+            - [ ] **Bulk-Only Transport (BOT):**
+                - [ ] Build Command Block Wrapper (CBW): 31-byte header with signature (0x43425355), tag, transfer length, flags, LUN, CDB.
+                - [ ] Send CBW via Bulk-OUT endpoint.
+                - [ ] Transfer data via Bulk-IN (read) or Bulk-OUT (write) endpoint.
+                - [ ] Receive Command Status Wrapper (CSW): 13-byte response with signature (0x53425355), tag, residue, status.
+                - [ ] CSW status: 0=passed, 1=failed (issue REQUEST SENSE), 2=phase error (reset recovery).
+            - [ ] **Reset Recovery:**
+                - [ ] Bulk-Only Mass Storage Reset (class-specific request 0xFF).
+                - [ ] Clear HALT on Bulk-IN and Bulk-OUT endpoints.
+            - [ ] **Integration:**
+                - [ ] Register `scsi_link_t` per USB device (bridge to SCSI mid-layer).
+                - [ ] Set max_targets=1, max_luns from GET MAX LUN request.
+                - [ ] Handle device disconnect: unregister link, detach all devices.
+
+        - [ ] **VirtIO-SCSI (`virtio_scsi.c`):**
+            - [ ] `vscsi_execute(link, req)`: map `scsi_request_t` to virtio request descriptor.
+                - [ ] Build request header: LUN (8-byte SAM encoding), tag, task attributes, CDB.
+                - [ ] Attach data buffers as scatter-gather (device-readable for writes, device-writable for reads).
+                - [ ] Attach response buffer (sense data, residual, status).
+                - [ ] Submit to request virtqueue; wait for used buffer notification.
+            - [ ] `vscsi_setup_event_buffers()`: pre-populate event virtqueue.
+            - [ ] `vscsi_process_events()`: handle hotplug add/remove, transport reset, parameter change events.
+            - [ ] Control virtqueue: INQUIRY, REPORT LUNS, task management via control queue.
+            - [ ] Multi-queue support: one request virtqueue per vCPU (if negotiated).
+
+        - [ ] **iSCSI (deferred):**
+            - [ ] TCP-based SCSI transport.
+            - [ ] Login, discovery, full-feature phase.
+            - [ ] PDU framing, session management.
+
+    - [ ] **Testing:**
+        - [ ] **Unit Tests:**
+            - [ ] CDB builder correctness: verify byte layout for READ(10), WRITE(10), INQUIRY, READ CAPACITY.
+            - [ ] Sense data parsing: fixed format with all 16 sense keys.
+            - [ ] Sense data parsing: common ASC/ASCQ pairs.
+            - [ ] Device registry: register, lookup, unregister, duplicate detection.
+            - [ ] Request allocation: pool exhaustion, free and reuse.
+            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`.
+        - [ ] **Property Tests:**
+            - [ ] All CDB builders produce valid length CDBs (6/10/12/16).
+            - [ ] Request pool invariant: allocated + free = total pool size.
+            - [ ] Device list: no duplicates (unique bus:target:lun).
+        - [ ] **Integration Tests:**
+            - [ ] VirtIO-SCSI disk: boot QEMU with `-device virtio-scsi-pci -device scsi-hd`, verify discovery + read/write.
+            - [ ] ATAPI CD-ROM: boot QEMU with `-cdrom`, verify READ CAPACITY + READ TOC + sector read.
+            - [ ] Bus rescan: add device to VirtIO-SCSI via hotplug, verify auto-attach.
+            - [ ] Generic passthrough: send INQUIRY via `SCSI_IOCTL_SEND_CMD` from userspace, verify response.
+            - [ ] Error path: simulate CHECK CONDITION, verify retry and sense reporting.
+
+    - [ ] **Documentation:**
+        - [ ] Internal doc: SCSI mid-layer architecture (link/device/request lifecycle).
+        - [ ] Internal doc: transport driver interface (`scsi_link_t.execute` contract).
+        - [ ] Internal doc: CDB reference and sense key/ASC/ASCQ table.
+        - [ ] Internal doc: device node hierarchy and ioctl interface.
+- [ ] **ATA/IDE (Legacy):** <!-- ide.c, ide.h -->
+
+    > **Files:** `sys/drivers/storage/ide/ide.c`, `ide.h`.
+    >
+    > **Current state:** supports primary/secondary channels, PIO (LBA28/48),
+    > DMA (bus master), ATAPI packet commands, master/slave device selection.
+    > Channel struct hardcoded for 2 channels.
+
+    - [ ] **Channel Architecture:**
+        - [ ] **Primary Channel:** I/O 0x1F0, Control 0x3F6, IRQ 14.
+        - [ ] **Secondary Channel:** I/O 0x170, Control 0x376, IRQ 15.
+        - [ ] **Tertiary Channel:** I/O 0x1E8, Control 0x3EE, IRQ 11.
+            - ISA add‑in IDE controllers (e.g., Sound Blaster AWE32/64, Promise DC4030).
+            - Linux equivalents: `/dev/hde` (master), `/dev/hdf` (slave).
+        - [ ] **Quaternary Channel:** I/O 0x168, Control 0x36E, IRQ 10 (or 9).
+            - ISA add‑in IDE controllers, secondary port.
+            - Linux equivalents: `/dev/hdg` (master), `/dev/hdh` (slave).
+        - [ ] Expand `ide_channel_t` array from 2 to 4 entries.
+        - [ ] Expand `ide_device_t` array from 4 to 8 entries (2 per channel × 4 channels).
+        - [ ] Add `ATA_TERTIARY_IO` (0x1E8), `ATA_TERTIARY_CTRL` (0x3EE), `ATA_QUATERNARY_IO` (0x168), `ATA_QUATERNARY_CTRL` (0x36E) defines to `ide.h`.
+        - [ ] Probe all four channels during `ide_init()` — detect presence by reading status register (0xFF = empty bus).
+        - [ ] Support configurable channel I/O bases (for PCI IDE controllers with non‑standard BARs).
+    - [ ] **PCI IDE Controller Discovery:**
+        - [ ] Scan PCI class 0x01 subclass 0x01 (IDE Controller) for native/compatibility mode.
+        - [ ] Read PCI Programming Interface byte to determine:
+            - Bit 0: Primary channel in native mode (use BAR0/BAR1) vs compatibility mode (0x1F0/0x3F6).
+            - Bit 2: Secondary channel in native mode (use BAR2/BAR3) vs compatibility mode (0x170/0x376).
+            - Bit 7: Bus Master capable (use BAR4 for DMA registers).
+        - [ ] For native‑mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line.
+        - [ ] Detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 — typically expose as separate PCI functions).
+        - [ ] ISA tertiary/quaternary probing: if PCI does not enumerate additional channels, probe legacy I/O ports at 0x1E8 and 0x168 for device presence.
+    - [ ] **Device Identification (`ide_identify` / `ide_identify_atapi`):**
+        - [ ] Issue IDENTIFY DEVICE (0xEC) or IDENTIFY PACKET DEVICE (0xA1).
+        - [ ] Parse model, serial, firmware revision strings (byte‑swap from ATA word format).
+        - [ ] Extract LBA28 sector count (words 60–61) and LBA48 sector count (words 100–103).
+        - [ ] Extract supported command sets: DMA, LBA48, SMART, NCQ, TRIM.
+        - [ ] Extract supported DMA modes: MWDMA (words 63), UDMA (word 88).
+        - [ ] Detect 48‑bit addressing support (command set word 83 bit 10).
+    - [ ] **PIO Mode Transfers:**
+        - [ ] **LBA28 Read/Write:** `ide_read_sectors()` / `ide_write_sectors()` — 28‑bit LBA, max 256 sectors.
+        - [ ] **LBA48 Read/Write:** `ide_read_sectors_ext()` / `ide_write_sectors_ext()` — 48‑bit LBA, max 65536 sectors.
+        - [ ] Wait‑for‑BSY / wait‑for‑DRQ polling loops with bounded timeout.
+        - [ ] Error detection: check ERR bit after command completion, decode error register.
+        - [ ] 400 ns delay after writing command register (read alternate status 4 times).
+    - [ ] **DMA Transfers:**
+        - [ ] **Bus Master Register Access:**
+            - [ ] `ide_bm_start(channel, write)`: set direction, start DMA.
+            - [ ] `ide_bm_stop(channel)`: clear start bit.
+            - [ ] `ide_bm_status(channel)`: read status (active, error, interrupt).
+            - [ ] `ide_bm_clear_interrupt(channel)`: write 1 to clear interrupt bit.
+        - [ ] **PRDT (Physical Region Descriptor Table) Setup:**
+            - [ ] `ide_prdt_setup(channel, buffer, byte_count)`: build scatter‑gather list.
+            - [ ] Each PRD entry: 4‑byte aligned phys address + byte count + EOT flag.
+            - [ ] PRDT must not cross 64 KB boundary.
+            - [ ] Max 32 PRD entries (128 KB transfer).
+        - [ ] **DMA Read/Write:** `ide_dma_read()` / `ide_dma_write()` — issue DMA command, start bus master, wait for IRQ.
+        - [ ] **UDMA Mode Negotiation:**
+            - [ ] Read supported UDMA modes from IDENTIFY word 88.
+            - [ ] Issue SET FEATURES (0xEF) subcommand 0x03 with transfer mode.
+            - [ ] Track active DMA mode per device (`ide_device_t.dma_mode`).
+    - [ ] **ATAPI (SCSI Transport):**
+        - [ ] `ide_atapi_packet(channel, drive, cdb, cdb_len, buffer, buf_len, write)`: send CDB via PACKET command (0xA0).
+        - [ ] Handle DRQ‑based data transfer (PIO) or DMA‑based transfer.
+        - [ ] `ide_atapi_read_capacity()`: SCSI READ CAPACITY (0x25).
+        - [ ] `ide_atapi_read_sectors()`: SCSI READ (10) (0x28).
+        - [ ] `ide_atapi_read_toc()`: SCSI READ TOC (0x43) for CD‑ROM.
+        - [ ] Medium change detection (unit attention sense key).
+    - [ ] **IRQ Handling:**
+        - [ ] `ide_irq_handler(irq)`: acknowledge interrupt, signal DMA completion.
+        - [ ] IRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary).
+        - [ ] Support shared IRQs for PCI native‑mode controllers.
+    - [ ] **Software Reset:**
+        - [ ] Issue SRST via device control register (bit 2).
+        - [ ] Wait for BSY clear on both master and slave.
+        - [ ] Re‑identify devices after reset.
+    - [ ] **Power Management (deferred):**
+        - [ ] STANDBY IMMEDIATE (0xE0), IDLE IMMEDIATE (0xE1).
+        - [ ] CHECK POWER MODE (0xE5).
+        - [ ] Spin‑down timer configuration.
+    - [ ] **Naming Convention:**
+        - [ ] Primary master: `ide0`, primary slave: `ide1`.
+        - [ ] Secondary master: `ide2`, secondary slave: `ide3`.
+        - [ ] Tertiary master: `ide4`, tertiary slave: `ide5`.
+        - [ ] Quaternary master: `ide6`, quaternary slave: `ide7`.
+        - [ ] Register with `/dev/storage/ideN` DevFS nodes.
+    - [ ] **Error Handling:**
+        - [ ] Decode ATA error register bits (BBK, UNC, IDNF, ABRT, TK0NF, AMNF).
+        - [ ] Retry failed reads up to 3 times before reporting error.
+        - [ ] Log device faults and media errors to kernel console.
+        - [ ] Handle timeout (device not responding) gracefully — mark device offline.
+    - [ ] **Testing:**
+        - [ ] Unit: IDENTIFY parsing (model string byte‑swap, LBA48 detection, DMA mode extraction).
+        - [ ] Unit: PRDT construction (alignment, boundary, EOT flag).
+        - [ ] Integration: PIO read/write round‑trip on QEMU `-hda` disk.
+        - [ ] Integration: DMA read/write round‑trip on QEMU with bus master.
+        - [ ] Integration: ATAPI CD‑ROM read capacity + read sectors on QEMU `-cdrom`.
+        - [ ] Integration: tertiary/quaternary channel detection on QEMU with `-device ide-hd,bus=ide.2,...` (or equivalent).
+    - [ ] **Documentation:**
+        - [ ] Internal doc: ATA/IDE register map and command reference.
+        - [ ] Internal doc: channel probing strategy (PCI native vs ISA compatibility vs legacy tertiary/quaternary).
+
+- [ ] **Floppy Disk Controller (`sys/drivers/storage/floppy/`):**
+
+    > Supports standard PC floppy disk controller (Intel 82077AA / NEC µPD765
+    > compatible). Up to 4 drives (2 per controller, though most PCs have 1 controller).
+    > Naming: `fd0`–`fd3` at `/dev/storage/fdN`.
+
+    - [ ] **Controller Initialization (`fdc_init`):**
+        - [ ] Detect FDC presence: read MSR (Main Status Register) at 0x3F4.
+        - [ ] Issue RESET command: assert bit 2 of DOR (Digital Output Register, 0x3F2), then deassert.
+        - [ ] Wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4).
+        - [ ] Configure controller: CONFIGURE command (implied seek, FIFO threshold).
+        - [ ] Set data rate via CCR (Configuration Control Register, 0x3F7): 500kbps for HD, 300kbps for DD, 250kbps for SD.
+        - [ ] Enable DMA channel 2 for data transfers (ISA DMA).
+    - [ ] **I/O Registers (base 0x3F0):**
+        - [ ] 0x3F2: DOR (Digital Output Register) — drive select, motor control, DMA/IRQ enable, reset.
+        - [ ] 0x3F4: MSR (Main Status Register) — RQM, DIO, NDMA, busy flags.
+        - [ ] 0x3F5: Data Register (FIFO) — command/result/data bytes.
+        - [ ] 0x3F7: DIR (Digital Input Register, read) — disk change detect (bit 7).
+        - [ ] 0x3F7: CCR (Configuration Control Register, write) — data rate select.
+    - [ ] **DMA Configuration:**
+        - [ ] ISA DMA channel 2 (8‑bit transfers).
+        - [ ] Program DMA controller (ports 0x04, 0x05, 0x81, 0x0A, 0x0B, 0x0C) for read/write.
+        - [ ] DMA buffer must be below 16 MB (ISA 24‑bit addressing).
+        - [ ] Allocate bounce buffer in low memory if kernel buffer is above 16 MB.
+    - [ ] **Drive Detection:**
+        - [ ] Query CMOS (RTC port 0x70/0x71, register 0x10) for drive types:
+            - Bits 7–4: drive 0 type, bits 3–0: drive 1 type.
+            - 0=none, 1=360K, 2=1.2M, 3=720K, 4=1.44M, 5=2.88M.
+        - [ ] Support up to 4 drives: drives 0–1 on primary FDC (0x3F0), drives 2–3 on secondary FDC (0x370, rare).
+        - [ ] Register detected drives with DevFS as `/dev/storage/fd0`..`/dev/storage/fd3`.
+    - [ ] **Motor Control:**
+        - [ ] Motor on: set DOR motor bits (bits 4–7) for target drive.
+        - [ ] Spin‑up delay: wait 300–500 ms after motor on before I/O.
+        - [ ] Motor off timer: auto‑stop motor after 2–3 seconds of inactivity.
+        - [ ] Track motor state per drive to avoid redundant spin‑up.
+    - [ ] **Media Types:**
+        - [ ] 3.5" HD: 1.44 MB — 80 cylinders, 2 heads, 18 sectors/track, 512 bytes/sector.
+        - [ ] 3.5" DD: 720 KB — 80 cylinders, 2 heads, 9 sectors/track.
+        - [ ] 3.5" ED: 2.88 MB — 80 cylinders, 2 heads, 36 sectors/track (rare).
+        - [ ] 5.25" HD: 1.2 MB — 80 cylinders, 2 heads, 15 sectors/track.
+        - [ ] 5.25" DD: 360 KB — 40 cylinders, 2 heads, 9 sectors/track.
+        - [ ] Store geometry per drive in `fdc_drive_t` struct.
+    - [ ] **Seek and Recalibrate:**
+        - [ ] RECALIBRATE command: move head to cylinder 0 (issued on init and after errors).
+        - [ ] SEEK command: move to target cylinder.
+        - [ ] Wait for IRQ6 after seek; issue SENSE INTERRUPT to confirm.
+        - [ ] Track current cylinder per drive to avoid redundant seeks.
+    - [ ] **Read/Write Operations:**
+        - [ ] READ DATA command (MT=1, MFM=1): multi‑track read with DMA.
+        - [ ] WRITE DATA command (MT=1, MFM=1): multi‑track write with DMA.
+        - [ ] CHS‑to‑LBA and LBA‑to‑CHS conversion for block device interface.
+        - [ ] Convert sector addresses: `cylinder = LBA / (heads * spt)`, `head = (LBA / spt) % heads`, `sector = (LBA % spt) + 1`.
+        - [ ] Read result bytes (ST0, ST1, ST2, C, H, R, N) after each command to check success.
+        - [ ] Retry on error: recalibrate and retry up to 3 times, then fail.
+    - [ ] **Format Track:**
+        - [ ] FORMAT TRACK command: write sector headers for an entire track.
+        - [ ] Build format buffer with (C, H, R, N) tuples for each sector.
+        - [ ] Used by disk formatting utilities.
+    - [ ] **Disk Change Detection:**
+        - [ ] Read DIR bit 7 (DSKCHG) to detect media removal/insertion.
+        - [ ] On change: invalidate cached geometry, re‑detect media type.
+        - [ ] Seek to cylinder 1 and back to cylinder 0 to clear DSKCHG bit.
+    - [ ] **IRQ Handling:**
+        - [ ] IRQ 6 handler: set completion flag, wake waiting thread.
+        - [ ] SENSE INTERRUPT STATUS command after IRQ to read ST0 and current cylinder.
+    - [ ] **Error Handling:**
+        - [ ] Decode ST0/ST1/ST2 result bytes for error classification.
+        - [ ] ST0 bits 7–6: interrupt code (00=normal, 01=abnormal, 10=invalid, 11=drive not ready).
+        - [ ] ST1: missing address mark, write protect, no data, overrun, CRC error.
+        - [ ] ST2: wrong cylinder, bad cylinder, missing data address mark.
+        - [ ] Automatic retry with recalibrate on recoverable errors.
+    - [ ] **Block Device Interface:**
+        - [ ] Register with storage subsystem as block device.
+        - [ ] `fdc_read(drive, lba, count, buffer)` / `fdc_write(drive, lba, count, buffer)`.
+        - [ ] Sector size: 512 bytes (standard).
+        - [ ] Report device capacity based on detected media geometry.
+    - [ ] **Testing:**
+        - [ ] Unit: CHS↔LBA conversion for all supported media geometries.
+        - [ ] Unit: DMA buffer address validation (below 16 MB, page‑aligned).
+        - [ ] Unit: CMOS drive type parsing.
+        - [ ] Integration: read/write/verify cycle on QEMU with `-fda` / `-fdb` images.
+        - [ ] Integration: disk change detection on QEMU.
+        - [ ] Integration: format + read‑back on blank floppy image.
+    - [ ] **Documentation:**
+        - [ ] Internal doc: FDC register map and command reference.
+        - [ ] Internal doc: DMA programming for ISA channel 2.
+        - [ ] Internal doc: media type detection and geometry tables.
+
+
+- [ ] **AHCI:**
+    - [ ] **HBA Initialization:**
+        - [ ] Enable AHCI Mode (GHC.AE).
+        - [ ] Perform HBA Reset processes (GHC.HR).
+        - [ ] Capability detection (CAP, CAP2).
+        - [ ] MSI-X / Interrupt setup.
+    - [ ] **Port Enumeration:**
+        - [ ] Check Implemented Ports (PI).
+        - [ ] Determine Port Type (SSTS.DET).
+        - [ ] Allocate Command Lists and FIS Receive areas (aligned 1K/256B).
+        - [ ] Start Command Engine (CMD.ST) and FIS Receive (CMD.FRE).
+    - [ ] **Command Handling:**
+        - [ ] Build Command Tables (PRDTs).
+        - [ ] Issue commands via Command Issue (CI) bitmask.
+        - [ ] Handle completion interrupts.
+- [ ] **NVMe:**
+    - [ ] **Controller Initialization:**
+        - [ ] Check CAP (Capabilities) register (Timeout, Doorbell stride).
+        - [ ] Disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0.
+        - [ ] Configure Admin Queue Attributes (AQA).
+        - [ ] Create Admin Submission/Completion Queues (ASQ/ACQ).
+        - [ ] Enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1.
+    - [ ] **Namespace Discovery:**
+        - [ ] Issue `Identify Controller` command.
+        - [ ] Issue `Identify Namespace` for active NSIDs.
+    - [ ] **I/O Queue Creation:**
+        - [ ] Determine number of queues supported.
+        - [ ] Issue `Create I/O Completion Queue`.
+        - [ ] Issue `Create I/O Submission Queue`.
+    - [ ] **Block I/O:**
+        - [ ] PRP (Physical Region Page) List construction for data buffers.
+        - [ ] Issue Read/Write NVM commands.
+- [ ] **Partitioning & DevFS:**
+    - [ ] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c -->
+    - [ ] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS. <!-- geom_subr.c -->
+- [ ] **Input:** <!-- ps2.c, keyboard.c, mouse.c, input.h -->
+
+    - [ ] **PS/2 Controller (`sys/drivers/input/ps2.c`, `ps2.h`):**
+
+        > **Files:** `ps2.c` (controller driver), `ps2.h` (registers,
+        > commands, status bits, device commands).
+
+        - [ ] **I/O Primitives:**
+            - [ ] `ps2_wait_write()`: spin on status port bit 1 (input buffer empty), timeout guard.
+            - [ ] `ps2_wait_read()`: spin on status port bit 0 (output buffer full), timeout guard.
+            - [ ] `ps2_write_command(cmd)`: wait‑then‑write to port 0x64.
+            - [ ] `ps2_write_data(data)`: wait‑then‑write to port 0x60.
+            - [ ] `ps2_read_data()`: wait‑then‑read from port 0x60 (return 0xFF on timeout).
+            - [ ] `ps2_read_data_timeout(data, loops)`: bounded read with explicit loop count.
+            - [ ] `ps2_flush()`: drain up to 16 stale bytes from output buffer.
+            - [ ] `ps2_write_aux(data)`: write to port 2 device via `0xD4` prefix.
+            - [ ] `ps2_send_command_with_response(cmd, response)`: write command, read single response byte.
+        - [ ] **Initialization Sequence (`ps2_init`):**
+            - [ ] Step 1: Disable both ports (`0xAD`, `0xA7`) to prevent IRQs during setup.
+            - [ ] Step 2: Flush output buffer (`ps2_flush()`).
+            - [ ] Step 3: Read configuration byte (`0x20`), disable IRQs (bits 0‑1), enable translation (bit 6), set system flag (bit 2), write back (`0x60`).
+            - [ ] Step 4: Controller self‑test (`0xAA`) — expect `0x55`; abort on failure/timeout.
+            - [ ] Step 4b: Re‑write configuration byte (self‑test may reset it).
+            - [ ] Step 5: Dual‑channel detection — enable port 2 (`0xA8`), re‑read config, check bit 5 (P2 clock); disable port 2 again.
+            - [ ] Step 6: Interface tests — `0xAB` (port 1), `0xA9` (port 2 if dual), expect `0x00`.
+            - [ ] Step 7: Enable ports (`0xAE`, `0xA8`).
+            - [ ] Step 8: Enable IRQs — set config bits 0 (and 1 if dual).
+            - [ ] Step 9: Mouse init on port 2 — reset (`0xFF`), wait ACK (`0xFA`) + BAT (`0xAA`) + device ID, enable data reporting (`0xF4`).
+        - [ ] **Error Recovery:**
+            - [ ] Retry self‑test once on failure (some controllers need two attempts).
+            - [ ] Log port test failure codes to kernel console.
+            - [ ] Continue with single‑channel if port 2 test fails.
+            - [ ] Timeout constants tuned per real hardware profiles (QEMU, Bochs, real i8042).
+
+    - [ ] **Keyboard Driver (`sys/drivers/input/keyboard.c`, `keyboard.h`):**
+
+        > **Files:** `keyboard.c` (IRQ1 handler, scancode decoder, key
+        > buffer), `keyboard.h` (public API).
+
+        - [ ] **IRQ1 Handler (`keyboard_handler`):**
+            - [ ] Read scancode from port 0x60.
+            - [ ] Harvest entropy from TSC + scancode into RNG pool.
+            - [ ] Dispatch to scancode decoder state machine.
+            - [ ] Send EOI (or rely on IDT dispatcher).
+        - [ ] **Scancode Set Decoding:**
+            - [ ] **Set 1 (XT‑compatible, default with translation):**
+                - [ ] Single‑byte make codes (0x01–0x58).
+                - [ ] Single‑byte break codes (make | 0x80).
+                - [ ] Extended prefix `0xE0` → two‑byte sequences:
+                    - [ ] Right Ctrl (E0 1D / E0 9D), Right Alt (E0 38 / E0 B8).
+                    - [ ] Arrow keys (E0 48/50/4B/4D).
+                    - [ ] Insert (E0 52), Delete (E0 53), Home (E0 47), End (E0 4F).
+                    - [ ] Page Up (E0 49), Page Down (E0 51).
+                    - [ ] Print Screen (E0 2A E0 37 / E0 B7 E0 AA).
+                    - [ ] Pause/Break (E1 1D 45 E1 9D C5 — three‑byte E1 sequence).
+                - [ ] Discard spurious `0xE1` prefix after handling Pause.
+            - [ ] **Set 2 (AT) — Optional Future:**
+                - [ ] Stub for native Set 2 decoding (for controllers without translation).
+                - [ ] `0xF0` break prefix instead of bit 7.
+        - [ ] **Scancode‑to‑Keycode Translation:**
+            - [ ] Define `KEY_*` keycodes independent of scancode set (internal enum/defines).
+            - [ ] Map Set 1 scancodes to keycodes via lookup table.
+            - [ ] Separate table for extended (E0‑prefixed) scancodes.
+        - [ ] **Modifier Tracking:**
+            - [ ] Track left/right independently: `kbd_lshift`/`kbd_rshift`, `kbd_lctrl`/`kbd_rctrl`, `kbd_lalt`/`kbd_ralt`.
+            - [ ] Aggregate flags: `kbd_shift`, `kbd_ctrl`, `kbd_alt`.
+            - [ ] Caps Lock toggle state (latch on make, ignore break).
+            - [ ] Num Lock toggle state.
+            - [ ] Scroll Lock toggle state.
+            - [ ] Update LED indicator state to match lock toggles (see LED Control below).
+        - [ ] **Keymap (Scancode/Keycode → Character):**
+            - [ ] **US QWERTY layout tables:**
+                - [ ] `kbd_us[128]`: unshifted ASCII mapping.
+                - [ ] `kbd_us_shifted[128]`: shifted ASCII mapping.
+                - [ ] Caps Lock interaction: uppercase letters but not symbols.
+                - [ ] Num Lock interaction: numpad keys → digits vs navigation.
+            - [ ] **Ctrl character generation:**
+                - [ ] `Ctrl+A..Z` → 0x01..0x1A.
+                - [ ] `Ctrl+[` → ESC (0x1B), `Ctrl+\` → FS (0x1C), `Ctrl+]` → GS (0x1D).
+            - [ ] **Alt character generation:**
+                - [ ] Alt sets bit 7 (traditional) or generates ESC prefix (VT convention).
+            - [ ] **Dead key / Compose key support (deferred):** stub interface.
+            - [ ] **Switchable keymap infrastructure:**
+                - [ ] `struct keymap` with base, shift, ctrl, altgr tables.
+                - [ ] Runtime keymap switching API (`keyboard_set_keymap()`).
+                - [ ] Additional layouts: DE, FR, UK (deferred — provide registration API only).
+        - [ ] **Function Key and Special Key Handling:**
+            - [ ] F1–F12 → generate escape sequences (VT100: `ESC O P`..`ESC O [` or `ESC [ 11~`..`ESC [ 24~`).
+            - [ ] Arrow keys → `ESC [ A/B/C/D`.
+            - [ ] Home/End/Ins/Del/PgUp/PgDn → `ESC [ 1~/2~/3~/4~/5~/6~` (or xterm variants).
+            - [ ] Alt+F1..F12 → VT switching (`vt_activate(n)`).
+            - [ ] Ctrl+F9 → debug process dump.
+            - [ ] SysRq / Print Screen → kernel debug hook (deferred).
+        - [ ] **Key Repeat (Typematic):**
+            - [ ] Send `0xF3` command to keyboard device with delay/rate parameters.
+            - [ ] Default: 250 ms delay, 30 Hz repeat (or use BIOS defaults).
+            - [ ] Alternatively implement software repeat via timer tick (deferred).
+        - [ ] **LED Control:**
+            - [ ] Send `0xED` command to keyboard device with LED status byte.
+            - [ ] Bit 0 = Scroll Lock, Bit 1 = Num Lock, Bit 2 = Caps Lock.
+            - [ ] Update LEDs on lock key toggle.
+            - [ ] Handle ACK (`0xFA`) / Resend (`0xFE`) responses.
+        - [ ] **Key Buffer (`kbd_buffer`):**
+            - [ ] Circular buffer (256 entries).
+            - [ ] `kbd_push(c)`: enqueue translated character.
+            - [ ] `keyboard_getc()`: dequeue character (returns 0 if empty).
+            - [ ] Overflow policy: drop newest keystrokes (preserve existing behavior).
+            - [ ] Consider expanding to store raw `input_event` structs instead of chars.
+        - [ ] **Input Subsystem Integration:**
+            - [ ] Register `input_dev_t` with `name="PS/2 Keyboard"`, `caps=EV_KEY`.
+            - [ ] Call `input_report_key(dev, keycode, 1)` on key press.
+            - [ ] Call `input_report_key(dev, keycode, 0)` on key release (currently missing).
+            - [ ] Call `input_sync(dev)` after each event.
+        - [ ] **VT/TTY Integration:**
+            - [ ] Push translated character to active VT's TTY via `tty_flip_buffer_push()`.
+            - [ ] Fallback to `console_push_char()` if no TTY attached.
+            - [ ] Respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it).
+
+    - [ ] **Mouse Driver (`sys/drivers/input/mouse.c`, `mouse.h`):**
+
+        > **Files:** `mouse.c` (IRQ12 handler, packet decoder, event
+        > queue), `mouse.h` (structures, public API).
+
+        - [ ] **IRQ12 Handler (`mouse_handler`):**
+            - [ ] Read status port to confirm data available (bit 0).
+            - [ ] Read data byte from port 0x60.
+            - [ ] Harvest entropy from TSC + data byte.
+            - [ ] Feed byte to packet state machine.
+        - [ ] **Packet Decoding:**
+            - [ ] **Standard PS/2 Mouse (3‑byte):**
+                - [ ] Byte 0: buttons (bits 0–2), sign bits (bits 4–5), overflow (bits 6–7), alignment bit 3 (always 1).
+                - [ ] Byte 1: X movement (signed 9‑bit with sign from byte 0 bit 4).
+                - [ ] Byte 2: Y movement (signed 9‑bit with sign from byte 0 bit 5, Y‑axis inverted).
+                - [ ] Realignment: if byte 0 bit 3 != 1, resync by discarding bytes.
+            - [ ] **IntelliMouse Extension (4‑byte) — deferred:**
+                - [ ] Detect via magic sample‑rate sequence (200, 100, 80 → ID 0x03).
+                - [ ] Byte 3: Z‑axis (scroll wheel), signed 4‑bit.
+            - [ ] **IntelliMouse Explorer (5‑button) — deferred:**
+                - [ ] Detect via magic sequence (200, 200, 80 → ID 0x04).
+                - [ ] Byte 3: Z‑axis (bits 0–3), buttons 4–5 (bits 4–5).
+            - [ ] **Overflow Handling:**
+                - [ ] If overflow bits (byte 0 bits 6–7) are set, clamp movement to max delta.
+        - [ ] **Mouse State:**
+            - [ ] Track cumulative `mouse_x`, `mouse_y` (absolute position for cursor).
+            - [ ] Track button state (`mouse_buttons`, bits 0=left, 1=right, 2=middle).
+            - [ ] Configurable resolution/acceleration (deferred).
+        - [ ] **Event Queue:**
+            - [ ] Circular buffer of `mouse_event_t` (64 entries).
+            - [ ] `mouse_q_push(dx, dy, buttons)`: enqueue relative event.
+            - [ ] `mouse_get_event(ev)`: dequeue event (returns 0 if empty).
+            - [ ] `mouse_get_state(x, y, buttons)`: poll current absolute position + buttons.
+        - [ ] **Input Subsystem Integration:**
+            - [ ] Register `input_dev_t` with `name="PS/2 Mouse"`, `caps=EV_REL|EV_KEY`.
+            - [ ] Report `REL_X`, `REL_Y`, `REL_WHEEL` (when supported).
+            - [ ] Report `BTN_LEFT` (0x110), `BTN_RIGHT` (0x111), `BTN_MIDDLE` (0x112).
+            - [ ] `input_sync()` after each complete packet.
+
+    - [ ] **Input Subsystem (`sys/input.h`):**
+        - [ ] Abstract `input_event` structure (type, code, value, timestamp).
+        - [ ] `input_register_device(dev)` / `input_unregister_device(dev)`.
+        - [ ] `input_report_key()`, `input_report_rel()`, `input_report_abs()`.
+        - [ ] `input_sync()` — event boundary marker.
+        - [ ] `/dev/input/eventN` character device interface for userspace.
+        - [ ] Event filtering: consumers subscribe to device + event type.
+
+    - [ ] **Hot‑Plug Detection (deferred):**
+        - [ ] Monitor controller status for device insertion/removal.
+        - [ ] Re‑run device identification (`0xF2`) on port activity change.
+        - [ ] (De)register input devices dynamically.
+
+    - [ ] **Testing:**
+        - [ ] **Unit Tests:**
+            - [ ] Scancode Set 1 decoding: verify all single‑byte and E0‑extended codes.
+            - [ ] Modifier tracking: all combinations of shift/ctrl/alt/capslock/numlock.
+            - [ ] Keymap: verify ASCII output for full US‑QWERTY layout (unshifted, shifted, ctrl).
+            - [ ] Key buffer: fill, overflow, drain, verify FIFO order.
+            - [ ] Mouse packet decoding: standard 3‑byte packets with known dx/dy/buttons.
+            - [ ] Mouse packet realignment: inject byte with bit 3 clear, verify resync.
+            - [ ] Mouse overflow: inject overflow bits, verify clamping.
+            - [ ] Mouse event queue: fill, overflow, drain.
+        - [ ] **Property Tests:**
+            - [ ] Key buffer invariant: `0 <= head, tail < KBD_BUFFER_SIZE`, head == tail ↔ empty.
+            - [ ] Mouse queue invariant: `0 <= head, tail < MOUSE_QUEUE_SIZE`.
+            - [ ] Randomized scancode sequences never crash handler or corrupt state.
+        - [ ] **Integration Tests:**
+            - [ ] Boot kernel in QEMU, inject keyboard scancodes via monitor (`sendkey`), verify TTY output.
+            - [ ] Boot kernel, inject mouse events, verify `mouse_get_state()` returns expected position.
+            - [ ] Alt+F1..F12 switches VT correctly.
+            - [ ] Ctrl+C / Ctrl+D / Ctrl+Z generate correct control characters.
+
+    - [ ] **Documentation:**
+        - [ ] Internal doc: PS/2 controller initialization sequence and error handling.
+        - [ ] Internal doc: scancode set 1 table and extended key mapping.
+        - [ ] Internal doc: input subsystem event model and device registration.
+
+- [ ] **Console Subsystem (`sys/console`):**
+    - [ ] **TTY Subsystem (Core):**
+        - [ ] **Structures (`tty_t`):**
+            - [ ] **Buffers & Queues:**
+                - [ ] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data.
+                - [ ] **Write Buffer (Output):** Queue for driver consumption.
+                - [ ] **Canon Buffer (Cooked):** Line-editing buffer for `ICANON` mode.
+                - [ ] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`.
+            - [ ] **State Control (`termios`):**
+                - [ ] `c_iflag`: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON).
+                - [ ] `c_oflag`: Output modes (OPOST, ONLCR, OXTABS).
+                - [ ] `c_cflag`: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS).
+                - [ ] `c_lflag`: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP).
+                - [ ] `c_cc`: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME, VSTART, VSTOP, VWERASE).
+                - [ ] `winsize`: Window size tracking (rows/cols) + `SIGWINCH`.
+            - [ ] **Line Discipline (`N_TTY`):**
+                - [ ] **Input Processing (`n_tty_receive_buf`):**
+                    - [ ] Parity checks and stripping.
+                    - [ ] Newline translation (CR->NL).
+                    - [ ] Software flow control (XON/XOFF detection).
+                    - [ ] Signal generation check (`ISIG`).
+                - [ ] **Canonical Editing (`n_tty_read`):**
+                    - [ ] Backspace/Delete handling (`VERASE`).
+                    - [ ] Line kill (`VKILL`).
+                    - [ ] Word erase (`VWERASE`).
+                    - [ ] EOF handling (`VEOF` / Ctrl+D).
+                - [ ] **Output Post-processing (`n_tty_write`):**
+                    - [ ] Newline expansion (NL -> CR/NL).
+                    - [ ] Tab expansion (optional).
+                - [ ] **Echoing Logic:**
+                    - [ ] Raw echo (input char -> output).
+                    - [ ] Control char echo (`^C`).
+                    - [ ] Erase echo (backspace-space-backspace sequence).
+            - [ ] **Driver Interface (`tty_driver`):**
+                - [ ] `install` / `remove`: setup private data.
+                - [ ] `open` / `close`: hardware init/shutdown.
+                - [ ] `write`: device output path.
+                - [ ] `put_char`: optimized single-char write.
+                - [ ] `flush_chars`: kick hardware transmission.
+                - [ ] `write_room`: check available hardware buffer space.
+                - [ ] `chars_in_buffer`: check pending bytes.
+                - [ ] `ioctl`: hardware-specific controls.
+                - [ ] `throttle` / `unthrottle`: hardware flow control hooks.
+            - [ ] **Session/Job Control:**
+                - [ ] `tty_struct.session`: Pointer to current session.
+                - [ ] `tty_struct.pgrp`: Pointer to foreground process group.
+                - [ ] `tty_check_change()`: Verify background writes (`SIGTTOU`).
+        - [ ] **API:**
+            - [ ] `tty_init()`: Initialize subsystem.
+            - [ ] `tty_alloc()`: Create a new TTY device.
+            - [ ] `tty_register_device()`: Register with DevFS `/dev/ttyX`.
+            - [ ] `tty_open`, `tty_close`: Refcounting and session logic.
+            - [ ] `tty_read`, `tty_write`: Dispatch to ldisc.
+            - [ ] `tty_ioctl`:
+                - [ ] `TIOCSCTTY`: Become controlling TTY.
+                - [ ] `TIOCSPGRP` / `TIOCGPGRP`: Manage foreground group.
+                - [ ] `TCGETS` / `TCSETS`: Termios get/set.
+                - [ ] `TIOCGWINSZ`: Window size.
+    - [ ] **Virtual Terminal (VT) Layer:**
+        - [ ] **VT Management:** Array of `vt_state_t` structures (vt0..vtN).
+        - [ ] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`).
+        - [ ] **Emulation:** VT102 state machine (escape codes).
+    - [ ] **Backend Drivers:**
+        - [ ] **VGA Text Mode Console:**
+            - [ ] **Initialization:**
+                - [ ] Detect VGA presence (BIOS/PCI enumeration).
+                - [ ] Set 80x25 or 80x50 text mode.
+                - [ ] Map video memory (0xB8000) into kernel address space.
+                - [ ] Initialize attribute byte defaults (white on black).
+            - [ ] **Text Output:**
+                - [ ] Implement `vga_putchar(char c, uint8_t attr)`.
+                - [ ] Handle control characters (CR, LF, BS, TAB, BEL).
+                - [ ] Implement `vga_write(const char *buf, size_t len)`.
+                - [ ] Tab stop handling (configurable tab width).
+            - [ ] **Cursor Control:**
+                - [ ] Read/write hardware cursor position (CRTC registers 0x0E/0x0F).
+                - [ ] Cursor shape control (underline, block, invisible).
+                - [ ] Cursor blink enable/disable.
+            - [ ] **Scrolling:**
+                - [ ] Software scroll (memmove video buffer).
+                - [ ] Hardware scroll (CRTC start address register).
+                - [ ] Scroll region support (VT102 DECSTBM).
+            - [ ] **Attributes:**
+                - [ ] 16-color foreground/background palette.
+                - [ ] Blink/bright background toggle (attribute controller).
+                - [ ] Reverse video, bold, underline emulation.
+            - [ ] **TTY Binding:**
+                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`.
+                - [ ] Implement `tty_driver->write()` callback.
+                - [ ] Implement `tty_driver->ioctl()` for VGA-specific controls.
+        - [ ] **Keyboard Input (PS/2 to TTY):**
+            - [ ] Fix PS/2 driver build errors (constant mismatches in `test_ps2.c`).
+            - [ ] **Input Path:**
+                - [ ] Hook keyboard driver to TTY input queue.
+                - [ ] Convert scancodes to ASCII via keymap.
+                - [ ] Handle modifier keys (Shift, Ctrl, Alt, AltGr).
+                - [ ] Generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A).
+            - [ ] **Special Keys:**
+                - [ ] Function keys (F1-F12) to escape sequences.
+                - [ ] Arrow keys to ANSI escape sequences.
+                - [ ] Insert, Delete, Home, End, PgUp, PgDn sequences.
+                - [ ] Numeric keypad handling (NumLock state).
+            - [ ] **Console Switching:**
+                - [ ] Alt+F1..F12 for virtual console switch.
+                - [ ] Ctrl+Alt+Del for reboot/shutdown hook.
+                - [ ] SysRq key handling (magic SysRq sequences).
+            - [ ] **LED Control:**
+                - [ ] Sync Caps Lock, Num Lock, Scroll Lock LEDs.
+                - [ ] LED state persistence across console switches.
+        - [ ] **Framebuffer Console (Graphical):**
+            - [ ] **Core Infrastructure:**
+                - [ ] `struct fb_info` device abstraction.
+                - [ ] Framebuffer registration/deregistration API.
+                - [ ] Memory mapping (physical to kernel virtual).
+                - [ ] `/dev/fb/[0-N]` device node creation.
+            - [ ] **Drivers:**
+                - [ ] **VESA VBE (Linear Framebuffer):**
+                    - [ ] VBE 2.0+ detection and capability query.
+                    - [ ] Mode enumeration and selection.
+                    - [ ] Linear framebuffer mapping (LFB base address).
+                    - [ ] Protected mode interface (PM32 entry points).
+                    - [ ] EDID retrieval for monitor detection.
+                - [ ] **UEFI GOP (Graphics Output Protocol):**
+                    - [ ] GOP protocol location and initialization.
+                    - [ ] Mode query and switching.
+                    - [ ] Framebuffer base and stride retrieval.
+                    - [ ] EFI runtime services integration.
+                - [ ] **Bochs Graphics Adapter (BGA):**
+                    - [ ] BGA detection (PCI vendor/device ID, I/O ports).
+                    - [ ] VBE DISPI register interface.
+                    - [ ] Mode setting (resolution, bpp, enable LFB).
+                    - [ ] Virtual resolution and display offset.
+                    - [ ] Bank switching (legacy mode fallback).
+                - [ ] **VirtIO-GPU:**
+                    - [ ] VirtIO device discovery and setup.
+                    - [ ] Resource creation (2D scanout).
+                    - [ ] Transfer to host (flush dirty regions).
+                    - [ ] Display info query (resolution, format).
+                    - [ ] Cursor image upload and positioning.
+            - [ ] **Pixel Formats:**
+                - [ ] 8-bit indexed (palette-based).
+                - [ ] 16-bit (RGB565, ARGB1555).
+                - [ ] 24-bit (RGB888, BGR888).
+                - [ ] 32-bit (ARGB8888, XRGB8888, ABGR8888).
+                - [ ] Endianness handling (little/big endian).
+                - [ ] Format conversion routines.
+            - [ ] **Rendering:**
+                - [ ] **Font Support:**
+                    - [ ] PSF1 font parser (256/512 glyphs, fixed width).
+                    - [ ] PSF2 font parser (Unicode table, variable metrics).
+                    - [ ] BDF/PCF font support (optional).
+                    - [ ] Built-in fallback font (8x16 VGA ROM font).
+                    - [ ] Font glyph cache (hash table lookup).
+                    - [ ] Unicode to glyph mapping (cmap).
+                - [ ] **Blitting Operations:**
+                    - [ ] `fb_fillrect()`: Solid color fill with ROP support.
+                    - [ ] `fb_copyarea()`: Screen-to-screen blit.
+                    - [ ] `fb_imageblit()`: Mono/color image to framebuffer.
+                    - [ ] Accelerated ops detection and fallback.
+                    - [ ] Clipping (viewport bounds checking).
+                - [ ] **Character Rendering:**
+                    - [ ] Glyph rendering with foreground/background colors.
+                    - [ ] Bold rendering (shift and OR, or bold font).
+                    - [ ] Italic rendering (shear transform, or italic font).
+                    - [ ] Underline and strikethrough rendering.
+                    - [ ] Reverse video attribute.
+                - [ ] **Performance:**
+                    - [ ] Double buffering (offscreen back buffer).
+                    - [ ] Dirty rectangle tracking.
+                    - [ ] Deferred updates (batch flush on vsync).
+                    - [ ] Write-combining memory type (PAT/MTRR).
+            - [ ] **Cursor:**
+                - [ ] **Software Cursor:**
+                    - [ ] XOR cursor rendering.
+                    - [ ] Cursor save/restore (background preservation).
+                    - [ ] Cursor blink timer integration.
+                - [ ] **Hardware Cursor:**
+                    - [ ] Cursor image upload (ARGB format).
+                    - [ ] Cursor position registers.
+                    - [ ] Hot spot offset configuration.
+                    - [ ] Cursor enable/disable.
+            - [ ] **Emulation (VT102/ANSI):**
+                - [ ] **Parser State Machine:**
+                    - [ ] Ground state (printable characters).
+                    - [ ] Escape state (ESC received).
+                    - [ ] CSI state (ESC [ sequences).
+                    - [ ] OSC state (Operating System Commands).
+                    - [ ] DCS state (Device Control Strings).
+                    - [ ] Parameter accumulation and parsing.
+                - [ ] **Cursor Control Sequences:**
+                    - [ ] CUU/CUD/CUF/CUB (cursor movement).
+                    - [ ] CUP/HVP (absolute positioning).
+                    - [ ] CNL/CPL (next/previous line).
+                    - [ ] CHA/VPA (column/row absolute).
+                    - [ ] SC/RC (save/restore cursor position).
+                    - [ ] DECSC/DECRC (save/restore with attributes).
+                - [ ] **Erase Sequences:**
+                    - [ ] ED (erase display: to end, to start, all).
+                    - [ ] EL (erase line: to end, to start, all).
+                    - [ ] ECH (erase characters).
+                    - [ ] DCH/ICH (delete/insert characters).
+                    - [ ] DL/IL (delete/insert lines).
+                - [ ] **Attribute Sequences (SGR):**
+                    - [ ] Reset (SGR 0).
+                    - [ ] Bold/dim/italic/underline/blink/reverse/hidden.
+                    - [ ] 8-color foreground/background (30-37, 40-47).
+                    - [ ] Bright colors (90-97, 100-107).
+                    - [ ] 256-color mode (38;5;N, 48;5;N).
+                    - [ ] 24-bit true color (38;2;R;G;B, 48;2;R;G;B).
+                - [ ] **Scrolling:**
+                    - [ ] DECSTBM (set top/bottom margins).
+                    - [ ] SU/SD (scroll up/down).
+                    - [ ] IND/RI (index/reverse index).
+                    - [ ] Smooth scroll support (optional).
+                - [ ] **Modes:**
+                    - [ ] DECCKM (cursor key mode: application/normal).
+                    - [ ] DECAWM (auto-wrap mode).
+                    - [ ] DECOM (origin mode: absolute/relative).
+                    - [ ] DECTCEM (cursor visibility).
+                    - [ ] Alternate screen buffer (DECSET 1049).
+                    - [ ] Bracketed paste mode (DECSET 2004).
+                - [ ] **Character Sets:**
+                    - [ ] G0/G1/G2/G3 character set designation.
+                    - [ ] SI/SO (shift in/out for G0/G1).
+                    - [ ] DEC Special Graphics (line drawing).
+                    - [ ] UTF-8 decoding and Unicode support.
+                - [ ] **Tabs:**
+                    - [ ] HTS (horizontal tab set).
+                    - [ ] TBC (tab clear: current, all).
+                    - [ ] CHT/CBT (cursor horizontal tab forward/back).
+                    - [ ] Default tab stops (every 8 columns).
+                - [ ] **Reports:**
+                    - [ ] DSR (device status report).
+                    - [ ] CPR (cursor position report).
+                    - [ ] DA (device attributes).
+                    - [ ] DECID (terminal ID).
+            - [ ] **TTY Binding:**
+                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`.
+                - [ ] `tty_driver->write()` with escape sequence processing.
+                - [ ] `tty_driver->ioctl()` for FB-specific controls.
+                - [ ] Window size tracking (TIOCGWINSZ/TIOCSWINSZ).
+        - [ ] **Serial Console (Headless):**
+            - [ ] **UART Drivers:**
+                - [ ] 8250/16550 UART driver (I/O port and MMIO).
+                - [ ] Baud rate configuration (divisor latch).
+                - [ ] Line control (data bits, parity, stop bits).
+                - [ ] FIFO control (16550A FIFO enable, trigger level).
+                - [ ] Modem control signals (DTR, RTS).
+                - [ ] Modem status signals (CTS, DSR, DCD, RI).
+                - [ ] Interrupt-driven I/O (IRQ handler).
+                - [ ] Polling mode fallback (for early boot).
+            - [ ] **Console Output:**
+                - [ ] VT102 pass-through (raw escape sequences).
+                - [ ] Output buffering and flow control.
+                - [ ] XON/XOFF software flow control.
+                - [ ] RTS/CTS hardware flow control.
+                - [ ] Break signal transmission.
+            - [ ] **Console Input:**
+                - [ ] Character reception and buffering.
+                - [ ] Break signal detection.
+                - [ ] Framing and parity error handling.
+                - [ ] Overrun error handling.
+            - [ ] **TTY Binding:**
+                - [ ] Register as `tty_driver` for `/dev/ttyS[0-N]`.
+                - [ ] `tty_driver->write()` callback.
+                - [ ] `tty_driver->ioctl()` for serial-specific controls.
+                - [ ] `tty_driver->set_termios()` for baud/parity changes.
+            - [ ] **Kernel Console:**
+                - [ ] Early boot console (before TTY init).
+                - [ ] `console=ttyS0,115200n8` kernel parameter parsing.
+                - [ ] Kernel panic output to serial.
+                - [ ] SysRq over serial (break + key).
+    - [ ] **Features:**
+        - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles.
+        - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.??
+- [ ] **RNG Subsystem (`/dev/random`, `/dev/urandom`):** <!-- random.c, random_internal.h, sys/random.h -->
+    - [ ] **Core Infrastructure:**
+        - [ ] **Data Structures:**
+            - [ ] Define `struct entropy_pool` (input pool, output pool, counters). <!-- random_internal.h -->
+            - [ ] Define `struct chacha20_ctx` (key, counter, block buffer). <!-- random_internal.h -->
+            - [ ] Define `struct rng_state` (global RNG state, seeded flag, reseed counter). <!-- random_internal.h -->
+            - [ ] Create `spinlock_t entropy_lock` for pool access. <!-- random.c -->
+            - [ ] Create `spinlock_t output_lock` for CSPRNG state. <!-- random.c -->
+            - [ ] Define entropy estimation structures (bits per source). <!-- random_internal.h -->
+        - [ ] **Header Files:**
+            - [ ] Create `sys/include/sys/random.h` (public API).
+            - [ ] Create `sys/kern/random_internal.h` (internal structures).
+            - [ ] Define `GRND_NONBLOCK`, `GRND_RANDOM`, `GRND_INSECURE` flags. <!-- sys/random.h -->
+        - [ ] **Initialization:**
+            - [ ] Implement `random_init()` called from `kmain`. <!-- random.c:449, main.c -->
+            - [ ] Initialize entropy pools to zero. <!-- random.c:454 -->
+            - [ ] Initialize CSPRNG state. <!-- random.c:456-458 -->
+            - [ ] Set initial seeded flag to false. <!-- random.c:453 (memset) -->
+            - [ ] Register `/dev/random` and `/dev/urandom` device nodes. <!-- random.c:478-494 -->
+    - [ ] **CSPRNG Algorithm (ChaCha20):** <!-- random.c:30-159 -->
+        - [ ] **Core Implementation:**
+            - [ ] Implement ChaCha20 quarter-round function. <!-- random.c:33-38 QR macro -->
+            - [ ] Implement ChaCha20 column and diagonal rounds. <!-- random.c:48-58 -->
+            - [ ] Implement ChaCha20 block function (20 rounds). <!-- random.c:41-63 -->
+            - [ ] Implement keystream generation with counter increment. <!-- random.c:107-115 -->
+            - [ ] Implement output serialization (little-endian). <!-- random.c:100-105 -->
+        - [ ] **Key Management:**
+            - [ ] Implement `chacha20_init(ctx, key, nonce)`. <!-- random.c:66-91 -->
+            - [ ] Implement `chacha20_rekey(ctx)` (fast-key-erasure). <!-- random.c:140-154 -->
+            - [ ] Implement `chacha20_wipe(ctx)` (secure zeroing). <!-- random.c:157-159 -->
+        - [ ] **Output Generation:**
+            - [ ] Implement `chacha20_extract(ctx, buf, len)`. <!-- random.c:119-137 -->
+            - [ ] Buffer partial blocks for efficiency. <!-- random.c:123-134 -->
+            - [ ] Rekey after every 1MB of output (configurable). <!-- random.c:397-401 RESEED_INTERVAL -->
+        - [ ] **Testing:**
+            - [ ] RFC 7539 test vectors (known answer tests).
+            - [ ] Block function correctness tests.
+            - [ ] Counter wraparound handling tests.
+    - [ ] **Entropy Mixing (Input Pool):** <!-- random.c:161-224 -->
+        - [ ] **Mixing Function:**
+            - [ ] Implement LFSR-based mixing (Linux-style). <!-- random.c:177-192 -->
+            - [ ] Implement CRC32-based fast mixing. <!-- Uses twist table -->
+            - [ ] Implement SHA-256 compression for extraction. <!-- Simplified compression random.c:198-206 -->
+            - [ ] Implement twist table for polynomial feedback. <!-- random.c:166-169 -->
+        - [ ] **Pool Management:**
+            - [ ] Define input pool size (4096 bits / 512 bytes). <!-- random_internal.h ENTROPY_POOL_SIZE -->
+            - [ ] Implement `pool_mix_bytes(pool, data, len)`. <!-- random.c:177-195 -->
+            - [ ] Implement `pool_extract_bytes(pool, out, len)`. <!-- random.c:209-224 -->
+            - [ ] Track estimated entropy bits in pool. <!-- entropy_pool.entropy_count -->
+        - [ ] **Entropy Estimation:**
+            - [ ] Conservative entropy crediting (bits per event). <!-- random.c:317-321 -->
+            - [ ] Overflow protection (cap at pool size). <!-- random.c:318-320 -->
+            - [ ] Debit entropy on extraction. <!-- random.c:361 -->
+            - [ ] Track total entropy collected since boot. <!-- entropy_pool.total_harvested -->
+    - [ ] **Entropy Sources & Harvesting:** <!-- random.c:303-345 -->
+        - [ ] **Harvesting Infrastructure:**
+            - [ ] Implement `random_harvest(data, len, bits, source)` (general API). <!-- random.c:307-326 -->
+            - [ ] Implement `random_harvest_fast(data, len)` (ISR-safe, no lock). <!-- random.c:328-341 -->
+            - [ ] Implement `random_harvest_direct(data, len, bits)` (high-quality). <!-- random.c:343-345 -->
+            - [ ] Define `enum entropy_source` (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG). <!-- sys/random.h -->
+            - [ ] Per-source entropy rate limiting. <!-- rng_state.harvest_count[] -->
+        - [ ] **Timing-Based Sources:**
+            - [ ] **Interrupt Timing:**
+                - [ ] Hook `pit_handler` for timer jitter (TSC delta). <!-- via isr_handler(IRQ0) -->
+                - [ ] Hook `isr_handler` for interrupt timing. <!-- idt.c:isr_handler -->
+                - [ ] Mix TSC low bits on each interrupt. <!-- random_harvest_fast -->
+                - [ ] Credit ~1 bit per interrupt timing sample. <!-- using random_harvest_fast (mixing only) -->
+            - [ ] **Keyboard/Mouse:** <!-- keyboard.c, mouse.c -->
+                - [ ] Hook `keyboard_handler` (scancode + timing). <!-- keyboard.c:68-72 -->
+                - [ ] Hook PS/2 mouse driver (movement + timing). <!-- mouse.c:54-58 -->
+                - [ ] Credit ~2-4 bits per HID event. <!-- Uses random_harvest_fast -->
+            - [ ] **Disk I/O:**
+                - [ ] Hook IDE/AHCI/VirtIO completion interrupts. <!-- Hooked virtio_blk (sync), ide -->
+                - [ ] Mix seek time / completion jitter.
+                - [ ] Credit ~1 bit per I/O completion.
+            - [ ] **Network:**
+                - [ ] Hook network packet arrival (timing + data).
+                - [ ] Mix packet timing and partial payload.
+                - [ ] Credit ~2 bits per packet timing.
+        - [ ] **Hardware RNG (RDRAND/RDSEED):** <!-- random.c:226-301 -->
+            - [ ] **Detection:**
+                - [ ] CPUID feature detection for RDRAND (ECX bit 30). <!-- random.c:241-244 -->
+                - [ ] CPUID feature detection for RDSEED (EBX bit 18). <!-- random.c:251-254 -->
+                - [ ] Runtime availability flags. <!-- rng_state.has_rdrand, has_rdseed -->
+            - [ ] **Implementation:**
+                - [ ] Implement `rdrand32()`, `rdrand64()` with retry loop. <!-- random.c:266-287 -->
+                - [ ] Implement `rdseed32()`, `rdseed64()` with failure handling.
+                - [ ] Fallback path when HWRNG unavailable. <!-- random.c:267 -->
+            - [ ] **Integration:**
+                - [ ] Periodic HWRNG harvesting (if available). <!-- random.c:464-468 -->
+                - [ ] Mix HWRNG output into entropy pool. <!-- random.c:295 -->
+                - [ ] Use HWRNG for fast-path output (XOR with CSPRNG).
+                - [ ] Credit ~32 bits per RDRAND invocation (conservative). <!-- random.c:296 -->
+        - [ ] **Jitter Entropy (CPU Timing):**
+            - [ ] Use BogoMIPS calibration loop for jitter measurement.
+            - [ ] Implement `jitterentropy_collect()` (memory access timing).
+            - [ ] CPU execution jitter measurement.
+            - [ ] Memory access timing variations.
+            - [ ] Minimum samples before crediting.
+        - [ ] **VirtIO Entropy Device:**
+            - [ ] VirtIO RNG device detection (device type 4).
+            - [ ] Request entropy from hypervisor.
+            - [ ] Mix hypervisor-provided randomness.
+            - [ ] Credit appropriately (host-dependent quality).
+    - [ ] **Reseeding & State Management:** <!-- random.c:356-372 -->
+        - [ ] **Reseed Logic:**
+            - [ ] Implement `random_reseed()` (extract from input pool). <!-- random.c:356-372 -->
+            - [ ] Minimum entropy threshold before first seed (256 bits). <!-- random.c:389, 471 -->
+            - [ ] Reseed interval (time-based or output-based). <!-- RESEED_INTERVAL, random.c:397 -->
+            - [ ] Reseed on entropy pool reaching threshold. <!-- random.c:389-391 -->
+        - [ ] **Seeded State Tracking:**
+            - [ ] Track `rng_seeded` boolean. <!-- rng_state.seeded -->
+            - [ ] Track `reseed_count` for auditing. <!-- rng_state.reseed_count -->
+            - [ ] Implement `random_is_seeded()` query. <!-- random.c:351-353 -->
+            - [ ] Block reads until first seed (for `/dev/random`). <!-- random.c:382-392 -->
+        - [ ] **Catastrophic Reseed:**
+            - [ ] Full state replacement on seed file load.
+            - [ ] Wipe previous state before new key material.
+            - [ ] Notify waiters after reseed.
+    - [ ] **Device Interfaces:** <!-- random.c:410-494 -->
+        - [ ] **`/dev/random` (Blocking):**
+            - [ ] Implement `random_dev_open()`. <!-- implicit via fs_node_t -->
+            - [ ] Implement `random_dev_read()` with blocking. <!-- random.c:415-421 -->
+            - [ ] Block until minimum entropy available. <!-- random.c:382-392 -->
+            - [ ] Wait queue for blocked readers (`random_wait`).
+            - [ ] Wakeup on entropy addition.
+            - [ ] Implement `random_dev_poll()` (POLLIN when seeded).
+        - [ ] **`/dev/urandom` (Non-blocking):**
+            - [ ] Implement `urandom_dev_read()` (always returns data). <!-- random.c:424-430 -->
+            - [ ] Warn once if read before seeded (dmesg).
+            - [ ] High throughput (CSPRNG stream). <!-- ChaCha20 stream -->
+            - [ ] No entropy debit (unlimited output). <!-- GRND_INSECURE -->
+        - [ ] **Shared Implementation:**
+            - [ ] Device major/minor number allocation. <!-- implicit -->
+            - [ ] `struct file_operations` registration. <!-- fs_node_t callbacks -->
+            - [ ] Character device creation. <!-- devfs_register_device -->
+            - [ ] Permissions check (world-readable). <!-- inherits from devfs -->
+        - [ ] **`getrandom()` Syscall:**
+            - [ ] Implement `sys_getrandom(buf, len, flags)`.
+            - [ ] `GRND_RANDOM` flag (use blocking pool).
+            - [ ] `GRND_NONBLOCK` flag (return EAGAIN if not seeded).
+            - [ ] `GRND_INSECURE` flag (return data even if not seeded).
+            - [ ] Personality support (native, Linux, FreeBSD).
+            - [ ] Register syscall number in all personality tables.
+        - [ ] **Kernel Internal API:**
+            - [ ] Implement `get_random_bytes(buf, len)` (kernel consumers).
+            - [ ] Implement `get_random_u32()`, `get_random_u64()`.
+            - [ ] Implement `get_random_bytes_wait(buf, len)` (blocking).
+            - [ ] Early boot fallback (before seeded).
+    - [ ] **IOCTLs & Administrative Interface:**
+        - [ ] **IOCTL Commands:**
+            - [ ] `RNDGETENTCNT`: Return entropy estimate (bits).
+            - [ ] `RNDADDTOENTCNT`: Add to entropy count (privileged).
+            - [ ] `RNDADDENTROPY`: Add entropy data + credit (privileged).
+            - [ ] `RNDZAPENTCNT`: Zero entropy count (privileged).
+            - [ ] `RNDCLEARPOOL`: Clear entropy pool (privileged).
+            - [ ] `RNDRESEEDCRNG`: Force CSPRNG reseed (privileged).
+        - [ ] **Implementation:**
+            - [ ] Implement `random_dev_ioctl()` dispatcher.
+            - [ ] Privilege checks (CAP_SYS_ADMIN or root).
+            - [ ] Input validation for user-provided entropy.
+            - [ ] Copyin/copyout for userspace buffers.
+        - [ ] **Sysctl Interface (Optional):**
+            - [ ] `kern.random.entropy_avail` (read-only).
+            - [ ] `kern.random.poolsize` (read-only).
+            - [ ] `kern.random.uuid` (read-only, per-read UUID).
+            - [ ] `kern.random.boot_id` (read-only, boot UUID).
+    - [ ] **Security & Correctness:**
+        - [ ] **Fork Safety:**
+            - [ ] Implement `random_reseed_on_fork()` hook.
+            - [ ] Call from `proc_fork()` after child creation.
+            - [ ] Mix PID, timestamp into child's CSPRNG state.
+            - [ ] Ensure parent and child diverge immediately.
+            - [ ] Wipe any copied CSPRNG buffer in child.
+        - [ ] **Exec Safety:**
+            - [ ] Wipe userspace-visible RNG state on `execve`.
+            - [ ] Reset any per-process CSPRNG state.
+            - [ ] Ensure no entropy leakage across exec boundary.
+        - [ ] **Memory Protection:**
+            - [ ] Use `explicit_bzero()` for sensitive state clearing.
+            - [ ] Mark CSPRNG state pages non-swappable.
+            - [ ] Clear key material immediately after rekey.
+            - [ ] Avoid leaving entropy in temporary buffers.
+        - [ ] **Backtracking Resistance:**
+            - [ ] Fast-key-erasure design (rekey after extraction).
+            - [ ] Cannot recover previous output given current state.
+            - [ ] Wipe intermediate state after each operation.
+        - [ ] **Prediction Resistance:**
+            - [ ] Periodic reseed from entropy pool.
+            - [ ] Mix in fresh entropy continuously.
+            - [ ] HWRNG XOR for defense-in-depth.
+        - [ ] **Audit & Logging:**
+            - [ ] Log first seed event.
+            - [ ] Log reseed events (rate-limited).
+            - [ ] Log HWRNG initialization status.
+            - [ ] Log warnings for uninitialized reads.
+    - [ ] **Boot-time Entropy & Seed File:**
+        - [ ] **Early Boot Entropy:**
+            - [ ] Collect BIOS/firmware timestamps.
+            - [ ] Collect Multiboot structure addresses.
+            - [ ] Collect memory map contents.
+            - [ ] Collect interrupt timing during init.
+        - [ ] **Seed File Support:**
+            - [ ] Read seed file from root filesystem on mount.
+            - [ ] Expected path: `/var/db/entropy/seed`.
+            - [ ] Seed file format: raw 256 bytes minimum.
+            - [ ] Mix seed file into entropy pool.
+            - [ ] Immediately overwrite seed file with fresh randomness.
+        - [ ] **Shutdown Handling:**
+            - [ ] Write fresh seed file on clean shutdown.
+            - [ ] Ensure seed file written before unmount.
+            - [ ] Atomic write (write temp, rename).
+    - [ ] **Performance Optimization:**
+        - [ ] **Fast Path:**
+            - [ ] Per-CPU CSPRNG state (avoid lock contention).
+            - [ ] Batch output generation (64-byte blocks).
+            - [ ] Minimize lock hold time.
+            - [ ] Lockless entropy harvesting counters.
+        - [ ] **Benchmarking:**
+            - [ ] Create `sys/tests/bench_rng.c` for throughput.
+            - [ ] Measure `get_random_bytes()` MB/s.
+            - [ ] Measure `read(/dev/urandom)` MB/s.
+            - [ ] Measure entropy harvesting overhead.
+            - [ ] Profile lock contention under load.
+        - [ ] **Optimization Targets:**
+            - [ ] Target: >100 MB/s for `/dev/urandom`.
+            - [ ] Target: <1μs for `get_random_u32()`.
+            - [ ] Target: <100ns for `random_harvest_fast()`.
+    - [ ] **Testing:**
+        - [ ] **Unit Tests:**
+            - [ ] `test_chacha20.c`: RFC 7539 test vectors.
+            - [ ] `test_entropy_pool.c`: Mixing function correctness.
+            - [ ] `test_rng_seeding.c`: Reseed logic validation.
+            - [ ] `test_rng_fork.c`: Parent/child output divergence.
+            - [ ] `test_rng_exec.c`: State wipe on exec.
+            - [ ] `test_getrandom.c`: Syscall interface validation.
+        - [ ] **Statistical Tests:**
+            - [ ] Dieharder test suite integration.
+            - [ ] NIST SP 800-22 test suite.
+            - [ ] TestU01 BigCrush (optional).
+            - [ ] Minimum: Frequency, runs, and chi-square tests.
+        - [ ] **Integration Tests:**
+            - [ ] Boot-to-seeded timing measurement.
+            - [ ] Stress test under heavy read load.
+            - [ ] Multi-process concurrent read test.
+            - [ ] HWRNG fallback path testing.
+    - [ ] **Documentation:**
+        - [ ] **Man Pages:**
+            - [ ] `man4/random.4`: Device interface documentation.
+            - [ ] `man2/getrandom.2`: Syscall documentation.
+            - [ ] Document blocking vs non-blocking behavior.
+            - [ ] Document entropy sources and estimation.
+            - [ ] Document security properties and limitations.
+        - [ ] **Kernel Documentation:**
+            - [ ] Architecture overview in `doc/random.md`.
+            - [ ] Entropy source hookup guide.
+            - [ ] Security model documentation.
+            - [ ] Performance tuning guide.
+
+
+## User Stories
+
+- **US-03-0001**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to storage Subsystem (Unified SCSI Stack): so that this capability is implemented with clear verification evidence.
+- **US-03-0002**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to core Architecture (CAM/Mid-layer): so that this capability is implemented with clear verification evidence.
+- **US-03-0003**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to data Structures (scsi.h): so that this capability is implemented with clear verification evidence.
+- **US-03-0004**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_request_t: command execution context so that this capability is implemented with clear verification evidence.
+- **US-03-0005**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cDB storage (up to SCSI_MAX_CDB_LEN = 16 bytes) so that this capability is implemented with clear verification evidence.
+- **US-03-0006**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cdb_len: actual CDB length (6, 10, 12, or 16) so that this capability is implemented with clear verification evidence.
+- **US-03-0007**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to data/data_len: DMA buffer pointer and transfer length so that this capability is implemented with clear verification evidence.
+- **US-03-0008**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to flags: direction (SCSI_REQ_READ, SCSI_REQ_WRITE), and options so that this capability is implemented with clear verification evidence.
+- **US-03-0009**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to status: SCSI status byte (GOOD, CHECK CONDITION, BUSY, etc.) so that this capability is implemented with clear verification evidence.
+- **US-03-0010**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sense_data[SCSI_SENSE_LEN]: auto-sense buffer (32 bytes) so that this capability is implemented with clear verification evidence.
+- **US-03-0011**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sense_len: actual sense data returned so that this capability is implemented with clear verification evidence.
+- **US-03-0012**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to timeout_ms: per-command timeout so that this capability is implemented with clear verification evidence.
+- **US-03-0013**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to retries / max_retries: retry counters (default 3, media error = 0) so that this capability is implemented with clear verification evidence.
+- **US-03-0014**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to callback: async completion function pointer so that this capability is implemented with clear verification evidence.
+- **US-03-0015**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to submit_time / start_time / elapsed_ms: timing instrumentation so that this capability is implemented with clear verification evidence.
+- **US-03-0016**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to queue linkage (next pointer) so that this capability is implemented with clear verification evidence.
+- **US-03-0017**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_device_t: target representation so that this capability is implemented with clear verification evidence.
+- **US-03-0018**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to addressing: bus, target (0-15), lun (0-255) so that this capability is implemented with clear verification evidence.
+- **US-03-0019**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to identity from INQUIRY: vendor[9], product[17], revision[5], serial[21] so that this capability is implemented with clear verification evidence.
+- **US-03-0020**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to type: peripheral device type (disk=0x00, tape=0x01, cdrom=0x05, etc.) so that this capability is implemented with clear verification evidence.
+- **US-03-0021**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to removable: RMB bit from INQUIRY so that this capability is implemented with clear verification evidence.
+- **US-03-0022**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_version: SPC version from INQUIRY so that this capability is implemented with clear verification evidence.
+- **US-03-0023**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to capacity: total sectors (from READ CAPACITY) so that this capability is implemented with clear verification evidence.
+- **US-03-0024**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sector_size: bytes/sector (512 for disk, 2048 for CD-ROM) so that this capability is implemented with clear verification evidence.
+- **US-03-0025**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to flags: online/offline, write-protected, supports TCQ so that this capability is implemented with clear verification evidence.
+- **US-03-0026**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to command queue: queue_head/queue_tail, queue_depth, max_queue_depth so that this capability is implemented with clear verification evidence.
+- **US-03-0027**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to link: back-pointer to transport interface so that this capability is implemented with clear verification evidence.
+- **US-03-0028**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to registry linkage (next pointer) so that this capability is implemented with clear verification evidence.
+- **US-03-0029**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_link_t: transport adapter interface so that this capability is implemented with clear verification evidence.
+- **US-03-0030**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to name[32]: adapter name (e.g., "atapi0", "virtio-scsi0") so that this capability is implemented with clear verification evidence.
+- **US-03-0031**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to execute(link, request): function pointer - transport-specific command dispatch so that this capability is implemented with clear verification evidence.
+- **US-03-0032**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to max_targets / max_luns: bus topology limits so that this capability is implemented with clear verification evidence.
+- **US-03-0033**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to adapter_queue_depth: HBA-level parallelism so that this capability is implemented with clear verification evidence.
+- **US-03-0034**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to flags: DMA-capable, supports tagged queueing, ordered tags so that this capability is implemented with clear verification evidence.
+- **US-03-0035**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to statistics: cmds_completed, cmds_failed, bytes_read, bytes_written so that this capability is implemented with clear verification evidence.
+- **US-03-0036**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_sense_fixed: SPC-3 fixed-format sense data (36 bytes) so that this capability is implemented with clear verification evidence.
+- **US-03-0037**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to response_code (0x70 current, 0x71 deferred) so that this capability is implemented with clear verification evidence.
+- **US-03-0038**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sense_key (bits 0-3), ILI (bit 5), EOM (bit 6), FileMark (bit 7) so that this capability is implemented with clear verification evidence.
+- **US-03-0039**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to info[4]: command-specific information so that this capability is implemented with clear verification evidence.
+- **US-03-0040**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to asc / ascq: Additional Sense Code / Qualifier so that this capability is implemented with clear verification evidence.
+- **US-03-0041**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_inquiry_data: standard INQUIRY response (36+ bytes) so that this capability is implemented with clear verification evidence.
+- **US-03-0042**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device_type (bits 0-4), qualifier (bits 5-7) so that this capability is implemented with clear verification evidence.
+- **US-03-0043**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rmb (bit 7), version, response_format so that this capability is implemented with clear verification evidence.
+- **US-03-0044**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to additional_length, flags (CmdQue, etc.) so that this capability is implemented with clear verification evidence.
+- **US-03-0045**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vendor/Product/Revision strings (space-padded) so that this capability is implemented with clear verification evidence.
+- **US-03-0046**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_report_luns_data: REPORT LUNS response (up to 64 LUNs) so that this capability is implemented with clear verification evidence.
+- **US-03-0047**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialization (scsi_init): so that this capability is implemented with clear verification evidence.
+- **US-03-0048**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize device registry (pre-allocate pool of scsi_device_t, 64 max) so that this capability is implemented with clear verification evidence.
+- **US-03-0049**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize request pool (pre-allocate scsi_request_t, 128 max) so that this capability is implemented with clear verification evidence.
+- **US-03-0050**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize free lists for both pools so that this capability is implemented with clear verification evidence.
+- **US-03-0051**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to call scsi_dev_init() and scsi_ctl_init() so that this capability is implemented with clear verification evidence.
+- **US-03-0052**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to transport Registration: so that this capability is implemented with clear verification evidence.
+- **US-03-0053**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_register_link(link): register HBA/transport adapter so that this capability is implemented with clear verification evidence.
+- **US-03-0054**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to validate execute callback is non-NULL so that this capability is implemented with clear verification evidence.
+- **US-03-0055**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to add to global link list (max 8 links) so that this capability is implemented with clear verification evidence.
+- **US-03-0056**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to trigger bus scan on the new link so that this capability is implemented with clear verification evidence.
+- **US-03-0057**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_unregister_link(link): unregister adapter so that this capability is implemented with clear verification evidence.
+- **US-03-0058**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to detach all devices on this link so that this capability is implemented with clear verification evidence.
+- **US-03-0059**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to free associated resources so that this capability is implemented with clear verification evidence.
+- **US-03-0060**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device Discovery: so that this capability is implemented with clear verification evidence.
+- **US-03-0061**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_scan_bus(link, bus): enumerate all targets on a bus so that this capability is implemented with clear verification evidence.
+- **US-03-0062**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iterate target IDs 0..link->max_targets - 1 so that this capability is implemented with clear verification evidence.
+- **US-03-0063**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to for each target: INQUIRY at LUN 0, then REPORT LUNS for multi-LUN so that this capability is implemented with clear verification evidence.
+- **US-03-0064**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fallback: sequential LUN probing if REPORT LUNS fails (old devices) so that this capability is implemented with clear verification evidence.
+- **US-03-0065**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_probe_lun(link, bus, target, lun): probe a single LUN so that this capability is implemented with clear verification evidence.
+- **US-03-0066**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to send TEST UNIT READY so that this capability is implemented with clear verification evidence.
+- **US-03-0067**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to send INQUIRY; parse device type, vendor, product, revision so that this capability is implemented with clear verification evidence.
+- **US-03-0068**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to if device type is valid: scsi_device_register() so that this capability is implemented with clear verification evidence.
+- **US-03-0069**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to send READ CAPACITY (10 or 16) for block devices so that this capability is implemented with clear verification evidence.
+- **US-03-0070**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to trigger scsi_auto_attach() on success so that this capability is implemented with clear verification evidence.
+- **US-03-0071**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_device_register(dev): add to global device list so that this capability is implemented with clear verification evidence.
+- **US-03-0072**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to check for duplicate (same bus:target:lun) so that this capability is implemented with clear verification evidence.
+- **US-03-0073**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to assign monotonically increasing device number so that this capability is implemented with clear verification evidence.
+- **US-03-0074**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to log discovery: "scsi: B:T:L vendor product [type]" so that this capability is implemented with clear verification evidence.
+- **US-03-0075**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_device_unregister(dev): remove from list so that this capability is implemented with clear verification evidence.
+- **US-03-0076**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_device_lookup(bus, target, lun): find registered device so that this capability is implemented with clear verification evidence.
+- **US-03-0077**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to command Execution: so that this capability is implemented with clear verification evidence.
+- **US-03-0078**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to request Lifecycle: so that this capability is implemented with clear verification evidence.
+- **US-03-0079**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_request_alloc(): allocate from pool (or return NULL if exhausted) so that this capability is implemented with clear verification evidence.
+- **US-03-0080**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_request_init(req, dev): zero fields, link to device, set default timeout (30s) and retries (3) so that this capability is implemented with clear verification evidence.
+- **US-03-0081**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_request_free(req): return to free pool so that this capability is implemented with clear verification evidence.
+- **US-03-0082**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to synchronous Execution: so that this capability is implemented with clear verification evidence.
+- **US-03-0083**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_execute_sync(dev, cdb, cdb_len, data, data_len, flags, timeout_ms): so that this capability is implemented with clear verification evidence.
+- **US-03-0084**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to allocate request, fill CDB/buffer, call scsi_execute(), block until complete, return status so that this capability is implemented with clear verification evidence.
+- **US-03-0085**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to core Execution (scsi_execute): so that this capability is implemented with clear verification evidence.
+- **US-03-0086**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to record submit_time timestamp so that this capability is implemented with clear verification evidence.
+- **US-03-0087**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to retry loop: attempt up to max_retries + 1 times so that this capability is implemented with clear verification evidence.
+- **US-03-0088**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to call link->execute(link, req) to dispatch to transport so that this capability is implemented with clear verification evidence.
+- **US-03-0089**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to record start_time, measure elapsed_ms so that this capability is implemented with clear verification evidence.
+- **US-03-0090**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to on CHECK CONDITION: auto-request sense, parse sense key so that this capability is implemented with clear verification evidence.
+- **US-03-0091**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to uNIT ATTENTION (sense key 6): retry automatically (medium changed) so that this capability is implemented with clear verification evidence.
+- **US-03-0092**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to nOT READY (sense key 2): retry with delay (device spinning up) so that this capability is implemented with clear verification evidence.
+- **US-03-0093**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mEDIUM ERROR (sense key 3): no retry (data loss) so that this capability is implemented with clear verification evidence.
+- **US-03-0094**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to aBORTED COMMAND (sense key 0xB): retry so that this capability is implemented with clear verification evidence.
+- **US-03-0095**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to on BUSY / TASK SET FULL: backoff and retry so that this capability is implemented with clear verification evidence.
+- **US-03-0096**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to update link statistics on completion so that this capability is implemented with clear verification evidence.
+- **US-03-0097**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to async Queue Management: so that this capability is implemented with clear verification evidence.
+- **US-03-0098**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_queue_request(req): enqueue to device's command queue so that this capability is implemented with clear verification evidence.
+- **US-03-0099**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to respect max_queue_depth (drop or backpressure) so that this capability is implemented with clear verification evidence.
+- **US-03-0100**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_process_queue(dev): dequeue and execute pending requests so that this capability is implemented with clear verification evidence.
+- **US-03-0101**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_abort_request(req): cancel pending request (remove from queue, invoke callback with error) so that this capability is implemented with clear verification evidence.
+- **US-03-0102**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_complete_request(req, status): mark done, invoke callback, trigger queue processing so that this capability is implemented with clear verification evidence.
+- **US-03-0103**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sense Data Parsing: so that this capability is implemented with clear verification evidence.
+- **US-03-0104**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_sense_key(sense, len): extract sense key from fixed or descriptor format so that this capability is implemented with clear verification evidence.
+- **US-03-0105**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_sense_asc(sense, len): extract ASC (Additional Sense Code) so that this capability is implemented with clear verification evidence.
+- **US-03-0106**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_sense_ascq(sense, len): extract ASCQ (Additional Sense Code Qualifier) so that this capability is implemented with clear verification evidence.
+- **US-03-0107**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_sense_string(sense, len, buf, buflen): human-readable sense string so that this capability is implemented with clear verification evidence.
+- **US-03-0108**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED so that this capability is implemented with clear verification evidence.
+- **US-03-0109**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present) so that this capability is implemented with clear verification evidence.
+- **US-03-0110**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cDB Builders: so that this capability is implemented with clear verification evidence.
+- **US-03-0111**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_test_unit_ready(cdb): 6-byte TUR so that this capability is implemented with clear verification evidence.
+- **US-03-0112**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_inquiry(cdb, len): 6-byte INQUIRY with allocation length so that this capability is implemented with clear verification evidence.
+- **US-03-0113**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_request_sense(cdb, len): 6-byte REQUEST SENSE so that this capability is implemented with clear verification evidence.
+- **US-03-0114**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_read_capacity_10(cdb): 10-byte READ CAPACITY so that this capability is implemented with clear verification evidence.
+- **US-03-0115**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_read_10(cdb, lba, count): 10-byte READ so that this capability is implemented with clear verification evidence.
+- **US-03-0116**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_write_10(cdb, lba, count): 10-byte WRITE so that this capability is implemented with clear verification evidence.
+- **US-03-0117**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_read_16(cdb, lba, count): 16-byte READ (LBA > 2TB) so that this capability is implemented with clear verification evidence.
+- **US-03-0118**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_write_16(cdb, lba, count): 16-byte WRITE (LBA > 2TB) so that this capability is implemented with clear verification evidence.
+- **US-03-0119**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_mode_sense_6(cdb, page, len) / scsi_cdb_mode_sense_10(cdb, page, len) so that this capability is implemented with clear verification evidence.
+- **US-03-0120**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_start_stop(cdb, start, load_eject): START STOP UNIT so that this capability is implemented with clear verification evidence.
+- **US-03-0121**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_cdb_sync_cache(cdb, lba, count): SYNCHRONIZE CACHE (10) so that this capability is implemented with clear verification evidence.
+- **US-03-0122**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to byte-order helpers: scsi_be16(), scsi_be32(), scsi_put_be16(), scsi_put_be32() so that this capability is implemented with clear verification evidence.
+- **US-03-0123**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to standard Command Wrappers: so that this capability is implemented with clear verification evidence.
+- **US-03-0124**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_test_unit_ready(dev): send TUR, return 0 on GOOD so that this capability is implemented with clear verification evidence.
+- **US-03-0125**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_inquiry(dev, inq): send INQUIRY, fill scsi_inquiry_data so that this capability is implemented with clear verification evidence.
+- **US-03-0126**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_read_capacity(dev, sectors, sector_size): READ CAPACITY (10 or 16), fill output so that this capability is implemented with clear verification evidence.
+- **US-03-0127**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_request_sense(dev, sense, len): explicit REQUEST SENSE so that this capability is implemented with clear verification evidence.
+- **US-03-0128**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_start_stop(dev, start, load_eject): START STOP UNIT so that this capability is implemented with clear verification evidence.
+- **US-03-0129**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_report_luns(dev, luns): REPORT LUNS, parse big-endian LUN list so that this capability is implemented with clear verification evidence.
+- **US-03-0130**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_synchronize_cache(dev): SYNCHRONIZE CACHE (write-back) so that this capability is implemented with clear verification evidence.
+- **US-03-0131**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_mode_sense(dev, page, buffer, len): MODE SENSE (for caching, geometry pages) so that this capability is implemented with clear verification evidence.
+- **US-03-0132**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to high-Level Device Driver (scsi_dev.c): so that this capability is implemented with clear verification evidence.
+- **US-03-0133**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to block Device Callbacks: so that this capability is implemented with clear verification evidence.
+- **US-03-0134**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_blk_read(blkdev, sector, count, buffer): build READ(10) CDB, execute sync, return sector count or -1 so that this capability is implemented with clear verification evidence.
+- **US-03-0135**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_blk_write(blkdev, sector, count, buffer): build WRITE(10) CDB, execute sync; reject writes to CD-ROM so that this capability is implemented with clear verification evidence.
+- **US-03-0136**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to handle sector size translation (512 vs 2048 for CD-ROM) so that this capability is implemented with clear verification evidence.
+- **US-03-0137**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to support READ(16)/WRITE(16) for devices with capacity > 2TB so that this capability is implemented with clear verification evidence.
+- **US-03-0138**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device Type Handling: so that this capability is implemented with clear verification evidence.
+- **US-03-0139**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to direct Access (Type 0x00 - Disk): so that this capability is implemented with clear verification evidence.
+- **US-03-0140**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rEAD CAPACITY for sector count and size so that this capability is implemented with clear verification evidence.
+- **US-03-0141**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cache flush via SYNCHRONIZE CACHE on unmount/shutdown so that this capability is implemented with clear verification evidence.
+- **US-03-0142**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device name: scsiN (sequential numbering) so that this capability is implemented with clear verification evidence.
+- **US-03-0143**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cD-ROM / DVD (Type 0x05 - ROM): so that this capability is implemented with clear verification evidence.
+- **US-03-0144**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_read_toc(dev, buffer, buflen): READ TOC/PMA/ATIP (CDB 0x43) so that this capability is implemented with clear verification evidence.
+- **US-03-0145**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_lock_door(dev, lock): PREVENT/ALLOW MEDIUM REMOVAL (CDB 0x1E) so that this capability is implemented with clear verification evidence.
+- **US-03-0146**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sector size: 2048 bytes (data CD standard) so that this capability is implemented with clear verification evidence.
+- **US-03-0147**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to handle UNIT ATTENTION on media change: re-read capacity so that this capability is implemented with clear verification evidence.
+- **US-03-0148**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wORM / Optical (Types 0x04, 0x07): so that this capability is implemented with clear verification evidence.
+- **US-03-0149**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to same as disk but write-once semantics; reject overwrites so that this capability is implemented with clear verification evidence.
+- **US-03-0150**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sequential Access (Type 0x01 - Tape) - deferred so that this capability is implemented with clear verification evidence.
+- **US-03-0151**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to attach / Detach: so that this capability is implemented with clear verification evidence.
+- **US-03-0152**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_dev_attach(scsi_dev): create scsi_blk_dev_t, register block device so that this capability is implemented with clear verification evidence.
+- **US-03-0153**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to only attach block-capable types (disk, cdrom, optical, worm) so that this capability is implemented with clear verification evidence.
+- **US-03-0154**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to set sector size based on device type so that this capability is implemented with clear verification evidence.
+- **US-03-0155**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to log: "scsi: attached scsiN (type) [vendor product]" so that this capability is implemented with clear verification evidence.
+- **US-03-0156**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_dev_detach(scsi_dev): unregister block device, remove from list so that this capability is implemented with clear verification evidence.
+- **US-03-0157**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_dev_lookup(name): find block device by name (e.g., "scsi0") so that this capability is implemented with clear verification evidence.
+- **US-03-0158**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_dev_init(): initialize unified device subsystem so that this capability is implemented with clear verification evidence.
+- **US-03-0159**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_auto_attach(dev): called on discovery - create generic node + block device so that this capability is implemented with clear verification evidence.
+- **US-03-0160**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to controller Interface (scsi_ctl.c): so that this capability is implemented with clear verification evidence.
+- **US-03-0161**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device Node Hierarchy: so that this capability is implemented with clear verification evidence.
+- **US-03-0162**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to /dev/storage/scsi/B:T:L (e.g., 0:0:0): generic SCSI pass-through node so that this capability is implemented with clear verification evidence.
+- **US-03-0163**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_create_generic_node(dev): create DevFS entry so that this capability is implemented with clear verification evidence.
+- **US-03-0164**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sg_ioctl(node, request, arg): ioctl handler for generic nodes so that this capability is implemented with clear verification evidence.
+- **US-03-0165**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to /dev/storage/scsi/B (e.g., 0): bus controller endpoint so that this capability is implemented with clear verification evidence.
+- **US-03-0166**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scsi_create_bus_node(link, bus_id): create DevFS entry so that this capability is implemented with clear verification evidence.
+- **US-03-0167**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bus_ioctl(node, request, arg): ioctl handler for bus operations so that this capability is implemented with clear verification evidence.
+- **US-03-0168**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to /dev/storage/scsiN (e.g., scsi0): high-level block device alias so that this capability is implemented with clear verification evidence.
+- **US-03-0169**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ioctl Operations: so that this capability is implemented with clear verification evidence.
+- **US-03-0170**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sCSI_IOCTL_SCAN (0x5301): trigger bus rescan so that this capability is implemented with clear verification evidence.
+- **US-03-0171**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sCSI_IOCTL_GET_INFO (0x5302): return scsi_ioctl_info_t (bus, target, lun, type, vendor, product, capacity) so that this capability is implemented with clear verification evidence.
+- **US-03-0172**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sCSI_IOCTL_GET_IDLUN (0x5303): return packed bus:target:lun so that this capability is implemented with clear verification evidence.
+- **US-03-0173**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sCSI_IOCTL_GET_COUNT (0x5304): return device count on bus so that this capability is implemented with clear verification evidence.
+- **US-03-0174**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sCSI_IOCTL_SEND_CMD (0x5305): pass-through raw SCSI CDB with data buffer so that this capability is implemented with clear verification evidence.
+- **US-03-0175**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to copy CDB from userspace, validate length so that this capability is implemented with clear verification evidence.
+- **US-03-0176**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to execute via scsi_execute_sync(), copy results back so that this capability is implemented with clear verification evidence.
+- **US-03-0177**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to require appropriate privilege (root or CAP_SYS_RAWIO) so that this capability is implemented with clear verification evidence.
+- **US-03-0178**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to transport/HBA Drivers (Low-Level): so that this capability is implemented with clear verification evidence.
+- **US-03-0179**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to aTAPI Transport (atapi_scsi.c, atapi_scsi.h): so that this capability is implemented with clear verification evidence.
+- **US-03-0180**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to atapi_link: scsi_link_t instance for ATA secondary (ATAPI) devices so that this capability is implemented with clear verification evidence.
+- **US-03-0181**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to atapi_execute(link, req): translate scsi_request_t to ATA PACKET command so that this capability is implemented with clear verification evidence.
+- **US-03-0182**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to select drive (master/slave) via device register so that this capability is implemented with clear verification evidence.
+- **US-03-0183**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to write PACKET command (0xA0) to command register so that this capability is implemented with clear verification evidence.
+- **US-03-0184**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wait for DRQ, then PIO-out the CDB (12 or 16 bytes, padded to 12) so that this capability is implemented with clear verification evidence.
+- **US-03-0185**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wait for DRQ for data phase; PIO-in/out data buffer so that this capability is implemented with clear verification evidence.
+- **US-03-0186**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read status register for errors; auto-request sense on CHECK CONDITION so that this capability is implemented with clear verification evidence.
+- **US-03-0187**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to atapi_init(): register link, set max_targets=2 (master/slave per channel) so that this capability is implemented with clear verification evidence.
+- **US-03-0188**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to support: primary + secondary IDE channels (4 possible ATAPI devices) so that this capability is implemented with clear verification evidence.
+- **US-03-0189**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to support: tertiary + quaternary channels (if IDE driver supports them) so that this capability is implemented with clear verification evidence.
+- **US-03-0190**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to uSB Mass Storage (deferred): so that this capability is implemented with clear verification evidence.
+- **US-03-0191**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bulk-Only Transport (BOT): so that this capability is implemented with clear verification evidence.
+- **US-03-0192**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to build Command Block Wrapper (CBW): 31-byte header with signature (0x43425355), tag, transfer length, flags, LUN, CDB so that this capability is implemented with clear verification evidence.
+- **US-03-0193**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to send CBW via Bulk-OUT endpoint so that this capability is implemented with clear verification evidence.
+- **US-03-0194**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to transfer data via Bulk-IN (read) or Bulk-OUT (write) endpoint so that this capability is implemented with clear verification evidence.
+- **US-03-0195**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to receive Command Status Wrapper (CSW): 13-byte response with signature (0x53425355), tag, residue, status so that this capability is implemented with clear verification evidence.
+- **US-03-0196**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cSW status: 0=passed, 1=failed (issue REQUEST SENSE), 2=phase error (reset recovery) so that this capability is implemented with clear verification evidence.
+- **US-03-0197**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reset Recovery: so that this capability is implemented with clear verification evidence.
+- **US-03-0198**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bulk-Only Mass Storage Reset (class-specific request 0xFF) so that this capability is implemented with clear verification evidence.
+- **US-03-0199**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to clear HALT on Bulk-IN and Bulk-OUT endpoints so that this capability is implemented with clear verification evidence.
+- **US-03-0200**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration: so that this capability is implemented with clear verification evidence.
+- **US-03-0201**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register scsi_link_t per USB device (bridge to SCSI mid-layer) so that this capability is implemented with clear verification evidence.
+- **US-03-0202**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to set max_targets=1, max_luns from GET MAX LUN request so that this capability is implemented with clear verification evidence.
+- **US-03-0203**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to handle device disconnect: unregister link, detach all devices so that this capability is implemented with clear verification evidence.
+- **US-03-0204**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to virtIO-SCSI (virtio_scsi.c): so that this capability is implemented with clear verification evidence.
+- **US-03-0205**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vscsi_execute(link, req): map scsi_request_t to virtio request descriptor so that this capability is implemented with clear verification evidence.
+- **US-03-0206**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to build request header: LUN (8-byte SAM encoding), tag, task attributes, CDB so that this capability is implemented with clear verification evidence.
+- **US-03-0207**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to attach data buffers as scatter-gather (device-readable for writes, device-writable for reads) so that this capability is implemented with clear verification evidence.
+- **US-03-0208**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to attach response buffer (sense data, residual, status) so that this capability is implemented with clear verification evidence.
+- **US-03-0209**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to submit to request virtqueue; wait for used buffer notification so that this capability is implemented with clear verification evidence.
+- **US-03-0210**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vscsi_setup_event_buffers(): pre-populate event virtqueue so that this capability is implemented with clear verification evidence.
+- **US-03-0211**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vscsi_process_events(): handle hotplug add/remove, transport reset, parameter change events so that this capability is implemented with clear verification evidence.
+- **US-03-0212**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to control virtqueue: INQUIRY, REPORT LUNS, task management via control queue so that this capability is implemented with clear verification evidence.
+- **US-03-0213**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to multi-queue support: one request virtqueue per vCPU (if negotiated) so that this capability is implemented with clear verification evidence.
+- **US-03-0214**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iSCSI (deferred): so that this capability is implemented with clear verification evidence.
+- **US-03-0215**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tCP-based SCSI transport so that this capability is implemented with clear verification evidence.
+- **US-03-0216**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to login, discovery, full-feature phase so that this capability is implemented with clear verification evidence.
+- **US-03-0217**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pDU framing, session management so that this capability is implemented with clear verification evidence.
+- **US-03-0218**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-03-0219**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to unit Tests: so that this capability is implemented with clear verification evidence.
+- **US-03-0220**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cDB builder correctness: verify byte layout for READ(10), WRITE(10), INQUIRY, READ CAPACITY so that this capability is implemented with clear verification evidence.
+- **US-03-0221**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sense data parsing: fixed format with all 16 sense keys so that this capability is implemented with clear verification evidence.
+- **US-03-0222**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sense data parsing: common ASC/ASCQ pairs so that this capability is implemented with clear verification evidence.
+- **US-03-0223**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device registry: register, lookup, unregister, duplicate detection so that this capability is implemented with clear verification evidence.
+- **US-03-0224**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to request allocation: pool exhaustion, free and reuse so that this capability is implemented with clear verification evidence.
+- **US-03-0225**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to byte-order helpers: scsi_be16(), scsi_be32(), scsi_put_be16(), scsi_put_be32() so that this capability is implemented with clear verification evidence.
+- **US-03-0226**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to property Tests: so that this capability is implemented with clear verification evidence.
+- **US-03-0227**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to all CDB builders produce valid length CDBs (6/10/12/16) so that this capability is implemented with clear verification evidence.
+- **US-03-0228**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to request pool invariant: allocated + free = total pool size so that this capability is implemented with clear verification evidence.
+- **US-03-0229**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device list: no duplicates (unique bus:target:lun) so that this capability is implemented with clear verification evidence.
+- **US-03-0230**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration Tests: so that this capability is implemented with clear verification evidence.
+- **US-03-0231**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to virtIO-SCSI disk: boot QEMU with -device virtio-scsi-pci -device scsi-hd, verify discovery + read/write so that this capability is implemented with clear verification evidence.
+- **US-03-0232**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to aTAPI CD-ROM: boot QEMU with -cdrom, verify READ CAPACITY + READ TOC + sector read so that this capability is implemented with clear verification evidence.
+- **US-03-0233**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bus rescan: add device to VirtIO-SCSI via hotplug, verify auto-attach so that this capability is implemented with clear verification evidence.
+- **US-03-0234**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to generic passthrough: send INQUIRY via SCSI_IOCTL_SEND_CMD from userspace, verify response so that this capability is implemented with clear verification evidence.
+- **US-03-0235**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to error path: simulate CHECK CONDITION, verify retry and sense reporting so that this capability is implemented with clear verification evidence.
+- **US-03-0236**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-03-0237**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: SCSI mid-layer architecture (link/device/request lifecycle) so that this capability is implemented with clear verification evidence.
+- **US-03-0238**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: transport driver interface (scsi_link_t.execute contract) so that this capability is implemented with clear verification evidence.
+- **US-03-0239**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: CDB reference and sense key/ASC/ASCQ table so that this capability is implemented with clear verification evidence.
+- **US-03-0240**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: device node hierarchy and ioctl interface so that this capability is implemented with clear verification evidence.
+- **US-03-0241**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to aTA/IDE (Legacy): <!-- ide.c, ide.h --> so that this capability is implemented with clear verification evidence.
+- **US-03-0242**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to channel Architecture: so that this capability is implemented with clear verification evidence.
+- **US-03-0243**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to primary Channel: I/O 0x1F0, Control 0x3F6, IRQ 14 so that this capability is implemented with clear verification evidence.
+- **US-03-0244**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to secondary Channel: I/O 0x170, Control 0x376, IRQ 15 so that this capability is implemented with clear verification evidence.
+- **US-03-0245**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tertiary Channel: I/O 0x1E8, Control 0x3EE, IRQ 11 so that this capability is implemented with clear verification evidence.
+- **US-03-0246**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to quaternary Channel: I/O 0x168, Control 0x36E, IRQ 10 (or 9) so that this capability is implemented with clear verification evidence.
+- **US-03-0247**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to expand ide_channel_t array from 2 to 4 entries so that this capability is implemented with clear verification evidence.
+- **US-03-0248**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to expand ide_device_t array from 4 to 8 entries (2 per channel × 4 channels) so that this capability is implemented with clear verification evidence.
+- **US-03-0249**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to add ATA_TERTIARY_IO (0x1E8), ATA_TERTIARY_CTRL (0x3EE), ATA_QUATERNARY_IO (0x168), ATA_QUATERNARY_CTRL (0x36E) defines to ide.h so that this capability is implemented with clear verification evidence.
+- **US-03-0250**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to probe all four channels during ide_init() - detect presence by reading status register (0xFF = empty bus) so that this capability is implemented with clear verification evidence.
+- **US-03-0251**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to support configurable channel I/O bases (for PCI IDE controllers with non-standard BARs) so that this capability is implemented with clear verification evidence.
+- **US-03-0252**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pCI IDE Controller Discovery: so that this capability is implemented with clear verification evidence.
+- **US-03-0253**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scan PCI class 0x01 subclass 0x01 (IDE Controller) for native/compatibility mode so that this capability is implemented with clear verification evidence.
+- **US-03-0254**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read PCI Programming Interface byte to determine: so that this capability is implemented with clear verification evidence.
+- **US-03-0255**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to for native-mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line so that this capability is implemented with clear verification evidence.
+- **US-03-0256**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 - typically expose as separate PCI functions) so that this capability is implemented with clear verification evidence.
+- **US-03-0257**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iSA tertiary/quaternary probing: if PCI does not enumerate additional channels, probe legacy I/O ports at 0x1E8 and 0x168 for device presence so that this capability is implemented with clear verification evidence.
+- **US-03-0258**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device Identification (ide_identify / ide_identify_atapi): so that this capability is implemented with clear verification evidence.
+- **US-03-0259**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue IDENTIFY DEVICE (0xEC) or IDENTIFY PACKET DEVICE (0xA1) so that this capability is implemented with clear verification evidence.
+- **US-03-0260**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to parse model, serial, firmware revision strings (byte-swap from ATA word format) so that this capability is implemented with clear verification evidence.
+- **US-03-0261**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to extract LBA28 sector count (words 60-61) and LBA48 sector count (words 100-103) so that this capability is implemented with clear verification evidence.
+- **US-03-0262**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to extract supported command sets: DMA, LBA48, SMART, NCQ, TRIM so that this capability is implemented with clear verification evidence.
+- **US-03-0263**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to extract supported DMA modes: MWDMA (words 63), UDMA (word 88) so that this capability is implemented with clear verification evidence.
+- **US-03-0264**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to detect 48-bit addressing support (command set word 83 bit 10) so that this capability is implemented with clear verification evidence.
+- **US-03-0265**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pIO Mode Transfers: so that this capability is implemented with clear verification evidence.
+- **US-03-0266**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to lBA28 Read/Write: ide_read_sectors() / ide_write_sectors() - 28-bit LBA, max 256 sectors so that this capability is implemented with clear verification evidence.
+- **US-03-0267**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to lBA48 Read/Write: ide_read_sectors_ext() / ide_write_sectors_ext() - 48-bit LBA, max 65536 sectors so that this capability is implemented with clear verification evidence.
+- **US-03-0268**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wait-for-BSY / wait-for-DRQ polling loops with bounded timeout so that this capability is implemented with clear verification evidence.
+- **US-03-0269**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to error detection: check ERR bit after command completion, decode error register so that this capability is implemented with clear verification evidence.
+- **US-03-0270**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 400 ns delay after writing command register (read alternate status 4 times) so that this capability is implemented with clear verification evidence.
+- **US-03-0271**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dMA Transfers: so that this capability is implemented with clear verification evidence.
+- **US-03-0272**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bus Master Register Access: so that this capability is implemented with clear verification evidence.
+- **US-03-0273**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_bm_start(channel, write): set direction, start DMA so that this capability is implemented with clear verification evidence.
+- **US-03-0274**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_bm_stop(channel): clear start bit so that this capability is implemented with clear verification evidence.
+- **US-03-0275**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_bm_status(channel): read status (active, error, interrupt) so that this capability is implemented with clear verification evidence.
+- **US-03-0276**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_bm_clear_interrupt(channel): write 1 to clear interrupt bit so that this capability is implemented with clear verification evidence.
+- **US-03-0277**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pRDT (Physical Region Descriptor Table) Setup: so that this capability is implemented with clear verification evidence.
+- **US-03-0278**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_prdt_setup(channel, buffer, byte_count): build scatter-gather list so that this capability is implemented with clear verification evidence.
+- **US-03-0279**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to each PRD entry: 4-byte aligned phys address + byte count + EOT flag so that this capability is implemented with clear verification evidence.
+- **US-03-0280**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pRDT must not cross 64 KB boundary so that this capability is implemented with clear verification evidence.
+- **US-03-0281**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to max 32 PRD entries (128 KB transfer) so that this capability is implemented with clear verification evidence.
+- **US-03-0282**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dMA Read/Write: ide_dma_read() / ide_dma_write() - issue DMA command, start bus master, wait for IRQ so that this capability is implemented with clear verification evidence.
+- **US-03-0283**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to uDMA Mode Negotiation: so that this capability is implemented with clear verification evidence.
+- **US-03-0284**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read supported UDMA modes from IDENTIFY word 88 so that this capability is implemented with clear verification evidence.
+- **US-03-0285**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue SET FEATURES (0xEF) subcommand 0x03 with transfer mode so that this capability is implemented with clear verification evidence.
+- **US-03-0286**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track active DMA mode per device (ide_device_t.dma_mode) so that this capability is implemented with clear verification evidence.
+- **US-03-0287**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to aTAPI (SCSI Transport): so that this capability is implemented with clear verification evidence.
+- **US-03-0288**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_atapi_packet(channel, drive, cdb, cdb_len, buffer, buf_len, write): send CDB via PACKET command (0xA0) so that this capability is implemented with clear verification evidence.
+- **US-03-0289**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to handle DRQ-based data transfer (PIO) or DMA-based transfer so that this capability is implemented with clear verification evidence.
+- **US-03-0290**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_atapi_read_capacity(): SCSI READ CAPACITY (0x25) so that this capability is implemented with clear verification evidence.
+- **US-03-0291**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_atapi_read_sectors(): SCSI READ (10) (0x28) so that this capability is implemented with clear verification evidence.
+- **US-03-0292**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_atapi_read_toc(): SCSI READ TOC (0x43) for CD-ROM so that this capability is implemented with clear verification evidence.
+- **US-03-0293**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to medium change detection (unit attention sense key) so that this capability is implemented with clear verification evidence.
+- **US-03-0294**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iRQ Handling: so that this capability is implemented with clear verification evidence.
+- **US-03-0295**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ide_irq_handler(irq): acknowledge interrupt, signal DMA completion so that this capability is implemented with clear verification evidence.
+- **US-03-0296**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary) so that this capability is implemented with clear verification evidence.
+- **US-03-0297**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to support shared IRQs for PCI native-mode controllers so that this capability is implemented with clear verification evidence.
+- **US-03-0298**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to software Reset: so that this capability is implemented with clear verification evidence.
+- **US-03-0299**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue SRST via device control register (bit 2) so that this capability is implemented with clear verification evidence.
+- **US-03-0300**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wait for BSY clear on both master and slave so that this capability is implemented with clear verification evidence.
+- **US-03-0301**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to re-identify devices after reset so that this capability is implemented with clear verification evidence.
+- **US-03-0302**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to power Management (deferred): so that this capability is implemented with clear verification evidence.
+- **US-03-0303**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sTANDBY IMMEDIATE (0xE0), IDLE IMMEDIATE (0xE1) so that this capability is implemented with clear verification evidence.
+- **US-03-0304**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cHECK POWER MODE (0xE5) so that this capability is implemented with clear verification evidence.
+- **US-03-0305**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to spin-down timer configuration so that this capability is implemented with clear verification evidence.
+- **US-03-0306**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to naming Convention: so that this capability is implemented with clear verification evidence.
+- **US-03-0307**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to primary master: ide0, primary slave: ide1 so that this capability is implemented with clear verification evidence.
+- **US-03-0308**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to secondary master: ide2, secondary slave: ide3 so that this capability is implemented with clear verification evidence.
+- **US-03-0309**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tertiary master: ide4, tertiary slave: ide5 so that this capability is implemented with clear verification evidence.
+- **US-03-0310**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to quaternary master: ide6, quaternary slave: ide7 so that this capability is implemented with clear verification evidence.
+- **US-03-0311**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register with /dev/storage/ideN DevFS nodes so that this capability is implemented with clear verification evidence.
+- **US-03-0312**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to error Handling: so that this capability is implemented with clear verification evidence.
+- **US-03-0313**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to decode ATA error register bits (BBK, UNC, IDNF, ABRT, TK0NF, AMNF) so that this capability is implemented with clear verification evidence.
+- **US-03-0314**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to retry failed reads up to 3 times before reporting error so that this capability is implemented with clear verification evidence.
+- **US-03-0315**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to log device faults and media errors to kernel console so that this capability is implemented with clear verification evidence.
+- **US-03-0316**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to handle timeout (device not responding) gracefully - mark device offline so that this capability is implemented with clear verification evidence.
+- **US-03-0317**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-03-0318**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to unit: IDENTIFY parsing (model string byte-swap, LBA48 detection, DMA mode extraction) so that this capability is implemented with clear verification evidence.
+- **US-03-0319**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to unit: PRDT construction (alignment, boundary, EOT flag) so that this capability is implemented with clear verification evidence.
+- **US-03-0320**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration: PIO read/write round-trip on QEMU -hda disk so that this capability is implemented with clear verification evidence.
+- **US-03-0321**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration: DMA read/write round-trip on QEMU with bus master so that this capability is implemented with clear verification evidence.
+- **US-03-0322**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration: ATAPI CD-ROM read capacity + read sectors on QEMU -cdrom so that this capability is implemented with clear verification evidence.
+- **US-03-0323**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration: tertiary/quaternary channel detection on QEMU with -device ide-hd,bus=ide.2,... (or equivalent) so that this capability is implemented with clear verification evidence.
+- **US-03-0324**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-03-0325**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: ATA/IDE register map and command reference so that this capability is implemented with clear verification evidence.
+- **US-03-0326**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: channel probing strategy (PCI native vs ISA compatibility vs legacy tertiary/quaternary) so that this capability is implemented with clear verification evidence.
+- **US-03-0327**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to floppy Disk Controller (sys/drivers/storage/floppy/): so that this capability is implemented with clear verification evidence.
+- **US-03-0328**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to controller Initialization (fdc_init): so that this capability is implemented with clear verification evidence.
+- **US-03-0329**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to detect FDC presence: read MSR (Main Status Register) at 0x3F4 so that this capability is implemented with clear verification evidence.
+- **US-03-0330**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue RESET command: assert bit 2 of DOR (Digital Output Register, 0x3F2), then deassert so that this capability is implemented with clear verification evidence.
+- **US-03-0331**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4) so that this capability is implemented with clear verification evidence.
+- **US-03-0332**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to configure controller: CONFIGURE command (implied seek, FIFO threshold) so that this capability is implemented with clear verification evidence.
+- **US-03-0333**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to set data rate via CCR (Configuration Control Register, 0x3F7): 500kbps for HD, 300kbps for DD, 250kbps for SD so that this capability is implemented with clear verification evidence.
+- **US-03-0334**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to enable DMA channel 2 for data transfers (ISA DMA) so that this capability is implemented with clear verification evidence.
+- **US-03-0335**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to i/O Registers (base 0x3F0): so that this capability is implemented with clear verification evidence.
+- **US-03-0336**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 0x3F2: DOR (Digital Output Register) - drive select, motor control, DMA/IRQ enable, reset so that this capability is implemented with clear verification evidence.
+- **US-03-0337**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 0x3F4: MSR (Main Status Register) - RQM, DIO, NDMA, busy flags so that this capability is implemented with clear verification evidence.
+- **US-03-0338**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 0x3F5: Data Register (FIFO) - command/result/data bytes so that this capability is implemented with clear verification evidence.
+- **US-03-0339**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 0x3F7: DIR (Digital Input Register, read) - disk change detect (bit 7) so that this capability is implemented with clear verification evidence.
+- **US-03-0340**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 0x3F7: CCR (Configuration Control Register, write) - data rate select so that this capability is implemented with clear verification evidence.
+- **US-03-0341**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dMA Configuration: so that this capability is implemented with clear verification evidence.
+- **US-03-0342**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iSA DMA channel 2 (8-bit transfers) so that this capability is implemented with clear verification evidence.
+- **US-03-0343**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to program DMA controller (ports 0x04, 0x05, 0x81, 0x0A, 0x0B, 0x0C) for read/write so that this capability is implemented with clear verification evidence.
+- **US-03-0344**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dMA buffer must be below 16 MB (ISA 24-bit addressing) so that this capability is implemented with clear verification evidence.
+- **US-03-0345**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to allocate bounce buffer in low memory if kernel buffer is above 16 MB so that this capability is implemented with clear verification evidence.
+- **US-03-0346**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to drive Detection: so that this capability is implemented with clear verification evidence.
+- **US-03-0347**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to query CMOS (RTC port 0x70/0x71, register 0x10) for drive types: so that this capability is implemented with clear verification evidence.
+- **US-03-0348**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to support up to 4 drives: drives 0-1 on primary FDC (0x3F0), drives 2-3 on secondary FDC (0x370, rare) so that this capability is implemented with clear verification evidence.
+- **US-03-0349**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register detected drives with DevFS as /dev/storage/fd0../dev/storage/fd3 so that this capability is implemented with clear verification evidence.
+- **US-03-0350**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to motor Control: so that this capability is implemented with clear verification evidence.
+- **US-03-0351**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to motor on: set DOR motor bits (bits 4-7) for target drive so that this capability is implemented with clear verification evidence.
+- **US-03-0352**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to spin-up delay: wait 300-500 ms after motor on before I/O so that this capability is implemented with clear verification evidence.
+- **US-03-0353**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to motor off timer: auto-stop motor after 2-3 seconds of inactivity so that this capability is implemented with clear verification evidence.
+- **US-03-0354**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track motor state per drive to avoid redundant spin-up so that this capability is implemented with clear verification evidence.
+- **US-03-0355**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to media Types: so that this capability is implemented with clear verification evidence.
+- **US-03-0356**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 3.5" HD: 1.44 MB - 80 cylinders, 2 heads, 18 sectors/track, 512 bytes/sector so that this capability is implemented with clear verification evidence.
+- **US-03-0357**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 3.5" DD: 720 KB - 80 cylinders, 2 heads, 9 sectors/track so that this capability is implemented with clear verification evidence.
+- **US-03-0358**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 3.5" ED: 2.88 MB - 80 cylinders, 2 heads, 36 sectors/track (rare) so that this capability is implemented with clear verification evidence.
+- **US-03-0359**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 5.25" HD: 1.2 MB - 80 cylinders, 2 heads, 15 sectors/track so that this capability is implemented with clear verification evidence.
+- **US-03-0360**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 5.25" DD: 360 KB - 40 cylinders, 2 heads, 9 sectors/track so that this capability is implemented with clear verification evidence.
+- **US-03-0361**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to store geometry per drive in fdc_drive_t struct so that this capability is implemented with clear verification evidence.
+- **US-03-0362**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to seek and Recalibrate: so that this capability is implemented with clear verification evidence.
+- **US-03-0363**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rECALIBRATE command: move head to cylinder 0 (issued on init and after errors) so that this capability is implemented with clear verification evidence.
+- **US-03-0364**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sEEK command: move to target cylinder so that this capability is implemented with clear verification evidence.
+- **US-03-0365**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wait for IRQ6 after seek; issue SENSE INTERRUPT to confirm so that this capability is implemented with clear verification evidence.
+- **US-03-0366**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track current cylinder per drive to avoid redundant seeks so that this capability is implemented with clear verification evidence.
+- **US-03-0367**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read/Write Operations: so that this capability is implemented with clear verification evidence.
+- **US-03-0368**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rEAD DATA command (MT=1, MFM=1): multi-track read with DMA so that this capability is implemented with clear verification evidence.
+- **US-03-0369**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wRITE DATA command (MT=1, MFM=1): multi-track write with DMA so that this capability is implemented with clear verification evidence.
+- **US-03-0370**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cHS-to-LBA and LBA-to-CHS conversion for block device interface so that this capability is implemented with clear verification evidence.
+- **US-03-0371**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to convert sector addresses: cylinder = LBA / (heads * spt), head = (LBA / spt) % heads, sector = (LBA % spt) + 1 so that this capability is implemented with clear verification evidence.
+- **US-03-0372**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read result bytes (ST0, ST1, ST2, C, H, R, N) after each command to check success so that this capability is implemented with clear verification evidence.
+- **US-03-0373**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to retry on error: recalibrate and retry up to 3 times, then fail so that this capability is implemented with clear verification evidence.
+- **US-03-0374**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to format Track: so that this capability is implemented with clear verification evidence.
+- **US-03-0375**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fORMAT TRACK command: write sector headers for an entire track so that this capability is implemented with clear verification evidence.
+- **US-03-0376**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to build format buffer with (C, H, R, N) tuples for each sector so that this capability is implemented with clear verification evidence.
+- **US-03-0377**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to used by disk formatting utilities so that this capability is implemented with clear verification evidence.
+- **US-03-0378**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to disk Change Detection: so that this capability is implemented with clear verification evidence.
+- **US-03-0379**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read DIR bit 7 (DSKCHG) to detect media removal/insertion so that this capability is implemented with clear verification evidence.
+- **US-03-0380**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to on change: invalidate cached geometry, re-detect media type so that this capability is implemented with clear verification evidence.
+- **US-03-0381**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to seek to cylinder 1 and back to cylinder 0 to clear DSKCHG bit so that this capability is implemented with clear verification evidence.
+- **US-03-0382**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iRQ Handling: so that this capability is implemented with clear verification evidence.
+- **US-03-0383**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iRQ 6 handler: set completion flag, wake waiting thread so that this capability is implemented with clear verification evidence.
+- **US-03-0384**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sENSE INTERRUPT STATUS command after IRQ to read ST0 and current cylinder so that this capability is implemented with clear verification evidence.
+- **US-03-0385**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to error Handling: so that this capability is implemented with clear verification evidence.
+- **US-03-0386**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to decode ST0/ST1/ST2 result bytes for error classification so that this capability is implemented with clear verification evidence.
+- **US-03-0387**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sT0 bits 7-6: interrupt code (00=normal, 01=abnormal, 10=invalid, 11=drive not ready) so that this capability is implemented with clear verification evidence.
+- **US-03-0388**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sT1: missing address mark, write protect, no data, overrun, CRC error so that this capability is implemented with clear verification evidence.
+- **US-03-0389**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sT2: wrong cylinder, bad cylinder, missing data address mark so that this capability is implemented with clear verification evidence.
+- **US-03-0390**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to automatic retry with recalibrate on recoverable errors so that this capability is implemented with clear verification evidence.
+- **US-03-0391**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to block Device Interface: so that this capability is implemented with clear verification evidence.
+- **US-03-0392**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register with storage subsystem as block device so that this capability is implemented with clear verification evidence.
+- **US-03-0393**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fdc_read(drive, lba, count, buffer) / fdc_write(drive, lba, count, buffer) so that this capability is implemented with clear verification evidence.
+- **US-03-0394**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sector size: 512 bytes (standard) so that this capability is implemented with clear verification evidence.
+- **US-03-0395**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to report device capacity based on detected media geometry so that this capability is implemented with clear verification evidence.
+- **US-03-0396**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-03-0397**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to unit: CHS↔LBA conversion for all supported media geometries so that this capability is implemented with clear verification evidence.
+- **US-03-0398**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to unit: DMA buffer address validation (below 16 MB, page-aligned) so that this capability is implemented with clear verification evidence.
+- **US-03-0399**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to unit: CMOS drive type parsing so that this capability is implemented with clear verification evidence.
+- **US-03-0400**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration: read/write/verify cycle on QEMU with -fda / -fdb images so that this capability is implemented with clear verification evidence.
+- **US-03-0401**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration: disk change detection on QEMU so that this capability is implemented with clear verification evidence.
+- **US-03-0402**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration: format + read-back on blank floppy image so that this capability is implemented with clear verification evidence.
+- **US-03-0403**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-03-0404**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: FDC register map and command reference so that this capability is implemented with clear verification evidence.
+- **US-03-0405**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: DMA programming for ISA channel 2 so that this capability is implemented with clear verification evidence.
+- **US-03-0406**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: media type detection and geometry tables so that this capability is implemented with clear verification evidence.
+- **US-03-0407**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to aHCI: so that this capability is implemented with clear verification evidence.
+- **US-03-0408**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hBA Initialization: so that this capability is implemented with clear verification evidence.
+- **US-03-0409**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to enable AHCI Mode (GHC.AE) so that this capability is implemented with clear verification evidence.
+- **US-03-0410**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to perform HBA Reset processes (GHC.HR) so that this capability is implemented with clear verification evidence.
+- **US-03-0411**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to capability detection (CAP, CAP2) so that this capability is implemented with clear verification evidence.
+- **US-03-0412**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mSI-X / Interrupt setup so that this capability is implemented with clear verification evidence.
+- **US-03-0413**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to port Enumeration: so that this capability is implemented with clear verification evidence.
+- **US-03-0414**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to check Implemented Ports (PI) so that this capability is implemented with clear verification evidence.
+- **US-03-0415**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to determine Port Type (SSTS.DET) so that this capability is implemented with clear verification evidence.
+- **US-03-0416**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to allocate Command Lists and FIS Receive areas (aligned 1K/256B) so that this capability is implemented with clear verification evidence.
+- **US-03-0417**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to start Command Engine (CMD.ST) and FIS Receive (CMD.FRE) so that this capability is implemented with clear verification evidence.
+- **US-03-0418**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to command Handling: so that this capability is implemented with clear verification evidence.
+- **US-03-0419**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to build Command Tables (PRDTs) so that this capability is implemented with clear verification evidence.
+- **US-03-0420**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue commands via Command Issue (CI) bitmask so that this capability is implemented with clear verification evidence.
+- **US-03-0421**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to handle completion interrupts so that this capability is implemented with clear verification evidence.
+- **US-03-0422**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to nVMe: so that this capability is implemented with clear verification evidence.
+- **US-03-0423**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to controller Initialization: so that this capability is implemented with clear verification evidence.
+- **US-03-0424**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to check CAP (Capabilities) register (Timeout, Doorbell stride) so that this capability is implemented with clear verification evidence.
+- **US-03-0425**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0 so that this capability is implemented with clear verification evidence.
+- **US-03-0426**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to configure Admin Queue Attributes (AQA) so that this capability is implemented with clear verification evidence.
+- **US-03-0427**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to create Admin Submission/Completion Queues (ASQ/ACQ) so that this capability is implemented with clear verification evidence.
+- **US-03-0428**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1 so that this capability is implemented with clear verification evidence.
+- **US-03-0429**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to namespace Discovery: so that this capability is implemented with clear verification evidence.
+- **US-03-0430**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue Identify Controller command so that this capability is implemented with clear verification evidence.
+- **US-03-0431**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue Identify Namespace for active NSIDs so that this capability is implemented with clear verification evidence.
+- **US-03-0432**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to i/O Queue Creation: so that this capability is implemented with clear verification evidence.
+- **US-03-0433**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to determine number of queues supported so that this capability is implemented with clear verification evidence.
+- **US-03-0434**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue Create I/O Completion Queue so that this capability is implemented with clear verification evidence.
+- **US-03-0435**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue Create I/O Submission Queue so that this capability is implemented with clear verification evidence.
+- **US-03-0436**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to block I/O: so that this capability is implemented with clear verification evidence.
+- **US-03-0437**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pRP (Physical Region Page) List construction for data buffers so that this capability is implemented with clear verification evidence.
+- **US-03-0438**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to issue Read/Write NVM commands so that this capability is implemented with clear verification evidence.
+- **US-03-0439**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to partitioning & DevFS: so that this capability is implemented with clear verification evidence.
+- **US-03-0440**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scanner: Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c --> so that this capability is implemented with clear verification evidence.
+- **US-03-0441**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to registration: Register device nodes (/dev/storage/sata0, /dev/storage/sata0s1) with DevFS. <!-- geom_subr.c --> so that this capability is implemented with clear verification evidence.
+- **US-03-0442**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input: <!-- ps2.c, keyboard.c, mouse.c, input.h --> so that this capability is implemented with clear verification evidence.
+- **US-03-0443**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pS/2 Controller (sys/drivers/input/ps2.c, ps2.h): so that this capability is implemented with clear verification evidence.
+- **US-03-0444**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to i/O Primitives: so that this capability is implemented with clear verification evidence.
+- **US-03-0445**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ps2_wait_write(): spin on status port bit 1 (input buffer empty), timeout guard so that this capability is implemented with clear verification evidence.
+- **US-03-0446**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ps2_wait_read(): spin on status port bit 0 (output buffer full), timeout guard so that this capability is implemented with clear verification evidence.
+- **US-03-0447**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ps2_write_command(cmd): wait-then-write to port 0x64 so that this capability is implemented with clear verification evidence.
+- **US-03-0448**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ps2_write_data(data): wait-then-write to port 0x60 so that this capability is implemented with clear verification evidence.
+- **US-03-0449**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ps2_read_data(): wait-then-read from port 0x60 (return 0xFF on timeout) so that this capability is implemented with clear verification evidence.
+- **US-03-0450**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ps2_read_data_timeout(data, loops): bounded read with explicit loop count so that this capability is implemented with clear verification evidence.
+- **US-03-0451**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ps2_flush(): drain up to 16 stale bytes from output buffer so that this capability is implemented with clear verification evidence.
+- **US-03-0452**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ps2_write_aux(data): write to port 2 device via 0xD4 prefix so that this capability is implemented with clear verification evidence.
+- **US-03-0453**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ps2_send_command_with_response(cmd, response): write command, read single response byte so that this capability is implemented with clear verification evidence.
+- **US-03-0454**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialization Sequence (ps2_init): so that this capability is implemented with clear verification evidence.
+- **US-03-0455**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 1: Disable both ports (0xAD, 0xA7) to prevent IRQs during setup so that this capability is implemented with clear verification evidence.
+- **US-03-0456**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 2: Flush output buffer (ps2_flush()) so that this capability is implemented with clear verification evidence.
+- **US-03-0457**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 3: Read configuration byte (0x20), disable IRQs (bits 0-1), enable translation (bit 6), set system flag (bit 2), write back (0x60) so that this capability is implemented with clear verification evidence.
+- **US-03-0458**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 4: Controller self-test (0xAA) - expect 0x55; abort on failure/timeout so that this capability is implemented with clear verification evidence.
+- **US-03-0459**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 4b: Re-write configuration byte (self-test may reset it) so that this capability is implemented with clear verification evidence.
+- **US-03-0460**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 5: Dual-channel detection - enable port 2 (0xA8), re-read config, check bit 5 (P2 clock); disable port 2 again so that this capability is implemented with clear verification evidence.
+- **US-03-0461**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 6: Interface tests - 0xAB (port 1), 0xA9 (port 2 if dual), expect 0x00 so that this capability is implemented with clear verification evidence.
+- **US-03-0462**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 7: Enable ports (0xAE, 0xA8) so that this capability is implemented with clear verification evidence.
+- **US-03-0463**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 8: Enable IRQs - set config bits 0 (and 1 if dual) so that this capability is implemented with clear verification evidence.
+- **US-03-0464**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to step 9: Mouse init on port 2 - reset (0xFF), wait ACK (0xFA) + BAT (0xAA) + device ID, enable data reporting (0xF4) so that this capability is implemented with clear verification evidence.
+- **US-03-0465**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to error Recovery: so that this capability is implemented with clear verification evidence.
+- **US-03-0466**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to retry self-test once on failure (some controllers need two attempts) so that this capability is implemented with clear verification evidence.
+- **US-03-0467**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to log port test failure codes to kernel console so that this capability is implemented with clear verification evidence.
+- **US-03-0468**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to continue with single-channel if port 2 test fails so that this capability is implemented with clear verification evidence.
+- **US-03-0469**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to timeout constants tuned per real hardware profiles (QEMU, Bochs, real i8042) so that this capability is implemented with clear verification evidence.
+- **US-03-0470**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to keyboard Driver (sys/drivers/input/keyboard.c, keyboard.h): so that this capability is implemented with clear verification evidence.
+- **US-03-0471**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iRQ1 Handler (keyboard_handler): so that this capability is implemented with clear verification evidence.
+- **US-03-0472**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read scancode from port 0x60 so that this capability is implemented with clear verification evidence.
+- **US-03-0473**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to harvest entropy from TSC + scancode into RNG pool so that this capability is implemented with clear verification evidence.
+- **US-03-0474**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dispatch to scancode decoder state machine so that this capability is implemented with clear verification evidence.
+- **US-03-0475**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to send EOI (or rely on IDT dispatcher) so that this capability is implemented with clear verification evidence.
+- **US-03-0476**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scancode Set Decoding: so that this capability is implemented with clear verification evidence.
+- **US-03-0477**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to set 1 (XT-compatible, default with translation): so that this capability is implemented with clear verification evidence.
+- **US-03-0478**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to single-byte make codes (0x01-0x58) so that this capability is implemented with clear verification evidence.
+- **US-03-0479**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to single-byte break codes (make | 0x80) so that this capability is implemented with clear verification evidence.
+- **US-03-0480**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to extended prefix 0xE0 → two-byte sequences: so that this capability is implemented with clear verification evidence.
+- **US-03-0481**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to right Ctrl (E0 1D / E0 9D), Right Alt (E0 38 / E0 B8) so that this capability is implemented with clear verification evidence.
+- **US-03-0482**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to arrow keys (E0 48/50/4B/4D) so that this capability is implemented with clear verification evidence.
+- **US-03-0483**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to insert (E0 52), Delete (E0 53), Home (E0 47), End (E0 4F) so that this capability is implemented with clear verification evidence.
+- **US-03-0484**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to page Up (E0 49), Page Down (E0 51) so that this capability is implemented with clear verification evidence.
+- **US-03-0485**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to print Screen (E0 2A E0 37 / E0 B7 E0 AA) so that this capability is implemented with clear verification evidence.
+- **US-03-0486**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pause/Break (E1 1D 45 E1 9D C5 - three-byte E1 sequence) so that this capability is implemented with clear verification evidence.
+- **US-03-0487**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to discard spurious 0xE1 prefix after handling Pause so that this capability is implemented with clear verification evidence.
+- **US-03-0488**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to set 2 (AT) - Optional Future: so that this capability is implemented with clear verification evidence.
+- **US-03-0489**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to stub for native Set 2 decoding (for controllers without translation) so that this capability is implemented with clear verification evidence.
+- **US-03-0490**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 0xF0 break prefix instead of bit 7 so that this capability is implemented with clear verification evidence.
+- **US-03-0491**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scancode-to-Keycode Translation: so that this capability is implemented with clear verification evidence.
+- **US-03-0492**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to define KEY_* keycodes independent of scancode set (internal enum/defines) so that this capability is implemented with clear verification evidence.
+- **US-03-0493**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to map Set 1 scancodes to keycodes via lookup table so that this capability is implemented with clear verification evidence.
+- **US-03-0494**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to separate table for extended (E0-prefixed) scancodes so that this capability is implemented with clear verification evidence.
+- **US-03-0495**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to modifier Tracking: so that this capability is implemented with clear verification evidence.
+- **US-03-0496**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track left/right independently: kbd_lshift/kbd_rshift, kbd_lctrl/kbd_rctrl, kbd_lalt/kbd_ralt so that this capability is implemented with clear verification evidence.
+- **US-03-0497**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to aggregate flags: kbd_shift, kbd_ctrl, kbd_alt so that this capability is implemented with clear verification evidence.
+- **US-03-0498**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to caps Lock toggle state (latch on make, ignore break) so that this capability is implemented with clear verification evidence.
+- **US-03-0499**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to num Lock toggle state so that this capability is implemented with clear verification evidence.
+- **US-03-0500**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scroll Lock toggle state so that this capability is implemented with clear verification evidence.
+- **US-03-0501**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to update LED indicator state to match lock toggles (see LED Control below) so that this capability is implemented with clear verification evidence.
+- **US-03-0502**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to keymap (Scancode/Keycode → Character): so that this capability is implemented with clear verification evidence.
+- **US-03-0503**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to uS QWERTY layout tables: so that this capability is implemented with clear verification evidence.
+- **US-03-0504**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kbd_us[128]: unshifted ASCII mapping so that this capability is implemented with clear verification evidence.
+- **US-03-0505**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kbd_us_shifted[128]: shifted ASCII mapping so that this capability is implemented with clear verification evidence.
+- **US-03-0506**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to caps Lock interaction: uppercase letters but not symbols so that this capability is implemented with clear verification evidence.
+- **US-03-0507**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to num Lock interaction: numpad keys → digits vs navigation so that this capability is implemented with clear verification evidence.
+- **US-03-0508**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ctrl character generation: so that this capability is implemented with clear verification evidence.
+- **US-03-0509**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ctrl+A..Z → 0x01..0x1A so that this capability is implemented with clear verification evidence.
+- **US-03-0510**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ctrl+[ → ESC (0x1B), Ctrl+\ → FS (0x1C), Ctrl+] → GS (0x1D) so that this capability is implemented with clear verification evidence.
+- **US-03-0511**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to alt character generation: so that this capability is implemented with clear verification evidence.
+- **US-03-0512**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to alt sets bit 7 (traditional) or generates ESC prefix (VT convention) so that this capability is implemented with clear verification evidence.
+- **US-03-0513**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dead key / Compose key support (deferred): stub interface so that this capability is implemented with clear verification evidence.
+- **US-03-0514**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to switchable keymap infrastructure: so that this capability is implemented with clear verification evidence.
+- **US-03-0515**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to struct keymap with base, shift, ctrl, altgr tables so that this capability is implemented with clear verification evidence.
+- **US-03-0516**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to runtime keymap switching API (keyboard_set_keymap()) so that this capability is implemented with clear verification evidence.
+- **US-03-0517**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to additional layouts: DE, FR, UK (deferred - provide registration API only) so that this capability is implemented with clear verification evidence.
+- **US-03-0518**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to function Key and Special Key Handling: so that this capability is implemented with clear verification evidence.
+- **US-03-0519**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to f1-F12 → generate escape sequences (VT100: ESC O P..ESC O [ or ESC [ 11~..ESC [ 24~) so that this capability is implemented with clear verification evidence.
+- **US-03-0520**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to arrow keys → ESC [ A/B/C/D so that this capability is implemented with clear verification evidence.
+- **US-03-0521**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to home/End/Ins/Del/PgUp/PgDn → ESC [ 1~/2~/3~/4~/5~/6~ (or xterm variants) so that this capability is implemented with clear verification evidence.
+- **US-03-0522**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to alt+F1..F12 → VT switching (vt_activate(n)) so that this capability is implemented with clear verification evidence.
+- **US-03-0523**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ctrl+F9 → debug process dump so that this capability is implemented with clear verification evidence.
+- **US-03-0524**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sysRq / Print Screen → kernel debug hook (deferred) so that this capability is implemented with clear verification evidence.
+- **US-03-0525**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to key Repeat (Typematic): so that this capability is implemented with clear verification evidence.
+- **US-03-0526**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to send 0xF3 command to keyboard device with delay/rate parameters so that this capability is implemented with clear verification evidence.
+- **US-03-0527**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to default: 250 ms delay, 30 Hz repeat (or use BIOS defaults) so that this capability is implemented with clear verification evidence.
+- **US-03-0528**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to alternatively implement software repeat via timer tick (deferred) so that this capability is implemented with clear verification evidence.
+- **US-03-0529**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to lED Control: so that this capability is implemented with clear verification evidence.
+- **US-03-0530**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to send 0xED command to keyboard device with LED status byte so that this capability is implemented with clear verification evidence.
+- **US-03-0531**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bit 0 = Scroll Lock, Bit 1 = Num Lock, Bit 2 = Caps Lock so that this capability is implemented with clear verification evidence.
+- **US-03-0532**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to update LEDs on lock key toggle so that this capability is implemented with clear verification evidence.
+- **US-03-0533**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to handle ACK (0xFA) / Resend (0xFE) responses so that this capability is implemented with clear verification evidence.
+- **US-03-0534**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to key Buffer (kbd_buffer): so that this capability is implemented with clear verification evidence.
+- **US-03-0535**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to circular buffer (256 entries) so that this capability is implemented with clear verification evidence.
+- **US-03-0536**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kbd_push(c): enqueue translated character so that this capability is implemented with clear verification evidence.
+- **US-03-0537**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to keyboard_getc(): dequeue character (returns 0 if empty) so that this capability is implemented with clear verification evidence.
+- **US-03-0538**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to overflow policy: drop newest keystrokes (preserve existing behavior) so that this capability is implemented with clear verification evidence.
+- **US-03-0539**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to consider expanding to store raw input_event structs instead of chars so that this capability is implemented with clear verification evidence.
+- **US-03-0540**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input Subsystem Integration: so that this capability is implemented with clear verification evidence.
+- **US-03-0541**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register input_dev_t with name="PS/2 Keyboard", caps=EV_KEY so that this capability is implemented with clear verification evidence.
+- **US-03-0542**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to call input_report_key(dev, keycode, 1) on key press so that this capability is implemented with clear verification evidence.
+- **US-03-0543**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to call input_report_key(dev, keycode, 0) on key release (currently missing) so that this capability is implemented with clear verification evidence.
+- **US-03-0544**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to call input_sync(dev) after each event so that this capability is implemented with clear verification evidence.
+- **US-03-0545**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vT/TTY Integration: so that this capability is implemented with clear verification evidence.
+- **US-03-0546**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to push translated character to active VT's TTY via tty_flip_buffer_push() so that this capability is implemented with clear verification evidence.
+- **US-03-0547**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fallback to console_push_char() if no TTY attached so that this capability is implemented with clear verification evidence.
+- **US-03-0548**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it) so that this capability is implemented with clear verification evidence.
+- **US-03-0549**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse Driver (sys/drivers/input/mouse.c, mouse.h): so that this capability is implemented with clear verification evidence.
+- **US-03-0550**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iRQ12 Handler (mouse_handler): so that this capability is implemented with clear verification evidence.
+- **US-03-0551**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read status port to confirm data available (bit 0) so that this capability is implemented with clear verification evidence.
+- **US-03-0552**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read data byte from port 0x60 so that this capability is implemented with clear verification evidence.
+- **US-03-0553**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to harvest entropy from TSC + data byte so that this capability is implemented with clear verification evidence.
+- **US-03-0554**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to feed byte to packet state machine so that this capability is implemented with clear verification evidence.
+- **US-03-0555**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to packet Decoding: so that this capability is implemented with clear verification evidence.
+- **US-03-0556**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to standard PS/2 Mouse (3-byte): so that this capability is implemented with clear verification evidence.
+- **US-03-0557**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to byte 0: buttons (bits 0-2), sign bits (bits 4-5), overflow (bits 6-7), alignment bit 3 (always 1) so that this capability is implemented with clear verification evidence.
+- **US-03-0558**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to byte 1: X movement (signed 9-bit with sign from byte 0 bit 4) so that this capability is implemented with clear verification evidence.
+- **US-03-0559**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to byte 2: Y movement (signed 9-bit with sign from byte 0 bit 5, Y-axis inverted) so that this capability is implemented with clear verification evidence.
+- **US-03-0560**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to realignment: if byte 0 bit 3 != 1, resync by discarding bytes so that this capability is implemented with clear verification evidence.
+- **US-03-0561**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to intelliMouse Extension (4-byte) - deferred: so that this capability is implemented with clear verification evidence.
+- **US-03-0562**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to detect via magic sample-rate sequence (200, 100, 80 → ID 0x03) so that this capability is implemented with clear verification evidence.
+- **US-03-0563**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to byte 3: Z-axis (scroll wheel), signed 4-bit so that this capability is implemented with clear verification evidence.
+- **US-03-0564**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to intelliMouse Explorer (5-button) - deferred: so that this capability is implemented with clear verification evidence.
+- **US-03-0565**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to detect via magic sequence (200, 200, 80 → ID 0x04) so that this capability is implemented with clear verification evidence.
+- **US-03-0566**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to byte 3: Z-axis (bits 0-3), buttons 4-5 (bits 4-5) so that this capability is implemented with clear verification evidence.
+- **US-03-0567**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to overflow Handling: so that this capability is implemented with clear verification evidence.
+- **US-03-0568**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to if overflow bits (byte 0 bits 6-7) are set, clamp movement to max delta so that this capability is implemented with clear verification evidence.
+- **US-03-0569**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse State: so that this capability is implemented with clear verification evidence.
+- **US-03-0570**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track cumulative mouse_x, mouse_y (absolute position for cursor) so that this capability is implemented with clear verification evidence.
+- **US-03-0571**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track button state (mouse_buttons, bits 0=left, 1=right, 2=middle) so that this capability is implemented with clear verification evidence.
+- **US-03-0572**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to configurable resolution/acceleration (deferred) so that this capability is implemented with clear verification evidence.
+- **US-03-0573**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to event Queue: so that this capability is implemented with clear verification evidence.
+- **US-03-0574**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to circular buffer of mouse_event_t (64 entries) so that this capability is implemented with clear verification evidence.
+- **US-03-0575**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse_q_push(dx, dy, buttons): enqueue relative event so that this capability is implemented with clear verification evidence.
+- **US-03-0576**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse_get_event(ev): dequeue event (returns 0 if empty) so that this capability is implemented with clear verification evidence.
+- **US-03-0577**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse_get_state(x, y, buttons): poll current absolute position + buttons so that this capability is implemented with clear verification evidence.
+- **US-03-0578**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input Subsystem Integration: so that this capability is implemented with clear verification evidence.
+- **US-03-0579**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register input_dev_t with name="PS/2 Mouse", caps=EV_REL|EV_KEY so that this capability is implemented with clear verification evidence.
+- **US-03-0580**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to report REL_X, REL_Y, REL_WHEEL (when supported) so that this capability is implemented with clear verification evidence.
+- **US-03-0581**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to report BTN_LEFT (0x110), BTN_RIGHT (0x111), BTN_MIDDLE (0x112) so that this capability is implemented with clear verification evidence.
+- **US-03-0582**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input_sync() after each complete packet so that this capability is implemented with clear verification evidence.
+- **US-03-0583**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input Subsystem (sys/input.h): so that this capability is implemented with clear verification evidence.
+- **US-03-0584**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to abstract input_event structure (type, code, value, timestamp) so that this capability is implemented with clear verification evidence.
+- **US-03-0585**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input_register_device(dev) / input_unregister_device(dev) so that this capability is implemented with clear verification evidence.
+- **US-03-0586**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input_report_key(), input_report_rel(), input_report_abs() so that this capability is implemented with clear verification evidence.
+- **US-03-0587**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input_sync() - event boundary marker so that this capability is implemented with clear verification evidence.
+- **US-03-0588**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to /dev/input/eventN character device interface for userspace so that this capability is implemented with clear verification evidence.
+- **US-03-0589**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to event filtering: consumers subscribe to device + event type so that this capability is implemented with clear verification evidence.
+- **US-03-0590**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hot-Plug Detection (deferred): so that this capability is implemented with clear verification evidence.
+- **US-03-0591**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to monitor controller status for device insertion/removal so that this capability is implemented with clear verification evidence.
+- **US-03-0592**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to re-run device identification (0xF2) on port activity change so that this capability is implemented with clear verification evidence.
+- **US-03-0593**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to (De)register input devices dynamically so that this capability is implemented with clear verification evidence.
+- **US-03-0594**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-03-0595**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to unit Tests: so that this capability is implemented with clear verification evidence.
+- **US-03-0596**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scancode Set 1 decoding: verify all single-byte and E0-extended codes so that this capability is implemented with clear verification evidence.
+- **US-03-0597**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to modifier tracking: all combinations of shift/ctrl/alt/capslock/numlock so that this capability is implemented with clear verification evidence.
+- **US-03-0598**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to keymap: verify ASCII output for full US-QWERTY layout (unshifted, shifted, ctrl) so that this capability is implemented with clear verification evidence.
+- **US-03-0599**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to key buffer: fill, overflow, drain, verify FIFO order so that this capability is implemented with clear verification evidence.
+- **US-03-0600**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse packet decoding: standard 3-byte packets with known dx/dy/buttons so that this capability is implemented with clear verification evidence.
+- **US-03-0601**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse packet realignment: inject byte with bit 3 clear, verify resync so that this capability is implemented with clear verification evidence.
+- **US-03-0602**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse overflow: inject overflow bits, verify clamping so that this capability is implemented with clear verification evidence.
+- **US-03-0603**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse event queue: fill, overflow, drain so that this capability is implemented with clear verification evidence.
+- **US-03-0604**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to property Tests: so that this capability is implemented with clear verification evidence.
+- **US-03-0605**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to key buffer invariant: 0 <= head, tail < KBD_BUFFER_SIZE, head == tail ↔ empty so that this capability is implemented with clear verification evidence.
+- **US-03-0606**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mouse queue invariant: 0 <= head, tail < MOUSE_QUEUE_SIZE so that this capability is implemented with clear verification evidence.
+- **US-03-0607**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to randomized scancode sequences never crash handler or corrupt state so that this capability is implemented with clear verification evidence.
+- **US-03-0608**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration Tests: so that this capability is implemented with clear verification evidence.
+- **US-03-0609**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to boot kernel in QEMU, inject keyboard scancodes via monitor (sendkey), verify TTY output so that this capability is implemented with clear verification evidence.
+- **US-03-0610**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to boot kernel, inject mouse events, verify mouse_get_state() returns expected position so that this capability is implemented with clear verification evidence.
+- **US-03-0611**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to alt+F1..F12 switches VT correctly so that this capability is implemented with clear verification evidence.
+- **US-03-0612**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ctrl+C / Ctrl+D / Ctrl+Z generate correct control characters so that this capability is implemented with clear verification evidence.
+- **US-03-0613**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-03-0614**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: PS/2 controller initialization sequence and error handling so that this capability is implemented with clear verification evidence.
+- **US-03-0615**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: scancode set 1 table and extended key mapping so that this capability is implemented with clear verification evidence.
+- **US-03-0616**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to internal doc: input subsystem event model and device registration so that this capability is implemented with clear verification evidence.
+- **US-03-0617**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to console Subsystem (sys/console): so that this capability is implemented with clear verification evidence.
+- **US-03-0618**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tTY Subsystem (Core): so that this capability is implemented with clear verification evidence.
+- **US-03-0619**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to structures (tty_t): so that this capability is implemented with clear verification evidence.
+- **US-03-0620**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to buffers & Queues: so that this capability is implemented with clear verification evidence.
+- **US-03-0621**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read Buffer (Raw Input): Circular buffer for incoming IRQ data so that this capability is implemented with clear verification evidence.
+- **US-03-0622**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to write Buffer (Output): Queue for driver consumption so that this capability is implemented with clear verification evidence.
+- **US-03-0623**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to canon Buffer (Cooked): Line-editing buffer for ICANON mode so that this capability is implemented with clear verification evidence.
+- **US-03-0624**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to flow Control: Low-water/High-water marks for IXON/IXOFF so that this capability is implemented with clear verification evidence.
+- **US-03-0625**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to state Control (termios): so that this capability is implemented with clear verification evidence.
+- **US-03-0626**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to c_iflag: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON) so that this capability is implemented with clear verification evidence.
+- **US-03-0627**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to c_oflag: Output modes (OPOST, ONLCR, OXTABS) so that this capability is implemented with clear verification evidence.
+- **US-03-0628**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to c_cflag: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS) so that this capability is implemented with clear verification evidence.
+- **US-03-0629**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to c_lflag: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP) so that this capability is implemented with clear verification evidence.
+- **US-03-0630**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to c_cc: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME, VSTART, VSTOP, VWERASE) so that this capability is implemented with clear verification evidence.
+- **US-03-0631**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to winsize: Window size tracking (rows/cols) + SIGWINCH so that this capability is implemented with clear verification evidence.
+- **US-03-0632**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to line Discipline (N_TTY): so that this capability is implemented with clear verification evidence.
+- **US-03-0633**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input Processing (n_tty_receive_buf): so that this capability is implemented with clear verification evidence.
+- **US-03-0634**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to parity checks and stripping so that this capability is implemented with clear verification evidence.
+- **US-03-0635**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to newline translation (CR->NL) so that this capability is implemented with clear verification evidence.
+- **US-03-0636**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to software flow control (XON/XOFF detection) so that this capability is implemented with clear verification evidence.
+- **US-03-0637**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to signal generation check (ISIG) so that this capability is implemented with clear verification evidence.
+- **US-03-0638**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to canonical Editing (n_tty_read): so that this capability is implemented with clear verification evidence.
+- **US-03-0639**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to backspace/Delete handling (VERASE) so that this capability is implemented with clear verification evidence.
+- **US-03-0640**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to line kill (VKILL) so that this capability is implemented with clear verification evidence.
+- **US-03-0641**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to word erase (VWERASE) so that this capability is implemented with clear verification evidence.
+- **US-03-0642**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to eOF handling (VEOF / Ctrl+D) so that this capability is implemented with clear verification evidence.
+- **US-03-0643**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to output Post-processing (n_tty_write): so that this capability is implemented with clear verification evidence.
+- **US-03-0644**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to newline expansion (NL -> CR/NL) so that this capability is implemented with clear verification evidence.
+- **US-03-0645**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tab expansion (optional) so that this capability is implemented with clear verification evidence.
+- **US-03-0646**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to echoing Logic: so that this capability is implemented with clear verification evidence.
+- **US-03-0647**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to raw echo (input char -> output) so that this capability is implemented with clear verification evidence.
+- **US-03-0648**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to control char echo (^C) so that this capability is implemented with clear verification evidence.
+- **US-03-0649**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to erase echo (backspace-space-backspace sequence) so that this capability is implemented with clear verification evidence.
+- **US-03-0650**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to driver Interface (tty_driver): so that this capability is implemented with clear verification evidence.
+- **US-03-0651**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to install / remove: setup private data so that this capability is implemented with clear verification evidence.
+- **US-03-0652**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to open / close: hardware init/shutdown so that this capability is implemented with clear verification evidence.
+- **US-03-0653**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to write: device output path so that this capability is implemented with clear verification evidence.
+- **US-03-0654**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to put_char: optimized single-char write so that this capability is implemented with clear verification evidence.
+- **US-03-0655**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to flush_chars: kick hardware transmission so that this capability is implemented with clear verification evidence.
+- **US-03-0656**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to write_room: check available hardware buffer space so that this capability is implemented with clear verification evidence.
+- **US-03-0657**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to chars_in_buffer: check pending bytes so that this capability is implemented with clear verification evidence.
+- **US-03-0658**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ioctl: hardware-specific controls so that this capability is implemented with clear verification evidence.
+- **US-03-0659**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to throttle / unthrottle: hardware flow control hooks so that this capability is implemented with clear verification evidence.
+- **US-03-0660**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to session/Job Control: so that this capability is implemented with clear verification evidence.
+- **US-03-0661**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_struct.session: Pointer to current session so that this capability is implemented with clear verification evidence.
+- **US-03-0662**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_struct.pgrp: Pointer to foreground process group so that this capability is implemented with clear verification evidence.
+- **US-03-0663**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_check_change(): Verify background writes (SIGTTOU) so that this capability is implemented with clear verification evidence.
+- **US-03-0664**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to aPI: so that this capability is implemented with clear verification evidence.
+- **US-03-0665**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_init(): Initialize subsystem so that this capability is implemented with clear verification evidence.
+- **US-03-0666**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_alloc(): Create a new TTY device so that this capability is implemented with clear verification evidence.
+- **US-03-0667**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_register_device(): Register with DevFS /dev/ttyX so that this capability is implemented with clear verification evidence.
+- **US-03-0668**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_open, tty_close: Refcounting and session logic so that this capability is implemented with clear verification evidence.
+- **US-03-0669**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_read, tty_write: Dispatch to ldisc so that this capability is implemented with clear verification evidence.
+- **US-03-0670**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_ioctl: so that this capability is implemented with clear verification evidence.
+- **US-03-0671**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tIOCSCTTY: Become controlling TTY so that this capability is implemented with clear verification evidence.
+- **US-03-0672**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tIOCSPGRP / TIOCGPGRP: Manage foreground group so that this capability is implemented with clear verification evidence.
+- **US-03-0673**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tCGETS / TCSETS: Termios get/set so that this capability is implemented with clear verification evidence.
+- **US-03-0674**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tIOCGWINSZ: Window size so that this capability is implemented with clear verification evidence.
+- **US-03-0675**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to virtual Terminal (VT) Layer: so that this capability is implemented with clear verification evidence.
+- **US-03-0676**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vT Management: Array of vt_state_t structures (vt0..vtN) so that this capability is implemented with clear verification evidence.
+- **US-03-0677**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to switching: vt_activate(n), keyboard shortcuts (Alt+Fn) so that this capability is implemented with clear verification evidence.
+- **US-03-0678**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to emulation: VT102 state machine (escape codes) so that this capability is implemented with clear verification evidence.
+- **US-03-0679**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to backend Drivers: so that this capability is implemented with clear verification evidence.
+- **US-03-0680**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vGA Text Mode Console: so that this capability is implemented with clear verification evidence.
+- **US-03-0681**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialization: so that this capability is implemented with clear verification evidence.
+- **US-03-0682**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to detect VGA presence (BIOS/PCI enumeration) so that this capability is implemented with clear verification evidence.
+- **US-03-0683**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to set 80x25 or 80x50 text mode so that this capability is implemented with clear verification evidence.
+- **US-03-0684**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to map video memory (0xB8000) into kernel address space so that this capability is implemented with clear verification evidence.
+- **US-03-0685**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize attribute byte defaults (white on black) so that this capability is implemented with clear verification evidence.
+- **US-03-0686**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to text Output: so that this capability is implemented with clear verification evidence.
+- **US-03-0687**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement vga_putchar(char c, uint8_t attr) so that this capability is implemented with clear verification evidence.
+- **US-03-0688**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to handle control characters (CR, LF, BS, TAB, BEL) so that this capability is implemented with clear verification evidence.
+- **US-03-0689**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement vga_write(const char *buf, size_t len) so that this capability is implemented with clear verification evidence.
+- **US-03-0690**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tab stop handling (configurable tab width) so that this capability is implemented with clear verification evidence.
+- **US-03-0691**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor Control: so that this capability is implemented with clear verification evidence.
+- **US-03-0692**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read/write hardware cursor position (CRTC registers 0x0E/0x0F) so that this capability is implemented with clear verification evidence.
+- **US-03-0693**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor shape control (underline, block, invisible) so that this capability is implemented with clear verification evidence.
+- **US-03-0694**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor blink enable/disable so that this capability is implemented with clear verification evidence.
+- **US-03-0695**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scrolling: so that this capability is implemented with clear verification evidence.
+- **US-03-0696**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to software scroll (memmove video buffer) so that this capability is implemented with clear verification evidence.
+- **US-03-0697**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hardware scroll (CRTC start address register) so that this capability is implemented with clear verification evidence.
+- **US-03-0698**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scroll region support (VT102 DECSTBM) so that this capability is implemented with clear verification evidence.
+- **US-03-0699**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to attributes: so that this capability is implemented with clear verification evidence.
+- **US-03-0700**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 16-color foreground/background palette so that this capability is implemented with clear verification evidence.
+- **US-03-0701**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to blink/bright background toggle (attribute controller) so that this capability is implemented with clear verification evidence.
+- **US-03-0702**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reverse video, bold, underline emulation so that this capability is implemented with clear verification evidence.
+- **US-03-0703**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tTY Binding: so that this capability is implemented with clear verification evidence.
+- **US-03-0704**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register as tty_driver for /dev/tty[1-N] so that this capability is implemented with clear verification evidence.
+- **US-03-0705**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement tty_driver->write() callback so that this capability is implemented with clear verification evidence.
+- **US-03-0706**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement tty_driver->ioctl() for VGA-specific controls so that this capability is implemented with clear verification evidence.
+- **US-03-0707**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to keyboard Input (PS/2 to TTY): so that this capability is implemented with clear verification evidence.
+- **US-03-0708**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fix PS/2 driver build errors (constant mismatches in test_ps2.c) so that this capability is implemented with clear verification evidence.
+- **US-03-0709**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input Path: so that this capability is implemented with clear verification evidence.
+- **US-03-0710**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hook keyboard driver to TTY input queue so that this capability is implemented with clear verification evidence.
+- **US-03-0711**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to convert scancodes to ASCII via keymap so that this capability is implemented with clear verification evidence.
+- **US-03-0712**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to handle modifier keys (Shift, Ctrl, Alt, AltGr) so that this capability is implemented with clear verification evidence.
+- **US-03-0713**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A) so that this capability is implemented with clear verification evidence.
+- **US-03-0714**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to special Keys: so that this capability is implemented with clear verification evidence.
+- **US-03-0715**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to function keys (F1-F12) to escape sequences so that this capability is implemented with clear verification evidence.
+- **US-03-0716**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to arrow keys to ANSI escape sequences so that this capability is implemented with clear verification evidence.
+- **US-03-0717**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to insert, Delete, Home, End, PgUp, PgDn sequences so that this capability is implemented with clear verification evidence.
+- **US-03-0718**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to numeric keypad handling (NumLock state) so that this capability is implemented with clear verification evidence.
+- **US-03-0719**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to console Switching: so that this capability is implemented with clear verification evidence.
+- **US-03-0720**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to alt+F1..F12 for virtual console switch so that this capability is implemented with clear verification evidence.
+- **US-03-0721**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ctrl+Alt+Del for reboot/shutdown hook so that this capability is implemented with clear verification evidence.
+- **US-03-0722**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sysRq key handling (magic SysRq sequences) so that this capability is implemented with clear verification evidence.
+- **US-03-0723**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to lED Control: so that this capability is implemented with clear verification evidence.
+- **US-03-0724**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sync Caps Lock, Num Lock, Scroll Lock LEDs so that this capability is implemented with clear verification evidence.
+- **US-03-0725**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to lED state persistence across console switches so that this capability is implemented with clear verification evidence.
+- **US-03-0726**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to framebuffer Console (Graphical): so that this capability is implemented with clear verification evidence.
+- **US-03-0727**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to core Infrastructure: so that this capability is implemented with clear verification evidence.
+- **US-03-0728**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to struct fb_info device abstraction so that this capability is implemented with clear verification evidence.
+- **US-03-0729**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to framebuffer registration/deregistration API so that this capability is implemented with clear verification evidence.
+- **US-03-0730**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to memory mapping (physical to kernel virtual) so that this capability is implemented with clear verification evidence.
+- **US-03-0731**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to /dev/fb/[0-N] device node creation so that this capability is implemented with clear verification evidence.
+- **US-03-0732**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to drivers: so that this capability is implemented with clear verification evidence.
+- **US-03-0733**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vESA VBE (Linear Framebuffer): so that this capability is implemented with clear verification evidence.
+- **US-03-0734**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vBE 2.0+ detection and capability query so that this capability is implemented with clear verification evidence.
+- **US-03-0735**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mode enumeration and selection so that this capability is implemented with clear verification evidence.
+- **US-03-0736**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to linear framebuffer mapping (LFB base address) so that this capability is implemented with clear verification evidence.
+- **US-03-0737**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to protected mode interface (PM32 entry points) so that this capability is implemented with clear verification evidence.
+- **US-03-0738**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to eDID retrieval for monitor detection so that this capability is implemented with clear verification evidence.
+- **US-03-0739**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to uEFI GOP (Graphics Output Protocol): so that this capability is implemented with clear verification evidence.
+- **US-03-0740**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to gOP protocol location and initialization so that this capability is implemented with clear verification evidence.
+- **US-03-0741**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mode query and switching so that this capability is implemented with clear verification evidence.
+- **US-03-0742**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to framebuffer base and stride retrieval so that this capability is implemented with clear verification evidence.
+- **US-03-0743**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to eFI runtime services integration so that this capability is implemented with clear verification evidence.
+- **US-03-0744**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bochs Graphics Adapter (BGA): so that this capability is implemented with clear verification evidence.
+- **US-03-0745**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bGA detection (PCI vendor/device ID, I/O ports) so that this capability is implemented with clear verification evidence.
+- **US-03-0746**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vBE DISPI register interface so that this capability is implemented with clear verification evidence.
+- **US-03-0747**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mode setting (resolution, bpp, enable LFB) so that this capability is implemented with clear verification evidence.
+- **US-03-0748**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to virtual resolution and display offset so that this capability is implemented with clear verification evidence.
+- **US-03-0749**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bank switching (legacy mode fallback) so that this capability is implemented with clear verification evidence.
+- **US-03-0750**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to virtIO-GPU: so that this capability is implemented with clear verification evidence.
+- **US-03-0751**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to virtIO device discovery and setup so that this capability is implemented with clear verification evidence.
+- **US-03-0752**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to resource creation (2D scanout) so that this capability is implemented with clear verification evidence.
+- **US-03-0753**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to transfer to host (flush dirty regions) so that this capability is implemented with clear verification evidence.
+- **US-03-0754**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to display info query (resolution, format) so that this capability is implemented with clear verification evidence.
+- **US-03-0755**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor image upload and positioning so that this capability is implemented with clear verification evidence.
+- **US-03-0756**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pixel Formats: so that this capability is implemented with clear verification evidence.
+- **US-03-0757**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 8-bit indexed (palette-based) so that this capability is implemented with clear verification evidence.
+- **US-03-0758**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 16-bit (RGB565, ARGB1555) so that this capability is implemented with clear verification evidence.
+- **US-03-0759**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 24-bit (RGB888, BGR888) so that this capability is implemented with clear verification evidence.
+- **US-03-0760**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 32-bit (ARGB8888, XRGB8888, ABGR8888) so that this capability is implemented with clear verification evidence.
+- **US-03-0761**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to endianness handling (little/big endian) so that this capability is implemented with clear verification evidence.
+- **US-03-0762**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to format conversion routines so that this capability is implemented with clear verification evidence.
+- **US-03-0763**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rendering: so that this capability is implemented with clear verification evidence.
+- **US-03-0764**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to font Support: so that this capability is implemented with clear verification evidence.
+- **US-03-0765**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pSF1 font parser (256/512 glyphs, fixed width) so that this capability is implemented with clear verification evidence.
+- **US-03-0766**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pSF2 font parser (Unicode table, variable metrics) so that this capability is implemented with clear verification evidence.
+- **US-03-0767**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bDF/PCF font support (optional) so that this capability is implemented with clear verification evidence.
+- **US-03-0768**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to built-in fallback font (8x16 VGA ROM font) so that this capability is implemented with clear verification evidence.
+- **US-03-0769**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to font glyph cache (hash table lookup) so that this capability is implemented with clear verification evidence.
+- **US-03-0770**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to unicode to glyph mapping (cmap) so that this capability is implemented with clear verification evidence.
+- **US-03-0771**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to blitting Operations: so that this capability is implemented with clear verification evidence.
+- **US-03-0772**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fb_fillrect(): Solid color fill with ROP support so that this capability is implemented with clear verification evidence.
+- **US-03-0773**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fb_copyarea(): Screen-to-screen blit so that this capability is implemented with clear verification evidence.
+- **US-03-0774**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fb_imageblit(): Mono/color image to framebuffer so that this capability is implemented with clear verification evidence.
+- **US-03-0775**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to accelerated ops detection and fallback so that this capability is implemented with clear verification evidence.
+- **US-03-0776**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to clipping (viewport bounds checking) so that this capability is implemented with clear verification evidence.
+- **US-03-0777**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to character Rendering: so that this capability is implemented with clear verification evidence.
+- **US-03-0778**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to glyph rendering with foreground/background colors so that this capability is implemented with clear verification evidence.
+- **US-03-0779**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bold rendering (shift and OR, or bold font) so that this capability is implemented with clear verification evidence.
+- **US-03-0780**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to italic rendering (shear transform, or italic font) so that this capability is implemented with clear verification evidence.
+- **US-03-0781**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to underline and strikethrough rendering so that this capability is implemented with clear verification evidence.
+- **US-03-0782**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reverse video attribute so that this capability is implemented with clear verification evidence.
+- **US-03-0783**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to performance: so that this capability is implemented with clear verification evidence.
+- **US-03-0784**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to double buffering (offscreen back buffer) so that this capability is implemented with clear verification evidence.
+- **US-03-0785**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dirty rectangle tracking so that this capability is implemented with clear verification evidence.
+- **US-03-0786**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to deferred updates (batch flush on vsync) so that this capability is implemented with clear verification evidence.
+- **US-03-0787**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to write-combining memory type (PAT/MTRR) so that this capability is implemented with clear verification evidence.
+- **US-03-0788**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor: so that this capability is implemented with clear verification evidence.
+- **US-03-0789**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to software Cursor: so that this capability is implemented with clear verification evidence.
+- **US-03-0790**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to xOR cursor rendering so that this capability is implemented with clear verification evidence.
+- **US-03-0791**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor save/restore (background preservation) so that this capability is implemented with clear verification evidence.
+- **US-03-0792**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor blink timer integration so that this capability is implemented with clear verification evidence.
+- **US-03-0793**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hardware Cursor: so that this capability is implemented with clear verification evidence.
+- **US-03-0794**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor image upload (ARGB format) so that this capability is implemented with clear verification evidence.
+- **US-03-0795**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor position registers so that this capability is implemented with clear verification evidence.
+- **US-03-0796**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hot spot offset configuration so that this capability is implemented with clear verification evidence.
+- **US-03-0797**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor enable/disable so that this capability is implemented with clear verification evidence.
+- **US-03-0798**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to emulation (VT102/ANSI): so that this capability is implemented with clear verification evidence.
+- **US-03-0799**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to parser State Machine: so that this capability is implemented with clear verification evidence.
+- **US-03-0800**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ground state (printable characters) so that this capability is implemented with clear verification evidence.
+- **US-03-0801**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to escape state (ESC received) so that this capability is implemented with clear verification evidence.
+- **US-03-0802**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cSI state (ESC [ sequences) so that this capability is implemented with clear verification evidence.
+- **US-03-0803**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to oSC state (Operating System Commands) so that this capability is implemented with clear verification evidence.
+- **US-03-0804**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dCS state (Device Control Strings) so that this capability is implemented with clear verification evidence.
+- **US-03-0805**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to parameter accumulation and parsing so that this capability is implemented with clear verification evidence.
+- **US-03-0806**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cursor Control Sequences: so that this capability is implemented with clear verification evidence.
+- **US-03-0807**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cUU/CUD/CUF/CUB (cursor movement) so that this capability is implemented with clear verification evidence.
+- **US-03-0808**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cUP/HVP (absolute positioning) so that this capability is implemented with clear verification evidence.
+- **US-03-0809**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cNL/CPL (next/previous line) so that this capability is implemented with clear verification evidence.
+- **US-03-0810**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cHA/VPA (column/row absolute) so that this capability is implemented with clear verification evidence.
+- **US-03-0811**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sC/RC (save/restore cursor position) so that this capability is implemented with clear verification evidence.
+- **US-03-0812**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dECSC/DECRC (save/restore with attributes) so that this capability is implemented with clear verification evidence.
+- **US-03-0813**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to erase Sequences: so that this capability is implemented with clear verification evidence.
+- **US-03-0814**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to eD (erase display: to end, to start, all) so that this capability is implemented with clear verification evidence.
+- **US-03-0815**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to eL (erase line: to end, to start, all) so that this capability is implemented with clear verification evidence.
+- **US-03-0816**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to eCH (erase characters) so that this capability is implemented with clear verification evidence.
+- **US-03-0817**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dCH/ICH (delete/insert characters) so that this capability is implemented with clear verification evidence.
+- **US-03-0818**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dL/IL (delete/insert lines) so that this capability is implemented with clear verification evidence.
+- **US-03-0819**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to attribute Sequences (SGR): so that this capability is implemented with clear verification evidence.
+- **US-03-0820**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reset (SGR 0) so that this capability is implemented with clear verification evidence.
+- **US-03-0821**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bold/dim/italic/underline/blink/reverse/hidden so that this capability is implemented with clear verification evidence.
+- **US-03-0822**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 8-color foreground/background (30-37, 40-47) so that this capability is implemented with clear verification evidence.
+- **US-03-0823**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bright colors (90-97, 100-107) so that this capability is implemented with clear verification evidence.
+- **US-03-0824**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 256-color mode (38;5;N, 48;5;N) so that this capability is implemented with clear verification evidence.
+- **US-03-0825**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 24-bit true color (38;2;R;G;B, 48;2;R;G;B) so that this capability is implemented with clear verification evidence.
+- **US-03-0826**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to scrolling: so that this capability is implemented with clear verification evidence.
+- **US-03-0827**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dECSTBM (set top/bottom margins) so that this capability is implemented with clear verification evidence.
+- **US-03-0828**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sU/SD (scroll up/down) so that this capability is implemented with clear verification evidence.
+- **US-03-0829**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iND/RI (index/reverse index) so that this capability is implemented with clear verification evidence.
+- **US-03-0830**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to smooth scroll support (optional) so that this capability is implemented with clear verification evidence.
+- **US-03-0831**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to modes: so that this capability is implemented with clear verification evidence.
+- **US-03-0832**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dECCKM (cursor key mode: application/normal) so that this capability is implemented with clear verification evidence.
+- **US-03-0833**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dECAWM (auto-wrap mode) so that this capability is implemented with clear verification evidence.
+- **US-03-0834**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dECOM (origin mode: absolute/relative) so that this capability is implemented with clear verification evidence.
+- **US-03-0835**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dECTCEM (cursor visibility) so that this capability is implemented with clear verification evidence.
+- **US-03-0836**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to alternate screen buffer (DECSET 1049) so that this capability is implemented with clear verification evidence.
+- **US-03-0837**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to bracketed paste mode (DECSET 2004) so that this capability is implemented with clear verification evidence.
+- **US-03-0838**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to character Sets: so that this capability is implemented with clear verification evidence.
+- **US-03-0839**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to g0/G1/G2/G3 character set designation so that this capability is implemented with clear verification evidence.
+- **US-03-0840**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sI/SO (shift in/out for G0/G1) so that this capability is implemented with clear verification evidence.
+- **US-03-0841**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dEC Special Graphics (line drawing) so that this capability is implemented with clear verification evidence.
+- **US-03-0842**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to uTF-8 decoding and Unicode support so that this capability is implemented with clear verification evidence.
+- **US-03-0843**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tabs: so that this capability is implemented with clear verification evidence.
+- **US-03-0844**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hTS (horizontal tab set) so that this capability is implemented with clear verification evidence.
+- **US-03-0845**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tBC (tab clear: current, all) so that this capability is implemented with clear verification evidence.
+- **US-03-0846**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cHT/CBT (cursor horizontal tab forward/back) so that this capability is implemented with clear verification evidence.
+- **US-03-0847**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to default tab stops (every 8 columns) so that this capability is implemented with clear verification evidence.
+- **US-03-0848**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reports: so that this capability is implemented with clear verification evidence.
+- **US-03-0849**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dSR (device status report) so that this capability is implemented with clear verification evidence.
+- **US-03-0850**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cPR (cursor position report) so that this capability is implemented with clear verification evidence.
+- **US-03-0851**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dA (device attributes) so that this capability is implemented with clear verification evidence.
+- **US-03-0852**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dECID (terminal ID) so that this capability is implemented with clear verification evidence.
+- **US-03-0853**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tTY Binding: so that this capability is implemented with clear verification evidence.
+- **US-03-0854**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register as tty_driver for /dev/tty[1-N] so that this capability is implemented with clear verification evidence.
+- **US-03-0855**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_driver->write() with escape sequence processing so that this capability is implemented with clear verification evidence.
+- **US-03-0856**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_driver->ioctl() for FB-specific controls so that this capability is implemented with clear verification evidence.
+- **US-03-0857**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to window size tracking (TIOCGWINSZ/TIOCSWINSZ) so that this capability is implemented with clear verification evidence.
+- **US-03-0858**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to serial Console (Headless): so that this capability is implemented with clear verification evidence.
+- **US-03-0859**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to uART Drivers: so that this capability is implemented with clear verification evidence.
+- **US-03-0860**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to 8250/16550 UART driver (I/O port and MMIO) so that this capability is implemented with clear verification evidence.
+- **US-03-0861**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to baud rate configuration (divisor latch) so that this capability is implemented with clear verification evidence.
+- **US-03-0862**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to line control (data bits, parity, stop bits) so that this capability is implemented with clear verification evidence.
+- **US-03-0863**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fIFO control (16550A FIFO enable, trigger level) so that this capability is implemented with clear verification evidence.
+- **US-03-0864**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to modem control signals (DTR, RTS) so that this capability is implemented with clear verification evidence.
+- **US-03-0865**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to modem status signals (CTS, DSR, DCD, RI) so that this capability is implemented with clear verification evidence.
+- **US-03-0866**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to interrupt-driven I/O (IRQ handler) so that this capability is implemented with clear verification evidence.
+- **US-03-0867**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to polling mode fallback (for early boot) so that this capability is implemented with clear verification evidence.
+- **US-03-0868**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to console Output: so that this capability is implemented with clear verification evidence.
+- **US-03-0869**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to vT102 pass-through (raw escape sequences) so that this capability is implemented with clear verification evidence.
+- **US-03-0870**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to output buffering and flow control so that this capability is implemented with clear verification evidence.
+- **US-03-0871**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to xON/XOFF software flow control so that this capability is implemented with clear verification evidence.
+- **US-03-0872**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rTS/CTS hardware flow control so that this capability is implemented with clear verification evidence.
+- **US-03-0873**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to break signal transmission so that this capability is implemented with clear verification evidence.
+- **US-03-0874**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to console Input: so that this capability is implemented with clear verification evidence.
+- **US-03-0875**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to character reception and buffering so that this capability is implemented with clear verification evidence.
+- **US-03-0876**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to break signal detection so that this capability is implemented with clear verification evidence.
+- **US-03-0877**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to framing and parity error handling so that this capability is implemented with clear verification evidence.
+- **US-03-0878**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to overrun error handling so that this capability is implemented with clear verification evidence.
+- **US-03-0879**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tTY Binding: so that this capability is implemented with clear verification evidence.
+- **US-03-0880**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register as tty_driver for /dev/ttyS[0-N] so that this capability is implemented with clear verification evidence.
+- **US-03-0881**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_driver->write() callback so that this capability is implemented with clear verification evidence.
+- **US-03-0882**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_driver->ioctl() for serial-specific controls so that this capability is implemented with clear verification evidence.
+- **US-03-0883**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to tty_driver->set_termios() for baud/parity changes so that this capability is implemented with clear verification evidence.
+- **US-03-0884**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kernel Console: so that this capability is implemented with clear verification evidence.
+- **US-03-0885**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to early boot console (before TTY init) so that this capability is implemented with clear verification evidence.
+- **US-03-0886**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to console=ttyS0,115200n8 kernel parameter parsing so that this capability is implemented with clear verification evidence.
+- **US-03-0887**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kernel panic output to serial so that this capability is implemented with clear verification evidence.
+- **US-03-0888**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sysRq over serial (break + key) so that this capability is implemented with clear verification evidence.
+- **US-03-0889**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to features: so that this capability is implemented with clear verification evidence.
+- **US-03-0890**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to multi-Terminal: Support switching (Alt+F1, etc.) between virtual consoles so that this capability is implemented with clear verification evidence.
+- **US-03-0891**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to legacy Support: CGA/Hercules/EGA fallback modes.?? so that this capability is implemented with clear verification evidence.
+- **US-03-0892**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rNG Subsystem (/dev/random, /dev/urandom): <!-- random.c, random_internal.h, sys/random.h --> so that this capability is implemented with clear verification evidence.
+- **US-03-0893**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to core Infrastructure: so that this capability is implemented with clear verification evidence.
+- **US-03-0894**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to data Structures: so that this capability is implemented with clear verification evidence.
+- **US-03-0895**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to define struct entropy_pool (input pool, output pool, counters). <!-- random_internal.h --> so that this capability is implemented with clear verification evidence.
+- **US-03-0896**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to define struct chacha20_ctx (key, counter, block buffer). <!-- random_internal.h --> so that this capability is implemented with clear verification evidence.
+- **US-03-0897**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to define struct rng_state (global RNG state, seeded flag, reseed counter). <!-- random_internal.h --> so that this capability is implemented with clear verification evidence.
+- **US-03-0898**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to create spinlock_t entropy_lock for pool access. <!-- random.c --> so that this capability is implemented with clear verification evidence.
+- **US-03-0899**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to create spinlock_t output_lock for CSPRNG state. <!-- random.c --> so that this capability is implemented with clear verification evidence.
+- **US-03-0900**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to define entropy estimation structures (bits per source). <!-- random_internal.h --> so that this capability is implemented with clear verification evidence.
+- **US-03-0901**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to header Files: so that this capability is implemented with clear verification evidence.
+- **US-03-0902**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to create sys/include/sys/random.h (public API) so that this capability is implemented with clear verification evidence.
+- **US-03-0903**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to create sys/kern/random_internal.h (internal structures) so that this capability is implemented with clear verification evidence.
+- **US-03-0904**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to define GRND_NONBLOCK, GRND_RANDOM, GRND_INSECURE flags. <!-- sys/random.h --> so that this capability is implemented with clear verification evidence.
+- **US-03-0905**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialization: so that this capability is implemented with clear verification evidence.
+- **US-03-0906**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_init() called from kmain. <!-- random.c:449, main.c --> so that this capability is implemented with clear verification evidence.
+- **US-03-0907**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize entropy pools to zero. <!-- random.c:454 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0908**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to initialize CSPRNG state. <!-- random.c:456-458 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0909**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to set initial seeded flag to false. <!-- random.c:453 (memset) --> so that this capability is implemented with clear verification evidence.
+- **US-03-0910**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register /dev/random and /dev/urandom device nodes. <!-- random.c:478-494 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0911**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cSPRNG Algorithm (ChaCha20): <!-- random.c:30-159 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0912**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to core Implementation: so that this capability is implemented with clear verification evidence.
+- **US-03-0913**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement ChaCha20 quarter-round function. <!-- random.c:33-38 QR macro --> so that this capability is implemented with clear verification evidence.
+- **US-03-0914**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement ChaCha20 column and diagonal rounds. <!-- random.c:48-58 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0915**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement ChaCha20 block function (20 rounds). <!-- random.c:41-63 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0916**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement keystream generation with counter increment. <!-- random.c:107-115 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0917**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement output serialization (little-endian). <!-- random.c:100-105 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0918**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to key Management: so that this capability is implemented with clear verification evidence.
+- **US-03-0919**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement chacha20_init(ctx, key, nonce). <!-- random.c:66-91 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0920**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement chacha20_rekey(ctx) (fast-key-erasure). <!-- random.c:140-154 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0921**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement chacha20_wipe(ctx) (secure zeroing). <!-- random.c:157-159 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0922**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to output Generation: so that this capability is implemented with clear verification evidence.
+- **US-03-0923**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement chacha20_extract(ctx, buf, len). <!-- random.c:119-137 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0924**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to buffer partial blocks for efficiency. <!-- random.c:123-134 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0925**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rekey after every 1MB of output (configurable). <!-- random.c:397-401 RESEED_INTERVAL --> so that this capability is implemented with clear verification evidence.
+- **US-03-0926**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-03-0927**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rFC 7539 test vectors (known answer tests) so that this capability is implemented with clear verification evidence.
+- **US-03-0928**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to block function correctness tests so that this capability is implemented with clear verification evidence.
+- **US-03-0929**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to counter wraparound handling tests so that this capability is implemented with clear verification evidence.
+- **US-03-0930**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to entropy Mixing (Input Pool): <!-- random.c:161-224 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0931**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mixing Function: so that this capability is implemented with clear verification evidence.
+- **US-03-0932**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement LFSR-based mixing (Linux-style). <!-- random.c:177-192 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0933**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement CRC32-based fast mixing. <!-- Uses twist table --> so that this capability is implemented with clear verification evidence.
+- **US-03-0934**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement SHA-256 compression for extraction. <!-- Simplified compression random.c:198-206 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0935**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement twist table for polynomial feedback. <!-- random.c:166-169 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0936**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to pool Management: so that this capability is implemented with clear verification evidence.
+- **US-03-0937**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to define input pool size (4096 bits / 512 bytes). <!-- random_internal.h ENTROPY_POOL_SIZE --> so that this capability is implemented with clear verification evidence.
+- **US-03-0938**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement pool_mix_bytes(pool, data, len). <!-- random.c:177-195 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0939**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement pool_extract_bytes(pool, out, len). <!-- random.c:209-224 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0940**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track estimated entropy bits in pool. <!-- entropy_pool.entropy_count --> so that this capability is implemented with clear verification evidence.
+- **US-03-0941**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to entropy Estimation: so that this capability is implemented with clear verification evidence.
+- **US-03-0942**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to conservative entropy crediting (bits per event). <!-- random.c:317-321 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0943**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to overflow protection (cap at pool size). <!-- random.c:318-320 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0944**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to debit entropy on extraction. <!-- random.c:361 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0945**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track total entropy collected since boot. <!-- entropy_pool.total_harvested --> so that this capability is implemented with clear verification evidence.
+- **US-03-0946**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to entropy Sources & Harvesting: <!-- random.c:303-345 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0947**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to harvesting Infrastructure: so that this capability is implemented with clear verification evidence.
+- **US-03-0948**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_harvest(data, len, bits, source) (general API). <!-- random.c:307-326 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0949**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_harvest_fast(data, len) (ISR-safe, no lock). <!-- random.c:328-341 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0950**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_harvest_direct(data, len, bits) (high-quality). <!-- random.c:343-345 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0951**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to define enum entropy_source (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG). <!-- sys/random.h --> so that this capability is implemented with clear verification evidence.
+- **US-03-0952**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to per-source entropy rate limiting. <!-- rng_state.harvest_count[] --> so that this capability is implemented with clear verification evidence.
+- **US-03-0953**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to timing-Based Sources: so that this capability is implemented with clear verification evidence.
+- **US-03-0954**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to interrupt Timing: so that this capability is implemented with clear verification evidence.
+- **US-03-0955**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hook pit_handler for timer jitter (TSC delta). <!-- via isr_handler(IRQ0) --> so that this capability is implemented with clear verification evidence.
+- **US-03-0956**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hook isr_handler for interrupt timing. <!-- idt.c:isr_handler --> so that this capability is implemented with clear verification evidence.
+- **US-03-0957**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mix TSC low bits on each interrupt. <!-- random_harvest_fast --> so that this capability is implemented with clear verification evidence.
+- **US-03-0958**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to credit ~1 bit per interrupt timing sample. <!-- using random_harvest_fast (mixing only) --> so that this capability is implemented with clear verification evidence.
+- **US-03-0959**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to keyboard/Mouse: <!-- keyboard.c, mouse.c --> so that this capability is implemented with clear verification evidence.
+- **US-03-0960**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hook keyboard_handler (scancode + timing). <!-- keyboard.c:68-72 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0961**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hook PS/2 mouse driver (movement + timing). <!-- mouse.c:54-58 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0962**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to credit ~2-4 bits per HID event. <!-- Uses random_harvest_fast --> so that this capability is implemented with clear verification evidence.
+- **US-03-0963**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to disk I/O: so that this capability is implemented with clear verification evidence.
+- **US-03-0964**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hook IDE/AHCI/VirtIO completion interrupts. <!-- Hooked virtio_blk (sync), ide --> so that this capability is implemented with clear verification evidence.
+- **US-03-0965**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mix seek time / completion jitter so that this capability is implemented with clear verification evidence.
+- **US-03-0966**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to credit ~1 bit per I/O completion so that this capability is implemented with clear verification evidence.
+- **US-03-0967**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to network: so that this capability is implemented with clear verification evidence.
+- **US-03-0968**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hook network packet arrival (timing + data) so that this capability is implemented with clear verification evidence.
+- **US-03-0969**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mix packet timing and partial payload so that this capability is implemented with clear verification evidence.
+- **US-03-0970**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to credit ~2 bits per packet timing so that this capability is implemented with clear verification evidence.
+- **US-03-0971**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hardware RNG (RDRAND/RDSEED): <!-- random.c:226-301 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0972**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to detection: so that this capability is implemented with clear verification evidence.
+- **US-03-0973**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cPUID feature detection for RDRAND (ECX bit 30). <!-- random.c:241-244 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0974**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cPUID feature detection for RDSEED (EBX bit 18). <!-- random.c:251-254 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0975**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to runtime availability flags. <!-- rng_state.has_rdrand, has_rdseed --> so that this capability is implemented with clear verification evidence.
+- **US-03-0976**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implementation: so that this capability is implemented with clear verification evidence.
+- **US-03-0977**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement rdrand32(), rdrand64() with retry loop. <!-- random.c:266-287 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0978**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement rdseed32(), rdseed64() with failure handling so that this capability is implemented with clear verification evidence.
+- **US-03-0979**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fallback path when HWRNG unavailable. <!-- random.c:267 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0980**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration: so that this capability is implemented with clear verification evidence.
+- **US-03-0981**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to periodic HWRNG harvesting (if available). <!-- random.c:464-468 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0982**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mix HWRNG output into entropy pool. <!-- random.c:295 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0983**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to use HWRNG for fast-path output (XOR with CSPRNG) so that this capability is implemented with clear verification evidence.
+- **US-03-0984**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to credit ~32 bits per RDRAND invocation (conservative). <!-- random.c:296 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0985**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to jitter Entropy (CPU Timing): so that this capability is implemented with clear verification evidence.
+- **US-03-0986**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to use BogoMIPS calibration loop for jitter measurement so that this capability is implemented with clear verification evidence.
+- **US-03-0987**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement jitterentropy_collect() (memory access timing) so that this capability is implemented with clear verification evidence.
+- **US-03-0988**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cPU execution jitter measurement so that this capability is implemented with clear verification evidence.
+- **US-03-0989**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to memory access timing variations so that this capability is implemented with clear verification evidence.
+- **US-03-0990**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to minimum samples before crediting so that this capability is implemented with clear verification evidence.
+- **US-03-0991**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to virtIO Entropy Device: so that this capability is implemented with clear verification evidence.
+- **US-03-0992**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to virtIO RNG device detection (device type 4) so that this capability is implemented with clear verification evidence.
+- **US-03-0993**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to request entropy from hypervisor so that this capability is implemented with clear verification evidence.
+- **US-03-0994**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mix hypervisor-provided randomness so that this capability is implemented with clear verification evidence.
+- **US-03-0995**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to credit appropriately (host-dependent quality) so that this capability is implemented with clear verification evidence.
+- **US-03-0996**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reseeding & State Management: <!-- random.c:356-372 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0997**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reseed Logic: so that this capability is implemented with clear verification evidence.
+- **US-03-0998**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_reseed() (extract from input pool). <!-- random.c:356-372 --> so that this capability is implemented with clear verification evidence.
+- **US-03-0999**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to minimum entropy threshold before first seed (256 bits). <!-- random.c:389, 471 --> so that this capability is implemented with clear verification evidence.
+- **US-03-1000**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reseed interval (time-based or output-based). <!-- RESEED_INTERVAL, random.c:397 --> so that this capability is implemented with clear verification evidence.
+- **US-03-1001**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reseed on entropy pool reaching threshold. <!-- random.c:389-391 --> so that this capability is implemented with clear verification evidence.
+- **US-03-1002**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to seeded State Tracking: so that this capability is implemented with clear verification evidence.
+- **US-03-1003**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track rng_seeded boolean. <!-- rng_state.seeded --> so that this capability is implemented with clear verification evidence.
+- **US-03-1004**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to track reseed_count for auditing. <!-- rng_state.reseed_count --> so that this capability is implemented with clear verification evidence.
+- **US-03-1005**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_is_seeded() query. <!-- random.c:351-353 --> so that this capability is implemented with clear verification evidence.
+- **US-03-1006**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to block reads until first seed (for /dev/random). <!-- random.c:382-392 --> so that this capability is implemented with clear verification evidence.
+- **US-03-1007**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to catastrophic Reseed: so that this capability is implemented with clear verification evidence.
+- **US-03-1008**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to full state replacement on seed file load so that this capability is implemented with clear verification evidence.
+- **US-03-1009**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wipe previous state before new key material so that this capability is implemented with clear verification evidence.
+- **US-03-1010**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to notify waiters after reseed so that this capability is implemented with clear verification evidence.
+- **US-03-1011**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device Interfaces: <!-- random.c:410-494 --> so that this capability is implemented with clear verification evidence.
+- **US-03-1012**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to /dev/random (Blocking): so that this capability is implemented with clear verification evidence.
+- **US-03-1013**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_dev_open(). <!-- implicit via fs_node_t --> so that this capability is implemented with clear verification evidence.
+- **US-03-1014**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_dev_read() with blocking. <!-- random.c:415-421 --> so that this capability is implemented with clear verification evidence.
+- **US-03-1015**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to block until minimum entropy available. <!-- random.c:382-392 --> so that this capability is implemented with clear verification evidence.
+- **US-03-1016**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wait queue for blocked readers (random_wait) so that this capability is implemented with clear verification evidence.
+- **US-03-1017**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wakeup on entropy addition so that this capability is implemented with clear verification evidence.
+- **US-03-1018**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_dev_poll() (POLLIN when seeded) so that this capability is implemented with clear verification evidence.
+- **US-03-1019**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to /dev/urandom (Non-blocking): so that this capability is implemented with clear verification evidence.
+- **US-03-1020**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement urandom_dev_read() (always returns data). <!-- random.c:424-430 --> so that this capability is implemented with clear verification evidence.
+- **US-03-1021**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to warn once if read before seeded (dmesg) so that this capability is implemented with clear verification evidence.
+- **US-03-1022**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to high throughput (CSPRNG stream). <!-- ChaCha20 stream --> so that this capability is implemented with clear verification evidence.
+- **US-03-1023**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to no entropy debit (unlimited output). <!-- GRND_INSECURE --> so that this capability is implemented with clear verification evidence.
+- **US-03-1024**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to shared Implementation: so that this capability is implemented with clear verification evidence.
+- **US-03-1025**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to device major/minor number allocation. <!-- implicit --> so that this capability is implemented with clear verification evidence.
+- **US-03-1026**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to struct file_operations registration. <!-- fs_node_t callbacks --> so that this capability is implemented with clear verification evidence.
+- **US-03-1027**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to character device creation. <!-- devfs_register_device --> so that this capability is implemented with clear verification evidence.
+- **US-03-1028**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to permissions check (world-readable). <!-- inherits from devfs --> so that this capability is implemented with clear verification evidence.
+- **US-03-1029**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to getrandom() Syscall: so that this capability is implemented with clear verification evidence.
+- **US-03-1030**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement sys_getrandom(buf, len, flags) so that this capability is implemented with clear verification evidence.
+- **US-03-1031**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to gRND_RANDOM flag (use blocking pool) so that this capability is implemented with clear verification evidence.
+- **US-03-1032**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to gRND_NONBLOCK flag (return EAGAIN if not seeded) so that this capability is implemented with clear verification evidence.
+- **US-03-1033**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to gRND_INSECURE flag (return data even if not seeded) so that this capability is implemented with clear verification evidence.
+- **US-03-1034**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to personality support (native, Linux, FreeBSD) so that this capability is implemented with clear verification evidence.
+- **US-03-1035**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to register syscall number in all personality tables so that this capability is implemented with clear verification evidence.
+- **US-03-1036**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kernel Internal API: so that this capability is implemented with clear verification evidence.
+- **US-03-1037**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement get_random_bytes(buf, len) (kernel consumers) so that this capability is implemented with clear verification evidence.
+- **US-03-1038**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement get_random_u32(), get_random_u64() so that this capability is implemented with clear verification evidence.
+- **US-03-1039**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement get_random_bytes_wait(buf, len) (blocking) so that this capability is implemented with clear verification evidence.
+- **US-03-1040**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to early boot fallback (before seeded) so that this capability is implemented with clear verification evidence.
+- **US-03-1041**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iOCTLs & Administrative Interface: so that this capability is implemented with clear verification evidence.
+- **US-03-1042**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to iOCTL Commands: so that this capability is implemented with clear verification evidence.
+- **US-03-1043**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rNDGETENTCNT: Return entropy estimate (bits) so that this capability is implemented with clear verification evidence.
+- **US-03-1044**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rNDADDTOENTCNT: Add to entropy count (privileged) so that this capability is implemented with clear verification evidence.
+- **US-03-1045**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rNDADDENTROPY: Add entropy data + credit (privileged) so that this capability is implemented with clear verification evidence.
+- **US-03-1046**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rNDZAPENTCNT: Zero entropy count (privileged) so that this capability is implemented with clear verification evidence.
+- **US-03-1047**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rNDCLEARPOOL: Clear entropy pool (privileged) so that this capability is implemented with clear verification evidence.
+- **US-03-1048**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to rNDRESEEDCRNG: Force CSPRNG reseed (privileged) so that this capability is implemented with clear verification evidence.
+- **US-03-1049**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implementation: so that this capability is implemented with clear verification evidence.
+- **US-03-1050**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_dev_ioctl() dispatcher so that this capability is implemented with clear verification evidence.
+- **US-03-1051**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to privilege checks (CAP_SYS_ADMIN or root) so that this capability is implemented with clear verification evidence.
+- **US-03-1052**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to input validation for user-provided entropy so that this capability is implemented with clear verification evidence.
+- **US-03-1053**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to copyin/copyout for userspace buffers so that this capability is implemented with clear verification evidence.
+- **US-03-1054**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to sysctl Interface (Optional): so that this capability is implemented with clear verification evidence.
+- **US-03-1055**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kern.random.entropy_avail (read-only) so that this capability is implemented with clear verification evidence.
+- **US-03-1056**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kern.random.poolsize (read-only) so that this capability is implemented with clear verification evidence.
+- **US-03-1057**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kern.random.uuid (read-only, per-read UUID) so that this capability is implemented with clear verification evidence.
+- **US-03-1058**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kern.random.boot_id (read-only, boot UUID) so that this capability is implemented with clear verification evidence.
+- **US-03-1059**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to security & Correctness: so that this capability is implemented with clear verification evidence.
+- **US-03-1060**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fork Safety: so that this capability is implemented with clear verification evidence.
+- **US-03-1061**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to implement random_reseed_on_fork() hook so that this capability is implemented with clear verification evidence.
+- **US-03-1062**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to call from proc_fork() after child creation so that this capability is implemented with clear verification evidence.
+- **US-03-1063**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mix PID, timestamp into child's CSPRNG state so that this capability is implemented with clear verification evidence.
+- **US-03-1064**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ensure parent and child diverge immediately so that this capability is implemented with clear verification evidence.
+- **US-03-1065**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wipe any copied CSPRNG buffer in child so that this capability is implemented with clear verification evidence.
+- **US-03-1066**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to exec Safety: so that this capability is implemented with clear verification evidence.
+- **US-03-1067**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wipe userspace-visible RNG state on execve so that this capability is implemented with clear verification evidence.
+- **US-03-1068**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to reset any per-process CSPRNG state so that this capability is implemented with clear verification evidence.
+- **US-03-1069**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ensure no entropy leakage across exec boundary so that this capability is implemented with clear verification evidence.
+- **US-03-1070**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to memory Protection: so that this capability is implemented with clear verification evidence.
+- **US-03-1071**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to use explicit_bzero() for sensitive state clearing so that this capability is implemented with clear verification evidence.
+- **US-03-1072**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mark CSPRNG state pages non-swappable so that this capability is implemented with clear verification evidence.
+- **US-03-1073**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to clear key material immediately after rekey so that this capability is implemented with clear verification evidence.
+- **US-03-1074**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to avoid leaving entropy in temporary buffers so that this capability is implemented with clear verification evidence.
+- **US-03-1075**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to backtracking Resistance: so that this capability is implemented with clear verification evidence.
+- **US-03-1076**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fast-key-erasure design (rekey after extraction) so that this capability is implemented with clear verification evidence.
+- **US-03-1077**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to cannot recover previous output given current state so that this capability is implemented with clear verification evidence.
+- **US-03-1078**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to wipe intermediate state after each operation so that this capability is implemented with clear verification evidence.
+- **US-03-1079**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to prediction Resistance: so that this capability is implemented with clear verification evidence.
+- **US-03-1080**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to periodic reseed from entropy pool so that this capability is implemented with clear verification evidence.
+- **US-03-1081**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mix in fresh entropy continuously so that this capability is implemented with clear verification evidence.
+- **US-03-1082**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hWRNG XOR for defense-in-depth so that this capability is implemented with clear verification evidence.
+- **US-03-1083**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to audit & Logging: so that this capability is implemented with clear verification evidence.
+- **US-03-1084**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to log first seed event so that this capability is implemented with clear verification evidence.
+- **US-03-1085**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to log reseed events (rate-limited) so that this capability is implemented with clear verification evidence.
+- **US-03-1086**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to log HWRNG initialization status so that this capability is implemented with clear verification evidence.
+- **US-03-1087**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to log warnings for uninitialized reads so that this capability is implemented with clear verification evidence.
+- **US-03-1088**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to boot-time Entropy & Seed File: so that this capability is implemented with clear verification evidence.
+- **US-03-1089**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to early Boot Entropy: so that this capability is implemented with clear verification evidence.
+- **US-03-1090**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to collect BIOS/firmware timestamps so that this capability is implemented with clear verification evidence.
+- **US-03-1091**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to collect Multiboot structure addresses so that this capability is implemented with clear verification evidence.
+- **US-03-1092**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to collect memory map contents so that this capability is implemented with clear verification evidence.
+- **US-03-1093**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to collect interrupt timing during init so that this capability is implemented with clear verification evidence.
+- **US-03-1094**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to seed File Support: so that this capability is implemented with clear verification evidence.
+- **US-03-1095**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to read seed file from root filesystem on mount so that this capability is implemented with clear verification evidence.
+- **US-03-1096**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to expected path: /var/db/entropy/seed so that this capability is implemented with clear verification evidence.
+- **US-03-1097**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to seed file format: raw 256 bytes minimum so that this capability is implemented with clear verification evidence.
+- **US-03-1098**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to mix seed file into entropy pool so that this capability is implemented with clear verification evidence.
+- **US-03-1099**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to immediately overwrite seed file with fresh randomness so that this capability is implemented with clear verification evidence.
+- **US-03-1100**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to shutdown Handling: so that this capability is implemented with clear verification evidence.
+- **US-03-1101**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to write fresh seed file on clean shutdown so that this capability is implemented with clear verification evidence.
+- **US-03-1102**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to ensure seed file written before unmount so that this capability is implemented with clear verification evidence.
+- **US-03-1103**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to atomic write (write temp, rename) so that this capability is implemented with clear verification evidence.
+- **US-03-1104**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to performance Optimization: so that this capability is implemented with clear verification evidence.
+- **US-03-1105**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to fast Path: so that this capability is implemented with clear verification evidence.
+- **US-03-1106**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to per-CPU CSPRNG state (avoid lock contention) so that this capability is implemented with clear verification evidence.
+- **US-03-1107**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to batch output generation (64-byte blocks) so that this capability is implemented with clear verification evidence.
+- **US-03-1108**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to minimize lock hold time so that this capability is implemented with clear verification evidence.
+- **US-03-1109**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to lockless entropy harvesting counters so that this capability is implemented with clear verification evidence.
+- **US-03-1110**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to benchmarking: so that this capability is implemented with clear verification evidence.
+- **US-03-1111**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to create sys/tests/bench_rng.c for throughput so that this capability is implemented with clear verification evidence.
+- **US-03-1112**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to measure get_random_bytes() MB/s so that this capability is implemented with clear verification evidence.
+- **US-03-1113**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to measure read(/dev/urandom) MB/s so that this capability is implemented with clear verification evidence.
+- **US-03-1114**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to measure entropy harvesting overhead so that this capability is implemented with clear verification evidence.
+- **US-03-1115**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to profile lock contention under load so that this capability is implemented with clear verification evidence.
+- **US-03-1116**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to optimization Targets: so that this capability is implemented with clear verification evidence.
+- **US-03-1117**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to target: >100 MB/s for /dev/urandom so that this capability is implemented with clear verification evidence.
+- **US-03-1118**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to target: <1μs for get_random_u32() so that this capability is implemented with clear verification evidence.
+- **US-03-1119**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to target: <100ns for random_harvest_fast() so that this capability is implemented with clear verification evidence.
+- **US-03-1120**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-03-1121**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to unit Tests: so that this capability is implemented with clear verification evidence.
+- **US-03-1122**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to test_chacha20.c: RFC 7539 test vectors so that this capability is implemented with clear verification evidence.
+- **US-03-1123**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to test_entropy_pool.c: Mixing function correctness so that this capability is implemented with clear verification evidence.
+- **US-03-1124**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to test_rng_seeding.c: Reseed logic validation so that this capability is implemented with clear verification evidence.
+- **US-03-1125**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to test_rng_fork.c: Parent/child output divergence so that this capability is implemented with clear verification evidence.
+- **US-03-1126**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to test_rng_exec.c: State wipe on exec so that this capability is implemented with clear verification evidence.
+- **US-03-1127**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to test_getrandom.c: Syscall interface validation so that this capability is implemented with clear verification evidence.
+- **US-03-1128**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to statistical Tests: so that this capability is implemented with clear verification evidence.
+- **US-03-1129**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to dieharder test suite integration so that this capability is implemented with clear verification evidence.
+- **US-03-1130**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to nIST SP 800-22 test suite so that this capability is implemented with clear verification evidence.
+- **US-03-1131**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to testU01 BigCrush (optional) so that this capability is implemented with clear verification evidence.
+- **US-03-1132**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to minimum: Frequency, runs, and chi-square tests so that this capability is implemented with clear verification evidence.
+- **US-03-1133**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to integration Tests: so that this capability is implemented with clear verification evidence.
+- **US-03-1134**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to boot-to-seeded timing measurement so that this capability is implemented with clear verification evidence.
+- **US-03-1135**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to stress test under heavy read load so that this capability is implemented with clear verification evidence.
+- **US-03-1136**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to multi-process concurrent read test so that this capability is implemented with clear verification evidence.
+- **US-03-1137**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to hWRNG fallback path testing so that this capability is implemented with clear verification evidence.
+- **US-03-1138**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-03-1139**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to man Pages: so that this capability is implemented with clear verification evidence.
+- **US-03-1140**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to man4/random.4: Device interface documentation so that this capability is implemented with clear verification evidence.
+- **US-03-1141**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to man2/getrandom.2: Syscall documentation so that this capability is implemented with clear verification evidence.
+- **US-03-1142**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to document blocking vs non-blocking behavior so that this capability is implemented with clear verification evidence.
+- **US-03-1143**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to document entropy sources and estimation so that this capability is implemented with clear verification evidence.
+- **US-03-1144**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to document security properties and limitations so that this capability is implemented with clear verification evidence.
+- **US-03-1145**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to kernel Documentation: so that this capability is implemented with clear verification evidence.
+- **US-03-1146**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to architecture overview in doc/random.md so that this capability is implemented with clear verification evidence.
+- **US-03-1147**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to entropy source hookup guide so that this capability is implemented with clear verification evidence.
+- **US-03-1148**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to security model documentation so that this capability is implemented with clear verification evidence.
+- **US-03-1149**: As a Substrate contributor working on 3. Drivers (`sys/drivers`), I want to performance tuning guide so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-03-0001** (EARS/Ubiquitous): The Substrate system shall storage Subsystem (Unified SCSI Stack):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0002** (EARS/Ubiquitous): The Substrate system shall core Architecture (CAM/Mid-layer):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0003** (EARS/Ubiquitous): The Substrate system shall data Structures (scsi.h):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0004** (EARS/Ubiquitous): The Substrate system shall scsi_request_t: command execution context.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0005** (EARS/Ubiquitous): The Substrate system shall cDB storage (up to SCSI_MAX_CDB_LEN = 16 bytes).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0006** (EARS/Ubiquitous): The Substrate system shall cdb_len: actual CDB length (6, 10, 12, or 16).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0007** (EARS/Ubiquitous): The Substrate system shall data/data_len: DMA buffer pointer and transfer length.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0008** (EARS/Ubiquitous): The Substrate system shall flags: direction (SCSI_REQ_READ, SCSI_REQ_WRITE), and options.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0009** (EARS/Ubiquitous): The Substrate system shall status: SCSI status byte (GOOD, CHECK CONDITION, BUSY, etc.).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0010** (EARS/Ubiquitous): The Substrate system shall sense_data[SCSI_SENSE_LEN]: auto-sense buffer (32 bytes).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0011** (EARS/Ubiquitous): The Substrate system shall sense_len: actual sense data returned.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0012** (EARS/Ubiquitous): The Substrate system shall timeout_ms: per-command timeout.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0013** (EARS/Ubiquitous): The Substrate system shall retries / max_retries: retry counters (default 3, media error = 0).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0014** (EARS/Ubiquitous): The Substrate system shall callback: async completion function pointer.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0015** (EARS/Ubiquitous): The Substrate system shall submit_time / start_time / elapsed_ms: timing instrumentation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0016** (EARS/Ubiquitous): The Substrate system shall queue linkage (next pointer).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0017** (EARS/Ubiquitous): The Substrate system shall scsi_device_t: target representation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0018** (EARS/Ubiquitous): The Substrate system shall addressing: bus, target (0-15), lun (0-255).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0019** (EARS/Ubiquitous): The Substrate system shall identity from INQUIRY: vendor[9], product[17], revision[5], serial[21].
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0020** (EARS/Ubiquitous): The Substrate system shall type: peripheral device type (disk=0x00, tape=0x01, cdrom=0x05, etc.).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0021** (EARS/Ubiquitous): The Substrate system shall removable: RMB bit from INQUIRY.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0022** (EARS/Ubiquitous): The Substrate system shall scsi_version: SPC version from INQUIRY.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0023** (EARS/Ubiquitous): The Substrate system shall capacity: total sectors (from READ CAPACITY).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0024** (EARS/Ubiquitous): The Substrate system shall sector_size: bytes/sector (512 for disk, 2048 for CD-ROM).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0025** (EARS/Ubiquitous): The Substrate system shall flags: online/offline, write-protected, supports TCQ.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0026** (EARS/Ubiquitous): The Substrate system shall command queue: queue_head/queue_tail, queue_depth, max_queue_depth.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0027** (EARS/Ubiquitous): The Substrate system shall link: back-pointer to transport interface.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0028** (EARS/Ubiquitous): The Substrate system shall registry linkage (next pointer).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0029** (EARS/Ubiquitous): The Substrate system shall scsi_link_t: transport adapter interface.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0030** (EARS/Ubiquitous): The Substrate system shall name[32]: adapter name (e.g., "atapi0", "virtio-scsi0").
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0031** (EARS/Ubiquitous): The Substrate system shall execute(link, request): function pointer - transport-specific command dispatch.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0032** (EARS/Ubiquitous): The Substrate system shall max_targets / max_luns: bus topology limits.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0033** (EARS/Ubiquitous): The Substrate system shall adapter_queue_depth: HBA-level parallelism.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0034** (EARS/Ubiquitous): The Substrate system shall flags: DMA-capable, supports tagged queueing, ordered tags.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0035** (EARS/Ubiquitous): The Substrate system shall statistics: cmds_completed, cmds_failed, bytes_read, bytes_written.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0036** (EARS/Ubiquitous): The Substrate system shall scsi_sense_fixed: SPC-3 fixed-format sense data (36 bytes).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0037** (EARS/Ubiquitous): The Substrate system shall response_code (0x70 current, 0x71 deferred).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0038** (EARS/Ubiquitous): The Substrate system shall sense_key (bits 0-3), ILI (bit 5), EOM (bit 6), FileMark (bit 7).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0039** (EARS/Ubiquitous): The Substrate system shall info[4]: command-specific information.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0040** (EARS/Ubiquitous): The Substrate system shall asc / ascq: Additional Sense Code / Qualifier.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0041** (EARS/Ubiquitous): The Substrate system shall scsi_inquiry_data: standard INQUIRY response (36+ bytes).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0042** (EARS/Ubiquitous): The Substrate system shall device_type (bits 0-4), qualifier (bits 5-7).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0043** (EARS/Ubiquitous): The Substrate system shall rmb (bit 7), version, response_format.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0044** (EARS/Ubiquitous): The Substrate system shall additional_length, flags (CmdQue, etc.).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0045** (EARS/Ubiquitous): The Substrate system shall vendor/Product/Revision strings (space-padded).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0046** (EARS/Ubiquitous): The Substrate system shall scsi_report_luns_data: REPORT LUNS response (up to 64 LUNs).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0047** (EARS/Ubiquitous): The Substrate system shall initialization (scsi_init):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0048** (EARS/Ubiquitous): The Substrate system shall initialize device registry (pre-allocate pool of scsi_device_t, 64 max).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0049** (EARS/Ubiquitous): The Substrate system shall initialize request pool (pre-allocate scsi_request_t, 128 max).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0050** (EARS/Ubiquitous): The Substrate system shall initialize free lists for both pools.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0051** (EARS/Ubiquitous): The Substrate system shall call scsi_dev_init() and scsi_ctl_init().
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0052** (EARS/Ubiquitous): The Substrate system shall transport Registration:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0053** (EARS/Ubiquitous): The Substrate system shall scsi_register_link(link): register HBA/transport adapter.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0054** (EARS/Ubiquitous): The Substrate system shall validate execute callback is non-NULL.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0055** (EARS/Ubiquitous): The Substrate system shall add to global link list (max 8 links).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0056** (EARS/Ubiquitous): The Substrate system shall trigger bus scan on the new link.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0057** (EARS/Ubiquitous): The Substrate system shall scsi_unregister_link(link): unregister adapter.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0058** (EARS/Ubiquitous): The Substrate system shall detach all devices on this link.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0059** (EARS/Ubiquitous): The Substrate system shall free associated resources.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0060** (EARS/Ubiquitous): The Substrate system shall device Discovery:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0061** (EARS/Ubiquitous): The Substrate system shall scsi_scan_bus(link, bus): enumerate all targets on a bus.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0062** (EARS/Ubiquitous): The Substrate system shall iterate target IDs 0..link->max_targets - 1.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0063** (EARS/Ubiquitous): The Substrate system shall for each target: INQUIRY at LUN 0, then REPORT LUNS for multi-LUN.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0064** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall fallback: sequential LUN probing if REPORT LUNS fails (old devices).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0065** (EARS/Ubiquitous): The Substrate system shall scsi_probe_lun(link, bus, target, lun): probe a single LUN.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0066** (EARS/Ubiquitous): The Substrate system shall send TEST UNIT READY.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0067** (EARS/Ubiquitous): The Substrate system shall send INQUIRY; parse device type, vendor, product, revision.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0068** (EARS/Ubiquitous): When device type is valid: scsi_device_register(), the Substrate system shall satisfy the specified behavior.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0069** (EARS/Ubiquitous): The Substrate system shall send READ CAPACITY (10 or 16) for block devices.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0070** (EARS/Ubiquitous): The Substrate system shall trigger scsi_auto_attach() on success.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0071** (EARS/Ubiquitous): The Substrate system shall scsi_device_register(dev): add to global device list.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0072** (EARS/Ubiquitous): The Substrate system shall check for duplicate (same bus:target:lun).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0073** (EARS/Ubiquitous): The Substrate system shall assign monotonically increasing device number.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0074** (EARS/Ubiquitous): The Substrate system shall log discovery: "scsi: B:T:L vendor product [type]".
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0075** (EARS/Ubiquitous): The Substrate system shall scsi_device_unregister(dev): remove from list.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0076** (EARS/Ubiquitous): The Substrate system shall scsi_device_lookup(bus, target, lun): find registered device.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0077** (EARS/Ubiquitous): The Substrate system shall command Execution:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0078** (EARS/Ubiquitous): The Substrate system shall request Lifecycle:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0079** (EARS/Ubiquitous): The Substrate system shall scsi_request_alloc(): allocate from pool (or return NULL if exhausted).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0080** (EARS/Ubiquitous): The Substrate system shall scsi_request_init(req, dev): zero fields, link to device, set default timeout (30s) and retries (3).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0081** (EARS/Ubiquitous): The Substrate system shall scsi_request_free(req): return to free pool.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0082** (EARS/Ubiquitous): The Substrate system shall synchronous Execution:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0083** (EARS/Ubiquitous): The Substrate system shall scsi_execute_sync(dev, cdb, cdb_len, data, data_len, flags, timeout_ms):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0084** (EARS/Ubiquitous): The Substrate system shall allocate request, fill CDB/buffer, call scsi_execute(), block until complete, return status.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0085** (EARS/Ubiquitous): The Substrate system shall core Execution (scsi_execute):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0086** (EARS/Ubiquitous): The Substrate system shall record submit_time timestamp.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0087** (EARS/Ubiquitous): The Substrate system shall retry loop: attempt up to max_retries + 1 times.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0088** (EARS/Ubiquitous): The Substrate system shall call link->execute(link, req) to dispatch to transport.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0089** (EARS/Ubiquitous): The Substrate system shall record start_time, measure elapsed_ms.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0090** (EARS/Ubiquitous): When CHECK CONDITION: auto-request sense, parse sense key, the Substrate system shall satisfy the specified behavior.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0091** (EARS/Ubiquitous): The Substrate system shall uNIT ATTENTION (sense key 6): retry automatically (medium changed).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0092** (EARS/Ubiquitous): The Substrate system shall nOT READY (sense key 2): retry with delay (device spinning up).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0093** (EARS/Ubiquitous): The Substrate system shall mEDIUM ERROR (sense key 3): no retry (data loss).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0094** (EARS/Ubiquitous): The Substrate system shall aBORTED COMMAND (sense key 0xB): retry.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0095** (EARS/Ubiquitous): When BUSY / TASK SET FULL: backoff and retry, the Substrate system shall satisfy the specified behavior.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0096** (EARS/Ubiquitous): The Substrate system shall update link statistics on completion.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0097** (EARS/Ubiquitous): The Substrate system shall async Queue Management:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0098** (EARS/Ubiquitous): The Substrate system shall scsi_queue_request(req): enqueue to device's command queue.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0099** (EARS/Ubiquitous): The Substrate system shall respect max_queue_depth (drop or backpressure).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0100** (EARS/Ubiquitous): The Substrate system shall scsi_process_queue(dev): dequeue and execute pending requests.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0101** (EARS/Ubiquitous): The Substrate system shall scsi_abort_request(req): cancel pending request (remove from queue, invoke callback with error).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0102** (EARS/Ubiquitous): The Substrate system shall scsi_complete_request(req, status): mark done, invoke callback, trigger queue processing.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0103** (EARS/Ubiquitous): The Substrate system shall sense Data Parsing:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0104** (EARS/Ubiquitous): The Substrate system shall scsi_sense_key(sense, len): extract sense key from fixed or descriptor format.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0105** (EARS/Ubiquitous): The Substrate system shall scsi_sense_asc(sense, len): extract ASC (Additional Sense Code).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0106** (EARS/Ubiquitous): The Substrate system shall scsi_sense_ascq(sense, len): extract ASCQ (Additional Sense Code Qualifier).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0107** (EARS/Ubiquitous): The Substrate system shall scsi_sense_string(sense, len, buf, buflen): human-readable sense string.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0108** (EARS/Ubiquitous): The Substrate system shall sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0109** (EARS/Ubiquitous): The Substrate system shall common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0110** (EARS/Ubiquitous): The Substrate system shall cDB Builders:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0111** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_test_unit_ready(cdb): 6-byte TUR.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0112** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_inquiry(cdb, len): 6-byte INQUIRY with allocation length.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0113** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_request_sense(cdb, len): 6-byte REQUEST SENSE.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0114** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_read_capacity_10(cdb): 10-byte READ CAPACITY.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0115** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_read_10(cdb, lba, count): 10-byte READ.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0116** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_write_10(cdb, lba, count): 10-byte WRITE.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0117** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_read_16(cdb, lba, count): 16-byte READ (LBA > 2TB).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0118** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_write_16(cdb, lba, count): 16-byte WRITE (LBA > 2TB).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0119** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_mode_sense_6(cdb, page, len) / scsi_cdb_mode_sense_10(cdb, page, len).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0120** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_start_stop(cdb, start, load_eject): START STOP UNIT.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0121** (EARS/Ubiquitous): The Substrate system shall scsi_cdb_sync_cache(cdb, lba, count): SYNCHRONIZE CACHE (10).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0122** (EARS/Ubiquitous): The Substrate system shall byte-order helpers: scsi_be16(), scsi_be32(), scsi_put_be16(), scsi_put_be32().
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0123** (EARS/Ubiquitous): The Substrate system shall standard Command Wrappers:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0124** (EARS/Ubiquitous): The Substrate system shall scsi_test_unit_ready(dev): send TUR, return 0 on GOOD.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0125** (EARS/Ubiquitous): The Substrate system shall scsi_inquiry(dev, inq): send INQUIRY, fill scsi_inquiry_data.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0126** (EARS/Ubiquitous): The Substrate system shall scsi_read_capacity(dev, sectors, sector_size): READ CAPACITY (10 or 16), fill output.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0127** (EARS/Ubiquitous): The Substrate system shall scsi_request_sense(dev, sense, len): explicit REQUEST SENSE.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0128** (EARS/Ubiquitous): The Substrate system shall scsi_start_stop(dev, start, load_eject): START STOP UNIT.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0129** (EARS/Ubiquitous): The Substrate system shall scsi_report_luns(dev, luns): REPORT LUNS, parse big-endian LUN list.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0130** (EARS/Ubiquitous): The Substrate system shall scsi_synchronize_cache(dev): SYNCHRONIZE CACHE (write-back).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0131** (EARS/Ubiquitous): The Substrate system shall scsi_mode_sense(dev, page, buffer, len): MODE SENSE (for caching, geometry pages).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0132** (EARS/Ubiquitous): The Substrate system shall high-Level Device Driver (scsi_dev.c):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0133** (EARS/Ubiquitous): The Substrate system shall block Device Callbacks:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0134** (EARS/Ubiquitous): The Substrate system shall scsi_blk_read(blkdev, sector, count, buffer): build READ(10) CDB, execute sync, return sector count or -1.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0135** (EARS/Ubiquitous): The Substrate system shall scsi_blk_write(blkdev, sector, count, buffer): build WRITE(10) CDB, execute sync; reject writes to CD-ROM.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0136** (EARS/Ubiquitous): The Substrate system shall handle sector size translation (512 vs 2048 for CD-ROM).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0137** (EARS/Ubiquitous): The Substrate system shall support READ(16)/WRITE(16) for devices with capacity > 2TB.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0138** (EARS/Ubiquitous): The Substrate system shall device Type Handling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0139** (EARS/Ubiquitous): The Substrate system shall direct Access (Type 0x00 - Disk):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0140** (EARS/Ubiquitous): The Substrate system shall rEAD CAPACITY for sector count and size.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0141** (EARS/Ubiquitous): The Substrate system shall cache flush via SYNCHRONIZE CACHE on unmount/shutdown.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0142** (EARS/Ubiquitous): The Substrate system shall device name: scsiN (sequential numbering).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0143** (EARS/Ubiquitous): The Substrate system shall cD-ROM / DVD (Type 0x05 - ROM):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0144** (EARS/Ubiquitous): The Substrate system shall scsi_read_toc(dev, buffer, buflen): READ TOC/PMA/ATIP (CDB 0x43).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0145** (EARS/Ubiquitous): The Substrate system shall scsi_lock_door(dev, lock): PREVENT/ALLOW MEDIUM REMOVAL (CDB 0x1E).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0146** (EARS/Ubiquitous): The Substrate system shall sector size: 2048 bytes (data CD standard).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0147** (EARS/Ubiquitous): The Substrate system shall handle UNIT ATTENTION on media change: re-read capacity.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0148** (EARS/Ubiquitous): The Substrate system shall wORM / Optical (Types 0x04, 0x07):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0149** (EARS/Ubiquitous): The Substrate system shall same as disk but write-once semantics; reject overwrites.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0150** (EARS/Ubiquitous): The Substrate system shall sequential Access (Type 0x01 - Tape) - deferred.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0151** (EARS/Ubiquitous): The Substrate system shall attach / Detach:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0152** (EARS/Ubiquitous): The Substrate system shall scsi_dev_attach(scsi_dev): create scsi_blk_dev_t, register block device.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0153** (EARS/Ubiquitous): The Substrate system shall only attach block-capable types (disk, cdrom, optical, worm).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0154** (EARS/Ubiquitous): The Substrate system shall set sector size based on device type.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0155** (EARS/Ubiquitous): The Substrate system shall log: "scsi: attached scsiN (type) [vendor product]".
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0156** (EARS/Ubiquitous): The Substrate system shall scsi_dev_detach(scsi_dev): unregister block device, remove from list.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0157** (EARS/Ubiquitous): The Substrate system shall scsi_dev_lookup(name): find block device by name (e.g., "scsi0").
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0158** (EARS/Ubiquitous): The Substrate system shall scsi_dev_init(): initialize unified device subsystem.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0159** (EARS/Ubiquitous): The Substrate system shall scsi_auto_attach(dev): called on discovery - create generic node + block device.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0160** (EARS/Ubiquitous): The Substrate system shall controller Interface (scsi_ctl.c):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0161** (EARS/Ubiquitous): The Substrate system shall device Node Hierarchy:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0162** (EARS/Ubiquitous): The Substrate system shall /dev/storage/scsi/B:T:L (e.g., 0:0:0): generic SCSI pass-through node.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0163** (EARS/Ubiquitous): The Substrate system shall scsi_create_generic_node(dev): create DevFS entry.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0164** (EARS/Ubiquitous): The Substrate system shall sg_ioctl(node, request, arg): ioctl handler for generic nodes.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0165** (EARS/Ubiquitous): The Substrate system shall /dev/storage/scsi/B (e.g., 0): bus controller endpoint.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0166** (EARS/Ubiquitous): The Substrate system shall scsi_create_bus_node(link, bus_id): create DevFS entry.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0167** (EARS/Ubiquitous): The Substrate system shall bus_ioctl(node, request, arg): ioctl handler for bus operations.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0168** (EARS/Ubiquitous): The Substrate system shall /dev/storage/scsiN (e.g., scsi0): high-level block device alias.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0169** (EARS/Ubiquitous): The Substrate system shall ioctl Operations:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0170** (EARS/Ubiquitous): The Substrate system shall sCSI_IOCTL_SCAN (0x5301): trigger bus rescan.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0171** (EARS/Ubiquitous): The Substrate system shall sCSI_IOCTL_GET_INFO (0x5302): return scsi_ioctl_info_t (bus, target, lun, type, vendor, product, capacity).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0172** (EARS/Ubiquitous): The Substrate system shall sCSI_IOCTL_GET_IDLUN (0x5303): return packed bus:target:lun.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0173** (EARS/Ubiquitous): The Substrate system shall sCSI_IOCTL_GET_COUNT (0x5304): return device count on bus.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0174** (EARS/Ubiquitous): The Substrate system shall sCSI_IOCTL_SEND_CMD (0x5305): pass-through raw SCSI CDB with data buffer.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0175** (EARS/Ubiquitous): The Substrate system shall copy CDB from userspace, validate length.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0176** (EARS/Ubiquitous): The Substrate system shall execute via scsi_execute_sync(), copy results back.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0177** (EARS/Ubiquitous): The Substrate system shall require appropriate privilege (root or CAP_SYS_RAWIO).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0178** (EARS/Ubiquitous): The Substrate system shall transport/HBA Drivers (Low-Level):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0179** (EARS/Ubiquitous): The Substrate system shall aTAPI Transport (atapi_scsi.c, atapi_scsi.h):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0180** (EARS/Ubiquitous): The Substrate system shall atapi_link: scsi_link_t instance for ATA secondary (ATAPI) devices.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0181** (EARS/Ubiquitous): The Substrate system shall atapi_execute(link, req): translate scsi_request_t to ATA PACKET command.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0182** (EARS/Ubiquitous): The Substrate system shall select drive (master/slave) via device register.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0183** (EARS/Ubiquitous): The Substrate system shall write PACKET command (0xA0) to command register.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0184** (EARS/Ubiquitous): The Substrate system shall wait for DRQ, then PIO-out the CDB (12 or 16 bytes, padded to 12).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0185** (EARS/Ubiquitous): The Substrate system shall wait for DRQ for data phase; PIO-in/out data buffer.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0186** (EARS/Ubiquitous): The Substrate system shall read status register for errors; auto-request sense on CHECK CONDITION.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0187** (EARS/Ubiquitous): The Substrate system shall atapi_init(): register link, set max_targets=2 (master/slave per channel).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0188** (EARS/Ubiquitous): The Substrate system shall support: primary + secondary IDE channels (4 possible ATAPI devices).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0189** (EARS/Ubiquitous): The Substrate system shall support: tertiary + quaternary channels (if IDE driver supports them).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0190** (EARS/Ubiquitous): The Substrate system shall uSB Mass Storage (deferred):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0191** (EARS/Ubiquitous): The Substrate system shall bulk-Only Transport (BOT):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0192** (EARS/Ubiquitous): The Substrate system shall build Command Block Wrapper (CBW): 31-byte header with signature (0x43425355), tag, transfer length, flags, LUN, CDB.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0193** (EARS/Ubiquitous): The Substrate system shall send CBW via Bulk-OUT endpoint.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0194** (EARS/Ubiquitous): The Substrate system shall transfer data via Bulk-IN (read) or Bulk-OUT (write) endpoint.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0195** (EARS/Ubiquitous): The Substrate system shall receive Command Status Wrapper (CSW): 13-byte response with signature (0x53425355), tag, residue, status.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0196** (EARS/Ubiquitous): The Substrate system shall cSW status: 0=passed, 1=failed (issue REQUEST SENSE), 2=phase error (reset recovery).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0197** (EARS/Ubiquitous): The Substrate system shall reset Recovery:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0198** (EARS/Ubiquitous): The Substrate system shall bulk-Only Mass Storage Reset (class-specific request 0xFF).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0199** (EARS/Ubiquitous): The Substrate system shall clear HALT on Bulk-IN and Bulk-OUT endpoints.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0200** (EARS/Ubiquitous): The Substrate system shall integration:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0201** (EARS/Ubiquitous): The Substrate system shall register scsi_link_t per USB device (bridge to SCSI mid-layer).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0202** (EARS/Ubiquitous): The Substrate system shall set max_targets=1, max_luns from GET MAX LUN request.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0203** (EARS/Ubiquitous): The Substrate system shall handle device disconnect: unregister link, detach all devices.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0204** (EARS/Ubiquitous): The Substrate system shall virtIO-SCSI (virtio_scsi.c):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0205** (EARS/Ubiquitous): The Substrate system shall vscsi_execute(link, req): map scsi_request_t to virtio request descriptor.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0206** (EARS/Ubiquitous): The Substrate system shall build request header: LUN (8-byte SAM encoding), tag, task attributes, CDB.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0207** (EARS/Ubiquitous): The Substrate system shall attach data buffers as scatter-gather (device-readable for writes, device-writable for reads).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0208** (EARS/Ubiquitous): The Substrate system shall attach response buffer (sense data, residual, status).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0209** (EARS/Ubiquitous): The Substrate system shall submit to request virtqueue; wait for used buffer notification.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0210** (EARS/Ubiquitous): The Substrate system shall vscsi_setup_event_buffers(): pre-populate event virtqueue.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0211** (EARS/Ubiquitous): The Substrate system shall vscsi_process_events(): handle hotplug add/remove, transport reset, parameter change events.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0212** (EARS/Ubiquitous): The Substrate system shall control virtqueue: INQUIRY, REPORT LUNS, task management via control queue.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0213** (EARS/Ubiquitous): The Substrate system shall multi-queue support: one request virtqueue per vCPU (if negotiated).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0214** (EARS/Ubiquitous): The Substrate system shall iSCSI (deferred):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0215** (EARS/Ubiquitous): The Substrate system shall tCP-based SCSI transport.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0216** (EARS/Ubiquitous): The Substrate system shall login, discovery, full-feature phase.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0217** (EARS/Ubiquitous): The Substrate system shall pDU framing, session management.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0218** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0219** (EARS/Ubiquitous): The Substrate system shall unit Tests:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0220** (EARS/Ubiquitous): The Substrate system shall cDB builder correctness: verify byte layout for READ(10), WRITE(10), INQUIRY, READ CAPACITY.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0221** (EARS/Ubiquitous): The Substrate system shall sense data parsing: fixed format with all 16 sense keys.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0222** (EARS/Ubiquitous): The Substrate system shall sense data parsing: common ASC/ASCQ pairs.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0223** (EARS/Ubiquitous): The Substrate system shall device registry: register, lookup, unregister, duplicate detection.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0224** (EARS/Ubiquitous): The Substrate system shall request allocation: pool exhaustion, free and reuse.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0225** (EARS/Ubiquitous): The Substrate system shall byte-order helpers: scsi_be16(), scsi_be32(), scsi_put_be16(), scsi_put_be32().
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0226** (EARS/Ubiquitous): The Substrate system shall property Tests:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0227** (EARS/Ubiquitous): The Substrate system shall all CDB builders produce valid length CDBs (6/10/12/16).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0228** (EARS/Ubiquitous): The Substrate system shall request pool invariant: allocated + free = total pool size.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0229** (EARS/Ubiquitous): The Substrate system shall device list: no duplicates (unique bus:target:lun).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0230** (EARS/Ubiquitous): The Substrate system shall integration Tests:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0231** (EARS/Ubiquitous): The Substrate system shall virtIO-SCSI disk: boot QEMU with -device virtio-scsi-pci -device scsi-hd, verify discovery + read/write.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0232** (EARS/Ubiquitous): The Substrate system shall aTAPI CD-ROM: boot QEMU with -cdrom, verify READ CAPACITY + READ TOC + sector read.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0233** (EARS/Ubiquitous): The Substrate system shall bus rescan: add device to VirtIO-SCSI via hotplug, verify auto-attach.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0234** (EARS/Ubiquitous): The Substrate system shall generic passthrough: send INQUIRY via SCSI_IOCTL_SEND_CMD from userspace, verify response.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0235** (EARS/Ubiquitous): The Substrate system shall error path: simulate CHECK CONDITION, verify retry and sense reporting.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0236** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0237** (EARS/Ubiquitous): The Substrate system shall internal doc: SCSI mid-layer architecture (link/device/request lifecycle).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0238** (EARS/Ubiquitous): The Substrate system shall internal doc: transport driver interface (scsi_link_t.execute contract).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0239** (EARS/Ubiquitous): The Substrate system shall internal doc: CDB reference and sense key/ASC/ASCQ table.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0240** (EARS/Ubiquitous): The Substrate system shall internal doc: device node hierarchy and ioctl interface.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0241** (EARS/Ubiquitous): The Substrate system shall aTA/IDE (Legacy): <!-- ide.c, ide.h -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0242** (EARS/Ubiquitous): The Substrate system shall channel Architecture:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0243** (EARS/Ubiquitous): The Substrate system shall primary Channel: I/O 0x1F0, Control 0x3F6, IRQ 14.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0244** (EARS/Ubiquitous): The Substrate system shall secondary Channel: I/O 0x170, Control 0x376, IRQ 15.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0245** (EARS/Ubiquitous): The Substrate system shall tertiary Channel: I/O 0x1E8, Control 0x3EE, IRQ 11.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0246** (EARS/Ubiquitous): The Substrate system shall quaternary Channel: I/O 0x168, Control 0x36E, IRQ 10 (or 9).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0247** (EARS/Ubiquitous): The Substrate system shall expand ide_channel_t array from 2 to 4 entries.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0248** (EARS/Ubiquitous): The Substrate system shall expand ide_device_t array from 4 to 8 entries (2 per channel × 4 channels).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0249** (EARS/Ubiquitous): The Substrate system shall add ATA_TERTIARY_IO (0x1E8), ATA_TERTIARY_CTRL (0x3EE), ATA_QUATERNARY_IO (0x168), ATA_QUATERNARY_CTRL (0x36E) defines to ide.h.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0250** (EARS/Ubiquitous): The Substrate system shall probe all four channels during ide_init() - detect presence by reading status register (0xFF = empty bus).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0251** (EARS/Ubiquitous): The Substrate system shall support configurable channel I/O bases (for PCI IDE controllers with non-standard BARs).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0252** (EARS/Ubiquitous): The Substrate system shall pCI IDE Controller Discovery:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0253** (EARS/Ubiquitous): The Substrate system shall scan PCI class 0x01 subclass 0x01 (IDE Controller) for native/compatibility mode.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0254** (EARS/Ubiquitous): The Substrate system shall read PCI Programming Interface byte to determine:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0255** (EARS/Ubiquitous): The Substrate system shall for native-mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0256** (EARS/Ubiquitous): The Substrate system shall detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 - typically expose as separate PCI functions).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0257** (EARS/Ubiquitous): The Substrate system shall iSA tertiary/quaternary probing: if PCI does not enumerate additional channels, probe legacy I/O ports at 0x1E8 and 0x168 for device presence.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0258** (EARS/Ubiquitous): The Substrate system shall device Identification (ide_identify / ide_identify_atapi):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0259** (EARS/Ubiquitous): The Substrate system shall issue IDENTIFY DEVICE (0xEC) or IDENTIFY PACKET DEVICE (0xA1).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0260** (EARS/Ubiquitous): The Substrate system shall parse model, serial, firmware revision strings (byte-swap from ATA word format).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0261** (EARS/Ubiquitous): The Substrate system shall extract LBA28 sector count (words 60-61) and LBA48 sector count (words 100-103).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0262** (EARS/Ubiquitous): The Substrate system shall extract supported command sets: DMA, LBA48, SMART, NCQ, TRIM.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0263** (EARS/Ubiquitous): The Substrate system shall extract supported DMA modes: MWDMA (words 63), UDMA (word 88).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0264** (EARS/Ubiquitous): The Substrate system shall detect 48-bit addressing support (command set word 83 bit 10).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0265** (EARS/Ubiquitous): The Substrate system shall pIO Mode Transfers:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0266** (EARS/Ubiquitous): The Substrate system shall lBA28 Read/Write: ide_read_sectors() / ide_write_sectors() - 28-bit LBA, max 256 sectors.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0267** (EARS/Ubiquitous): The Substrate system shall lBA48 Read/Write: ide_read_sectors_ext() / ide_write_sectors_ext() - 48-bit LBA, max 65536 sectors.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0268** (EARS/Ubiquitous): The Substrate system shall wait-for-BSY / wait-for-DRQ polling loops with bounded timeout.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0269** (EARS/Ubiquitous): The Substrate system shall error detection: check ERR bit after command completion, decode error register.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0270** (EARS/Ubiquitous): The Substrate system shall 400 ns delay after writing command register (read alternate status 4 times).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0271** (EARS/Ubiquitous): The Substrate system shall dMA Transfers:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0272** (EARS/Ubiquitous): The Substrate system shall bus Master Register Access:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0273** (EARS/Ubiquitous): The Substrate system shall ide_bm_start(channel, write): set direction, start DMA.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0274** (EARS/Ubiquitous): The Substrate system shall ide_bm_stop(channel): clear start bit.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0275** (EARS/Ubiquitous): The Substrate system shall ide_bm_status(channel): read status (active, error, interrupt).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0276** (EARS/Ubiquitous): The Substrate system shall ide_bm_clear_interrupt(channel): write 1 to clear interrupt bit.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0277** (EARS/Ubiquitous): The Substrate system shall pRDT (Physical Region Descriptor Table) Setup:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0278** (EARS/Ubiquitous): The Substrate system shall ide_prdt_setup(channel, buffer, byte_count): build scatter-gather list.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0279** (EARS/Ubiquitous): The Substrate system shall each PRD entry: 4-byte aligned phys address + byte count + EOT flag.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0280** (EARS/Ubiquitous): The Substrate system shall pRDT must not cross 64 KB boundary.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0281** (EARS/Ubiquitous): The Substrate system shall max 32 PRD entries (128 KB transfer).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0282** (EARS/Ubiquitous): The Substrate system shall dMA Read/Write: ide_dma_read() / ide_dma_write() - issue DMA command, start bus master, wait for IRQ.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0283** (EARS/Ubiquitous): The Substrate system shall uDMA Mode Negotiation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0284** (EARS/Ubiquitous): The Substrate system shall read supported UDMA modes from IDENTIFY word 88.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0285** (EARS/Ubiquitous): The Substrate system shall issue SET FEATURES (0xEF) subcommand 0x03 with transfer mode.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0286** (EARS/Ubiquitous): The Substrate system shall track active DMA mode per device (ide_device_t.dma_mode).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0287** (EARS/Ubiquitous): The Substrate system shall aTAPI (SCSI Transport):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0288** (EARS/Ubiquitous): The Substrate system shall ide_atapi_packet(channel, drive, cdb, cdb_len, buffer, buf_len, write): send CDB via PACKET command (0xA0).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0289** (EARS/Ubiquitous): The Substrate system shall handle DRQ-based data transfer (PIO) or DMA-based transfer.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0290** (EARS/Ubiquitous): The Substrate system shall ide_atapi_read_capacity(): SCSI READ CAPACITY (0x25).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0291** (EARS/Ubiquitous): The Substrate system shall ide_atapi_read_sectors(): SCSI READ (10) (0x28).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0292** (EARS/Ubiquitous): The Substrate system shall ide_atapi_read_toc(): SCSI READ TOC (0x43) for CD-ROM.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0293** (EARS/Ubiquitous): The Substrate system shall medium change detection (unit attention sense key).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0294** (EARS/Ubiquitous): The Substrate system shall iRQ Handling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0295** (EARS/Ubiquitous): The Substrate system shall ide_irq_handler(irq): acknowledge interrupt, signal DMA completion.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0296** (EARS/Ubiquitous): The Substrate system shall iRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0297** (EARS/Ubiquitous): The Substrate system shall support shared IRQs for PCI native-mode controllers.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0298** (EARS/Ubiquitous): The Substrate system shall software Reset:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0299** (EARS/Ubiquitous): The Substrate system shall issue SRST via device control register (bit 2).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0300** (EARS/Ubiquitous): The Substrate system shall wait for BSY clear on both master and slave.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0301** (EARS/Ubiquitous): The Substrate system shall re-identify devices after reset.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0302** (EARS/Ubiquitous): The Substrate system shall power Management (deferred):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0303** (EARS/Ubiquitous): The Substrate system shall sTANDBY IMMEDIATE (0xE0), IDLE IMMEDIATE (0xE1).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0304** (EARS/Ubiquitous): The Substrate system shall cHECK POWER MODE (0xE5).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0305** (EARS/Ubiquitous): The Substrate system shall spin-down timer configuration.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0306** (EARS/Ubiquitous): The Substrate system shall naming Convention:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0307** (EARS/Ubiquitous): The Substrate system shall primary master: ide0, primary slave: ide1.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0308** (EARS/Ubiquitous): The Substrate system shall secondary master: ide2, secondary slave: ide3.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0309** (EARS/Ubiquitous): The Substrate system shall tertiary master: ide4, tertiary slave: ide5.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0310** (EARS/Ubiquitous): The Substrate system shall quaternary master: ide6, quaternary slave: ide7.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0311** (EARS/Ubiquitous): The Substrate system shall register with /dev/storage/ideN DevFS nodes.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0312** (EARS/Ubiquitous): The Substrate system shall error Handling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0313** (EARS/Ubiquitous): The Substrate system shall decode ATA error register bits (BBK, UNC, IDNF, ABRT, TK0NF, AMNF).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0314** (EARS/Ubiquitous): The Substrate system shall retry failed reads up to 3 times before reporting error.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0315** (EARS/Ubiquitous): The Substrate system shall log device faults and media errors to kernel console.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0316** (EARS/Ubiquitous): The Substrate system shall handle timeout (device not responding) gracefully - mark device offline.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0317** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0318** (EARS/Ubiquitous): The Substrate system shall unit: IDENTIFY parsing (model string byte-swap, LBA48 detection, DMA mode extraction).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0319** (EARS/Ubiquitous): The Substrate system shall unit: PRDT construction (alignment, boundary, EOT flag).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0320** (EARS/Ubiquitous): The Substrate system shall integration: PIO read/write round-trip on QEMU -hda disk.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0321** (EARS/Ubiquitous): The Substrate system shall integration: DMA read/write round-trip on QEMU with bus master.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0322** (EARS/Ubiquitous): The Substrate system shall integration: ATAPI CD-ROM read capacity + read sectors on QEMU -cdrom.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0323** (EARS/Ubiquitous): The Substrate system shall integration: tertiary/quaternary channel detection on QEMU with -device ide-hd,bus=ide.2,... (or equivalent).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0324** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0325** (EARS/Ubiquitous): The Substrate system shall internal doc: ATA/IDE register map and command reference.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0326** (EARS/Ubiquitous): The Substrate system shall internal doc: channel probing strategy (PCI native vs ISA compatibility vs legacy tertiary/quaternary).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0327** (EARS/Ubiquitous): The Substrate system shall floppy Disk Controller (sys/drivers/storage/floppy/):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0328** (EARS/Ubiquitous): The Substrate system shall controller Initialization (fdc_init):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0329** (EARS/Ubiquitous): The Substrate system shall detect FDC presence: read MSR (Main Status Register) at 0x3F4.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0330** (EARS/Ubiquitous): The Substrate system shall issue RESET command: assert bit 2 of DOR (Digital Output Register, 0x3F2), then deassert.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0331** (EARS/Ubiquitous): The Substrate system shall wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0332** (EARS/Ubiquitous): The Substrate system shall configure controller: CONFIGURE command (implied seek, FIFO threshold).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0333** (EARS/Ubiquitous): The Substrate system shall set data rate via CCR (Configuration Control Register, 0x3F7): 500kbps for HD, 300kbps for DD, 250kbps for SD.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0334** (EARS/Ubiquitous): The Substrate system shall enable DMA channel 2 for data transfers (ISA DMA).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0335** (EARS/Ubiquitous): The Substrate system shall i/O Registers (base 0x3F0):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0336** (EARS/Ubiquitous): The Substrate system shall 0x3F2: DOR (Digital Output Register) - drive select, motor control, DMA/IRQ enable, reset.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0337** (EARS/Ubiquitous): The Substrate system shall 0x3F4: MSR (Main Status Register) - RQM, DIO, NDMA, busy flags.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0338** (EARS/Ubiquitous): The Substrate system shall 0x3F5: Data Register (FIFO) - command/result/data bytes.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0339** (EARS/Ubiquitous): The Substrate system shall 0x3F7: DIR (Digital Input Register, read) - disk change detect (bit 7).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0340** (EARS/Ubiquitous): The Substrate system shall 0x3F7: CCR (Configuration Control Register, write) - data rate select.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0341** (EARS/Ubiquitous): The Substrate system shall dMA Configuration:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0342** (EARS/Ubiquitous): The Substrate system shall iSA DMA channel 2 (8-bit transfers).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0343** (EARS/Ubiquitous): The Substrate system shall program DMA controller (ports 0x04, 0x05, 0x81, 0x0A, 0x0B, 0x0C) for read/write.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0344** (EARS/Ubiquitous): The Substrate system shall dMA buffer must be below 16 MB (ISA 24-bit addressing).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0345** (EARS/Ubiquitous): The Substrate system shall allocate bounce buffer in low memory if kernel buffer is above 16 MB.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0346** (EARS/Ubiquitous): The Substrate system shall drive Detection:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0347** (EARS/Ubiquitous): The Substrate system shall query CMOS (RTC port 0x70/0x71, register 0x10) for drive types:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0348** (EARS/Ubiquitous): The Substrate system shall support up to 4 drives: drives 0-1 on primary FDC (0x3F0), drives 2-3 on secondary FDC (0x370, rare).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0349** (EARS/Ubiquitous): The Substrate system shall register detected drives with DevFS as /dev/storage/fd0../dev/storage/fd3.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0350** (EARS/Ubiquitous): The Substrate system shall motor Control:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0351** (EARS/Ubiquitous): The Substrate system shall motor on: set DOR motor bits (bits 4-7) for target drive.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0352** (EARS/Ubiquitous): The Substrate system shall spin-up delay: wait 300-500 ms after motor on before I/O.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0353** (EARS/Ubiquitous): The Substrate system shall motor off timer: auto-stop motor after 2-3 seconds of inactivity.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0354** (EARS/Ubiquitous): The Substrate system shall track motor state per drive to avoid redundant spin-up.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0355** (EARS/Ubiquitous): The Substrate system shall media Types:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0356** (EARS/Ubiquitous): The Substrate system shall 3.5" HD: 1.44 MB - 80 cylinders, 2 heads, 18 sectors/track, 512 bytes/sector.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0357** (EARS/Ubiquitous): The Substrate system shall 3.5" DD: 720 KB - 80 cylinders, 2 heads, 9 sectors/track.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0358** (EARS/Ubiquitous): The Substrate system shall 3.5" ED: 2.88 MB - 80 cylinders, 2 heads, 36 sectors/track (rare).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0359** (EARS/Ubiquitous): The Substrate system shall 5.25" HD: 1.2 MB - 80 cylinders, 2 heads, 15 sectors/track.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0360** (EARS/Ubiquitous): The Substrate system shall 5.25" DD: 360 KB - 40 cylinders, 2 heads, 9 sectors/track.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0361** (EARS/Ubiquitous): The Substrate system shall store geometry per drive in fdc_drive_t struct.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0362** (EARS/Ubiquitous): The Substrate system shall seek and Recalibrate:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0363** (EARS/Ubiquitous): The Substrate system shall rECALIBRATE command: move head to cylinder 0 (issued on init and after errors).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0364** (EARS/Ubiquitous): The Substrate system shall sEEK command: move to target cylinder.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0365** (EARS/Ubiquitous): The Substrate system shall wait for IRQ6 after seek; issue SENSE INTERRUPT to confirm.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0366** (EARS/Ubiquitous): The Substrate system shall track current cylinder per drive to avoid redundant seeks.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0367** (EARS/Ubiquitous): The Substrate system shall read/Write Operations:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0368** (EARS/Ubiquitous): The Substrate system shall rEAD DATA command (MT=1, MFM=1): multi-track read with DMA.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0369** (EARS/Ubiquitous): The Substrate system shall wRITE DATA command (MT=1, MFM=1): multi-track write with DMA.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0370** (EARS/Ubiquitous): The Substrate system shall cHS-to-LBA and LBA-to-CHS conversion for block device interface.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0371** (EARS/Ubiquitous): The Substrate system shall convert sector addresses: cylinder = LBA / (heads * spt), head = (LBA / spt) % heads, sector = (LBA % spt) + 1.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0372** (EARS/Ubiquitous): The Substrate system shall read result bytes (ST0, ST1, ST2, C, H, R, N) after each command to check success.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0373** (EARS/Ubiquitous): The Substrate system shall retry on error: recalibrate and retry up to 3 times, then fail.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0374** (EARS/Ubiquitous): The Substrate system shall format Track:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0375** (EARS/Ubiquitous): The Substrate system shall fORMAT TRACK command: write sector headers for an entire track.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0376** (EARS/Ubiquitous): The Substrate system shall build format buffer with (C, H, R, N) tuples for each sector.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0377** (EARS/Ubiquitous): The Substrate system shall used by disk formatting utilities.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0378** (EARS/Ubiquitous): The Substrate system shall disk Change Detection:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0379** (EARS/Ubiquitous): The Substrate system shall read DIR bit 7 (DSKCHG) to detect media removal/insertion.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0380** (EARS/Ubiquitous): When change: invalidate cached geometry, re-detect media type, the Substrate system shall satisfy the specified behavior.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0381** (EARS/Ubiquitous): The Substrate system shall seek to cylinder 1 and back to cylinder 0 to clear DSKCHG bit.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0382** (EARS/Ubiquitous): The Substrate system shall iRQ Handling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0383** (EARS/Ubiquitous): The Substrate system shall iRQ 6 handler: set completion flag, wake waiting thread.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0384** (EARS/Ubiquitous): The Substrate system shall sENSE INTERRUPT STATUS command after IRQ to read ST0 and current cylinder.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0385** (EARS/Ubiquitous): The Substrate system shall error Handling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0386** (EARS/Ubiquitous): The Substrate system shall decode ST0/ST1/ST2 result bytes for error classification.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0387** (EARS/Ubiquitous): The Substrate system shall sT0 bits 7-6: interrupt code (00=normal, 01=abnormal, 10=invalid, 11=drive not ready).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0388** (EARS/Ubiquitous): The Substrate system shall sT1: missing address mark, write protect, no data, overrun, CRC error.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0389** (EARS/Ubiquitous): The Substrate system shall sT2: wrong cylinder, bad cylinder, missing data address mark.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0390** (EARS/Ubiquitous): The Substrate system shall automatic retry with recalibrate on recoverable errors.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0391** (EARS/Ubiquitous): The Substrate system shall block Device Interface:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0392** (EARS/Ubiquitous): The Substrate system shall register with storage subsystem as block device.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0393** (EARS/Ubiquitous): The Substrate system shall fdc_read(drive, lba, count, buffer) / fdc_write(drive, lba, count, buffer).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0394** (EARS/Ubiquitous): The Substrate system shall sector size: 512 bytes (standard).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0395** (EARS/Ubiquitous): The Substrate system shall report device capacity based on detected media geometry.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0396** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0397** (EARS/Ubiquitous): The Substrate system shall unit: CHS↔LBA conversion for all supported media geometries.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0398** (EARS/Ubiquitous): The Substrate system shall unit: DMA buffer address validation (below 16 MB, page-aligned).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0399** (EARS/Ubiquitous): The Substrate system shall unit: CMOS drive type parsing.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0400** (EARS/Ubiquitous): The Substrate system shall integration: read/write/verify cycle on QEMU with -fda / -fdb images.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0401** (EARS/Ubiquitous): The Substrate system shall integration: disk change detection on QEMU.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0402** (EARS/Ubiquitous): The Substrate system shall integration: format + read-back on blank floppy image.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0403** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0404** (EARS/Ubiquitous): The Substrate system shall internal doc: FDC register map and command reference.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0405** (EARS/Ubiquitous): The Substrate system shall internal doc: DMA programming for ISA channel 2.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0406** (EARS/Ubiquitous): The Substrate system shall internal doc: media type detection and geometry tables.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0407** (EARS/Ubiquitous): The Substrate system shall aHCI:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0408** (EARS/Ubiquitous): The Substrate system shall hBA Initialization:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0409** (EARS/Ubiquitous): The Substrate system shall enable AHCI Mode (GHC.AE).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0410** (EARS/Ubiquitous): The Substrate system shall perform HBA Reset processes (GHC.HR).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0411** (EARS/Ubiquitous): The Substrate system shall capability detection (CAP, CAP2).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0412** (EARS/Ubiquitous): The Substrate system shall mSI-X / Interrupt setup.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0413** (EARS/Ubiquitous): The Substrate system shall port Enumeration:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0414** (EARS/Ubiquitous): The Substrate system shall check Implemented Ports (PI).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0415** (EARS/Ubiquitous): The Substrate system shall determine Port Type (SSTS.DET).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0416** (EARS/Ubiquitous): The Substrate system shall allocate Command Lists and FIS Receive areas (aligned 1K/256B).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0417** (EARS/Ubiquitous): The Substrate system shall start Command Engine (CMD.ST) and FIS Receive (CMD.FRE).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0418** (EARS/Ubiquitous): The Substrate system shall command Handling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0419** (EARS/Ubiquitous): The Substrate system shall build Command Tables (PRDTs).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0420** (EARS/Ubiquitous): The Substrate system shall issue commands via Command Issue (CI) bitmask.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0421** (EARS/Ubiquitous): The Substrate system shall handle completion interrupts.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0422** (EARS/Ubiquitous): The Substrate system shall nVMe:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0423** (EARS/Ubiquitous): The Substrate system shall controller Initialization:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0424** (EARS/Ubiquitous): The Substrate system shall check CAP (Capabilities) register (Timeout, Doorbell stride).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0425** (EARS/Ubiquitous): The Substrate system shall disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0426** (EARS/Ubiquitous): The Substrate system shall configure Admin Queue Attributes (AQA).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0427** (EARS/Ubiquitous): The Substrate system shall create Admin Submission/Completion Queues (ASQ/ACQ).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0428** (EARS/Ubiquitous): The Substrate system shall enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0429** (EARS/Ubiquitous): The Substrate system shall namespace Discovery:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0430** (EARS/Ubiquitous): The Substrate system shall issue Identify Controller command.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0431** (EARS/Ubiquitous): The Substrate system shall issue Identify Namespace for active NSIDs.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0432** (EARS/Ubiquitous): The Substrate system shall i/O Queue Creation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0433** (EARS/Ubiquitous): The Substrate system shall determine number of queues supported.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0434** (EARS/Ubiquitous): The Substrate system shall issue Create I/O Completion Queue.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0435** (EARS/Ubiquitous): The Substrate system shall issue Create I/O Submission Queue.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0436** (EARS/Ubiquitous): The Substrate system shall block I/O:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0437** (EARS/Ubiquitous): The Substrate system shall pRP (Physical Region Page) List construction for data buffers.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0438** (EARS/Ubiquitous): The Substrate system shall issue Read/Write NVM commands.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0439** (EARS/Ubiquitous): The Substrate system shall partitioning & DevFS:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0440** (EARS/Ubiquitous): The Substrate system shall scanner: Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0441** (EARS/Ubiquitous): The Substrate system shall registration: Register device nodes (/dev/storage/sata0, /dev/storage/sata0s1) with DevFS. <!-- geom_subr.c -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0442** (EARS/Ubiquitous): The Substrate system shall input: <!-- ps2.c, keyboard.c, mouse.c, input.h -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0443** (EARS/Ubiquitous): The Substrate system shall pS/2 Controller (sys/drivers/input/ps2.c, ps2.h):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0444** (EARS/Ubiquitous): The Substrate system shall i/O Primitives:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0445** (EARS/Ubiquitous): The Substrate system shall ps2_wait_write(): spin on status port bit 1 (input buffer empty), timeout guard.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0446** (EARS/Ubiquitous): The Substrate system shall ps2_wait_read(): spin on status port bit 0 (output buffer full), timeout guard.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0447** (EARS/Ubiquitous): The Substrate system shall ps2_write_command(cmd): wait-then-write to port 0x64.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0448** (EARS/Ubiquitous): The Substrate system shall ps2_write_data(data): wait-then-write to port 0x60.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0449** (EARS/Ubiquitous): The Substrate system shall ps2_read_data(): wait-then-read from port 0x60 (return 0xFF on timeout).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0450** (EARS/Ubiquitous): The Substrate system shall ps2_read_data_timeout(data, loops): bounded read with explicit loop count.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0451** (EARS/Ubiquitous): The Substrate system shall ps2_flush(): drain up to 16 stale bytes from output buffer.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0452** (EARS/Ubiquitous): The Substrate system shall ps2_write_aux(data): write to port 2 device via 0xD4 prefix.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0453** (EARS/Ubiquitous): The Substrate system shall ps2_send_command_with_response(cmd, response): write command, read single response byte.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0454** (EARS/Ubiquitous): The Substrate system shall initialization Sequence (ps2_init):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0455** (EARS/Ubiquitous): The Substrate system shall step 1: Disable both ports (0xAD, 0xA7) to prevent IRQs during setup.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0456** (EARS/Ubiquitous): The Substrate system shall step 2: Flush output buffer (ps2_flush()).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0457** (EARS/Ubiquitous): The Substrate system shall step 3: Read configuration byte (0x20), disable IRQs (bits 0-1), enable translation (bit 6), set system flag (bit 2), write back (0x60).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0458** (EARS/Ubiquitous): The Substrate system shall step 4: Controller self-test (0xAA) - expect 0x55; abort on failure/timeout.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0459** (EARS/Ubiquitous): The Substrate system shall step 4b: Re-write configuration byte (self-test may reset it).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0460** (EARS/Ubiquitous): The Substrate system shall step 5: Dual-channel detection - enable port 2 (0xA8), re-read config, check bit 5 (P2 clock); disable port 2 again.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0461** (EARS/Ubiquitous): The Substrate system shall step 6: Interface tests - 0xAB (port 1), 0xA9 (port 2 if dual), expect 0x00.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0462** (EARS/Ubiquitous): The Substrate system shall step 7: Enable ports (0xAE, 0xA8).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0463** (EARS/Ubiquitous): The Substrate system shall step 8: Enable IRQs - set config bits 0 (and 1 if dual).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0464** (EARS/Ubiquitous): The Substrate system shall step 9: Mouse init on port 2 - reset (0xFF), wait ACK (0xFA) + BAT (0xAA) + device ID, enable data reporting (0xF4).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0465** (EARS/Ubiquitous): The Substrate system shall error Recovery:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0466** (EARS/Ubiquitous): The Substrate system shall retry self-test once on failure (some controllers need two attempts).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0467** (EARS/Ubiquitous): The Substrate system shall log port test failure codes to kernel console.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0468** (EARS/Ubiquitous): The Substrate system shall continue with single-channel if port 2 test fails.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0469** (EARS/Ubiquitous): The Substrate system shall timeout constants tuned per real hardware profiles (QEMU, Bochs, real i8042).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0470** (EARS/Ubiquitous): The Substrate system shall keyboard Driver (sys/drivers/input/keyboard.c, keyboard.h):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0471** (EARS/Ubiquitous): The Substrate system shall iRQ1 Handler (keyboard_handler):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0472** (EARS/Ubiquitous): The Substrate system shall read scancode from port 0x60.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0473** (EARS/Ubiquitous): The Substrate system shall harvest entropy from TSC + scancode into RNG pool.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0474** (EARS/Ubiquitous): The Substrate system shall dispatch to scancode decoder state machine.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0475** (EARS/Ubiquitous): The Substrate system shall send EOI (or rely on IDT dispatcher).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0476** (EARS/Ubiquitous): The Substrate system shall scancode Set Decoding:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0477** (EARS/Ubiquitous): The Substrate system shall set 1 (XT-compatible, default with translation):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0478** (EARS/Ubiquitous): The Substrate system shall single-byte make codes (0x01-0x58).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0479** (EARS/Ubiquitous): The Substrate system shall single-byte break codes (make | 0x80).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0480** (EARS/Ubiquitous): The Substrate system shall extended prefix 0xE0 → two-byte sequences:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0481** (EARS/Ubiquitous): The Substrate system shall right Ctrl (E0 1D / E0 9D), Right Alt (E0 38 / E0 B8).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0482** (EARS/Ubiquitous): The Substrate system shall arrow keys (E0 48/50/4B/4D).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0483** (EARS/Ubiquitous): The Substrate system shall insert (E0 52), Delete (E0 53), Home (E0 47), End (E0 4F).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0484** (EARS/Ubiquitous): The Substrate system shall page Up (E0 49), Page Down (E0 51).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0485** (EARS/Ubiquitous): The Substrate system shall print Screen (E0 2A E0 37 / E0 B7 E0 AA).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0486** (EARS/Ubiquitous): The Substrate system shall pause/Break (E1 1D 45 E1 9D C5 - three-byte E1 sequence).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0487** (EARS/Ubiquitous): The Substrate system shall discard spurious 0xE1 prefix after handling Pause.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0488** (EARS/Ubiquitous): The Substrate system shall set 2 (AT) - Optional Future:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0489** (EARS/Ubiquitous): The Substrate system shall stub for native Set 2 decoding (for controllers without translation).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0490** (EARS/Ubiquitous): The Substrate system shall 0xF0 break prefix instead of bit 7.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0491** (EARS/Ubiquitous): The Substrate system shall scancode-to-Keycode Translation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0492** (EARS/Ubiquitous): The Substrate system shall define KEY_* keycodes independent of scancode set (internal enum/defines).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0493** (EARS/Ubiquitous): The Substrate system shall map Set 1 scancodes to keycodes via lookup table.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0494** (EARS/Ubiquitous): The Substrate system shall separate table for extended (E0-prefixed) scancodes.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0495** (EARS/Ubiquitous): The Substrate system shall modifier Tracking:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0496** (EARS/Ubiquitous): The Substrate system shall track left/right independently: kbd_lshift/kbd_rshift, kbd_lctrl/kbd_rctrl, kbd_lalt/kbd_ralt.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0497** (EARS/Ubiquitous): The Substrate system shall aggregate flags: kbd_shift, kbd_ctrl, kbd_alt.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0498** (EARS/Ubiquitous): The Substrate system shall caps Lock toggle state (latch on make, ignore break).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0499** (EARS/Ubiquitous): The Substrate system shall num Lock toggle state.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0500** (EARS/Ubiquitous): The Substrate system shall scroll Lock toggle state.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0501** (EARS/Ubiquitous): The Substrate system shall update LED indicator state to match lock toggles (see LED Control below).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0502** (EARS/Ubiquitous): The Substrate system shall keymap (Scancode/Keycode → Character):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0503** (EARS/Ubiquitous): The Substrate system shall uS QWERTY layout tables:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0504** (EARS/Ubiquitous): The Substrate system shall kbd_us[128]: unshifted ASCII mapping.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0505** (EARS/Ubiquitous): The Substrate system shall kbd_us_shifted[128]: shifted ASCII mapping.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0506** (EARS/Ubiquitous): The Substrate system shall caps Lock interaction: uppercase letters but not symbols.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0507** (EARS/Ubiquitous): The Substrate system shall num Lock interaction: numpad keys → digits vs navigation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0508** (EARS/Ubiquitous): The Substrate system shall ctrl character generation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0509** (EARS/Ubiquitous): The Substrate system shall ctrl+A..Z → 0x01..0x1A.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0510** (EARS/Ubiquitous): The Substrate system shall ctrl+[ → ESC (0x1B), Ctrl+\ → FS (0x1C), Ctrl+] → GS (0x1D).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0511** (EARS/Ubiquitous): The Substrate system shall alt character generation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0512** (EARS/Ubiquitous): The Substrate system shall alt sets bit 7 (traditional) or generates ESC prefix (VT convention).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0513** (EARS/Ubiquitous): The Substrate system shall dead key / Compose key support (deferred): stub interface.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0514** (EARS/Ubiquitous): The Substrate system shall switchable keymap infrastructure:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0515** (EARS/Ubiquitous): The Substrate system shall struct keymap with base, shift, ctrl, altgr tables.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0516** (EARS/Ubiquitous): The Substrate system shall runtime keymap switching API (keyboard_set_keymap()).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0517** (EARS/Ubiquitous): The Substrate system shall additional layouts: DE, FR, UK (deferred - provide registration API only).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0518** (EARS/Ubiquitous): The Substrate system shall function Key and Special Key Handling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0519** (EARS/Ubiquitous): The Substrate system shall f1-F12 → generate escape sequences (VT100: ESC O P..ESC O [ or ESC [ 11~..ESC [ 24~).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0520** (EARS/Ubiquitous): The Substrate system shall arrow keys → ESC [ A/B/C/D.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0521** (EARS/Ubiquitous): The Substrate system shall home/End/Ins/Del/PgUp/PgDn → ESC [ 1~/2~/3~/4~/5~/6~ (or xterm variants).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0522** (EARS/Ubiquitous): The Substrate system shall alt+F1..F12 → VT switching (vt_activate(n)).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0523** (EARS/Ubiquitous): The Substrate system shall ctrl+F9 → debug process dump.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0524** (EARS/Ubiquitous): The Substrate system shall sysRq / Print Screen → kernel debug hook (deferred).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0525** (EARS/Ubiquitous): The Substrate system shall key Repeat (Typematic):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0526** (EARS/Ubiquitous): The Substrate system shall send 0xF3 command to keyboard device with delay/rate parameters.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0527** (EARS/Ubiquitous): The Substrate system shall default: 250 ms delay, 30 Hz repeat (or use BIOS defaults).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0528** (EARS/Ubiquitous): The Substrate system shall alternatively implement software repeat via timer tick (deferred).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0529** (EARS/Ubiquitous): The Substrate system shall lED Control:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0530** (EARS/Ubiquitous): The Substrate system shall send 0xED command to keyboard device with LED status byte.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0531** (EARS/Ubiquitous): The Substrate system shall bit 0 = Scroll Lock, Bit 1 = Num Lock, Bit 2 = Caps Lock.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0532** (EARS/Ubiquitous): The Substrate system shall update LEDs on lock key toggle.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0533** (EARS/Ubiquitous): The Substrate system shall handle ACK (0xFA) / Resend (0xFE) responses.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0534** (EARS/Ubiquitous): The Substrate system shall key Buffer (kbd_buffer):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0535** (EARS/Ubiquitous): The Substrate system shall circular buffer (256 entries).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0536** (EARS/Ubiquitous): The Substrate system shall kbd_push(c): enqueue translated character.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0537** (EARS/Ubiquitous): The Substrate system shall keyboard_getc(): dequeue character (returns 0 if empty).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0538** (EARS/Ubiquitous): The Substrate system shall overflow policy: drop newest keystrokes (preserve existing behavior).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0539** (EARS/Ubiquitous): The Substrate system shall consider expanding to store raw input_event structs instead of chars.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0540** (EARS/Ubiquitous): The Substrate system shall input Subsystem Integration:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0541** (EARS/Ubiquitous): The Substrate system shall register input_dev_t with name="PS/2 Keyboard", caps=EV_KEY.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0542** (EARS/Ubiquitous): The Substrate system shall call input_report_key(dev, keycode, 1) on key press.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0543** (EARS/Ubiquitous): The Substrate system shall call input_report_key(dev, keycode, 0) on key release (currently missing).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0544** (EARS/Ubiquitous): The Substrate system shall call input_sync(dev) after each event.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0545** (EARS/Ubiquitous): The Substrate system shall vT/TTY Integration:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0546** (EARS/Ubiquitous): The Substrate system shall push translated character to active VT's TTY via tty_flip_buffer_push().
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0547** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall fallback to console_push_char() if no TTY attached.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0548** (EARS/Ubiquitous): The Substrate system shall respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0549** (EARS/Ubiquitous): The Substrate system shall mouse Driver (sys/drivers/input/mouse.c, mouse.h):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0550** (EARS/Ubiquitous): The Substrate system shall iRQ12 Handler (mouse_handler):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0551** (EARS/Ubiquitous): The Substrate system shall read status port to confirm data available (bit 0).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0552** (EARS/Ubiquitous): The Substrate system shall read data byte from port 0x60.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0553** (EARS/Ubiquitous): The Substrate system shall harvest entropy from TSC + data byte.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0554** (EARS/Ubiquitous): The Substrate system shall feed byte to packet state machine.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0555** (EARS/Ubiquitous): The Substrate system shall packet Decoding:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0556** (EARS/Ubiquitous): The Substrate system shall standard PS/2 Mouse (3-byte):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0557** (EARS/Ubiquitous): The Substrate system shall byte 0: buttons (bits 0-2), sign bits (bits 4-5), overflow (bits 6-7), alignment bit 3 (always 1).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0558** (EARS/Ubiquitous): The Substrate system shall byte 1: X movement (signed 9-bit with sign from byte 0 bit 4).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0559** (EARS/Ubiquitous): The Substrate system shall byte 2: Y movement (signed 9-bit with sign from byte 0 bit 5, Y-axis inverted).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0560** (EARS/Ubiquitous): The Substrate system shall realignment: if byte 0 bit 3 != 1, resync by discarding bytes.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0561** (EARS/Ubiquitous): The Substrate system shall intelliMouse Extension (4-byte) - deferred:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0562** (EARS/Ubiquitous): The Substrate system shall detect via magic sample-rate sequence (200, 100, 80 → ID 0x03).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0563** (EARS/Ubiquitous): The Substrate system shall byte 3: Z-axis (scroll wheel), signed 4-bit.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0564** (EARS/Ubiquitous): The Substrate system shall intelliMouse Explorer (5-button) - deferred:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0565** (EARS/Ubiquitous): The Substrate system shall detect via magic sequence (200, 200, 80 → ID 0x04).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0566** (EARS/Ubiquitous): The Substrate system shall byte 3: Z-axis (bits 0-3), buttons 4-5 (bits 4-5).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0567** (EARS/Ubiquitous): The Substrate system shall overflow Handling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0568** (EARS/Ubiquitous): When overflow bits (byte 0 bits 6-7) are set, clamp movement to max delta, the Substrate system shall satisfy the specified behavior.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0569** (EARS/Ubiquitous): The Substrate system shall mouse State:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0570** (EARS/Ubiquitous): The Substrate system shall track cumulative mouse_x, mouse_y (absolute position for cursor).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0571** (EARS/Ubiquitous): The Substrate system shall track button state (mouse_buttons, bits 0=left, 1=right, 2=middle).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0572** (EARS/Ubiquitous): The Substrate system shall configurable resolution/acceleration (deferred).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0573** (EARS/Ubiquitous): The Substrate system shall event Queue:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0574** (EARS/Ubiquitous): The Substrate system shall circular buffer of mouse_event_t (64 entries).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0575** (EARS/Ubiquitous): The Substrate system shall mouse_q_push(dx, dy, buttons): enqueue relative event.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0576** (EARS/Ubiquitous): The Substrate system shall mouse_get_event(ev): dequeue event (returns 0 if empty).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0577** (EARS/Ubiquitous): The Substrate system shall mouse_get_state(x, y, buttons): poll current absolute position + buttons.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0578** (EARS/Ubiquitous): The Substrate system shall input Subsystem Integration:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0579** (EARS/Ubiquitous): The Substrate system shall register input_dev_t with name="PS/2 Mouse", caps=EV_REL|EV_KEY.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0580** (EARS/Ubiquitous): The Substrate system shall report REL_X, REL_Y, REL_WHEEL (when supported).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0581** (EARS/Ubiquitous): The Substrate system shall report BTN_LEFT (0x110), BTN_RIGHT (0x111), BTN_MIDDLE (0x112).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0582** (EARS/Ubiquitous): The Substrate system shall input_sync() after each complete packet.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0583** (EARS/Ubiquitous): The Substrate system shall input Subsystem (sys/input.h):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0584** (EARS/Ubiquitous): The Substrate system shall abstract input_event structure (type, code, value, timestamp).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0585** (EARS/Ubiquitous): The Substrate system shall input_register_device(dev) / input_unregister_device(dev).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0586** (EARS/Ubiquitous): The Substrate system shall input_report_key(), input_report_rel(), input_report_abs().
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0587** (EARS/Ubiquitous): The Substrate system shall input_sync() - event boundary marker.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0588** (EARS/Ubiquitous): The Substrate system shall /dev/input/eventN character device interface for userspace.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0589** (EARS/Ubiquitous): The Substrate system shall event filtering: consumers subscribe to device + event type.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0590** (EARS/Ubiquitous): The Substrate system shall hot-Plug Detection (deferred):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0591** (EARS/Ubiquitous): The Substrate system shall monitor controller status for device insertion/removal.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0592** (EARS/Ubiquitous): The Substrate system shall re-run device identification (0xF2) on port activity change.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0593** (EARS/Ubiquitous): The Substrate system shall (De)register input devices dynamically.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0594** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0595** (EARS/Ubiquitous): The Substrate system shall unit Tests:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0596** (EARS/Ubiquitous): The Substrate system shall scancode Set 1 decoding: verify all single-byte and E0-extended codes.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0597** (EARS/Ubiquitous): The Substrate system shall modifier tracking: all combinations of shift/ctrl/alt/capslock/numlock.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0598** (EARS/Ubiquitous): The Substrate system shall keymap: verify ASCII output for full US-QWERTY layout (unshifted, shifted, ctrl).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0599** (EARS/Ubiquitous): The Substrate system shall key buffer: fill, overflow, drain, verify FIFO order.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0600** (EARS/Ubiquitous): The Substrate system shall mouse packet decoding: standard 3-byte packets with known dx/dy/buttons.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0601** (EARS/Ubiquitous): The Substrate system shall mouse packet realignment: inject byte with bit 3 clear, verify resync.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0602** (EARS/Ubiquitous): The Substrate system shall mouse overflow: inject overflow bits, verify clamping.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0603** (EARS/Ubiquitous): The Substrate system shall mouse event queue: fill, overflow, drain.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0604** (EARS/Ubiquitous): The Substrate system shall property Tests:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0605** (EARS/Ubiquitous): The Substrate system shall key buffer invariant: 0 <= head, tail < KBD_BUFFER_SIZE, head == tail ↔ empty.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0606** (EARS/Ubiquitous): The Substrate system shall mouse queue invariant: 0 <= head, tail < MOUSE_QUEUE_SIZE.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0607** (EARS/Ubiquitous): The Substrate system shall randomized scancode sequences never crash handler or corrupt state.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0608** (EARS/Ubiquitous): The Substrate system shall integration Tests:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0609** (EARS/Ubiquitous): The Substrate system shall boot kernel in QEMU, inject keyboard scancodes via monitor (sendkey), verify TTY output.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0610** (EARS/Ubiquitous): The Substrate system shall boot kernel, inject mouse events, verify mouse_get_state() returns expected position.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0611** (EARS/Ubiquitous): The Substrate system shall alt+F1..F12 switches VT correctly.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0612** (EARS/Ubiquitous): The Substrate system shall ctrl+C / Ctrl+D / Ctrl+Z generate correct control characters.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0613** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0614** (EARS/Ubiquitous): The Substrate system shall internal doc: PS/2 controller initialization sequence and error handling.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0615** (EARS/Ubiquitous): The Substrate system shall internal doc: scancode set 1 table and extended key mapping.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0616** (EARS/Ubiquitous): The Substrate system shall internal doc: input subsystem event model and device registration.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0617** (EARS/Ubiquitous): The Substrate system shall console Subsystem (sys/console):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0618** (EARS/Ubiquitous): The Substrate system shall tTY Subsystem (Core):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0619** (EARS/Ubiquitous): The Substrate system shall structures (tty_t):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0620** (EARS/Ubiquitous): The Substrate system shall buffers & Queues:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0621** (EARS/Ubiquitous): The Substrate system shall read Buffer (Raw Input): Circular buffer for incoming IRQ data.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0622** (EARS/Ubiquitous): The Substrate system shall write Buffer (Output): Queue for driver consumption.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0623** (EARS/Ubiquitous): The Substrate system shall canon Buffer (Cooked): Line-editing buffer for ICANON mode.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0624** (EARS/Ubiquitous): The Substrate system shall flow Control: Low-water/High-water marks for IXON/IXOFF.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0625** (EARS/Ubiquitous): The Substrate system shall state Control (termios):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0626** (EARS/Ubiquitous): The Substrate system shall c_iflag: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0627** (EARS/Ubiquitous): The Substrate system shall c_oflag: Output modes (OPOST, ONLCR, OXTABS).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0628** (EARS/Ubiquitous): The Substrate system shall c_cflag: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0629** (EARS/Ubiquitous): The Substrate system shall c_lflag: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0630** (EARS/Ubiquitous): The Substrate system shall c_cc: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME, VSTART, VSTOP, VWERASE).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0631** (EARS/Ubiquitous): The Substrate system shall winsize: Window size tracking (rows/cols) + SIGWINCH.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0632** (EARS/Ubiquitous): The Substrate system shall line Discipline (N_TTY):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0633** (EARS/Ubiquitous): The Substrate system shall input Processing (n_tty_receive_buf):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0634** (EARS/Ubiquitous): The Substrate system shall parity checks and stripping.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0635** (EARS/Ubiquitous): The Substrate system shall newline translation (CR->NL).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0636** (EARS/Ubiquitous): The Substrate system shall software flow control (XON/XOFF detection).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0637** (EARS/Ubiquitous): The Substrate system shall signal generation check (ISIG).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0638** (EARS/Ubiquitous): The Substrate system shall canonical Editing (n_tty_read):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0639** (EARS/Ubiquitous): The Substrate system shall backspace/Delete handling (VERASE).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0640** (EARS/Ubiquitous): The Substrate system shall line kill (VKILL).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0641** (EARS/Ubiquitous): The Substrate system shall word erase (VWERASE).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0642** (EARS/Ubiquitous): The Substrate system shall eOF handling (VEOF / Ctrl+D).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0643** (EARS/Ubiquitous): The Substrate system shall output Post-processing (n_tty_write):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0644** (EARS/Ubiquitous): The Substrate system shall newline expansion (NL -> CR/NL).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0645** (EARS/Ubiquitous): The Substrate system shall tab expansion (optional).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0646** (EARS/Ubiquitous): The Substrate system shall echoing Logic:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0647** (EARS/Ubiquitous): The Substrate system shall raw echo (input char -> output).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0648** (EARS/Ubiquitous): The Substrate system shall control char echo (^C).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0649** (EARS/Ubiquitous): The Substrate system shall erase echo (backspace-space-backspace sequence).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0650** (EARS/Ubiquitous): The Substrate system shall driver Interface (tty_driver):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0651** (EARS/Ubiquitous): The Substrate system shall install / remove: setup private data.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0652** (EARS/Ubiquitous): The Substrate system shall open / close: hardware init/shutdown.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0653** (EARS/Ubiquitous): The Substrate system shall write: device output path.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0654** (EARS/Ubiquitous): The Substrate system shall put_char: optimized single-char write.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0655** (EARS/Ubiquitous): The Substrate system shall flush_chars: kick hardware transmission.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0656** (EARS/Ubiquitous): The Substrate system shall write_room: check available hardware buffer space.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0657** (EARS/Ubiquitous): The Substrate system shall chars_in_buffer: check pending bytes.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0658** (EARS/Ubiquitous): The Substrate system shall ioctl: hardware-specific controls.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0659** (EARS/Ubiquitous): The Substrate system shall throttle / unthrottle: hardware flow control hooks.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0660** (EARS/Ubiquitous): The Substrate system shall session/Job Control:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0661** (EARS/Ubiquitous): The Substrate system shall tty_struct.session: Pointer to current session.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0662** (EARS/Ubiquitous): The Substrate system shall tty_struct.pgrp: Pointer to foreground process group.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0663** (EARS/Ubiquitous): The Substrate system shall tty_check_change(): Verify background writes (SIGTTOU).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0664** (EARS/Ubiquitous): The Substrate system shall aPI:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0665** (EARS/Ubiquitous): The Substrate system shall tty_init(): Initialize subsystem.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0666** (EARS/Ubiquitous): The Substrate system shall tty_alloc(): Create a new TTY device.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0667** (EARS/Ubiquitous): The Substrate system shall tty_register_device(): Register with DevFS /dev/ttyX.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0668** (EARS/Ubiquitous): The Substrate system shall tty_open, tty_close: Refcounting and session logic.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0669** (EARS/Ubiquitous): The Substrate system shall tty_read, tty_write: Dispatch to ldisc.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0670** (EARS/Ubiquitous): The Substrate system shall tty_ioctl:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0671** (EARS/Ubiquitous): The Substrate system shall tIOCSCTTY: Become controlling TTY.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0672** (EARS/Ubiquitous): The Substrate system shall tIOCSPGRP / TIOCGPGRP: Manage foreground group.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0673** (EARS/Ubiquitous): The Substrate system shall tCGETS / TCSETS: Termios get/set.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0674** (EARS/Ubiquitous): The Substrate system shall tIOCGWINSZ: Window size.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0675** (EARS/Ubiquitous): The Substrate system shall virtual Terminal (VT) Layer:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0676** (EARS/Ubiquitous): The Substrate system shall vT Management: Array of vt_state_t structures (vt0..vtN).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0677** (EARS/Ubiquitous): The Substrate system shall switching: vt_activate(n), keyboard shortcuts (Alt+Fn).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0678** (EARS/Ubiquitous): The Substrate system shall emulation: VT102 state machine (escape codes).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0679** (EARS/Ubiquitous): The Substrate system shall backend Drivers:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0680** (EARS/Ubiquitous): The Substrate system shall vGA Text Mode Console:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0681** (EARS/Ubiquitous): The Substrate system shall initialization:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0682** (EARS/Ubiquitous): The Substrate system shall detect VGA presence (BIOS/PCI enumeration).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0683** (EARS/Ubiquitous): The Substrate system shall set 80x25 or 80x50 text mode.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0684** (EARS/Ubiquitous): The Substrate system shall map video memory (0xB8000) into kernel address space.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0685** (EARS/Ubiquitous): The Substrate system shall initialize attribute byte defaults (white on black).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0686** (EARS/Ubiquitous): The Substrate system shall text Output:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0687** (EARS/Ubiquitous): The Substrate system shall implement vga_putchar(char c, uint8_t attr).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0688** (EARS/Ubiquitous): The Substrate system shall handle control characters (CR, LF, BS, TAB, BEL).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0689** (EARS/Ubiquitous): The Substrate system shall implement vga_write(const char *buf, size_t len).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0690** (EARS/Ubiquitous): The Substrate system shall tab stop handling (configurable tab width).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0691** (EARS/Ubiquitous): The Substrate system shall cursor Control:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0692** (EARS/Ubiquitous): The Substrate system shall read/write hardware cursor position (CRTC registers 0x0E/0x0F).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0693** (EARS/Ubiquitous): The Substrate system shall cursor shape control (underline, block, invisible).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0694** (EARS/Ubiquitous): The Substrate system shall cursor blink enable/disable.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0695** (EARS/Ubiquitous): The Substrate system shall scrolling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0696** (EARS/Ubiquitous): The Substrate system shall software scroll (memmove video buffer).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0697** (EARS/Ubiquitous): The Substrate system shall hardware scroll (CRTC start address register).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0698** (EARS/Ubiquitous): The Substrate system shall scroll region support (VT102 DECSTBM).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0699** (EARS/Ubiquitous): The Substrate system shall attributes:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0700** (EARS/Ubiquitous): The Substrate system shall 16-color foreground/background palette.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0701** (EARS/Ubiquitous): The Substrate system shall blink/bright background toggle (attribute controller).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0702** (EARS/Ubiquitous): The Substrate system shall reverse video, bold, underline emulation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0703** (EARS/Ubiquitous): The Substrate system shall tTY Binding:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0704** (EARS/Ubiquitous): The Substrate system shall register as tty_driver for /dev/tty[1-N].
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0705** (EARS/Ubiquitous): The Substrate system shall implement tty_driver->write() callback.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0706** (EARS/Ubiquitous): The Substrate system shall implement tty_driver->ioctl() for VGA-specific controls.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0707** (EARS/Ubiquitous): The Substrate system shall keyboard Input (PS/2 to TTY):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0708** (EARS/Ubiquitous): The Substrate system shall fix PS/2 driver build errors (constant mismatches in test_ps2.c).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0709** (EARS/Ubiquitous): The Substrate system shall input Path:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0710** (EARS/Ubiquitous): The Substrate system shall hook keyboard driver to TTY input queue.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0711** (EARS/Ubiquitous): The Substrate system shall convert scancodes to ASCII via keymap.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0712** (EARS/Ubiquitous): The Substrate system shall handle modifier keys (Shift, Ctrl, Alt, AltGr).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0713** (EARS/Ubiquitous): The Substrate system shall generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0714** (EARS/Ubiquitous): The Substrate system shall special Keys:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0715** (EARS/Ubiquitous): The Substrate system shall function keys (F1-F12) to escape sequences.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0716** (EARS/Ubiquitous): The Substrate system shall arrow keys to ANSI escape sequences.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0717** (EARS/Ubiquitous): The Substrate system shall insert, Delete, Home, End, PgUp, PgDn sequences.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0718** (EARS/Ubiquitous): The Substrate system shall numeric keypad handling (NumLock state).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0719** (EARS/Ubiquitous): The Substrate system shall console Switching:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0720** (EARS/Ubiquitous): The Substrate system shall alt+F1..F12 for virtual console switch.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0721** (EARS/Ubiquitous): The Substrate system shall ctrl+Alt+Del for reboot/shutdown hook.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0722** (EARS/Ubiquitous): The Substrate system shall sysRq key handling (magic SysRq sequences).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0723** (EARS/Ubiquitous): The Substrate system shall lED Control:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0724** (EARS/Ubiquitous): The Substrate system shall sync Caps Lock, Num Lock, Scroll Lock LEDs.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0725** (EARS/Ubiquitous): The Substrate system shall lED state persistence across console switches.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0726** (EARS/Ubiquitous): The Substrate system shall framebuffer Console (Graphical):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0727** (EARS/Ubiquitous): The Substrate system shall core Infrastructure:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0728** (EARS/Ubiquitous): The Substrate system shall struct fb_info device abstraction.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0729** (EARS/Ubiquitous): The Substrate system shall framebuffer registration/deregistration API.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0730** (EARS/Ubiquitous): The Substrate system shall memory mapping (physical to kernel virtual).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0731** (EARS/Ubiquitous): The Substrate system shall /dev/fb/[0-N] device node creation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0732** (EARS/Ubiquitous): The Substrate system shall drivers:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0733** (EARS/Ubiquitous): The Substrate system shall vESA VBE (Linear Framebuffer):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0734** (EARS/Ubiquitous): The Substrate system shall vBE 2.0+ detection and capability query.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0735** (EARS/Ubiquitous): The Substrate system shall mode enumeration and selection.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0736** (EARS/Ubiquitous): The Substrate system shall linear framebuffer mapping (LFB base address).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0737** (EARS/Ubiquitous): The Substrate system shall protected mode interface (PM32 entry points).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0738** (EARS/Ubiquitous): The Substrate system shall eDID retrieval for monitor detection.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0739** (EARS/Ubiquitous): The Substrate system shall uEFI GOP (Graphics Output Protocol):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0740** (EARS/Ubiquitous): The Substrate system shall gOP protocol location and initialization.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0741** (EARS/Ubiquitous): The Substrate system shall mode query and switching.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0742** (EARS/Ubiquitous): The Substrate system shall framebuffer base and stride retrieval.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0743** (EARS/Ubiquitous): The Substrate system shall eFI runtime services integration.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0744** (EARS/Ubiquitous): The Substrate system shall bochs Graphics Adapter (BGA):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0745** (EARS/Ubiquitous): The Substrate system shall bGA detection (PCI vendor/device ID, I/O ports).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0746** (EARS/Ubiquitous): The Substrate system shall vBE DISPI register interface.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0747** (EARS/Ubiquitous): The Substrate system shall mode setting (resolution, bpp, enable LFB).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0748** (EARS/Ubiquitous): The Substrate system shall virtual resolution and display offset.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0749** (EARS/Ubiquitous): The Substrate system shall bank switching (legacy mode fallback).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0750** (EARS/Ubiquitous): The Substrate system shall virtIO-GPU:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0751** (EARS/Ubiquitous): The Substrate system shall virtIO device discovery and setup.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0752** (EARS/Ubiquitous): The Substrate system shall resource creation (2D scanout).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0753** (EARS/Ubiquitous): The Substrate system shall transfer to host (flush dirty regions).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0754** (EARS/Ubiquitous): The Substrate system shall display info query (resolution, format).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0755** (EARS/Ubiquitous): The Substrate system shall cursor image upload and positioning.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0756** (EARS/Ubiquitous): The Substrate system shall pixel Formats:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0757** (EARS/Ubiquitous): The Substrate system shall 8-bit indexed (palette-based).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0758** (EARS/Ubiquitous): The Substrate system shall 16-bit (RGB565, ARGB1555).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0759** (EARS/Ubiquitous): The Substrate system shall 24-bit (RGB888, BGR888).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0760** (EARS/Ubiquitous): The Substrate system shall 32-bit (ARGB8888, XRGB8888, ABGR8888).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0761** (EARS/Ubiquitous): The Substrate system shall endianness handling (little/big endian).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0762** (EARS/Ubiquitous): The Substrate system shall format conversion routines.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0763** (EARS/Ubiquitous): The Substrate system shall rendering:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0764** (EARS/Ubiquitous): The Substrate system shall font Support:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0765** (EARS/Ubiquitous): The Substrate system shall pSF1 font parser (256/512 glyphs, fixed width).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0766** (EARS/Ubiquitous): The Substrate system shall pSF2 font parser (Unicode table, variable metrics).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0767** (EARS/Ubiquitous): The Substrate system shall bDF/PCF font support (optional).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0768** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall built-in fallback font (8x16 VGA ROM font).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0769** (EARS/Ubiquitous): The Substrate system shall font glyph cache (hash table lookup).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0770** (EARS/Ubiquitous): The Substrate system shall unicode to glyph mapping (cmap).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0771** (EARS/Ubiquitous): The Substrate system shall blitting Operations:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0772** (EARS/Ubiquitous): The Substrate system shall fb_fillrect(): Solid color fill with ROP support.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0773** (EARS/Ubiquitous): The Substrate system shall fb_copyarea(): Screen-to-screen blit.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0774** (EARS/Ubiquitous): The Substrate system shall fb_imageblit(): Mono/color image to framebuffer.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0775** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall accelerated ops detection and fallback.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0776** (EARS/Ubiquitous): The Substrate system shall clipping (viewport bounds checking).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0777** (EARS/Ubiquitous): The Substrate system shall character Rendering:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0778** (EARS/Ubiquitous): The Substrate system shall glyph rendering with foreground/background colors.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0779** (EARS/Ubiquitous): The Substrate system shall bold rendering (shift and OR, or bold font).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0780** (EARS/Ubiquitous): The Substrate system shall italic rendering (shear transform, or italic font).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0781** (EARS/Ubiquitous): The Substrate system shall underline and strikethrough rendering.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0782** (EARS/Ubiquitous): The Substrate system shall reverse video attribute.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0783** (EARS/Ubiquitous): The Substrate system shall performance:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0784** (EARS/Ubiquitous): The Substrate system shall double buffering (offscreen back buffer).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0785** (EARS/Ubiquitous): The Substrate system shall dirty rectangle tracking.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0786** (EARS/Ubiquitous): The Substrate system shall deferred updates (batch flush on vsync).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0787** (EARS/Ubiquitous): The Substrate system shall write-combining memory type (PAT/MTRR).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0788** (EARS/Ubiquitous): The Substrate system shall cursor:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0789** (EARS/Ubiquitous): The Substrate system shall software Cursor:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0790** (EARS/Ubiquitous): The Substrate system shall xOR cursor rendering.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0791** (EARS/Ubiquitous): The Substrate system shall cursor save/restore (background preservation).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0792** (EARS/Ubiquitous): The Substrate system shall cursor blink timer integration.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0793** (EARS/Ubiquitous): The Substrate system shall hardware Cursor:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0794** (EARS/Ubiquitous): The Substrate system shall cursor image upload (ARGB format).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0795** (EARS/Ubiquitous): The Substrate system shall cursor position registers.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0796** (EARS/Ubiquitous): The Substrate system shall hot spot offset configuration.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0797** (EARS/Ubiquitous): The Substrate system shall cursor enable/disable.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0798** (EARS/Ubiquitous): The Substrate system shall emulation (VT102/ANSI):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0799** (EARS/Ubiquitous): The Substrate system shall parser State Machine:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0800** (EARS/Ubiquitous): The Substrate system shall ground state (printable characters).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0801** (EARS/Ubiquitous): The Substrate system shall escape state (ESC received).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0802** (EARS/Ubiquitous): The Substrate system shall cSI state (ESC [ sequences).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0803** (EARS/Ubiquitous): The Substrate system shall oSC state (Operating System Commands).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0804** (EARS/Ubiquitous): The Substrate system shall dCS state (Device Control Strings).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0805** (EARS/Ubiquitous): The Substrate system shall parameter accumulation and parsing.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0806** (EARS/Ubiquitous): The Substrate system shall cursor Control Sequences:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0807** (EARS/Ubiquitous): The Substrate system shall cUU/CUD/CUF/CUB (cursor movement).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0808** (EARS/Ubiquitous): The Substrate system shall cUP/HVP (absolute positioning).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0809** (EARS/Ubiquitous): The Substrate system shall cNL/CPL (next/previous line).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0810** (EARS/Ubiquitous): The Substrate system shall cHA/VPA (column/row absolute).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0811** (EARS/Ubiquitous): The Substrate system shall sC/RC (save/restore cursor position).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0812** (EARS/Ubiquitous): The Substrate system shall dECSC/DECRC (save/restore with attributes).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0813** (EARS/Ubiquitous): The Substrate system shall erase Sequences:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0814** (EARS/Ubiquitous): The Substrate system shall eD (erase display: to end, to start, all).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0815** (EARS/Ubiquitous): The Substrate system shall eL (erase line: to end, to start, all).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0816** (EARS/Ubiquitous): The Substrate system shall eCH (erase characters).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0817** (EARS/Ubiquitous): The Substrate system shall dCH/ICH (delete/insert characters).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0818** (EARS/Ubiquitous): The Substrate system shall dL/IL (delete/insert lines).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0819** (EARS/Ubiquitous): The Substrate system shall attribute Sequences (SGR):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0820** (EARS/Ubiquitous): The Substrate system shall reset (SGR 0).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0821** (EARS/Ubiquitous): The Substrate system shall bold/dim/italic/underline/blink/reverse/hidden.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0822** (EARS/Ubiquitous): The Substrate system shall 8-color foreground/background (30-37, 40-47).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0823** (EARS/Ubiquitous): The Substrate system shall bright colors (90-97, 100-107).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0824** (EARS/Ubiquitous): The Substrate system shall 256-color mode (38;5;N, 48;5;N).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0825** (EARS/Ubiquitous): The Substrate system shall 24-bit true color (38;2;R;G;B, 48;2;R;G;B).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0826** (EARS/Ubiquitous): The Substrate system shall scrolling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0827** (EARS/Ubiquitous): The Substrate system shall dECSTBM (set top/bottom margins).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0828** (EARS/Ubiquitous): The Substrate system shall sU/SD (scroll up/down).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0829** (EARS/Ubiquitous): The Substrate system shall iND/RI (index/reverse index).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0830** (EARS/Ubiquitous): The Substrate system shall smooth scroll support (optional).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0831** (EARS/Ubiquitous): The Substrate system shall modes:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0832** (EARS/Ubiquitous): The Substrate system shall dECCKM (cursor key mode: application/normal).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0833** (EARS/Ubiquitous): The Substrate system shall dECAWM (auto-wrap mode).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0834** (EARS/Ubiquitous): The Substrate system shall dECOM (origin mode: absolute/relative).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0835** (EARS/Ubiquitous): The Substrate system shall dECTCEM (cursor visibility).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0836** (EARS/Ubiquitous): The Substrate system shall alternate screen buffer (DECSET 1049).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0837** (EARS/Ubiquitous): The Substrate system shall bracketed paste mode (DECSET 2004).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0838** (EARS/Ubiquitous): The Substrate system shall character Sets:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0839** (EARS/Ubiquitous): The Substrate system shall g0/G1/G2/G3 character set designation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0840** (EARS/Ubiquitous): The Substrate system shall sI/SO (shift in/out for G0/G1).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0841** (EARS/Ubiquitous): The Substrate system shall dEC Special Graphics (line drawing).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0842** (EARS/Ubiquitous): The Substrate system shall uTF-8 decoding and Unicode support.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0843** (EARS/Ubiquitous): The Substrate system shall tabs:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0844** (EARS/Ubiquitous): The Substrate system shall hTS (horizontal tab set).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0845** (EARS/Ubiquitous): The Substrate system shall tBC (tab clear: current, all).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0846** (EARS/Ubiquitous): The Substrate system shall cHT/CBT (cursor horizontal tab forward/back).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0847** (EARS/Ubiquitous): The Substrate system shall default tab stops (every 8 columns).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0848** (EARS/Ubiquitous): The Substrate system shall reports:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0849** (EARS/Ubiquitous): The Substrate system shall dSR (device status report).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0850** (EARS/Ubiquitous): The Substrate system shall cPR (cursor position report).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0851** (EARS/Ubiquitous): The Substrate system shall dA (device attributes).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0852** (EARS/Ubiquitous): The Substrate system shall dECID (terminal ID).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0853** (EARS/Ubiquitous): The Substrate system shall tTY Binding:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0854** (EARS/Ubiquitous): The Substrate system shall register as tty_driver for /dev/tty[1-N].
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0855** (EARS/Ubiquitous): The Substrate system shall tty_driver->write() with escape sequence processing.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0856** (EARS/Ubiquitous): The Substrate system shall tty_driver->ioctl() for FB-specific controls.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0857** (EARS/Ubiquitous): The Substrate system shall window size tracking (TIOCGWINSZ/TIOCSWINSZ).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0858** (EARS/Ubiquitous): The Substrate system shall serial Console (Headless):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0859** (EARS/Ubiquitous): The Substrate system shall uART Drivers:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0860** (EARS/Ubiquitous): The Substrate system shall 8250/16550 UART driver (I/O port and MMIO).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0861** (EARS/Ubiquitous): The Substrate system shall baud rate configuration (divisor latch).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0862** (EARS/Ubiquitous): The Substrate system shall line control (data bits, parity, stop bits).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0863** (EARS/Ubiquitous): The Substrate system shall fIFO control (16550A FIFO enable, trigger level).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0864** (EARS/Ubiquitous): The Substrate system shall modem control signals (DTR, RTS).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0865** (EARS/Ubiquitous): The Substrate system shall modem status signals (CTS, DSR, DCD, RI).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0866** (EARS/Ubiquitous): The Substrate system shall interrupt-driven I/O (IRQ handler).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0867** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall polling mode fallback (for early boot).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0868** (EARS/Ubiquitous): The Substrate system shall console Output:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0869** (EARS/Ubiquitous): The Substrate system shall vT102 pass-through (raw escape sequences).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0870** (EARS/Ubiquitous): The Substrate system shall output buffering and flow control.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0871** (EARS/Ubiquitous): The Substrate system shall xON/XOFF software flow control.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0872** (EARS/Ubiquitous): The Substrate system shall rTS/CTS hardware flow control.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0873** (EARS/Ubiquitous): The Substrate system shall break signal transmission.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0874** (EARS/Ubiquitous): The Substrate system shall console Input:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0875** (EARS/Ubiquitous): The Substrate system shall character reception and buffering.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0876** (EARS/Ubiquitous): The Substrate system shall break signal detection.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0877** (EARS/Ubiquitous): The Substrate system shall framing and parity error handling.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0878** (EARS/Ubiquitous): The Substrate system shall overrun error handling.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0879** (EARS/Ubiquitous): The Substrate system shall tTY Binding:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0880** (EARS/Ubiquitous): The Substrate system shall register as tty_driver for /dev/ttyS[0-N].
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0881** (EARS/Ubiquitous): The Substrate system shall tty_driver->write() callback.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0882** (EARS/Ubiquitous): The Substrate system shall tty_driver->ioctl() for serial-specific controls.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0883** (EARS/Ubiquitous): The Substrate system shall tty_driver->set_termios() for baud/parity changes.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0884** (EARS/Ubiquitous): The Substrate system shall kernel Console:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0885** (EARS/Ubiquitous): The Substrate system shall early boot console (before TTY init).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0886** (EARS/Ubiquitous): The Substrate system shall console=ttyS0,115200n8 kernel parameter parsing.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0887** (EARS/Ubiquitous): The Substrate system shall kernel panic output to serial.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0888** (EARS/Ubiquitous): The Substrate system shall sysRq over serial (break + key).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0889** (EARS/Ubiquitous): The Substrate system shall features:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0890** (EARS/Ubiquitous): The Substrate system shall multi-Terminal: Support switching (Alt+F1, etc.) between virtual consoles.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0891** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall legacy Support: CGA/Hercules/EGA fallback modes.??.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0892** (EARS/Ubiquitous): The Substrate system shall rNG Subsystem (/dev/random, /dev/urandom): <!-- random.c, random_internal.h, sys/random.h -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0893** (EARS/Ubiquitous): The Substrate system shall core Infrastructure:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0894** (EARS/Ubiquitous): The Substrate system shall data Structures:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0895** (EARS/Ubiquitous): The Substrate system shall define struct entropy_pool (input pool, output pool, counters). <!-- random_internal.h -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0896** (EARS/Ubiquitous): The Substrate system shall define struct chacha20_ctx (key, counter, block buffer). <!-- random_internal.h -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0897** (EARS/Ubiquitous): The Substrate system shall define struct rng_state (global RNG state, seeded flag, reseed counter). <!-- random_internal.h -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0898** (EARS/Ubiquitous): The Substrate system shall create spinlock_t entropy_lock for pool access. <!-- random.c -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0899** (EARS/Ubiquitous): The Substrate system shall create spinlock_t output_lock for CSPRNG state. <!-- random.c -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0900** (EARS/Ubiquitous): The Substrate system shall define entropy estimation structures (bits per source). <!-- random_internal.h -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0901** (EARS/Ubiquitous): The Substrate system shall header Files:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0902** (EARS/Ubiquitous): The Substrate system shall create sys/include/sys/random.h (public API).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0903** (EARS/Ubiquitous): The Substrate system shall create sys/kern/random_internal.h (internal structures).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0904** (EARS/Ubiquitous): The Substrate system shall define GRND_NONBLOCK, GRND_RANDOM, GRND_INSECURE flags. <!-- sys/random.h -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0905** (EARS/Ubiquitous): The Substrate system shall initialization:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0906** (EARS/Ubiquitous): The Substrate system shall implement random_init() called from kmain. <!-- random.c:449, main.c -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0907** (EARS/Ubiquitous): The Substrate system shall initialize entropy pools to zero. <!-- random.c:454 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0908** (EARS/Ubiquitous): The Substrate system shall initialize CSPRNG state. <!-- random.c:456-458 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0909** (EARS/Ubiquitous): The Substrate system shall set initial seeded flag to false. <!-- random.c:453 (memset) -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0910** (EARS/Ubiquitous): The Substrate system shall register /dev/random and /dev/urandom device nodes. <!-- random.c:478-494 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0911** (EARS/Ubiquitous): The Substrate system shall cSPRNG Algorithm (ChaCha20): <!-- random.c:30-159 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0912** (EARS/Ubiquitous): The Substrate system shall core Implementation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0913** (EARS/Ubiquitous): The Substrate system shall implement ChaCha20 quarter-round function. <!-- random.c:33-38 QR macro -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0914** (EARS/Ubiquitous): The Substrate system shall implement ChaCha20 column and diagonal rounds. <!-- random.c:48-58 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0915** (EARS/Ubiquitous): The Substrate system shall implement ChaCha20 block function (20 rounds). <!-- random.c:41-63 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0916** (EARS/Ubiquitous): The Substrate system shall implement keystream generation with counter increment. <!-- random.c:107-115 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0917** (EARS/Ubiquitous): The Substrate system shall implement output serialization (little-endian). <!-- random.c:100-105 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0918** (EARS/Ubiquitous): The Substrate system shall key Management:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0919** (EARS/Ubiquitous): The Substrate system shall implement chacha20_init(ctx, key, nonce). <!-- random.c:66-91 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0920** (EARS/Ubiquitous): The Substrate system shall implement chacha20_rekey(ctx) (fast-key-erasure). <!-- random.c:140-154 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0921** (EARS/Ubiquitous): The Substrate system shall implement chacha20_wipe(ctx) (secure zeroing). <!-- random.c:157-159 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0922** (EARS/Ubiquitous): The Substrate system shall output Generation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0923** (EARS/Ubiquitous): The Substrate system shall implement chacha20_extract(ctx, buf, len). <!-- random.c:119-137 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0924** (EARS/Ubiquitous): The Substrate system shall buffer partial blocks for efficiency. <!-- random.c:123-134 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0925** (EARS/Ubiquitous): The Substrate system shall rekey after every 1MB of output (configurable). <!-- random.c:397-401 RESEED_INTERVAL -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0926** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0927** (EARS/Ubiquitous): The Substrate system shall rFC 7539 test vectors (known answer tests).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0928** (EARS/Ubiquitous): The Substrate system shall block function correctness tests.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0929** (EARS/Ubiquitous): The Substrate system shall counter wraparound handling tests.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0930** (EARS/Ubiquitous): The Substrate system shall entropy Mixing (Input Pool): <!-- random.c:161-224 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0931** (EARS/Ubiquitous): The Substrate system shall mixing Function:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0932** (EARS/Ubiquitous): The Substrate system shall implement LFSR-based mixing (Linux-style). <!-- random.c:177-192 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0933** (EARS/Ubiquitous): The Substrate system shall implement CRC32-based fast mixing. <!-- Uses twist table -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0934** (EARS/Ubiquitous): The Substrate system shall implement SHA-256 compression for extraction. <!-- Simplified compression random.c:198-206 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0935** (EARS/Ubiquitous): The Substrate system shall implement twist table for polynomial feedback. <!-- random.c:166-169 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0936** (EARS/Ubiquitous): The Substrate system shall pool Management:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0937** (EARS/Ubiquitous): The Substrate system shall define input pool size (4096 bits / 512 bytes). <!-- random_internal.h ENTROPY_POOL_SIZE -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0938** (EARS/Ubiquitous): The Substrate system shall implement pool_mix_bytes(pool, data, len). <!-- random.c:177-195 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0939** (EARS/Ubiquitous): The Substrate system shall implement pool_extract_bytes(pool, out, len). <!-- random.c:209-224 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0940** (EARS/Ubiquitous): The Substrate system shall track estimated entropy bits in pool. <!-- entropy_pool.entropy_count -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0941** (EARS/Ubiquitous): The Substrate system shall entropy Estimation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0942** (EARS/Ubiquitous): The Substrate system shall conservative entropy crediting (bits per event). <!-- random.c:317-321 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0943** (EARS/Ubiquitous): The Substrate system shall overflow protection (cap at pool size). <!-- random.c:318-320 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0944** (EARS/Ubiquitous): The Substrate system shall debit entropy on extraction. <!-- random.c:361 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0945** (EARS/Ubiquitous): The Substrate system shall track total entropy collected since boot. <!-- entropy_pool.total_harvested -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0946** (EARS/Ubiquitous): The Substrate system shall entropy Sources & Harvesting: <!-- random.c:303-345 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0947** (EARS/Ubiquitous): The Substrate system shall harvesting Infrastructure:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0948** (EARS/Ubiquitous): The Substrate system shall implement random_harvest(data, len, bits, source) (general API). <!-- random.c:307-326 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0949** (EARS/Ubiquitous): The Substrate system shall implement random_harvest_fast(data, len) (ISR-safe, no lock). <!-- random.c:328-341 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0950** (EARS/Ubiquitous): The Substrate system shall implement random_harvest_direct(data, len, bits) (high-quality). <!-- random.c:343-345 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0951** (EARS/Ubiquitous): The Substrate system shall define enum entropy_source (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG). <!-- sys/random.h -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0952** (EARS/Ubiquitous): The Substrate system shall per-source entropy rate limiting. <!-- rng_state.harvest_count[] -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0953** (EARS/Ubiquitous): The Substrate system shall timing-Based Sources:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0954** (EARS/Ubiquitous): The Substrate system shall interrupt Timing:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0955** (EARS/Ubiquitous): The Substrate system shall hook pit_handler for timer jitter (TSC delta). <!-- via isr_handler(IRQ0) -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0956** (EARS/Ubiquitous): The Substrate system shall hook isr_handler for interrupt timing. <!-- idt.c:isr_handler -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0957** (EARS/Ubiquitous): The Substrate system shall mix TSC low bits on each interrupt. <!-- random_harvest_fast -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0958** (EARS/Ubiquitous): The Substrate system shall credit ~1 bit per interrupt timing sample. <!-- using random_harvest_fast (mixing only) -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0959** (EARS/Ubiquitous): The Substrate system shall keyboard/Mouse: <!-- keyboard.c, mouse.c -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0960** (EARS/Ubiquitous): The Substrate system shall hook keyboard_handler (scancode + timing). <!-- keyboard.c:68-72 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0961** (EARS/Ubiquitous): The Substrate system shall hook PS/2 mouse driver (movement + timing). <!-- mouse.c:54-58 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0962** (EARS/Ubiquitous): The Substrate system shall credit ~2-4 bits per HID event. <!-- Uses random_harvest_fast -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0963** (EARS/Ubiquitous): The Substrate system shall disk I/O:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0964** (EARS/Ubiquitous): The Substrate system shall hook IDE/AHCI/VirtIO completion interrupts. <!-- Hooked virtio_blk (sync), ide -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0965** (EARS/Ubiquitous): The Substrate system shall mix seek time / completion jitter.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0966** (EARS/Ubiquitous): The Substrate system shall credit ~1 bit per I/O completion.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0967** (EARS/Ubiquitous): The Substrate system shall network:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0968** (EARS/Ubiquitous): The Substrate system shall hook network packet arrival (timing + data).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0969** (EARS/Ubiquitous): The Substrate system shall mix packet timing and partial payload.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0970** (EARS/Ubiquitous): The Substrate system shall credit ~2 bits per packet timing.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0971** (EARS/Ubiquitous): The Substrate system shall hardware RNG (RDRAND/RDSEED): <!-- random.c:226-301 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0972** (EARS/Ubiquitous): The Substrate system shall detection:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0973** (EARS/Ubiquitous): The Substrate system shall cPUID feature detection for RDRAND (ECX bit 30). <!-- random.c:241-244 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0974** (EARS/Ubiquitous): The Substrate system shall cPUID feature detection for RDSEED (EBX bit 18). <!-- random.c:251-254 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0975** (EARS/Ubiquitous): The Substrate system shall runtime availability flags. <!-- rng_state.has_rdrand, has_rdseed -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0976** (EARS/Ubiquitous): The Substrate system shall implementation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0977** (EARS/Ubiquitous): The Substrate system shall implement rdrand32(), rdrand64() with retry loop. <!-- random.c:266-287 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0978** (EARS/Ubiquitous): The Substrate system shall implement rdseed32(), rdseed64() with failure handling.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0979** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall fallback path when HWRNG unavailable. <!-- random.c:267 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0980** (EARS/Ubiquitous): The Substrate system shall integration:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0981** (EARS/Ubiquitous): The Substrate system shall periodic HWRNG harvesting (if available). <!-- random.c:464-468 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0982** (EARS/Ubiquitous): The Substrate system shall mix HWRNG output into entropy pool. <!-- random.c:295 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0983** (EARS/Ubiquitous): The Substrate system shall use HWRNG for fast-path output (XOR with CSPRNG).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0984** (EARS/Ubiquitous): The Substrate system shall credit ~32 bits per RDRAND invocation (conservative). <!-- random.c:296 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0985** (EARS/Ubiquitous): The Substrate system shall jitter Entropy (CPU Timing):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0986** (EARS/Ubiquitous): The Substrate system shall use BogoMIPS calibration loop for jitter measurement.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0987** (EARS/Ubiquitous): The Substrate system shall implement jitterentropy_collect() (memory access timing).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0988** (EARS/Ubiquitous): The Substrate system shall cPU execution jitter measurement.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0989** (EARS/Ubiquitous): The Substrate system shall memory access timing variations.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0990** (EARS/Ubiquitous): The Substrate system shall minimum samples before crediting.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0991** (EARS/Ubiquitous): The Substrate system shall virtIO Entropy Device:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0992** (EARS/Ubiquitous): The Substrate system shall virtIO RNG device detection (device type 4).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0993** (EARS/Ubiquitous): The Substrate system shall request entropy from hypervisor.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0994** (EARS/Ubiquitous): The Substrate system shall mix hypervisor-provided randomness.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0995** (EARS/Ubiquitous): The Substrate system shall credit appropriately (host-dependent quality).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0996** (EARS/Ubiquitous): The Substrate system shall reseeding & State Management: <!-- random.c:356-372 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0997** (EARS/Ubiquitous): The Substrate system shall reseed Logic:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0998** (EARS/Ubiquitous): The Substrate system shall implement random_reseed() (extract from input pool). <!-- random.c:356-372 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-0999** (EARS/Ubiquitous): The Substrate system shall minimum entropy threshold before first seed (256 bits). <!-- random.c:389, 471 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1000** (EARS/Ubiquitous): The Substrate system shall reseed interval (time-based or output-based). <!-- RESEED_INTERVAL, random.c:397 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1001** (EARS/Ubiquitous): The Substrate system shall reseed on entropy pool reaching threshold. <!-- random.c:389-391 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1002** (EARS/Ubiquitous): The Substrate system shall seeded State Tracking:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1003** (EARS/Ubiquitous): The Substrate system shall track rng_seeded boolean. <!-- rng_state.seeded -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1004** (EARS/Ubiquitous): The Substrate system shall track reseed_count for auditing. <!-- rng_state.reseed_count -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1005** (EARS/Ubiquitous): The Substrate system shall implement random_is_seeded() query. <!-- random.c:351-353 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1006** (EARS/Ubiquitous): The Substrate system shall block reads until first seed (for /dev/random). <!-- random.c:382-392 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1007** (EARS/Ubiquitous): The Substrate system shall catastrophic Reseed:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1008** (EARS/Ubiquitous): The Substrate system shall full state replacement on seed file load.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1009** (EARS/Ubiquitous): The Substrate system shall wipe previous state before new key material.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1010** (EARS/Ubiquitous): The Substrate system shall notify waiters after reseed.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1011** (EARS/Ubiquitous): The Substrate system shall device Interfaces: <!-- random.c:410-494 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1012** (EARS/Ubiquitous): The Substrate system shall /dev/random (Blocking):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1013** (EARS/Ubiquitous): The Substrate system shall implement random_dev_open(). <!-- implicit via fs_node_t -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1014** (EARS/Ubiquitous): The Substrate system shall implement random_dev_read() with blocking. <!-- random.c:415-421 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1015** (EARS/Ubiquitous): The Substrate system shall block until minimum entropy available. <!-- random.c:382-392 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1016** (EARS/Ubiquitous): The Substrate system shall wait queue for blocked readers (random_wait).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1017** (EARS/Ubiquitous): The Substrate system shall wakeup on entropy addition.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1018** (EARS/Ubiquitous): The Substrate system shall implement random_dev_poll() (POLLIN when seeded).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1019** (EARS/Ubiquitous): The Substrate system shall /dev/urandom (Non-blocking):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1020** (EARS/Ubiquitous): The Substrate system shall implement urandom_dev_read() (always returns data). <!-- random.c:424-430 -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1021** (EARS/Ubiquitous): The Substrate system shall warn once if read before seeded (dmesg).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1022** (EARS/Ubiquitous): The Substrate system shall high throughput (CSPRNG stream). <!-- ChaCha20 stream -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1023** (EARS/Ubiquitous): The Substrate system shall no entropy debit (unlimited output). <!-- GRND_INSECURE -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1024** (EARS/Ubiquitous): The Substrate system shall shared Implementation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1025** (EARS/Ubiquitous): The Substrate system shall device major/minor number allocation. <!-- implicit -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1026** (EARS/Ubiquitous): The Substrate system shall struct file_operations registration. <!-- fs_node_t callbacks -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1027** (EARS/Ubiquitous): The Substrate system shall character device creation. <!-- devfs_register_device -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1028** (EARS/Ubiquitous): The Substrate system shall permissions check (world-readable). <!-- inherits from devfs -->.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1029** (EARS/Ubiquitous): The Substrate system shall getrandom() Syscall:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1030** (EARS/Ubiquitous): The Substrate system shall implement sys_getrandom(buf, len, flags).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1031** (EARS/Ubiquitous): The Substrate system shall gRND_RANDOM flag (use blocking pool).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1032** (EARS/Ubiquitous): The Substrate system shall gRND_NONBLOCK flag (return EAGAIN if not seeded).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1033** (EARS/Ubiquitous): The Substrate system shall gRND_INSECURE flag (return data even if not seeded).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1034** (EARS/Ubiquitous): The Substrate system shall personality support (native, Linux, FreeBSD).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1035** (EARS/Ubiquitous): The Substrate system shall register syscall number in all personality tables.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1036** (EARS/Ubiquitous): The Substrate system shall kernel Internal API:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1037** (EARS/Ubiquitous): The Substrate system shall implement get_random_bytes(buf, len) (kernel consumers).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1038** (EARS/Ubiquitous): The Substrate system shall implement get_random_u32(), get_random_u64().
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1039** (EARS/Ubiquitous): The Substrate system shall implement get_random_bytes_wait(buf, len) (blocking).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1040** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall early boot fallback (before seeded).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1041** (EARS/Ubiquitous): The Substrate system shall iOCTLs & Administrative Interface:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1042** (EARS/Ubiquitous): The Substrate system shall iOCTL Commands:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1043** (EARS/Ubiquitous): The Substrate system shall rNDGETENTCNT: Return entropy estimate (bits).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1044** (EARS/Ubiquitous): The Substrate system shall rNDADDTOENTCNT: Add to entropy count (privileged).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1045** (EARS/Ubiquitous): The Substrate system shall rNDADDENTROPY: Add entropy data + credit (privileged).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1046** (EARS/Ubiquitous): The Substrate system shall rNDZAPENTCNT: Zero entropy count (privileged).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1047** (EARS/Ubiquitous): The Substrate system shall rNDCLEARPOOL: Clear entropy pool (privileged).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1048** (EARS/Ubiquitous): The Substrate system shall rNDRESEEDCRNG: Force CSPRNG reseed (privileged).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1049** (EARS/Ubiquitous): The Substrate system shall implementation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1050** (EARS/Ubiquitous): The Substrate system shall implement random_dev_ioctl() dispatcher.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1051** (EARS/Ubiquitous): The Substrate system shall privilege checks (CAP_SYS_ADMIN or root).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1052** (EARS/Ubiquitous): The Substrate system shall input validation for user-provided entropy.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1053** (EARS/Ubiquitous): The Substrate system shall copyin/copyout for userspace buffers.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1054** (EARS/Ubiquitous): The Substrate system shall sysctl Interface (Optional):.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1055** (EARS/Ubiquitous): The Substrate system shall kern.random.entropy_avail (read-only).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1056** (EARS/Ubiquitous): The Substrate system shall kern.random.poolsize (read-only).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1057** (EARS/Ubiquitous): The Substrate system shall kern.random.uuid (read-only, per-read UUID).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1058** (EARS/Ubiquitous): The Substrate system shall kern.random.boot_id (read-only, boot UUID).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1059** (EARS/Ubiquitous): The Substrate system shall security & Correctness:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1060** (EARS/Ubiquitous): The Substrate system shall fork Safety:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1061** (EARS/Ubiquitous): The Substrate system shall implement random_reseed_on_fork() hook.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1062** (EARS/Ubiquitous): The Substrate system shall call from proc_fork() after child creation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1063** (EARS/Ubiquitous): The Substrate system shall mix PID, timestamp into child's CSPRNG state.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1064** (EARS/Ubiquitous): The Substrate system shall ensure parent and child diverge immediately.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1065** (EARS/Ubiquitous): The Substrate system shall wipe any copied CSPRNG buffer in child.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1066** (EARS/Ubiquitous): The Substrate system shall exec Safety:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1067** (EARS/Ubiquitous): The Substrate system shall wipe userspace-visible RNG state on execve.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1068** (EARS/Ubiquitous): The Substrate system shall reset any per-process CSPRNG state.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1069** (EARS/Ubiquitous): The Substrate system shall ensure no entropy leakage across exec boundary.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1070** (EARS/Ubiquitous): The Substrate system shall memory Protection:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1071** (EARS/Ubiquitous): The Substrate system shall use explicit_bzero() for sensitive state clearing.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1072** (EARS/Ubiquitous): The Substrate system shall mark CSPRNG state pages non-swappable.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1073** (EARS/Ubiquitous): The Substrate system shall clear key material immediately after rekey.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1074** (EARS/Ubiquitous): The Substrate system shall avoid leaving entropy in temporary buffers.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1075** (EARS/Ubiquitous): The Substrate system shall backtracking Resistance:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1076** (EARS/Ubiquitous): The Substrate system shall fast-key-erasure design (rekey after extraction).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1077** (EARS/Ubiquitous): The Substrate system shall cannot recover previous output given current state.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1078** (EARS/Ubiquitous): The Substrate system shall wipe intermediate state after each operation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1079** (EARS/Ubiquitous): The Substrate system shall prediction Resistance:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1080** (EARS/Ubiquitous): The Substrate system shall periodic reseed from entropy pool.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1081** (EARS/Ubiquitous): The Substrate system shall mix in fresh entropy continuously.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1082** (EARS/Ubiquitous): The Substrate system shall hWRNG XOR for defense-in-depth.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1083** (EARS/Ubiquitous): The Substrate system shall audit & Logging:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1084** (EARS/Ubiquitous): The Substrate system shall log first seed event.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1085** (EARS/Ubiquitous): The Substrate system shall log reseed events (rate-limited).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1086** (EARS/Ubiquitous): The Substrate system shall log HWRNG initialization status.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1087** (EARS/Ubiquitous): The Substrate system shall log warnings for uninitialized reads.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1088** (EARS/Ubiquitous): The Substrate system shall boot-time Entropy & Seed File:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1089** (EARS/Ubiquitous): The Substrate system shall early Boot Entropy:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1090** (EARS/Ubiquitous): The Substrate system shall collect BIOS/firmware timestamps.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1091** (EARS/Ubiquitous): The Substrate system shall collect Multiboot structure addresses.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1092** (EARS/Ubiquitous): The Substrate system shall collect memory map contents.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1093** (EARS/Ubiquitous): The Substrate system shall collect interrupt timing during init.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1094** (EARS/Ubiquitous): The Substrate system shall seed File Support:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1095** (EARS/Ubiquitous): The Substrate system shall read seed file from root filesystem on mount.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1096** (EARS/Ubiquitous): The Substrate system shall expected path: /var/db/entropy/seed.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1097** (EARS/Ubiquitous): The Substrate system shall seed file format: raw 256 bytes minimum.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1098** (EARS/Ubiquitous): The Substrate system shall mix seed file into entropy pool.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1099** (EARS/Ubiquitous): The Substrate system shall immediately overwrite seed file with fresh randomness.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1100** (EARS/Ubiquitous): The Substrate system shall shutdown Handling:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1101** (EARS/Ubiquitous): The Substrate system shall write fresh seed file on clean shutdown.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1102** (EARS/Ubiquitous): The Substrate system shall ensure seed file written before unmount.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1103** (EARS/Ubiquitous): The Substrate system shall atomic write (write temp, rename).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1104** (EARS/Ubiquitous): The Substrate system shall performance Optimization:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1105** (EARS/Ubiquitous): The Substrate system shall fast Path:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1106** (EARS/Ubiquitous): The Substrate system shall per-CPU CSPRNG state (avoid lock contention).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1107** (EARS/Ubiquitous): The Substrate system shall batch output generation (64-byte blocks).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1108** (EARS/Ubiquitous): The Substrate system shall minimize lock hold time.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1109** (EARS/Ubiquitous): The Substrate system shall lockless entropy harvesting counters.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1110** (EARS/Ubiquitous): The Substrate system shall benchmarking:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1111** (EARS/Ubiquitous): The Substrate system shall create sys/tests/bench_rng.c for throughput.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1112** (EARS/Ubiquitous): The Substrate system shall measure get_random_bytes() MB/s.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1113** (EARS/Ubiquitous): The Substrate system shall measure read(/dev/urandom) MB/s.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1114** (EARS/Ubiquitous): The Substrate system shall measure entropy harvesting overhead.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1115** (EARS/Ubiquitous): The Substrate system shall profile lock contention under load.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1116** (EARS/Ubiquitous): The Substrate system shall optimization Targets:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1117** (EARS/Ubiquitous): The Substrate system shall target: >100 MB/s for /dev/urandom.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1118** (EARS/Ubiquitous): The Substrate system shall target: <1μs for get_random_u32().
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1119** (EARS/Ubiquitous): The Substrate system shall target: <100ns for random_harvest_fast().
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1120** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1121** (EARS/Ubiquitous): The Substrate system shall unit Tests:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1122** (EARS/Ubiquitous): The Substrate system shall test_chacha20.c: RFC 7539 test vectors.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1123** (EARS/Ubiquitous): The Substrate system shall test_entropy_pool.c: Mixing function correctness.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1124** (EARS/Ubiquitous): The Substrate system shall test_rng_seeding.c: Reseed logic validation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1125** (EARS/Ubiquitous): The Substrate system shall test_rng_fork.c: Parent/child output divergence.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1126** (EARS/Ubiquitous): The Substrate system shall test_rng_exec.c: State wipe on exec.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1127** (EARS/Ubiquitous): The Substrate system shall test_getrandom.c: Syscall interface validation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1128** (EARS/Ubiquitous): The Substrate system shall statistical Tests:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1129** (EARS/Ubiquitous): The Substrate system shall dieharder test suite integration.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1130** (EARS/Ubiquitous): The Substrate system shall nIST SP 800-22 test suite.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1131** (EARS/Ubiquitous): The Substrate system shall testU01 BigCrush (optional).
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1132** (EARS/Ubiquitous): The Substrate system shall minimum: Frequency, runs, and chi-square tests.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1133** (EARS/Ubiquitous): The Substrate system shall integration Tests:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1134** (EARS/Ubiquitous): The Substrate system shall boot-to-seeded timing measurement.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1135** (EARS/Ubiquitous): The Substrate system shall stress test under heavy read load.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1136** (EARS/Ubiquitous): The Substrate system shall multi-process concurrent read test.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1137** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall hWRNG fallback path testing.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1138** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1139** (EARS/Ubiquitous): The Substrate system shall man Pages:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1140** (EARS/Ubiquitous): The Substrate system shall man4/random.4: Device interface documentation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1141** (EARS/Ubiquitous): The Substrate system shall man2/getrandom.2: Syscall documentation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1142** (EARS/Ubiquitous): The Substrate system shall document blocking vs non-blocking behavior.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1143** (EARS/Ubiquitous): The Substrate system shall document entropy sources and estimation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1144** (EARS/Ubiquitous): The Substrate system shall document security properties and limitations.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1145** (EARS/Ubiquitous): The Substrate system shall kernel Documentation:.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1146** (EARS/Ubiquitous): The Substrate system shall architecture overview in doc/random.md.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1147** (EARS/Ubiquitous): The Substrate system shall entropy source hookup guide.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1148** (EARS/Ubiquitous): The Substrate system shall security model documentation.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-03-1149** (EARS/Ubiquitous): The Substrate system shall performance tuning guide.
+  - Context: 3. Drivers (`sys/drivers`)
+  - Verification: design review + implementation evidence + test/doc update.

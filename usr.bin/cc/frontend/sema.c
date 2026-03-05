@@ -1105,7 +1105,7 @@ static void expr_clear_array_meta(cc_expr_t *e) {
 static void expr_set_array_meta_decl(cc_expr_t *e, long array_len, int array_ndim,
                                      const long array_dims[CC_MAX_ARRAY_DIMS]) {
     int i;
-    if (e->kind != CC_EXPR_CAST) {
+    if (e->kind != CC_EXPR_CAST && !(e->kind == CC_EXPR_SIZEOF && e->lhs == NULL)) {
         expr_clear_array_meta(e);
     }
     if (e == NULL || array_ndim <= 0 || array_dims == NULL) {
@@ -1563,19 +1563,7 @@ static int is_bitwise_op(cc_binop_t op) {
 }
 
 static int builtin_bswap_bits(const char *name) {
-    if (name == NULL) {
-        return 0;
-    }
-    if (strcmp(name, "__builtin_bswap16") == 0) {
-        return 16;
-    }
-    if (strcmp(name, "__builtin_bswap32") == 0) {
-        return 32;
-    }
-    if (strcmp(name, "__builtin_bswap64") == 0) {
-        return 64;
-    }
-    return 0;
+    return(cc_builtin_bswap_bits(name));
 }
 
 typedef enum {
@@ -1593,6 +1581,7 @@ typedef enum {
     BUILTIN_UNPREDICTABLE,
     BUILTIN_CLZ,
     BUILTIN_CTZ,
+    BUILTIN_FFS,
     BUILTIN_POPCOUNT,
     BUILTIN_ADD_OVERFLOW,
     BUILTIN_SUB_OVERFLOW,
@@ -1670,6 +1659,10 @@ static builtin_kind_t builtin_kind(const char *name) {
     if (strcmp(name, "__builtin_ctz") == 0 || strcmp(name, "__builtin_ctzl") == 0 ||
         strcmp(name, "__builtin_ctzll") == 0) {
         return BUILTIN_CTZ;
+    }
+    if (strcmp(name, "__builtin_ffs") == 0 || strcmp(name, "__builtin_ffsl") == 0 ||
+        strcmp(name, "__builtin_ffsll") == 0) {
+        return BUILTIN_FFS;
     }
     if (strcmp(name, "__builtin_popcount") == 0 || strcmp(name, "__builtin_popcountl") == 0 ||
         strcmp(name, "__builtin_popcountll") == 0) {
@@ -1841,6 +1834,44 @@ static long type_size_bytes_struct(const cc_translation_unit_t *tu, cc_type_t t,
     return -1;
 }
 
+static long array_type_size_bytes(const cc_translation_unit_t *tu, cc_type_t t, int struct_id, int array_ndim,
+                                  const long array_dims[CC_MAX_ARRAY_DIMS]) {
+    cc_type_t elem_type;
+    int elem_struct_id;
+    long elem_size;
+    long count = 1;
+    int i;
+
+    if (array_ndim <= 0) {
+        return type_size_bytes_struct(tu, t, struct_id);
+    }
+    elem_type = t;
+    elem_struct_id = struct_id;
+    if (is_pointer_type(t)) {
+        for (i = 0; i < array_ndim; ++i) {
+            elem_type = ptr_base_type(elem_type);
+            if (elem_struct_id >= 0 && elem_type != CC_TYPE_VOID) {
+                elem_struct_id = -1;
+            }
+        }
+    }
+    elem_size = type_size_bytes_struct(tu, elem_type, elem_struct_id);
+    if (elem_size <= 0) {
+        return -1;
+    }
+    for (i = 0; i < array_ndim; ++i) {
+        long d = array_dims != NULL ? array_dims[i] : 0;
+        if (d <= 0 || count > LONG_MAX / d) {
+            return -1;
+        }
+        count *= d;
+    }
+    if (elem_size > LONG_MAX / count) {
+        return -1;
+    }
+    return elem_size * count;
+}
+
 static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t *e, long *out) {
     long a;
     long b;
@@ -1936,7 +1967,7 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
         if (e->lhs != NULL) {
             *out = type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
         } else {
-            *out = type_size_bytes_struct(tu, e->aux_type, e->aux_struct_id);
+            *out = array_type_size_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
         }
         return *out < 0 ? -1 : 0;
 
@@ -2047,7 +2078,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
         set_diag(diag, "null expression in semantic analysis");
         return -1;
     }
-    if (e->kind != CC_EXPR_CAST) {
+    if (e->kind != CC_EXPR_CAST && !(e->kind == CC_EXPR_SIZEOF && e->lhs == NULL)) {
         expr_clear_array_meta(e);
     }
 
@@ -2614,18 +2645,26 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
             e->struct_id = e->args[0]->struct_id;
             return 0;
         }
-        if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ) {
+        if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ || bk == BUILTIN_FFS) {
+            const char *builtin_name = "__builtin_clz";
+            if (bk == BUILTIN_CTZ) {
+                builtin_name = "__builtin_ctz";
+            } else if (bk == BUILTIN_FFS) {
+                builtin_name = "__builtin_ffs";
+            }
             if (e->arg_count != 1) {
-                set_diag(diag, bk == BUILTIN_CLZ ? "__builtin_clz expects exactly 1 argument"
-                                                 : "__builtin_ctz expects exactly 1 argument");
+                char msg[96];
+                snprintf(msg, sizeof(msg), "%s expects exactly 1 argument", builtin_name);
+                set_diag(diag, msg);
                 return -1;
             }
             if (check_expr(tu, e->args[0], vars, var_count, depth, diag) != 0) {
                 return -1;
             }
             if (!is_integral_type(e->args[0]->value_type)) {
-                set_diag(diag, bk == BUILTIN_CLZ ? "__builtin_clz argument must be integral"
-                                                 : "__builtin_ctz argument must be integral");
+                char msg[96];
+                snprintf(msg, sizeof(msg), "%s argument must be integral", builtin_name);
+                set_diag(diag, msg);
                 return -1;
             }
             e->value_type = CC_TYPE_INT;
@@ -3113,7 +3152,12 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 }
             }
             if (strncmp(e->ident, "__builtin_", 10) == 0) {
-                /* Fallback for unimplemented builtin signatures. */
+                if (!cc_builtin_is_recognized(e->ident)) {
+                    if (diag != NULL && diag->message[0] == '\0') {
+                        snprintf(diag->message, sizeof(diag->message), "unsupported builtin function: %s", e->ident);
+                    }
+                    return -1;
+                }
                 e->value_type = CC_TYPE_INT;
                 e->struct_id = -1;
                 return 0;
@@ -3539,7 +3583,7 @@ static int check_expr(const cc_translation_unit_t *tu, cc_expr_t *e, var_entry_t
                 return -1;
             }
         } else {
-            if (type_size_bytes_struct(tu, e->aux_type, e->aux_struct_id) < 0) {
+            if (array_type_size_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims) < 0) {
                 set_diag(diag, "sizeof unsupported for this type");
                 return -1;
             }
@@ -4538,8 +4582,10 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                     return -1;
                 }
                 if (s->expr->value_type != CC_TYPE_VOID) {
-                    set_diag(diag, "void function cannot return a value");
-                    return -1;
+                    if (emit_required_warning(diag, s->line, s->col,
+                                              "void function returning a value is a GNU extension; value is ignored") != 0) {
+                        return -1;
+                    }
                 }
             }
         } else {
@@ -5176,7 +5222,7 @@ fail_global_item:
             }
             goto fail_decl;
         }
-        if (g_std_c17 && f->has_body && !f->has_prototype) {
+        if (g_std_c17 && !g_std_c23 && f->has_body && f->has_oldstyle_param_decls) {
             char msg[256];
             snprintf(msg, sizeof(msg), "old-style function definition is obsolescent in C17: %s", f->name);
             if (emit_warning(diag, f->line, f->col, msg, 0) != 0) {
@@ -5230,6 +5276,10 @@ fail_global_item:
         }
         for (j = 0; j < i; ++j) {
             cc_function_t *prev = &tu->funcs[j];
+            int prev_static;
+            int cur_static;
+            int prev_extern;
+            int cur_extern;
             if (strcmp(prev->name, f->name) != 0) {
                 continue;
             }
@@ -5239,6 +5289,26 @@ fail_global_item:
                              f->name);
                 }
                 goto fail_decl;
+            }
+            prev_static = ((prev->storage & CC_STORAGE_STATIC) != 0);
+            cur_static = ((f->storage & CC_STORAGE_STATIC) != 0);
+            prev_extern = ((prev->storage & CC_STORAGE_EXTERN) != 0);
+            cur_extern = ((f->storage & CC_STORAGE_EXTERN) != 0);
+            if ((prev_static && cur_extern) || (cur_static && prev_extern)) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "conflicting storage-class for function declaration: %s", f->name);
+                }
+                goto fail_decl;
+            }
+            /*
+             * C inline/linkage rule interaction:
+             * a prior extern declaration keeps a later plain inline definition
+             * externally visible in this TU.
+             */
+            if ((prev_extern || cur_extern) && !prev_static && !cur_static) {
+                prev->storage |= CC_STORAGE_EXTERN;
+                f->storage |= CC_STORAGE_EXTERN;
             }
             if (prev->has_body && f->has_body) {
                 int prev_inline = ((prev->storage & CC_STORAGE_INLINE) != 0);
