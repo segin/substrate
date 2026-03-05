@@ -1,0 +1,2057 @@
+# 6b. Editline Library (`lib/edit`)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 5420-5851.
+
+## Reimplemented Checklist (All Open)
+
+### 6b. Editline Library (`lib/edit`)
+
+> **Files:** `editline.c`, `readline.c`, `history.c`, `terminal.c`,
+> `el.h` (internal), `histedit.h` (public API in `lib/edit/` and
+> `include/histedit.h`).
+>
+> **Current state:** skeletal — `el_init`/`el_end`/`el_reset`/`el_set`/
+> `el_get`/`el_line` exist. `el_gets` handles basic insert, backspace,
+> `^C`, `^D`, `^L`, and arrow‑key cursor movement + history nav.
+> History supports `H_ENTER`/`H_FIRST`/`H_LAST`/`H_PREV`/`H_NEXT`/
+> `H_SETSIZE`. Terminal supports raw/orig mode switching.
+
+- [ ] **Core Foundation (`editline.c`, `el.h`, `histedit.h`):**
+    - [ ] Create `lib/edit/` directory structure.
+    - [ ] Implement `el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr)`: allocate `EditLine`, initialize line buffer (1024‑byte default), store streams.
+    - [ ] Implement `el_end(EditLine *el)`: restore terminal, free line buffer and state.
+    - [ ] Implement `el_reset(EditLine *el)`: zero `len`/`cursor`, NUL‑terminate buffer.
+    - [ ] Implement `el_line(EditLine *el)`: return `LineInfo` with `buffer`/`cursor`/`lastchar` pointers.
+    - [ ] Define `struct editline` (streams, terminal, line, history, prompt).
+    - [ ] Define `struct line` (buffer, cap, len, cursor, `LineInfo`).
+    - [ ] Define `struct terminal` (orig/raw `termios`, `is_raw` flag).
+    - [ ] Add `prog` name storage for error messages.
+    - [ ] Add `editor_mode` field to `struct editline` (enum: `ED_EMACS`, `ED_VI`).
+    - [ ] Add `signal_state` field to `struct editline` (saved dispositions + mask).
+    - [ ] Add `completion` callback pointer and client data to `struct editline`.
+    - [ ] Add `rprompt` (right‑prompt) pointer to `struct editline`.
+    - [ ] Dynamic line‑buffer growth: `realloc` when `len + 1 >= cap` (double strategy, capped at 1 MiB).
+    - [ ] Implement `el_resize(EditLine *el)`: force terminal size re‑query and redraw.
+    - [ ] Thread‑safety: document that `EditLine` is not thread‑safe (single‑thread contract).
+
+- [ ] **Line Editing Engine (`readline.c`):**
+    - [ ] **Character Insertion:**
+        - [ ] Insert printable ASCII at cursor with `memmove` rightward shift.
+        - [ ] Reject insertion when buffer is at capacity (grow or beep).
+        - [ ] Support overwrite/replace mode toggle (Insert key).
+    - [ ] **Deletion:**
+        - [ ] Backspace (`^H` / 0x7F): delete char before cursor.
+        - [ ] Delete (`^D`): delete char at cursor (or EOF on empty line).
+        - [ ] `kill-line` (`^K`): delete from cursor to end of line, save to kill ring.
+        - [ ] `backward-kill-line` (`^U`): delete from start to cursor, save to kill ring.
+        - [ ] `kill-word` (`M-d`): delete from cursor to end of word, save to kill ring.
+        - [ ] `backward-kill-word` (`M-^H` / `M-DEL`): delete word before cursor, save to kill ring.
+        - [ ] `delete-char-or-list` (configurable `^D` variant): list completions if at end, else delete.
+    - [ ] **Cursor Navigation:**
+        - [ ] Left/Right arrow keys (ESC `[D` / ESC `[C`).
+        - [ ] `beginning-of-line` (`^A`): move to column 0.
+        - [ ] `end-of-line` (`^E`): move to `lastchar`.
+        - [ ] `forward-word` (`M-f`): skip to next word boundary.
+        - [ ] `backward-word` (`M-b`): skip to previous word boundary.
+        - [ ] Home / End keys (ESC `[H`, ESC `[F`, and alternate sequences ESC `[1~` / ESC `[4~`).
+    - [ ] **Screen Refresh (`refresh_line`):**
+        - [ ] `\\r` + `CSI K` + prompt + buffer + cursor reposition via `CSI %dD`.
+        - [ ] Handle multi‑line buffers: track physical rows, scroll window.
+        - [ ] Calculate visible width accounting for prompt length and terminal columns.
+        - [ ] Handle lines wider than terminal width (horizontal scrolling or wrapping).
+        - [ ] Optimize refresh: track dirty region and only redraw changed portion.
+    - [ ] **History Navigation:**
+        - [ ] Up arrow (`ESC [A`): `H_PREV` — load previous history entry.
+        - [ ] Down arrow (`ESC [B`): `H_NEXT` — load next or reset to empty.
+        - [ ] Save current input before first history navigation; restore on down‑past‑end.
+        - [ ] `history-search-backward` (`^R`): incremental reverse search.
+        - [ ] `history-search-forward` (`^S`): incremental forward search.
+        - [ ] `beginning-of-history` (`M-<`): jump to oldest entry.
+        - [ ] `end-of-history` (`M->`): jump to newest / current input.
+    - [ ] **Special Keys:**
+        - [ ] `^C`: print `^C`, reset line, reprint prompt.
+        - [ ] `^L`: clear screen (`CSI H` + `CSI 2J`), refresh line.
+        - [ ] Enter (`\\n` / `\\r`): accept line, restore terminal, return buffer.
+        - [ ] `^T` (`transpose-chars`): swap char at cursor with previous.
+        - [ ] `^W` (`unix-word-rubout`): kill word backward (whitespace‑delimited).
+        - [ ] `^Y` (`yank`): paste most recent kill‑ring entry.
+        - [ ] `M-y` (`yank-pop`): cycle through kill ring after yank.
+        - [ ] `^_` (`undo`): undo last editing operation.
+    - [ ] **Escape Sequence Decoding:**
+        - [ ] Two‑byte CSI: `ESC [` + final byte.
+        - [ ] Three‑byte CSI with numeric parameter: `ESC [ <digit> ~` (Delete, Insert, PgUp, PgDn).
+        - [ ] SS3 sequences: `ESC O A`/`B`/`C`/`D` (alternate arrow encoding).
+        - [ ] Extended CSI: `ESC [ 1 ; <mod> <final>` (Shift/Ctrl/Alt + arrow/Home/End).
+        - [ ] Timeout on incomplete escape (avoid blocking on bare ESC).
+    - [ ] **Kill Ring:**
+        - [ ] Circular buffer (8 entries default).
+        - [ ] `kill-line`, `kill-word`, `backward-kill-word`, `backward-kill-line` all push to ring.
+        - [ ] Consecutive kills append to the same ring entry.
+        - [ ] `yank` inserts most recent; `yank-pop` rotates.
+    - [ ] **Undo System:**
+        - [ ] Record each editing operation (insert, delete, cursor move) as an undo entry.
+        - [ ] `^_` pops the undo stack and reverts the operation.
+        - [ ] Limit undo stack depth (256 entries default).
+
+- [ ] **Emacs Key‑Binding Map:**
+    - [ ] **Implemented:**
+        - [ ] Printable self‑insert (0x20–0x7E).
+        - [ ] Backspace / Delete.
+        - [ ] `^C` (interrupt), `^D` (delete/EOF), `^L` (clear screen).
+        - [ ] Arrow keys (cursor movement + history).
+    - [ ] **Required Additions:**
+        - [ ] `^A` — `beginning-of-line`.
+        - [ ] `^B` — `backward-char`.
+        - [ ] `^E` — `end-of-line`.
+        - [ ] `^F` — `forward-char`.
+        - [ ] `^K` — `kill-line`.
+        - [ ] `^N` — `next-history` (alias for down‑arrow).
+        - [ ] `^P` — `previous-history` (alias for up‑arrow).
+        - [ ] `^R` — `reverse-search-history`.
+        - [ ] `^S` — `forward-search-history`.
+        - [ ] `^T` — `transpose-chars`.
+        - [ ] `^U` — `unix-line-discard`.
+        - [ ] `^W` — `unix-word-rubout`.
+        - [ ] `^Y` — `yank`.
+        - [ ] `^_` — `undo`.
+        - [ ] `M-b` — `backward-word`.
+        - [ ] `M-c` — `capitalize-word`.
+        - [ ] `M-d` — `kill-word`.
+        - [ ] `M-f` — `forward-word`.
+        - [ ] `M-l` — `downcase-word`.
+        - [ ] `M-u` — `upcase-word`.
+        - [ ] `M-y` — `yank-pop`.
+        - [ ] `M-<` — `beginning-of-history`.
+        - [ ] `M->` — `end-of-history`.
+        - [ ] `M-.` — `yank-last-arg` (insert last arg of previous command).
+        - [ ] `Tab` (`^I`) — `complete` (filename completion).
+
+- [ ] **Vi Mode (`EL_EDITOR "vi"`):**
+    - [ ] **Mode State Machine:**
+        - [ ] Insert mode (default on entry): self‑insert, ESC → command mode.
+        - [ ] Command mode: motion, edit, and search commands.
+        - [ ] Replace mode (`R`): overwrite characters, ESC → command mode.
+        - [ ] Track mode in `struct editline` (`vi_mode` enum: `VI_INSERT`, `VI_COMMAND`, `VI_REPLACE`).
+    - [ ] **Insert‑Mode Keys:**
+        - [ ] `ESC` — switch to command mode.
+        - [ ] `^H` / Backspace — delete backward.
+        - [ ] `^W` — delete word backward.
+        - [ ] `^U` — delete to start of line.
+        - [ ] `^D` — EOF / delete char.
+    - [ ] **Command‑Mode Motion:**
+        - [ ] `h` / `l` — left / right one char.
+        - [ ] `w` / `W` — forward word / WORD.
+        - [ ] `b` / `B` — backward word / WORD.
+        - [ ] `e` / `E` — end of word / WORD.
+        - [ ] `0` — beginning of line.
+        - [ ] `$` — end of line.
+        - [ ] `^` — first non‑blank character.
+        - [ ] `f<c>` / `F<c>` — find char forward / backward.
+        - [ ] `t<c>` / `T<c>` — find char till forward / backward.
+        - [ ] `;` / `,` — repeat / reverse last find.
+    - [ ] **Command‑Mode Editing:**
+        - [ ] `i` — enter insert mode at cursor.
+        - [ ] `a` — enter insert mode after cursor.
+        - [ ] `I` — insert at beginning of line.
+        - [ ] `A` — insert at end of line.
+        - [ ] `x` — delete char at cursor.
+        - [ ] `X` — delete char before cursor.
+        - [ ] `r<c>` — replace char at cursor with `<c>`.
+        - [ ] `R` — enter replace mode.
+        - [ ] `d<motion>` — delete over motion (e.g., `dw`, `d$`, `dd`).
+        - [ ] `c<motion>` — change over motion (delete + insert mode).
+        - [ ] `D` — delete to end of line (`d$`).
+        - [ ] `C` — change to end of line (`c$`).
+        - [ ] `s` — substitute char (delete + insert).
+        - [ ] `S` — substitute entire line.
+        - [ ] `y<motion>` — yank over motion.
+        - [ ] `p` / `P` — paste after / before cursor.
+        - [ ] `u` — undo last change.
+        - [ ] `.` — repeat last edit command.
+        - [ ] `~` — toggle case of char at cursor.
+    - [ ] **Command‑Mode History:**
+        - [ ] `j` / `k` — next / previous history.
+        - [ ] `/pattern` — search history backward.
+        - [ ] `?pattern` — search history forward.
+        - [ ] `n` / `N` — repeat search / reverse.
+    - [ ] **Command‑Mode Misc:**
+        - [ ] `v` — invoke `$VISUAL` or `$EDITOR` on current line.
+        - [ ] `#` — comment out line (prepend `#`, accept).
+        - [ ] Count prefixes: `3dw` = delete 3 words.
+
+- [ ] **Terminal Abstraction (`terminal.c`):**
+    - [ ] **Raw Mode:**
+        - [ ] `terminal_set_raw(EditLine *el)`: save orig termios, set raw (no echo, no canon, no signals, CS8, VMIN=1, VTIME=0).
+        - [ ] `terminal_set_orig(EditLine *el)`: restore saved termios.
+    - [ ] **Capability Queries:**
+        - [ ] Query terminal dimensions via `ioctl(TIOCGWINSZ)`.
+        - [ ] Fallback to `$COLUMNS` / `$LINES` environment variables.
+        - [ ] Fallback to 80×24 default.
+        - [ ] Cache dimensions; invalidate on `SIGWINCH`.
+    - [ ] **Termcap/Terminfo Support:**
+        - [ ] Query `$TERM` and look up capabilities.
+        - [ ] Support cursor motion: `cm` (absolute), `le`/`nd`/`up`/`do` (relative).
+        - [ ] Support clear: `cl` (screen), `ce` (to end of line), `cd` (to end of screen).
+        - [ ] Support insert/delete: `ic`/`dc` (char), `al`/`dl` (line).
+        - [ ] Support attributes: `md` (bold), `me` (reset), `so`/`se` (standout).
+        - [ ] Support scrolling: `sr` (reverse), `sf` (forward).
+        - [ ] Hardcoded ANSI/VT100 fallback when termcap unavailable.
+    - [ ] **Output Buffering:**
+        - [ ] Buffer terminal writes and flush in batches (reduce syscall overhead).
+        - [ ] Ensure flush on prompt display and before blocking reads.
+
+- [ ] **Signal Handling:**
+    - [ ] **`SIGWINCH` Handler:**
+        - [ ] Install handler in `el_gets`; remove on return.
+        - [ ] On receipt: re‑query `TIOCGWINSZ`, update stored dimensions, force full redraw.
+    - [ ] **`SIGINT` Handler:**
+        - [ ] If `EL_SIGNAL` is set: install handler in `el_gets`.
+        - [ ] On receipt: discard current line, print `^C\\n`, reset buffer, reprint prompt (do not exit).
+    - [ ] **`SIGQUIT` Handler:**
+        - [ ] If `EL_SIGNAL` is set: install handler, ignore `SIGQUIT` during editing.
+    - [ ] **`SIGTSTP` / `SIGCONT` Handler:**
+        - [ ] `SIGTSTP`: restore terminal, send `SIGTSTP` to self.
+        - [ ] `SIGCONT`: re‑enter raw mode, redraw prompt + buffer.
+    - [ ] **`SIGTERM` / `SIGHUP` Handler:**
+        - [ ] Restore terminal, propagate signal (allow clean shell exit).
+    - [ ] **Signal Mask Discipline:**
+        - [ ] Save old signal dispositions in `el_gets` entry, restore on exit.
+        - [ ] Use `sigaction` (not `signal`) for reliable semantics.
+        - [ ] Set `SA_RESTART` where appropriate.
+
+- [ ] **Key Map Subsystem:**
+    - [ ] **Key Map Structure:**
+        - [ ] Define `el_keymap_t` as a 256‑entry table mapping byte → action (function pointer or nested map pointer).
+        - [ ] Support multi‑byte key sequences via chained keymaps (e.g., ESC → sub‑map).
+        - [ ] Default keymaps: `emacs_keymap`, `vi_insert_keymap`, `vi_command_keymap`.
+    - [ ] **Key Binding API:**
+        - [ ] `el_set(el, EL_BIND, key_sequence, command_name)`: bind key to named command.
+        - [ ] `el_set(el, EL_BIND, key_sequence, NULL)`: unbind key.
+        - [ ] Parse key sequence notation: `^A`, `\\e`, `\\M-`, `\\C-`, `\\e[A`, literal chars.
+    - [ ] **Action Registry:**
+        - [ ] Register all built‑in editing commands with string names.
+        - [ ] Support user‑defined custom action callbacks via `el_set(el, EL_ADDFN, name, help, func)`.
+        - [ ] `el_set(el, EL_BIND, "-a", ...)`: bind in vi alternate (command) keymap.
+
+- [ ] **Programmable Completion:**
+    - [ ] **Completion Callback:**
+        - [ ] `el_set(el, EL_ADDFN, "complete", "Complete", completion_fn)`: register custom completion function.
+        - [ ] Callback signature: `unsigned char fn(EditLine *el, int ch)`.
+        - [ ] Default: filename completion (glob + opendir scan).
+    - [ ] **Filename Completion Engine:**
+        - [ ] Extract word under cursor (back to whitespace or special char).
+        - [ ] Expand `~` prefix before lookup.
+        - [ ] `opendir` + `readdir` scan for matching prefixes.
+        - [ ] If single match: insert remainder + trailing space (or `/` for directory).
+        - [ ] If multiple matches: insert common prefix, then list alternatives on second tab.
+        - [ ] Display alternatives in columns (use terminal width).
+    - [ ] **Integration with Shell:**
+        - [ ] Shell provides custom completion callback that understands builtins, paths, variables, hostnames.
+        - [ ] Document callback interface in `editline(3)`.
+
+- [ ] **Tokenizer (`tok_init` / `tok_str` / `tok_end`):**
+    - [ ] `tok_init(const char *ifs)`: create tokenizer context with IFS string.
+    - [ ] `tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv)`: tokenize line content into argv.
+    - [ ] `tok_reset(Tokenizer *tok)`: reset tokenizer state.
+    - [ ] `tok_end(Tokenizer *tok)`: free tokenizer resources.
+    - [ ] Handle single‑quoting, double‑quoting, and backslash‑escaping.
+    - [ ] Handle continuation (incomplete quotes → return continuation status).
+    - [ ] Add `Tokenizer` typedef and API to `histedit.h`.
+
+- [ ] **`el_set()` / `el_get()` Operations:**
+    - [ ] `EL_PROMPT` (0): set/get prompt string pointer. **(Implemented)**
+    - [ ] `EL_PROMPT_ESC`: set prompt function with escape‑char marking (for non‑printing sequences).
+    - [ ] `EL_TERMINAL` (1): set terminal type string. **(Stub, unused)**
+    - [ ] `EL_EDITOR` (2): set editor mode (`"emacs"` or `"vi"`). **(Stub — sets field but no vi mode)**
+    - [ ] `EL_SIGNAL` (3): enable/disable signal handling during `el_gets`. **(Stub)**
+    - [ ] `EL_BIND` (4): bind key sequence → editor command.
+    - [ ] `EL_ECHOTC` (5): echo a termcap string.
+    - [ ] `EL_SETTC` (6): set a termcap value.
+    - [ ] `EL_REFRESH` (7): force screen refresh. **(Stub)**
+    - [ ] `EL_HIST` (8): set history function + context. **(Implemented — stores `History *`)**
+    - [ ] `EL_ADDFN`: register user‑defined editing function.
+    - [ ] `EL_SETFN`: replace an existing named function.
+    - [ ] `EL_RPROMPT`: set right‑side prompt string/function.
+    - [ ] `EL_CLIENTDATA`: set/get opaque user pointer.
+    - [ ] `EL_SETTY`: set tty mode and character assignments.
+    - [ ] `EL_GETFP`: get FILE * (in/out/err).
+    - [ ] `EL_SETFP`: set FILE * (in/out/err).
+    - [ ] `EL_EDITMODE`: enable/disable editing (passthrough mode).
+
+- [ ] **`el_source()` and `.editrc` Parsing:**
+    - [ ] `el_source(EditLine *el, const char *file)`: read and execute editrc commands.
+    - [ ] Default path: `~/.editrc` if `file` is `NULL`.
+    - [ ] **Supported `.editrc` Commands:**
+        - [ ] `bind [-a] [-e] [-v] [-s] [key [command]]`: bind key to command.
+        - [ ] `echotc cap [arg ...]`: execute termcap string.
+        - [ ] `edit [on|off]`: enable/disable editing.
+        - [ ] `settc cap value`: set termcap variable.
+        - [ ] `setty [-a] [-d] [-q] [-x] mode ...`: set tty modes.
+    - [ ] Comment lines (`#`) and blank lines.
+    - [ ] Per‑program sections: `prog:command args` (match `prog` against `el->prog`).
+    - [ ] Error reporting: print line number and diagnostic on parse errors, continue.
+
+- [ ] **History Management (`history.c`):**
+    - [ ] **Core (Implemented):**
+        - [ ] `history_init()`: allocate `History` with linked list, default max 100.
+        - [ ] `history_end(History *h)`: free all nodes and list.
+        - [ ] `H_SETSIZE` (1): set maximum entries; evict oldest on overflow.
+        - [ ] `H_ENTER` (10): add entry (skip duplicates of tail).
+        - [ ] `H_FIRST` (3): set cursor to head.
+        - [ ] `H_LAST` (4): set cursor to tail.
+        - [ ] `H_PREV` (5): move cursor backward (toward oldest).
+        - [ ] `H_NEXT` (6): move cursor forward (toward newest).
+    - [ ] **Missing Operations:**
+        - [ ] `H_GETSIZE` (2): return current entry count via `HistEvent.num`.
+        - [ ] `H_CURR` (7): return current entry without moving cursor.
+        - [ ] `H_SET` (8): set cursor to entry by number.
+        - [ ] `H_ADD` (9): append text to current entry (multi‑line continuation).
+        - [ ] `H_APPEND` (11): append string to last entry.
+        - [ ] `H_END` (12): move cursor past end (sentinel, `ev.str = NULL`).
+        - [ ] `H_NEXT_STR` (13): search forward for entry containing string.
+        - [ ] `H_PREV_STR` (14): search backward for entry containing string.
+        - [ ] `H_NEXT_EVENT` (15): move to next entry matching event number.
+        - [ ] `H_PREV_EVENT` (16): move to previous entry matching event number.
+        - [ ] `H_LOAD` (17): load history from file (one entry per line).
+        - [ ] `H_SAVE` (18): save history to file.
+        - [ ] `H_CLEAR` (19): clear all entries.
+    - [ ] **History Numbering:**
+        - [ ] Assign monotonically increasing event numbers to entries.
+        - [ ] Set `HistEvent.num` on all operations that return an entry.
+    - [ ] **Unique History (Dedup):**
+        - [ ] Option to suppress consecutive duplicate entries (already done for tail).
+        - [ ] Option to remove all duplicates on insert (keep most recent).
+    - [ ] **Timestamp Support:**
+        - [ ] Store entry timestamp (for save/load fidelity with extended format).
+    - [ ] **File Format:**
+        - [ ] Simple format: one entry per line, newlines escaped as `\\n`.
+        - [ ] Write atomically (tmp + rename) to prevent corruption.
+
+- [ ] **Readline Compatibility Layer (`readline.c` — extended):**
+    - [ ] **Implemented:**
+        - [ ] `el_gets(EditLine *el, int *count)`: main read loop with raw mode, insert, backspace, arrows, history, `^C`, `^D`, `^L`.
+    - [ ] **API Shim Functions (for applications using readline(3)):**
+        - [ ] `readline(const char *prompt)`: wrapper that creates/reuses `EditLine`, calls `el_gets`, returns `strdup`'d result.
+        - [ ] `add_history(const char *line)`: wrapper around `history(h, &ev, H_ENTER, line)`.
+        - [ ] `rl_bind_key(int key, rl_command_func_t *function)`: map to `el_set(EL_BIND, ...)`.
+        - [ ] `rl_set_prompt(const char *prompt)`: map to `el_set(EL_PROMPT, ...)`.
+        - [ ] `rl_on_new_line()`: map to refresh.
+        - [ ] `rl_forced_update_display()`: map to `el_set(EL_REFRESH)`.
+    - [ ] **Readline Variables (Global Shims):**
+        - [ ] `rl_line_buffer`: pointer to current line buffer.
+        - [ ] `rl_point`: cursor position.
+        - [ ] `rl_end`: end of buffer position.
+        - [ ] `rl_readline_name`: application name.
+        - [ ] `rl_attempted_completion_function`: completion callback.
+    - [ ] **Header:** provide `readline/readline.h` and `readline/history.h` compatibility headers.
+
+- [ ] **UTF‑8 / Wide‑Character Support:**
+    - [ ] **Input Decoding:**
+        - [ ] Decode multi‑byte UTF‑8 sequences on input into `wchar_t` codepoints.
+        - [ ] Validate sequences: reject overlong encodings, surrogates, values > U+10FFFF.
+        - [ ] Handle incomplete sequences at read boundary (buffer and re‑read).
+    - [ ] **Display Width:**
+        - [ ] Use `wcwidth()` / project‑local equivalent to determine display width of each codepoint.
+        - [ ] Handle zero‑width combining characters (display width 0).
+        - [ ] Handle CJK double‑width characters (display width 2).
+        - [ ] Handle non‑printable characters (display as `^X` or `\uXXXX`).
+    - [ ] **Cursor Navigation:**
+        - [ ] `forward-char` / `backward-char` move by codepoint, not byte.
+        - [ ] `forward-word` / `backward-word` recognize Unicode word boundaries (letter/digit vs punctuation).
+        - [ ] Delete/backspace remove entire multi‑byte codepoint.
+    - [ ] **Line Buffer:**
+        - [ ] Store as UTF‑8 bytes internally (no wchar_t buffer).
+        - [ ] Cursor and length track byte positions; convert to character positions for display.
+    - [ ] **Locale Integration:**
+        - [ ] Detect locale encoding via `nl_langinfo(CODESET)` or `$LC_CTYPE`.
+        - [ ] Fall back to ASCII‑only mode if locale is not UTF‑8.
+
+- [ ] **Multi‑Line Editing:**
+    - [ ] Detect `\\n` within line buffer (e.g., from continuation or `el_insertstr`).
+    - [ ] Track logical lines vs physical screen rows.
+    - [ ] Up/Down arrow within multi‑line buffer: move between logical lines (not history).
+    - [ ] Correct cursor positioning across wrapped physical lines.
+    - [ ] `el_gets` continuation support: return continuation indicator for incomplete input (unmatched quotes, trailing `\\`).
+
+- [ ] **Testing:**
+    - [ ] **Unit Tests (`tests/lib/edit/`):**
+        - [ ] **Line Buffer Tests:**
+            - [ ] Insert at beginning, middle, end.
+            - [ ] Delete at beginning, middle, end.
+            - [ ] Cursor movement: forward/backward char, word, begin/end of line.
+            - [ ] Buffer growth: insert beyond initial capacity.
+            - [ ] Kill and yank: `^K`, `^U`, `^Y`.
+            - [ ] Undo: verify each operation reverts.
+        - [ ] **History Tests:**
+            - [ ] `H_ENTER` respects max size eviction.
+            - [ ] `H_PREV` / `H_NEXT` traverse entire list correctly.
+            - [ ] `H_NEXT_STR` / `H_PREV_STR` find correct entries.
+            - [ ] `H_LOAD` / `H_SAVE` round‑trip (write then read back, compare).
+            - [ ] `H_CLEAR` empties all entries.
+            - [ ] Duplicate suppression: consecutive and all‑duplicates modes.
+        - [ ] **Key Map Tests:**
+            - [ ] Bind, unbind, rebind a key; verify action dispatches correctly.
+            - [ ] Multi‑byte sequence binding (ESC `[A` → `previous-history`).
+            - [ ] Per‑program `.editrc` binding.
+        - [ ] **Tokenizer Tests:**
+            - [ ] Simple whitespace splitting.
+            - [ ] Quoted strings (single, double).
+            - [ ] Backslash escaping within quotes.
+            - [ ] Continuation detection (incomplete quotes).
+        - [ ] **`.editrc` Parser Tests:**
+            - [ ] Valid `bind` commands.
+            - [ ] Comment and blank line handling.
+            - [ ] Program‑specific sections.
+            - [ ] Malformed line: error message + continue.
+        - [ ] **Emacs Binding Tests:**
+            - [ ] Verify all `^A`–`^Z` and `M-*` bindings dispatch to correct actions.
+        - [ ] **Vi Mode Tests:**
+            - [ ] Insert → command → insert transitions.
+            - [ ] Motion commands (`w`, `b`, `e`, `$`, `0`).
+            - [ ] Edit commands (`d`, `c`, `x`, `r`, `p`).
+            - [ ] Count prefixes (`3dw`).
+            - [ ] Search (`/`, `?`, `n`, `N`).
+    - [ ] **Property Tests:**
+        - [ ] Line buffer invariants: `0 <= cursor <= len < cap`, buffer NUL‑terminated.
+        - [ ] History invariants: `size <= max_size`, doubly‑linked list consistency.
+        - [ ] Randomized editing sequences (insert, delete, move, undo) never crash or corrupt.
+        - [ ] Kill ring: yank always produces previously killed text.
+    - [ ] **Fuzz Tests:**
+        - [ ] Fuzz `el_gets` input stream with random bytes (harness: in‑memory `FILE *`).
+        - [ ] Fuzz `.editrc` parser with random config files.
+        - [ ] Fuzz tokenizer with random line buffers.
+    - [ ] **Integration Tests:**
+        - [ ] Drive `el_gets` via PTY: send escape sequences, verify output bytes.
+        - [ ] History file round‑trip: save, load, compare.
+        - [ ] Readline-compat: build a minimal readline app against `libedit`, verify prompt + completion.
+
+- [ ] **Documentation:**
+    - [ ] Man page: `editline(3)` — overview of the library. **(Exists)**
+    - [ ] Man page: `el_init(3)`, `el_gets(3)`, `el_set(3)`, `el_get(3)`, `el_line(3)`, `el_end(3)`, `el_reset(3)`, `el_source(3)`, `el_resize(3)` — API reference. **(Exists)**
+    - [ ] Man page: `editrc(5)` — `.editrc` file format and commands. **(Exists)**
+    - [ ] Man page: `history(3)` — history API (`history_init`, `history_end`, `H_*` ops). **(Exists)**
+    - [ ] Man page: `tok_init(3)` — tokenizer API.
+    - [ ] Update `editline(3)` with vi mode documentation.
+    - [ ] Update `editline(3)` with completion callback documentation.
+    - [ ] Update `history(3)` with `H_LOAD` / `H_SAVE` / timestamps documentation.
+    - [ ] Document readline compatibility layer and header shim.
+
+
+## User Stories
+
+- **US-08-0001**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to core Foundation (editline.c, el.h, histedit.h): so that this capability is implemented with clear verification evidence.
+- **US-08-0002**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to create lib/edit/ directory structure so that this capability is implemented with clear verification evidence.
+- **US-08-0003**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to implement el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr): allocate EditLine, initialize line buffer (1024-byte default), store streams so that this capability is implemented with clear verification evidence.
+- **US-08-0004**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to implement el_end(EditLine *el): restore terminal, free line buffer and state so that this capability is implemented with clear verification evidence.
+- **US-08-0005**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to implement el_reset(EditLine *el): zero len/cursor, NUL-terminate buffer so that this capability is implemented with clear verification evidence.
+- **US-08-0006**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to implement el_line(EditLine *el): return LineInfo with buffer/cursor/lastchar pointers so that this capability is implemented with clear verification evidence.
+- **US-08-0007**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to define struct editline (streams, terminal, line, history, prompt) so that this capability is implemented with clear verification evidence.
+- **US-08-0008**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to define struct line (buffer, cap, len, cursor, LineInfo) so that this capability is implemented with clear verification evidence.
+- **US-08-0009**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to define struct terminal (orig/raw termios, is_raw flag) so that this capability is implemented with clear verification evidence.
+- **US-08-0010**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to add prog name storage for error messages so that this capability is implemented with clear verification evidence.
+- **US-08-0011**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to add editor_mode field to struct editline (enum: ED_EMACS, ED_VI) so that this capability is implemented with clear verification evidence.
+- **US-08-0012**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to add signal_state field to struct editline (saved dispositions + mask) so that this capability is implemented with clear verification evidence.
+- **US-08-0013**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to add completion callback pointer and client data to struct editline so that this capability is implemented with clear verification evidence.
+- **US-08-0014**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to add rprompt (right-prompt) pointer to struct editline so that this capability is implemented with clear verification evidence.
+- **US-08-0015**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to dynamic line-buffer growth: realloc when len + 1 >= cap (double strategy, capped at 1 MiB) so that this capability is implemented with clear verification evidence.
+- **US-08-0016**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to implement el_resize(EditLine *el): force terminal size re-query and redraw so that this capability is implemented with clear verification evidence.
+- **US-08-0017**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to thread-safety: document that EditLine is not thread-safe (single-thread contract) so that this capability is implemented with clear verification evidence.
+- **US-08-0018**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to line Editing Engine (readline.c): so that this capability is implemented with clear verification evidence.
+- **US-08-0019**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to character Insertion: so that this capability is implemented with clear verification evidence.
+- **US-08-0020**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to insert printable ASCII at cursor with memmove rightward shift so that this capability is implemented with clear verification evidence.
+- **US-08-0021**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to reject insertion when buffer is at capacity (grow or beep) so that this capability is implemented with clear verification evidence.
+- **US-08-0022**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to support overwrite/replace mode toggle (Insert key) so that this capability is implemented with clear verification evidence.
+- **US-08-0023**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to deletion: so that this capability is implemented with clear verification evidence.
+- **US-08-0024**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to backspace (^H / 0x7F): delete char before cursor so that this capability is implemented with clear verification evidence.
+- **US-08-0025**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to delete (^D): delete char at cursor (or EOF on empty line) so that this capability is implemented with clear verification evidence.
+- **US-08-0026**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to kill-line (^K): delete from cursor to end of line, save to kill ring so that this capability is implemented with clear verification evidence.
+- **US-08-0027**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to backward-kill-line (^U): delete from start to cursor, save to kill ring so that this capability is implemented with clear verification evidence.
+- **US-08-0028**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to kill-word (M-d): delete from cursor to end of word, save to kill ring so that this capability is implemented with clear verification evidence.
+- **US-08-0029**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to backward-kill-word (M-^H / M-DEL): delete word before cursor, save to kill ring so that this capability is implemented with clear verification evidence.
+- **US-08-0030**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to delete-char-or-list (configurable ^D variant): list completions if at end, else delete so that this capability is implemented with clear verification evidence.
+- **US-08-0031**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to cursor Navigation: so that this capability is implemented with clear verification evidence.
+- **US-08-0032**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to left/Right arrow keys (ESC [D / ESC [C) so that this capability is implemented with clear verification evidence.
+- **US-08-0033**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to beginning-of-line (^A): move to column 0 so that this capability is implemented with clear verification evidence.
+- **US-08-0034**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to end-of-line (^E): move to lastchar so that this capability is implemented with clear verification evidence.
+- **US-08-0035**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to forward-word (M-f): skip to next word boundary so that this capability is implemented with clear verification evidence.
+- **US-08-0036**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to backward-word (M-b): skip to previous word boundary so that this capability is implemented with clear verification evidence.
+- **US-08-0037**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to home / End keys (ESC [H, ESC [F, and alternate sequences ESC [1~ / ESC [4~) so that this capability is implemented with clear verification evidence.
+- **US-08-0038**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to screen Refresh (refresh_line): so that this capability is implemented with clear verification evidence.
+- **US-08-0039**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to \\r + CSI K + prompt + buffer + cursor reposition via CSI %dD so that this capability is implemented with clear verification evidence.
+- **US-08-0040**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to handle multi-line buffers: track physical rows, scroll window so that this capability is implemented with clear verification evidence.
+- **US-08-0041**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to calculate visible width accounting for prompt length and terminal columns so that this capability is implemented with clear verification evidence.
+- **US-08-0042**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to handle lines wider than terminal width (horizontal scrolling or wrapping) so that this capability is implemented with clear verification evidence.
+- **US-08-0043**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to optimize refresh: track dirty region and only redraw changed portion so that this capability is implemented with clear verification evidence.
+- **US-08-0044**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history Navigation: so that this capability is implemented with clear verification evidence.
+- **US-08-0045**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to up arrow (ESC [A): H_PREV - load previous history entry so that this capability is implemented with clear verification evidence.
+- **US-08-0046**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to down arrow (ESC [B): H_NEXT - load next or reset to empty so that this capability is implemented with clear verification evidence.
+- **US-08-0047**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to save current input before first history navigation; restore on down-past-end so that this capability is implemented with clear verification evidence.
+- **US-08-0048**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history-search-backward (^R): incremental reverse search so that this capability is implemented with clear verification evidence.
+- **US-08-0049**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history-search-forward (^S): incremental forward search so that this capability is implemented with clear verification evidence.
+- **US-08-0050**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to beginning-of-history (M-<): jump to oldest entry so that this capability is implemented with clear verification evidence.
+- **US-08-0051**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to end-of-history (M->): jump to newest / current input so that this capability is implemented with clear verification evidence.
+- **US-08-0052**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to special Keys: so that this capability is implemented with clear verification evidence.
+- **US-08-0053**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^C: print ^C, reset line, reprint prompt so that this capability is implemented with clear verification evidence.
+- **US-08-0054**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^L: clear screen (CSI H + CSI 2J), refresh line so that this capability is implemented with clear verification evidence.
+- **US-08-0055**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to enter (\\n / \\r): accept line, restore terminal, return buffer so that this capability is implemented with clear verification evidence.
+- **US-08-0056**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^T (transpose-chars): swap char at cursor with previous so that this capability is implemented with clear verification evidence.
+- **US-08-0057**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^W (unix-word-rubout): kill word backward (whitespace-delimited) so that this capability is implemented with clear verification evidence.
+- **US-08-0058**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^Y (yank): paste most recent kill-ring entry so that this capability is implemented with clear verification evidence.
+- **US-08-0059**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-y (yank-pop): cycle through kill ring after yank so that this capability is implemented with clear verification evidence.
+- **US-08-0060**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^_ (undo): undo last editing operation so that this capability is implemented with clear verification evidence.
+- **US-08-0061**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to escape Sequence Decoding: so that this capability is implemented with clear verification evidence.
+- **US-08-0062**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to two-byte CSI: ESC [ + final byte so that this capability is implemented with clear verification evidence.
+- **US-08-0063**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to three-byte CSI with numeric parameter: ESC [ <digit> ~ (Delete, Insert, PgUp, PgDn) so that this capability is implemented with clear verification evidence.
+- **US-08-0064**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to sS3 sequences: ESC O A/B/C/D (alternate arrow encoding) so that this capability is implemented with clear verification evidence.
+- **US-08-0065**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to extended CSI: ESC [ 1 ; <mod> <final> (Shift/Ctrl/Alt + arrow/Home/End) so that this capability is implemented with clear verification evidence.
+- **US-08-0066**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to timeout on incomplete escape (avoid blocking on bare ESC) so that this capability is implemented with clear verification evidence.
+- **US-08-0067**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to kill Ring: so that this capability is implemented with clear verification evidence.
+- **US-08-0068**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to circular buffer (8 entries default) so that this capability is implemented with clear verification evidence.
+- **US-08-0069**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to kill-line, kill-word, backward-kill-word, backward-kill-line all push to ring so that this capability is implemented with clear verification evidence.
+- **US-08-0070**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to consecutive kills append to the same ring entry so that this capability is implemented with clear verification evidence.
+- **US-08-0071**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to yank inserts most recent; yank-pop rotates so that this capability is implemented with clear verification evidence.
+- **US-08-0072**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to undo System: so that this capability is implemented with clear verification evidence.
+- **US-08-0073**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to record each editing operation (insert, delete, cursor move) as an undo entry so that this capability is implemented with clear verification evidence.
+- **US-08-0074**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^_ pops the undo stack and reverts the operation so that this capability is implemented with clear verification evidence.
+- **US-08-0075**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to limit undo stack depth (256 entries default) so that this capability is implemented with clear verification evidence.
+- **US-08-0076**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to emacs Key-Binding Map: so that this capability is implemented with clear verification evidence.
+- **US-08-0077**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to implemented: so that this capability is implemented with clear verification evidence.
+- **US-08-0078**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to printable self-insert (0x20-0x7E) so that this capability is implemented with clear verification evidence.
+- **US-08-0079**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to backspace / Delete so that this capability is implemented with clear verification evidence.
+- **US-08-0080**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^C (interrupt), ^D (delete/EOF), ^L (clear screen) so that this capability is implemented with clear verification evidence.
+- **US-08-0081**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to arrow keys (cursor movement + history) so that this capability is implemented with clear verification evidence.
+- **US-08-0082**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to required Additions: so that this capability is implemented with clear verification evidence.
+- **US-08-0083**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^A - beginning-of-line so that this capability is implemented with clear verification evidence.
+- **US-08-0084**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^B - backward-char so that this capability is implemented with clear verification evidence.
+- **US-08-0085**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^E - end-of-line so that this capability is implemented with clear verification evidence.
+- **US-08-0086**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^F - forward-char so that this capability is implemented with clear verification evidence.
+- **US-08-0087**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^K - kill-line so that this capability is implemented with clear verification evidence.
+- **US-08-0088**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^N - next-history (alias for down-arrow) so that this capability is implemented with clear verification evidence.
+- **US-08-0089**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^P - previous-history (alias for up-arrow) so that this capability is implemented with clear verification evidence.
+- **US-08-0090**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^R - reverse-search-history so that this capability is implemented with clear verification evidence.
+- **US-08-0091**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^S - forward-search-history so that this capability is implemented with clear verification evidence.
+- **US-08-0092**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^T - transpose-chars so that this capability is implemented with clear verification evidence.
+- **US-08-0093**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^U - unix-line-discard so that this capability is implemented with clear verification evidence.
+- **US-08-0094**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^W - unix-word-rubout so that this capability is implemented with clear verification evidence.
+- **US-08-0095**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^Y - yank so that this capability is implemented with clear verification evidence.
+- **US-08-0096**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^_ - undo so that this capability is implemented with clear verification evidence.
+- **US-08-0097**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-b - backward-word so that this capability is implemented with clear verification evidence.
+- **US-08-0098**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-c - capitalize-word so that this capability is implemented with clear verification evidence.
+- **US-08-0099**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-d - kill-word so that this capability is implemented with clear verification evidence.
+- **US-08-0100**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-f - forward-word so that this capability is implemented with clear verification evidence.
+- **US-08-0101**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-l - downcase-word so that this capability is implemented with clear verification evidence.
+- **US-08-0102**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-u - upcase-word so that this capability is implemented with clear verification evidence.
+- **US-08-0103**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-y - yank-pop so that this capability is implemented with clear verification evidence.
+- **US-08-0104**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-< - beginning-of-history so that this capability is implemented with clear verification evidence.
+- **US-08-0105**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-> - end-of-history so that this capability is implemented with clear verification evidence.
+- **US-08-0106**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to m-. - yank-last-arg (insert last arg of previous command) so that this capability is implemented with clear verification evidence.
+- **US-08-0107**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tab (^I) - complete (filename completion) so that this capability is implemented with clear verification evidence.
+- **US-08-0108**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to vi Mode (EL_EDITOR "vi"): so that this capability is implemented with clear verification evidence.
+- **US-08-0109**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to mode State Machine: so that this capability is implemented with clear verification evidence.
+- **US-08-0110**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to insert mode (default on entry): self-insert, ESC → command mode so that this capability is implemented with clear verification evidence.
+- **US-08-0111**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to command mode: motion, edit, and search commands so that this capability is implemented with clear verification evidence.
+- **US-08-0112**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to replace mode (R): overwrite characters, ESC → command mode so that this capability is implemented with clear verification evidence.
+- **US-08-0113**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to track mode in struct editline (vi_mode enum: VI_INSERT, VI_COMMAND, VI_REPLACE) so that this capability is implemented with clear verification evidence.
+- **US-08-0114**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to insert-Mode Keys: so that this capability is implemented with clear verification evidence.
+- **US-08-0115**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eSC - switch to command mode so that this capability is implemented with clear verification evidence.
+- **US-08-0116**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^H / Backspace - delete backward so that this capability is implemented with clear verification evidence.
+- **US-08-0117**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^W - delete word backward so that this capability is implemented with clear verification evidence.
+- **US-08-0118**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^U - delete to start of line so that this capability is implemented with clear verification evidence.
+- **US-08-0119**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^D - EOF / delete char so that this capability is implemented with clear verification evidence.
+- **US-08-0120**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to command-Mode Motion: so that this capability is implemented with clear verification evidence.
+- **US-08-0121**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h / l - left / right one char so that this capability is implemented with clear verification evidence.
+- **US-08-0122**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to w / W - forward word / WORD so that this capability is implemented with clear verification evidence.
+- **US-08-0123**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to b / B - backward word / WORD so that this capability is implemented with clear verification evidence.
+- **US-08-0124**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to e / E - end of word / WORD so that this capability is implemented with clear verification evidence.
+- **US-08-0125**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to 0 - beginning of line so that this capability is implemented with clear verification evidence.
+- **US-08-0126**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to $ - end of line so that this capability is implemented with clear verification evidence.
+- **US-08-0127**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ^ - first non-blank character so that this capability is implemented with clear verification evidence.
+- **US-08-0128**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to f<c> / F<c> - find char forward / backward so that this capability is implemented with clear verification evidence.
+- **US-08-0129**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to t<c> / T<c> - find char till forward / backward so that this capability is implemented with clear verification evidence.
+- **US-08-0130**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ; / , - repeat / reverse last find so that this capability is implemented with clear verification evidence.
+- **US-08-0131**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to command-Mode Editing: so that this capability is implemented with clear verification evidence.
+- **US-08-0132**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to i - enter insert mode at cursor so that this capability is implemented with clear verification evidence.
+- **US-08-0133**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to a - enter insert mode after cursor so that this capability is implemented with clear verification evidence.
+- **US-08-0134**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to i - insert at beginning of line so that this capability is implemented with clear verification evidence.
+- **US-08-0135**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to a - insert at end of line so that this capability is implemented with clear verification evidence.
+- **US-08-0136**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to x - delete char at cursor so that this capability is implemented with clear verification evidence.
+- **US-08-0137**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to x - delete char before cursor so that this capability is implemented with clear verification evidence.
+- **US-08-0138**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to r<c> - replace char at cursor with <c> so that this capability is implemented with clear verification evidence.
+- **US-08-0139**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to r - enter replace mode so that this capability is implemented with clear verification evidence.
+- **US-08-0140**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to d<motion> - delete over motion (e.g., dw, d$, dd) so that this capability is implemented with clear verification evidence.
+- **US-08-0141**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to c<motion> - change over motion (delete + insert mode) so that this capability is implemented with clear verification evidence.
+- **US-08-0142**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to d - delete to end of line (d$) so that this capability is implemented with clear verification evidence.
+- **US-08-0143**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to c - change to end of line (c$) so that this capability is implemented with clear verification evidence.
+- **US-08-0144**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to s - substitute char (delete + insert) so that this capability is implemented with clear verification evidence.
+- **US-08-0145**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to s - substitute entire line so that this capability is implemented with clear verification evidence.
+- **US-08-0146**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to y<motion> - yank over motion so that this capability is implemented with clear verification evidence.
+- **US-08-0147**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to p / P - paste after / before cursor so that this capability is implemented with clear verification evidence.
+- **US-08-0148**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to u - undo last change so that this capability is implemented with clear verification evidence.
+- **US-08-0149**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to . - repeat last edit command so that this capability is implemented with clear verification evidence.
+- **US-08-0150**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ~ - toggle case of char at cursor so that this capability is implemented with clear verification evidence.
+- **US-08-0151**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to command-Mode History: so that this capability is implemented with clear verification evidence.
+- **US-08-0152**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to j / k - next / previous history so that this capability is implemented with clear verification evidence.
+- **US-08-0153**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to /pattern - search history backward so that this capability is implemented with clear verification evidence.
+- **US-08-0154**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ?pattern - search history forward so that this capability is implemented with clear verification evidence.
+- **US-08-0155**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to n / N - repeat search / reverse so that this capability is implemented with clear verification evidence.
+- **US-08-0156**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to command-Mode Misc: so that this capability is implemented with clear verification evidence.
+- **US-08-0157**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to v - invoke $VISUAL or $EDITOR on current line so that this capability is implemented with clear verification evidence.
+- **US-08-0158**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to # - comment out line (prepend #, accept) so that this capability is implemented with clear verification evidence.
+- **US-08-0159**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to count prefixes: 3dw = delete 3 words so that this capability is implemented with clear verification evidence.
+- **US-08-0160**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to terminal Abstraction (terminal.c): so that this capability is implemented with clear verification evidence.
+- **US-08-0161**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to raw Mode: so that this capability is implemented with clear verification evidence.
+- **US-08-0162**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to terminal_set_raw(EditLine *el): save orig termios, set raw (no echo, no canon, no signals, CS8, VMIN=1, VTIME=0) so that this capability is implemented with clear verification evidence.
+- **US-08-0163**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to terminal_set_orig(EditLine *el): restore saved termios so that this capability is implemented with clear verification evidence.
+- **US-08-0164**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to capability Queries: so that this capability is implemented with clear verification evidence.
+- **US-08-0165**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to query terminal dimensions via ioctl(TIOCGWINSZ) so that this capability is implemented with clear verification evidence.
+- **US-08-0166**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to fallback to $COLUMNS / $LINES environment variables so that this capability is implemented with clear verification evidence.
+- **US-08-0167**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to fallback to 80×24 default so that this capability is implemented with clear verification evidence.
+- **US-08-0168**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to cache dimensions; invalidate on SIGWINCH so that this capability is implemented with clear verification evidence.
+- **US-08-0169**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to termcap/Terminfo Support: so that this capability is implemented with clear verification evidence.
+- **US-08-0170**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to query $TERM and look up capabilities so that this capability is implemented with clear verification evidence.
+- **US-08-0171**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to support cursor motion: cm (absolute), le/nd/up/do (relative) so that this capability is implemented with clear verification evidence.
+- **US-08-0172**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to support clear: cl (screen), ce (to end of line), cd (to end of screen) so that this capability is implemented with clear verification evidence.
+- **US-08-0173**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to support insert/delete: ic/dc (char), al/dl (line) so that this capability is implemented with clear verification evidence.
+- **US-08-0174**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to support attributes: md (bold), me (reset), so/se (standout) so that this capability is implemented with clear verification evidence.
+- **US-08-0175**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to support scrolling: sr (reverse), sf (forward) so that this capability is implemented with clear verification evidence.
+- **US-08-0176**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to hardcoded ANSI/VT100 fallback when termcap unavailable so that this capability is implemented with clear verification evidence.
+- **US-08-0177**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to output Buffering: so that this capability is implemented with clear verification evidence.
+- **US-08-0178**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to buffer terminal writes and flush in batches (reduce syscall overhead) so that this capability is implemented with clear verification evidence.
+- **US-08-0179**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to ensure flush on prompt display and before blocking reads so that this capability is implemented with clear verification evidence.
+- **US-08-0180**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to signal Handling: so that this capability is implemented with clear verification evidence.
+- **US-08-0181**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to sIGWINCH Handler: so that this capability is implemented with clear verification evidence.
+- **US-08-0182**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to install handler in el_gets; remove on return so that this capability is implemented with clear verification evidence.
+- **US-08-0183**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to on receipt: re-query TIOCGWINSZ, update stored dimensions, force full redraw so that this capability is implemented with clear verification evidence.
+- **US-08-0184**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to sIGINT Handler: so that this capability is implemented with clear verification evidence.
+- **US-08-0185**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to if EL_SIGNAL is set: install handler in el_gets so that this capability is implemented with clear verification evidence.
+- **US-08-0186**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to on receipt: discard current line, print ^C\\n, reset buffer, reprint prompt (do not exit) so that this capability is implemented with clear verification evidence.
+- **US-08-0187**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to sIGQUIT Handler: so that this capability is implemented with clear verification evidence.
+- **US-08-0188**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to if EL_SIGNAL is set: install handler, ignore SIGQUIT during editing so that this capability is implemented with clear verification evidence.
+- **US-08-0189**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to sIGTSTP / SIGCONT Handler: so that this capability is implemented with clear verification evidence.
+- **US-08-0190**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to sIGTSTP: restore terminal, send SIGTSTP to self so that this capability is implemented with clear verification evidence.
+- **US-08-0191**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to sIGCONT: re-enter raw mode, redraw prompt + buffer so that this capability is implemented with clear verification evidence.
+- **US-08-0192**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to sIGTERM / SIGHUP Handler: so that this capability is implemented with clear verification evidence.
+- **US-08-0193**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to restore terminal, propagate signal (allow clean shell exit) so that this capability is implemented with clear verification evidence.
+- **US-08-0194**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to signal Mask Discipline: so that this capability is implemented with clear verification evidence.
+- **US-08-0195**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to save old signal dispositions in el_gets entry, restore on exit so that this capability is implemented with clear verification evidence.
+- **US-08-0196**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to use sigaction (not signal) for reliable semantics so that this capability is implemented with clear verification evidence.
+- **US-08-0197**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to set SA_RESTART where appropriate so that this capability is implemented with clear verification evidence.
+- **US-08-0198**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to key Map Subsystem: so that this capability is implemented with clear verification evidence.
+- **US-08-0199**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to key Map Structure: so that this capability is implemented with clear verification evidence.
+- **US-08-0200**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to define el_keymap_t as a 256-entry table mapping byte → action (function pointer or nested map pointer) so that this capability is implemented with clear verification evidence.
+- **US-08-0201**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to support multi-byte key sequences via chained keymaps (e.g., ESC → sub-map) so that this capability is implemented with clear verification evidence.
+- **US-08-0202**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to default keymaps: emacs_keymap, vi_insert_keymap, vi_command_keymap so that this capability is implemented with clear verification evidence.
+- **US-08-0203**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to key Binding API: so that this capability is implemented with clear verification evidence.
+- **US-08-0204**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to el_set(el, EL_BIND, key_sequence, command_name): bind key to named command so that this capability is implemented with clear verification evidence.
+- **US-08-0205**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to el_set(el, EL_BIND, key_sequence, NULL): unbind key so that this capability is implemented with clear verification evidence.
+- **US-08-0206**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to parse key sequence notation: ^A, \\e, \\M-, \\C-, \\e[A, literal chars so that this capability is implemented with clear verification evidence.
+- **US-08-0207**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to action Registry: so that this capability is implemented with clear verification evidence.
+- **US-08-0208**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to register all built-in editing commands with string names so that this capability is implemented with clear verification evidence.
+- **US-08-0209**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to support user-defined custom action callbacks via el_set(el, EL_ADDFN, name, help, func) so that this capability is implemented with clear verification evidence.
+- **US-08-0210**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to el_set(el, EL_BIND, "-a", ...): bind in vi alternate (command) keymap so that this capability is implemented with clear verification evidence.
+- **US-08-0211**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to programmable Completion: so that this capability is implemented with clear verification evidence.
+- **US-08-0212**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to completion Callback: so that this capability is implemented with clear verification evidence.
+- **US-08-0213**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to el_set(el, EL_ADDFN, "complete", "Complete", completion_fn): register custom completion function so that this capability is implemented with clear verification evidence.
+- **US-08-0214**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to callback signature: unsigned char fn(EditLine *el, int ch) so that this capability is implemented with clear verification evidence.
+- **US-08-0215**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to default: filename completion (glob + opendir scan) so that this capability is implemented with clear verification evidence.
+- **US-08-0216**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to filename Completion Engine: so that this capability is implemented with clear verification evidence.
+- **US-08-0217**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to extract word under cursor (back to whitespace or special char) so that this capability is implemented with clear verification evidence.
+- **US-08-0218**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to expand ~ prefix before lookup so that this capability is implemented with clear verification evidence.
+- **US-08-0219**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to opendir + readdir scan for matching prefixes so that this capability is implemented with clear verification evidence.
+- **US-08-0220**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to if single match: insert remainder + trailing space (or / for directory) so that this capability is implemented with clear verification evidence.
+- **US-08-0221**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to if multiple matches: insert common prefix, then list alternatives on second tab so that this capability is implemented with clear verification evidence.
+- **US-08-0222**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to display alternatives in columns (use terminal width) so that this capability is implemented with clear verification evidence.
+- **US-08-0223**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to integration with Shell: so that this capability is implemented with clear verification evidence.
+- **US-08-0224**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to shell provides custom completion callback that understands builtins, paths, variables, hostnames so that this capability is implemented with clear verification evidence.
+- **US-08-0225**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to document callback interface in editline(3) so that this capability is implemented with clear verification evidence.
+- **US-08-0226**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tokenizer (tok_init / tok_str / tok_end): so that this capability is implemented with clear verification evidence.
+- **US-08-0227**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tok_init(const char *ifs): create tokenizer context with IFS string so that this capability is implemented with clear verification evidence.
+- **US-08-0228**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv): tokenize line content into argv so that this capability is implemented with clear verification evidence.
+- **US-08-0229**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tok_reset(Tokenizer *tok): reset tokenizer state so that this capability is implemented with clear verification evidence.
+- **US-08-0230**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tok_end(Tokenizer *tok): free tokenizer resources so that this capability is implemented with clear verification evidence.
+- **US-08-0231**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to handle single-quoting, double-quoting, and backslash-escaping so that this capability is implemented with clear verification evidence.
+- **US-08-0232**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to handle continuation (incomplete quotes → return continuation status) so that this capability is implemented with clear verification evidence.
+- **US-08-0233**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to add Tokenizer typedef and API to histedit.h so that this capability is implemented with clear verification evidence.
+- **US-08-0234**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to el_set() / el_get() Operations: so that this capability is implemented with clear verification evidence.
+- **US-08-0235**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_PROMPT (0): set/get prompt string pointer. (Implemented) so that this capability is implemented with clear verification evidence.
+- **US-08-0236**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_PROMPT_ESC: set prompt function with escape-char marking (for non-printing sequences) so that this capability is implemented with clear verification evidence.
+- **US-08-0237**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_TERMINAL (1): set terminal type string. (Stub, unused) so that this capability is implemented with clear verification evidence.
+- **US-08-0238**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_EDITOR (2): set editor mode ("emacs" or "vi"). (Stub - sets field but no vi mode) so that this capability is implemented with clear verification evidence.
+- **US-08-0239**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_SIGNAL (3): enable/disable signal handling during el_gets. (Stub) so that this capability is implemented with clear verification evidence.
+- **US-08-0240**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_BIND (4): bind key sequence → editor command so that this capability is implemented with clear verification evidence.
+- **US-08-0241**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_ECHOTC (5): echo a termcap string so that this capability is implemented with clear verification evidence.
+- **US-08-0242**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_SETTC (6): set a termcap value so that this capability is implemented with clear verification evidence.
+- **US-08-0243**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_REFRESH (7): force screen refresh. (Stub) so that this capability is implemented with clear verification evidence.
+- **US-08-0244**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_HIST (8): set history function + context. **(Implemented - stores History *)** so that this capability is implemented with clear verification evidence.
+- **US-08-0245**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_ADDFN: register user-defined editing function so that this capability is implemented with clear verification evidence.
+- **US-08-0246**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_SETFN: replace an existing named function so that this capability is implemented with clear verification evidence.
+- **US-08-0247**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_RPROMPT: set right-side prompt string/function so that this capability is implemented with clear verification evidence.
+- **US-08-0248**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_CLIENTDATA: set/get opaque user pointer so that this capability is implemented with clear verification evidence.
+- **US-08-0249**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_SETTY: set tty mode and character assignments so that this capability is implemented with clear verification evidence.
+- **US-08-0250**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_GETFP: get FILE * (in/out/err) so that this capability is implemented with clear verification evidence.
+- **US-08-0251**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_SETFP: set FILE * (in/out/err) so that this capability is implemented with clear verification evidence.
+- **US-08-0252**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to eL_EDITMODE: enable/disable editing (passthrough mode) so that this capability is implemented with clear verification evidence.
+- **US-08-0253**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to el_source() and .editrc Parsing: so that this capability is implemented with clear verification evidence.
+- **US-08-0254**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to el_source(EditLine *el, const char *file): read and execute editrc commands so that this capability is implemented with clear verification evidence.
+- **US-08-0255**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to default path: ~/.editrc if file is NULL so that this capability is implemented with clear verification evidence.
+- **US-08-0256**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to supported .editrc Commands: so that this capability is implemented with clear verification evidence.
+- **US-08-0257**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to bind [-a] [-e] [-v] [-s] [key [command]]: bind key to command so that this capability is implemented with clear verification evidence.
+- **US-08-0258**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to echotc cap [arg ...]: execute termcap string so that this capability is implemented with clear verification evidence.
+- **US-08-0259**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to edit [on|off]: enable/disable editing so that this capability is implemented with clear verification evidence.
+- **US-08-0260**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to settc cap value: set termcap variable so that this capability is implemented with clear verification evidence.
+- **US-08-0261**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to setty [-a] [-d] [-q] [-x] mode ...: set tty modes so that this capability is implemented with clear verification evidence.
+- **US-08-0262**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to comment lines (#) and blank lines so that this capability is implemented with clear verification evidence.
+- **US-08-0263**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to per-program sections: prog:command args (match prog against el->prog) so that this capability is implemented with clear verification evidence.
+- **US-08-0264**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to error reporting: print line number and diagnostic on parse errors, continue so that this capability is implemented with clear verification evidence.
+- **US-08-0265**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history Management (history.c): so that this capability is implemented with clear verification evidence.
+- **US-08-0266**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to core (Implemented): so that this capability is implemented with clear verification evidence.
+- **US-08-0267**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history_init(): allocate History with linked list, default max 100 so that this capability is implemented with clear verification evidence.
+- **US-08-0268**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history_end(History *h): free all nodes and list so that this capability is implemented with clear verification evidence.
+- **US-08-0269**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_SETSIZE (1): set maximum entries; evict oldest on overflow so that this capability is implemented with clear verification evidence.
+- **US-08-0270**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_ENTER (10): add entry (skip duplicates of tail) so that this capability is implemented with clear verification evidence.
+- **US-08-0271**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_FIRST (3): set cursor to head so that this capability is implemented with clear verification evidence.
+- **US-08-0272**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_LAST (4): set cursor to tail so that this capability is implemented with clear verification evidence.
+- **US-08-0273**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_PREV (5): move cursor backward (toward oldest) so that this capability is implemented with clear verification evidence.
+- **US-08-0274**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_NEXT (6): move cursor forward (toward newest) so that this capability is implemented with clear verification evidence.
+- **US-08-0275**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to missing Operations: so that this capability is implemented with clear verification evidence.
+- **US-08-0276**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_GETSIZE (2): return current entry count via HistEvent.num so that this capability is implemented with clear verification evidence.
+- **US-08-0277**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_CURR (7): return current entry without moving cursor so that this capability is implemented with clear verification evidence.
+- **US-08-0278**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_SET (8): set cursor to entry by number so that this capability is implemented with clear verification evidence.
+- **US-08-0279**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_ADD (9): append text to current entry (multi-line continuation) so that this capability is implemented with clear verification evidence.
+- **US-08-0280**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_APPEND (11): append string to last entry so that this capability is implemented with clear verification evidence.
+- **US-08-0281**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_END (12): move cursor past end (sentinel, ev.str = NULL) so that this capability is implemented with clear verification evidence.
+- **US-08-0282**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_NEXT_STR (13): search forward for entry containing string so that this capability is implemented with clear verification evidence.
+- **US-08-0283**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_PREV_STR (14): search backward for entry containing string so that this capability is implemented with clear verification evidence.
+- **US-08-0284**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_NEXT_EVENT (15): move to next entry matching event number so that this capability is implemented with clear verification evidence.
+- **US-08-0285**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_PREV_EVENT (16): move to previous entry matching event number so that this capability is implemented with clear verification evidence.
+- **US-08-0286**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_LOAD (17): load history from file (one entry per line) so that this capability is implemented with clear verification evidence.
+- **US-08-0287**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_SAVE (18): save history to file so that this capability is implemented with clear verification evidence.
+- **US-08-0288**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_CLEAR (19): clear all entries so that this capability is implemented with clear verification evidence.
+- **US-08-0289**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history Numbering: so that this capability is implemented with clear verification evidence.
+- **US-08-0290**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to assign monotonically increasing event numbers to entries so that this capability is implemented with clear verification evidence.
+- **US-08-0291**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to set HistEvent.num on all operations that return an entry so that this capability is implemented with clear verification evidence.
+- **US-08-0292**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to unique History (Dedup): so that this capability is implemented with clear verification evidence.
+- **US-08-0293**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to option to suppress consecutive duplicate entries (already done for tail) so that this capability is implemented with clear verification evidence.
+- **US-08-0294**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to option to remove all duplicates on insert (keep most recent) so that this capability is implemented with clear verification evidence.
+- **US-08-0295**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to timestamp Support: so that this capability is implemented with clear verification evidence.
+- **US-08-0296**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to store entry timestamp (for save/load fidelity with extended format) so that this capability is implemented with clear verification evidence.
+- **US-08-0297**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to file Format: so that this capability is implemented with clear verification evidence.
+- **US-08-0298**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to simple format: one entry per line, newlines escaped as \\n so that this capability is implemented with clear verification evidence.
+- **US-08-0299**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to write atomically (tmp + rename) to prevent corruption so that this capability is implemented with clear verification evidence.
+- **US-08-0300**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to readline Compatibility Layer (readline.c - extended): so that this capability is implemented with clear verification evidence.
+- **US-08-0301**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to implemented: so that this capability is implemented with clear verification evidence.
+- **US-08-0302**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to el_gets(EditLine *el, int *count): main read loop with raw mode, insert, backspace, arrows, history, ^C, ^D, ^L so that this capability is implemented with clear verification evidence.
+- **US-08-0303**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to aPI Shim Functions (for applications using readline(3)): so that this capability is implemented with clear verification evidence.
+- **US-08-0304**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to readline(const char *prompt): wrapper that creates/reuses EditLine, calls el_gets, returns strdup'd result so that this capability is implemented with clear verification evidence.
+- **US-08-0305**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to add_history(const char *line): wrapper around history(h, &ev, H_ENTER, line) so that this capability is implemented with clear verification evidence.
+- **US-08-0306**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to rl_bind_key(int key, rl_command_func_t *function): map to el_set(EL_BIND, ...) so that this capability is implemented with clear verification evidence.
+- **US-08-0307**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to rl_set_prompt(const char *prompt): map to el_set(EL_PROMPT, ...) so that this capability is implemented with clear verification evidence.
+- **US-08-0308**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to rl_on_new_line(): map to refresh so that this capability is implemented with clear verification evidence.
+- **US-08-0309**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to rl_forced_update_display(): map to el_set(EL_REFRESH) so that this capability is implemented with clear verification evidence.
+- **US-08-0310**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to readline Variables (Global Shims): so that this capability is implemented with clear verification evidence.
+- **US-08-0311**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to rl_line_buffer: pointer to current line buffer so that this capability is implemented with clear verification evidence.
+- **US-08-0312**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to rl_point: cursor position so that this capability is implemented with clear verification evidence.
+- **US-08-0313**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to rl_end: end of buffer position so that this capability is implemented with clear verification evidence.
+- **US-08-0314**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to rl_readline_name: application name so that this capability is implemented with clear verification evidence.
+- **US-08-0315**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to rl_attempted_completion_function: completion callback so that this capability is implemented with clear verification evidence.
+- **US-08-0316**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to header: provide readline/readline.h and readline/history.h compatibility headers so that this capability is implemented with clear verification evidence.
+- **US-08-0317**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to uTF-8 / Wide-Character Support: so that this capability is implemented with clear verification evidence.
+- **US-08-0318**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to input Decoding: so that this capability is implemented with clear verification evidence.
+- **US-08-0319**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to decode multi-byte UTF-8 sequences on input into wchar_t codepoints so that this capability is implemented with clear verification evidence.
+- **US-08-0320**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to validate sequences: reject overlong encodings, surrogates, values > U+10FFFF so that this capability is implemented with clear verification evidence.
+- **US-08-0321**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to handle incomplete sequences at read boundary (buffer and re-read) so that this capability is implemented with clear verification evidence.
+- **US-08-0322**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to display Width: so that this capability is implemented with clear verification evidence.
+- **US-08-0323**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to use wcwidth() / project-local equivalent to determine display width of each codepoint so that this capability is implemented with clear verification evidence.
+- **US-08-0324**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to handle zero-width combining characters (display width 0) so that this capability is implemented with clear verification evidence.
+- **US-08-0325**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to handle CJK double-width characters (display width 2) so that this capability is implemented with clear verification evidence.
+- **US-08-0326**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to handle non-printable characters (display as ^X or \uXXXX) so that this capability is implemented with clear verification evidence.
+- **US-08-0327**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to cursor Navigation: so that this capability is implemented with clear verification evidence.
+- **US-08-0328**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to forward-char / backward-char move by codepoint, not byte so that this capability is implemented with clear verification evidence.
+- **US-08-0329**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to forward-word / backward-word recognize Unicode word boundaries (letter/digit vs punctuation) so that this capability is implemented with clear verification evidence.
+- **US-08-0330**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to delete/backspace remove entire multi-byte codepoint so that this capability is implemented with clear verification evidence.
+- **US-08-0331**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to line Buffer: so that this capability is implemented with clear verification evidence.
+- **US-08-0332**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to store as UTF-8 bytes internally (no wchar_t buffer) so that this capability is implemented with clear verification evidence.
+- **US-08-0333**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to cursor and length track byte positions; convert to character positions for display so that this capability is implemented with clear verification evidence.
+- **US-08-0334**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to locale Integration: so that this capability is implemented with clear verification evidence.
+- **US-08-0335**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to detect locale encoding via nl_langinfo(CODESET) or $LC_CTYPE so that this capability is implemented with clear verification evidence.
+- **US-08-0336**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to fall back to ASCII-only mode if locale is not UTF-8 so that this capability is implemented with clear verification evidence.
+- **US-08-0337**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to multi-Line Editing: so that this capability is implemented with clear verification evidence.
+- **US-08-0338**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to detect \\n within line buffer (e.g., from continuation or el_insertstr) so that this capability is implemented with clear verification evidence.
+- **US-08-0339**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to track logical lines vs physical screen rows so that this capability is implemented with clear verification evidence.
+- **US-08-0340**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to up/Down arrow within multi-line buffer: move between logical lines (not history) so that this capability is implemented with clear verification evidence.
+- **US-08-0341**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to correct cursor positioning across wrapped physical lines so that this capability is implemented with clear verification evidence.
+- **US-08-0342**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to el_gets continuation support: return continuation indicator for incomplete input (unmatched quotes, trailing \\) so that this capability is implemented with clear verification evidence.
+- **US-08-0343**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-08-0344**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to unit Tests (tests/lib/edit/): so that this capability is implemented with clear verification evidence.
+- **US-08-0345**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to line Buffer Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0346**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to insert at beginning, middle, end so that this capability is implemented with clear verification evidence.
+- **US-08-0347**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to delete at beginning, middle, end so that this capability is implemented with clear verification evidence.
+- **US-08-0348**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to cursor movement: forward/backward char, word, begin/end of line so that this capability is implemented with clear verification evidence.
+- **US-08-0349**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to buffer growth: insert beyond initial capacity so that this capability is implemented with clear verification evidence.
+- **US-08-0350**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to kill and yank: ^K, ^U, ^Y so that this capability is implemented with clear verification evidence.
+- **US-08-0351**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to undo: verify each operation reverts so that this capability is implemented with clear verification evidence.
+- **US-08-0352**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0353**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_ENTER respects max size eviction so that this capability is implemented with clear verification evidence.
+- **US-08-0354**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_PREV / H_NEXT traverse entire list correctly so that this capability is implemented with clear verification evidence.
+- **US-08-0355**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_NEXT_STR / H_PREV_STR find correct entries so that this capability is implemented with clear verification evidence.
+- **US-08-0356**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_LOAD / H_SAVE round-trip (write then read back, compare) so that this capability is implemented with clear verification evidence.
+- **US-08-0357**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to h_CLEAR empties all entries so that this capability is implemented with clear verification evidence.
+- **US-08-0358**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to duplicate suppression: consecutive and all-duplicates modes so that this capability is implemented with clear verification evidence.
+- **US-08-0359**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to key Map Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0360**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to bind, unbind, rebind a key; verify action dispatches correctly so that this capability is implemented with clear verification evidence.
+- **US-08-0361**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to multi-byte sequence binding (ESC [A → previous-history) so that this capability is implemented with clear verification evidence.
+- **US-08-0362**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to per-program .editrc binding so that this capability is implemented with clear verification evidence.
+- **US-08-0363**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to tokenizer Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0364**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to simple whitespace splitting so that this capability is implemented with clear verification evidence.
+- **US-08-0365**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to quoted strings (single, double) so that this capability is implemented with clear verification evidence.
+- **US-08-0366**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to backslash escaping within quotes so that this capability is implemented with clear verification evidence.
+- **US-08-0367**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to continuation detection (incomplete quotes) so that this capability is implemented with clear verification evidence.
+- **US-08-0368**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to .editrc Parser Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0369**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to valid bind commands so that this capability is implemented with clear verification evidence.
+- **US-08-0370**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to comment and blank line handling so that this capability is implemented with clear verification evidence.
+- **US-08-0371**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to program-specific sections so that this capability is implemented with clear verification evidence.
+- **US-08-0372**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to malformed line: error message + continue so that this capability is implemented with clear verification evidence.
+- **US-08-0373**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to emacs Binding Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0374**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to verify all ^A-^Z and M-* bindings dispatch to correct actions so that this capability is implemented with clear verification evidence.
+- **US-08-0375**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to vi Mode Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0376**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to insert → command → insert transitions so that this capability is implemented with clear verification evidence.
+- **US-08-0377**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to motion commands (w, b, e, $, 0) so that this capability is implemented with clear verification evidence.
+- **US-08-0378**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to edit commands (d, c, x, r, p) so that this capability is implemented with clear verification evidence.
+- **US-08-0379**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to count prefixes (3dw) so that this capability is implemented with clear verification evidence.
+- **US-08-0380**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to search (/, ?, n, N) so that this capability is implemented with clear verification evidence.
+- **US-08-0381**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to property Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0382**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to line buffer invariants: 0 <= cursor <= len < cap, buffer NUL-terminated so that this capability is implemented with clear verification evidence.
+- **US-08-0383**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history invariants: size <= max_size, doubly-linked list consistency so that this capability is implemented with clear verification evidence.
+- **US-08-0384**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to randomized editing sequences (insert, delete, move, undo) never crash or corrupt so that this capability is implemented with clear verification evidence.
+- **US-08-0385**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to kill ring: yank always produces previously killed text so that this capability is implemented with clear verification evidence.
+- **US-08-0386**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to fuzz Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0387**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to fuzz el_gets input stream with random bytes (harness: in-memory FILE *) so that this capability is implemented with clear verification evidence.
+- **US-08-0388**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to fuzz .editrc parser with random config files so that this capability is implemented with clear verification evidence.
+- **US-08-0389**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to fuzz tokenizer with random line buffers so that this capability is implemented with clear verification evidence.
+- **US-08-0390**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to integration Tests: so that this capability is implemented with clear verification evidence.
+- **US-08-0391**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to drive el_gets via PTY: send escape sequences, verify output bytes so that this capability is implemented with clear verification evidence.
+- **US-08-0392**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to history file round-trip: save, load, compare so that this capability is implemented with clear verification evidence.
+- **US-08-0393**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to readline-compat: build a minimal readline app against libedit, verify prompt + completion so that this capability is implemented with clear verification evidence.
+- **US-08-0394**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-08-0395**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to man page: editline(3) - overview of the library. (Exists) so that this capability is implemented with clear verification evidence.
+- **US-08-0396**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to man page: el_init(3), el_gets(3), el_set(3), el_get(3), el_line(3), el_end(3), el_reset(3), el_source(3), el_resize(3) - API reference. (Exists) so that this capability is implemented with clear verification evidence.
+- **US-08-0397**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to man page: editrc(5) - .editrc file format and commands. (Exists) so that this capability is implemented with clear verification evidence.
+- **US-08-0398**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to man page: history(3) - history API (history_init, history_end, H_* ops). (Exists) so that this capability is implemented with clear verification evidence.
+- **US-08-0399**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to man page: tok_init(3) - tokenizer API so that this capability is implemented with clear verification evidence.
+- **US-08-0400**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to update editline(3) with vi mode documentation so that this capability is implemented with clear verification evidence.
+- **US-08-0401**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to update editline(3) with completion callback documentation so that this capability is implemented with clear verification evidence.
+- **US-08-0402**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to update history(3) with H_LOAD / H_SAVE / timestamps documentation so that this capability is implemented with clear verification evidence.
+- **US-08-0403**: As a Substrate contributor working on 6b. Editline Library (`lib/edit`), I want to document readline compatibility layer and header shim so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-08-0001** (EARS/Ubiquitous): The Substrate system shall core Foundation (editline.c, el.h, histedit.h):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0002** (EARS/Ubiquitous): The Substrate system shall create lib/edit/ directory structure.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0003** (EARS/Ubiquitous): The Substrate system shall implement el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr): allocate EditLine, initialize line buffer (1024-byte default), store streams.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0004** (EARS/Ubiquitous): The Substrate system shall implement el_end(EditLine *el): restore terminal, free line buffer and state.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0005** (EARS/Ubiquitous): The Substrate system shall implement el_reset(EditLine *el): zero len/cursor, NUL-terminate buffer.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0006** (EARS/Ubiquitous): The Substrate system shall implement el_line(EditLine *el): return LineInfo with buffer/cursor/lastchar pointers.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0007** (EARS/Ubiquitous): The Substrate system shall define struct editline (streams, terminal, line, history, prompt).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0008** (EARS/Ubiquitous): The Substrate system shall define struct line (buffer, cap, len, cursor, LineInfo).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0009** (EARS/Ubiquitous): The Substrate system shall define struct terminal (orig/raw termios, is_raw flag).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0010** (EARS/Ubiquitous): The Substrate system shall add prog name storage for error messages.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0011** (EARS/Ubiquitous): The Substrate system shall add editor_mode field to struct editline (enum: ED_EMACS, ED_VI).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0012** (EARS/Ubiquitous): The Substrate system shall add signal_state field to struct editline (saved dispositions + mask).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0013** (EARS/Ubiquitous): The Substrate system shall add completion callback pointer and client data to struct editline.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0014** (EARS/Ubiquitous): The Substrate system shall add rprompt (right-prompt) pointer to struct editline.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0015** (EARS/Ubiquitous): The Substrate system shall dynamic line-buffer growth: realloc when len + 1 >= cap (double strategy, capped at 1 MiB).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0016** (EARS/Ubiquitous): The Substrate system shall implement el_resize(EditLine *el): force terminal size re-query and redraw.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0017** (EARS/Ubiquitous): The Substrate system shall thread-safety: document that EditLine is not thread-safe (single-thread contract).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0018** (EARS/Ubiquitous): The Substrate system shall line Editing Engine (readline.c):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0019** (EARS/Ubiquitous): The Substrate system shall character Insertion:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0020** (EARS/Ubiquitous): The Substrate system shall insert printable ASCII at cursor with memmove rightward shift.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0021** (EARS/Ubiquitous): The Substrate system shall reject insertion when buffer is at capacity (grow or beep).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0022** (EARS/Ubiquitous): The Substrate system shall support overwrite/replace mode toggle (Insert key).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0023** (EARS/Ubiquitous): The Substrate system shall deletion:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0024** (EARS/Ubiquitous): The Substrate system shall backspace (^H / 0x7F): delete char before cursor.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0025** (EARS/Ubiquitous): The Substrate system shall delete (^D): delete char at cursor (or EOF on empty line).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0026** (EARS/Ubiquitous): The Substrate system shall kill-line (^K): delete from cursor to end of line, save to kill ring.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0027** (EARS/Ubiquitous): The Substrate system shall backward-kill-line (^U): delete from start to cursor, save to kill ring.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0028** (EARS/Ubiquitous): The Substrate system shall kill-word (M-d): delete from cursor to end of word, save to kill ring.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0029** (EARS/Ubiquitous): The Substrate system shall backward-kill-word (M-^H / M-DEL): delete word before cursor, save to kill ring.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0030** (EARS/Ubiquitous): The Substrate system shall delete-char-or-list (configurable ^D variant): list completions if at end, else delete.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0031** (EARS/Ubiquitous): The Substrate system shall cursor Navigation:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0032** (EARS/Ubiquitous): The Substrate system shall left/Right arrow keys (ESC [D / ESC [C).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0033** (EARS/Ubiquitous): The Substrate system shall beginning-of-line (^A): move to column 0.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0034** (EARS/Ubiquitous): The Substrate system shall end-of-line (^E): move to lastchar.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0035** (EARS/Ubiquitous): The Substrate system shall forward-word (M-f): skip to next word boundary.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0036** (EARS/Ubiquitous): The Substrate system shall backward-word (M-b): skip to previous word boundary.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0037** (EARS/Ubiquitous): The Substrate system shall home / End keys (ESC [H, ESC [F, and alternate sequences ESC [1~ / ESC [4~).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0038** (EARS/Ubiquitous): The Substrate system shall screen Refresh (refresh_line):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0039** (EARS/Ubiquitous): The Substrate system shall \\r + CSI K + prompt + buffer + cursor reposition via CSI %dD.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0040** (EARS/Ubiquitous): The Substrate system shall handle multi-line buffers: track physical rows, scroll window.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0041** (EARS/Ubiquitous): The Substrate system shall calculate visible width accounting for prompt length and terminal columns.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0042** (EARS/Ubiquitous): The Substrate system shall handle lines wider than terminal width (horizontal scrolling or wrapping).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0043** (EARS/Ubiquitous): The Substrate system shall optimize refresh: track dirty region and only redraw changed portion.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0044** (EARS/Ubiquitous): The Substrate system shall history Navigation:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0045** (EARS/Ubiquitous): The Substrate system shall up arrow (ESC [A): H_PREV - load previous history entry.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0046** (EARS/Ubiquitous): The Substrate system shall down arrow (ESC [B): H_NEXT - load next or reset to empty.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0047** (EARS/Ubiquitous): The Substrate system shall save current input before first history navigation; restore on down-past-end.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0048** (EARS/Ubiquitous): The Substrate system shall history-search-backward (^R): incremental reverse search.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0049** (EARS/Ubiquitous): The Substrate system shall history-search-forward (^S): incremental forward search.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0050** (EARS/Ubiquitous): The Substrate system shall beginning-of-history (M-<): jump to oldest entry.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0051** (EARS/Ubiquitous): The Substrate system shall end-of-history (M->): jump to newest / current input.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0052** (EARS/Ubiquitous): The Substrate system shall special Keys:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0053** (EARS/Ubiquitous): The Substrate system shall ^C: print ^C, reset line, reprint prompt.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0054** (EARS/Ubiquitous): The Substrate system shall ^L: clear screen (CSI H + CSI 2J), refresh line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0055** (EARS/Ubiquitous): The Substrate system shall enter (\\n / \\r): accept line, restore terminal, return buffer.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0056** (EARS/Ubiquitous): The Substrate system shall ^T (transpose-chars): swap char at cursor with previous.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0057** (EARS/Ubiquitous): The Substrate system shall ^W (unix-word-rubout): kill word backward (whitespace-delimited).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0058** (EARS/Ubiquitous): The Substrate system shall ^Y (yank): paste most recent kill-ring entry.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0059** (EARS/Ubiquitous): The Substrate system shall m-y (yank-pop): cycle through kill ring after yank.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0060** (EARS/Ubiquitous): The Substrate system shall ^_ (undo): undo last editing operation.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0061** (EARS/Ubiquitous): The Substrate system shall escape Sequence Decoding:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0062** (EARS/Ubiquitous): The Substrate system shall two-byte CSI: ESC [ + final byte.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0063** (EARS/Ubiquitous): The Substrate system shall three-byte CSI with numeric parameter: ESC [ <digit> ~ (Delete, Insert, PgUp, PgDn).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0064** (EARS/Ubiquitous): The Substrate system shall sS3 sequences: ESC O A/B/C/D (alternate arrow encoding).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0065** (EARS/Ubiquitous): The Substrate system shall extended CSI: ESC [ 1 ; <mod> <final> (Shift/Ctrl/Alt + arrow/Home/End).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0066** (EARS/Ubiquitous): The Substrate system shall timeout on incomplete escape (avoid blocking on bare ESC).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0067** (EARS/Ubiquitous): The Substrate system shall kill Ring:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0068** (EARS/Ubiquitous): The Substrate system shall circular buffer (8 entries default).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0069** (EARS/Ubiquitous): The Substrate system shall kill-line, kill-word, backward-kill-word, backward-kill-line all push to ring.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0070** (EARS/Ubiquitous): The Substrate system shall consecutive kills append to the same ring entry.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0071** (EARS/Ubiquitous): The Substrate system shall yank inserts most recent; yank-pop rotates.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0072** (EARS/Ubiquitous): The Substrate system shall undo System:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0073** (EARS/Ubiquitous): The Substrate system shall record each editing operation (insert, delete, cursor move) as an undo entry.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0074** (EARS/Ubiquitous): The Substrate system shall ^_ pops the undo stack and reverts the operation.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0075** (EARS/Ubiquitous): The Substrate system shall limit undo stack depth (256 entries default).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0076** (EARS/Ubiquitous): The Substrate system shall emacs Key-Binding Map:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0077** (EARS/Ubiquitous): The Substrate system shall implemented:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0078** (EARS/Ubiquitous): The Substrate system shall printable self-insert (0x20-0x7E).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0079** (EARS/Ubiquitous): The Substrate system shall backspace / Delete.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0080** (EARS/Ubiquitous): The Substrate system shall ^C (interrupt), ^D (delete/EOF), ^L (clear screen).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0081** (EARS/Ubiquitous): The Substrate system shall arrow keys (cursor movement + history).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0082** (EARS/Ubiquitous): The Substrate system shall required Additions:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0083** (EARS/Ubiquitous): The Substrate system shall ^A - beginning-of-line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0084** (EARS/Ubiquitous): The Substrate system shall ^B - backward-char.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0085** (EARS/Ubiquitous): The Substrate system shall ^E - end-of-line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0086** (EARS/Ubiquitous): The Substrate system shall ^F - forward-char.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0087** (EARS/Ubiquitous): The Substrate system shall ^K - kill-line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0088** (EARS/Ubiquitous): The Substrate system shall ^N - next-history (alias for down-arrow).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0089** (EARS/Ubiquitous): The Substrate system shall ^P - previous-history (alias for up-arrow).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0090** (EARS/Ubiquitous): The Substrate system shall ^R - reverse-search-history.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0091** (EARS/Ubiquitous): The Substrate system shall ^S - forward-search-history.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0092** (EARS/Ubiquitous): The Substrate system shall ^T - transpose-chars.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0093** (EARS/Ubiquitous): The Substrate system shall ^U - unix-line-discard.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0094** (EARS/Ubiquitous): The Substrate system shall ^W - unix-word-rubout.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0095** (EARS/Ubiquitous): The Substrate system shall ^Y - yank.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0096** (EARS/Ubiquitous): The Substrate system shall ^_ - undo.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0097** (EARS/Ubiquitous): The Substrate system shall m-b - backward-word.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0098** (EARS/Ubiquitous): The Substrate system shall m-c - capitalize-word.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0099** (EARS/Ubiquitous): The Substrate system shall m-d - kill-word.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0100** (EARS/Ubiquitous): The Substrate system shall m-f - forward-word.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0101** (EARS/Ubiquitous): The Substrate system shall m-l - downcase-word.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0102** (EARS/Ubiquitous): The Substrate system shall m-u - upcase-word.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0103** (EARS/Ubiquitous): The Substrate system shall m-y - yank-pop.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0104** (EARS/Ubiquitous): The Substrate system shall m-< - beginning-of-history.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0105** (EARS/Ubiquitous): The Substrate system shall m-> - end-of-history.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0106** (EARS/Ubiquitous): The Substrate system shall m-. - yank-last-arg (insert last arg of previous command).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0107** (EARS/Ubiquitous): The Substrate system shall tab (^I) - complete (filename completion).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0108** (EARS/Ubiquitous): The Substrate system shall vi Mode (EL_EDITOR "vi"):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0109** (EARS/Ubiquitous): The Substrate system shall mode State Machine:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0110** (EARS/Ubiquitous): The Substrate system shall insert mode (default on entry): self-insert, ESC → command mode.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0111** (EARS/Ubiquitous): The Substrate system shall command mode: motion, edit, and search commands.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0112** (EARS/Ubiquitous): The Substrate system shall replace mode (R): overwrite characters, ESC → command mode.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0113** (EARS/Ubiquitous): The Substrate system shall track mode in struct editline (vi_mode enum: VI_INSERT, VI_COMMAND, VI_REPLACE).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0114** (EARS/Ubiquitous): The Substrate system shall insert-Mode Keys:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0115** (EARS/Ubiquitous): The Substrate system shall eSC - switch to command mode.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0116** (EARS/Ubiquitous): The Substrate system shall ^H / Backspace - delete backward.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0117** (EARS/Ubiquitous): The Substrate system shall ^W - delete word backward.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0118** (EARS/Ubiquitous): The Substrate system shall ^U - delete to start of line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0119** (EARS/Ubiquitous): The Substrate system shall ^D - EOF / delete char.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0120** (EARS/Ubiquitous): The Substrate system shall command-Mode Motion:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0121** (EARS/Ubiquitous): The Substrate system shall h / l - left / right one char.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0122** (EARS/Ubiquitous): The Substrate system shall w / W - forward word / WORD.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0123** (EARS/Ubiquitous): The Substrate system shall b / B - backward word / WORD.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0124** (EARS/Ubiquitous): The Substrate system shall e / E - end of word / WORD.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0125** (EARS/Ubiquitous): The Substrate system shall 0 - beginning of line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0126** (EARS/Ubiquitous): The Substrate system shall $ - end of line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0127** (EARS/Ubiquitous): The Substrate system shall ^ - first non-blank character.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0128** (EARS/Ubiquitous): The Substrate system shall f<c> / F<c> - find char forward / backward.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0129** (EARS/Ubiquitous): The Substrate system shall t<c> / T<c> - find char till forward / backward.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0130** (EARS/Ubiquitous): The Substrate system shall ; / , - repeat / reverse last find.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0131** (EARS/Ubiquitous): The Substrate system shall command-Mode Editing:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0132** (EARS/Ubiquitous): The Substrate system shall i - enter insert mode at cursor.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0133** (EARS/Ubiquitous): The Substrate system shall a - enter insert mode after cursor.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0134** (EARS/Ubiquitous): The Substrate system shall i - insert at beginning of line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0135** (EARS/Ubiquitous): The Substrate system shall a - insert at end of line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0136** (EARS/Ubiquitous): The Substrate system shall x - delete char at cursor.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0137** (EARS/Ubiquitous): The Substrate system shall x - delete char before cursor.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0138** (EARS/Ubiquitous): The Substrate system shall r<c> - replace char at cursor with <c>.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0139** (EARS/Ubiquitous): The Substrate system shall r - enter replace mode.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0140** (EARS/Ubiquitous): The Substrate system shall d<motion> - delete over motion (e.g., dw, d$, dd).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0141** (EARS/Ubiquitous): The Substrate system shall c<motion> - change over motion (delete + insert mode).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0142** (EARS/Ubiquitous): The Substrate system shall d - delete to end of line (d$).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0143** (EARS/Ubiquitous): The Substrate system shall c - change to end of line (c$).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0144** (EARS/Ubiquitous): The Substrate system shall s - substitute char (delete + insert).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0145** (EARS/Ubiquitous): The Substrate system shall s - substitute entire line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0146** (EARS/Ubiquitous): The Substrate system shall y<motion> - yank over motion.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0147** (EARS/Ubiquitous): The Substrate system shall p / P - paste after / before cursor.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0148** (EARS/Ubiquitous): The Substrate system shall u - undo last change.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0149** (EARS/Ubiquitous): The Substrate system shall . - repeat last edit command.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0150** (EARS/Ubiquitous): The Substrate system shall ~ - toggle case of char at cursor.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0151** (EARS/Ubiquitous): The Substrate system shall command-Mode History:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0152** (EARS/Ubiquitous): The Substrate system shall j / k - next / previous history.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0153** (EARS/Ubiquitous): The Substrate system shall /pattern - search history backward.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0154** (EARS/Ubiquitous): The Substrate system shall ?pattern - search history forward.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0155** (EARS/Ubiquitous): The Substrate system shall n / N - repeat search / reverse.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0156** (EARS/Ubiquitous): The Substrate system shall command-Mode Misc:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0157** (EARS/Ubiquitous): The Substrate system shall v - invoke $VISUAL or $EDITOR on current line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0158** (EARS/Ubiquitous): The Substrate system shall # - comment out line (prepend #, accept).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0159** (EARS/Ubiquitous): The Substrate system shall count prefixes: 3dw = delete 3 words.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0160** (EARS/Ubiquitous): The Substrate system shall terminal Abstraction (terminal.c):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0161** (EARS/Ubiquitous): The Substrate system shall raw Mode:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0162** (EARS/Ubiquitous): The Substrate system shall terminal_set_raw(EditLine *el): save orig termios, set raw (no echo, no canon, no signals, CS8, VMIN=1, VTIME=0).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0163** (EARS/Ubiquitous): The Substrate system shall terminal_set_orig(EditLine *el): restore saved termios.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0164** (EARS/Ubiquitous): The Substrate system shall capability Queries:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0165** (EARS/Ubiquitous): The Substrate system shall query terminal dimensions via ioctl(TIOCGWINSZ).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0166** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall fallback to $COLUMNS / $LINES environment variables.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0167** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall fallback to 80×24 default.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0168** (EARS/Ubiquitous): The Substrate system shall cache dimensions; invalidate on SIGWINCH.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0169** (EARS/Ubiquitous): The Substrate system shall termcap/Terminfo Support:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0170** (EARS/Ubiquitous): The Substrate system shall query $TERM and look up capabilities.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0171** (EARS/Ubiquitous): The Substrate system shall support cursor motion: cm (absolute), le/nd/up/do (relative).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0172** (EARS/Ubiquitous): The Substrate system shall support clear: cl (screen), ce (to end of line), cd (to end of screen).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0173** (EARS/Ubiquitous): The Substrate system shall support insert/delete: ic/dc (char), al/dl (line).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0174** (EARS/Ubiquitous): The Substrate system shall support attributes: md (bold), me (reset), so/se (standout).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0175** (EARS/Ubiquitous): The Substrate system shall support scrolling: sr (reverse), sf (forward).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0176** (EARS/Ubiquitous): Where a primary path is unavailable, the Substrate system shall hardcoded ANSI/VT100 fallback when termcap unavailable.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0177** (EARS/Ubiquitous): The Substrate system shall output Buffering:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0178** (EARS/Ubiquitous): The Substrate system shall buffer terminal writes and flush in batches (reduce syscall overhead).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0179** (EARS/Ubiquitous): The Substrate system shall ensure flush on prompt display and before blocking reads.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0180** (EARS/Ubiquitous): The Substrate system shall signal Handling:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0181** (EARS/Ubiquitous): The Substrate system shall sIGWINCH Handler:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0182** (EARS/Ubiquitous): The Substrate system shall install handler in el_gets; remove on return.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0183** (EARS/Ubiquitous): When receipt: re-query TIOCGWINSZ, update stored dimensions, force full redraw, the Substrate system shall satisfy the specified behavior.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0184** (EARS/Ubiquitous): The Substrate system shall sIGINT Handler:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0185** (EARS/Ubiquitous): When EL_SIGNAL is set: install handler in el_gets, the Substrate system shall satisfy the specified behavior.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0186** (EARS/Ubiquitous): When receipt: discard current line, print ^C\\n, reset buffer, reprint prompt (do not exit), the Substrate system shall satisfy the specified behavior.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0187** (EARS/Ubiquitous): The Substrate system shall sIGQUIT Handler:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0188** (EARS/Ubiquitous): When EL_SIGNAL is set: install handler, ignore SIGQUIT during editing, the Substrate system shall satisfy the specified behavior.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0189** (EARS/Ubiquitous): The Substrate system shall sIGTSTP / SIGCONT Handler:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0190** (EARS/Ubiquitous): The Substrate system shall sIGTSTP: restore terminal, send SIGTSTP to self.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0191** (EARS/Ubiquitous): The Substrate system shall sIGCONT: re-enter raw mode, redraw prompt + buffer.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0192** (EARS/Ubiquitous): The Substrate system shall sIGTERM / SIGHUP Handler:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0193** (EARS/Ubiquitous): The Substrate system shall restore terminal, propagate signal (allow clean shell exit).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0194** (EARS/Ubiquitous): The Substrate system shall signal Mask Discipline:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0195** (EARS/Ubiquitous): The Substrate system shall save old signal dispositions in el_gets entry, restore on exit.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0196** (EARS/Ubiquitous): The Substrate system shall use sigaction (not signal) for reliable semantics.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0197** (EARS/Ubiquitous): The Substrate system shall set SA_RESTART where appropriate.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0198** (EARS/Ubiquitous): The Substrate system shall key Map Subsystem:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0199** (EARS/Ubiquitous): The Substrate system shall key Map Structure:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0200** (EARS/Ubiquitous): The Substrate system shall define el_keymap_t as a 256-entry table mapping byte → action (function pointer or nested map pointer).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0201** (EARS/Ubiquitous): The Substrate system shall support multi-byte key sequences via chained keymaps (e.g., ESC → sub-map).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0202** (EARS/Ubiquitous): The Substrate system shall default keymaps: emacs_keymap, vi_insert_keymap, vi_command_keymap.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0203** (EARS/Ubiquitous): The Substrate system shall key Binding API:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0204** (EARS/Ubiquitous): The Substrate system shall el_set(el, EL_BIND, key_sequence, command_name): bind key to named command.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0205** (EARS/Ubiquitous): The Substrate system shall el_set(el, EL_BIND, key_sequence, NULL): unbind key.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0206** (EARS/Ubiquitous): The Substrate system shall parse key sequence notation: ^A, \\e, \\M-, \\C-, \\e[A, literal chars.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0207** (EARS/Ubiquitous): The Substrate system shall action Registry:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0208** (EARS/Ubiquitous): The Substrate system shall register all built-in editing commands with string names.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0209** (EARS/Ubiquitous): The Substrate system shall support user-defined custom action callbacks via el_set(el, EL_ADDFN, name, help, func).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0210** (EARS/Ubiquitous): The Substrate system shall el_set(el, EL_BIND, "-a", ...): bind in vi alternate (command) keymap.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0211** (EARS/Ubiquitous): The Substrate system shall programmable Completion:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0212** (EARS/Ubiquitous): The Substrate system shall completion Callback:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0213** (EARS/Ubiquitous): The Substrate system shall el_set(el, EL_ADDFN, "complete", "Complete", completion_fn): register custom completion function.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0214** (EARS/Ubiquitous): The Substrate system shall callback signature: unsigned char fn(EditLine *el, int ch).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0215** (EARS/Ubiquitous): The Substrate system shall default: filename completion (glob + opendir scan).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0216** (EARS/Ubiquitous): The Substrate system shall filename Completion Engine:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0217** (EARS/Ubiquitous): The Substrate system shall extract word under cursor (back to whitespace or special char).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0218** (EARS/Ubiquitous): The Substrate system shall expand ~ prefix before lookup.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0219** (EARS/Ubiquitous): The Substrate system shall opendir + readdir scan for matching prefixes.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0220** (EARS/Ubiquitous): When single match: insert remainder + trailing space (or / for directory), the Substrate system shall satisfy the specified behavior.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0221** (EARS/Ubiquitous): When multiple matches: insert common prefix, then list alternatives on second tab, the Substrate system shall satisfy the specified behavior.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0222** (EARS/Ubiquitous): The Substrate system shall display alternatives in columns (use terminal width).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0223** (EARS/Ubiquitous): The Substrate system shall integration with Shell:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0224** (EARS/Ubiquitous): The Substrate system shall shell provides custom completion callback that understands builtins, paths, variables, hostnames.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0225** (EARS/Ubiquitous): The Substrate system shall document callback interface in editline(3).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0226** (EARS/Ubiquitous): The Substrate system shall tokenizer (tok_init / tok_str / tok_end):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0227** (EARS/Ubiquitous): The Substrate system shall tok_init(const char *ifs): create tokenizer context with IFS string.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0228** (EARS/Ubiquitous): The Substrate system shall tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv): tokenize line content into argv.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0229** (EARS/Ubiquitous): The Substrate system shall tok_reset(Tokenizer *tok): reset tokenizer state.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0230** (EARS/Ubiquitous): The Substrate system shall tok_end(Tokenizer *tok): free tokenizer resources.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0231** (EARS/Ubiquitous): The Substrate system shall handle single-quoting, double-quoting, and backslash-escaping.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0232** (EARS/Ubiquitous): The Substrate system shall handle continuation (incomplete quotes → return continuation status).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0233** (EARS/Ubiquitous): The Substrate system shall add Tokenizer typedef and API to histedit.h.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0234** (EARS/Ubiquitous): The Substrate system shall el_set() / el_get() Operations:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0235** (EARS/Ubiquitous): The Substrate system shall eL_PROMPT (0): set/get prompt string pointer. (Implemented).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0236** (EARS/Ubiquitous): The Substrate system shall eL_PROMPT_ESC: set prompt function with escape-char marking (for non-printing sequences).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0237** (EARS/Ubiquitous): The Substrate system shall eL_TERMINAL (1): set terminal type string. (Stub, unused).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0238** (EARS/Ubiquitous): The Substrate system shall eL_EDITOR (2): set editor mode ("emacs" or "vi"). (Stub - sets field but no vi mode).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0239** (EARS/Ubiquitous): The Substrate system shall eL_SIGNAL (3): enable/disable signal handling during el_gets. (Stub).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0240** (EARS/Ubiquitous): The Substrate system shall eL_BIND (4): bind key sequence → editor command.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0241** (EARS/Ubiquitous): The Substrate system shall eL_ECHOTC (5): echo a termcap string.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0242** (EARS/Ubiquitous): The Substrate system shall eL_SETTC (6): set a termcap value.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0243** (EARS/Ubiquitous): The Substrate system shall eL_REFRESH (7): force screen refresh. (Stub).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0244** (EARS/Ubiquitous): The Substrate system shall eL_HIST (8): set history function + context. **(Implemented - stores History *)**.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0245** (EARS/Ubiquitous): The Substrate system shall eL_ADDFN: register user-defined editing function.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0246** (EARS/Ubiquitous): The Substrate system shall eL_SETFN: replace an existing named function.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0247** (EARS/Ubiquitous): The Substrate system shall eL_RPROMPT: set right-side prompt string/function.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0248** (EARS/Ubiquitous): The Substrate system shall eL_CLIENTDATA: set/get opaque user pointer.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0249** (EARS/Ubiquitous): The Substrate system shall eL_SETTY: set tty mode and character assignments.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0250** (EARS/Ubiquitous): The Substrate system shall eL_GETFP: get FILE * (in/out/err).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0251** (EARS/Ubiquitous): The Substrate system shall eL_SETFP: set FILE * (in/out/err).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0252** (EARS/Ubiquitous): The Substrate system shall eL_EDITMODE: enable/disable editing (passthrough mode).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0253** (EARS/Ubiquitous): The Substrate system shall el_source() and .editrc Parsing:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0254** (EARS/Ubiquitous): The Substrate system shall el_source(EditLine *el, const char *file): read and execute editrc commands.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0255** (EARS/Ubiquitous): The Substrate system shall default path: ~/.editrc if file is NULL.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0256** (EARS/Ubiquitous): The Substrate system shall supported .editrc Commands:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0257** (EARS/Ubiquitous): The Substrate system shall bind [-a] [-e] [-v] [-s] [key [command]]: bind key to command.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0258** (EARS/Ubiquitous): The Substrate system shall echotc cap [arg ...]: execute termcap string.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0259** (EARS/Ubiquitous): The Substrate system shall edit [on|off]: enable/disable editing.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0260** (EARS/Ubiquitous): The Substrate system shall settc cap value: set termcap variable.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0261** (EARS/Ubiquitous): The Substrate system shall setty [-a] [-d] [-q] [-x] mode ...: set tty modes.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0262** (EARS/Ubiquitous): The Substrate system shall comment lines (#) and blank lines.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0263** (EARS/Ubiquitous): The Substrate system shall per-program sections: prog:command args (match prog against el->prog).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0264** (EARS/Ubiquitous): The Substrate system shall error reporting: print line number and diagnostic on parse errors, continue.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0265** (EARS/Ubiquitous): The Substrate system shall history Management (history.c):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0266** (EARS/Ubiquitous): The Substrate system shall core (Implemented):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0267** (EARS/Ubiquitous): The Substrate system shall history_init(): allocate History with linked list, default max 100.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0268** (EARS/Ubiquitous): The Substrate system shall history_end(History *h): free all nodes and list.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0269** (EARS/Ubiquitous): The Substrate system shall h_SETSIZE (1): set maximum entries; evict oldest on overflow.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0270** (EARS/Ubiquitous): The Substrate system shall h_ENTER (10): add entry (skip duplicates of tail).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0271** (EARS/Ubiquitous): The Substrate system shall h_FIRST (3): set cursor to head.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0272** (EARS/Ubiquitous): The Substrate system shall h_LAST (4): set cursor to tail.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0273** (EARS/Ubiquitous): The Substrate system shall h_PREV (5): move cursor backward (toward oldest).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0274** (EARS/Ubiquitous): The Substrate system shall h_NEXT (6): move cursor forward (toward newest).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0275** (EARS/Ubiquitous): The Substrate system shall missing Operations:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0276** (EARS/Ubiquitous): The Substrate system shall h_GETSIZE (2): return current entry count via HistEvent.num.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0277** (EARS/Ubiquitous): The Substrate system shall h_CURR (7): return current entry without moving cursor.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0278** (EARS/Ubiquitous): The Substrate system shall h_SET (8): set cursor to entry by number.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0279** (EARS/Ubiquitous): The Substrate system shall h_ADD (9): append text to current entry (multi-line continuation).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0280** (EARS/Ubiquitous): The Substrate system shall h_APPEND (11): append string to last entry.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0281** (EARS/Ubiquitous): The Substrate system shall h_END (12): move cursor past end (sentinel, ev.str = NULL).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0282** (EARS/Ubiquitous): The Substrate system shall h_NEXT_STR (13): search forward for entry containing string.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0283** (EARS/Ubiquitous): The Substrate system shall h_PREV_STR (14): search backward for entry containing string.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0284** (EARS/Ubiquitous): The Substrate system shall h_NEXT_EVENT (15): move to next entry matching event number.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0285** (EARS/Ubiquitous): The Substrate system shall h_PREV_EVENT (16): move to previous entry matching event number.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0286** (EARS/Ubiquitous): The Substrate system shall h_LOAD (17): load history from file (one entry per line).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0287** (EARS/Ubiquitous): The Substrate system shall h_SAVE (18): save history to file.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0288** (EARS/Ubiquitous): The Substrate system shall h_CLEAR (19): clear all entries.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0289** (EARS/Ubiquitous): The Substrate system shall history Numbering:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0290** (EARS/Ubiquitous): The Substrate system shall assign monotonically increasing event numbers to entries.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0291** (EARS/Ubiquitous): The Substrate system shall set HistEvent.num on all operations that return an entry.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0292** (EARS/Ubiquitous): The Substrate system shall unique History (Dedup):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0293** (EARS/Ubiquitous): The Substrate system shall option to suppress consecutive duplicate entries (already done for tail).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0294** (EARS/Ubiquitous): The Substrate system shall option to remove all duplicates on insert (keep most recent).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0295** (EARS/Ubiquitous): The Substrate system shall timestamp Support:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0296** (EARS/Ubiquitous): The Substrate system shall store entry timestamp (for save/load fidelity with extended format).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0297** (EARS/Ubiquitous): The Substrate system shall file Format:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0298** (EARS/Ubiquitous): The Substrate system shall simple format: one entry per line, newlines escaped as \\n.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0299** (EARS/Ubiquitous): The Substrate system shall write atomically (tmp + rename) to prevent corruption.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0300** (EARS/Ubiquitous): The Substrate system shall readline Compatibility Layer (readline.c - extended):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0301** (EARS/Ubiquitous): The Substrate system shall implemented:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0302** (EARS/Ubiquitous): The Substrate system shall el_gets(EditLine *el, int *count): main read loop with raw mode, insert, backspace, arrows, history, ^C, ^D, ^L.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0303** (EARS/Ubiquitous): The Substrate system shall aPI Shim Functions (for applications using readline(3)):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0304** (EARS/Ubiquitous): The Substrate system shall readline(const char *prompt): wrapper that creates/reuses EditLine, calls el_gets, returns strdup'd result.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0305** (EARS/Ubiquitous): The Substrate system shall add_history(const char *line): wrapper around history(h, &ev, H_ENTER, line).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0306** (EARS/Ubiquitous): The Substrate system shall rl_bind_key(int key, rl_command_func_t *function): map to el_set(EL_BIND, ...).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0307** (EARS/Ubiquitous): The Substrate system shall rl_set_prompt(const char *prompt): map to el_set(EL_PROMPT, ...).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0308** (EARS/Ubiquitous): The Substrate system shall rl_on_new_line(): map to refresh.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0309** (EARS/Ubiquitous): The Substrate system shall rl_forced_update_display(): map to el_set(EL_REFRESH).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0310** (EARS/Ubiquitous): The Substrate system shall readline Variables (Global Shims):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0311** (EARS/Ubiquitous): The Substrate system shall rl_line_buffer: pointer to current line buffer.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0312** (EARS/Ubiquitous): The Substrate system shall rl_point: cursor position.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0313** (EARS/Ubiquitous): The Substrate system shall rl_end: end of buffer position.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0314** (EARS/Ubiquitous): The Substrate system shall rl_readline_name: application name.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0315** (EARS/Ubiquitous): The Substrate system shall rl_attempted_completion_function: completion callback.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0316** (EARS/Ubiquitous): The Substrate system shall header: provide readline/readline.h and readline/history.h compatibility headers.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0317** (EARS/Ubiquitous): The Substrate system shall uTF-8 / Wide-Character Support:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0318** (EARS/Ubiquitous): The Substrate system shall input Decoding:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0319** (EARS/Ubiquitous): The Substrate system shall decode multi-byte UTF-8 sequences on input into wchar_t codepoints.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0320** (EARS/Ubiquitous): The Substrate system shall validate sequences: reject overlong encodings, surrogates, values > U+10FFFF.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0321** (EARS/Ubiquitous): The Substrate system shall handle incomplete sequences at read boundary (buffer and re-read).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0322** (EARS/Ubiquitous): The Substrate system shall display Width:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0323** (EARS/Ubiquitous): The Substrate system shall use wcwidth() / project-local equivalent to determine display width of each codepoint.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0324** (EARS/Ubiquitous): The Substrate system shall handle zero-width combining characters (display width 0).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0325** (EARS/Ubiquitous): The Substrate system shall handle CJK double-width characters (display width 2).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0326** (EARS/Ubiquitous): The Substrate system shall handle non-printable characters (display as ^X or \uXXXX).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0327** (EARS/Ubiquitous): The Substrate system shall cursor Navigation:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0328** (EARS/Ubiquitous): The Substrate system shall forward-char / backward-char move by codepoint, not byte.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0329** (EARS/Ubiquitous): The Substrate system shall forward-word / backward-word recognize Unicode word boundaries (letter/digit vs punctuation).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0330** (EARS/Ubiquitous): The Substrate system shall delete/backspace remove entire multi-byte codepoint.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0331** (EARS/Ubiquitous): The Substrate system shall line Buffer:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0332** (EARS/Ubiquitous): The Substrate system shall store as UTF-8 bytes internally (no wchar_t buffer).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0333** (EARS/Ubiquitous): The Substrate system shall cursor and length track byte positions; convert to character positions for display.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0334** (EARS/Ubiquitous): The Substrate system shall locale Integration:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0335** (EARS/Ubiquitous): The Substrate system shall detect locale encoding via nl_langinfo(CODESET) or $LC_CTYPE.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0336** (EARS/Ubiquitous): The Substrate system shall fall back to ASCII-only mode if locale is not UTF-8.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0337** (EARS/Ubiquitous): The Substrate system shall multi-Line Editing:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0338** (EARS/Ubiquitous): The Substrate system shall detect \\n within line buffer (e.g., from continuation or el_insertstr).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0339** (EARS/Ubiquitous): The Substrate system shall track logical lines vs physical screen rows.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0340** (EARS/Ubiquitous): The Substrate system shall up/Down arrow within multi-line buffer: move between logical lines (not history).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0341** (EARS/Ubiquitous): The Substrate system shall correct cursor positioning across wrapped physical lines.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0342** (EARS/Ubiquitous): The Substrate system shall el_gets continuation support: return continuation indicator for incomplete input (unmatched quotes, trailing \\).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0343** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0344** (EARS/Ubiquitous): The Substrate system shall unit Tests (tests/lib/edit/):.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0345** (EARS/Ubiquitous): The Substrate system shall line Buffer Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0346** (EARS/Ubiquitous): The Substrate system shall insert at beginning, middle, end.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0347** (EARS/Ubiquitous): The Substrate system shall delete at beginning, middle, end.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0348** (EARS/Ubiquitous): The Substrate system shall cursor movement: forward/backward char, word, begin/end of line.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0349** (EARS/Ubiquitous): The Substrate system shall buffer growth: insert beyond initial capacity.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0350** (EARS/Ubiquitous): The Substrate system shall kill and yank: ^K, ^U, ^Y.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0351** (EARS/Ubiquitous): The Substrate system shall undo: verify each operation reverts.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0352** (EARS/Ubiquitous): The Substrate system shall history Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0353** (EARS/Ubiquitous): The Substrate system shall h_ENTER respects max size eviction.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0354** (EARS/Ubiquitous): The Substrate system shall h_PREV / H_NEXT traverse entire list correctly.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0355** (EARS/Ubiquitous): The Substrate system shall h_NEXT_STR / H_PREV_STR find correct entries.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0356** (EARS/Ubiquitous): The Substrate system shall h_LOAD / H_SAVE round-trip (write then read back, compare).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0357** (EARS/Ubiquitous): The Substrate system shall h_CLEAR empties all entries.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0358** (EARS/Ubiquitous): The Substrate system shall duplicate suppression: consecutive and all-duplicates modes.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0359** (EARS/Ubiquitous): The Substrate system shall key Map Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0360** (EARS/Ubiquitous): The Substrate system shall bind, unbind, rebind a key; verify action dispatches correctly.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0361** (EARS/Ubiquitous): The Substrate system shall multi-byte sequence binding (ESC [A → previous-history).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0362** (EARS/Ubiquitous): The Substrate system shall per-program .editrc binding.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0363** (EARS/Ubiquitous): The Substrate system shall tokenizer Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0364** (EARS/Ubiquitous): The Substrate system shall simple whitespace splitting.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0365** (EARS/Ubiquitous): The Substrate system shall quoted strings (single, double).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0366** (EARS/Ubiquitous): The Substrate system shall backslash escaping within quotes.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0367** (EARS/Ubiquitous): The Substrate system shall continuation detection (incomplete quotes).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0368** (EARS/Ubiquitous): The Substrate system shall .editrc Parser Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0369** (EARS/Ubiquitous): The Substrate system shall valid bind commands.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0370** (EARS/Ubiquitous): The Substrate system shall comment and blank line handling.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0371** (EARS/Ubiquitous): The Substrate system shall program-specific sections.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0372** (EARS/Ubiquitous): The Substrate system shall malformed line: error message + continue.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0373** (EARS/Ubiquitous): The Substrate system shall emacs Binding Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0374** (EARS/Ubiquitous): The Substrate system shall verify all ^A-^Z and M-* bindings dispatch to correct actions.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0375** (EARS/Ubiquitous): The Substrate system shall vi Mode Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0376** (EARS/Ubiquitous): The Substrate system shall insert → command → insert transitions.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0377** (EARS/Ubiquitous): The Substrate system shall motion commands (w, b, e, $, 0).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0378** (EARS/Ubiquitous): The Substrate system shall edit commands (d, c, x, r, p).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0379** (EARS/Ubiquitous): The Substrate system shall count prefixes (3dw).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0380** (EARS/Ubiquitous): The Substrate system shall search (/, ?, n, N).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0381** (EARS/Ubiquitous): The Substrate system shall property Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0382** (EARS/Ubiquitous): The Substrate system shall line buffer invariants: 0 <= cursor <= len < cap, buffer NUL-terminated.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0383** (EARS/Ubiquitous): The Substrate system shall history invariants: size <= max_size, doubly-linked list consistency.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0384** (EARS/Ubiquitous): The Substrate system shall randomized editing sequences (insert, delete, move, undo) never crash or corrupt.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0385** (EARS/Ubiquitous): The Substrate system shall kill ring: yank always produces previously killed text.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0386** (EARS/Ubiquitous): The Substrate system shall fuzz Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0387** (EARS/Ubiquitous): The Substrate system shall fuzz el_gets input stream with random bytes (harness: in-memory FILE *).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0388** (EARS/Ubiquitous): The Substrate system shall fuzz .editrc parser with random config files.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0389** (EARS/Ubiquitous): The Substrate system shall fuzz tokenizer with random line buffers.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0390** (EARS/Ubiquitous): The Substrate system shall integration Tests:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0391** (EARS/Ubiquitous): The Substrate system shall drive el_gets via PTY: send escape sequences, verify output bytes.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0392** (EARS/Ubiquitous): The Substrate system shall history file round-trip: save, load, compare.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0393** (EARS/Ubiquitous): The Substrate system shall readline-compat: build a minimal readline app against libedit, verify prompt + completion.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0394** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0395** (EARS/Ubiquitous): The Substrate system shall man page: editline(3) - overview of the library. (Exists).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0396** (EARS/Ubiquitous): The Substrate system shall man page: el_init(3), el_gets(3), el_set(3), el_get(3), el_line(3), el_end(3), el_reset(3), el_source(3), el_resize(3) - API reference. (Exists).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0397** (EARS/Ubiquitous): The Substrate system shall man page: editrc(5) - .editrc file format and commands. (Exists).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0398** (EARS/Ubiquitous): The Substrate system shall man page: history(3) - history API (history_init, history_end, H_* ops). (Exists).
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0399** (EARS/Ubiquitous): The Substrate system shall man page: tok_init(3) - tokenizer API.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0400** (EARS/Ubiquitous): The Substrate system shall update editline(3) with vi mode documentation.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0401** (EARS/Ubiquitous): The Substrate system shall update editline(3) with completion callback documentation.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0402** (EARS/Ubiquitous): The Substrate system shall update history(3) with H_LOAD / H_SAVE / timestamps documentation.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-08-0403** (EARS/Ubiquitous): The Substrate system shall document readline compatibility layer and header shim.
+  - Context: 6b. Editline Library (`lib/edit`)
+  - Verification: design review + implementation evidence + test/doc update.
