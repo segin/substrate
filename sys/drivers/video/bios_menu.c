@@ -62,35 +62,39 @@ static void bios_putc(char c) {
     vm86_bios_call(0x10, &regs);
 }
 
+/* Buffer at 0x3000 used for batched string output via BIOS INT 10h, AH=13h */
+#define BIOS_STRING_BUF_MAX 4000
+
 static void bios_puts(const char *s) {
-    char *buf = (char *)BIOS_STRING_BUFFER;
+    char *buf = (char *)(uintptr_t)BIOS_STRING_BUFFER;
     struct vm86_regs regs;
 
     while (*s) {
-        size_t len = 0;
+        int len = 0;
 
-        // Convert \n to \r\n and copy to low memory buffer
-        while (*s && len < 511) { // Leave room for potentially 2 chars (\r, \n)
+        while (*s && len < BIOS_STRING_BUF_MAX - 1) {
             if (*s == '\n') {
                 buf[len++] = '\r';
+                if (len >= BIOS_STRING_BUF_MAX - 1) {
+                    break;
+                }
             }
             buf[len++] = *s++;
         }
 
-        if (len == 0) continue;
+        if (len == 0) {
+            return;
+        }
 
-        // Get cursor position (AH=0x03, BH=0)
         memset(&regs, 0, sizeof(regs));
         regs.eax = 0x0300;
         regs.ebx = 0x0000;
         vm86_bios_call(0x10, &regs);
+        uint16_t cursor_pos = regs.edx & 0xFFFF;
 
-        uint16_t cursor_pos = regs.edx & 0xFFFF; // DH = row, DL = col
-
-        // Write string (AH=0x13, AL=0x01: update cursor)
         memset(&regs, 0, sizeof(regs));
         regs.eax = 0x1301;
-        regs.ebx = 0x0007; // Page 0, Light Grey
+        regs.ebx = 0x0007;
         regs.ecx = len;
         regs.edx = cursor_pos;
         regs.es  = BIOS_STRING_BUFFER >> 4;

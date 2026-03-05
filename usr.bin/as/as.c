@@ -1,6 +1,13 @@
+#include "as_data.h"
+#include "as_elf_emit.h"
+#include "as_lexer.h"
+#include "as_parser.h"
+#include "as_sections.h"
+#include "as_symtab.h"
 #include "elfobj.h"
 #include <ctype.h>
 #include <errno.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,6 +18,10 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#ifndef PATH_MAX
+#define PATH_MAX 4096
+#endif
 
 #ifndef EM_X86_64
 #define EM_X86_64 62
@@ -31,12 +42,19 @@ typedef struct {
     size_t cap;
 } strvec_t;
 
+typedef enum {
+    AS_OUTPUT_ELF = 0,
+    AS_OUTPUT_BINARY,
+} as_output_t;
+
 typedef struct {
     int mode;
     int syntax_intel;
+    as_output_t output;
     int emit_listing;
     int statistics;
     int target_help;
+    int invoked_from_cc;
     int warn_enabled;
     int fatal_warnings;
     const char *in_path;
@@ -154,7 +172,7 @@ static void as_diag(as_error_code_t code, const char *fmt, ...) {
     if (g_emit_error_codes) {
         fprintf(stderr, "[%s] ", as_error_code_name(code));
     }
-    fprintf(stderr, "as: ");
+    fprintf(stderr, "as: error: ");
     va_start(ap, fmt);
     vfprintf(stderr, fmt, ap);
     va_end(ap);
@@ -164,10 +182,12 @@ static void as_diag(as_error_code_t code, const char *fmt, ...) {
 static void usage(const char *prog) {
     fprintf(stderr,
             "usage: %s [-32|-64] [-c] [-g] [-I dir] [-D name[=value]] [-march cpu] [-mtune cpu] "
+            "[-O elf|binary] "
             "[-msyntax=att|intel] [-W|--warn|--no-warn|--fatal-warnings] "
+            "[--from-cc] "
             "[-al[=file]] [--defsym sym=val] [--statistics] [--target-help] "
             "[-Wa opts] [--max-input-bytes N] [--max-line-bytes N] [--max-token-length N] "
-            "[--max-macro-depth N] [--max-include-depth N] [-o output] input.s\n",
+            "[--max-macro-depth N] [--max-include-depth N] [-o output] input.s|input.S\n",
             prog);
 }
 
@@ -535,61 +555,88 @@ static const char *march_to_gas(int mode, const char *march) {
     return march;
 }
 
-static const char *backend_compiler(void) {
-    const char *override = getenv("AS_BACKEND");
-    const char *cc = getenv("CC");
-    const char *from_cc = getenv("SUBSTRATE_CC_ACTIVE");
+static int source_needs_cpp(const char *path) {
+    const char *dot;
 
+    if (path == NULL) {
+        return 0;
+    }
+    dot = strrchr(path, '.');
+    if (dot == NULL) {
+        return 0;
+    }
+    return strcmp(dot, ".S") == 0;
+}
+
+static int x64_isa_level_from_march(const char *march) {
+    if (march == NULL || march[0] == '\0') {
+        return 1;
+    }
+    if (strcmp(march, "x86-64-v4") == 0) {
+        return 4;
+    }
+    if (strcmp(march, "x86-64-v3") == 0) {
+        return 3;
+    }
+    if (strcmp(march, "x86-64-v2") == 0) {
+        return 2;
+    }
+    return 1;
+}
+
+static const char *resolve_cpp_tool(const as_ctx_t *ctx, char *buf, size_t bufsz) {
+    const char *override;
+    const char *self;
+    const char *slash;
+    size_t dirlen;
+
+    override = getenv("AS_CPP");
     if (override != NULL && override[0] != '\0') {
         return override;
     }
-    if (from_cc != NULL && from_cc[0] != '\0') {
-        /*
-         * Avoid cc->as->cc recursion when builds export CC=cc and PATH points
-         * at this toolchain.
-         */
-        return "gcc";
+    if (ctx == NULL || ctx->self_path == NULL || buf == NULL || bufsz == 0) {
+        return "cpp";
     }
-    if (cc != NULL && cc[0] != '\0') {
-        return cc;
+    self = ctx->self_path;
+    slash = strrchr(self, '/');
+    if (slash == NULL) {
+        return "cpp";
     }
-    return "gcc";
+    dirlen = (size_t)(slash - self);
+
+    if (snprintf(buf, bufsz, "%.*s/../cc/cpp", (int)dirlen, self) > 0 && access(buf, X_OK) == 0) {
+        return buf;
+    }
+    if (snprintf(buf, bufsz, "%.*s/cpp", (int)dirlen, self) > 0 && access(buf, X_OK) == 0) {
+        return buf;
+    }
+    return "cpp";
 }
 
-static int run_backend(const as_ctx_t *ctx) {
+static int run_cpp_stage(const as_ctx_t *ctx, const char *in_path, const char *out_path) {
     size_t i;
     size_t argc;
     char **argv;
     size_t at = 0;
-    const char *cc_prog;
+    char cpp_path[PATH_MAX];
+    const char *cpp_prog;
     pid_t pid;
     int status;
 
-    cc_prog = backend_compiler();
-    argc = 9 + ctx->gcc_opts.count + (ctx->as_opts.count * 2);
+    cpp_prog = resolve_cpp_tool(ctx, cpp_path, sizeof(cpp_path));
+    argc = 5 + ctx->gcc_opts.count;
     argv = (char **)calloc(argc + 1, sizeof(*argv));
     if (argv == NULL) {
         return -1;
     }
 
-    argv[at++] = (char *)cc_prog;
-    argv[at++] = "-c";
-    argv[at++] = "-x";
-    argv[at++] = "assembler-with-cpp";
-    argv[at++] = ctx->mode == AS_MODE_64 ? "-m64" : "-m32";
-    argv[at++] = "-B/usr/bin";
-
+    argv[at++] = (char *)cpp_prog;
     for (i = 0; i < ctx->gcc_opts.count; ++i) {
         argv[at++] = ctx->gcc_opts.items[i];
     }
-    for (i = 0; i < ctx->as_opts.count; ++i) {
-        argv[at++] = "-Xassembler";
-        argv[at++] = ctx->as_opts.items[i];
-    }
-
     argv[at++] = "-o";
-    argv[at++] = (char *)ctx->out_path;
-    argv[at++] = (char *)ctx->in_path;
+    argv[at++] = (char *)out_path;
+    argv[at++] = (char *)in_path;
     argv[at] = NULL;
 
     pid = fork();
@@ -613,9 +660,162 @@ static int run_backend(const as_ctx_t *ctx) {
     return 0;
 }
 
+static int collect_include_dirs(const as_ctx_t *ctx, const char ***dirs_out, size_t *count_out) {
+    const char **dirs = NULL;
+    size_t i;
+    size_t count = 0;
+
+    if (dirs_out == NULL || count_out == NULL) {
+        return -1;
+    }
+    *dirs_out = NULL;
+    *count_out = 0;
+
+    if (ctx == NULL || ctx->as_opts.count == 0) {
+        return 0;
+    }
+
+    dirs = (const char **)calloc(ctx->as_opts.count, sizeof(*dirs));
+    if (dirs == NULL) {
+        return -1;
+    }
+    for (i = 0; i < ctx->as_opts.count; ++i) {
+        const char *opt = ctx->as_opts.items[i];
+        if (strncmp(opt, "-I", 2) != 0) {
+            continue;
+        }
+        if (opt[2] == '\0') {
+            continue;
+        }
+        dirs[count++] = opt + 2;
+    }
+    *dirs_out = dirs;
+    *count_out = count;
+    return 0;
+}
+
+static int run_native_backend(const as_ctx_t *ctx) {
+    as_token_vec_t toks;
+    as_parse_result_t parsed;
+    as_symtab_t syms;
+    as_section_state_t secs;
+    as_data_program_t data;
+    as_lexer_cfg_t lcfg;
+    as_parser_cfg_t pcfg;
+    as_elf_cfg_t ecfg;
+    const char **include_dirs = NULL;
+    size_t include_dir_count = 0;
+    char errbuf[512];
+    char *temp_pp = NULL;
+    const char *src_path = NULL;
+    int rc = -1;
+
+    memset(&lcfg, 0, sizeof(lcfg));
+    memset(&pcfg, 0, sizeof(pcfg));
+    memset(&ecfg, 0, sizeof(ecfg));
+    as_token_vec_init(&toks);
+    as_parse_result_init(&parsed);
+    as_symtab_init(&syms);
+    as_section_state_init(&secs);
+    as_data_program_init(&data);
+
+    if (source_needs_cpp(ctx->in_path)) {
+        char tmp_template[] = "/tmp/aspp_XXXXXX";
+        int fd = mkstemp(tmp_template);
+        if (fd < 0) {
+            as_diag(AS_E_INTERNAL, "failed to create temp preprocessed file: %s", strerror(errno));
+            goto out;
+        }
+        close(fd);
+        temp_pp = xstrdup(tmp_template);
+        if (temp_pp == NULL) {
+            as_diag(AS_E_INTERNAL, "out of memory");
+            goto out;
+        }
+        if (run_cpp_stage(ctx, ctx->in_path, temp_pp) != 0) {
+            as_diag(AS_E_BACKEND, "preprocessor stage failed");
+            goto out;
+        }
+        src_path = temp_pp;
+    } else {
+        src_path = ctx->in_path;
+    }
+
+    if (collect_include_dirs(ctx, &include_dirs, &include_dir_count) != 0) {
+        as_diag(AS_E_INTERNAL, "failed to build include dir list");
+        goto out;
+    }
+
+    lcfg.include_dirs = include_dirs;
+    lcfg.include_dir_count = include_dir_count;
+    lcfg.intel_syntax = ctx->syntax_intel;
+    lcfg.max_include_depth = (unsigned)ctx->max_include_depth;
+
+    pcfg.intel_syntax = ctx->syntax_intel;
+    pcfg.arch = AS_PARSER_ARCH_X86;
+
+    ecfg.machine = ctx->mode == AS_MODE_64 ? EM_X86_64 : EM_386;
+    ecfg.is_64 = ctx->mode == AS_MODE_64 ? 1u : 0u;
+    ecfg.use_rela = ctx->mode == AS_MODE_64 ? 1u : 0u;
+    ecfg.x86_64_isa_level = (unsigned)x64_isa_level_from_march(ctx->march);
+    ecfg.intel_syntax = (unsigned)(ctx->syntax_intel ? 1 : 0);
+
+    if (as_lex_file(src_path, &lcfg, &toks, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
+    if (as_parse_tokens(&toks, &pcfg, &parsed, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
+    if (as_symtab_build(&parsed, &syms, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
+    if (as_sections_build(&parsed, &secs, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
+    if (as_data_build(&parsed, &data, errbuf, sizeof(errbuf)) != 0) {
+        as_diag(AS_E_BACKEND, "%s", errbuf);
+        goto out;
+    }
+    if (ctx->output == AS_OUTPUT_BINARY) {
+        if (as_elf_emit_binary_file(&parsed, &secs, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
+    } else {
+        if (as_elf_emit_file(&parsed, &secs, &syms, &data, &ecfg, ctx->out_path, errbuf, sizeof(errbuf)) != 0) {
+            as_diag(AS_E_BACKEND, "%s", errbuf);
+            goto out;
+        }
+    }
+
+    rc = 0;
+
+out:
+    if (temp_pp != NULL) {
+        unlink(temp_pp);
+    }
+    free(temp_pp);
+    free(include_dirs);
+    as_data_program_free(&data);
+    as_section_state_free(&secs);
+    as_symtab_free(&syms);
+    as_parse_result_free(&parsed);
+    as_token_vec_free(&toks);
+    return rc;
+}
+
+
 static int validate_output_file(const as_ctx_t *ctx) {
     elfobj_t *check = NULL;
     elf_err_t err;
+
+    if (ctx->output == AS_OUTPUT_BINARY) {
+        return 0;
+    }
 
     err = elf_open(ctx->out_path, &check);
     if (err != ELF_OK) {
@@ -662,10 +862,14 @@ static void print_target_help(const as_ctx_t *ctx) {
     puts("  x86/i386:");
     puts("    core integer ops, jumps/calls/returns, basic x87/MMX/SSE names");
     puts("    prefixes: lock, rep/repe/repne, segment overrides, rex");
+    puts("    syntax: -msyntax=att|intel, .intel_syntax/.att_syntax");
+    puts("    Intel memory qualifiers parsed: byte/word/dword/qword/xmmword/ymmword/zmmword ptr");
     puts("  x86-64:");
     puts("    baseline x86-64 plus ISA levels x86-64-v2/v3/v4");
     puts("  ARMv7 / AArch64:");
     puts("    baseline branch/arithmetic syntax, register lists, condition codes");
+    puts("  output:");
+    puts("    -O elf (default) or -O binary (flat image: .text/.rodata/.data/.bss)");
 }
 
 static char *default_listing_path(const as_ctx_t *ctx) {
@@ -769,6 +973,7 @@ int main(int argc, char **argv) {
     memset(&ctx, 0, sizeof(ctx));
     ctx.mode = AS_MODE_AUTO;
     ctx.out_path = "a.out.o";
+    ctx.output = AS_OUTPUT_ELF;
     ctx.self_path = argv[0];
     ctx.warn_enabled = 1;
     ctx.max_input_bytes = limit_from_env("AS_MAX_INPUT_BYTES");
@@ -800,7 +1005,58 @@ int main(int argc, char **argv) {
             ctx.statistics = 1;
             continue;
         }
+        if (strcmp(arg, "--from-cc") == 0) {
+            ctx.invoked_from_cc = 1;
+            continue;
+        }
         if (strcmp(arg, "-c") == 0) {
+            continue;
+        }
+        if (strcmp(arg, "-O") == 0) {
+            const char *value;
+            if (i + 1 >= argc) {
+                usage(argv[0]);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
+            value = argv[++i];
+            if (strcmp(value, "elf") == 0) {
+                ctx.output = AS_OUTPUT_ELF;
+            } else if (strcmp(value, "binary") == 0 || strcmp(value, "bin") == 0) {
+                ctx.output = AS_OUTPUT_BINARY;
+            } else if (isdigit((unsigned char)value[0])) {
+                if (push_opt_with_value(&ctx.as_opts, "-O", value) != 0) {
+                    strvec_free(&ctx.gcc_opts);
+                    strvec_free(&ctx.as_opts);
+                    return 1;
+                }
+            } else {
+                as_diag(AS_E_USAGE, "unsupported output format '%s' for -O (expected elf|binary)", value);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
+            continue;
+        }
+        if (strncmp(arg, "-O", 2) == 0 && arg[2] != '\0') {
+            const char *value = arg + 2;
+            if (strcmp(value, "elf") == 0) {
+                ctx.output = AS_OUTPUT_ELF;
+            } else if (strcmp(value, "binary") == 0 || strcmp(value, "bin") == 0) {
+                ctx.output = AS_OUTPUT_BINARY;
+            } else if (isdigit((unsigned char)value[0])) {
+                if (strvec_push(&ctx.as_opts, arg) != 0) {
+                    strvec_free(&ctx.gcc_opts);
+                    strvec_free(&ctx.as_opts);
+                    return 1;
+                }
+            } else {
+                as_diag(AS_E_USAGE, "unsupported output format '%s' for -O (expected elf|binary)", value);
+                strvec_free(&ctx.gcc_opts);
+                strvec_free(&ctx.as_opts);
+                return 2;
+            }
             continue;
         }
         if (strcmp(arg, "-W") == 0 || strcmp(arg, "--warn") == 0) {
@@ -938,7 +1194,7 @@ int main(int argc, char **argv) {
             continue;
         }
         if (strcmp(arg, "-g") == 0) {
-            if (strvec_push(&ctx.gcc_opts, arg) != 0) {
+            if (strvec_push(&ctx.gcc_opts, arg) != 0 || strvec_push(&ctx.as_opts, arg) != 0) {
                 strvec_free(&ctx.gcc_opts);
                 strvec_free(&ctx.as_opts);
                 return 1;
@@ -973,7 +1229,8 @@ int main(int argc, char **argv) {
                 }
                 continue;
             }
-            if (push_opt_with_value(&ctx.gcc_opts, strcmp(arg, "-I") == 0 ? "-I" : "-D", value) != 0) {
+            if (push_opt_with_value(&ctx.gcc_opts, strcmp(arg, "-I") == 0 ? "-I" : "-D", value) != 0 ||
+                (strcmp(arg, "-I") == 0 && push_opt_with_value(&ctx.as_opts, "-I", value) != 0)) {
                 strvec_free(&ctx.gcc_opts);
                 strvec_free(&ctx.as_opts);
                 return 1;
@@ -1022,7 +1279,7 @@ int main(int argc, char **argv) {
             continue;
         }
         if (strncmp(arg, "-I", 2) == 0 || strncmp(arg, "-D", 2) == 0) {
-            if (strvec_push(&ctx.gcc_opts, arg) != 0) {
+            if (strvec_push(&ctx.gcc_opts, arg) != 0 || (strncmp(arg, "-I", 2) == 0 && strvec_push(&ctx.as_opts, arg) != 0)) {
                 strvec_free(&ctx.gcc_opts);
                 strvec_free(&ctx.as_opts);
                 return 1;
@@ -1125,8 +1382,7 @@ int main(int argc, char **argv) {
         strvec_free(&ctx.as_opts);
         return 1;
     }
-    if (run_backend(&ctx) != 0) {
-        as_diag(AS_E_BACKEND, "backend assembly failed");
+    if (run_native_backend(&ctx) != 0) {
         strvec_free(&ctx.gcc_opts);
         strvec_free(&ctx.as_opts);
         return 1;
