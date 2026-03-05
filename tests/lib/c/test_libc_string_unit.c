@@ -337,6 +337,40 @@ void run_strspn_tests(void) {
     ASSERT_EQ(libc_strspn("hello", "he"), 2, "Accept has subset");
 }
 
+void run_strcpy_tests(void) {
+    printf("Running strcpy tests...\n");
+    char dest[256];
+
+    // Basic copy
+    memset(dest, 'X', sizeof(dest));
+    char *ret = libc_strcpy(dest, "Hello World");
+    ASSERT_EQ((uintptr_t)ret, (uintptr_t)dest, "strcpy returns destination pointer");
+    ASSERT_STREQ(dest, "Hello World", "Basic strcpy");
+    ASSERT_EQ(dest[11], '\0', "Null terminator copied");
+    ASSERT_EQ(dest[12], 'X', "Did not overwrite past null terminator");
+
+    // Empty string
+    memset(dest, 'X', sizeof(dest));
+    ret = libc_strcpy(dest, "");
+    ASSERT_EQ((uintptr_t)ret, (uintptr_t)dest, "strcpy returns destination pointer for empty string");
+    ASSERT_STREQ(dest, "", "Empty strcpy");
+    ASSERT_EQ(dest[0], '\0', "Null terminator copied for empty string");
+    ASSERT_EQ(dest[1], 'X', "Did not overwrite past null terminator for empty string");
+
+    // Large string
+    char large_src[128];
+    memset(large_src, 'A', 127);
+    large_src[127] = '\0';
+    memset(dest, 'X', sizeof(dest));
+    libc_strcpy(dest, large_src);
+    ASSERT_STREQ(dest, large_src, "Large strcpy");
+}
+
+bool test_libc_strcpy(void) {
+    run_strcpy_tests();
+    return true;
+}
+
 bool test_libc_strlen(void) {
     run_strlen_tests();
     return true;
@@ -379,6 +413,7 @@ bool test_libc_strdup(void) {
 
 #ifndef NO_MAIN
 int main(void) {
+    run_strcpy_tests();
     run_strlen_tests();
     run_strspn_tests();
     run_memmove_tests();
