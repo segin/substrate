@@ -23,14 +23,17 @@ static void test_assert(int condition, const char *name) {
     }
 }
 
+extern void kmain(void);
+
 /*
  * test_ksym_lookup_known - Test lookup of known symbol
  */
 static void test_ksym_lookup_known(void) {
-    const struct ksym *sym = ksym_lookup(0xC0100000);
-    test_assert(sym != NULL, "ksym_lookup finds _start at 0xC0100000");
+    uint32_t addr = (uint32_t)&kmain;
+    const struct ksym *sym = ksym_lookup(addr);
+    test_assert(sym != NULL, "ksym_lookup finds kmain by address");
     if (sym) {
-        test_assert(strcmp(sym->name, "_start") == 0, "Symbol name is _start");
+        test_assert(strcmp(sym->name, "kmain") == 0, "Symbol name is kmain");
     }
 }
 
@@ -38,8 +41,8 @@ static void test_ksym_lookup_known(void) {
  * test_ksym_lookup_offset - Test lookup with offset into function
  */
 static void test_ksym_lookup_offset(void) {
-    /* Address within kmain (0xC0100020 + some offset) */
-    const struct ksym *sym = ksym_lookup(0xC0100025);
+    uint32_t addr = (uint32_t)&kmain + 5;
+    const struct ksym *sym = ksym_lookup(addr);
     test_assert(sym != NULL, "ksym_lookup finds symbol for offset address");
     if (sym) {
         test_assert(strcmp(sym->name, "kmain") == 0, "Offset address maps to kmain");
@@ -51,13 +54,14 @@ static void test_ksym_lookup_offset(void) {
  */
 static void test_ksym_resolve_basic(void) {
     char buf[64];
+    uint32_t addr = (uint32_t)&kmain;
     
     /* Exact address */
-    ksym_resolve(0xC0100020, buf, sizeof(buf));
+    ksym_resolve(addr, buf, sizeof(buf));
     test_assert(strcmp(buf, "kmain") == 0, "Exact address resolves to kmain");
     
     /* Address with offset */
-    ksym_resolve(0xC0100025, buf, sizeof(buf));
+    ksym_resolve(addr + 5, buf, sizeof(buf));
     test_assert(strncmp(buf, "kmain+0x5", 9) == 0, "Offset address resolves to kmain+0x5");
 }
 

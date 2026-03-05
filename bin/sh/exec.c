@@ -592,12 +592,9 @@ static int builtin_eval(int argc, char **argv) {
                 size_t len = strlen(argv[i]);
                 memcpy(ptr, argv[i], len);
                 ptr += len;
-                if (i < argc - 1) {
-                    *ptr++ = ' ';
-                } else {
-                    *ptr = '\0';
-                }
+                if (i < argc - 1) *ptr++ = ' ';
             }
+            *ptr = '\0';
             status = execute_line(line);
             free(line);
         }

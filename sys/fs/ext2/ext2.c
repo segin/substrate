@@ -478,6 +478,10 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     ctx->last_readdir_idx = (uint64_t)-1;
     ctx->last_readdir_pos = 0;
 
+    // Initialize dcache
+    ctx->dcache_idx = 0;
+    memset(ctx->dcache, 0, sizeof(ctx->dcache));
+
     // If this cache slot was previously used, it might have allocated buffers.
     // We should free them to avoid leaks when reusing the slot for a new inode.
     // In a more sophisticated cache, we might reuse them, but here we prioritize correctness.
@@ -658,6 +662,29 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     
     mutex_lock(&ctx->lock);
 
+    fs_node_t *result_node = NULL;
+
+    // 1. Check dcache
+    for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
+        if (ctx->dcache[k].inode_num != 0 &&
+            ctx->dcache[k].name_len == name_len &&
+            memcmp(ctx->dcache[k].name, name, name_len) == 0) {
+
+            ext2_inode_t inode;
+            if (ext2_read_inode(fs, ctx->dcache[k].inode_num, &inode) == 0) {
+                result_node = ext2_alloc_node(fs, ctx->dcache[k].inode_num, &inode);
+                // Copy name
+                size_t len = name_len;
+                if (len >= sizeof(result_node->name)) {
+                    len = sizeof(result_node->name) - 1;
+                }
+                memcpy(result_node->name, name, len);
+                result_node->name[len] = '\0';
+                goto cleanup;
+            }
+        }
+    }
+
     // Lazy allocate
     uint32_t block_size = fs->block_size;
     if (!ctx->block_buf) ctx->block_buf = kmalloc(block_size);
@@ -674,8 +701,6 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
     uint32_t *indirect = ctx->indirect_buf;
     uint32_t *dindirect = ctx->dindirect_buf;
     uint32_t *tindirect = ctx->tindirect_buf;
-
-    fs_node_t *result_node = NULL;
 
     while (pos < dir_size) {
         uint32_t block_idx = pos / fs->block_size;
@@ -703,6 +728,16 @@ fs_node_t *ext2_finddir(fs_node_t *node, char *name) {
                         }
                         memcpy(result_node->name, de->name, len);
                         result_node->name[len] = '\0';
+
+                        // Add to dcache only if name fits
+                        if (len < sizeof(ctx->dcache[0].name)) {
+                            uint32_t idx = ctx->dcache_idx++ % EXT2_DCACHE_SIZE;
+                            ctx->dcache[idx].inode_num = de->inode;
+                            ctx->dcache[idx].name_len = len;
+                            memcpy(ctx->dcache[idx].name, de->name, len);
+                            ctx->dcache[idx].name[len] = '\0';
+                        }
+
                         goto cleanup;
                     }
                 }
@@ -776,13 +811,26 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_fs.last_alloc_group = 0;
     ext2_fs.last_alloc_bit = 0;
 
+    // Initialize active block bitmap cache
+    ext2_fs.active_bg_group = (uint32_t)-1;
+    if (!ext2_fs.active_bg_bitmap) {
+        ext2_fs.active_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    }
+
+    // Initialize active inode bitmap cache
+    ext2_fs.active_inode_bg_group = (uint32_t)-1;
+    if (!ext2_fs.active_inode_bg_bitmap) {
+        ext2_fs.active_inode_bg_bitmap = uma_zalloc(ext2_block_cache, M_WAITOK);
+    }
+
     // Setup root node
     ext2_root_ctx.fs = &ext2_fs;
     ext2_root_ctx.inode_num = EXT2_ROOT_INO;
     memcpy(&ext2_root_ctx.inode, &root_inode, sizeof(ext2_inode_t));
     
     memset(&ext2_root, 0, sizeof(fs_node_t));
-    strcpy(ext2_root.name, "/");
+    strncpy(ext2_root.name, "/", sizeof(ext2_root.name) - 1);
+    ext2_root.name[sizeof(ext2_root.name) - 1] = '\0';
     ext2_root.flags = FS_DIRECTORY;
     ext2_root.inode = EXT2_ROOT_INO;
     ext2_root.length = root_inode.i_size;
@@ -809,9 +857,6 @@ void ext2_init(void) {
 uint32_t ext2_alloc_block(ext2_fs_t *fs) {
     if (!fs) return 0;
     
-    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
-    if (!bitmap_buf) return 0;
-    
     // Search each block group for a free block, starting from last allocation
     uint32_t start_group = fs->last_alloc_group;
     uint32_t group = start_group;
@@ -822,12 +867,17 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             continue;
         }
         
-        // Read the block bitmap
-        if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf) != fs->block_size) {
-            group = (group + 1) % fs->group_count;
-            continue;
+        // Read the block bitmap if it's not cached
+        if (fs->active_bg_group != group) {
+            fs->active_bg_group = (uint32_t)-1;
+            if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, fs->active_bg_bitmap) != fs->block_size) {
+                group = (group + 1) % fs->group_count;
+                continue;
+            }
+            fs->active_bg_group = group;
         }
         
+        uint8_t *bitmap_buf = fs->active_bg_bitmap;
         uint32_t bits_in_group = fs->blocks_per_group;
         uint32_t start_bit = (group == fs->last_alloc_group) ? fs->last_alloc_bit : 0;
         uint32_t found_idx = 0;
@@ -865,14 +915,12 @@ uint32_t ext2_alloc_block(ext2_fs_t *fs) {
             fs->last_alloc_group = group;
             fs->last_alloc_bit = (found_idx + 1) % bits_in_group;
 
-            uma_zfree(ext2_block_cache, bitmap_buf);
             return block_num;
         }
 
         group = (group + 1) % fs->group_count;
     } while (group != start_group);
     
-    uma_zfree(ext2_block_cache, bitmap_buf);
     return 0; // No free blocks
 }
 
@@ -886,15 +934,17 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     
     if (group >= fs->group_count) return;
     
-    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
-    if (!bitmap_buf) return;
-    
-    // Read the block bitmap
-    if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, bitmap_buf) != fs->block_size) {
-        uma_zfree(ext2_block_cache, bitmap_buf);
-        return;
+    // Read the block bitmap if it's not cached
+    if (fs->active_bg_group != group) {
+        fs->active_bg_group = (uint32_t)-1;
+        if (ext2_read_block(fs, fs->bgd[group].bg_block_bitmap, fs->active_bg_bitmap) != fs->block_size) {
+            return;
+        }
+        fs->active_bg_group = group;
     }
     
+    uint8_t *bitmap_buf = fs->active_bg_bitmap;
+
     uint32_t byte_idx = index / 8;
     uint32_t bit_idx = index % 8;
     
@@ -909,26 +959,27 @@ void ext2_free_block(ext2_fs_t *fs, uint32_t block_num) {
     
     // Update superblock
     fs->sb.s_free_blocks_count++;
-
-    uma_zfree(ext2_block_cache, bitmap_buf);
 }
 
 // Allocate an inode
 uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
     if (!fs) return 0;
     
-    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
-    if (!bitmap_buf) return 0;
-    
     // Search each block group for a free inode
     for (uint32_t group = 0; group < fs->group_count; group++) {
         if (fs->bgd[group].bg_free_inodes_count == 0) continue;
         
-        // Read the inode bitmap
-        if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf) != fs->block_size) {
-            continue;
+        // Read the inode bitmap if it's not cached
+        if (fs->active_inode_bg_group != group) {
+            fs->active_inode_bg_group = (uint32_t)-1;
+            if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_inode_bg_bitmap) != fs->block_size) {
+                continue;
+            }
+            fs->active_inode_bg_group = group;
         }
         
+        uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
+
         // Find the first free bit (skip reserved inodes in first group)
         uint32_t start = (group == 0) ? fs->sb.s_first_ino : 0;
         uint32_t bits_in_group = fs->inodes_per_group;
@@ -982,13 +1033,11 @@ uint32_t ext2_alloc_inode(ext2_fs_t *fs, int is_dir) {
                 
                 ext2_write_inode(fs, inode_num, &inode);
                 
-                uma_zfree(ext2_block_cache, bitmap_buf);
                 return inode_num;
             }
         }
     }
     
-    uma_zfree(ext2_block_cache, bitmap_buf);
     return 0; // No free inodes
 }
 
@@ -1002,15 +1051,17 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     
     if (group >= fs->group_count) return;
     
-    uint8_t *bitmap_buf = uma_zalloc(ext2_block_cache, M_WAITOK);
-    if (!bitmap_buf) return;
-    
-    // Read the inode bitmap
-    if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, bitmap_buf) != fs->block_size) {
-        uma_zfree(ext2_block_cache, bitmap_buf);
-        return;
+    // Read the inode bitmap if it's not cached
+    if (fs->active_inode_bg_group != group) {
+        fs->active_inode_bg_group = (uint32_t)-1;
+        if (ext2_read_block(fs, fs->bgd[group].bg_inode_bitmap, fs->active_inode_bg_bitmap) != fs->block_size) {
+            return;
+        }
+        fs->active_inode_bg_group = group;
     }
     
+    uint8_t *bitmap_buf = fs->active_inode_bg_bitmap;
+
     uint32_t byte_idx = index / 8;
     uint32_t bit_idx = index % 8;
     
@@ -1028,8 +1079,6 @@ void ext2_free_inode(ext2_fs_t *fs, uint32_t inode_num, int was_dir) {
     
     // Update superblock
     fs->sb.s_free_inodes_count++;
-
-    uma_zfree(ext2_block_cache, bitmap_buf);
 }
 
 // Add directory entry
@@ -1046,6 +1095,16 @@ int ext2_add_entry(fs_node_t *dir, const char *name, uint32_t inode) {
     uint32_t required_size = ((8 + name_len + 3) / 4) * 4;
     
     mutex_lock(&ctx->lock);
+
+    // Invalidate dcache entry if it matches
+    for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
+        if (ctx->dcache[k].inode_num != 0 &&
+            ctx->dcache[k].name_len == name_len &&
+            memcmp(ctx->dcache[k].name, name, name_len) == 0) {
+            ctx->dcache[k].inode_num = 0;
+            // No break, clear all possible duplicates just in case
+        }
+    }
 
     // Lazy allocate
     uint32_t block_size = fs->block_size;
@@ -1178,6 +1237,16 @@ int ext2_remove_entry(fs_node_t *dir, const char *name) {
     size_t name_len = strlen(name);
 
     mutex_lock(&ctx->lock);
+
+    // Invalidate dcache entry if it matches
+    for (int k = 0; k < EXT2_DCACHE_SIZE; k++) {
+        if (ctx->dcache[k].inode_num != 0 &&
+            ctx->dcache[k].name_len == name_len &&
+            memcmp(ctx->dcache[k].name, name, name_len) == 0) {
+            ctx->dcache[k].inode_num = 0;
+            // No break, clear all possible duplicates just in case
+        }
+    }
 
     // Lazy allocate
     uint32_t block_size = fs->block_size;

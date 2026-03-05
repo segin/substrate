@@ -258,7 +258,7 @@ static int proc_generate_status(char *b, size_t s, process_t *proc) {
 
     /* Sanitize comm to prevent procfs line injection */
     for (int i = 0; comm_safe[i] != '\0'; i++) {
-        if ((unsigned char)comm_safe[i] < 32 || (unsigned char)comm_safe[i] == 127) {
+        if ((unsigned char)comm_safe[i] < 32 || (unsigned char)comm_safe[i] > 126) {
             comm_safe[i] = '_';
         }
     }
@@ -351,7 +351,8 @@ static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     const char *entries[] = { ".", "..", "status", "cmdline", NULL };
     if (index >= 4) return NULL;
-    strcpy(proc_dirent.d_name, entries[index]);
+    strncpy(proc_dirent.d_name, entries[index], sizeof(proc_dirent.d_name) - 1);
+    proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
     proc_dirent.d_ino = node->inode;
     return &proc_dirent;
 }
@@ -362,7 +363,8 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
         if (!pid_file) return NULL;
         pid_file->inode = node->inode;
         pid_file->flags = FS_FILE;
-        strcpy(pid_file->name, "status");
+        strncpy(pid_file->name, "status", sizeof(pid_file->name) - 1);
+        pid_file->name[sizeof(pid_file->name) - 1] = '\0';
         pid_file->read = &proc_pid_status_read;
         return pid_file;
     }
@@ -371,7 +373,8 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
         if (!pid_file) return NULL;
         pid_file->inode = node->inode;
         pid_file->flags = FS_FILE;
-        strcpy(pid_file->name, "cmdline");
+        strncpy(pid_file->name, "cmdline", sizeof(pid_file->name) - 1);
+        pid_file->name[sizeof(pid_file->name) - 1] = '\0';
         pid_file->read = &proc_pid_cmdline_read;
         return pid_file;
     }
@@ -384,13 +387,24 @@ static struct dirent *procfs_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
     
     /* . and .. */
-    if (index == 0) { strcpy(proc_dirent.d_name, "."); proc_dirent.d_ino = node->inode; return &proc_dirent; }
-    if (index == 1) { strcpy(proc_dirent.d_name, ".."); proc_dirent.d_ino = node->inode; return &proc_dirent; }
+    if (index == 0) {
+        strncpy(proc_dirent.d_name, ".", sizeof(proc_dirent.d_name) - 1);
+        proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
+        proc_dirent.d_ino = node->inode;
+        return &proc_dirent;
+    }
+    if (index == 1) {
+        strncpy(proc_dirent.d_name, "..", sizeof(proc_dirent.d_name) - 1);
+        proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
+        proc_dirent.d_ino = node->inode;
+        return &proc_dirent;
+    }
     
     /* Static entries from table */
     uint64_t static_idx = index - 2;
     if (static_idx < PROCFS_STATIC_COUNT) {
-        strcpy(proc_dirent.d_name, procfs_entries[static_idx].name);
+        strncpy(proc_dirent.d_name, procfs_entries[static_idx].name, sizeof(proc_dirent.d_name) - 1);
+        proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
         proc_dirent.d_ino = static_idx + 1; // Assign a unique inode for static entries
         return &proc_dirent;
     }
@@ -473,7 +487,8 @@ void procfs_init(void) {
     }
 
     memset(&procfs_root_node, 0, sizeof(fs_node_t));
-    strcpy(procfs_root_node.name, "proc");
+    strncpy(procfs_root_node.name, "proc", sizeof(procfs_root_node.name) - 1);
+    procfs_root_node.name[sizeof(procfs_root_node.name) - 1] = '\0';
     procfs_root_node.flags = FS_DIRECTORY;
     procfs_root_node.readdir = &procfs_readdir;
     procfs_root_node.finddir = &procfs_finddir;

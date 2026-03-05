@@ -286,16 +286,16 @@ void hw_text_set_color(uint8_t fg, uint8_t bg) {
 }
 
 void hw_text_init(void) {
-    console_init(); // Ensure TTY subsystem is up
+    // Console core is initialized by kmain before hw_text_init().
     vt_init();      // Initialize VT states
     
     // Register the TTY driver
-    for (int i = 0; i < VT_MAX; i++) {
+    for (int i = 0; i < 1; i++) {
         char name[16];
         struct tty *tty = tty_alloc(&vt_driver, i);
         if (tty) {
             snprintf(name, sizeof(name), "tty%d", i + 1);
-            tty_register_device(tty, name);
+            (void)name;
             
             // If this is VT 0 (tty1), make it the console backend
             if (i == 0) {

@@ -149,6 +149,14 @@ char *strstr(const char *haystack, const char *needle) {
     return NULL;
 }
 
+static int parse_console_serial_index(const char *value) {
+    if (!value) return -1;
+    if (strncmp(value, "serial", 6) != 0) return -1;
+    if (value[6] < '0' || value[6] > '3') return -1;
+    if (value[7] != '\0') return -1;
+    return value[6] - '0';
+}
+
 
 
 
@@ -218,7 +226,7 @@ void kinit_task(void *arg) {
         kprint("kinit: Trying ");
         kprint(init_path);
         kprint("\n");
-        if (elf_execve(init_path, NULL, NULL) == 0) {
+        if (elf_execve(-1, init_path, NULL, NULL) == 0) {
             goto exec_success;
         }
         panic("kinit: Requested init failed.");
@@ -226,10 +234,10 @@ void kinit_task(void *arg) {
 
     // Default paths
     kprint("kinit: Trying default init paths...\n");
-    if (elf_execve("/sbin/init", NULL, NULL) == 0) goto exec_success;
-    if (elf_execve("/etc/init", NULL, NULL) == 0) goto exec_success;
-    if (elf_execve("/bin/init", NULL, NULL) == 0) goto exec_success;
-    if (elf_execve("/bin/sh", NULL, NULL) == 0) goto exec_success;
+    if (elf_execve(-1, "/sbin/init", NULL, NULL) == 0) goto exec_success;
+    if (elf_execve(-1, "/etc/init", NULL, NULL) == 0) goto exec_success;
+    if (elf_execve(-1, "/bin/init", NULL, NULL) == 0) goto exec_success;
+    if (elf_execve(-1, "/bin/sh", NULL, NULL) == 0) goto exec_success;
 
     panic("kinit: No init found. Try passing init= option to kernel.");
 
@@ -269,6 +277,8 @@ void kmain(unsigned long magic, unsigned long addr) {
     multiboot_info_t *mboot_info = (multiboot_info_t *)addr;
     static multiboot_info_t fake_mbi;
     char *cmdline = NULL;
+    int cmdline_serial_console = -1;
+    char console_param[32] = {0};
 
     if (magic == FREEBSD_LOADER_MAGIC) {
         memset(&fake_mbi, 0, sizeof(fake_mbi));
@@ -292,6 +302,19 @@ void kmain(unsigned long magic, unsigned long addr) {
     }
     kprint("\n");
 
+    if (cmdline_get("console", console_param, sizeof(console_param)) == 0) {
+        if (strcmp(console_param, "console0") == 0) {
+            kprint("console=console0: default console configuration.\n");
+        } else {
+            cmdline_serial_console = parse_console_serial_index(console_param);
+            if (cmdline_serial_console < 0) {
+                kprint("Unknown console= value: ");
+                kprint(console_param);
+                kprint(" (expected console0 or serial0..serial3)\n");
+            }
+        }
+    }
+
 
     // SMP Discovery (before memory init so UMA knows CPU count)
     smp_init();
@@ -301,10 +324,14 @@ void kmain(unsigned long magic, unsigned long addr) {
 
     console_init();
     hw_text_init(); // Registers VGA text console
+    if (cmdline_serial_console >= 0 && uart_select_port((uint32_t)cmdline_serial_console) == 0) {
+        kprintf("console=serial%d selected (COM%d).\n",
+                cmdline_serial_console, cmdline_serial_console + 1);
+    }
     uart_init(); // Initializes UART hardare
 
     // Check for serial debug (MUST be after console_init which clears backends)
-    if (cmdline_has("serial_debug")) {
+    if (cmdline_has("serial_debug") || cmdline_serial_console >= 0) {
         serial_debug_enabled = 1;
         console_register(uart_get_console());
         kprint("Serial Debug Enabled.\n");

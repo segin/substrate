@@ -104,7 +104,7 @@ static void pmm_record_multiboot_info(uint32_t mboot_addr) {
  *
  * Modules loaded by the bootloader must not be overwritten.
  */
-static void pmm_record_module_regions(uint32_t mods_addr, uint32_t mods_count) {
+static void __attribute__((unused)) pmm_record_module_regions(uint32_t mods_addr, uint32_t mods_count) {
     if (!mods_addr || mods_count == 0) return;
     
     module_region_count = 0;
@@ -186,7 +186,7 @@ static int pmm_check_overlap(phys_addr_t start, phys_addr_t end,
  *
  * This reserves kernel, Multiboot info, modules, and reserved memory types.
  */
-static void pmm_reserve_regions(void) {
+static void __attribute__((unused)) pmm_reserve_regions(void) {
     for (int i = 0; i < pmm_region_count; i++) {
         if (!pmm_regions[i].valid) continue;
         
@@ -562,20 +562,15 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // 0. Initialize kernel bounds first (needed for all subsequent operations)
     pmm_init_kernel_bounds();
     
-    // 1. Record Multiboot info and module regions for exclusion
+    // 1. Record bootloader metadata region for exclusion.
+    // NOTE: pmm_init() is called with mmap_addr (memory map buffer), not the
+    // multiboot_info_t pointer itself. Do not interpret mmap_addr as MBI.
     if (mmap_addr) {
-        /* mmap_addr is virtual from boot.S, but we might need physical for marking */
-        uint32_t mboot_phys = mmap_addr;
-        if (mboot_phys >= 0xC0000000) {
-            mboot_phys -= 0xC0000000;
+        uint32_t mmap_phys = mmap_addr;
+        if (mmap_phys >= 0xC0000000) {
+            mmap_phys -= 0xC0000000;
         }
-        pmm_record_multiboot_info(mboot_phys);
-        
-        /* Check if we have modules */
-        multiboot_info_t *mboot = (multiboot_info_t *)(uintptr_t)mmap_addr;
-        if (mboot->flags & MULTIBOOT_INFO_MODS) {
-            pmm_record_module_regions(mboot->mods_addr, mboot->mods_count);
-        }
+        pmm_record_multiboot_info(mmap_phys);
     }
 
     // 2. Pass 1: Find limits with 64-bit accumulation for >4GB systems
@@ -630,9 +625,8 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
         return;
     }
 
-    // 6. Reserve kernel and excluded regions first
+    // 6. Reserve kernel image first (non-usable ranges are never added as free)
     pmm_reserve_kernel();
-    pmm_reserve_regions();
     
     // 7. Init Ranges via Buddy using Iterator (skips reserved areas)
     pmm_walk_mmap(mmap_addr, mmap_length, pmm_cb_init_buddy, NULL);

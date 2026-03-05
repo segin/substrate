@@ -5,6 +5,16 @@
 #include <sys/termios.h>
 
 int uart_received(void);
+static uint16_t uart_base_port = UART_COM1;
+
+int uart_select_port(uint32_t serial_index) {
+    static const uint16_t uart_ports[] = { UART_COM1, UART_COM2, UART_COM3, UART_COM4 };
+    if (serial_index >= (sizeof(uart_ports) / sizeof(uart_ports[0]))) {
+        return -1;
+    }
+    uart_base_port = uart_ports[serial_index];
+    return 0;
+}
 
 static void uart_console_write(const char *data, size_t len) {
     uart_write(data, len);
@@ -58,19 +68,19 @@ static void uart_set_termios(struct termios *t) {
 
     // Apply (DLAB sequence)
     // Note: Interrupts should be masked preferably
-    outb(UART_COM1 + 3, lcr | 0x80); // Enable DLAB
-    outb(UART_COM1 + 0, divisor & 0xFF);
-    outb(UART_COM1 + 1, (divisor >> 8) & 0xFF);
-    outb(UART_COM1 + 3, lcr); // Disable DLAB, set params
+    outb(uart_base_port + 3, lcr | 0x80); // Enable DLAB
+    outb(uart_base_port + 0, divisor & 0xFF);
+    outb(uart_base_port + 1, (divisor >> 8) & 0xFF);
+    outb(uart_base_port + 3, lcr); // Disable DLAB, set params
 
     // Modem Control (AFE/Flow Control)
-    uint8_t mcr = inb(UART_COM1 + 4); 
+    uint8_t mcr = inb(uart_base_port + 4); 
     if (t->c_cflag & CRTSCTS) {
         mcr |= 0x20; // Auto Flow Control (AFE) on 16550A+
     } else {
         mcr &= ~0x20;
     }
-    outb(UART_COM1 + 4, mcr);
+    outb(uart_base_port + 4, mcr);
 }
 
 static console_backend_t uart_console = {
@@ -87,61 +97,91 @@ console_backend_t *uart_get_console(void) {
 }
 
 void uart_init(void) {
-    outb(UART_COM1 + 1, 0x01);    // Enable Received Data Available Interrupt (0x1)
-    outb(UART_COM1 + 3, 0x80);    // Enable DLAB (set baud rate divisor)
-    outb(UART_COM1 + 0, 0x03);    // Set divisor to 3 (lo byte) 38400 baud
-    outb(UART_COM1 + 1, 0x00);    //                  (hi byte)
-    outb(UART_COM1 + 3, 0x03);    // 8 bits, no parity, one stop bit
-    outb(UART_COM1 + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
-    outb(UART_COM1 + 4, 0x0B);    // IRQs enabled, RTS/DSR set
+    outb(uart_base_port + 1, 0x00);    // Disable all interrupts
+    outb(uart_base_port + 3, 0x80);    // Enable DLAB (set baud rate divisor)
+    outb(uart_base_port + 0, 0x03);    // Set divisor to 3 (lo byte) 38400 baud
+    outb(uart_base_port + 1, 0x00);    //                  (hi byte)
+    outb(uart_base_port + 3, 0x03);    // 8 bits, no parity, one stop bit
+    outb(uart_base_port + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
+    outb(uart_base_port + 4, 0x0B);    // IRQs enabled, RTS/DSR set
+
+    // Enable Receiver Data Available interrupts only.
+    outb(uart_base_port + 1, 0x01);
 }
 
 void uart_handler(registers_t *regs) {
     (void)regs;
-    // Check IIR (Interrupt Identity Register) to confirm it's RDA
-    // but usually we just check LSR bit 0
-    uart_received(); // To update status? 
     
-    // Read while data available
-    while (inb(UART_COM1 + 5) & 1) {
-        char c = inb(UART_COM1 + 0);
+    uint8_t iir;
+    while (1) {
+        iir = inb(uart_base_port + 2);
+        if (iir & 1) {
+            break; // No more pending interrupts
+        }
 
-        // Debug triggers for Serial Console
-        if (c == 0x10) { // Ctrl+P - Process Dump
-            extern void debug_dump_processes(void);
-            debug_dump_processes();
-        } else if (c == 0x09) { // Ctrl+I - Info/State (Alternative)
-             // ...
-             // Pass through for now
-             extern void console_push_char(char c);
-             console_push_char(c);
-        } else {
-            // Push to TTY
-            extern void console_push_char(char c);
-            console_push_char(c);
+        uint8_t type = (iir >> 1) & 7;
+
+        if (type == 2) {
+            // Received Data Available
+            while (inb(uart_base_port + 5) & 1) {
+                char c = inb(uart_base_port + 0);
+
+                // Debug triggers for Serial Console
+                if (c == 0x10) { // Ctrl+P - Process Dump
+                    extern void debug_dump_processes(void);
+                    debug_dump_processes();
+                } else if (c == 0x09) { // Ctrl+I - Info/State (Alternative)
+                    extern void console_push_char(char c);
+                    console_push_char(c);
+                } else {
+                    extern void console_push_char(char c);
+                    console_push_char(c);
+                }
+            }
+        } else if (type == 1) {
+            // Transmitter Holding Register Empty (unused in polling TX mode)
+            (void)inb(uart_base_port + 5);
+        } else if (type == 6) {
+            // Character Timeout (handle like RDA)
+            while (inb(uart_base_port + 5) & 1) {
+                char c = inb(uart_base_port + 0);
+                extern void console_push_char(char c);
+                console_push_char(c);
+            }
+        } else if (type == 3) {
+            // Receiver Line Status (error)
+            inb(uart_base_port + 5);
+        } else if (type == 0) {
+            // Modem Status
+            inb(uart_base_port + 6);
         }
     }
 }
 
 int uart_received(void) {
-    return inb(UART_COM1 + 5) & 1;
+    return inb(uart_base_port + 5) & 1;
 }
 
 char uart_getc(void) {
-    while (uart_received() == 0);
-    return inb(UART_COM1 + 0);
+    uint32_t spins = 0;
+    while (uart_received() == 0) {
+        spins++;
+        if (spins > 100000) return 0; // Avoid hang
+    }
+    return inb(uart_base_port + 0);
 }
 
 int uart_is_transmit_empty(void) {
-    return inb(UART_COM1 + 5) & 0x20;
+    return inb(uart_base_port + 5) & 0x20;
 }
 
 void uart_putc(char c) {
     while (uart_is_transmit_empty() == 0);
-    outb(UART_COM1 + 0, c);
+    outb(uart_base_port + 0, c);
 }
 
 void uart_write(const char* data, size_t size) {
-    for (size_t i = 0; i < size; i++)
+    for (size_t i = 0; i < size; i++) {
         uart_putc(data[i]);
+    }
 }
