@@ -47,15 +47,13 @@ all: test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_
 	./lib/edit/host_test_history
 	./test_readline
 	./test_libedit
+	./test_bc
 
 test_readline: lib/edit/test_readline.c ../lib/edit/readline.c
 	$(CC) $(CFLAGS_COMMON) -I../lib/edit $< -o $@
 
 test_libedit: lib/edit/test_editline.c ../lib/edit/editline.c
 	$(CC) $(CFLAGS_COMMON) -I../include -I../lib/edit $< ../lib/edit/editline.c -o $@
-
-test_bc:
-	$(MAKE) -C bin/bc test
 
 # Duplicate rule removed
 
@@ -174,7 +172,7 @@ string_prefixed.o: ../lib/c/src/string.c
 	objcopy --prefix-symbols=libc_ string_raw.o string_prefixed.o
 
 clean:
-	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_libedit
+	rm -f *.o test_runner test_minix test_ext2_perf test_libc_string test_libc_time test_libc_stdlib test_libc_ctype test_libc_assert test_ext2_remove_perf bench_ext2_readdir test_libpthread_mutex test_pthread_join test_readline test_libedit test_bc
 	$(MAKE) -C sys clean
 	$(MAKE) -C lib/edit clean
 
@@ -192,3 +190,6 @@ bench_vm_map_alloc.o: bench_vm_map_alloc.c
 
 mocks_vm.o: mocks_vm.c
 	$(CC) $(CFLAGS_KERN) -c $< -o $@
+
+test_bc: bin/bc/host_test_bc.c ../bin/bc/bc.c ../usr.lib/bc/num.c ../usr.lib/bc/arith.c
+	$(CC) $(CFLAGS_COMMON) $< ../usr.lib/bc/num.c ../usr.lib/bc/arith.c -o $@
