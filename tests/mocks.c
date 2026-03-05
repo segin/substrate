@@ -280,6 +280,7 @@ struct fs_node *devfs_root_node_ptr;
 struct nameidata;
 int namei(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
 int namei_simple(const char *path, struct nameidata *ndp) { (void)path; (void)ndp; return -1; }
+void namei_init(void) {}
 struct vnode;
 
 // vm_map_lookup stub
@@ -295,14 +296,9 @@ void vm_phys_get_free(uint64_t *free) { *free = 0; }
 void vm_phys_get_used(uint64_t *used) { *used = 0; }
 static struct vm_page mock_pages[256];
 static int mock_page_idx = 0;
-void *vm_phys_alloc_page(void) {
-    if (mock_page_idx >= 256) return NULL;
-    return &mock_pages[mock_page_idx++];
-}
-void vm_phys_free_page(void *page) { (void)page; }
+
 void sched_get_system_load(uint32_t *loads) { loads[0]=0; loads[1]=0; loads[2]=0; }
 
-void swapper_request_work(void) {}
 
 // Fix cast:
 uint32_t pmm_get_page(void) { return (uint32_t)(uintptr_t)malloc(4096); }
