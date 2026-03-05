@@ -599,8 +599,6 @@ static void parse_rules(void) {
                     if (nrules >= MAXPROD) no_space();
                     plhs[nrules] = lhs->index;
                     rrhs[nrules] = nitems;
-                    rlhs[nrules] = lhs->index; /* Redundant? plhs uses index. rlhs uses index? definitions say short* but array usage implies same */
-                    /* Note: defs.h has plhs, rlhs. Usually plhs is sufficient. rlhs might be per-item? */
                     /* Let's stick to: plhs[rule] = lhs_symbol_index. ritem[item_index] = symbol_index. */
                     /* We need to track where a rule starts in ritem. 'rrhs[rule]' can point to start in ritem. */
                     n_deferred = 0; /* New rule */
@@ -622,7 +620,6 @@ static void parse_rules(void) {
                      if (nrules >= MAXPROD) no_space();
                      plhs[nrules] = lhs->index;
                      rrhs[nrules] = nitems;
-                     rlhs[nrules] = lhs->index;
                 } else if (t == ';') {
                      /* End of rule block */
                      if (nitems >= MAXPROD * 4) no_space();
@@ -678,11 +675,9 @@ static void parse_rules(void) {
                         /* Move current rule info to new slot */
                         plhs[nrules] = plhs[mid_rule_idx];
                         rrhs[nrules] = rrhs[mid_rule_idx];
-                        rlhs[nrules] = rlhs[mid_rule_idx];
 
                         /* Setup mid-rule info */
                         plhs[mid_rule_idx] = dummy->index;
-                        rlhs[mid_rule_idx] = dummy->index;
                         /* rrhs[mid_rule_idx] deferred */
 
                         /* Calculate offset: symbols before dummy */
@@ -766,7 +761,6 @@ static void create_augmented_rule(void) {
 
     plhs[1] = accept_sym->index;
     rrhs[1] = nitems;
-    rlhs[1] = accept_sym->index;
 
     ritem[nitems++] = goal_symbol->index;
     ritem[nitems++] = end_sym->index;
@@ -822,16 +816,11 @@ static void fixup_grammar(void) {
         }
     }
 
-    /* Fixup plhs and rlhs */
+    /* Fixup plhs */
     for (i = 0; i < nrules; i++) {
          if (plhs[i] > 0) {
              bucket *bp = temp_sym_map[plhs[i]];
              plhs[i] = bp->index;
-         }
-         /* rlhs seems redundant but let's fix it too if used */
-         if (rlhs[i] > 0) {
-             bucket *bp = temp_sym_map[rlhs[i]];
-             rlhs[i] = bp->index;
          }
     }
 }
