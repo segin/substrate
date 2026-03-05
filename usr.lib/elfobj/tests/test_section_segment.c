@@ -41,6 +41,9 @@ int main(void) {
     if (elf_section_set_merge(data, 1, 1) != ELF_OK) fail("set merge");
     if (elf_section_set_tls(tdata, 1) != ELF_OK) fail("set tls");
     if (elf_section_set_note_info(note, 7, "TESTNOTE") != ELF_OK) fail("set note");
+    if (elf_section_set_name(data, ".rodata.str1.1") != ELF_OK) fail("set name");
+    if (elf_section_set_name(NULL, ".rodata") != ELF_ERR_STATE) fail("set name (NULL section)");
+    if (elf_section_set_name(data, NULL) != ELF_ERR_STATE) fail("set name (NULL name)");
 
     if (elf_reorder_section(obj, note, 1) != ELF_OK) fail("reorder section");
     if (elf_remove_section(obj, data) != ELF_OK) fail("remove section");
