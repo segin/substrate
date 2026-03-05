@@ -1,0 +1,537 @@
+# 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 10551-10810.
+
+## Reimplemented Checklist (All Open)
+
+### 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+Reference: User Request (Step 31552)
+
+> [!NOTE]
+> ELKS (Embeddable Linux Kernel Subset) is a 16-bit Linux-like OS for 8086/80286. This personality enables running ELKS binaries on Substrate using LDT-based 16-bit protected mode segments.
+
+- [ ] **Design & Specification:**
+    - [ ] Produce ELKS personality specification document.
+        - Files: `docs/personality/elks_spec.md`
+        - Tests: N/A (design doc)
+        - Docs: `elks_spec.md`
+        - Acceptance: Document covers binary format recognition, ABI semantics (syscalls, signal model), data models (near/far pointers), and expected process environment.
+    - [ ] Define ELKS syscall table mapping to Substrate equivalents.
+        - Files: `docs/personality/elks_syscalls.md`, `sys/exec/perso/elks_syscall_table.h`
+        - Tests: N/A (design doc)
+        - Docs: `elks_syscalls.md`
+        - Acceptance: Complete mapping table with supported/unsupported syscalls documented.
+    - [ ] Define ELKS signal model and mapping to POSIX signals.
+        - Files: `docs/personality/elks_spec.md`
+        - Tests: N/A (design doc)
+        - Acceptance: Signal numbers and semantics documented.
+    - [ ] Define ELKS memory model (tiny/small/medium/compact/large).
+        - Files: `docs/personality/elks_spec.md`
+        - Tests: N/A (design doc)
+        - Acceptance: Each memory model's segment layout documented.
+
+- [ ] **Binary Format Recognition:**
+    - [ ] Implement ELKS a.out binary format detection.
+        - Files: `sys/fs/exec/elks_aout.c`, `sys/fs/exec/elks_aout.h`
+        - Tests: unit (magic number detection)
+        - Docs: `elks_aout.4` manpage
+        - Acceptance: Correctly identify ELKS a.out magic (0x0301 for 8086, 0x0302 for 80286).
+    - [ ] Register ELKS loader with exec subsystem.
+        - Files: `sys/fs/exec/exec.c`, `sys/fs/exec/elks_aout.c`
+        - Tests: integration (exec ELKS binary triggers loader)
+        - Acceptance: ELKS binaries dispatched to elks_load() function.
+
+- [ ] **ELKS Exec Loader:**
+    - [ ] Implement `elks_load()` function for ELKS binary loading.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (load sample ELKS binary into memory)
+        - Acceptance: Binary text/data/bss segments loaded correctly.
+    - [ ] Allocate 16-bit LDT segments via LDT API for code/data/stack.
+        - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/ldt.c`
+        - Tests: unit (verify LDT entries created)
+        - Acceptance: Separate LDT entries for CS (code), DS (data), SS (stack), ES (extra).
+    - [ ] Set up ELKS stack segment with correct base and limit.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (stack segment bounds)
+        - Acceptance: Stack limit enforced by hardware; overflow triggers #SS exception.
+    - [ ] Set up ELKS data segment with correct base and limit.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (data segment bounds)
+        - Acceptance: Data accesses beyond limit trigger #GP exception.
+    - [ ] Install syscall gateway trampoline for 16-bit to 32-bit transition.
+        - Files: `sys/fs/exec/elks_aout.c`, `sys/arch/i386/elks_gate.S`
+        - Tests: integration (syscall from 16-bit code reaches kernel)
+        - Acceptance: INT 0x80 from 16-bit context transitions to 32-bit kernel handler.
+    - [ ] Handle ELKS environment variables and argv setup.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: integration (argc/argv accessible from ELKS binary)
+        - Acceptance: ELKS main() receives correct argc, argv.
+    - [ ] Set process bitness to BITNESS_16 on ELKS exec.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: unit (verify bitness field after exec)
+        - Acceptance: `current_process->bitness == BITNESS_16` after ELKS load.
+
+- [ ] **Runtime Support & Syscall Translation:**
+    - [ ] Implement ELKS syscall dispatcher.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (dispatch to correct handler)
+        - Acceptance: ELKS syscall numbers correctly mapped to handlers.
+    - [ ] Implement ELKS sys_exit translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (ELKS exit terminates process)
+        - Acceptance: Process exits cleanly with correct exit code.
+    - [ ] Implement ELKS sys_read/sys_write translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (hello world prints to stdout)
+        - Acceptance: Console I/O works correctly.
+    - [ ] Implement ELKS sys_open/sys_close translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (open/read/close file)
+        - Acceptance: File operations work with VFS.
+    - [ ] Implement ELKS sys_brk translation (16-bit heap).
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (heap expansion within segment)
+        - Acceptance: brk works within data segment limit.
+    - [ ] Implement ELKS sys_fork translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (fork returns in both parent and child)
+        - Acceptance: Child inherits LDT segments correctly.
+    - [ ] Implement ELKS sys_execve translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (exec another ELKS binary)
+        - Acceptance: LDT segments properly replaced on exec.
+    - [ ] Implement ELKS sys_waitpid translation.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (wait for child)
+        - Acceptance: Parent receives child exit status.
+    - [ ] Implement ELKS signal syscalls (sys_signal, sys_kill).
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: integration (signal delivery)
+        - Acceptance: Signals delivered and handlers invoked.
+    - [ ] Return ENOSYS for unsupported ELKS syscalls with kernel log.
+        - Files: `sys/exec/perso/perso_elks.c`
+        - Tests: unit (verify ENOSYS return)
+        - Acceptance: Unsupported syscalls return -ENOSYS without crashing.
+    - [ ] Implement 16:16 far pointer to linear address conversion.
+        - Files: `sys/exec/perso/perso_elks.c`, `sys/arch/i386/ldt.c`
+        - Tests: unit (segment:offset to linear)
+        - Acceptance: `LDT[seg].base + offset` computed correctly.
+
+- [ ] **Resource Isolation & Signal Handling:**
+    - [ ] Ensure ELKS processes have isolated LDT (not shared with other processes).
+        - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
+        - Tests: unit (verify LDT per-process)
+        - Acceptance: Each ELKS process gets private LDT.
+    - [ ] Implement signal delivery for 16-bit context.
+        - Files: `sys/arch/i386/signal.c`, `sys/exec/perso/perso_elks.c`
+        - Tests: integration (SIGINT delivery to ELKS process)
+        - Acceptance: Signal handler invoked in 16-bit mode with correct context.
+    - [ ] Implement signal return (sigreturn) for 16-bit context.
+        - Files: `sys/arch/i386/signal.c`
+        - Tests: integration (return from signal handler)
+        - Acceptance: Execution resumes at interrupted point.
+    - [ ] Implement core dump generation for ELKS processes.
+        - Files: `sys/kern/core.c`, `sys/exec/perso/perso_elks.c`
+        - Tests: integration (SIGSEGV generates core)
+        - Docs: `core.5` manpage update
+        - Acceptance: Core dump includes 16-bit register state and segment info.
+
+- [ ] **Safety & Cleanup (LDT Lifecycle):**
+    - [ ] Implement LDT cleanup on process exit.
+        - Files: `sys/arch/i386/ldt.c`, `sys/pm/process.c`
+        - Tests: unit (no leaked LDT entries after exit)
+        - Acceptance: All LDT entries freed when ELKS process exits.
+    - [ ] Implement LDT duplication on fork.
+        - Files: `sys/arch/i386/ldt.c`, `sys/pm/fork.c`
+        - Tests: unit (child gets copy of LDT)
+        - Acceptance: Child LDT is independent copy of parent LDT.
+    - [ ] Implement LDT replacement on exec.
+        - Files: `sys/arch/i386/ldt.c`, `sys/fs/exec/exec.c`
+        - Tests: unit (old LDT freed, new LDT installed)
+        - Acceptance: exec clears old LDT and installs new one.
+    - [ ] Add LDT entry validation to prevent privilege escalation.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: fuzz (malformed LDT entries)
+        - Acceptance: DPL must be 3; conforming code segments rejected; call gates rejected.
+    - [ ] Implement LDT limit enforcement during context switch.
+        - Files: `sys/arch/i386/switch.S`, `sys/kern/sched.c`
+        - Tests: unit (LLDT loaded correctly)
+        - Acceptance: LDTR loaded with correct selector on context switch.
+    - [ ] Add kernel log warnings for suspicious LDT usage patterns.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: unit (warning logged)
+        - Acceptance: Unusual patterns (many allocations, odd limits) logged.
+
+- [ ] **Testing & Validation:**
+    - [ ] Create ELKS hello world test binary.
+        - Files: `tests/elks/hello.S`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU, verify output)
+        - Acceptance: "Hello, ELKS!" printed to console.
+    - [ ] Create ELKS sleep test binary.
+        - Files: `tests/elks/sleep.c`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU, verify delay)
+        - Acceptance: Process sleeps for specified duration.
+    - [ ] Create ELKS file I/O test binary.
+        - Files: `tests/elks/fileio.c`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU, verify file created)
+        - Acceptance: File created, written, read, and deleted correctly.
+    - [ ] Create ELKS fork test binary.
+        - Files: `tests/elks/fork.c`, `tests/elks/Makefile`
+        - Tests: emulation (run in QEMU)
+        - Acceptance: Parent and child both print distinct messages.
+    - [ ] Create automated test harness for ELKS binaries.
+        - Files: `tests/elks/run_tests.sh`, `tests/elks/harness.c`
+        - Tests: CI integration
+        - Acceptance: All ELKS tests pass in automated pipeline.
+    - [ ] Add ELKS syscall fuzzing tests.
+        - Files: `tests/elks/fuzz_syscalls.c`
+        - Tests: fuzz (random syscall args)
+        - Acceptance: No kernel panics; all invalid calls return errors.
+    - [ ] Add LDT bounds violation tests.
+        - Files: `tests/elks/bounds_test.S`
+        - Tests: unit (access beyond segment limit)
+        - Acceptance: #GP exception raised and handled correctly.
+
+- [ ] **Sample ELKS Userland & Build Scripts:**
+    - [ ] Add ELKS cross-compiler toolchain setup script.
+        - Files: `tools/elks/setup_toolchain.sh`
+        - Tests: N/A (build script)
+        - Docs: `tools/elks/README.md`
+        - Acceptance: Script downloads/builds ia16-elf-gcc toolchain.
+    - [ ] Add sample ELKS shell (minimal).
+        - Files: `tests/elks/minish.c`, `tests/elks/Makefile`
+        - Tests: emulation (run commands in QEMU)
+        - Acceptance: Basic command execution works.
+    - [ ] Add sample ELKS cat utility.
+        - Files: `tests/elks/cat.c`, `tests/elks/Makefile`
+        - Tests: emulation
+        - Acceptance: File contents displayed correctly.
+    - [ ] Add sample ELKS ls utility.
+        - Files: `tests/elks/ls.c`, `tests/elks/Makefile`
+        - Tests: emulation
+        - Acceptance: Directory listing displayed.
+    - [ ] Add ELKS binary build Makefile.
+        - Files: `tests/elks/Makefile`
+        - Tests: N/A (build script)
+        - Acceptance: `make -C tests/elks` builds all ELKS test binaries.
+
+- [ ] **Documentation:**
+    - [ ] Create personality-elks(7) developer guide.
+        - Files: `docs/man/man7/personality-elks.7`
+        - Tests: N/A (documentation)
+        - Docs: `personality-elks.7`
+        - Acceptance: Covers architecture, limitations, and usage.
+    - [ ] Create ELKS-compat(4) compatibility notes.
+        - Files: `docs/man/man4/ELKS-compat.4`
+        - Tests: N/A (documentation)
+        - Docs: `ELKS-compat.4`
+        - Acceptance: Documents known limitations and unsupported features.
+    - [ ] Add ELKS personality to ARCHITECTURE.md.
+        - Files: `ARCHITECTURE.md`
+        - Tests: N/A (documentation)
+        - Acceptance: ELKS personality architecture documented.
+    - [ ] Add ELKS syscall reference table.
+        - Files: `docs/personality/elks_syscall_ref.md`
+        - Tests: N/A (documentation)
+        - Acceptance: All syscalls listed with support status.
+    - [ ] Document LDT API usage for personality developers.
+        - Files: `docs/kernel/ldt_api.md`
+        - Tests: N/A (documentation)
+        - Acceptance: API documented with examples.
+
+- [ ] **Quality Audit & Refactoring:**
+        - Acceptance: All allocated resources freed on error.
+    - [ ] Audit elks_aout.c for unchecked file read errors.
+        - Files: `sys/fs/exec/elks_aout.c`
+        - Tests: fuzz (truncated binary files)
+        - Acceptance: Truncated binaries rejected with ENOEXEC.
+    - [ ] Audit ldt.c for race conditions in multi-threaded allocation.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: stress (concurrent LDT alloc/free)
+        - Acceptance: No corrupted LDT state under contention.
+    - [ ] Refactor LDT allocation to use UMA zone for efficiency.
+        - Files: `sys/arch/i386/ldt.c`
+        - Tests: unit (allocation performance)
+        - Acceptance: LDT allocation O(1) via UMA zone.
+    - [ ] Add static analysis annotations to ELKS personality code.
+        - Files: `sys/exec/perso/perso_elks.c`, `sys/fs/exec/elks_aout.c`
+        - Tests: static analysis (sparse/coverity)
+    - [ ] **Refactor Console and UART Subsystems**
+        - Note: Migrated files, updated Makefiles, fixed include paths, added missing VGA colors. Build verified.
+        - Files: `sys/kern/ansi_handler.c`, `sys/kern/console.c`, `sys/kern/tty.c`, `sys/drivers/serial/*`
+        - Goal: Migrate console/tty code to `sys/drivers/console/` and UART to `sys/drivers/console/uart/`.
+        - Acceptance: Build passes, files moved, functionality preserved.
+        - Acceptance: No warnings from static analysis tools.
+
+
+
+## User Stories
+
+- **US-20-0001**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to design & Specification: so that this capability is implemented with clear verification evidence.
+- **US-20-0002**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to produce ELKS personality specification document so that this capability is implemented with clear verification evidence.
+- **US-20-0003**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to define ELKS syscall table mapping to Substrate equivalents so that this capability is implemented with clear verification evidence.
+- **US-20-0004**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to define ELKS signal model and mapping to POSIX signals so that this capability is implemented with clear verification evidence.
+- **US-20-0005**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to define ELKS memory model (tiny/small/medium/compact/large) so that this capability is implemented with clear verification evidence.
+- **US-20-0006**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to binary Format Recognition: so that this capability is implemented with clear verification evidence.
+- **US-20-0007**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS a.out binary format detection so that this capability is implemented with clear verification evidence.
+- **US-20-0008**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to register ELKS loader with exec subsystem so that this capability is implemented with clear verification evidence.
+- **US-20-0009**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to eLKS Exec Loader: so that this capability is implemented with clear verification evidence.
+- **US-20-0010**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement elks_load() function for ELKS binary loading so that this capability is implemented with clear verification evidence.
+- **US-20-0011**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to allocate 16-bit LDT segments via LDT API for code/data/stack so that this capability is implemented with clear verification evidence.
+- **US-20-0012**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to set up ELKS stack segment with correct base and limit so that this capability is implemented with clear verification evidence.
+- **US-20-0013**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to set up ELKS data segment with correct base and limit so that this capability is implemented with clear verification evidence.
+- **US-20-0014**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to install syscall gateway trampoline for 16-bit to 32-bit transition so that this capability is implemented with clear verification evidence.
+- **US-20-0015**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to handle ELKS environment variables and argv setup so that this capability is implemented with clear verification evidence.
+- **US-20-0016**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to set process bitness to BITNESS_16 on ELKS exec so that this capability is implemented with clear verification evidence.
+- **US-20-0017**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to runtime Support & Syscall Translation: so that this capability is implemented with clear verification evidence.
+- **US-20-0018**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS syscall dispatcher so that this capability is implemented with clear verification evidence.
+- **US-20-0019**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_exit translation so that this capability is implemented with clear verification evidence.
+- **US-20-0020**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_read/sys_write translation so that this capability is implemented with clear verification evidence.
+- **US-20-0021**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_open/sys_close translation so that this capability is implemented with clear verification evidence.
+- **US-20-0022**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_brk translation (16-bit heap) so that this capability is implemented with clear verification evidence.
+- **US-20-0023**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_fork translation so that this capability is implemented with clear verification evidence.
+- **US-20-0024**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_execve translation so that this capability is implemented with clear verification evidence.
+- **US-20-0025**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS sys_waitpid translation so that this capability is implemented with clear verification evidence.
+- **US-20-0026**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement ELKS signal syscalls (sys_signal, sys_kill) so that this capability is implemented with clear verification evidence.
+- **US-20-0027**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to return ENOSYS for unsupported ELKS syscalls with kernel log so that this capability is implemented with clear verification evidence.
+- **US-20-0028**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement 16:16 far pointer to linear address conversion so that this capability is implemented with clear verification evidence.
+- **US-20-0029**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to resource Isolation & Signal Handling: so that this capability is implemented with clear verification evidence.
+- **US-20-0030**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to ensure ELKS processes have isolated LDT (not shared with other processes) so that this capability is implemented with clear verification evidence.
+- **US-20-0031**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement signal delivery for 16-bit context so that this capability is implemented with clear verification evidence.
+- **US-20-0032**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement signal return (sigreturn) for 16-bit context so that this capability is implemented with clear verification evidence.
+- **US-20-0033**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement core dump generation for ELKS processes so that this capability is implemented with clear verification evidence.
+- **US-20-0034**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to safety & Cleanup (LDT Lifecycle): so that this capability is implemented with clear verification evidence.
+- **US-20-0035**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement LDT cleanup on process exit so that this capability is implemented with clear verification evidence.
+- **US-20-0036**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement LDT duplication on fork so that this capability is implemented with clear verification evidence.
+- **US-20-0037**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement LDT replacement on exec so that this capability is implemented with clear verification evidence.
+- **US-20-0038**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add LDT entry validation to prevent privilege escalation so that this capability is implemented with clear verification evidence.
+- **US-20-0039**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to implement LDT limit enforcement during context switch so that this capability is implemented with clear verification evidence.
+- **US-20-0040**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add kernel log warnings for suspicious LDT usage patterns so that this capability is implemented with clear verification evidence.
+- **US-20-0041**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to testing & Validation: so that this capability is implemented with clear verification evidence.
+- **US-20-0042**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create ELKS hello world test binary so that this capability is implemented with clear verification evidence.
+- **US-20-0043**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create ELKS sleep test binary so that this capability is implemented with clear verification evidence.
+- **US-20-0044**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create ELKS file I/O test binary so that this capability is implemented with clear verification evidence.
+- **US-20-0045**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create ELKS fork test binary so that this capability is implemented with clear verification evidence.
+- **US-20-0046**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create automated test harness for ELKS binaries so that this capability is implemented with clear verification evidence.
+- **US-20-0047**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS syscall fuzzing tests so that this capability is implemented with clear verification evidence.
+- **US-20-0048**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add LDT bounds violation tests so that this capability is implemented with clear verification evidence.
+- **US-20-0049**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to sample ELKS Userland & Build Scripts: so that this capability is implemented with clear verification evidence.
+- **US-20-0050**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS cross-compiler toolchain setup script so that this capability is implemented with clear verification evidence.
+- **US-20-0051**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add sample ELKS shell (minimal) so that this capability is implemented with clear verification evidence.
+- **US-20-0052**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add sample ELKS cat utility so that this capability is implemented with clear verification evidence.
+- **US-20-0053**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add sample ELKS ls utility so that this capability is implemented with clear verification evidence.
+- **US-20-0054**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS binary build Makefile so that this capability is implemented with clear verification evidence.
+- **US-20-0055**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-20-0056**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create personality-elks(7) developer guide so that this capability is implemented with clear verification evidence.
+- **US-20-0057**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to create ELKS-compat(4) compatibility notes so that this capability is implemented with clear verification evidence.
+- **US-20-0058**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS personality to ARCHITECTURE.md so that this capability is implemented with clear verification evidence.
+- **US-20-0059**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add ELKS syscall reference table so that this capability is implemented with clear verification evidence.
+- **US-20-0060**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to document LDT API usage for personality developers so that this capability is implemented with clear verification evidence.
+- **US-20-0061**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to quality Audit & Refactoring: so that this capability is implemented with clear verification evidence.
+- **US-20-0062**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to audit elks_aout.c for unchecked file read errors so that this capability is implemented with clear verification evidence.
+- **US-20-0063**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to audit ldt.c for race conditions in multi-threaded allocation so that this capability is implemented with clear verification evidence.
+- **US-20-0064**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to refactor LDT allocation to use UMA zone for efficiency so that this capability is implemented with clear verification evidence.
+- **US-20-0065**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to add static analysis annotations to ELKS personality code so that this capability is implemented with clear verification evidence.
+- **US-20-0066**: As a Substrate contributor working on 16. ELKS Kernel Personality (16-bit LDT-based Execution), I want to refactor Console and UART Subsystems so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-20-0001** (EARS/Ubiquitous): The Substrate system shall design & Specification:.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0002** (EARS/Ubiquitous): The Substrate system shall produce ELKS personality specification document.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0003** (EARS/Ubiquitous): The Substrate system shall define ELKS syscall table mapping to Substrate equivalents.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0004** (EARS/Ubiquitous): The Substrate system shall define ELKS signal model and mapping to POSIX signals.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0005** (EARS/Ubiquitous): The Substrate system shall define ELKS memory model (tiny/small/medium/compact/large).
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0006** (EARS/Ubiquitous): The Substrate system shall binary Format Recognition:.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0007** (EARS/Ubiquitous): The Substrate system shall implement ELKS a.out binary format detection.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0008** (EARS/Ubiquitous): The Substrate system shall register ELKS loader with exec subsystem.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0009** (EARS/Ubiquitous): The Substrate system shall eLKS Exec Loader:.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0010** (EARS/Ubiquitous): The Substrate system shall implement elks_load() function for ELKS binary loading.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0011** (EARS/Ubiquitous): The Substrate system shall allocate 16-bit LDT segments via LDT API for code/data/stack.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0012** (EARS/Ubiquitous): The Substrate system shall set up ELKS stack segment with correct base and limit.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0013** (EARS/Ubiquitous): The Substrate system shall set up ELKS data segment with correct base and limit.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0014** (EARS/Ubiquitous): The Substrate system shall install syscall gateway trampoline for 16-bit to 32-bit transition.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0015** (EARS/Ubiquitous): The Substrate system shall handle ELKS environment variables and argv setup.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0016** (EARS/Ubiquitous): The Substrate system shall set process bitness to BITNESS_16 on ELKS exec.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0017** (EARS/Ubiquitous): The Substrate system shall runtime Support & Syscall Translation:.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0018** (EARS/Ubiquitous): The Substrate system shall implement ELKS syscall dispatcher.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0019** (EARS/Ubiquitous): The Substrate system shall implement ELKS sys_exit translation.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0020** (EARS/Ubiquitous): The Substrate system shall implement ELKS sys_read/sys_write translation.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0021** (EARS/Ubiquitous): The Substrate system shall implement ELKS sys_open/sys_close translation.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0022** (EARS/Ubiquitous): The Substrate system shall implement ELKS sys_brk translation (16-bit heap).
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0023** (EARS/Ubiquitous): The Substrate system shall implement ELKS sys_fork translation.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0024** (EARS/Ubiquitous): The Substrate system shall implement ELKS sys_execve translation.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0025** (EARS/Ubiquitous): The Substrate system shall implement ELKS sys_waitpid translation.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0026** (EARS/Ubiquitous): The Substrate system shall implement ELKS signal syscalls (sys_signal, sys_kill).
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0027** (EARS/Ubiquitous): The Substrate system shall return ENOSYS for unsupported ELKS syscalls with kernel log.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0028** (EARS/Ubiquitous): The Substrate system shall implement 16:16 far pointer to linear address conversion.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0029** (EARS/Ubiquitous): The Substrate system shall resource Isolation & Signal Handling:.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0030** (EARS/Ubiquitous): The Substrate system shall ensure ELKS processes have isolated LDT (not shared with other processes).
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0031** (EARS/Ubiquitous): The Substrate system shall implement signal delivery for 16-bit context.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0032** (EARS/Ubiquitous): The Substrate system shall implement signal return (sigreturn) for 16-bit context.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0033** (EARS/Ubiquitous): The Substrate system shall implement core dump generation for ELKS processes.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0034** (EARS/Ubiquitous): The Substrate system shall safety & Cleanup (LDT Lifecycle):.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0035** (EARS/Ubiquitous): The Substrate system shall implement LDT cleanup on process exit.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0036** (EARS/Ubiquitous): The Substrate system shall implement LDT duplication on fork.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0037** (EARS/Ubiquitous): The Substrate system shall implement LDT replacement on exec.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0038** (EARS/Ubiquitous): The Substrate system shall add LDT entry validation to prevent privilege escalation.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0039** (EARS/Ubiquitous): The Substrate system shall implement LDT limit enforcement during context switch.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0040** (EARS/Ubiquitous): The Substrate system shall add kernel log warnings for suspicious LDT usage patterns.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0041** (EARS/Ubiquitous): The Substrate system shall testing & Validation:.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0042** (EARS/Ubiquitous): The Substrate system shall create ELKS hello world test binary.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0043** (EARS/Ubiquitous): The Substrate system shall create ELKS sleep test binary.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0044** (EARS/Ubiquitous): The Substrate system shall create ELKS file I/O test binary.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0045** (EARS/Ubiquitous): The Substrate system shall create ELKS fork test binary.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0046** (EARS/Ubiquitous): The Substrate system shall create automated test harness for ELKS binaries.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0047** (EARS/Ubiquitous): The Substrate system shall add ELKS syscall fuzzing tests.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0048** (EARS/Ubiquitous): The Substrate system shall add LDT bounds violation tests.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0049** (EARS/Ubiquitous): The Substrate system shall sample ELKS Userland & Build Scripts:.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0050** (EARS/Ubiquitous): The Substrate system shall add ELKS cross-compiler toolchain setup script.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0051** (EARS/Ubiquitous): The Substrate system shall add sample ELKS shell (minimal).
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0052** (EARS/Ubiquitous): The Substrate system shall add sample ELKS cat utility.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0053** (EARS/Ubiquitous): The Substrate system shall add sample ELKS ls utility.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0054** (EARS/Ubiquitous): The Substrate system shall add ELKS binary build Makefile.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0055** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0056** (EARS/Ubiquitous): The Substrate system shall create personality-elks(7) developer guide.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0057** (EARS/Ubiquitous): The Substrate system shall create ELKS-compat(4) compatibility notes.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0058** (EARS/Ubiquitous): The Substrate system shall add ELKS personality to ARCHITECTURE.md.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0059** (EARS/Ubiquitous): The Substrate system shall add ELKS syscall reference table.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0060** (EARS/Ubiquitous): The Substrate system shall document LDT API usage for personality developers.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0061** (EARS/Ubiquitous): The Substrate system shall quality Audit & Refactoring:.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0062** (EARS/Ubiquitous): The Substrate system shall audit elks_aout.c for unchecked file read errors.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0063** (EARS/Ubiquitous): The Substrate system shall audit ldt.c for race conditions in multi-threaded allocation.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0064** (EARS/Ubiquitous): The Substrate system shall refactor LDT allocation to use UMA zone for efficiency.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0065** (EARS/Ubiquitous): The Substrate system shall add static analysis annotations to ELKS personality code.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-20-0066** (EARS/Ubiquitous): The Substrate system shall refactor Console and UART Subsystems.
+  - Context: 16. ELKS Kernel Personality (16-bit LDT-based Execution)
+  - Verification: design review + implementation evidence + test/doc update.

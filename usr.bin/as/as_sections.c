@@ -321,6 +321,34 @@ static unsigned parse_type_string(const char *raw) {
     return type;
 }
 
+static void infer_section_defaults(const char *name, unsigned *flags, unsigned *type) {
+    unsigned f = SHF_ALLOC;
+    unsigned t = SHT_PROGBITS;
+
+    if (name != NULL) {
+        if (strcmp(name, ".text") == 0 || strncmp(name, ".text.", 6) == 0) {
+            f = SHF_ALLOC | SHF_EXECINSTR;
+            t = SHT_PROGBITS;
+        } else if (strcmp(name, ".data") == 0 || strncmp(name, ".data.", 6) == 0) {
+            f = SHF_ALLOC | SHF_WRITE;
+            t = SHT_PROGBITS;
+        } else if (strcmp(name, ".bss") == 0 || strncmp(name, ".bss.", 5) == 0) {
+            f = SHF_ALLOC | SHF_WRITE;
+            t = SHT_NOBITS;
+        } else if (strcmp(name, ".rodata") == 0 || strncmp(name, ".rodata.", 8) == 0) {
+            f = SHF_ALLOC;
+            t = SHT_PROGBITS;
+        }
+    }
+
+    if (flags != NULL) {
+        *flags = f;
+    }
+    if (type != NULL) {
+        *type = t;
+    }
+}
+
 static int switch_section(sec_ctx_t *ctx, const char *name, unsigned subsection,
                           unsigned flags, unsigned type, int update_attrs) {
     ssize_t idx;
@@ -366,6 +394,7 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
     char *name;
     unsigned flags;
     unsigned type;
+    ssize_t existing = -1;
 
     if (d->arg_count < 1) {
         return -1;
@@ -380,8 +409,22 @@ static int process_section_like(sec_ctx_t *ctx, const as_stmt_t *st, int do_push
         return -1;
     }
 
-    flags = (d->arg_count >= 2) ? parse_flags_string(d->args[1]) : s->items[s->current_index].flags;
-    type = (d->arg_count >= 3) ? parse_type_string(d->args[2]) : s->items[s->current_index].type;
+    existing = find_section_index(s, name, 0);
+    if (d->arg_count >= 2) {
+        flags = parse_flags_string(d->args[1]);
+    } else if (existing >= 0) {
+        flags = s->items[existing].flags;
+    } else {
+        infer_section_defaults(name, &flags, NULL);
+    }
+
+    if (d->arg_count >= 3) {
+        type = parse_type_string(d->args[2]);
+    } else if (existing >= 0) {
+        type = s->items[existing].type;
+    } else {
+        infer_section_defaults(name, NULL, &type);
+    }
 
     if (switch_section(ctx, name, 0, flags, type, 1) != 0) {
         free(name);
