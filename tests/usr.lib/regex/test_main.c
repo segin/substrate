@@ -2,6 +2,8 @@
 
 int test_api_basic(void);
 int test_api_match(void);
+int test_util_toupper(void);
+int test_util_tolower(void);
 int test_replace_basic(void);
 int test_dos_limits(void);
 int test_streaming_basic(void);
@@ -11,6 +13,8 @@ int main(void) {
     int failures = 0;
     failures += test_api_basic();
     failures += test_api_match();
+    failures += test_util_toupper();
+    failures += test_util_tolower();
     failures += test_replace_basic();
     failures += test_dos_limits();
     failures += test_streaming_basic();
