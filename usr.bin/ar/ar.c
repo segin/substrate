@@ -84,7 +84,7 @@ static bool archive_is_thin = false;
 /* Symbol table entry */
 struct sym_entry {
     char *name;
-    size_t name_len;
+    size_t name_len; /* Cached length of the symbol name */
     uint64_t offset; /* File offset of member header */
     struct ar_memb *member; /* Pointer to member */
     struct sym_entry *next;

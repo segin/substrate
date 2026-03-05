@@ -258,7 +258,7 @@ static int proc_generate_status(char *b, size_t s, process_t *proc) {
 
     /* Sanitize comm to prevent procfs line injection */
     for (int i = 0; comm_safe[i] != '\0'; i++) {
-        if ((unsigned char)comm_safe[i] < 32 || (unsigned char)comm_safe[i] == 127) {
+        if ((unsigned char)comm_safe[i] < 32 || (unsigned char)comm_safe[i] > 126) {
             comm_safe[i] = '_';
         }
     }

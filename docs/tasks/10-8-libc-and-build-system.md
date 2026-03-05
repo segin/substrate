@@ -1,0 +1,2271 @@
+# 8. LibC & Build System (User Requests & Audit)
+
+> This file was seeded from `TASKS.md` using a fork-copy (rename+restore) workflow to preserve lineage.
+> Source span in original monolith: lines 8477-8930.
+
+## Reimplemented Checklist (All Open)
+
+### 8. LibC & Build System (User Requests & Audit)
+- [ ] **LibC Core Compliance (Audit Findings):**
+    - [ ] **Critical Headers (Missing Files):**
+        - [ ] Create `string.h` (functions exist in `string.c` but header is missing).
+        - [ ] Create `limits.h`, `setjmp.h`, `locale.h`.
+        - [ ] Create `err.h` (BSD error reporting helpers).
+        - [ ] Create `stddef.h`, `stdint.h`, `stdarg.h` (wrapping GCC builtins).
+    - [ ] **String Manipulation (`<string.h>`):**
+        - [ ] `strndup()`: Bounded string duplication.
+        - [ ] `stpcpy()` / `stpncpy()`: Copy returning end pointer.
+        - [ ] `strpbrk()`: Search for any of a set of chars.
+        - [ ] `strcoll()` / `strxfrm()`: Locale-aware comparison stubs.
+    - [ ] **Standard Library (`<stdlib.h>`):**
+        - [ ] `strtol()` / `strtoul()` / `strtoll()` / `strtoull()`: Robust string-to-integer conversion.
+        - [ ] `strtod()` / `strtof()`: String to float implementation (currently `atof` is a stub).
+        - [ ] `div()` / `ldiv()` / `lldiv()`: Combined quotient/remainder.
+        - [ ] `atexit()`: Exit handlers (currently `at_quick_exit` is a stub).
+        - [ ] `mbstowcs()` / `wcstombs()`: Multibyte conversion stubs.
+    - [ ] **Standard I/O (`<stdio.h>`):**
+        - [ ] **CRITICAL:** `sscanf()` / `scanf()` / `fscanf()`: Input parsing implementation.
+        - [ ] `snprintf()`: Add wrapper around `vsnprintf`.
+        - [ ] `freopen()`: Reopen stream with new mode.
+        - [ ] `setvbuf()` / `setbuf()`: Buffering mode control.
+        - [ ] `tmpfile()` / `tmpnam()`: Temporary file support.
+        - [ ] `fileno()`: Get fd from `FILE*`.
+    - [ ] **POSIX System Interface (`<unistd.h>`):**
+        - [ ] `dup()`: Duplicate fd (wrapper around `SYS_DUP` or `fcntl`).
+        - [ ] `getppid()`: Get parent PID.
+        - [ ] `setsid()` / `getsid()`: Session ID management.
+        - [ ] `getpgrp()` / `setpgid()`: Process group management.
+        - [ ] `symlink()`: Create symbolic link.
+        - [ ] `ftruncate()` / `truncate()`: Truncate file size.
+        - [ ] `fsync()` / `fdatasync()`: Flush file changes.
+    - [ ] **Time & Date (`<time.h>`):**
+        - [ ] `gmtime()` / `localtime()`: Timestamp to struct tm.
+        - [ ] `mktime()`: Struct tm to timestamp.
+        - [ ] `strftime()` / `strptime()`: Time formatting/parsing.
+        - [ ] `difftime()`: Time difference.
+        - [ ] `ctime()` / `asctime()`: Time to string.
+- [ ] **LibC Features (User Requests):**
+    - [ ] **Implement `getopt_long` (GNU Compatible):**
+        - [ ] Define `struct option` (name, has_arg, flag, val).
+        - [ ] Implement `getopt_long()` function signature.
+        - [ ] Implement `getopt_long_only()` variant.
+        - [ ] Handle argument parsing (`--arg`, `--arg=val`).
+        - [ ] Handle `no_argument`, `required_argument`, `optional_argument`.
+        - [ ] Internal state management (`optind`, `opterr`, `optopt`, `optarg`).
+        - [ ] Error reporting and `?` / `:` return codes.
+        - [ ] Support for non-option argument reordering (swapping argv elements).
+        - [ ] Test against GNU `getopt_long` behavior.
+- [ ] **Low-Level Helpers (LibC Extension):**
+    - [ ] `xmalloc(size)`: Safe memory allocation.
+        - [ ] **Prototype:** `void *xmalloc(size_t size)`
+        - [ ] **Purpose:** Allocate memory, aborting on failure.
+        - [ ] **Standards:** Common extension (Busybox/GNU coreutils style).
+        - [ ] **Syscalls / Kernel interfaces:** `malloc` -> `brk`/`mmap`.
+        - [ ] **Signal-safety / async-signal-safe:** no — calls `malloc`.
+        - [ ] **Reentrancy / thread-safety:** Thread-safe (if `malloc` is).
+        - [ ] **Error semantics:** Returns valid pointer or exits program (never returns NULL).
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xmalloc(1024)` -> returns pointer
+            - [ ] `xmalloc(huge)` -> prints error and exits (mock/limit env)
+        - [ ] **Implementation notes:** Wrapper around `malloc`.
+        - [ ] **Priority:** high
+    - [ ] `xopen(path, flags, mode)`: Safe file open.
+        - [ ] **Prototype:** `int xopen(const char *path, int flags, mode_t mode)`
+        - [ ] **Purpose:** Open file, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Syscalls / Kernel interfaces:** `open` / `openat`.
+        - [ ] **Signal-safety / async-signal-safe:** yes (if error handler is simple).
+        - [ ] **Reentrancy / thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns valid fd or exits program.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xopen("exist", O_RDONLY)` -> returns fd
+            - [ ] `xopen("noexist", O_RDONLY)` -> prints error and exits
+        - [ ] **Priority:** high
+    - [ ] `xrealloc(ptr, size)`: Safe memory reallocation.
+        - [ ] **Prototype:** `void *xrealloc(void *ptr, size_t size)`
+        - [ ] **Purpose:** Reallocate memory, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `malloc` / `free` -> `brk`/`mmap`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe (if Underlying allocator is).
+        - [ ] **Error semantics:** Exits program on failure.
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xrealloc(NULL, 10)` -> equivalent to xmalloc
+            - [ ] `xrealloc(ptr, 20)` -> preserves data, returns new ptr
+        - [ ] **Implementation notes:** `realloc(ptr, 0)` behavior check.
+        - [ ] **Priority:** high
+    - [ ] `xcalloc(nmemb, size)`: Safe zero-initialized allocation.
+        - [ ] **Prototype:** `void *xcalloc(size_t nmemb, size_t size)`
+        - [ ] **Purpose:** Allocate zeroed memory, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `calloc`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits program on failure, check overflow.
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xcalloc(10, 10)` -> returns zeroed buffer
+            - [ ] `xcalloc(MAX, MAX)` -> overflow check and exit
+        - [ ] **Implementation notes:** Check for multiplication overflow.
+        - [ ] **Priority:** high
+    - [ ] `xstrdup(s)`: Safe string duplication.
+        - [ ] **Prototype:** `char *xstrdup(const char *s)`
+        - [ ] **Purpose:** Duplicate string, aborting on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `malloc`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits program on failure.
+        - [ ] **Memory ownership:** Caller must free.
+        - [ ] **Acceptance tests:**
+            - [ ] `xstrdup("foo")` -> returns copy
+        - [ ] **Implementation notes:** Wrapper around `strdup`.
+        - [ ] **Priority:** high
+    - [ ] `xread(fd, buf, count)`: Read exact amount or fail.
+        - [ ] **Prototype:** `size_t xread(int fd, void *buf, size_t count)`
+        - [ ] **Purpose:** Read requested bytes, looping on partials/EINTR, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `read`.
+        - [ ] **Signal-safety:** yes (if error handler is simple).
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns count read (may be < requested if EOF), exits on IO error.
+        - [ ] **Memory ownership:** generic buffer.
+        - [ ] **Acceptance tests:**
+            - [ ] `xread` full buffer -> returns count
+            - [ ] `xread` partial -> loops or returns short on EOF
+        - [ ] **Implementation notes:** Distinguish short read (EOF) vs error.
+        - [ ] **Priority:** high
+    - [ ] `xwrite(fd, buf, count)`: Write exact amount or fail.
+        - [ ] **Prototype:** `void xwrite(int fd, const void *buf, size_t count)`
+        - [ ] **Purpose:** Write all bytes, looping on partials/EINTR, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `write`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits if write fails or incomplete.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xwrite` full buffer -> succeeds
+            - [ ] `xwrite` to full disk -> exits
+        - [ ] **Implementation notes:** Loop until all written.
+        - [ ] **Priority:** high
+    - [ ] `xstat(path, buf)`: Safe file status.
+        - [ ] **Prototype:** `void xstat(const char *path, struct stat *buf)`
+        - [ ] **Purpose:** Get file status, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `stat`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits on error.
+        - [ ] **Memory ownership:** caller provides struct.
+        - [ ] **Acceptance tests:**
+            - [ ] `xstat("exist", &sb)` -> success
+            - [ ] `xstat("noexist", &sb)` -> exits
+        - [ ] **Implementation notes:** Used when file is expected to exist.
+        - [ ] **Priority:** medium
+    - [ ] `xaccess(path, mode)`: Safe access check.
+        - [ ] **Prototype:** `void xaccess(const char *path, int mode)`
+        - [ ] **Purpose:** Check file access, exit on error (permission denied is error).
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `access`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits if check fails.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xaccess` readable -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+    - [ ] `xopendir(path)`: Safe directory open.
+        - [ ] **Prototype:** `DIR *xopendir(const char *path)`
+        - [ ] **Purpose:** Open directory, exit on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `open`, `fstat`, `mmap` (via `opendir`).
+        - [ ] **Signal-safety:** no (allocates).
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns valid DIR* or exits.
+        - [ ] **Memory ownership:** Caller calls closedir.
+        - [ ] **Acceptance tests:**
+            - [ ] `xopendir(".")` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** high
+    - [ ] `xclosedir(dirp)`: Safe directory close.
+        - [ ] **Prototype:** `void xclosedir(DIR *dirp)`
+        - [ ] **Purpose:** Close directory, warn/exit on failure? usually just wrapper.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `close`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Exits on error (unlikely).
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xclosedir` -> success
+        - [ ] **Implementation notes:** Check return code.
+        - [ ] **Priority:** medium
+    - [ ] `xfork()`: Safe process creation.
+        - [ ] **Prototype:** `pid_t xfork(void)`
+        - [ ] **Purpose:** Fork process, exit on failure (EAGAIN usually).
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `fork`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns pid or exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xfork()` -> parent gets pid, child gets 0
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** high
+    - [ ] `xwaitpid(pid, status, options)`: Safe wait.
+        - [ ] **Prototype:** `pid_t xwaitpid(pid_t pid, int *status, int options)`
+        - [ ] **Purpose:** Wait for process, loop on EINTR, exit on other error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `waitpid`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Returns pid.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xwaitpid` -> reaps zombie
+        - [ ] **Implementation notes:** Handle EINTR internally.
+        - [ ] **Priority:** high
+    - [ ] `xexecvp(file, argv)`: Safe execute.
+        - [ ] **Prototype:** `void xexecvp(const char *file, char *const argv[])`
+        - [ ] **Purpose:** Execute program, exit on failure (print error).
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `execvp`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** Thread-safe.
+        - [ ] **Error semantics:** Does not return on success; exits on fail.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xexecvp("true", ...)` -> runs true
+            - [ ] `xexecvp("noexist", ...)` -> prints error, exits
+        - [ ] **Implementation notes:** Should print "cannot execute <file>: <strerror>".
+        - [ ] **Priority:** high
+    - [ ] `xsignal(signum, handler)`: Safe signal handler install.
+        - [ ] **Prototype:** `sighandler_t xsignal(int signum, sighandler_t handler)`
+        - [ ] **Purpose:** Set signal handler using `sigaction` (SA_RESTART), exit on error.
+        - [ ] **Standards:** BSD/Common.
+        - [ ] **Underlying syscalls:** `sigaction`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns old handler or exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xsignal` -> handler set
+        - [ ] **Implementation notes:** Ensure portable sigaction usage.
+        - [ ] **Priority:** medium
+    - [ ] `humanize_number(buf, len, number, suffix, scale, flags)`: Format number.
+        - [ ] **Prototype:** `int humanize_number(char *buf, size_t len, int64_t number, const char *suffix, int scale, int flags)`
+        - [ ] **Purpose:** Format number with SI prefixes (k, M, G).
+        - [ ] **Standards:** NetBSD / BSD.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns length or -1.
+        - [ ] **Memory ownership:** writes to buf.
+        - [ ] **Acceptance tests:**
+            - [ ] 1024 -> "1K"
+        - [ ] **Implementation notes:** Port from NetBSD/OpenBSD.
+        - [ ] **Priority:** medium
+    - [ ] `parse_mode(mode_str, old_mode)`: Parse mode string.
+        - [ ] **Prototype:** `mode_t parse_mode(const char *str, mode_t old)`
+        - [ ] **Purpose:** Parse chmod-style symbolic mode (u+x).
+        - [ ] **Standards:** Custom / BSD-like.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns new mode or -1/exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] "u+x" -> adds executable bit
+        - [ ] **Implementation notes:** State machine for symbolic parsing.
+        - [ ] **Priority:** medium
+    - [ ] `strlcpy(dst, src, size)`: Safe string copy.
+        - [ ] **Prototype:** `size_t strlcpy(char *dst, const char *src, size_t size)`
+        - [ ] **Purpose:** Copy string with NUL termination guarantee.
+        - [ ] **Standards:** OpenBSD / Common.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns total length of src.
+        - [ ] **Memory ownership:** writes dst.
+        - [ ] **Acceptance tests:**
+            - [ ] Truncation check.
+        - [ ] **Implementation notes:** Standard BSD behavior.
+        - [ ] **Priority:** high
+    - [ ] `strlcat(dst, src, size)`: Safe string cat.
+        - [ ] **Prototype:** `size_t strlcat(char *dst, const char *src, size_t size)`
+        - [ ] **Purpose:** Concatenate string with NUL termination guarantee.
+        - [ ] **Standards:** OpenBSD / Common.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns total length.
+        - [ ] **Memory ownership:** writes dst.
+        - [ ] **Acceptance tests:**
+            - [ ] Truncation check.
+        - [ ] **Implementation notes:** Standard BSD behavior.
+        - [ ] **Priority:** high
+    - [ ] `warn(fmt, ...)`: Print warning.
+        - [ ] **Prototype:** `void warn(const char *fmt, ...)`
+        - [ ] **Purpose:** Print "progname: fmt: strerror(errno)\n" to stderr.
+        - [ ] **Standards:** BSD.
+        - [ ] **Underlying syscalls:** `write` / `fprintf`.
+        - [ ] **Signal-safety:** no (stdio).
+        - [ ] **Thread-safety:** locked (stdio).
+        - [ ] **Error semantics:** None.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `warn("fail")` -> prints message + errno
+        - [ ] **Implementation notes:** Use `vfprintf`.
+        - [ ] **Priority:** high
+    - [ ] `err(eval, fmt, ...)`: Print error and exit.
+        - [ ] **Prototype:** `void err(int eval, const char *fmt, ...)`
+        - [ ] **Purpose:** Print warning and exit with `eval`.
+        - [ ] **Standards:** BSD.
+        - [ ] **Underlying syscalls:** `write`, `exit`.
+        - [ ] **Signal-safety:** no.
+        - [ ] **Thread-safety:** N/A (exits).
+        - [ ] **Error semantics:** Exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `err(1, "fail")` -> exits 1, prints msg
+        - [ ] **Implementation notes:** Calls `warn` then `exit`.
+        - [ ] **Priority:** high
+    - [ ] `setprogname(name)` / `getprogname()`: Program name.
+        - [ ] **Prototype:** `void setprogname(const char *name)`, `const char *getprogname(void)`
+        - [ ] **Purpose:** Store/retrieve program name for diagnostics.
+        - [ ] **Standards:** BSD.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes (atomic ptr read/write).
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** N/A.
+        - [ ] **Memory ownership:** static/copy.
+        - [ ] **Acceptance tests:**
+            - [ ] set/get match
+        - [ ] **Implementation notes:** `basename` of argv[0].
+        - [ ] **Priority:** high
+    - [ ] `basename(path)`: Thread-safe path component extraction.
+        - [ ] **Prototype:** `char *basename(char *path)`
+        - [ ] **Purpose:** Return last component of path.
+        - [ ] **Standards:** POSIX.1-2008.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** yes (modifies path or returns static constant).
+        - [ ] **Error semantics:** Returns "." or "/".
+        - [ ] **Memory ownership:** May modify input (POSIX).
+        - [ ] **Acceptance tests:**
+            - [ ] `basename("/usr/bin/ls")` -> "ls"
+            - [ ] `basename("/")` -> "/"
+        - [ ] **Implementation notes:** Handle trailing slashes.
+        - [ ] **Priority:** medium
+    - [ ] `dirname(path)`: Thread-safe directory component extraction.
+        - [ ] **Prototype:** `char *dirname(char *path)`
+        - [ ] **Purpose:** Return parent directory of path.
+        - [ ] **Standards:** POSIX.1-2008.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** yes (modifies path).
+        - [ ] **Error semantics:** Returns "." or "/".
+        - [ ] **Memory ownership:** May modify input.
+        - [ ] **Acceptance tests:**
+            - [ ] `dirname("/usr/bin/ls")` -> "/usr/bin"
+        - [ ] **Implementation notes:** Handle trailing slashes.
+        - [ ] **Priority:** medium
+    - [ ] `xchmod(path, mode)`: Safe chmod.
+        - [ ] **Prototype:** `void xchmod(const char *path, mode_t mode)`
+        - [ ] **Purpose:** Change mode, exit on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `chmod`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Exits on error.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xchmod` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+    - [ ] `xchown(path, owner, group)`: Safe chown.
+        - [ ] **Prototype:** `void xchown(const char *path, uid_t owner, gid_t group)`
+        - [ ] **Purpose:** Change ownership, exit on failure.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `chown`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Exits on error.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xchown` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+    - [ ] `strtonum(numstr, minval, maxval, errstrp)`: Safe number parsing.
+        - [ ] **Prototype:** `long long strtonum(const char *nptr, long long minval, long long maxval, const char **errstr)`
+        - [ ] **Purpose:** Parse number with bounds checking and strict validation.
+        - [ ] **Standards:** OpenBSD / BSD.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns 0 on error and sets errstr.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `strtonum("10", 0, 100, &err)` -> 10, err=NULL
+            - [ ] `strtonum("101", 0, 100, &err)` -> 0, err="too large"
+        - [ ] **Implementation notes:** Strict parsing (no trailing garbage).
+        - [ ] **Priority:** high
+    - [ ] `xgetenv(name)`: Safe environment get.
+        - [ ] **Prototype:** `char *xgetenv(const char *name)`
+        - [ ] **Purpose:** Get environment variable, maybe exit if missing? Or just standard `getenv` wrapper? Usually just `getenv` is fine, but maybe `safe_getenv` for setuid?
+        - [ ] **Standards:** Internal.
+        - [ ] **Underlying syscalls:** none.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe (usually).
+        - [ ] **Error semantics:** Returns value or NULL.
+        - [ ] **Memory ownership:** environment owned.
+        - [ ] **Acceptance tests:**
+            - [ ] Get existing var.
+        - [ ] **Implementation notes:** Maybe strict version `xgetenv_required`?
+        - [ ] **Priority:** low
+    - [ ] `xopenat(dirfd, path, flags, mode)`: Safe relative open.
+        - [ ] **Prototype:** `int xopenat(int dirfd, const char *path, int flags, mode_t mode)`
+        - [ ] **Purpose:** Open file relative to dir, exit on error.
+        - [ ] **Standards:** Common extension.
+        - [ ] **Underlying syscalls:** `openat`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns fd or exits.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xopenat` -> success
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** medium
+    - [ ] `xisatty(fd)`: Safe tty check.
+        - [ ] **Prototype:** `int xisatty(int fd)`
+        - [ ] **Purpose:** Check if fd is a tty, handle errno? Just `isatty` wrapper?
+        - [ ] **Standards:** POSIX.
+        - [ ] **Underlying syscalls:** `ioctl`.
+        - [ ] **Signal-safety:** yes.
+        - [ ] **Thread-safety:** safe.
+        - [ ] **Error semantics:** Returns 1/0.
+        - [ ] **Memory ownership:** N/A.
+        - [ ] **Acceptance tests:**
+            - [ ] `xisatty(0)` -> 1 (if tty)
+        - [ ] **Implementation notes:** Wrapper.
+        - [ ] **Priority:** low
+- [ ] **Build System:**
+    - [ ] Implement `native_dist` target to build usermode tools for the host OS (skipping libc/libm etc).
+
+
+
+## User Stories
+
+- **US-10-0001**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to libC Core Compliance (Audit Findings): so that this capability is implemented with clear verification evidence.
+- **US-10-0002**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to critical Headers (Missing Files): so that this capability is implemented with clear verification evidence.
+- **US-10-0003**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to create string.h (functions exist in string.c but header is missing) so that this capability is implemented with clear verification evidence.
+- **US-10-0004**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to create limits.h, setjmp.h, locale.h so that this capability is implemented with clear verification evidence.
+- **US-10-0005**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to create err.h (BSD error reporting helpers) so that this capability is implemented with clear verification evidence.
+- **US-10-0006**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to create stddef.h, stdint.h, stdarg.h (wrapping GCC builtins) so that this capability is implemented with clear verification evidence.
+- **US-10-0007**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to string Manipulation (<string.h>): so that this capability is implemented with clear verification evidence.
+- **US-10-0008**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strndup(): Bounded string duplication so that this capability is implemented with clear verification evidence.
+- **US-10-0009**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to stpcpy() / stpncpy(): Copy returning end pointer so that this capability is implemented with clear verification evidence.
+- **US-10-0010**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strpbrk(): Search for any of a set of chars so that this capability is implemented with clear verification evidence.
+- **US-10-0011**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strcoll() / strxfrm(): Locale-aware comparison stubs so that this capability is implemented with clear verification evidence.
+- **US-10-0012**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standard Library (<stdlib.h>): so that this capability is implemented with clear verification evidence.
+- **US-10-0013**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strtol() / strtoul() / strtoll() / strtoull(): Robust string-to-integer conversion so that this capability is implemented with clear verification evidence.
+- **US-10-0014**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strtod() / strtof(): String to float implementation (currently atof is a stub) so that this capability is implemented with clear verification evidence.
+- **US-10-0015**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to div() / ldiv() / lldiv(): Combined quotient/remainder so that this capability is implemented with clear verification evidence.
+- **US-10-0016**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to atexit(): Exit handlers (currently at_quick_exit is a stub) so that this capability is implemented with clear verification evidence.
+- **US-10-0017**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to mbstowcs() / wcstombs(): Multibyte conversion stubs so that this capability is implemented with clear verification evidence.
+- **US-10-0018**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standard I/O (<stdio.h>): so that this capability is implemented with clear verification evidence.
+- **US-10-0019**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to cRITICAL: sscanf() / scanf() / fscanf(): Input parsing implementation so that this capability is implemented with clear verification evidence.
+- **US-10-0020**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to snprintf(): Add wrapper around vsnprintf so that this capability is implemented with clear verification evidence.
+- **US-10-0021**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to freopen(): Reopen stream with new mode so that this capability is implemented with clear verification evidence.
+- **US-10-0022**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to setvbuf() / setbuf(): Buffering mode control so that this capability is implemented with clear verification evidence.
+- **US-10-0023**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to tmpfile() / tmpnam(): Temporary file support so that this capability is implemented with clear verification evidence.
+- **US-10-0024**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to fileno(): Get fd from FILE* so that this capability is implemented with clear verification evidence.
+- **US-10-0025**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to pOSIX System Interface (<unistd.h>): so that this capability is implemented with clear verification evidence.
+- **US-10-0026**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to dup(): Duplicate fd (wrapper around SYS_DUP or fcntl) so that this capability is implemented with clear verification evidence.
+- **US-10-0027**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to getppid(): Get parent PID so that this capability is implemented with clear verification evidence.
+- **US-10-0028**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to setsid() / getsid(): Session ID management so that this capability is implemented with clear verification evidence.
+- **US-10-0029**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to getpgrp() / setpgid(): Process group management so that this capability is implemented with clear verification evidence.
+- **US-10-0030**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to symlink(): Create symbolic link so that this capability is implemented with clear verification evidence.
+- **US-10-0031**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to ftruncate() / truncate(): Truncate file size so that this capability is implemented with clear verification evidence.
+- **US-10-0032**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to fsync() / fdatasync(): Flush file changes so that this capability is implemented with clear verification evidence.
+- **US-10-0033**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to time & Date (<time.h>): so that this capability is implemented with clear verification evidence.
+- **US-10-0034**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to gmtime() / localtime(): Timestamp to struct tm so that this capability is implemented with clear verification evidence.
+- **US-10-0035**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to mktime(): Struct tm to timestamp so that this capability is implemented with clear verification evidence.
+- **US-10-0036**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strftime() / strptime(): Time formatting/parsing so that this capability is implemented with clear verification evidence.
+- **US-10-0037**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to difftime(): Time difference so that this capability is implemented with clear verification evidence.
+- **US-10-0038**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to ctime() / asctime(): Time to string so that this capability is implemented with clear verification evidence.
+- **US-10-0039**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to libC Features (User Requests): so that this capability is implemented with clear verification evidence.
+- **US-10-0040**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implement getopt_long (GNU Compatible): so that this capability is implemented with clear verification evidence.
+- **US-10-0041**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to define struct option (name, has_arg, flag, val) so that this capability is implemented with clear verification evidence.
+- **US-10-0042**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implement getopt_long() function signature so that this capability is implemented with clear verification evidence.
+- **US-10-0043**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implement getopt_long_only() variant so that this capability is implemented with clear verification evidence.
+- **US-10-0044**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to handle argument parsing (--arg, --arg=val) so that this capability is implemented with clear verification evidence.
+- **US-10-0045**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to handle no_argument, required_argument, optional_argument so that this capability is implemented with clear verification evidence.
+- **US-10-0046**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to internal state management (optind, opterr, optopt, optarg) so that this capability is implemented with clear verification evidence.
+- **US-10-0047**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error reporting and ? / : return codes so that this capability is implemented with clear verification evidence.
+- **US-10-0048**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to support for non-option argument reordering (swapping argv elements) so that this capability is implemented with clear verification evidence.
+- **US-10-0049**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to test against GNU getopt_long behavior so that this capability is implemented with clear verification evidence.
+- **US-10-0050**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to low-Level Helpers (LibC Extension): so that this capability is implemented with clear verification evidence.
+- **US-10-0051**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xmalloc(size): Safe memory allocation so that this capability is implemented with clear verification evidence.
+- **US-10-0052**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void *xmalloc(size_t size) so that this capability is implemented with clear verification evidence.
+- **US-10-0053**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Allocate memory, aborting on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0054**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension (Busybox/GNU coreutils style) so that this capability is implemented with clear verification evidence.
+- **US-10-0055**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to syscalls / Kernel interfaces: malloc -> brk/mmap so that this capability is implemented with clear verification evidence.
+- **US-10-0056**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety / async-signal-safe: no - calls malloc so that this capability is implemented with clear verification evidence.
+- **US-10-0057**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to reentrancy / thread-safety: Thread-safe (if malloc is) so that this capability is implemented with clear verification evidence.
+- **US-10-0058**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns valid pointer or exits program (never returns NULL) so that this capability is implemented with clear verification evidence.
+- **US-10-0059**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: Caller must free so that this capability is implemented with clear verification evidence.
+- **US-10-0060**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0061**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xmalloc(1024) -> returns pointer so that this capability is implemented with clear verification evidence.
+- **US-10-0062**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xmalloc(huge) -> prints error and exits (mock/limit env) so that this capability is implemented with clear verification evidence.
+- **US-10-0063**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Wrapper around malloc so that this capability is implemented with clear verification evidence.
+- **US-10-0064**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0065**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xopen(path, flags, mode): Safe file open so that this capability is implemented with clear verification evidence.
+- **US-10-0066**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: int xopen(const char *path, int flags, mode_t mode) so that this capability is implemented with clear verification evidence.
+- **US-10-0067**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Open file, aborting on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0068**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0069**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to syscalls / Kernel interfaces: open / openat so that this capability is implemented with clear verification evidence.
+- **US-10-0070**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety / async-signal-safe: yes (if error handler is simple) so that this capability is implemented with clear verification evidence.
+- **US-10-0071**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to reentrancy / thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0072**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns valid fd or exits program so that this capability is implemented with clear verification evidence.
+- **US-10-0073**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0074**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0075**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xopen("exist", O_RDONLY) -> returns fd so that this capability is implemented with clear verification evidence.
+- **US-10-0076**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xopen("noexist", O_RDONLY) -> prints error and exits so that this capability is implemented with clear verification evidence.
+- **US-10-0077**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0078**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xrealloc(ptr, size): Safe memory reallocation so that this capability is implemented with clear verification evidence.
+- **US-10-0079**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void *xrealloc(void *ptr, size_t size) so that this capability is implemented with clear verification evidence.
+- **US-10-0080**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Reallocate memory, aborting on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0081**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0082**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: malloc / free -> brk/mmap so that this capability is implemented with clear verification evidence.
+- **US-10-0083**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: no so that this capability is implemented with clear verification evidence.
+- **US-10-0084**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe (if Underlying allocator is) so that this capability is implemented with clear verification evidence.
+- **US-10-0085**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits program on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0086**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: Caller must free so that this capability is implemented with clear verification evidence.
+- **US-10-0087**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0088**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xrealloc(NULL, 10) -> equivalent to xmalloc so that this capability is implemented with clear verification evidence.
+- **US-10-0089**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xrealloc(ptr, 20) -> preserves data, returns new ptr so that this capability is implemented with clear verification evidence.
+- **US-10-0090**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: realloc(ptr, 0) behavior check so that this capability is implemented with clear verification evidence.
+- **US-10-0091**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0092**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xcalloc(nmemb, size): Safe zero-initialized allocation so that this capability is implemented with clear verification evidence.
+- **US-10-0093**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void *xcalloc(size_t nmemb, size_t size) so that this capability is implemented with clear verification evidence.
+- **US-10-0094**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Allocate zeroed memory, aborting on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0095**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0096**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: calloc so that this capability is implemented with clear verification evidence.
+- **US-10-0097**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: no so that this capability is implemented with clear verification evidence.
+- **US-10-0098**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0099**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits program on failure, check overflow so that this capability is implemented with clear verification evidence.
+- **US-10-0100**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: Caller must free so that this capability is implemented with clear verification evidence.
+- **US-10-0101**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0102**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xcalloc(10, 10) -> returns zeroed buffer so that this capability is implemented with clear verification evidence.
+- **US-10-0103**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xcalloc(MAX, MAX) -> overflow check and exit so that this capability is implemented with clear verification evidence.
+- **US-10-0104**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Check for multiplication overflow so that this capability is implemented with clear verification evidence.
+- **US-10-0105**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0106**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xstrdup(s): Safe string duplication so that this capability is implemented with clear verification evidence.
+- **US-10-0107**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: char *xstrdup(const char *s) so that this capability is implemented with clear verification evidence.
+- **US-10-0108**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Duplicate string, aborting on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0109**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0110**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: malloc so that this capability is implemented with clear verification evidence.
+- **US-10-0111**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: no so that this capability is implemented with clear verification evidence.
+- **US-10-0112**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0113**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits program on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0114**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: Caller must free so that this capability is implemented with clear verification evidence.
+- **US-10-0115**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0116**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xstrdup("foo") -> returns copy so that this capability is implemented with clear verification evidence.
+- **US-10-0117**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Wrapper around strdup so that this capability is implemented with clear verification evidence.
+- **US-10-0118**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0119**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xread(fd, buf, count): Read exact amount or fail so that this capability is implemented with clear verification evidence.
+- **US-10-0120**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: size_t xread(int fd, void *buf, size_t count) so that this capability is implemented with clear verification evidence.
+- **US-10-0121**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Read requested bytes, looping on partials/EINTR, exit on error so that this capability is implemented with clear verification evidence.
+- **US-10-0122**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0123**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: read so that this capability is implemented with clear verification evidence.
+- **US-10-0124**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes (if error handler is simple) so that this capability is implemented with clear verification evidence.
+- **US-10-0125**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0126**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns count read (may be < requested if EOF), exits on IO error so that this capability is implemented with clear verification evidence.
+- **US-10-0127**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: generic buffer so that this capability is implemented with clear verification evidence.
+- **US-10-0128**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0129**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xread full buffer -> returns count so that this capability is implemented with clear verification evidence.
+- **US-10-0130**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xread partial -> loops or returns short on EOF so that this capability is implemented with clear verification evidence.
+- **US-10-0131**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Distinguish short read (EOF) vs error so that this capability is implemented with clear verification evidence.
+- **US-10-0132**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0133**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xwrite(fd, buf, count): Write exact amount or fail so that this capability is implemented with clear verification evidence.
+- **US-10-0134**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void xwrite(int fd, const void *buf, size_t count) so that this capability is implemented with clear verification evidence.
+- **US-10-0135**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Write all bytes, looping on partials/EINTR, exit on error so that this capability is implemented with clear verification evidence.
+- **US-10-0136**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0137**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: write so that this capability is implemented with clear verification evidence.
+- **US-10-0138**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0139**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0140**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits if write fails or incomplete so that this capability is implemented with clear verification evidence.
+- **US-10-0141**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0142**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0143**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xwrite full buffer -> succeeds so that this capability is implemented with clear verification evidence.
+- **US-10-0144**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xwrite to full disk -> exits so that this capability is implemented with clear verification evidence.
+- **US-10-0145**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Loop until all written so that this capability is implemented with clear verification evidence.
+- **US-10-0146**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0147**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xstat(path, buf): Safe file status so that this capability is implemented with clear verification evidence.
+- **US-10-0148**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void xstat(const char *path, struct stat *buf) so that this capability is implemented with clear verification evidence.
+- **US-10-0149**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Get file status, exit on error so that this capability is implemented with clear verification evidence.
+- **US-10-0150**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0151**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: stat so that this capability is implemented with clear verification evidence.
+- **US-10-0152**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0153**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0154**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits on error so that this capability is implemented with clear verification evidence.
+- **US-10-0155**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: caller provides struct so that this capability is implemented with clear verification evidence.
+- **US-10-0156**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0157**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xstat("exist", &sb) -> success so that this capability is implemented with clear verification evidence.
+- **US-10-0158**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xstat("noexist", &sb) -> exits so that this capability is implemented with clear verification evidence.
+- **US-10-0159**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Used when file is expected to exist so that this capability is implemented with clear verification evidence.
+- **US-10-0160**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: medium so that this capability is implemented with clear verification evidence.
+- **US-10-0161**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xaccess(path, mode): Safe access check so that this capability is implemented with clear verification evidence.
+- **US-10-0162**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void xaccess(const char *path, int mode) so that this capability is implemented with clear verification evidence.
+- **US-10-0163**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Check file access, exit on error (permission denied is error) so that this capability is implemented with clear verification evidence.
+- **US-10-0164**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0165**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: access so that this capability is implemented with clear verification evidence.
+- **US-10-0166**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0167**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0168**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits if check fails so that this capability is implemented with clear verification evidence.
+- **US-10-0169**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0170**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0171**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xaccess readable -> success so that this capability is implemented with clear verification evidence.
+- **US-10-0172**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Wrapper so that this capability is implemented with clear verification evidence.
+- **US-10-0173**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: low so that this capability is implemented with clear verification evidence.
+- **US-10-0174**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xopendir(path): Safe directory open so that this capability is implemented with clear verification evidence.
+- **US-10-0175**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: DIR *xopendir(const char *path) so that this capability is implemented with clear verification evidence.
+- **US-10-0176**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Open directory, exit on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0177**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0178**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: open, fstat, mmap (via opendir) so that this capability is implemented with clear verification evidence.
+- **US-10-0179**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: no (allocates) so that this capability is implemented with clear verification evidence.
+- **US-10-0180**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0181**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns valid DIR* or exits so that this capability is implemented with clear verification evidence.
+- **US-10-0182**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: Caller calls closedir so that this capability is implemented with clear verification evidence.
+- **US-10-0183**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0184**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xopendir(".") -> success so that this capability is implemented with clear verification evidence.
+- **US-10-0185**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Wrapper so that this capability is implemented with clear verification evidence.
+- **US-10-0186**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0187**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xclosedir(dirp): Safe directory close so that this capability is implemented with clear verification evidence.
+- **US-10-0188**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void xclosedir(DIR *dirp) so that this capability is implemented with clear verification evidence.
+- **US-10-0189**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Close directory, warn/exit on failure? usually just wrapper so that this capability is implemented with clear verification evidence.
+- **US-10-0190**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0191**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: close so that this capability is implemented with clear verification evidence.
+- **US-10-0192**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: no so that this capability is implemented with clear verification evidence.
+- **US-10-0193**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0194**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits on error (unlikely) so that this capability is implemented with clear verification evidence.
+- **US-10-0195**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0196**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0197**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xclosedir -> success so that this capability is implemented with clear verification evidence.
+- **US-10-0198**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Check return code so that this capability is implemented with clear verification evidence.
+- **US-10-0199**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: medium so that this capability is implemented with clear verification evidence.
+- **US-10-0200**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xfork(): Safe process creation so that this capability is implemented with clear verification evidence.
+- **US-10-0201**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: pid_t xfork(void) so that this capability is implemented with clear verification evidence.
+- **US-10-0202**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Fork process, exit on failure (EAGAIN usually) so that this capability is implemented with clear verification evidence.
+- **US-10-0203**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0204**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: fork so that this capability is implemented with clear verification evidence.
+- **US-10-0205**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0206**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0207**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns pid or exits so that this capability is implemented with clear verification evidence.
+- **US-10-0208**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0209**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0210**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xfork() -> parent gets pid, child gets 0 so that this capability is implemented with clear verification evidence.
+- **US-10-0211**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Wrapper so that this capability is implemented with clear verification evidence.
+- **US-10-0212**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0213**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xwaitpid(pid, status, options): Safe wait so that this capability is implemented with clear verification evidence.
+- **US-10-0214**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: pid_t xwaitpid(pid_t pid, int *status, int options) so that this capability is implemented with clear verification evidence.
+- **US-10-0215**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Wait for process, loop on EINTR, exit on other error so that this capability is implemented with clear verification evidence.
+- **US-10-0216**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0217**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: waitpid so that this capability is implemented with clear verification evidence.
+- **US-10-0218**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0219**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0220**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns pid so that this capability is implemented with clear verification evidence.
+- **US-10-0221**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0222**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0223**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xwaitpid -> reaps zombie so that this capability is implemented with clear verification evidence.
+- **US-10-0224**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Handle EINTR internally so that this capability is implemented with clear verification evidence.
+- **US-10-0225**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0226**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xexecvp(file, argv): Safe execute so that this capability is implemented with clear verification evidence.
+- **US-10-0227**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void xexecvp(const char *file, char *const argv[]) so that this capability is implemented with clear verification evidence.
+- **US-10-0228**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Execute program, exit on failure (print error) so that this capability is implemented with clear verification evidence.
+- **US-10-0229**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0230**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: execvp so that this capability is implemented with clear verification evidence.
+- **US-10-0231**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0232**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: Thread-safe so that this capability is implemented with clear verification evidence.
+- **US-10-0233**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Does not return on success; exits on fail so that this capability is implemented with clear verification evidence.
+- **US-10-0234**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0235**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0236**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xexecvp("true", ...) -> runs true so that this capability is implemented with clear verification evidence.
+- **US-10-0237**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xexecvp("noexist", ...) -> prints error, exits so that this capability is implemented with clear verification evidence.
+- **US-10-0238**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Should print "cannot execute <file>: <strerror>" so that this capability is implemented with clear verification evidence.
+- **US-10-0239**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0240**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xsignal(signum, handler): Safe signal handler install so that this capability is implemented with clear verification evidence.
+- **US-10-0241**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: sighandler_t xsignal(int signum, sighandler_t handler) so that this capability is implemented with clear verification evidence.
+- **US-10-0242**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Set signal handler using sigaction (SA_RESTART), exit on error so that this capability is implemented with clear verification evidence.
+- **US-10-0243**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: BSD/Common so that this capability is implemented with clear verification evidence.
+- **US-10-0244**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: sigaction so that this capability is implemented with clear verification evidence.
+- **US-10-0245**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0246**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0247**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns old handler or exits so that this capability is implemented with clear verification evidence.
+- **US-10-0248**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0249**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0250**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xsignal -> handler set so that this capability is implemented with clear verification evidence.
+- **US-10-0251**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Ensure portable sigaction usage so that this capability is implemented with clear verification evidence.
+- **US-10-0252**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: medium so that this capability is implemented with clear verification evidence.
+- **US-10-0253**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to humanize_number(buf, len, number, suffix, scale, flags): Format number so that this capability is implemented with clear verification evidence.
+- **US-10-0254**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: int humanize_number(char *buf, size_t len, int64_t number, const char *suffix, int scale, int flags) so that this capability is implemented with clear verification evidence.
+- **US-10-0255**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Format number with SI prefixes (k, M, G) so that this capability is implemented with clear verification evidence.
+- **US-10-0256**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: NetBSD / BSD so that this capability is implemented with clear verification evidence.
+- **US-10-0257**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: none so that this capability is implemented with clear verification evidence.
+- **US-10-0258**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0259**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0260**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns length or -1 so that this capability is implemented with clear verification evidence.
+- **US-10-0261**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: writes to buf so that this capability is implemented with clear verification evidence.
+- **US-10-0262**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0263**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to 1024 -> "1K" so that this capability is implemented with clear verification evidence.
+- **US-10-0264**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Port from NetBSD/OpenBSD so that this capability is implemented with clear verification evidence.
+- **US-10-0265**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: medium so that this capability is implemented with clear verification evidence.
+- **US-10-0266**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to parse_mode(mode_str, old_mode): Parse mode string so that this capability is implemented with clear verification evidence.
+- **US-10-0267**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: mode_t parse_mode(const char *str, mode_t old) so that this capability is implemented with clear verification evidence.
+- **US-10-0268**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Parse chmod-style symbolic mode (u+x) so that this capability is implemented with clear verification evidence.
+- **US-10-0269**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Custom / BSD-like so that this capability is implemented with clear verification evidence.
+- **US-10-0270**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: none so that this capability is implemented with clear verification evidence.
+- **US-10-0271**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0272**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0273**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns new mode or -1/exits so that this capability is implemented with clear verification evidence.
+- **US-10-0274**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0275**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0276**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to "u+x" -> adds executable bit so that this capability is implemented with clear verification evidence.
+- **US-10-0277**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: State machine for symbolic parsing so that this capability is implemented with clear verification evidence.
+- **US-10-0278**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: medium so that this capability is implemented with clear verification evidence.
+- **US-10-0279**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strlcpy(dst, src, size): Safe string copy so that this capability is implemented with clear verification evidence.
+- **US-10-0280**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: size_t strlcpy(char *dst, const char *src, size_t size) so that this capability is implemented with clear verification evidence.
+- **US-10-0281**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Copy string with NUL termination guarantee so that this capability is implemented with clear verification evidence.
+- **US-10-0282**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: OpenBSD / Common so that this capability is implemented with clear verification evidence.
+- **US-10-0283**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: none so that this capability is implemented with clear verification evidence.
+- **US-10-0284**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0285**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0286**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns total length of src so that this capability is implemented with clear verification evidence.
+- **US-10-0287**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: writes dst so that this capability is implemented with clear verification evidence.
+- **US-10-0288**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0289**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to truncation check so that this capability is implemented with clear verification evidence.
+- **US-10-0290**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Standard BSD behavior so that this capability is implemented with clear verification evidence.
+- **US-10-0291**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0292**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strlcat(dst, src, size): Safe string cat so that this capability is implemented with clear verification evidence.
+- **US-10-0293**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: size_t strlcat(char *dst, const char *src, size_t size) so that this capability is implemented with clear verification evidence.
+- **US-10-0294**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Concatenate string with NUL termination guarantee so that this capability is implemented with clear verification evidence.
+- **US-10-0295**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: OpenBSD / Common so that this capability is implemented with clear verification evidence.
+- **US-10-0296**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: none so that this capability is implemented with clear verification evidence.
+- **US-10-0297**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0298**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0299**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns total length so that this capability is implemented with clear verification evidence.
+- **US-10-0300**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: writes dst so that this capability is implemented with clear verification evidence.
+- **US-10-0301**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0302**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to truncation check so that this capability is implemented with clear verification evidence.
+- **US-10-0303**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Standard BSD behavior so that this capability is implemented with clear verification evidence.
+- **US-10-0304**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0305**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to warn(fmt, ...): Print warning so that this capability is implemented with clear verification evidence.
+- **US-10-0306**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void warn(const char *fmt, ...) so that this capability is implemented with clear verification evidence.
+- **US-10-0307**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Print "progname: fmt: strerror(errno)\n" to stderr so that this capability is implemented with clear verification evidence.
+- **US-10-0308**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: BSD so that this capability is implemented with clear verification evidence.
+- **US-10-0309**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: write / fprintf so that this capability is implemented with clear verification evidence.
+- **US-10-0310**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: no (stdio) so that this capability is implemented with clear verification evidence.
+- **US-10-0311**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: locked (stdio) so that this capability is implemented with clear verification evidence.
+- **US-10-0312**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: None so that this capability is implemented with clear verification evidence.
+- **US-10-0313**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0314**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0315**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to warn("fail") -> prints message + errno so that this capability is implemented with clear verification evidence.
+- **US-10-0316**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Use vfprintf so that this capability is implemented with clear verification evidence.
+- **US-10-0317**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0318**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to err(eval, fmt, ...): Print error and exit so that this capability is implemented with clear verification evidence.
+- **US-10-0319**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void err(int eval, const char *fmt, ...) so that this capability is implemented with clear verification evidence.
+- **US-10-0320**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Print warning and exit with eval so that this capability is implemented with clear verification evidence.
+- **US-10-0321**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: BSD so that this capability is implemented with clear verification evidence.
+- **US-10-0322**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: write, exit so that this capability is implemented with clear verification evidence.
+- **US-10-0323**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: no so that this capability is implemented with clear verification evidence.
+- **US-10-0324**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: N/A (exits) so that this capability is implemented with clear verification evidence.
+- **US-10-0325**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits so that this capability is implemented with clear verification evidence.
+- **US-10-0326**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0327**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0328**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to err(1, "fail") -> exits 1, prints msg so that this capability is implemented with clear verification evidence.
+- **US-10-0329**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Calls warn then exit so that this capability is implemented with clear verification evidence.
+- **US-10-0330**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0331**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to setprogname(name) / getprogname(): Program name so that this capability is implemented with clear verification evidence.
+- **US-10-0332**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void setprogname(const char *name), const char *getprogname(void) so that this capability is implemented with clear verification evidence.
+- **US-10-0333**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Store/retrieve program name for diagnostics so that this capability is implemented with clear verification evidence.
+- **US-10-0334**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: BSD so that this capability is implemented with clear verification evidence.
+- **US-10-0335**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: none so that this capability is implemented with clear verification evidence.
+- **US-10-0336**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes (atomic ptr read/write) so that this capability is implemented with clear verification evidence.
+- **US-10-0337**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0338**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0339**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: static/copy so that this capability is implemented with clear verification evidence.
+- **US-10-0340**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0341**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to set/get match so that this capability is implemented with clear verification evidence.
+- **US-10-0342**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: basename of argv[0] so that this capability is implemented with clear verification evidence.
+- **US-10-0343**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0344**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to basename(path): Thread-safe path component extraction so that this capability is implemented with clear verification evidence.
+- **US-10-0345**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: char *basename(char *path) so that this capability is implemented with clear verification evidence.
+- **US-10-0346**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Return last component of path so that this capability is implemented with clear verification evidence.
+- **US-10-0347**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: POSIX.1-2008 so that this capability is implemented with clear verification evidence.
+- **US-10-0348**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: none so that this capability is implemented with clear verification evidence.
+- **US-10-0349**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0350**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: yes (modifies path or returns static constant) so that this capability is implemented with clear verification evidence.
+- **US-10-0351**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns "." or "/" so that this capability is implemented with clear verification evidence.
+- **US-10-0352**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: May modify input (POSIX) so that this capability is implemented with clear verification evidence.
+- **US-10-0353**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0354**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to basename("/usr/bin/ls") -> "ls" so that this capability is implemented with clear verification evidence.
+- **US-10-0355**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to basename("/") -> "/" so that this capability is implemented with clear verification evidence.
+- **US-10-0356**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Handle trailing slashes so that this capability is implemented with clear verification evidence.
+- **US-10-0357**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: medium so that this capability is implemented with clear verification evidence.
+- **US-10-0358**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to dirname(path): Thread-safe directory component extraction so that this capability is implemented with clear verification evidence.
+- **US-10-0359**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: char *dirname(char *path) so that this capability is implemented with clear verification evidence.
+- **US-10-0360**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Return parent directory of path so that this capability is implemented with clear verification evidence.
+- **US-10-0361**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: POSIX.1-2008 so that this capability is implemented with clear verification evidence.
+- **US-10-0362**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: none so that this capability is implemented with clear verification evidence.
+- **US-10-0363**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0364**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: yes (modifies path) so that this capability is implemented with clear verification evidence.
+- **US-10-0365**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns "." or "/" so that this capability is implemented with clear verification evidence.
+- **US-10-0366**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: May modify input so that this capability is implemented with clear verification evidence.
+- **US-10-0367**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0368**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to dirname("/usr/bin/ls") -> "/usr/bin" so that this capability is implemented with clear verification evidence.
+- **US-10-0369**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Handle trailing slashes so that this capability is implemented with clear verification evidence.
+- **US-10-0370**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: medium so that this capability is implemented with clear verification evidence.
+- **US-10-0371**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xchmod(path, mode): Safe chmod so that this capability is implemented with clear verification evidence.
+- **US-10-0372**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void xchmod(const char *path, mode_t mode) so that this capability is implemented with clear verification evidence.
+- **US-10-0373**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Change mode, exit on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0374**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0375**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: chmod so that this capability is implemented with clear verification evidence.
+- **US-10-0376**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0377**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0378**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits on error so that this capability is implemented with clear verification evidence.
+- **US-10-0379**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0380**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0381**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xchmod -> success so that this capability is implemented with clear verification evidence.
+- **US-10-0382**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Wrapper so that this capability is implemented with clear verification evidence.
+- **US-10-0383**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: low so that this capability is implemented with clear verification evidence.
+- **US-10-0384**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xchown(path, owner, group): Safe chown so that this capability is implemented with clear verification evidence.
+- **US-10-0385**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: void xchown(const char *path, uid_t owner, gid_t group) so that this capability is implemented with clear verification evidence.
+- **US-10-0386**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Change ownership, exit on failure so that this capability is implemented with clear verification evidence.
+- **US-10-0387**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0388**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: chown so that this capability is implemented with clear verification evidence.
+- **US-10-0389**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0390**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0391**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Exits on error so that this capability is implemented with clear verification evidence.
+- **US-10-0392**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0393**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0394**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xchown -> success so that this capability is implemented with clear verification evidence.
+- **US-10-0395**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Wrapper so that this capability is implemented with clear verification evidence.
+- **US-10-0396**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: low so that this capability is implemented with clear verification evidence.
+- **US-10-0397**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strtonum(numstr, minval, maxval, errstrp): Safe number parsing so that this capability is implemented with clear verification evidence.
+- **US-10-0398**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: long long strtonum(const char *nptr, long long minval, long long maxval, const char **errstr) so that this capability is implemented with clear verification evidence.
+- **US-10-0399**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Parse number with bounds checking and strict validation so that this capability is implemented with clear verification evidence.
+- **US-10-0400**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: OpenBSD / BSD so that this capability is implemented with clear verification evidence.
+- **US-10-0401**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: none so that this capability is implemented with clear verification evidence.
+- **US-10-0402**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0403**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0404**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns 0 on error and sets errstr so that this capability is implemented with clear verification evidence.
+- **US-10-0405**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0406**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0407**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strtonum("10", 0, 100, &err) -> 10, err=NULL so that this capability is implemented with clear verification evidence.
+- **US-10-0408**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to strtonum("101", 0, 100, &err) -> 0, err="too large" so that this capability is implemented with clear verification evidence.
+- **US-10-0409**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Strict parsing (no trailing garbage) so that this capability is implemented with clear verification evidence.
+- **US-10-0410**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: high so that this capability is implemented with clear verification evidence.
+- **US-10-0411**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xgetenv(name): Safe environment get so that this capability is implemented with clear verification evidence.
+- **US-10-0412**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: char *xgetenv(const char *name) so that this capability is implemented with clear verification evidence.
+- **US-10-0413**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Get environment variable, maybe exit if missing? Or just standard getenv wrapper? Usually just getenv is fine, but maybe safe_getenv for setuid? so that this capability is implemented with clear verification evidence.
+- **US-10-0414**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Internal so that this capability is implemented with clear verification evidence.
+- **US-10-0415**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: none so that this capability is implemented with clear verification evidence.
+- **US-10-0416**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0417**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe (usually) so that this capability is implemented with clear verification evidence.
+- **US-10-0418**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns value or NULL so that this capability is implemented with clear verification evidence.
+- **US-10-0419**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: environment owned so that this capability is implemented with clear verification evidence.
+- **US-10-0420**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0421**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to get existing var so that this capability is implemented with clear verification evidence.
+- **US-10-0422**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Maybe strict version xgetenv_required? so that this capability is implemented with clear verification evidence.
+- **US-10-0423**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: low so that this capability is implemented with clear verification evidence.
+- **US-10-0424**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xopenat(dirfd, path, flags, mode): Safe relative open so that this capability is implemented with clear verification evidence.
+- **US-10-0425**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: int xopenat(int dirfd, const char *path, int flags, mode_t mode) so that this capability is implemented with clear verification evidence.
+- **US-10-0426**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Open file relative to dir, exit on error so that this capability is implemented with clear verification evidence.
+- **US-10-0427**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: Common extension so that this capability is implemented with clear verification evidence.
+- **US-10-0428**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: openat so that this capability is implemented with clear verification evidence.
+- **US-10-0429**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0430**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0431**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns fd or exits so that this capability is implemented with clear verification evidence.
+- **US-10-0432**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0433**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0434**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xopenat -> success so that this capability is implemented with clear verification evidence.
+- **US-10-0435**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Wrapper so that this capability is implemented with clear verification evidence.
+- **US-10-0436**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: medium so that this capability is implemented with clear verification evidence.
+- **US-10-0437**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xisatty(fd): Safe tty check so that this capability is implemented with clear verification evidence.
+- **US-10-0438**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to prototype: int xisatty(int fd) so that this capability is implemented with clear verification evidence.
+- **US-10-0439**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to purpose: Check if fd is a tty, handle errno? Just isatty wrapper? so that this capability is implemented with clear verification evidence.
+- **US-10-0440**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to standards: POSIX so that this capability is implemented with clear verification evidence.
+- **US-10-0441**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to underlying syscalls: ioctl so that this capability is implemented with clear verification evidence.
+- **US-10-0442**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to signal-safety: yes so that this capability is implemented with clear verification evidence.
+- **US-10-0443**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to thread-safety: safe so that this capability is implemented with clear verification evidence.
+- **US-10-0444**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to error semantics: Returns 1/0 so that this capability is implemented with clear verification evidence.
+- **US-10-0445**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to memory ownership: N/A so that this capability is implemented with clear verification evidence.
+- **US-10-0446**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to acceptance tests: so that this capability is implemented with clear verification evidence.
+- **US-10-0447**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to xisatty(0) -> 1 (if tty) so that this capability is implemented with clear verification evidence.
+- **US-10-0448**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implementation notes: Wrapper so that this capability is implemented with clear verification evidence.
+- **US-10-0449**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to priority: low so that this capability is implemented with clear verification evidence.
+- **US-10-0450**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to build System: so that this capability is implemented with clear verification evidence.
+- **US-10-0451**: As a Substrate contributor working on 8. LibC & Build System (User Requests & Audit), I want to implement native_dist target to build usermode tools for the host OS (skipping libc/libm etc) so that this capability is implemented with clear verification evidence.
+
+## INCOSE/EARS Requirements
+
+- **REQ-10-0001** (EARS/Ubiquitous): The Substrate system shall libC Core Compliance (Audit Findings):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0002** (EARS/Ubiquitous): The Substrate system shall critical Headers (Missing Files):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0003** (EARS/Ubiquitous): The Substrate system shall create string.h (functions exist in string.c but header is missing).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0004** (EARS/Ubiquitous): The Substrate system shall create limits.h, setjmp.h, locale.h.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0005** (EARS/Ubiquitous): The Substrate system shall create err.h (BSD error reporting helpers).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0006** (EARS/Ubiquitous): The Substrate system shall create stddef.h, stdint.h, stdarg.h (wrapping GCC builtins).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0007** (EARS/Ubiquitous): The Substrate system shall string Manipulation (<string.h>):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0008** (EARS/Ubiquitous): The Substrate system shall strndup(): Bounded string duplication.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0009** (EARS/Ubiquitous): The Substrate system shall stpcpy() / stpncpy(): Copy returning end pointer.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0010** (EARS/Ubiquitous): The Substrate system shall strpbrk(): Search for any of a set of chars.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0011** (EARS/Ubiquitous): The Substrate system shall strcoll() / strxfrm(): Locale-aware comparison stubs.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0012** (EARS/Ubiquitous): The Substrate system shall standard Library (<stdlib.h>):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0013** (EARS/Ubiquitous): The Substrate system shall strtol() / strtoul() / strtoll() / strtoull(): Robust string-to-integer conversion.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0014** (EARS/Ubiquitous): The Substrate system shall strtod() / strtof(): String to float implementation (currently atof is a stub).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0015** (EARS/Ubiquitous): The Substrate system shall div() / ldiv() / lldiv(): Combined quotient/remainder.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0016** (EARS/Ubiquitous): The Substrate system shall atexit(): Exit handlers (currently at_quick_exit is a stub).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0017** (EARS/Ubiquitous): The Substrate system shall mbstowcs() / wcstombs(): Multibyte conversion stubs.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0018** (EARS/Ubiquitous): The Substrate system shall standard I/O (<stdio.h>):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0019** (EARS/Ubiquitous): The Substrate system shall cRITICAL: sscanf() / scanf() / fscanf(): Input parsing implementation.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0020** (EARS/Ubiquitous): The Substrate system shall snprintf(): Add wrapper around vsnprintf.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0021** (EARS/Ubiquitous): The Substrate system shall freopen(): Reopen stream with new mode.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0022** (EARS/Ubiquitous): The Substrate system shall setvbuf() / setbuf(): Buffering mode control.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0023** (EARS/Ubiquitous): The Substrate system shall tmpfile() / tmpnam(): Temporary file support.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0024** (EARS/Ubiquitous): The Substrate system shall fileno(): Get fd from FILE*.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0025** (EARS/Ubiquitous): The Substrate system shall pOSIX System Interface (<unistd.h>):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0026** (EARS/Ubiquitous): The Substrate system shall dup(): Duplicate fd (wrapper around SYS_DUP or fcntl).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0027** (EARS/Ubiquitous): The Substrate system shall getppid(): Get parent PID.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0028** (EARS/Ubiquitous): The Substrate system shall setsid() / getsid(): Session ID management.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0029** (EARS/Ubiquitous): The Substrate system shall getpgrp() / setpgid(): Process group management.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0030** (EARS/Ubiquitous): The Substrate system shall symlink(): Create symbolic link.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0031** (EARS/Ubiquitous): The Substrate system shall ftruncate() / truncate(): Truncate file size.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0032** (EARS/Ubiquitous): The Substrate system shall fsync() / fdatasync(): Flush file changes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0033** (EARS/Ubiquitous): The Substrate system shall time & Date (<time.h>):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0034** (EARS/Ubiquitous): The Substrate system shall gmtime() / localtime(): Timestamp to struct tm.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0035** (EARS/Ubiquitous): The Substrate system shall mktime(): Struct tm to timestamp.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0036** (EARS/Ubiquitous): The Substrate system shall strftime() / strptime(): Time formatting/parsing.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0037** (EARS/Ubiquitous): The Substrate system shall difftime(): Time difference.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0038** (EARS/Ubiquitous): The Substrate system shall ctime() / asctime(): Time to string.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0039** (EARS/Ubiquitous): The Substrate system shall libC Features (User Requests):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0040** (EARS/Ubiquitous): The Substrate system shall implement getopt_long (GNU Compatible):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0041** (EARS/Ubiquitous): The Substrate system shall define struct option (name, has_arg, flag, val).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0042** (EARS/Ubiquitous): The Substrate system shall implement getopt_long() function signature.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0043** (EARS/Ubiquitous): The Substrate system shall implement getopt_long_only() variant.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0044** (EARS/Ubiquitous): The Substrate system shall handle argument parsing (--arg, --arg=val).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0045** (EARS/Ubiquitous): The Substrate system shall handle no_argument, required_argument, optional_argument.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0046** (EARS/Ubiquitous): The Substrate system shall internal state management (optind, opterr, optopt, optarg).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0047** (EARS/Ubiquitous): The Substrate system shall error reporting and ? / : return codes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0048** (EARS/Ubiquitous): The Substrate system shall support for non-option argument reordering (swapping argv elements).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0049** (EARS/Ubiquitous): The Substrate system shall test against GNU getopt_long behavior.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0050** (EARS/Ubiquitous): The Substrate system shall low-Level Helpers (LibC Extension):.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0051** (EARS/Ubiquitous): The Substrate system shall xmalloc(size): Safe memory allocation.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0052** (EARS/Ubiquitous): The Substrate system shall prototype: void *xmalloc(size_t size).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0053** (EARS/Ubiquitous): The Substrate system shall purpose: Allocate memory, aborting on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0054** (EARS/Ubiquitous): The Substrate system shall standards: Common extension (Busybox/GNU coreutils style).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0055** (EARS/Ubiquitous): The Substrate system shall syscalls / Kernel interfaces: malloc -> brk/mmap.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0056** (EARS/Ubiquitous): The Substrate system shall signal-safety / async-signal-safe: no - calls malloc.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0057** (EARS/Ubiquitous): The Substrate system shall reentrancy / thread-safety: Thread-safe (if malloc is).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0058** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns valid pointer or exits program (never returns NULL).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0059** (EARS/Ubiquitous): The Substrate system shall memory ownership: Caller must free.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0060** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0061** (EARS/Ubiquitous): The Substrate system shall xmalloc(1024) -> returns pointer.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0062** (EARS/Ubiquitous): The Substrate system shall xmalloc(huge) -> prints error and exits (mock/limit env).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0063** (EARS/Ubiquitous): The Substrate system shall implementation notes: Wrapper around malloc.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0064** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0065** (EARS/Ubiquitous): The Substrate system shall xopen(path, flags, mode): Safe file open.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0066** (EARS/Ubiquitous): The Substrate system shall prototype: int xopen(const char *path, int flags, mode_t mode).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0067** (EARS/Ubiquitous): The Substrate system shall purpose: Open file, aborting on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0068** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0069** (EARS/Ubiquitous): The Substrate system shall syscalls / Kernel interfaces: open / openat.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0070** (EARS/Ubiquitous): The Substrate system shall signal-safety / async-signal-safe: yes (if error handler is simple).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0071** (EARS/Ubiquitous): The Substrate system shall reentrancy / thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0072** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns valid fd or exits program.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0073** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0074** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0075** (EARS/Ubiquitous): The Substrate system shall xopen("exist", O_RDONLY) -> returns fd.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0076** (EARS/Ubiquitous): The Substrate system shall xopen("noexist", O_RDONLY) -> prints error and exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0077** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0078** (EARS/Ubiquitous): The Substrate system shall xrealloc(ptr, size): Safe memory reallocation.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0079** (EARS/Ubiquitous): The Substrate system shall prototype: void *xrealloc(void *ptr, size_t size).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0080** (EARS/Ubiquitous): The Substrate system shall purpose: Reallocate memory, aborting on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0081** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0082** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: malloc / free -> brk/mmap.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0083** (EARS/Ubiquitous): The Substrate system shall signal-safety: no.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0084** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe (if Underlying allocator is).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0085** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits program on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0086** (EARS/Ubiquitous): The Substrate system shall memory ownership: Caller must free.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0087** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0088** (EARS/Ubiquitous): The Substrate system shall xrealloc(NULL, 10) -> equivalent to xmalloc.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0089** (EARS/Ubiquitous): The Substrate system shall xrealloc(ptr, 20) -> preserves data, returns new ptr.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0090** (EARS/Ubiquitous): The Substrate system shall implementation notes: realloc(ptr, 0) behavior check.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0091** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0092** (EARS/Ubiquitous): The Substrate system shall xcalloc(nmemb, size): Safe zero-initialized allocation.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0093** (EARS/Ubiquitous): The Substrate system shall prototype: void *xcalloc(size_t nmemb, size_t size).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0094** (EARS/Ubiquitous): The Substrate system shall purpose: Allocate zeroed memory, aborting on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0095** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0096** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: calloc.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0097** (EARS/Ubiquitous): The Substrate system shall signal-safety: no.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0098** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0099** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits program on failure, check overflow.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0100** (EARS/Ubiquitous): The Substrate system shall memory ownership: Caller must free.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0101** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0102** (EARS/Ubiquitous): The Substrate system shall xcalloc(10, 10) -> returns zeroed buffer.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0103** (EARS/Ubiquitous): The Substrate system shall xcalloc(MAX, MAX) -> overflow check and exit.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0104** (EARS/Ubiquitous): The Substrate system shall implementation notes: Check for multiplication overflow.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0105** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0106** (EARS/Ubiquitous): The Substrate system shall xstrdup(s): Safe string duplication.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0107** (EARS/Ubiquitous): The Substrate system shall prototype: char *xstrdup(const char *s).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0108** (EARS/Ubiquitous): The Substrate system shall purpose: Duplicate string, aborting on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0109** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0110** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: malloc.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0111** (EARS/Ubiquitous): The Substrate system shall signal-safety: no.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0112** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0113** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits program on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0114** (EARS/Ubiquitous): The Substrate system shall memory ownership: Caller must free.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0115** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0116** (EARS/Ubiquitous): The Substrate system shall xstrdup("foo") -> returns copy.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0117** (EARS/Ubiquitous): The Substrate system shall implementation notes: Wrapper around strdup.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0118** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0119** (EARS/Ubiquitous): The Substrate system shall xread(fd, buf, count): Read exact amount or fail.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0120** (EARS/Ubiquitous): The Substrate system shall prototype: size_t xread(int fd, void *buf, size_t count).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0121** (EARS/Ubiquitous): The Substrate system shall purpose: Read requested bytes, looping on partials/EINTR, exit on error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0122** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0123** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: read.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0124** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes (if error handler is simple).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0125** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0126** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns count read (may be < requested if EOF), exits on IO error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0127** (EARS/Ubiquitous): The Substrate system shall memory ownership: generic buffer.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0128** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0129** (EARS/Ubiquitous): The Substrate system shall xread full buffer -> returns count.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0130** (EARS/Ubiquitous): The Substrate system shall xread partial -> loops or returns short on EOF.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0131** (EARS/Ubiquitous): The Substrate system shall implementation notes: Distinguish short read (EOF) vs error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0132** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0133** (EARS/Ubiquitous): The Substrate system shall xwrite(fd, buf, count): Write exact amount or fail.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0134** (EARS/Ubiquitous): The Substrate system shall prototype: void xwrite(int fd, const void *buf, size_t count).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0135** (EARS/Ubiquitous): The Substrate system shall purpose: Write all bytes, looping on partials/EINTR, exit on error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0136** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0137** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: write.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0138** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0139** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0140** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits if write fails or incomplete.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0141** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0142** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0143** (EARS/Ubiquitous): The Substrate system shall xwrite full buffer -> succeeds.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0144** (EARS/Ubiquitous): The Substrate system shall xwrite to full disk -> exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0145** (EARS/Ubiquitous): The Substrate system shall implementation notes: Loop until all written.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0146** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0147** (EARS/Ubiquitous): The Substrate system shall xstat(path, buf): Safe file status.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0148** (EARS/Ubiquitous): The Substrate system shall prototype: void xstat(const char *path, struct stat *buf).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0149** (EARS/Ubiquitous): The Substrate system shall purpose: Get file status, exit on error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0150** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0151** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: stat.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0152** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0153** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0154** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits on error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0155** (EARS/Ubiquitous): The Substrate system shall memory ownership: caller provides struct.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0156** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0157** (EARS/Ubiquitous): The Substrate system shall xstat("exist", &sb) -> success.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0158** (EARS/Ubiquitous): The Substrate system shall xstat("noexist", &sb) -> exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0159** (EARS/Ubiquitous): The Substrate system shall implementation notes: Used when file is expected to exist.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0160** (EARS/Ubiquitous): The Substrate system shall priority: medium.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0161** (EARS/Ubiquitous): The Substrate system shall xaccess(path, mode): Safe access check.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0162** (EARS/Ubiquitous): The Substrate system shall prototype: void xaccess(const char *path, int mode).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0163** (EARS/Ubiquitous): The Substrate system shall purpose: Check file access, exit on error (permission denied is error).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0164** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0165** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: access.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0166** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0167** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0168** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits if check fails.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0169** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0170** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0171** (EARS/Ubiquitous): The Substrate system shall xaccess readable -> success.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0172** (EARS/Ubiquitous): The Substrate system shall implementation notes: Wrapper.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0173** (EARS/Ubiquitous): The Substrate system shall priority: low.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0174** (EARS/Ubiquitous): The Substrate system shall xopendir(path): Safe directory open.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0175** (EARS/Ubiquitous): The Substrate system shall prototype: DIR *xopendir(const char *path).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0176** (EARS/Ubiquitous): The Substrate system shall purpose: Open directory, exit on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0177** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0178** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: open, fstat, mmap (via opendir).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0179** (EARS/Ubiquitous): The Substrate system shall signal-safety: no (allocates).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0180** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0181** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns valid DIR* or exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0182** (EARS/Ubiquitous): The Substrate system shall memory ownership: Caller calls closedir.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0183** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0184** (EARS/Ubiquitous): The Substrate system shall xopendir(".") -> success.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0185** (EARS/Ubiquitous): The Substrate system shall implementation notes: Wrapper.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0186** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0187** (EARS/Ubiquitous): The Substrate system shall xclosedir(dirp): Safe directory close.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0188** (EARS/Ubiquitous): The Substrate system shall prototype: void xclosedir(DIR *dirp).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0189** (EARS/Ubiquitous): The Substrate system shall purpose: Close directory, warn/exit on failure? usually just wrapper.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0190** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0191** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: close.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0192** (EARS/Ubiquitous): The Substrate system shall signal-safety: no.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0193** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0194** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits on error (unlikely).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0195** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0196** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0197** (EARS/Ubiquitous): The Substrate system shall xclosedir -> success.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0198** (EARS/Ubiquitous): The Substrate system shall implementation notes: Check return code.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0199** (EARS/Ubiquitous): The Substrate system shall priority: medium.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0200** (EARS/Ubiquitous): The Substrate system shall xfork(): Safe process creation.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0201** (EARS/Ubiquitous): The Substrate system shall prototype: pid_t xfork(void).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0202** (EARS/Ubiquitous): The Substrate system shall purpose: Fork process, exit on failure (EAGAIN usually).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0203** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0204** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: fork.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0205** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0206** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0207** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns pid or exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0208** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0209** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0210** (EARS/Ubiquitous): The Substrate system shall xfork() -> parent gets pid, child gets 0.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0211** (EARS/Ubiquitous): The Substrate system shall implementation notes: Wrapper.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0212** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0213** (EARS/Ubiquitous): The Substrate system shall xwaitpid(pid, status, options): Safe wait.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0214** (EARS/Ubiquitous): The Substrate system shall prototype: pid_t xwaitpid(pid_t pid, int *status, int options).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0215** (EARS/Ubiquitous): The Substrate system shall purpose: Wait for process, loop on EINTR, exit on other error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0216** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0217** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: waitpid.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0218** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0219** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0220** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns pid.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0221** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0222** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0223** (EARS/Ubiquitous): The Substrate system shall xwaitpid -> reaps zombie.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0224** (EARS/Ubiquitous): The Substrate system shall implementation notes: Handle EINTR internally.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0225** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0226** (EARS/Ubiquitous): The Substrate system shall xexecvp(file, argv): Safe execute.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0227** (EARS/Ubiquitous): The Substrate system shall prototype: void xexecvp(const char *file, char *const argv[]).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0228** (EARS/Ubiquitous): The Substrate system shall purpose: Execute program, exit on failure (print error).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0229** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0230** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: execvp.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0231** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0232** (EARS/Ubiquitous): The Substrate system shall thread-safety: Thread-safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0233** (EARS/Ubiquitous): The Substrate system shall error semantics: Does not return on success; exits on fail.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0234** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0235** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0236** (EARS/Ubiquitous): The Substrate system shall xexecvp("true", ...) -> runs true.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0237** (EARS/Ubiquitous): The Substrate system shall xexecvp("noexist", ...) -> prints error, exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0238** (EARS/Ubiquitous): The Substrate system shall implementation notes: Should print "cannot execute <file>: <strerror>".
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0239** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0240** (EARS/Ubiquitous): The Substrate system shall xsignal(signum, handler): Safe signal handler install.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0241** (EARS/Ubiquitous): The Substrate system shall prototype: sighandler_t xsignal(int signum, sighandler_t handler).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0242** (EARS/Ubiquitous): The Substrate system shall purpose: Set signal handler using sigaction (SA_RESTART), exit on error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0243** (EARS/Ubiquitous): The Substrate system shall standards: BSD/Common.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0244** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: sigaction.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0245** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0246** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0247** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns old handler or exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0248** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0249** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0250** (EARS/Ubiquitous): The Substrate system shall xsignal -> handler set.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0251** (EARS/Ubiquitous): The Substrate system shall implementation notes: Ensure portable sigaction usage.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0252** (EARS/Ubiquitous): The Substrate system shall priority: medium.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0253** (EARS/Ubiquitous): The Substrate system shall humanize_number(buf, len, number, suffix, scale, flags): Format number.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0254** (EARS/Ubiquitous): The Substrate system shall prototype: int humanize_number(char *buf, size_t len, int64_t number, const char *suffix, int scale, int flags).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0255** (EARS/Ubiquitous): The Substrate system shall purpose: Format number with SI prefixes (k, M, G).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0256** (EARS/Ubiquitous): The Substrate system shall standards: NetBSD / BSD.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0257** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: none.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0258** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0259** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0260** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns length or -1.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0261** (EARS/Ubiquitous): The Substrate system shall memory ownership: writes to buf.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0262** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0263** (EARS/Ubiquitous): The Substrate system shall 1024 -> "1K".
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0264** (EARS/Ubiquitous): The Substrate system shall implementation notes: Port from NetBSD/OpenBSD.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0265** (EARS/Ubiquitous): The Substrate system shall priority: medium.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0266** (EARS/Ubiquitous): The Substrate system shall parse_mode(mode_str, old_mode): Parse mode string.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0267** (EARS/Ubiquitous): The Substrate system shall prototype: mode_t parse_mode(const char *str, mode_t old).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0268** (EARS/Ubiquitous): The Substrate system shall purpose: Parse chmod-style symbolic mode (u+x).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0269** (EARS/Ubiquitous): The Substrate system shall standards: Custom / BSD-like.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0270** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: none.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0271** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0272** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0273** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns new mode or -1/exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0274** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0275** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0276** (EARS/Ubiquitous): The Substrate system shall "u+x" -> adds executable bit.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0277** (EARS/Ubiquitous): The Substrate system shall implementation notes: State machine for symbolic parsing.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0278** (EARS/Ubiquitous): The Substrate system shall priority: medium.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0279** (EARS/Ubiquitous): The Substrate system shall strlcpy(dst, src, size): Safe string copy.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0280** (EARS/Ubiquitous): The Substrate system shall prototype: size_t strlcpy(char *dst, const char *src, size_t size).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0281** (EARS/Ubiquitous): The Substrate system shall purpose: Copy string with NUL termination guarantee.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0282** (EARS/Ubiquitous): The Substrate system shall standards: OpenBSD / Common.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0283** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: none.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0284** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0285** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0286** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns total length of src.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0287** (EARS/Ubiquitous): The Substrate system shall memory ownership: writes dst.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0288** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0289** (EARS/Ubiquitous): The Substrate system shall truncation check.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0290** (EARS/Ubiquitous): The Substrate system shall implementation notes: Standard BSD behavior.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0291** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0292** (EARS/Ubiquitous): The Substrate system shall strlcat(dst, src, size): Safe string cat.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0293** (EARS/Ubiquitous): The Substrate system shall prototype: size_t strlcat(char *dst, const char *src, size_t size).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0294** (EARS/Ubiquitous): The Substrate system shall purpose: Concatenate string with NUL termination guarantee.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0295** (EARS/Ubiquitous): The Substrate system shall standards: OpenBSD / Common.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0296** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: none.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0297** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0298** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0299** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns total length.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0300** (EARS/Ubiquitous): The Substrate system shall memory ownership: writes dst.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0301** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0302** (EARS/Ubiquitous): The Substrate system shall truncation check.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0303** (EARS/Ubiquitous): The Substrate system shall implementation notes: Standard BSD behavior.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0304** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0305** (EARS/Ubiquitous): The Substrate system shall warn(fmt, ...): Print warning.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0306** (EARS/Ubiquitous): The Substrate system shall prototype: void warn(const char *fmt, ...).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0307** (EARS/Ubiquitous): The Substrate system shall purpose: Print "progname: fmt: strerror(errno)\n" to stderr.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0308** (EARS/Ubiquitous): The Substrate system shall standards: BSD.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0309** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: write / fprintf.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0310** (EARS/Ubiquitous): The Substrate system shall signal-safety: no (stdio).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0311** (EARS/Ubiquitous): The Substrate system shall thread-safety: locked (stdio).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0312** (EARS/Ubiquitous): The Substrate system shall error semantics: None.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0313** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0314** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0315** (EARS/Ubiquitous): The Substrate system shall warn("fail") -> prints message + errno.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0316** (EARS/Ubiquitous): The Substrate system shall implementation notes: Use vfprintf.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0317** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0318** (EARS/Ubiquitous): The Substrate system shall err(eval, fmt, ...): Print error and exit.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0319** (EARS/Ubiquitous): The Substrate system shall prototype: void err(int eval, const char *fmt, ...).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0320** (EARS/Ubiquitous): The Substrate system shall purpose: Print warning and exit with eval.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0321** (EARS/Ubiquitous): The Substrate system shall standards: BSD.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0322** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: write, exit.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0323** (EARS/Ubiquitous): The Substrate system shall signal-safety: no.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0324** (EARS/Ubiquitous): The Substrate system shall thread-safety: N/A (exits).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0325** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0326** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0327** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0328** (EARS/Ubiquitous): The Substrate system shall err(1, "fail") -> exits 1, prints msg.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0329** (EARS/Ubiquitous): The Substrate system shall implementation notes: Calls warn then exit.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0330** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0331** (EARS/Ubiquitous): The Substrate system shall setprogname(name) / getprogname(): Program name.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0332** (EARS/Ubiquitous): The Substrate system shall prototype: void setprogname(const char *name), const char *getprogname(void).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0333** (EARS/Ubiquitous): The Substrate system shall purpose: Store/retrieve program name for diagnostics.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0334** (EARS/Ubiquitous): The Substrate system shall standards: BSD.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0335** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: none.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0336** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes (atomic ptr read/write).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0337** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0338** (EARS/Ubiquitous): The Substrate system shall error semantics: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0339** (EARS/Ubiquitous): The Substrate system shall memory ownership: static/copy.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0340** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0341** (EARS/Ubiquitous): The Substrate system shall set/get match.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0342** (EARS/Ubiquitous): The Substrate system shall implementation notes: basename of argv[0].
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0343** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0344** (EARS/Ubiquitous): The Substrate system shall basename(path): Thread-safe path component extraction.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0345** (EARS/Ubiquitous): The Substrate system shall prototype: char *basename(char *path).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0346** (EARS/Ubiquitous): The Substrate system shall purpose: Return last component of path.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0347** (EARS/Ubiquitous): The Substrate system shall standards: POSIX.1-2008.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0348** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: none.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0349** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0350** (EARS/Ubiquitous): The Substrate system shall thread-safety: yes (modifies path or returns static constant).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0351** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns "." or "/".
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0352** (EARS/Ubiquitous): The Substrate system shall memory ownership: May modify input (POSIX).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0353** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0354** (EARS/Ubiquitous): The Substrate system shall basename("/usr/bin/ls") -> "ls".
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0355** (EARS/Ubiquitous): The Substrate system shall basename("/") -> "/".
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0356** (EARS/Ubiquitous): The Substrate system shall implementation notes: Handle trailing slashes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0357** (EARS/Ubiquitous): The Substrate system shall priority: medium.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0358** (EARS/Ubiquitous): The Substrate system shall dirname(path): Thread-safe directory component extraction.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0359** (EARS/Ubiquitous): The Substrate system shall prototype: char *dirname(char *path).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0360** (EARS/Ubiquitous): The Substrate system shall purpose: Return parent directory of path.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0361** (EARS/Ubiquitous): The Substrate system shall standards: POSIX.1-2008.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0362** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: none.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0363** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0364** (EARS/Ubiquitous): The Substrate system shall thread-safety: yes (modifies path).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0365** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns "." or "/".
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0366** (EARS/Ubiquitous): The Substrate system shall memory ownership: May modify input.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0367** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0368** (EARS/Ubiquitous): The Substrate system shall dirname("/usr/bin/ls") -> "/usr/bin".
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0369** (EARS/Ubiquitous): The Substrate system shall implementation notes: Handle trailing slashes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0370** (EARS/Ubiquitous): The Substrate system shall priority: medium.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0371** (EARS/Ubiquitous): The Substrate system shall xchmod(path, mode): Safe chmod.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0372** (EARS/Ubiquitous): The Substrate system shall prototype: void xchmod(const char *path, mode_t mode).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0373** (EARS/Ubiquitous): The Substrate system shall purpose: Change mode, exit on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0374** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0375** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: chmod.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0376** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0377** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0378** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits on error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0379** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0380** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0381** (EARS/Ubiquitous): The Substrate system shall xchmod -> success.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0382** (EARS/Ubiquitous): The Substrate system shall implementation notes: Wrapper.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0383** (EARS/Ubiquitous): The Substrate system shall priority: low.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0384** (EARS/Ubiquitous): The Substrate system shall xchown(path, owner, group): Safe chown.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0385** (EARS/Ubiquitous): The Substrate system shall prototype: void xchown(const char *path, uid_t owner, gid_t group).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0386** (EARS/Ubiquitous): The Substrate system shall purpose: Change ownership, exit on failure.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0387** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0388** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: chown.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0389** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0390** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0391** (EARS/Ubiquitous): The Substrate system shall error semantics: Exits on error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0392** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0393** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0394** (EARS/Ubiquitous): The Substrate system shall xchown -> success.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0395** (EARS/Ubiquitous): The Substrate system shall implementation notes: Wrapper.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0396** (EARS/Ubiquitous): The Substrate system shall priority: low.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0397** (EARS/Ubiquitous): The Substrate system shall strtonum(numstr, minval, maxval, errstrp): Safe number parsing.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0398** (EARS/Ubiquitous): The Substrate system shall prototype: long long strtonum(const char *nptr, long long minval, long long maxval, const char **errstr).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0399** (EARS/Ubiquitous): The Substrate system shall purpose: Parse number with bounds checking and strict validation.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0400** (EARS/Ubiquitous): The Substrate system shall standards: OpenBSD / BSD.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0401** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: none.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0402** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0403** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0404** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns 0 on error and sets errstr.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0405** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0406** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0407** (EARS/Ubiquitous): The Substrate system shall strtonum("10", 0, 100, &err) -> 10, err=NULL.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0408** (EARS/Ubiquitous): The Substrate system shall strtonum("101", 0, 100, &err) -> 0, err="too large".
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0409** (EARS/Ubiquitous): The Substrate system shall implementation notes: Strict parsing (no trailing garbage).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0410** (EARS/Ubiquitous): The Substrate system shall priority: high.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0411** (EARS/Ubiquitous): The Substrate system shall xgetenv(name): Safe environment get.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0412** (EARS/Ubiquitous): The Substrate system shall prototype: char *xgetenv(const char *name).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0413** (EARS/Ubiquitous): The Substrate system shall purpose: Get environment variable, maybe exit if missing? Or just standard getenv wrapper? Usually just getenv is fine, but maybe safe_getenv for setuid?.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0414** (EARS/Ubiquitous): The Substrate system shall standards: Internal.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0415** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: none.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0416** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0417** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe (usually).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0418** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns value or NULL.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0419** (EARS/Ubiquitous): The Substrate system shall memory ownership: environment owned.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0420** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0421** (EARS/Ubiquitous): The Substrate system shall get existing var.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0422** (EARS/Ubiquitous): The Substrate system shall implementation notes: Maybe strict version xgetenv_required?.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0423** (EARS/Ubiquitous): The Substrate system shall priority: low.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0424** (EARS/Ubiquitous): The Substrate system shall xopenat(dirfd, path, flags, mode): Safe relative open.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0425** (EARS/Ubiquitous): The Substrate system shall prototype: int xopenat(int dirfd, const char *path, int flags, mode_t mode).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0426** (EARS/Ubiquitous): The Substrate system shall purpose: Open file relative to dir, exit on error.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0427** (EARS/Ubiquitous): The Substrate system shall standards: Common extension.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0428** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: openat.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0429** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0430** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0431** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns fd or exits.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0432** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0433** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0434** (EARS/Ubiquitous): The Substrate system shall xopenat -> success.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0435** (EARS/Ubiquitous): The Substrate system shall implementation notes: Wrapper.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0436** (EARS/Ubiquitous): The Substrate system shall priority: medium.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0437** (EARS/Ubiquitous): The Substrate system shall xisatty(fd): Safe tty check.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0438** (EARS/Ubiquitous): The Substrate system shall prototype: int xisatty(int fd).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0439** (EARS/Ubiquitous): The Substrate system shall purpose: Check if fd is a tty, handle errno? Just isatty wrapper?.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0440** (EARS/Ubiquitous): The Substrate system shall standards: POSIX.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0441** (EARS/Ubiquitous): The Substrate system shall underlying syscalls: ioctl.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0442** (EARS/Ubiquitous): The Substrate system shall signal-safety: yes.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0443** (EARS/Ubiquitous): The Substrate system shall thread-safety: safe.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0444** (EARS/Ubiquitous): The Substrate system shall error semantics: Returns 1/0.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0445** (EARS/Ubiquitous): The Substrate system shall memory ownership: N/A.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0446** (EARS/Ubiquitous): The Substrate system shall acceptance tests:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0447** (EARS/Ubiquitous): The Substrate system shall xisatty(0) -> 1 (if tty).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0448** (EARS/Ubiquitous): The Substrate system shall implementation notes: Wrapper.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0449** (EARS/Ubiquitous): The Substrate system shall priority: low.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0450** (EARS/Ubiquitous): The Substrate system shall build System:.
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-10-0451** (EARS/Ubiquitous): The Substrate system shall implement native_dist target to build usermode tools for the host OS (skipping libc/libm etc).
+  - Context: 8. LibC & Build System (User Requests & Audit)
+  - Verification: design review + implementation evidence + test/doc update.
