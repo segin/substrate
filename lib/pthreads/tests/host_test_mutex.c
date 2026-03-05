@@ -62,26 +62,7 @@ void mock_free(void *ptr) {
 }
 
 long mock_syscall(long num, ...) {
-    va_list args;
-    va_start(args, num);
-    long arg1 = va_arg(args, long);
-    // long arg2 = va_arg(args, long);
-    va_end(args);
-
-    if (num == SYS_THR_NEW) {
-        mock_thr_new_calls++;
-        struct thr_param *param = (struct thr_param *)arg1;
-        if (param->child_tid) *(param->child_tid) = mock_next_tid++;
-        return 0;
-    }
-    if (num == SYS_THR_JOIN) {
-        mock_thr_join_calls++;
-        return 0;
-    }
-    if (num == SYS_THR_EXIT) {
-        return 0;
-    }
-    return -1;
+    return 0;
 }
 
 void mock_exit(int status) {
@@ -89,47 +70,28 @@ void mock_exit(int status) {
 }
 
 int main() {
-    printf("Running host_test_join...\n");
+    printf("Running host_test_mutex...\n");
 
-    my_pthread_t t1;
+    my_pthread_mutex_t mutex = 1; // start with 1 to make sure init zeros it
     int ret;
 
-    // 1. Create a thread
-    mock_malloc_calls = 0;
-    mock_free_calls = 0;
-    mock_thr_new_calls = 0;
-
-    ret = my_pthread_create(&t1, NULL, NULL, NULL);
+    // Test mutex init with NULL attributes
+    ret = my_pthread_mutex_init(&mutex, NULL);
     assert(ret == 0);
-    assert(mock_thr_new_calls == 1);
-    // 1 malloc for stack, 1 for args
-    assert(mock_malloc_calls == 2);
+    assert(mutex == 0);
 
-    // 2. Join the thread
-    mock_thr_join_calls = 0;
-    mock_free_calls = 0;
-
-    ret = my_pthread_join(t1, NULL);
+    // Test mutex lock/unlock/destroy
+    ret = my_pthread_mutex_lock(&mutex);
     assert(ret == 0);
-    assert(mock_thr_join_calls == 1);
+    assert(mutex == 1); // Mock lock implementation sets to 1
 
-    // Should have freed the stack (1 call)
-    // Args are NOT freed because thread didn't run.
-    assert(mock_free_calls == 1);
+    ret = my_pthread_mutex_unlock(&mutex);
+    assert(ret == 0);
+    assert(mutex == 0);
 
-    // 3. Verify slot reuse
-    // We already used 1 slot and freed it.
-    // If we run MAX_PTHREADS more times, we should be fine.
+    ret = my_pthread_mutex_destroy(&mutex);
+    assert(ret == 0);
 
-    for (int i = 0; i < MAX_PTHREADS + 10; i++) {
-        my_pthread_t t;
-        ret = my_pthread_create(&t, NULL, NULL, NULL);
-        assert(ret == 0);
-
-        ret = my_pthread_join(t, NULL);
-        assert(ret == 0);
-    }
-
-    printf("host_test_join PASSED\n");
+    printf("host_test_mutex PASSED\n");
     return 0;
 }
