@@ -40,6 +40,11 @@ static void exec_reset_signals(void) {
     // sig_ignore remains unchanged - ignored signals stay ignored
 }
 
+static int is_linux_ldso_path(const char *interp_path) {
+    if (!interp_path) return 0;
+    return strcmp(interp_path, "/lib/ld-linux.so.2") == 0;
+}
+
 int elf_check_file(Elf32_Ehdr *hdr) {
     if (!hdr) return 0;
     if (hdr->e_ident[0] != ELFMAG0) return 0;
@@ -384,7 +389,7 @@ static int exec_copy_args(char *const array[], int count, char **k_array, char *
 
 // Helper to set up the user stack
 static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int argc, char **k_envp, int envc,
-                            uint32_t entry, uint32_t at_base, fs_node_t *file) {
+                            uint32_t at_entry, uint32_t at_base, fs_node_t *file) {
     uint32_t user_stack_base = 0xBFFF0000;
     uint32_t user_stack_size = 16; // 64KB
     
@@ -490,7 +495,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
     sp -= 4; STACK_WRITE32(sp, 0);
     sp -= 4; STACK_WRITE32(sp, AT_NULL);
     
-    sp -= 4; STACK_WRITE32(sp, entry);
+    sp -= 4; STACK_WRITE32(sp, at_entry);
     sp -= 4; STACK_WRITE32(sp, AT_ENTRY);
     
     sp -= 4; STACK_WRITE32(sp, ehdr.e_phnum);
@@ -705,16 +710,26 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     char interp_path[256];
     uint32_t interp_len = sizeof(interp_path);
     uint32_t at_base = 0;
-    uint32_t entry = elf_load(file, 0, interp_path, &interp_len);
-    if (entry == 0) {
+    uint32_t main_entry = elf_load(file, 0, interp_path, &interp_len);
+    if (main_entry == 0) {
         kprint("execve: Failed to load ELF\n");
         goto cleanup;
     }
 
+    uint32_t entry = main_entry;
     if (interp_len > 0) {
         kprint("execve: Loading interpreter: ");
         kprint(interp_path);
         kprint("\n");
+
+        if (is_linux_ldso_path(interp_path) && current_process) {
+            /*
+             * Hard-wire Linux personality for Linux ld.so PT_INTERP.
+             * This keeps syscall ABI and signal semantics aligned with
+             * Linux dynamic linker expectations regardless of ELF OSABI.
+             */
+            current_process->perso_id = PERS_LINUX;
+        }
 
         fs_node_t *interp_file = vfs_lookup(fs_root, interp_path);
         if (!interp_file) {
@@ -731,6 +746,11 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
 
         at_base = interp_base;
         entry = interp_entry;
+
+        if (is_linux_ldso_path(interp_path) && current_process) {
+            // Re-assert Linux personality after interpreter load branding.
+            current_process->perso_id = PERS_LINUX;
+        }
     }
 
 
@@ -757,7 +777,7 @@ int elf_execve(int fd, const char *path, char *const argv[], char *const envp[])
     set_kernel_stack((uint32_t)current_thread->kstack_top);
 
     uint32_t sp;
-    if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc, entry, at_base, file) < 0) {
+    if (exec_setup_stack(new_pmap, &sp, k_argv, argc, k_envp, envc, main_entry, at_base, file) < 0) {
         goto cleanup;
     }
 
