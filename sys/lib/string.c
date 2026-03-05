@@ -209,6 +209,16 @@ size_t strspn(const char *s1, const char *s2) {
     return n;
 }
 
+size_t strcspn(const char *s1, const char *s2) {
+    size_t n;
+    for (n = 0; *s1; s1++, n++) {
+        const char *p;
+        for (p = s2; *p && *p != *s1; p++);
+        if (*p) break;
+    }
+    return n;
+}
+
 char *strpbrk(const char *s1, const char *s2) {
     while (*s1) {
         if (strchr(s2, *s1++)) return (char *)s1 - 1;
