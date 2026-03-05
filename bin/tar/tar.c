@@ -601,6 +601,7 @@ static void usage(void) {
 int main(int argc, char **argv) {
     memset(&opt, 0, sizeof(opt));
     opt.format = FMT_PAX;
+    opt.safe_extract = true; /* Enable safe extraction by default */
 
     static struct option lo[] = {
         {"file", required_argument, 0, 'f'},

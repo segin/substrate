@@ -67,6 +67,23 @@ static char *trim_copy(const char *s) {
     return out;
 }
 
+static void strip_reloc_modifier(char *name) {
+    char *at;
+
+    if (name == NULL) {
+        return;
+    }
+    at = strchr(name, '@');
+    if (at == NULL || at[1] == '\0') {
+        return;
+    }
+    if (strcasecmp(at + 1, "PLT") == 0 ||
+        strcasecmp(at + 1, "GOTPCREL") == 0 ||
+        strcasecmp(at + 1, "GOTTPOFF") == 0) {
+        *at = '\0';
+    }
+}
+
 void as_symtab_init(as_symtab_t *tab) {
     if (tab == NULL) {
         return;
@@ -134,6 +151,16 @@ static as_symbol_t *get_or_create_symbol(sym_ctx_t *ctx, const char *name) {
         return NULL;
     }
     return sym;
+}
+
+static int is_local_temp_symbol_name(const char *name) {
+    if (name == NULL) {
+        return 0;
+    }
+    if (name[0] == '.' && name[1] == 'L') {
+        return 1;
+    }
+    return 0;
 }
 
 static int parse_u64_arg(const char *s, unsigned long long *out) {
@@ -462,7 +489,13 @@ static int visit_expr_ref(sym_ctx_t *ctx, const as_expr_t *e, const char *file, 
     }
 
     if (e->kind == AS_EXPR_SYMBOL && e->symbol != NULL) {
-        sym = get_or_create_symbol(ctx, e->symbol);
+        char *name = trim_copy(e->symbol);
+        if (name == NULL) {
+            return -1;
+        }
+        strip_reloc_modifier(name);
+        sym = get_or_create_symbol(ctx, name);
+        free(name);
         if (sym == NULL) {
             return -1;
         }
@@ -575,6 +608,10 @@ int as_symtab_build(const as_parse_result_t *parsed, as_symtab_t *tab,
     for (i = 0; i < tab->count; ++i) {
         as_symbol_t *sym = &tab->items[i];
         sym->unresolved = (!sym->defined && !sym->is_common && sym->reference_count > 0) ? 1 : 0;
+        if (sym->unresolved && sym->bind == AS_SYM_BIND_LOCAL && !is_local_temp_symbol_name(sym->name)) {
+            /* GAS-compatible default: unresolved non-temporary symbols are extern/global. */
+            sym->bind = AS_SYM_BIND_GLOBAL;
+        }
     }
 
     return 0;
