@@ -70,7 +70,7 @@ typedef struct {
     as_x86_operand_kind_t kind;
     union {
         as_x86_reg_t reg;
-        int32_t imm;
+        int64_t imm;
         int32_t rel;
         as_x86_mem_t mem;
     } u;
@@ -82,6 +82,7 @@ typedef struct {
     int lock_prefix;
     int rep_prefix;
     int rex_w;
+    int byte_op;
     int operand_size_override;
     int address_size_override;
     as_x86_operand_t ops[3];
