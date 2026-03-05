@@ -3,117 +3,95 @@
 id \- return user identity
 .SH SYNOPSIS
 .B id
-.RB [ \-Z ]
-.RI [ user ]
+.RB [ user ]
 .br
-.B id
-.RB [ \-G ]
+.B id \-G
 .RB [ \-n ]
-.RB [ \-z ]
-.RI [ user ]
+.RB [ user ]
+.br
+.B id \-g
+.RB [ \-nr ]
+.RB [ user ]
+.br
+.B id \-u
+.RB [ \-nr ]
+.RB [ user ]
 .br
 .B id
-.RB [ \-g ]
-.RB [ \-n ]
-.RB [ \-r ]
-.RB [ \-z ]
-.RI [ user ]
+.RB [ \-pPcdsAMR ]
+.RB [ user ]
 .br
 .B id
-.RB [ \-u ]
-.RB [ \-n ]
-.RB [ \-r ]
-.RB [ \-z ]
-.RI [ user ]
-.br
-.B id
-.RB [ \-p | \-P | \-c | \-d | \-s | \-A | \-M | \-R ]
-.RI [ user ]
+.RB [ \-\-zero ]
+.RB [ \-\-context ]
+.RB [ user... ]
 .SH DESCRIPTION
-Print user and group information for the specified
-.IR user ,
-or (when
-.I user
-omitted) for the current user.
-.PP
+The
 .B id
-by default prints the real and effective user and group IDs and all 
-supplementary groups of the current process, or the specified user.
+utility writes information about the current user or a specified
+.IR user .
+By default, the utility writes the user name, user ID, group name, group ID,
+and supplementary group information of the current or specified user.
 .SH OPTIONS
+The following options are supported:
 .TP
-.BR \-u ", " \-\-user
-Output only the effective user ID.
+.BR \-A
+Output the process audit user ID and audit properties (FreeBSD extension).
 .TP
-.BR \-g ", " \-\-group
-Output only the effective group ID.
+.BR \-c
+Output the login class (BSD extension).
+.TP
+.BR \-d
+Output the home directory of the current or specified user (FreeBSD extension).
 .TP
 .BR \-G ", " \-\-groups
 Output all different group IDs (effective, real, and supplementary).
 .TP
+.BR \-g ", " \-\-group
+Output only the effective group ID.
+.TP
+.BR \-M
+Output the MAC label of the current process (FreeBSD extension).
+.TP
 .BR \-n ", " \-\-name
-With
-.BR \-u ,
-.BR \-g ,
+Output the name in the format specified by the
+.B \-u
 or
-.BR \-G ,
-output the name instead of the numeric ID. If the name cannot be mapped,
-the numeric ID is output.
+.B \-g
+or
+.B \-G
+options instead of the numeric ID. If the ID cannot be mapped to a name, the numeric value is printed.
+.TP
+.BR \-p
+Make the output human-readable, emitting keywords on separate lines (BSD extension).
+.TP
+.BR \-P
+Output a passwd(5)-style entry for the specified user (FreeBSD extension).
+.TP
+.BR \-R
+Output the routing table of the current process (OpenBSD extension).
 .TP
 .BR \-r ", " \-\-real
-With
-.BR \-u
+Output the real ID instead of the effective ID for the
+.B \-u
 or
-.BR \-g ,
-output the real ID instead of the effective ID.
+.B \-g
+options.
 .TP
-.BR \-z ", " \-\-zero
-Delimit output items with NUL characters instead of spaces or newlines.
-This option is not permitted in the default output format.
+.BR \-s
+Output the login shell of the current or specified user (FreeBSD extension).
+.TP
+.BR \-u ", " \-\-user
+Output only the effective user ID.
 .TP
 .BR \-Z ", " \-\-context
-Print only the security context of the process. Exits with status 1
-if the system does not support security contexts.
+Print only the security context of the process (GNU extension).
 .TP
-.B \-p
-Make the output human-readable, outputting multiline information categorized
-as login, uid, euid, rgid, and groups. (BSD extension)
-.TP
-.B \-P
-Output a passwd(5)-style colon-separated entry. (FreeBSD extension)
-.TP
-.B \-c
-Output the login class. (BSD extension)
-.TP
-.B \-d
-Output the home directory. (FreeBSD extension)
-.TP
-.B \-s
-Output the login shell. (FreeBSD extension)
-.TP
-.B \-A
-Output the process audit user ID. (FreeBSD extension)
-.TP
-.B \-M
-Output the MAC label of the current process. (FreeBSD extension)
-.TP
-.B \-R
-Output the routing table of the current process. (OpenBSD extension)
-.TP
-.B \-\-help
-Display this help and exit.
-.TP
-.B \-\-version
-Display version information and exit.
-.SH CONFORMING TO
-The
-.B id
-utility is compliant with the POSIX.1-2024 Shell and Utilities specification,
-with extensions derived from GNU coreutils and BSD systems (FreeBSD, OpenBSD, NetBSD).
+.BR \-z ", " \-\-zero
+Delimit output with NUL characters instead of whitespace (GNU extension).
 .SH EXIT STATUS
 The
 .B id
-utility exits 0 on success, and >0 if an error occurs.
+utility returns 0 on success, and >0 if an error occurs.
 .SH SEE ALSO
-.BR groups (1),
-.BR whoami (1),
-.BR getuid (2)
+getgroups(2), getgid(2), getuid(2), passwd(5)

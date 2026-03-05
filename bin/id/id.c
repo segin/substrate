@@ -1,14 +1,10 @@
 #include <sys/types.h>
 #include <sys/param.h>
-#include <sys/stat.h>
-#include <errno.h>
 #include <getopt.h>
 #include <grp.h>
 #include <pwd.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #define MAX_GROUPS 16384
@@ -191,7 +187,7 @@ static void print_bsd_p(const char *req_user, uid_t ruid, uid_t euid, gid_t rgid
 	/* class omitted as we don't have login classes in substrate yet */
 }
 
-static int do_id(const char *user, struct id_opts *o, bool multi_user)
+static int do_id(const char *user, struct id_opts *o, bool is_last_user)
 {
 	uid_t ruid, euid;
 	gid_t rgid, egid;
@@ -263,13 +259,10 @@ static int do_id(const char *user, struct id_opts *o, bool multi_user)
 			first = false;
 		}
 		putchar(delim);
+		if(o->zero_term && !is_last_user) putchar('\0');
 		break;
 	}
 	case MODE_DEFAULT:
-		if(o->zero_term && multi_user) {
-			/* GNU uses double-nul between users? Not formally in default mode? */
-			/* Wait, GNU says --zero is not allowed with default format */
-		}
 		print_default(ruid, euid, rgid, egid, ngroups, groups);
 		putchar(delim);
 		break;
@@ -285,10 +278,13 @@ static int do_id(const char *user, struct id_opts *o, bool multi_user)
 		/* format: name:passwd:uid:gid:class:change:expire:gecos:dir:shell */
 		printf("%s:%s:%u:%u::0:0:%s:%s:%s\n",
 		       pw->pw_name, pw->pw_passwd, pw->pw_uid, pw->pw_gid,
-		       pw->pw_gecos, pw->pw_dir, pw->pw_shell);
+		       pw->pw_gecos ? pw->pw_gecos : "",
+		       pw->pw_dir ? pw->pw_dir : "",
+		       pw->pw_shell ? pw->pw_shell : "");
 		break;
 	case MODE_C:
 		/* Login class */
+		printf("default\n");
 		break;
 	case MODE_D:
 		if(!pw && !user) pw = getpwuid(ruid);
@@ -328,20 +324,24 @@ int main(int argc, char *argv[])
 	};
 
 	int opt;
+    int mode_count = 0;
+
+#define SET_MODE(m) do { o.mode = (m); mode_count++; } while(0)
+
 	while((opt = getopt_long(argc, argv, "uGgnrpPcdAsMaZRz", longopts, NULL)) != -1) {
 		switch(opt) {
-		case 'u': o.mode = MODE_U; break;
-		case 'g': o.mode = MODE_G; break;
-		case 'G': o.mode = MODE_CAP_G; break;
-		case 'p': o.mode = MODE_P; break;
-		case 'P': o.mode = MODE_CAP_P; break;
-		case 'c': o.mode = MODE_C; break;
-		case 'd': o.mode = MODE_D; break;
-		case 's': o.mode = MODE_S; break;
-		case 'A': o.mode = MODE_A; break;
-		case 'M': o.mode = MODE_M; break;
-		case 'R': o.mode = MODE_R; break;
-		case 'Z': o.mode = MODE_CAP_Z; break;
+		case 'u': SET_MODE(MODE_U); break;
+		case 'g': SET_MODE(MODE_G); break;
+		case 'G': SET_MODE(MODE_CAP_G); break;
+		case 'p': SET_MODE(MODE_P); break;
+		case 'P': SET_MODE(MODE_CAP_P); break;
+		case 'c': SET_MODE(MODE_C); break;
+		case 'd': SET_MODE(MODE_D); break;
+		case 's': SET_MODE(MODE_S); break;
+		case 'A': SET_MODE(MODE_A); break;
+		case 'M': SET_MODE(MODE_M); break;
+		case 'R': SET_MODE(MODE_R); break;
+		case 'Z': SET_MODE(MODE_CAP_Z); break;
 		case 'n': o.use_name = true; break;
 		case 'r': o.use_real = true; break;
 		case 'z': o.zero_term = true; break;
@@ -355,6 +355,10 @@ int main(int argc, char *argv[])
 	}
 
 	/* Validations */
+	if(mode_count > 1) {
+		fprintf(stderr, "%s: cannot print multiple formats\n", o.progname);
+		return 1;
+	}
 	if(o.mode == MODE_DEFAULT && o.use_name) {
 		fprintf(stderr, "%s: cannot print only names or real IDs in default format\n", o.progname);
 		return 1;
@@ -372,13 +376,10 @@ int main(int argc, char *argv[])
 
 	int ret = 0;
 	if(optind == argc) {
-		ret = do_id(NULL, &o, false);
+		ret = do_id(NULL, &o, true);
 	} else {
 		for(int i = optind; i < argc; i++) {
-			if(o.mode == MODE_DEFAULT && o.zero_term) {
-				/* handle GNU double-delim here if we wanted to */
-			}
-			if(do_id(argv[i], &o, (argc - optind > 1)) != 0) {
+			if(do_id(argv[i], &o, (i == argc - 1)) != 0) {
 				ret = 1;
 			}
 		}
