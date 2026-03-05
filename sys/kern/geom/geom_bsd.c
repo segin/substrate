@@ -101,7 +101,7 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         
         kprint(" ");
         char sname[32];
-        sprintf(sname, "%s%c", prefix, 'a' + i);
+        snprintf(sname, sizeof(sname), "%s%c", prefix, 'a' + i);
         kprint(sname);
         slice_count++;
     }
@@ -146,7 +146,7 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         
         /* Create slice name: ide0p1a, ide0p1b, etc. */
         char slice_name[32];
-        sprintf("%s%c", prefix, 'a' + i);
+        snprintf(slice_name, sizeof(slice_name), "%s%c", prefix, 'a' + i);
         
         /* Register slice */
         geom_add_partition(disk, slice_name, slice_start, slice_size,
