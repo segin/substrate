@@ -58,6 +58,10 @@ int main(void) {
     if (elf_segment_section_count(load) < 1) fail("load section count");
     if (elf_segment_count(obj) < 3) fail("segment count");
 
+    if (elf_segment_align(load) != 0x1000) fail("load align");
+    if (elf_segment_align(tls) != 8) fail("tls align");
+    if (elf_segment_align(NULL) != 0) fail("null segment align");
+
     if (elf_validate(obj, &diag) != ELF_OK) fail(diag ? diag : "validate");
     free(diag);
     elf_close(obj);

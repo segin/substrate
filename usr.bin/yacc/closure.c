@@ -12,7 +12,6 @@ short *eff;
 static short *derives;      /* derives[i] = first rule deriving symbol i */
 static short *next_rule;    /* next_rule[r] = next rule with same LHS as r, or -1 */
 
-static void set_eff(void);
 static int cmp_short(const void *a, const void *b);
 
 static int cmp_short(const void *a, const void *b) {
@@ -121,9 +120,4 @@ void closure(short *nucleus, int n) {
         item_count = j;
         item_set_end = item_set + item_count;
     }
-}
-
-static void set_eff(void) {
-    /* Compute EFF array for LALR lookahead computation */
-    /* This is called later in the LALR phase, not needed for LR(0) */
 }

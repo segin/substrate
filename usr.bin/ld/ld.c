@@ -3938,7 +3938,8 @@ static int load_object_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, sy
     return 0;
 }
 
-static char *resolve_library_path_suffix(const ld_ctx_t *ctx, const char *name, const char *suffix) {
+static char *resolve_library_path_suffix_ex(const ld_ctx_t *ctx, const char *name, const char *suffix,
+                                            int include_default_dirs) {
     static const char *default_dirs[] = {
         "/usr/lib",
         "/usr/local/lib"
@@ -3954,6 +3955,9 @@ static char *resolve_library_path_suffix(const ld_ctx_t *ctx, const char *name, 
         }
         free(cand);
     }
+    if (!include_default_dirs) {
+        return NULL;
+    }
     for (i = 0; i < sizeof(default_dirs) / sizeof(default_dirs[0]); ++i) {
         char *cand = path_join(default_dirs[i], leaf);
         if (cand != NULL && access(cand, R_OK) == 0) {
@@ -3962,6 +3966,14 @@ static char *resolve_library_path_suffix(const ld_ctx_t *ctx, const char *name, 
         free(cand);
     }
     return NULL;
+}
+
+static char *resolve_library_path_suffix(const ld_ctx_t *ctx, const char *name, const char *suffix) {
+    return resolve_library_path_suffix_ex(ctx, name, suffix, 1);
+}
+
+static char *resolve_library_path_suffix_explicit(const ld_ctx_t *ctx, const char *name, const char *suffix) {
+    return resolve_library_path_suffix_ex(ctx, name, suffix, 0);
 }
 
 static int load_path_input(const char *path, ld_ctx_t *ctx, objvec_t *objs, symstate_t *state,
@@ -4717,6 +4729,37 @@ static int unresolved_symbol_has_dso_provider(ld_ctx_t *ctx, const char *name, i
     if (ctx == NULL || name == NULL || name[0] == '\0' || ctx->dso_inputs.count == 0) {
         return 0;
     }
+    for (i = 0; i < ctx->dso_inputs.count; ++i) {
+        elfobj_t *obj = NULL;
+        const elf_symbol_t *sym;
+        uint8_t bind;
+        uint8_t vis;
+        uint16_t shndx;
+
+        if (elf_open(ctx->dso_inputs.items[i], &obj) != ELF_OK) {
+            continue;
+        }
+        maybe_autoswitch_mode(ctx, obj, 0, ctx->dso_inputs.items[i]);
+        if (!obj_matches_mode(obj, ctx->mode) || elf_type(obj) != ET_DYN) {
+            elf_close(obj);
+            continue;
+        }
+        sym = elf_find_symbol(obj, name);
+        if (sym != NULL) {
+            bind = elf_symbol_bind(sym);
+            vis = elf_symbol_visibility(sym);
+            shndx = elf_symbol_shndx(sym);
+            if ((bind == STB_GLOBAL || bind == STB_WEAK) &&
+                (vis == STV_DEFAULT || vis == STV_PROTECTED) &&
+                shndx != SHN_UNDEF) {
+                *out_has_provider = 1;
+                elf_close(obj);
+                return 0;
+            }
+        }
+        elf_close(obj);
+    }
+
     memset(&probe, 0, sizeof(probe));
     if (symset_add(&probe.unresolved, name) != 0) {
         symstate_free(&probe);
@@ -5498,6 +5541,7 @@ static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports)
             const elf_symbol_t *sym;
             dyn_import_t *imp;
             uint32_t type;
+            int plt_ref;
 
             if (rel == NULL) {
                 continue;
@@ -5507,7 +5551,12 @@ static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports)
                 continue;
             }
             type = elf_reloc_type(rel);
-            if (!reloc_is_x64_plt_ref(type) && !reloc_is_x64_got_ref(type) &&
+            plt_ref = reloc_is_x64_plt_ref(type);
+            if (!plt_ref && type == R_X86_64_PC32 &&
+                (elf_symbol_type(sym) == STT_FUNC || elf_symbol_type(sym) == STT_NOTYPE)) {
+                plt_ref = 1;
+            }
+            if (!plt_ref && !reloc_is_x64_got_ref(type) &&
                 !reloc_is_x64_tls_gd_ref(type) && !reloc_is_x64_tls_ie_ref(type)) {
                 continue;
             }
@@ -5515,7 +5564,7 @@ static int collect_dynamic_imports_x64(elfobj_t *out, dyn_import_vec_t *imports)
             if (imp == NULL) {
                 return -1;
             }
-            if (reloc_is_x64_plt_ref(type)) {
+            if (plt_ref) {
                 imp->need_plt = 1;
             }
             if (reloc_is_x64_got_ref(type)) {
@@ -7145,6 +7194,7 @@ static int load_library_script(const char *script_path, ld_ctx_t *ctx, objvec_t 
 static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *objs, symstate_t *state) {
     char *path_so = NULL;
     char *path_a = NULL;
+    char *path_a_explicit = NULL;
     int shared_matches = 0;
     int have_shared_match = 0;
     int handled = 0;
@@ -7163,7 +7213,19 @@ static int load_library_input(ld_ctx_t *ctx, const ld_input_t *in, objvec_t *obj
         return 0;
     }
 
-    path_so = resolve_library_path_suffix(ctx, in->text, ".so");
+    path_so = resolve_library_path_suffix_explicit(ctx, in->text, ".so");
+    if (path_so == NULL) {
+        path_a_explicit = resolve_library_path_suffix_explicit(ctx, in->text, ".a");
+        if (path_a_explicit != NULL) {
+            if (load_path_input(path_a_explicit, ctx, objs, state, in->whole_archive, 0) != 0) {
+                free(path_a_explicit);
+                return -1;
+            }
+            free(path_a_explicit);
+            return 0;
+        }
+        path_so = resolve_library_path_suffix(ctx, in->text, ".so");
+    }
     if (path_so != NULL &&
         load_library_script(path_so, ctx, objs, state, in->whole_archive, in->as_needed, &handled) == 0 &&
         handled) {
@@ -8073,7 +8135,12 @@ static int resolve_symbol_addr_for_reloc(elfobj_t *obj, const ld_ctx_t *ctx, con
         return resolve_symbol_addr(obj, sym, allow_undef, out_addr, undef_name);
     }
     if (ctx != NULL && ctx->mode == 64) {
-        if (reloc_is_x64_plt_ref(type) && imp->need_plt) {
+        int plt_ref = reloc_is_x64_plt_ref(type);
+        if (!plt_ref && type == R_X86_64_PC32 &&
+            (elf_symbol_type(sym) == STT_FUNC || elf_symbol_type(sym) == STT_NOTYPE)) {
+            plt_ref = 1;
+        }
+        if (plt_ref && imp->need_plt) {
             sec = elf_find_section(obj, ".plt");
             if (sec == NULL) {
                 return -1;
@@ -9133,7 +9200,7 @@ static int check_undefined_symbols(elfobj_t *obj, const ld_ctx_t *ctx, int allow
                 if (strcmp(name, "_GLOBAL_OFFSET_TABLE_") == 0) {
                     continue;
                 }
-                if (find_planned_import(ctx, name) != NULL) {
+                {
                     int has_provider = 0;
                     if (unresolved_symbol_has_dso_provider((ld_ctx_t *)ctx, name, &has_provider) != 0) {
                         fprintf(stderr, "ld: failed while validating unresolved symbol providers\n");
@@ -9272,9 +9339,15 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
                 return -1;
             }
             if (machine == EM_X86_64 &&
-                (type == R_X86_64_GOTPCRELX || type == R_X86_64_REX_GOTPCRELX) &&
+                (type == R_X86_64_GOTPCREL || type == R_X86_64_GOTPCRELX || type == R_X86_64_REX_GOTPCRELX) &&
+                sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF &&
                 off >= 2 && buf[off - 2] == 0x8b) {
-                /* Relax MOV r64, [rip+disp32] GOT load into LEA r64, [rip+disp32]. */
+                /*
+                 * Relax MOV r64, [rip+disp32] GOT load into LEA r64, [rip+disp32]
+                 * only for non-preemptible symbols. This is required for code that
+                 * materializes addresses via @GOTPCREL and then dereferences once.
+                 * Undefined/imported symbols must keep GOT-indirect load semantics.
+                 */
                 buf[off - 2] = 0x8d;
             }
             if (trace_reloc_env) {

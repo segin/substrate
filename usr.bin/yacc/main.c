@@ -37,7 +37,6 @@ int union_defined = 0;
 
 short plhs[MAXPROD];
 short ritem[MAXPROD * 4];
-short rlhs[MAXPROD]; /* symbol index for LHS of rule i */
 short rrhs[MAXPROD]; /* index in ritem for RHS of rule i */
 
 int lineno = 1;
