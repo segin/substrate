@@ -38,6 +38,14 @@ int main(void) {
     if (elf_section_set_type(data, SHT_PROGBITS) != ELF_OK) fail("set type");
     if (elf_section_set_flags(data, SHF_ALLOC) != ELF_OK) fail("set flags");
     if (elf_section_set_group(text, 1, 1) != ELF_OK) fail("set group");
+
+    /* test elf_section_set_align coverage */
+    if (elf_section_set_align(NULL, 16) != ELF_ERR_STATE) fail("set align NULL");
+    if (elf_section_set_align(text, 0) != ELF_OK) fail("set align 0");
+    if (elf_section_align(text) != 1) fail("align 0 did not result in align 1");
+    if (elf_section_set_align(text, 16) != ELF_OK) fail("set align 16");
+    if (elf_section_align(text) != 16) fail("align 16 did not result in align 16");
+
     if (elf_section_set_merge(data, 1, 1) != ELF_OK) fail("set merge");
     if (elf_section_set_tls(tdata, 1) != ELF_OK) fail("set tls");
     if (elf_section_set_note_info(note, 7, "TESTNOTE") != ELF_OK) fail("set note");
@@ -60,6 +68,10 @@ int main(void) {
 
     if (elf_validate(obj, &diag) != ELF_OK) fail(diag ? diag : "validate");
     free(diag);
+
+    if (elf_finalize(obj) != ELF_OK) fail("finalize");
+    if (elf_section_set_align(text, 32) != ELF_ERR_STATE) fail("set align on immutable object");
+
     elf_close(obj);
     return 0;
 }
