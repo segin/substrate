@@ -283,6 +283,9 @@ void vm_pager_put_pages(void *obj, void **m, int count, bool sync) { (void)obj; 
 // vm_phys stubs
 void vm_phys_get_free(uint64_t *free) { *free = 0; }
 void vm_phys_get_used(uint64_t *used) { *used = 0; }
+uintptr_t vm_phys_alloc_page(void) { return (uintptr_t)malloc(4096); }
+void vm_phys_free_page(uintptr_t pa) { free((void*)pa); }
+void swapper_request_work(void) {}
 void sched_get_system_load(uint32_t *loads) { loads[0]=0; loads[1]=0; loads[2]=0; }
 
 // Fix cast:
