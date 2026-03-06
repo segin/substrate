@@ -212,6 +212,30 @@ static void test_mark_used_single_page_reservation(void) {
     TEST_PASS("mark_used_single_page_reservation");
 }
 
+/* Property: free_count + used_count stays constant */
+static void test_free_used_invariant(void) {
+    size_t free0 = vm_phys_get_free();
+    size_t used0 = vm_phys_get_used();
+    size_t total0 = free0 + used0;
+
+    vm_page_t *a = vm_phys_alloc_page();
+    vm_page_t *b = vm_phys_alloc_page();
+    TEST_ASSERT(a != NULL && b != NULL, "invariant: allocations failed");
+
+    size_t free1 = vm_phys_get_free();
+    size_t used1 = vm_phys_get_used();
+    TEST_ASSERT(free1 + used1 == total0, "invariant: total changed after alloc");
+
+    vm_phys_free_page(a);
+    vm_phys_free_page(b);
+
+    size_t free2 = vm_phys_get_free();
+    size_t used2 = vm_phys_get_used();
+    TEST_ASSERT(free2 + used2 == total0, "invariant: total changed after free");
+
+    TEST_PASS("free_used_invariant");
+}
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");
@@ -227,6 +251,7 @@ void test_vm_phys(void) {
     test_contiguous_zero_count();
     test_free_count_tracking();
     test_mark_used_single_page_reservation();
+    test_free_used_invariant();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);

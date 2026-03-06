@@ -27,6 +27,8 @@ extern void test_mmap_parsing(void);
 extern void test_e820_parsing(void);
 extern void test_vm_phys(void);
 extern void test_vm_page_queue(void);
+extern void test_pmm_watermark(void);
+extern void test_pmm_buddy(void);
 extern void test_vm_page_queue(void);
 extern void run_minix_mount_tests(void);
 extern void run_minix_write_tests(void);
@@ -122,6 +124,14 @@ void run_kernel_tests(void) {
 
     if (all || strcmp(test_arg, "vm_phys") == 0) {
         test_vm_phys();
+    }
+
+    if (all || strcmp(test_arg, "pmm_watermark") == 0) {
+        test_pmm_watermark();
+    }
+
+    if (all || strcmp(test_arg, "pmm_buddy") == 0) {
+        test_pmm_buddy();
     }
 
     if (all || strcmp(test_arg, "vm_page_queue") == 0) {
@@ -418,4 +428,3 @@ void run_kernel_tests(void) {
         for (;;) __asm__ volatile("hlt");
     }
 }
-
