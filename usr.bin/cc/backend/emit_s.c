@@ -1521,6 +1521,10 @@ static int slot_live_order_cmp(const void *ap, const void *bp) {
     return 0;
 }
 
+static int ssa_is_terminator_op(cc_ssa_opcode_t op) {
+    return op == CC_SSA_BR || op == CC_SSA_BR_COND || op == CC_SSA_TRAP || op == CC_SSA_RET;
+}
+
 static void emit_frame_load_reg(FILE *fp, int is_64bit, long off, const char *reg) {
     if (is_64bit) {
         fprintf(fp, "\tmovq %ld(%%rbp), %s\n", off, reg);
@@ -2315,15 +2319,19 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
     int nvals;
     int *first_def;
     int *last_use;
+    int *block_of_instr;
+    int *local_slot;
+    unsigned char *value_local;
     int *active_values;
     int *free_slots;
     slot_live_order_t *order;
     int active_count;
     int free_count;
     int next_slot;
+    int max_local_slots;
     int raw_frame;
     size_t j;
-    const char *disable_reuse;
+    const char *unsafe_reuse;
 
     memset(out, 0, sizeof(*out));
     out->slot_size = slot_size;
@@ -2338,14 +2346,21 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
     out->stackalloc_off = (int *)calloc((size_t)nvals, sizeof(*out->stackalloc_off));
     first_def = (int *)malloc((size_t)nvals * sizeof(*first_def));
     last_use = (int *)malloc((size_t)nvals * sizeof(*last_use));
+    block_of_instr = (int *)malloc((size_t)(f->instr_count > 0 ? f->instr_count : 1) * sizeof(*block_of_instr));
+    local_slot = (int *)malloc((size_t)nvals * sizeof(*local_slot));
+    value_local = (unsigned char *)calloc((size_t)nvals, sizeof(*value_local));
     active_values = (int *)malloc((size_t)nvals * sizeof(*active_values));
     free_slots = (int *)malloc((size_t)nvals * sizeof(*free_slots));
     order = (slot_live_order_t *)malloc((size_t)nvals * sizeof(*order));
     if (out->slot_of == NULL || out->stackalloc_off == NULL || first_def == NULL || last_use == NULL ||
-        active_values == NULL || free_slots == NULL || order == NULL) {
+        block_of_instr == NULL || local_slot == NULL || value_local == NULL || active_values == NULL ||
+        free_slots == NULL || order == NULL) {
         set_diag(diag, "out of memory building stack slot layout");
         free(first_def);
         free(last_use);
+        free(block_of_instr);
+        free(local_slot);
+        free(value_local);
         free(active_values);
         free(free_slots);
         free(order);
@@ -2356,16 +2371,7 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
         out->slot_of[i] = 0;
         first_def[i] = -1;
         last_use[i] = -1;
-    }
-
-    disable_reuse = getenv("CC_DEBUG_DISABLE_SLOT_REUSE");
-    if (disable_reuse != NULL && disable_reuse[0] != '\0') {
-        for (i = 0; i < nvals; ++i) {
-            out->slot_of[i] = i;
-        }
-        out->slot_count = nvals;
-        raw_frame = out->slot_count * slot_size;
-        goto stackalloc_layout;
+        local_slot[i] = -1;
     }
 
     for (j = 0; j < f->instr_count; ++j) {
@@ -2405,6 +2411,118 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
                 last_use[v] = (int)j;
             }
         }
+    }
+
+    /*
+     * Default behavior: safe slot reuse restricted to values whose full
+     * lifetime is contained in a single basic block. This avoids CFG aliasing
+     * hazards while preventing pathological stack growth in temp-heavy code.
+     *
+     * Set CC_DEBUG_ENABLE_UNSAFE_SLOT_REUSE to enable old cross-block
+     * interval coloring for debugging.
+     */
+    unsafe_reuse = getenv("CC_DEBUG_ENABLE_UNSAFE_SLOT_REUSE");
+    if (unsafe_reuse == NULL || unsafe_reuse[0] == '\0') {
+        int cur_block = 0;
+        int block_count = 0;
+        int block_id;
+
+        for (j = 0; j < f->instr_count; ++j) {
+            const cc_ssa_instr_t *in = &f->instrs[j];
+            if (j > 0 && in->op == CC_SSA_LABEL) {
+                cur_block++;
+            }
+            block_of_instr[j] = cur_block;
+            if (ssa_is_terminator_op(in->op) && j + 1 < f->instr_count) {
+                cur_block++;
+            }
+        }
+        block_count = f->instr_count > 0 ? (cur_block + 1) : 1;
+
+        for (i = 0; i < nvals; ++i) {
+            if (first_def[i] < 0) {
+                value_local[i] = 0;
+                continue;
+            }
+            if (last_use[i] < first_def[i]) {
+                last_use[i] = first_def[i];
+            }
+            if (f->instr_count > 0 && block_of_instr[first_def[i]] == block_of_instr[last_use[i]]) {
+                value_local[i] = 1;
+            } else {
+                value_local[i] = 0;
+            }
+        }
+
+        next_slot = 0;
+        for (i = 0; i < nvals; ++i) {
+            if (!value_local[i]) {
+                out->slot_of[i] = next_slot++;
+            }
+        }
+
+        max_local_slots = 0;
+        for (block_id = 0; block_id < block_count; ++block_id) {
+            int local_count = 0;
+            int local_next = 0;
+
+            for (i = 0; i < nvals; ++i) {
+                if (!value_local[i] || first_def[i] < 0) {
+                    continue;
+                }
+                if (block_of_instr[first_def[i]] != block_id) {
+                    continue;
+                }
+                order[local_count].value = i;
+                order[local_count].first_def = first_def[i];
+                local_count++;
+            }
+            if (local_count == 0) {
+                continue;
+            }
+
+            qsort(order, (size_t)local_count, sizeof(*order), slot_live_order_cmp);
+            active_count = 0;
+            free_count = 0;
+            for (i = 0; i < local_count; ++i) {
+                int v = order[i].value;
+                int start = first_def[v];
+                int slot;
+                int k = 0;
+
+                while (k < active_count) {
+                    int av = active_values[k];
+                    if (last_use[av] < start) {
+                        free_slots[free_count++] = local_slot[av];
+                        active_values[k] = active_values[active_count - 1];
+                        active_count--;
+                        continue;
+                    }
+                    k++;
+                }
+
+                if (free_count > 0) {
+                    slot = free_slots[free_count - 1];
+                    free_count--;
+                } else {
+                    slot = local_next++;
+                }
+                local_slot[v] = slot;
+                active_values[active_count++] = v;
+            }
+            if (local_next > max_local_slots) {
+                max_local_slots = local_next;
+            }
+        }
+
+        for (i = 0; i < nvals; ++i) {
+            if (value_local[i] && local_slot[i] >= 0) {
+                out->slot_of[i] = next_slot + local_slot[i];
+            }
+        }
+        out->slot_count = next_slot + max_local_slots;
+        raw_frame = out->slot_count * slot_size;
+        goto stackalloc_layout;
     }
 
     for (i = 0; i < nvals; ++i) {
@@ -2454,6 +2572,9 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
 stackalloc_layout:
     free(first_def);
     free(last_use);
+    free(block_of_instr);
+    free(local_slot);
+    free(value_local);
     free(active_values);
     free(free_slots);
     free(order);
@@ -2476,9 +2597,9 @@ stackalloc_layout:
     return 0;
 }
 
-static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index) {
+static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, size_t gpr_start) {
     abi_loc_t loc;
-    size_t gpr = 0;
+    size_t gpr = gpr_start;
     size_t xmm = 0;
     size_t stack = 0;
     int i;
@@ -2552,9 +2673,9 @@ static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_in
     *out_xmm_regs = xmm;
 }
 
-static void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_t *out_gpr, size_t *out_xmm,
+static void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_t gpr_start, size_t *out_gpr, size_t *out_xmm,
                               size_t *out_stack) {
-    size_t gpr = 0;
+    size_t gpr = gpr_start;
     size_t xmm = 0;
     size_t stack = 0;
     int i;
@@ -2565,7 +2686,7 @@ static void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_
         fixed_count = (int)f->param_count;
     }
     for (i = 0; i < fixed_count; ++i) {
-        abi_loc_t loc = abi64_param_loc(f, i);
+        abi_loc_t loc = abi64_param_loc(f, i, gpr_start);
         if (loc.kind == ABI_LOC_GPR) {
             gpr++;
         } else if (loc.kind == ABI_LOC_XMM) {
@@ -2660,7 +2781,7 @@ static void emit_x86_64_fround32(FILE *fp, const slot_layout_t *lay, const cc_ss
 }
 
 static void emit_x86_64_va_start(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
-                                 const cc_ssa_instr_t *in, int va_state_off, int va_regsave_off) {
+                                 const cc_ssa_instr_t *in, int va_state_off, int va_regsave_off, int gpr_bias) {
     size_t gpr_used = 0;
     size_t xmm_used = 0;
     size_t stack_used = 0;
@@ -2671,7 +2792,7 @@ static void emit_x86_64_va_start(FILE *fp, const cc_ssa_function_t *f, const slo
     int_regs_flush(fp, f, lay, ist);
     rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
     if (f->is_variadic) {
-        abi64_fixed_usage(f, (int)in->imm, &gpr_used, &xmm_used, &stack_used);
+        abi64_fixed_usage(f, (int)in->imm, (size_t)(gpr_bias > 0 ? gpr_bias : 0), &gpr_used, &xmm_used, &stack_used);
         gp_offset = (long)(gpr_used * 8);
         fp_offset = 48 + (long)(xmm_used * 16);
         overflow_off = 16 + (long)(stack_used * 8);
@@ -3005,6 +3126,54 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     return 0;
 }
 
+static long x86_64_function_sret_size(const cc_ssa_function_t *f) {
+    size_t i;
+    long max_size = 0;
+
+    if (f == NULL) {
+        return 0;
+    }
+    for (i = 0; i < f->instr_count; ++i) {
+        const cc_ssa_instr_t *in = &f->instrs[i];
+        if (in->op != CC_SSA_RET || in->imm <= 16) {
+            continue;
+        }
+        if (in->imm > max_size) {
+            max_size = in->imm;
+        }
+    }
+    return max_size;
+}
+
+static long x86_64_infer_sret_size_from_calls(const cc_ssa_module_t *m, const cc_ssa_function_t *callee) {
+    size_t i;
+    long max_size = 0;
+
+    if (m == NULL || callee == NULL || callee->name == NULL) {
+        return 0;
+    }
+    for (i = 0; i < m->func_count; ++i) {
+        const cc_ssa_function_t *f = &m->funcs[i];
+        size_t j;
+        for (j = 0; j < f->instr_count; ++j) {
+            const cc_ssa_instr_t *in = &f->instrs[j];
+            if (in->op != CC_SSA_CALL) {
+                continue;
+            }
+            if (in->sym == NULL || strcmp(in->sym, callee->name) != 0) {
+                continue;
+            }
+            if (in->rhs < 0 || in->dst < 0 || in->rhs != in->dst || in->imm <= 16) {
+                continue;
+            }
+            if (in->imm > max_size) {
+                max_size = in->imm;
+            }
+        }
+    }
+    return max_size;
+}
+
 static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit_debug, int pic,
                        cc_diag_t *diag) {
     size_t i;
@@ -3019,6 +3188,17 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         int raw_frame;
         int va_state_off = 0;
         int va_regsave_off = 0;
+        long sret_mem_size = x86_64_function_sret_size(f);
+        long inferred_sret_size = x86_64_infer_sret_size_from_calls(m, f);
+        int has_sret = sret_mem_size > 16 ? 1 : 0;
+        int sret_ptr_off = 0;
+        int param_gpr_bias = has_sret ? 1 : 0;
+
+        if (inferred_sret_size > sret_mem_size) {
+            sret_mem_size = inferred_sret_size;
+        }
+        has_sret = sret_mem_size > 16 ? 1 : 0;
+        param_gpr_bias = has_sret ? 1 : 0;
 
         if (build_slot_layout(f, 8, &lay, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
@@ -3027,6 +3207,10 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
             return -1;
         }
         raw_frame = lay.frame_bytes;
+        if (has_sret) {
+            sret_ptr_off = -(raw_frame + 8);
+            raw_frame += 8;
+        }
         if (f->is_variadic) {
             va_state_off = -(raw_frame + 24);
             raw_frame += 24;
@@ -3075,6 +3259,9 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         if (frame > 0) {
             fprintf(fp, "\tsubq $%d, %%rsp\n", frame);
         }
+        if (has_sret) {
+            fprintf(fp, "\tmovq %%rdi, %d(%%rbp)\n", sret_ptr_off);
+        }
         if (f->is_variadic) {
             fprintf(fp, "\tmovq %%rdi, %d(%%rbp)\n", va_regsave_off + 0);
             fprintf(fp, "\tmovq %%rsi, %d(%%rbp)\n", va_regsave_off + 8);
@@ -3106,7 +3293,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
 
             switch (in->op) {
             case CC_SSA_PARAM: {
-                abi_loc_t loc = abi64_param_loc(f, in->param_index);
+                abi_loc_t loc = abi64_param_loc(f, in->param_index, (size_t)param_gpr_bias);
                 cc_value_type_t vt = f->value_types[in->dst];
                 long pbytes = in->imm > 0 ? in->imm : 8;
                 if (loc.kind == ABI_LOC_XMM) {
@@ -3504,7 +3691,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
 
             case CC_SSA_VA_START: {
-                emit_x86_64_va_start(fp, f, &lay, &ist, in, va_state_off, va_regsave_off);
+                emit_x86_64_va_start(fp, f, &lay, &ist, in, va_state_off, va_regsave_off, param_gpr_bias);
                 break;
             }
 
@@ -3541,7 +3728,20 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                 break;
 
             case CC_SSA_RET:
-                if (in->lhs >= 0) {
+                if (has_sret) {
+                    long copy_bytes = in->imm > 0 ? in->imm : sret_mem_size;
+                    if (copy_bytes <= 0) {
+                        copy_bytes = sret_mem_size;
+                    }
+                    int_regs_flush(fp, f, &lay, &ist);
+                    if (in->lhs >= 0) {
+                        emit_x86_64_load_int_value_to_reg(fp, f, &lay, in->lhs, "%rsi");
+                        fprintf(fp, "\tmovq %d(%%rbp), %%rdi\n", sret_ptr_off);
+                        fprintf(fp, "\tmovq $%ld, %%rdx\n", copy_bytes);
+                        fprintf(fp, "\tcall memcpy\n");
+                    }
+                    fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", sret_ptr_off);
+                } else if (in->lhs >= 0) {
                     if (in->imm > 0 && in->imm <= 16) {
                         int_regs_flush(fp, f, &lay, &ist);
                         fprintf(fp, "\tmovq %d(%%rbp), %%rax\n", slot_off(&lay, in->lhs));
