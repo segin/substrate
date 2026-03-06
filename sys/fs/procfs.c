@@ -13,6 +13,8 @@
 #include <kern/cmdline.h>
 #include <exec/perso/personality.h>
 #include <arch/i386/pmap.h>
+#include <sys/session.h>
+#include <sys/tty.h>
 #include <string.h>
 #include <stdio.h>
 #include <stddef.h>
@@ -455,6 +457,90 @@ static size_t proc_pid_status_read(fs_node_t *node, off_t offset, size_t size, u
     return read_len;
 }
 
+static char proc_linux_state(process_t *proc) {
+    if (!proc) return 'R';
+    switch (proc->state) {
+        case SRUN:   return 'R';
+        case SSLEEP: return 'S';
+        case SSTOP:  return 'T';
+        case SZOMB:  return 'Z';
+        case SDYING: return 'X';
+        default:     return 'R';
+    }
+}
+
+static int proc_generate_stat(char *b, size_t s, process_t *proc) {
+    char comm_safe[AC_COMM_LEN + 1];
+    strncpy(comm_safe, proc->comm, AC_COMM_LEN);
+    comm_safe[AC_COMM_LEN] = '\0';
+
+    for (int i = 0; comm_safe[i] != '\0'; i++) {
+        unsigned char c = (unsigned char)comm_safe[i];
+        if (c < 32 || c > 126 || c == ')' || c == '(') {
+            comm_safe[i] = '_';
+        }
+    }
+
+    int ppid = proc->ppid;
+    int pgrp = proc->p_pgrp ? proc->p_pgrp->pg_id : proc->pid;
+    int session = (proc->p_pgrp && proc->p_pgrp->pg_session)
+                      ? proc->p_pgrp->pg_session->s_sid
+                      : pgrp;
+    int tty_nr = 0;
+    int tpgid = (proc->tty) ? proc->tty->pgrp : -1;
+
+    /*
+     * Linux-style /proc/<pid>/stat requires a long, fixed-order field list.
+     * Userland parsers (e.g. BusyBox ps) often skip deep into the tail fields.
+     * Provide a full-shaped record with conservative defaults for unsupported
+     * accounting values so field-skipping never runs past end-of-string.
+     */
+    return snprintf(b, s,
+        "%d (%s) %c %d %d %d %d %d "
+        "0 0 0 0 0 "                   /* flags..cmajflt */
+        "%u %u 0 0 20 0 1 0 %u 0 0 "   /* utime..rss */
+        "0 0 0 0 0 0 0 0 0 0 "         /* rsslim..cnswap */
+        "0 0 0 0 0 0 0 0 0 0 "         /* exit_signal..arg_end */
+        "0 0 0 0 0 0 0 0 0 0 "         /* env_start..exit_code */
+        "0 0 0 0 0 0 0 0 0 0\n",       /* extra tail padding */
+        proc->pid, comm_safe, proc_linux_state(proc), ppid, pgrp, session, tty_nr, tpgid,
+        proc->utime, proc->stime, proc->start_time);
+}
+
+static size_t proc_pid_stat_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    int pid = node->inode;
+    process_t *p = proc_find(pid);
+    if (!p) return 0;
+
+    char tmp[512];
+    int len = proc_generate_stat(tmp, sizeof(tmp), p);
+    if (len < 0) return 0;
+
+    char *source_buf = tmp;
+    char *alloc_buf = NULL;
+    if (len >= (int)sizeof(tmp)) {
+        size_t alloc_size = (size_t)len + 1;
+        alloc_buf = kmalloc(alloc_size);
+        if (alloc_buf) {
+            len = proc_generate_stat(alloc_buf, alloc_size, p);
+            source_buf = alloc_buf;
+        } else {
+            len = (int)sizeof(tmp) - 1;
+        }
+    }
+
+    if ((size_t)offset >= (size_t)len) return 0;
+    size_t read_len = size;
+    if ((size_t)offset + read_len > (size_t)len) {
+        read_len = (size_t)len - (size_t)offset;
+    }
+    memcpy(buffer, source_buf + offset, read_len);
+    if (alloc_buf) {
+        kfree(alloc_buf, (size_t)len + 1);
+    }
+    return read_len;
+}
+
 static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     int pid = node->inode;
     process_t *p = proc_find(pid);
@@ -470,8 +556,8 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
 
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {
     (void)node;
-    const char *entries[] = { ".", "..", "status", "cmdline", NULL };
-    if (index >= 4) return NULL;
+    const char *entries[] = { ".", "..", "status", "cmdline", "stat", NULL };
+    if (index >= 5) return NULL;
     strncpy(proc_dirent.d_name, entries[index], sizeof(proc_dirent.d_name) - 1);
     proc_dirent.d_name[sizeof(proc_dirent.d_name) - 1] = '\0';
     proc_dirent.d_ino = node->inode;
@@ -502,6 +588,17 @@ static fs_node_t *proc_pid_finddir(fs_node_t *node, char *name) {
         strncpy(pid_file->name, "cmdline", sizeof(pid_file->name) - 1);
         pid_file->name[sizeof(pid_file->name) - 1] = '\0';
         pid_file->read = &proc_pid_cmdline_read;
+        return pid_file;
+    }
+    if (strcmp(name, "stat") == 0) {
+        fs_node_t *pid_file = procfs_get_node();
+        if (!pid_file) return NULL;
+        pid_file->inode = node->inode;
+        pid_file->flags = FS_FILE;
+        pid_file->mask = 0444;
+        strncpy(pid_file->name, "stat", sizeof(pid_file->name) - 1);
+        pid_file->name[sizeof(pid_file->name) - 1] = '\0';
+        pid_file->read = &proc_pid_stat_read;
         return pid_file;
     }
     return NULL;
