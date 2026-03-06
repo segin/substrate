@@ -32,6 +32,8 @@ static uint8_t pmm_bitmap_static[4096];
 #define PMM_MAX_MODULE_REGIONS 8
 #define PMM_MAX_BOOT_REGIONS 16
 #define PMM_PHYS_VIRT_BASE 0xC0000000U
+#define PMM_BOOTSTRAP_LOWMEM_LIMIT (15U * 1024U * 1024U)
+#define PMM_CONSTRAINED_RAM_LIMIT (4U * 1024U * 1024U)
 
 typedef struct pmm_region {
     phys_addr_t start;
@@ -71,6 +73,8 @@ typedef struct pmm_usable_range {
 
 static pmm_usable_range_t pmm_usable_ranges[PMM_MAX_USABLE_RANGES];
 static int pmm_usable_range_count = 0;
+static int pmm_bootstrap_lowmem_only = 1;
+static int pmm_highmem_seeded = 0;
 
 typedef struct multiboot_module {
     uint32_t mod_start;
@@ -107,6 +111,12 @@ static uint32_t pmm_virt_to_phys(uint32_t addr) {
     }
     return addr;
 }
+
+static void pmm_select_metadata(uint64_t max_phys, uint64_t total_usable,
+                                uint8_t **out_bitmap,
+                                size_t *out_bitmap_bytes,
+                                vm_page_t **out_page_array,
+                                size_t *out_total_blocks);
 
 static void pmm_mark_used_range(phys_addr_t start, phys_addr_t end) {
     uint32_t page_start = start & ~(PMM_BLOCK_SIZE - 1);
@@ -187,6 +197,12 @@ static void pmm_record_multiboot_string(uint32_t phys_addr) {
         return;
     }
 
+    phys_addr = pmm_virt_to_phys(phys_addr);
+    if (phys_addr >= PMM_BOOTSTRAP_LOWMEM_LIMIT) {
+        pmm_record_boot_region(phys_addr, phys_addr + PMM_BLOCK_SIZE);
+        return;
+    }
+
     const char *s = (const char *)(uintptr_t)(phys_addr + PMM_PHYS_VIRT_BASE);
     size_t len = strnlen(s, 4096);
     pmm_record_boot_region(phys_addr, phys_addr + (uint32_t)len + 1);
@@ -201,6 +217,9 @@ static void pmm_record_module_regions(uint32_t mods_addr, uint32_t mods_count) {
     if (!mods_addr || mods_count == 0) return;
 
     uint32_t mods_addr_phys = pmm_virt_to_phys(mods_addr);
+    if (mods_addr_phys >= PMM_BOOTSTRAP_LOWMEM_LIMIT) {
+        return;
+    }
     uint32_t mods_addr_virt = mods_addr_phys + PMM_PHYS_VIRT_BASE;
 
     /* Limit to our array size */
@@ -379,24 +398,96 @@ static uint32_t watermark_ptr;
 static uint32_t watermark_end;
 
 void pmm_watermark_init(uint32_t start, uint32_t end) {
+    uint32_t clamped_end = end;
+    if (clamped_end > PMM_BOOTSTRAP_LOWMEM_LIMIT) {
+        clamped_end = PMM_BOOTSTRAP_LOWMEM_LIMIT;
+    }
+
     watermark_base = (start + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
     watermark_ptr = watermark_base;
-    watermark_end = end;
+    watermark_end = clamped_end & ~(PMM_BLOCK_SIZE - 1);
+    if (watermark_end < watermark_base) {
+        watermark_end = watermark_base;
+    }
 }
 
 void* pmm_watermark_alloc(size_t bytes, size_t align) {
+    if (bytes == 0) {
+        return (void *)(uintptr_t)(watermark_ptr + PMM_PHYS_VIRT_BASE);
+    }
+
     if (align == 0) align = 16;
-    watermark_ptr = (watermark_ptr + align - 1) & ~(align - 1);
-    
-    if (watermark_ptr + bytes > watermark_end) return NULL;
-    uint32_t result = watermark_ptr;
-    watermark_ptr += bytes;
-    return (void*)(uintptr_t)(result + 0xC0000000);
+    if ((align & (align - 1)) != 0) {
+        align = PMM_BLOCK_SIZE;
+    }
+
+    uint32_t aligned_ptr = (watermark_ptr + (uint32_t)align - 1U) & ~((uint32_t)align - 1U);
+    if (aligned_ptr < watermark_ptr) {
+        return NULL;
+    }
+
+    uint32_t alloc_bytes = (uint32_t)bytes;
+    uint32_t new_ptr = aligned_ptr + alloc_bytes;
+    if (new_ptr < aligned_ptr || new_ptr > watermark_end) {
+        return NULL;
+    }
+
+    watermark_ptr = new_ptr;
+    return (void *)(uintptr_t)(aligned_ptr + PMM_PHYS_VIRT_BASE);
 }
 
 uint32_t pmm_watermark_used(void) {
     return watermark_ptr - watermark_base;
 } 
+
+static void pmm_select_metadata(uint64_t max_phys, uint64_t total_usable,
+                                uint8_t **out_bitmap,
+                                size_t *out_bitmap_bytes,
+                                vm_page_t **out_page_array,
+                                size_t *out_total_blocks) {
+    uint32_t max_phys_addr = (uint32_t)max_phys;
+    if (max_phys_addr & (PMM_BLOCK_SIZE - 1)) {
+        max_phys_addr = (max_phys_addr + PMM_BLOCK_SIZE) & ~(PMM_BLOCK_SIZE - 1);
+    }
+    if (max_phys_addr < PMM_BLOCK_SIZE) {
+        max_phys_addr = PMM_BLOCK_SIZE;
+    }
+
+    if (max_phys_addr < PMM_CONSTRAINED_RAM_LIMIT || total_usable < PMM_CONSTRAINED_RAM_LIMIT) {
+        kprint("PMM: constrained RAM (<4MB), using static bitmap metadata.\n");
+        *out_bitmap = pmm_bitmap_static;
+        *out_bitmap_bytes = sizeof(pmm_bitmap_static);
+        *out_total_blocks = (*out_bitmap_bytes) * 8;
+        *out_page_array = NULL;
+        return;
+    }
+
+    size_t total_blocks = max_phys_addr / PMM_BLOCK_SIZE;
+    size_t bitmap_bytes = (total_blocks + 7) / 8;
+    size_t array_bytes = total_blocks * sizeof(vm_page_t);
+    uint32_t saved_ptr = watermark_ptr;
+
+    uint8_t *bitmap = (uint8_t *)pmm_watermark_alloc(bitmap_bytes, 16);
+    vm_page_t *page_array = NULL;
+    if (bitmap) {
+        page_array = (vm_page_t *)pmm_watermark_alloc(array_bytes, PMM_BLOCK_SIZE);
+    }
+
+    if (!bitmap || !page_array) {
+        watermark_ptr = saved_ptr;
+        kprint("PMM: Warn - metadata allocation exceeded bootstrap low memory, using static bitmap.\n");
+        *out_bitmap = pmm_bitmap_static;
+        *out_bitmap_bytes = sizeof(pmm_bitmap_static);
+        *out_total_blocks = (*out_bitmap_bytes) * 8;
+        *out_page_array = NULL;
+        return;
+    }
+
+    *out_bitmap = bitmap;
+    *out_bitmap_bytes = bitmap_bytes;
+    *out_total_blocks = total_blocks;
+    *out_page_array = page_array;
+}
 
 // ==================== wrappers for Legacy PMM API ====================
 
@@ -692,6 +783,10 @@ static void pmm_seed_usable_ranges(void) {
 static void pmm_cb_init_buddy(phys_addr_t start, phys_addr_t length, void *arg) {
     (void)arg;
     phys_addr_t end = start + length;
+
+    if (pmm_bootstrap_lowmem_only && end > PMM_BOOTSTRAP_LOWMEM_LIMIT) {
+        end = PMM_BOOTSTRAP_LOWMEM_LIMIT;
+    }
     
     /* Use proper kernel bounds from initialized globals */
     uint32_t k_phys_start = kernel_phys_start;
@@ -726,10 +821,34 @@ static void pmm_cb_init_buddy(phys_addr_t start, phys_addr_t length, void *arg) 
     }
 }
 
+void pmm_enable_highmem(void) {
+    if (pmm_highmem_seeded) {
+        return;
+    }
+
+    pmm_bootstrap_lowmem_only = 0;
+
+    for (int i = 0; i < pmm_usable_range_count; i++) {
+        phys_addr_t start = pmm_usable_ranges[i].start;
+        phys_addr_t end = pmm_usable_ranges[i].end;
+        if (start < PMM_BOOTSTRAP_LOWMEM_LIMIT) {
+            start = PMM_BOOTSTRAP_LOWMEM_LIMIT;
+        }
+        if (end > start) {
+            pmm_cb_init_buddy(start, end - start, NULL);
+        }
+    }
+
+    pmm_highmem_seeded = 1;
+    kprint("PMM: high memory ranges enabled after bootstrap paging.\n");
+}
+
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // 0. Initialize kernel bounds first (needed for all subsequent operations)
     pmm_init_kernel_bounds();
     pmm_reset_walk_state();
+    pmm_bootstrap_lowmem_only = 1;
+    pmm_highmem_seeded = 0;
 
     // 2. Pass 1: Find limits with 64-bit accumulation for >4GB systems
     struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0 };
@@ -743,27 +862,12 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // 3. Init Watermark
     pmm_watermark_init(kernel_phys_end, (uint32_t)stats.max_phys);
     
-    uint32_t max_phys_addr = (uint32_t)stats.max_phys;
-    if (max_phys_addr & (PMM_BLOCK_SIZE - 1)) {
-        max_phys_addr = (max_phys_addr + PMM_BLOCK_SIZE) & ~(PMM_BLOCK_SIZE - 1);
-    }
-    
-    size_t total_blocks = max_phys_addr / PMM_BLOCK_SIZE;
-    size_t bitmap_bytes = (total_blocks + 7) / 8;
-    
-    uint8_t* pmm_bitmap = (uint8_t*)pmm_watermark_alloc(bitmap_bytes, 16);
-    size_t array_bytes = total_blocks * sizeof(vm_page_t);
-    vm_page_t* pmm_page_array = (vm_page_t*)pmm_watermark_alloc(array_bytes, PMM_BLOCK_SIZE);
-    
-    if (!pmm_bitmap) {
-        // Fallback
-         kprint("PMM: Warn - using static bitmap.\n");
-         pmm_bitmap = pmm_bitmap_static;
-         bitmap_bytes = sizeof(pmm_bitmap_static);
-         total_blocks = bitmap_bytes * 8;
-         pmm_page_array = NULL; // No page array in fallback? Or alloc smaller?
-         // vm_phys handles NULL page array gracefully (lookup returns NULL)
-    }
+    size_t total_blocks = 0;
+    size_t bitmap_bytes = 0;
+    uint8_t* pmm_bitmap = NULL;
+    vm_page_t* pmm_page_array = NULL;
+    pmm_select_metadata(stats.max_phys, stats.total_usable,
+                        &pmm_bitmap, &bitmap_bytes, &pmm_page_array, &total_blocks);
 
     // 4. Init Generic PMM
     // We pass the "total_page_count" as total_blocks
@@ -773,11 +877,11 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm_report_memory_stats();
 
     if (mmap_addr == 0 || mmap_length == 0) {
-        kprint("PMM: Fallback 16MB.\n");
+        kprint("PMM: Fallback 15MB.\n");
         // Fallback init...
         // ... (Similar to before)
         uint32_t k_end = kernel_phys_end;
-        vm_phys_add_range(k_end, 16 * 1024 * 1024);
+        vm_phys_add_range(k_end, PMM_BOOTSTRAP_LOWMEM_LIMIT);
         pmm_reserve_kernel();
         return;
     }
@@ -1035,15 +1139,17 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     pmm_init_kernel_bounds();
     pmm_reset_walk_state();
     pmm_clear_boot_exclusions();
+    pmm_bootstrap_lowmem_only = 1;
+    pmm_highmem_seeded = 0;
     
     if (!map || count == 0) {
-        kprint("PMM: No e820 map provided, using fallback 16MB\n");
+        kprint("PMM: No e820 map provided, using fallback 15MB\n");
         uint32_t k_end = kernel_phys_end;
         
-        pmm_watermark_init(k_end, 16 * 1024 * 1024);
+        pmm_watermark_init(k_end, PMM_BOOTSTRAP_LOWMEM_LIMIT);
         
         /* Minimal init */
-        size_t total_blocks = (16 * 1024 * 1024) / PMM_BLOCK_SIZE;
+        size_t total_blocks = PMM_BOOTSTRAP_LOWMEM_LIMIT / PMM_BLOCK_SIZE;
         size_t bitmap_bytes = (total_blocks + 7) / 8;
         uint8_t *pmm_bitmap = (uint8_t *)pmm_watermark_alloc(bitmap_bytes, 16); // Assuming 16-byte alignment for bitmap
         
@@ -1054,7 +1160,7 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
         }
         
         vm_phys_early_init(pmm_bitmap, bitmap_bytes, NULL, total_blocks);
-        vm_phys_add_range(k_end, 16 * 1024 * 1024);
+        vm_phys_add_range(k_end, PMM_BOOTSTRAP_LOWMEM_LIMIT);
         pmm_reserve_kernel();
         return;
     }
@@ -1072,25 +1178,12 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     /* Init Watermark */
     pmm_watermark_init(kernel_phys_end, (uint32_t)stats.max_phys);
     
-    uint32_t max_phys_addr = (uint32_t)stats.max_phys;
-    if (max_phys_addr & (PMM_BLOCK_SIZE - 1)) {
-        max_phys_addr = (max_phys_addr + PMM_BLOCK_SIZE) & ~(PMM_BLOCK_SIZE - 1);
-    }
-    
-    size_t total_blocks = max_phys_addr / PMM_BLOCK_SIZE;
-    size_t bitmap_bytes = (total_blocks + 7) / 8;
-    
-    uint8_t* pmm_bitmap = (uint8_t*)pmm_watermark_alloc(bitmap_bytes, 16);
-    size_t array_bytes = total_blocks * sizeof(vm_page_t);
-    vm_page_t* pmm_page_array = (vm_page_t*)pmm_watermark_alloc(array_bytes, PMM_BLOCK_SIZE);
-    
-    if (!pmm_bitmap) {
-        kprint("PMM: Warn - using static bitmap.\n");
-        pmm_bitmap = pmm_bitmap_static;
-        bitmap_bytes = sizeof(pmm_bitmap_static);
-        total_blocks = bitmap_bytes * 8;
-        pmm_page_array = NULL;
-    }
+    size_t total_blocks = 0;
+    size_t bitmap_bytes = 0;
+    uint8_t* pmm_bitmap = NULL;
+    vm_page_t* pmm_page_array = NULL;
+    pmm_select_metadata(stats.max_phys, stats.total_usable,
+                        &pmm_bitmap, &bitmap_bytes, &pmm_page_array, &total_blocks);
     
     /* Init Generic PMM */
     vm_phys_early_init(pmm_bitmap, bitmap_bytes, pmm_page_array, total_blocks);

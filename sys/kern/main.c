@@ -114,13 +114,21 @@ static void init_memory(multiboot_info_t *mboot_info) {
     extern void vm_zone_init(void);
     extern void uma_startup(void);
     extern void kmem_init(void);
+
+    early_uart_print("KMAIN: vm_page_init\n");
     vm_page_init();
+    early_uart_print("KMAIN: vm_object_init\n");
     vm_object_init();
+    early_uart_print("KMAIN: vm_zone_init\n");
     vm_zone_init();
     // Discover Cores before UMA startup so UMA can init per-CPU caches
+    early_uart_print("KMAIN: smp_discover_cores(2)\n");
     smp_discover_cores();
+    early_uart_print("KMAIN: uma_startup\n");
     uma_startup();    // Initialize UMA before kmem (kmem uses UMA zones)
+    early_uart_print("KMAIN: kmem_init\n");
     kmem_init();      // Initialize kernel memory allocator
+    early_uart_print("KMAIN: vm ready\n");
     kprint("VM subsystem initialized.\n");
     
     // Update mboot_info global copy if needed
@@ -166,6 +174,8 @@ static int parse_console_serial_index(const char *value) {
 
 
 static void init_root_fs(void) {
+    static const char *pseudo_mounts[] = { "/dev", "/proc", "/sys", NULL };
+
     // Parse root= argument
     char root_dev[64] = {0};
     if (cmdline_get("root", root_dev, sizeof(root_dev)) == 0) {
@@ -200,10 +210,49 @@ static void init_root_fs(void) {
         panic("not syncing - cannot mount root!");
     }
 
-    // Mount pseudo-filesystems AFTER root is established
-    vfs_mount_legacy(NULL, "/dev", "devfs", 0, NULL);
-    vfs_mount_legacy(NULL, "/proc", "procfs", 0, NULL);
-    vfs_mount_legacy(NULL, "/sys", "sysfs", 0, NULL);
+    // Ensure pseudo mountpoints exist and are directories.
+    for (int i = 0; pseudo_mounts[i] != NULL; i++) {
+        fs_node_t *mp = vfs_lookup(fs_root, pseudo_mounts[i]);
+        if (!mp) {
+            if (vfs_mkdir(pseudo_mounts[i], 0755) == 0) {
+                kprint("VFS: Created mountpoint ");
+                kprint(pseudo_mounts[i]);
+                kprint("\n");
+            } else {
+                kprint("VFS: Failed to create mountpoint ");
+                kprint(pseudo_mounts[i]);
+                kprint("\n");
+            }
+            mp = vfs_lookup(fs_root, pseudo_mounts[i]);
+        }
+
+        if (!mp) {
+            kprint("VFS: Mountpoint missing: ");
+            kprint(pseudo_mounts[i]);
+            kprint("\n");
+        } else if ((mp->flags & 0x7) != FS_DIRECTORY) {
+            kprint("VFS: Mountpoint not a directory: ");
+            kprint(pseudo_mounts[i]);
+            kprint("\n");
+        }
+    }
+
+    // Mount pseudo-filesystems AFTER root is established.
+    if (vfs_mount_legacy(NULL, "/dev", "devfs", 0, NULL) != 0) {
+        kprint("VFS: Failed to mount devfs on /dev\n");
+    } else {
+        kprint("VFS: Mounted devfs on /dev\n");
+    }
+    if (vfs_mount_legacy(NULL, "/proc", "procfs", 0, NULL) != 0) {
+        kprint("VFS: Failed to mount procfs on /proc\n");
+    } else {
+        kprint("VFS: Mounted procfs on /proc\n");
+    }
+    if (vfs_mount_legacy(NULL, "/sys", "sysfs", 0, NULL) != 0) {
+        kprint("VFS: Failed to mount sysfs on /sys\n");
+    } else {
+        kprint("VFS: Mounted sysfs on /sys\n");
+    }
 }
 
 // kinit - kernel init task (becomes PID 1 after exec)

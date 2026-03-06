@@ -26,9 +26,10 @@ _start:
 	# Save Multiboot magic and info pointer
 	mov %eax, %ebp
 
-	# 1. Setup Page Tables to map first 8MB
-	# Tables map physical 0..8MB to 0..8MB (Identity) and 3GB..3GB+8MB (Higher Half)
-	
+	# 1. Setup Page Tables to map first 16MB
+	# Tables map physical 0..16MB to 0..16MB (Identity) and
+	# 3GB..3GB+16MB (Higher Half)
+
 	# Table 1: 0..4MB
 	mov $(boot_page_table1 - 0xC0000000), %edi
 	mov $0, %esi
@@ -83,7 +84,7 @@ _start:
 
 	# 2. Setup Page Directory
 	mov $(boot_page_directory - 0xC0000000), %edx
-	
+
 	# Entry 0, 1, 2, 3: PT1, PT2, PT3, PT4 (Identity 0..16MB)
 	mov $(boot_page_table1 - 0xC0000000), %eax
 	or $3, %eax

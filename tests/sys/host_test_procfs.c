@@ -36,7 +36,19 @@ void kfree(void *ptr, size_t size) {
 }
 
 uint32_t get_time(void) { return 123456789; }
-void cmdline_get(char *buf, size_t buf_len) { snprintf(buf, buf_len, "kernel cmdline"); }
+int cmdline_get(const char *key, char *buf, size_t buf_len) {
+    if (!key || !buf || buf_len == 0) return -1;
+    if (strcmp(key, "root") == 0) {
+        snprintf(buf, buf_len, "/dev/storage/ide0");
+        return 0;
+    }
+    return -1;
+}
+int cmdline_get_full(char *buf, size_t buf_len) {
+    if (!buf || buf_len == 0) return -1;
+    snprintf(buf, buf_len, "serial_debug root=/dev/storage/ide0 init=/bin/native_test");
+    return 0;
+}
 uint32_t pmm_get_total_memory(void) { return 1024 * 1024 * 1024; }
 uint32_t pmm_get_free_memory(void) { return 512 * 1024 * 1024; }
 filesystem_t *vfs_get_filesystems(void) { return NULL; }
@@ -74,6 +86,13 @@ struct personality *perso_lookup(int id) {
 
 /* Test Helpers */
 
+static uint32_t mock_cpuinfo_gen(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    return (uint32_t)snprintf(buf, size,
+                              "processor\t: 0\n"
+                              "vendor_id\t: TestVendor\n");
+}
+
 void setup_processes() {
     memset(processes, 0, sizeof(processes));
     for(int i=0; i<MAX_PROCS; i++) processes[i].pid = -1;
@@ -98,13 +117,52 @@ void test_procfs_finddir_static(void) {
     fs_node_t *node = procfs_finddir(NULL, "cpuinfo");
     assert(node != NULL);
     assert(strcmp(node->name, "cpuinfo") == 0);
+    if (node->close) node->close(node);
 
     node = procfs_finddir(NULL, "meminfo");
     assert(node != NULL);
     assert(strcmp(node->name, "meminfo") == 0);
 
+    node = procfs_finddir(NULL, "cow_stats");
+    assert(node != NULL);
+    assert(strcmp(node->name, "cow_stats") == 0);
+
+    node = procfs_finddir(NULL, "self");
+    assert(node != NULL);
+    assert(strcmp(node->name, "self") == 0);
+    assert(node->flags == FS_SYMLINK);
+    if (node->close) node->close(node);
+
     node = procfs_finddir(NULL, "nonexistent");
     assert(node == NULL);
+    printf("PASS\n");
+}
+
+void test_procfs_self_dynamic_target(void) {
+    printf("Test: procfs /proc/self dynamic target...\n");
+
+    current_process = &processes[0]; /* PID 1 */
+    fs_node_t *self = procfs_finddir(NULL, "self");
+    assert(self != NULL);
+    assert(self->readlink != NULL);
+    char target[64];
+    int len = self->readlink(self, target, sizeof(target));
+    assert(len > 0);
+    target[len] = '\0';
+    assert(strcmp(target, "/proc/1/") == 0);
+    if (self->close) self->close(self);
+
+    current_process = &processes[1]; /* PID 123 */
+    self = procfs_finddir(NULL, "self");
+    assert(self != NULL);
+    len = self->readlink(self, target, sizeof(target));
+    assert(len > 0);
+    target[len] = '\0';
+    char expected[64];
+    snprintf(expected, sizeof(expected), "/proc/%d/", current_process->pid);
+    assert(strcmp(target, expected) == 0);
+    if (self->close) self->close(self);
+
     printf("PASS\n");
 }
 
@@ -221,8 +279,44 @@ void test_proc_status_injection(void) {
     printf("PASS\n");
 }
 
+void test_procfs_cow_stats_read(void) {
+    printf("Test: procfs cow_stats read...\n");
+
+    fs_node_t *node = procfs_finddir(NULL, "cow_stats");
+    assert(node != NULL);
+    assert(node->read != NULL);
+
+    char buffer[256];
+    memset(buffer, 0, sizeof(buffer));
+    size_t n = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+    assert(n > 0);
+    assert(strstr(buffer, "cow_faults:") != NULL);
+    assert(strstr(buffer, "cow_pages_mapped:") != NULL);
+    assert(strstr(buffer, "cow_duplications:") != NULL);
+    assert(strstr(buffer, "pages_saved_by_cow:") != NULL);
+
+    printf("PASS\n");
+}
+
+void test_procfs_cmdline_read(void) {
+    printf("Test: procfs cmdline read...\n");
+
+    fs_node_t *node = procfs_finddir(NULL, "cmdline");
+    assert(node != NULL);
+    assert(node->read != NULL);
+
+    char buffer[256];
+    memset(buffer, 0, sizeof(buffer));
+    size_t n = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+    assert(n > 0);
+    assert(strstr(buffer, "serial_debug root=/dev/storage/ide0 init=/bin/native_test") != NULL);
+
+    printf("PASS\n");
+}
+
 int main() {
     procfs_init();
+    assert(procfs_register_entry("cpuinfo", mock_cpuinfo_gen, NULL) == 0);
     setup_processes();
 
     test_procfs_finddir_static();
@@ -230,6 +324,9 @@ int main() {
     test_proc_pid_finddir();
     test_procfs_finddir_mixed();
     test_proc_status_injection();
+    test_procfs_self_dynamic_target();
+    test_procfs_cow_stats_read();
+    test_procfs_cmdline_read();
     // Uncomment to test crash
     test_procfs_kmalloc_fail();
 

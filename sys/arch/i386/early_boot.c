@@ -27,49 +27,85 @@ static void early_print_hex(uint32_t val) {
     early_uart_print(buf);
 }
 
-/* Current exception number - set by stubs */
+/* Current exception number (for compatibility with previous diagnostics) */
 volatile int early_exception_num = 0;
 
-/* Early exception handler - prints via UART and halts */
-void early_exception_handler(void) {
+/* Early exception handler - prints fault context via UART and halts */
+void early_exception_handler(uint32_t vec, uint32_t err, uint32_t eip,
+                             uint32_t cs, uint32_t eflags, uint32_t cr2) {
+    early_exception_num = (int)vec;
+
     early_uart_print("!!! EARLY EXCEPTION #");
-    early_print_hex(early_exception_num);
+    early_print_hex(vec);
     early_uart_print(" !!!\n");
-    
-    /* Try to get some useful info from stack */
-    uint32_t eip;
-    __asm__ volatile("mov 4(%%ebp), %0" : "=r"(eip));
+
+    early_uart_print("ERR: ");
+    early_print_hex(err);
+    early_uart_print("\n");
+
+    early_uart_print("CR2: ");
+    early_print_hex(cr2);
+    early_uart_print("\n");
+
     early_uart_print("EIP: ");
     early_print_hex(eip);
     early_uart_print("\n");
 
-    /* Halt forever */
+    early_uart_print("CS: ");
+    early_print_hex(cs);
+    early_uart_print("\n");
+
+    early_uart_print("EFLAGS: ");
+    early_print_hex(eflags);
+    early_uart_print("\n");
+
     for (;;) __asm__ volatile("hlt");
 }
 
-/* Macro to generate exception stubs */
-#define EARLY_ISR(idx) \
+__attribute__((used, naked)) void early_isr_common(void) {
+    __asm__ volatile(
+        "pusha\n"
+        "movl %esp, %ebx\n"       /* Base of saved register frame */
+        "movl %cr2, %eax\n"
+        "pushl %eax\n"            /* arg6: cr2 */
+        "pushl 48(%ebx)\n"        /* arg5: eflags */
+        "pushl 44(%ebx)\n"        /* arg4: cs */
+        "pushl 40(%ebx)\n"        /* arg3: eip */
+        "pushl 36(%ebx)\n"        /* arg2: err */
+        "pushl 32(%ebx)\n"        /* arg1: vec */
+        "call early_exception_handler\n"
+        "add $24, %esp\n"
+        "1:\n"
+        "hlt\n"
+        "jmp 1b\n"
+    );
+}
+
+#define EARLY_ISR_NOERR(idx) \
     __attribute__((naked)) void early_isr##idx(void) { \
         __asm__ volatile( \
-            "pusha\n" \
-            "movl %1, %0\n" \
-            "call early_exception_handler\n" \
-            "popa\n" \
-            "iret\n" \
-            : "=m"(early_exception_num) \
-            : "i"(idx) \
-            : "memory" \
+            "pushl $0\n" \
+            "pushl $" #idx "\n" \
+            "jmp early_isr_common\n" \
         ); \
     }
 
-EARLY_ISR(0)  EARLY_ISR(1)  EARLY_ISR(2)  EARLY_ISR(3)
-EARLY_ISR(4)  EARLY_ISR(5)  EARLY_ISR(6)  EARLY_ISR(7)
-EARLY_ISR(8)  EARLY_ISR(9)  EARLY_ISR(10) EARLY_ISR(11)
-EARLY_ISR(12) EARLY_ISR(13) EARLY_ISR(14) EARLY_ISR(15)
-EARLY_ISR(16) EARLY_ISR(17) EARLY_ISR(18) EARLY_ISR(19)
-EARLY_ISR(20) EARLY_ISR(21) EARLY_ISR(22) EARLY_ISR(23)
-EARLY_ISR(24) EARLY_ISR(25) EARLY_ISR(26) EARLY_ISR(27)
-EARLY_ISR(28) EARLY_ISR(29) EARLY_ISR(30) EARLY_ISR(31)
+#define EARLY_ISR_ERR(idx) \
+    __attribute__((naked)) void early_isr##idx(void) { \
+        __asm__ volatile( \
+            "pushl $" #idx "\n" \
+            "jmp early_isr_common\n" \
+        ); \
+    }
+
+EARLY_ISR_NOERR(0)  EARLY_ISR_NOERR(1)  EARLY_ISR_NOERR(2)  EARLY_ISR_NOERR(3)
+EARLY_ISR_NOERR(4)  EARLY_ISR_NOERR(5)  EARLY_ISR_NOERR(6)  EARLY_ISR_NOERR(7)
+EARLY_ISR_ERR(8)    EARLY_ISR_NOERR(9)  EARLY_ISR_ERR(10)   EARLY_ISR_ERR(11)
+EARLY_ISR_ERR(12)   EARLY_ISR_ERR(13)   EARLY_ISR_ERR(14)   EARLY_ISR_NOERR(15)
+EARLY_ISR_NOERR(16) EARLY_ISR_ERR(17)   EARLY_ISR_NOERR(18) EARLY_ISR_NOERR(19)
+EARLY_ISR_NOERR(20) EARLY_ISR_ERR(21)   EARLY_ISR_NOERR(22) EARLY_ISR_NOERR(23)
+EARLY_ISR_NOERR(24) EARLY_ISR_NOERR(25) EARLY_ISR_NOERR(26) EARLY_ISR_NOERR(27)
+EARLY_ISR_NOERR(28) EARLY_ISR_NOERR(29) EARLY_ISR_NOERR(30) EARLY_ISR_NOERR(31)
 
 static uint32_t early_isr_addr(int n) {
     switch(n) {

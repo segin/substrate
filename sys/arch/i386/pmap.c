@@ -187,6 +187,9 @@ void pmap_bootstrap(void) {
     __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_pmap_store.pdir_phys));
     
     kprint("PMAP: Paging Enabled (Higher Half, 128MB mapped)\n");
+
+    // Bootstrap stage is complete: allow PMM to expose high memory ranges.
+    pmm_enable_highmem();
     
     // Unmap page 0 for NULL pointer protection (L565)
     pmap_null_protect();
@@ -491,6 +494,18 @@ pmap_t pmap_fork(pmap_t src_pmap) {
             // Technically it's a conversion to COW. 
             src_pmap->stats.cow_pages_mapped++; 
         }
+    }
+
+    /*
+     * Parent mappings were rewritten read-only for COW.
+     * If parent's pmap is currently active, flush stale writable TLB entries
+     * so subsequent parent writes fault and trigger COW instead of corrupting
+     * shared child pages.
+     */
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (cr3 == src_pmap->pdir_phys) {
+        pmap_invalidate_all();
     }
     
     return dst_pmap;
@@ -1007,11 +1022,15 @@ int pmap_page_is_cow(pmap_t pmap, uint32_t va) {
     if (!(V_PD[pdi] & PTE_P)) return 0;
     
     uint32_t *pt = V_PT(pdi);
-    if (!(pt[pti] & PTE_P)) return 0;
-    
-    // COW pages are present but not writable
-    // (We'd need to check ref_count in vm_page_t for full detection)
-    return (pt[pti] & PTE_P) && !(pt[pti] & PTE_W);
+    uint32_t pte = pt[pti];
+    if (!(pte & PTE_P)) return 0;
+
+    /* COW requires a shared backing page plus read-only mapping. */
+    if (pte & PTE_W) return 0;
+
+    vm_page_t *page = pmm_get_page(pte & PTE_FRAME);
+    if (!page) return 0;
+    return page->ref_count > 1;
 }
 
 void pmap_invalidate_page(uint32_t va) {
@@ -1091,9 +1110,6 @@ void pmap_shootdown_page(uint32_t va) {
     
     // Send IPI to all other CPUs
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
-    
-    // Note: Full shootdown completion barrier would wait for ACKs
-    // For now we proceed (caller can add barrier if needed)
     shootdown_pending = 0;
 }
 

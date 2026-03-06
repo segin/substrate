@@ -19,6 +19,32 @@ struct vnode *rootvnode = NULL;
 
 static filesystem_t *filesystems = NULL;
 
+static fs_node_t *vfs_cross_mountpoint(fs_node_t *node) {
+    if (!node) return NULL;
+
+    if ((node->flags & FS_MOUNTPOINT) && node->ptr) {
+        return node->ptr;
+    }
+
+    struct mount *mp;
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        fs_node_t *covered = mp->mnt_node_covered;
+        if (!covered || !mp->mnt_node_root) continue;
+
+        if (covered == node) {
+            return mp->mnt_node_root;
+        }
+
+        if (covered->inode != 0 &&
+            covered->inode == node->inode &&
+            ((covered->flags & 0x7) == (node->flags & 0x7))) {
+            return mp->mnt_node_root;
+        }
+    }
+
+    return node;
+}
+
 // External filesystem init functions
 extern void ext2_init(void);
 extern void fat_init(void);
@@ -33,6 +59,7 @@ extern void fuse_fs_init(void);
 extern void p9_init(void);
 extern void pseudo_init(void);
 extern void full_init(void);
+extern void cpuid_init(void);
 
 void vfs_init(void) {
     kprint("VFS: Initializing...\n");
@@ -47,6 +74,7 @@ void vfs_init(void) {
     // Register pseudo-filesystems
     devfs_init();
     procfs_init();
+    cpuid_init();
     sysfs_init();
     pseudo_init();
     full_init();
@@ -193,6 +221,12 @@ int vfs_mount_legacy(const char *device, const char *path, const char *type, uin
         root->mp = mp;
 
         TAILQ_INSERT_TAIL(&mountlist, mp, mnt_list);
+        kprintf("VFS: mount table add %s (%s)\n",
+                mp->mnt_stat.f_mntonname,
+                mp->mnt_stat.f_fstypename[0] ? mp->mnt_stat.f_fstypename : "unknown");
+    } else {
+        kprintf("VFS: failed to allocate mount entry for %s (%s)\n",
+                path ? path : "(null)", type ? type : "unknown");
     }
 
     return 0;
@@ -293,6 +327,14 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
             result->mp = node->mp;
         }
 
+        /*
+         * Mountpoint crossing for terminal lookups:
+         * path "/dev" should resolve to devfs root, not the covered directory.
+         */
+        if (result && (result->flags & FS_MOUNTPOINT) && result->ptr) {
+            result = result->ptr;
+        }
+
         // Resolve symlinks (with depth limit)
         if (result && (result->flags & 0x7) == FS_SYMLINK && result->readlink) {
             // Check if we should follow symlinks
@@ -335,11 +377,14 @@ static fs_node_t *finddir_fs_internal(fs_node_t *node, char *name, int depth, in
 // Lookup a path from a root node
 fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
+    int absolute = (path[0] == '/');
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
     
     fs_node_t *current = root;
     static char component[256];
+    char resolved[512];
+    size_t resolved_len = 0;
     const char *p = path;
     
     while (*p) {
@@ -354,11 +399,52 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
             if (*p == '/') p++;
             continue;
         }
+
+        if (component[0] == '.' && component[1] == '\0') {
+            if (*p == '/') p++;
+            continue;
+        }
+
+        if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
+            fs_node_t *parent = finddir_fs(current, "..");
+            if (parent) current = parent;
+            if (*p == '/') p++;
+            continue;
+        }
         
         // Lookup this component
         current = finddir_fs(current, component);
         if (!current) return NULL;
+
+        /*
+         * Mount crossing by pathname for covered nodes that are recreated
+         * per-lookup (e.g. ext2 dynamic fs_node instances).
+         */
+        if (absolute) {
+            size_t comp_len = strlen(component);
+            if (resolved_len == 0) {
+                if (comp_len + 1 < sizeof(resolved)) {
+                    resolved[0] = '/';
+                    memcpy(resolved + 1, component, comp_len + 1);
+                    resolved_len = comp_len + 1;
+                }
+            } else if (resolved_len + 1 + comp_len < sizeof(resolved)) {
+                resolved[resolved_len++] = '/';
+                memcpy(resolved + resolved_len, component, comp_len + 1);
+                resolved_len += comp_len;
+            }
+
+            struct mount *mp;
+            TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+                if (mp->mnt_node_root && strcmp(mp->mnt_stat_path, resolved) == 0) {
+                    current = mp->mnt_node_root;
+                    break;
+                }
+            }
+        }
         
+        current = vfs_cross_mountpoint(current);
+
         // Skip trailing slash
         if (*p == '/') p++;
     }
@@ -368,11 +454,14 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
 
 fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
     if (!path || !root) return NULL;
+    int absolute = (path[0] == '/');
     if (path[0] == '/') path++; // Skip leading /
     if (path[0] == '\0') return root; // Root itself
     
     fs_node_t *current = root;
     static char component[256];
+    char resolved[512];
+    size_t resolved_len = 0;
     const char *p = path;
     
     while (*p) {
@@ -384,6 +473,18 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         component[i] = '\0';
         
         if (i == 0) {
+            if (*p == '/') p++;
+            continue;
+        }
+
+        if (component[0] == '.' && component[1] == '\0') {
+            if (*p == '/') p++;
+            continue;
+        }
+
+        if (component[0] == '.' && component[1] == '.' && component[2] == '\0') {
+            fs_node_t *parent = finddir_fs_internal(current, "..", 0, 1);
+            if (parent) current = parent;
             if (*p == '/') p++;
             continue;
         }
@@ -395,7 +496,32 @@ fs_node_t *vfs_lookup_lstat(fs_node_t *root, const char *path) {
         // If last, DO NOT follow symlinks
         current = finddir_fs_internal(current, component, 0, !is_last);
         if (!current) return NULL;
+
+        if (absolute) {
+            size_t comp_len = strlen(component);
+            if (resolved_len == 0) {
+                if (comp_len + 1 < sizeof(resolved)) {
+                    resolved[0] = '/';
+                    memcpy(resolved + 1, component, comp_len + 1);
+                    resolved_len = comp_len + 1;
+                }
+            } else if (resolved_len + 1 + comp_len < sizeof(resolved)) {
+                resolved[resolved_len++] = '/';
+                memcpy(resolved + resolved_len, component, comp_len + 1);
+                resolved_len += comp_len;
+            }
+
+            struct mount *mp;
+            TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+                if (mp->mnt_node_root && strcmp(mp->mnt_stat_path, resolved) == 0) {
+                    current = mp->mnt_node_root;
+                    break;
+                }
+            }
+        }
         
+        current = vfs_cross_mountpoint(current);
+
         // Skip trailing slash
         if (*p == '/') p++;
     }
