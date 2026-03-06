@@ -110,6 +110,7 @@ void cc_ssa_function_free(cc_ssa_function_t *f) {
     free(f->attr_alias);
     free(f->param_values);
     free(f->param_types);
+    free(f->param_abi);
     free(f->value_types);
 
     for (i = 0; i < f->instr_count; ++i) {
@@ -125,6 +126,7 @@ static int dup_instr(cc_ssa_instr_t *dst, const cc_ssa_instr_t *src) {
 
     dst->sym = NULL;
     dst->args = NULL;
+    dst->call_arg_abi = NULL;
     dst->asm_out_values = NULL;
     dst->asm_out_sizes = NULL;
     dst->asm_out_constraints = NULL;
@@ -145,6 +147,7 @@ static int dup_instr(cc_ssa_instr_t *dst, const cc_ssa_instr_t *src) {
         }
     }
     if (dup_int_array(&dst->args, src->args, src->arg_count) != 0 ||
+        dup_u8_array(&dst->call_arg_abi, src->call_arg_abi, src->arg_count) != 0 ||
         dup_int_array(&dst->asm_out_values, src->asm_out_values, src->asm_out_count) != 0 ||
         dup_u8_array(&dst->asm_out_sizes, src->asm_out_sizes, src->asm_out_count) != 0 ||
         dup_str_array(&dst->asm_out_constraints, src->asm_out_constraints, src->asm_out_count) != 0 ||

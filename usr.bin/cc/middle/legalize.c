@@ -38,6 +38,13 @@ static int legalize_function(cc_ssa_function_t *f, cc_diag_t *diag) {
             if (in->op == CC_SSA_LABEL) {
                 /* A label starts a new block after a terminator. */
                 terminated = 0;
+            } else if (in->op == CC_SSA_STACKALLOC) {
+                /*
+                 * STACKALLOC is a pseudo-definition consumed by backend slot
+                 * layout; it is not a runtime side-effecting instruction.
+                 * Preserve it even if emitted after a terminator so value->slot
+                 * mappings remain valid for later reachable uses.
+                 */
             } else {
                 dropped = 1;
                 cc_ssa_instr_free(in);

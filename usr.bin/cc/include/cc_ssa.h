@@ -19,6 +19,11 @@ typedef enum {
 } cc_cmp_kind_t;
 
 typedef enum {
+    CC_CALL_ARG_ABI_DEFAULT = 0,
+    CC_CALL_ARG_ABI_LDOUBLE = 1
+} cc_call_arg_abi_t;
+
+typedef enum {
     CC_SSA_PARAM = 0,
     CC_SSA_CONST,
     CC_SSA_STR,
@@ -72,8 +77,10 @@ typedef struct {
     int is_unsigned;
     int call_is_variadic;
     int call_fixed_count;
+    int call_ret_x87;
     char *sym;
     int *args;
+    unsigned char *call_arg_abi;
     size_t arg_count;
     int asm_volatile;
     int asm_is_goto;
@@ -142,6 +149,8 @@ typedef struct {
     size_t param_count;
     int *param_values;
     cc_value_type_t *param_types;
+    unsigned char *param_abi;
+    unsigned char ret_abi;
 
     cc_ssa_instr_t *instrs;
     size_t instr_count;

@@ -14,6 +14,7 @@ typedef enum {
 typedef struct {
     abi_loc_kind_t kind;
     size_t index;
+    size_t size;
 } abi_loc_t;
 
 typedef struct {
@@ -49,6 +50,7 @@ static int g_i386_fp_math_mode = 0;
 
 static const char *reg64_to8(const char *r);
 static const char *reg32_to8(const char *r);
+static size_t align_up_size(size_t v, size_t align);
 
 void cc_backend_set_i386_isa_level(int level) {
     if (level < 3) level = 3;
@@ -2601,44 +2603,61 @@ static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, si
     abi_loc_t loc;
     size_t gpr = gpr_start;
     size_t xmm = 0;
-    size_t stack = 0;
+    size_t stack_bytes = 0;
     int i;
     loc.kind = ABI_LOC_STACK;
     loc.index = 0;
+    loc.size = 8;
 
     for (i = 0; i <= param_index; ++i) {
+        int is_ldouble = (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) ? 1 : 0;
         cc_value_type_t vt = f->param_types[i];
+        if (is_ldouble) {
+            stack_bytes = align_up_size(stack_bytes, 16);
+            if (i == param_index) {
+                loc.kind = ABI_LOC_STACK;
+                loc.index = stack_bytes;
+                loc.size = 16;
+                return loc;
+            }
+            stack_bytes += 16;
+            continue;
+        }
         if (vt == CC_VAL_F64) {
             if (xmm < 8) {
                 if (i == param_index) {
                     loc.kind = ABI_LOC_XMM;
                     loc.index = xmm;
+                    loc.size = 8;
                     return loc;
                 }
                 xmm++;
             } else {
                 if (i == param_index) {
                     loc.kind = ABI_LOC_STACK;
-                    loc.index = stack;
+                    loc.index = stack_bytes;
+                    loc.size = 8;
                     return loc;
                 }
-                stack++;
+                stack_bytes += 8;
             }
         } else {
             if (gpr < 6) {
                 if (i == param_index) {
                     loc.kind = ABI_LOC_GPR;
                     loc.index = gpr;
+                    loc.size = 8;
                     return loc;
                 }
                 gpr++;
             } else {
                 if (i == param_index) {
                     loc.kind = ABI_LOC_STACK;
-                    loc.index = stack;
+                    loc.index = stack_bytes;
+                    loc.size = 8;
                     return loc;
                 }
-                stack++;
+                stack_bytes += 8;
             }
         }
     }
@@ -2646,38 +2665,64 @@ static abi_loc_t abi64_param_loc(const cc_ssa_function_t *f, int param_index, si
     return loc;
 }
 
+static int call_arg_is_ldouble_abi(const cc_ssa_instr_t *in, size_t arg_index) {
+    if (in == NULL || in->call_arg_abi == NULL || arg_index >= in->arg_count) {
+        return 0;
+    }
+    return in->call_arg_abi[arg_index] == CC_CALL_ARG_ABI_LDOUBLE ? 1 : 0;
+}
+
+static size_t align_up_size(size_t v, size_t align) {
+    if (align == 0) {
+        return v;
+    }
+    return (v + (align - 1)) & ~(align - 1);
+}
+
 static void abi64_classify_call_args(const cc_ssa_function_t *f, const cc_ssa_instr_t *in, size_t gpr_start,
-                                     abi_loc_t *locs, size_t *out_stack_count, size_t *out_xmm_regs) {
+                                     abi_loc_t *locs, size_t *out_stack_bytes, size_t *out_xmm_regs) {
     size_t gpr = gpr_start;
     size_t xmm = 0;
-    size_t stack = 0;
+    size_t stack_bytes = 0;
     size_t i;
 
     for (i = 0; i < in->arg_count; ++i) {
         cc_value_type_t vt = f->value_types[in->args[i]];
+        if (call_arg_is_ldouble_abi(in, i)) {
+            stack_bytes = align_up_size(stack_bytes, 16);
+            locs[i].kind = ABI_LOC_STACK;
+            locs[i].index = stack_bytes;
+            locs[i].size = 16;
+            stack_bytes += 16;
+            continue;
+        }
         if (vt == CC_VAL_F64 && xmm < 8) {
             locs[i].kind = ABI_LOC_XMM;
             locs[i].index = xmm++;
+            locs[i].size = 8;
             continue;
         }
         if (vt != CC_VAL_F64 && gpr < 6) {
             locs[i].kind = ABI_LOC_GPR;
             locs[i].index = gpr++;
+            locs[i].size = 8;
             continue;
         }
         locs[i].kind = ABI_LOC_STACK;
-        locs[i].index = stack++;
+        locs[i].index = stack_bytes;
+        locs[i].size = 8;
+        stack_bytes += 8;
     }
 
-    *out_stack_count = stack;
+    *out_stack_bytes = stack_bytes;
     *out_xmm_regs = xmm;
 }
 
 static void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_t gpr_start, size_t *out_gpr, size_t *out_xmm,
-                              size_t *out_stack) {
+                              size_t *out_stack_bytes) {
     size_t gpr = gpr_start;
     size_t xmm = 0;
-    size_t stack = 0;
+    size_t stack_bytes = 0;
     int i;
     if (fixed_count < 0) {
         fixed_count = 0;
@@ -2692,7 +2737,10 @@ static void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_
         } else if (loc.kind == ABI_LOC_XMM) {
             xmm++;
         } else {
-            stack++;
+            size_t end = loc.index + loc.size;
+            if (end > stack_bytes) {
+                stack_bytes = end;
+            }
         }
     }
     if (out_gpr != NULL) {
@@ -2701,8 +2749,8 @@ static void abi64_fixed_usage(const cc_ssa_function_t *f, int fixed_count, size_
     if (out_xmm != NULL) {
         *out_xmm = xmm;
     }
-    if (out_stack != NULL) {
-        *out_stack = stack;
+    if (out_stack_bytes != NULL) {
+        *out_stack_bytes = stack_bytes;
     }
 }
 
@@ -2744,6 +2792,10 @@ static void emit_x86_64_load_fp_indirect(FILE *fp, const cc_ssa_function_t *f, c
     if (mem_size == 4) {
         fprintf(fp, "\tmovss (%s), %s\n", ist->regs[rp], tmp);
         fprintf(fp, "\tcvtss2sd %s, %s\n", tmp, tmp);
+    } else if (mem_size >= 16) {
+        fprintf(fp, "\tfldt (%s)\n", ist->regs[rp]);
+        fprintf(fp, "\tfstpl %d(%%rbp)\n", slot_off(lay, in->dst));
+        return;
     } else {
         fprintf(fp, "\tmovsd (%s), %s\n", ist->regs[rp], tmp);
     }
@@ -2759,6 +2811,9 @@ static void emit_x86_64_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, 
     if (mem_size == 4) {
         fprintf(fp, "\tcvtsd2ss %s, %s\n", tmp, tmp);
         fprintf(fp, "\tmovss %s, (%s)\n", tmp, ist->regs[rp]);
+    } else if (mem_size >= 16) {
+        fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(lay, in->rhs));
+        fprintf(fp, "\tfstpt (%s)\n", ist->regs[rp]);
     } else {
         fprintf(fp, "\tmovsd %s, (%s)\n", tmp, ist->regs[rp]);
     }
@@ -2784,7 +2839,7 @@ static void emit_x86_64_va_start(FILE *fp, const cc_ssa_function_t *f, const slo
                                  const cc_ssa_instr_t *in, int va_state_off, int va_regsave_off, int gpr_bias) {
     size_t gpr_used = 0;
     size_t xmm_used = 0;
-    size_t stack_used = 0;
+    size_t stack_bytes = 0;
     long gp_offset;
     long fp_offset;
     long overflow_off;
@@ -2792,10 +2847,10 @@ static void emit_x86_64_va_start(FILE *fp, const cc_ssa_function_t *f, const slo
     int_regs_flush(fp, f, lay, ist);
     rd = int_regs_define(fp, f, lay, ist, in->dst, -1, -1);
     if (f->is_variadic) {
-        abi64_fixed_usage(f, (int)in->imm, (size_t)(gpr_bias > 0 ? gpr_bias : 0), &gpr_used, &xmm_used, &stack_used);
+        abi64_fixed_usage(f, (int)in->imm, (size_t)(gpr_bias > 0 ? gpr_bias : 0), &gpr_used, &xmm_used, &stack_bytes);
         gp_offset = (long)(gpr_used * 8);
         fp_offset = 48 + (long)(xmm_used * 16);
-        overflow_off = 16 + (long)(stack_used * 8);
+        overflow_off = 16 + (long)stack_bytes;
 
         fprintf(fp, "\tmovl $%ld, %d(%%rbp)\n", gp_offset, va_state_off);
         fprintf(fp, "\tmovl $%ld, %d(%%rbp)\n", fp_offset, va_state_off + 4);
@@ -2867,8 +2922,32 @@ static int emit_x86_64_store_value_to_rsp(FILE *fp, const cc_ssa_function_t *f, 
     return 0;
 }
 
+static int emit_x86_64_store_ldouble_to_rsp(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                            int value, size_t off_rsp, cc_diag_t *diag) {
+    if (value < 0 || value >= f->value_count) {
+        set_diag(diag, "call argument value out of range");
+        return -1;
+    }
+    if (f->value_types[value] != CC_VAL_F64) {
+        set_diag(diag, "internal error: non-float assigned to long double argument");
+        return -1;
+    }
+    fprintf(fp, "\tmovsd %d(%%rbp), %%xmm15\n", slot_off(lay, value));
+    fprintf(fp, "\tmovsd %%xmm15, %zu(%%rsp)\n", off_rsp);
+    fprintf(fp, "\tfldl %zu(%%rsp)\n", off_rsp);
+    fprintf(fp, "\tfstpt %zu(%%rsp)\n", off_rsp);
+    /*
+     * Keep the upper 2 padding bytes deterministic. Use byte stores instead
+     * of a 16-bit immediate store to avoid assembler-width ambiguities.
+     */
+    fprintf(fp, "\tmovb $0, %zu(%%rsp)\n", off_rsp + 10);
+    fprintf(fp, "\tmovb $0, %zu(%%rsp)\n", off_rsp + 11);
+    return 0;
+}
+
 static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
-                                             int value, const abi_loc_t *loc, cc_diag_t *diag) {
+                                             const cc_ssa_instr_t *in, size_t arg_index, int value,
+                                             const abi_loc_t *loc, cc_diag_t *diag) {
     if (value < 0 || value >= f->value_count) {
         set_diag(diag, "call argument value out of range");
         return -1;
@@ -2906,7 +2985,10 @@ static int emit_x86_64_move_value_to_abi_loc(FILE *fp, const cc_ssa_function_t *
         return 0;
     }
     if (loc->kind == ABI_LOC_STACK) {
-        return emit_x86_64_store_value_to_rsp(fp, f, lay, value, loc->index * 8, diag);
+        if (call_arg_is_ldouble_abi(in, arg_index)) {
+            return emit_x86_64_store_ldouble_to_rsp(fp, f, lay, value, loc->index, diag);
+        }
+        return emit_x86_64_store_value_to_rsp(fp, f, lay, value, loc->index, diag);
     }
     set_diag(diag, "internal error: unknown ABI argument location");
     return -1;
@@ -3042,7 +3124,7 @@ static void emit_x86_64_store_aggregate_return(FILE *fp, const cc_ssa_function_t
 static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int_reg_state_t *ist,
                             const cc_ssa_instr_t *in, cc_diag_t *diag) {
     size_t a;
-    size_t abi_stack_count = 0;
+    size_t abi_stack_bytes = 0;
     size_t xmm_regs = 0;
     size_t stack_bytes;
     size_t stack_pad;
@@ -3070,11 +3152,11 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
             set_diag(diag, "out of memory classifying call arguments");
             return -1;
         }
-        abi64_classify_call_args(f, in, gpr_start, locs, &abi_stack_count, &xmm_regs);
+        abi64_classify_call_args(f, in, gpr_start, locs, &abi_stack_bytes, &xmm_regs);
     }
 
-    stack_bytes = abi_stack_count * 8;
-    stack_pad = (stack_bytes & 0xF) == 0 ? 0 : 8;
+    stack_bytes = abi_stack_bytes;
+    stack_pad = (stack_bytes & 0xF) == 0 ? 0 : (16 - (stack_bytes & 0xF));
     stack_total = stack_bytes + stack_pad;
 
     if (stack_total > 0) {
@@ -3085,7 +3167,7 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     }
     for (a = 0; a < in->arg_count; ++a) {
         int arg_value = in->args[a];
-        if (emit_x86_64_move_value_to_abi_loc(fp, f, lay, arg_value, &locs[a], diag) != 0) {
+        if (emit_x86_64_move_value_to_abi_loc(fp, f, lay, in, a, arg_value, &locs[a], diag) != 0) {
             free(locs);
             return -1;
         }
@@ -3111,7 +3193,11 @@ static int emit_x86_64_call(FILE *fp, const cc_ssa_function_t *f, const slot_lay
     }
     if (in->dst >= 0) {
         if (f->value_types[in->dst] == CC_VAL_F64) {
-            fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(lay, in->dst));
+            if (in->call_ret_x87) {
+                fprintf(fp, "\tfstpl %d(%%rbp)\n", slot_off(lay, in->dst));
+            } else {
+                fprintf(fp, "\tmovsd %%xmm0, %d(%%rbp)\n", slot_off(lay, in->dst));
+            }
         } else {
             long ret_bytes = in->imm > 0 ? in->imm : 8;
             emit_x86_64_normalize_int_return(fp, ret_bytes, in->is_unsigned);
@@ -3177,6 +3263,8 @@ static long x86_64_infer_sret_size_from_calls(const cc_ssa_module_t *m, const cc
 static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path, int emit_debug, int pic,
                        cc_diag_t *diag) {
     size_t i;
+    const char *trace_env = getenv("CC_DEBUG_TRACE");
+    int debug_trace = (trace_env != NULL && trace_env[0] != '\0');
 
     for (i = 0; i < m->func_count; ++i) {
         const cc_ssa_function_t *f = &m->funcs[i];
@@ -3200,7 +3288,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         has_sret = sret_mem_size > 16 ? 1 : 0;
         param_gpr_bias = has_sret ? 1 : 0;
 
-        if (build_slot_layout(f, 8, &lay, diag) != 0) {
+        if (build_slot_layout(f, 16, &lay, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "x86_64: failed to build slot layout");
             }
@@ -3224,6 +3312,17 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
          * multiple of 16 to preserve that alignment at internal call sites.
          */
         frame = cc_backend_align_frame_size(raw_frame, 16);
+
+        if (debug_trace) {
+            int v;
+            fprintf(fp, "\t# ccdbg begin %s values=%d frame=%d raw=%d\n", f->name, f->value_count, frame, raw_frame);
+            for (v = 0; v < f->value_count; ++v) {
+                long off = slot_off(&lay, v);
+                if (off != 0) {
+                    fprintf(fp, "\t# ccdbg slot v%d off=%ld ty=%d\n", v, off, (int)f->value_types[v]);
+                }
+            }
+        }
 
         fprintf(fp, "\n");
         emit_text_section(fp, f->attr_section != NULL && f->attr_section[0] != '\0' ? f->attr_section : NULL);
@@ -3289,12 +3388,23 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         for (j = 0; j < f->instr_count; ++j) {
             const cc_ssa_instr_t *in = &f->instrs[j];
             ist.cur_index = (int)j;
+            if (debug_trace) {
+                fprintf(fp, "\t# ccdbg i=%zu op=%s dst=%d lhs=%d rhs=%d imm=%ld lbl=%d tl=%d fl=%d\n", j,
+                        ssa_op_name(in->op), in->dst, in->lhs, in->rhs, in->imm, in->label, in->true_label,
+                        in->false_label);
+            }
             int_regs_flush(fp, f, &lay, &ist);
 
             switch (in->op) {
             case CC_SSA_PARAM: {
                 abi_loc_t loc = abi64_param_loc(f, in->param_index, (size_t)param_gpr_bias);
                 cc_value_type_t vt = f->value_types[in->dst];
+                int param_is_ldouble =
+                    (f->param_abi != NULL && in->param_index >= 0 &&
+                     (size_t)in->param_index < f->param_count &&
+                     f->param_abi[in->param_index] == CC_CALL_ARG_ABI_LDOUBLE)
+                        ? 1
+                        : 0;
                 long pbytes = in->imm > 0 ? in->imm : 8;
                 if (loc.kind == ABI_LOC_XMM) {
                     int_regs_flush(fp, f, &lay, &ist);
@@ -3332,8 +3442,12 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         emit_x86_64_normalize_int_param_reg(fp, ist.regs[rd], pbytes, in->is_unsigned);
                     }
                 } else {
-                    int poff = 16 + (int)(loc.index * 8);
-                    if (vt == CC_VAL_F64) {
+                    int poff = 16 + (int)loc.index;
+                    if (param_is_ldouble && vt == CC_VAL_F64) {
+                        int_regs_flush(fp, f, &lay, &ist);
+                        fprintf(fp, "\tfldt %d(%%rbp)\n", poff);
+                        fprintf(fp, "\tfstpl %d(%%rbp)\n", slot_off(&lay, in->dst));
+                    } else if (vt == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
                         fprintf(fp, "\tmovsd %d(%%rbp), %s\n", poff, x86_64_fp_tmp_reg());
                         fprintf(fp, "\tmovsd %s, %d(%%rbp)\n", x86_64_fp_tmp_reg(), slot_off(&lay, in->dst));
@@ -3750,7 +3864,11 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
                         }
                     } else if (f->ret_type == CC_VAL_F64) {
                         int_regs_flush(fp, f, &lay, &ist);
-                        fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
+                        if (f->ret_abi == CC_CALL_ARG_ABI_LDOUBLE) {
+                            fprintf(fp, "\tfldl %d(%%rbp)\n", slot_off(&lay, in->lhs));
+                        } else {
+                            fprintf(fp, "\tmovsd %d(%%rbp), %%xmm0\n", slot_off(&lay, in->lhs));
+                        }
                     } else {
                         int rl = int_regs_load(fp, f, &lay, &ist, in->lhs, int_reg_index(&ist, "%rax"), -1);
                         int_regs_flush(fp, f, &lay, &ist);
@@ -3785,7 +3903,9 @@ static int i386_param_offset(const cc_ssa_function_t *f, int param_index) {
     int off = 8;
     int i;
     for (i = 0; i < param_index; ++i) {
-        if (f->param_types[i] == CC_VAL_F64) {
+        if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) {
+            off += 12;
+        } else if (f->param_types[i] == CC_VAL_F64) {
             off += 8;
         } else {
             off += 4;
@@ -3804,7 +3924,9 @@ static int i386_variadic_start_offset(const cc_ssa_function_t *f, int fixed_coun
         fixed_count = (int)f->param_count;
     }
     for (i = 0; i < fixed_count; ++i) {
-        if (f->param_types[i] == CC_VAL_F64) {
+        if (f->param_abi != NULL && f->param_abi[i] == CC_CALL_ARG_ABI_LDOUBLE) {
+            off += 12;
+        } else if (f->param_types[i] == CC_VAL_F64) {
             off += 8;
         } else {
             off += 4;
@@ -4005,6 +4127,8 @@ static void emit_i386_load_fp_indirect(FILE *fp, const cc_ssa_function_t *f, con
     if (use_x87_fp) {
         if (mem_size == 4) {
             fprintf(fp, "\tflds (%s)\n", ist->regs[rp]);
+        } else if (mem_size >= 10) {
+            fprintf(fp, "\tfldt (%s)\n", ist->regs[rp]);
         } else {
             fprintf(fp, "\tfldl (%s)\n", ist->regs[rp]);
         }
@@ -4014,6 +4138,10 @@ static void emit_i386_load_fp_indirect(FILE *fp, const cc_ssa_function_t *f, con
         if (mem_size == 4) {
             fprintf(fp, "\tmovss (%s), %s\n", ist->regs[rp], tmp);
             fprintf(fp, "\tcvtss2sd %s, %s\n", tmp, tmp);
+        } else if (mem_size >= 10) {
+            fprintf(fp, "\tfldt (%s)\n", ist->regs[rp]);
+            fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(lay, in->dst));
+            return;
         } else {
             fprintf(fp, "\tmovsd (%s), %s\n", ist->regs[rp], tmp);
         }
@@ -4030,6 +4158,8 @@ static void emit_i386_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, co
         fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->rhs));
         if (mem_size == 4) {
             fprintf(fp, "\tfstps (%s)\n", ist->regs[rp]);
+        } else if (mem_size >= 10) {
+            fprintf(fp, "\tfstpt (%s)\n", ist->regs[rp]);
         } else {
             fprintf(fp, "\tfstpl (%s)\n", ist->regs[rp]);
         }
@@ -4039,6 +4169,9 @@ static void emit_i386_store_fp_indirect(FILE *fp, const cc_ssa_function_t *f, co
         if (mem_size == 4) {
             fprintf(fp, "\tcvtsd2ss %s, %s\n", tmp, tmp);
             fprintf(fp, "\tmovss %s, (%s)\n", tmp, ist->regs[rp]);
+        } else if (mem_size >= 10) {
+            fprintf(fp, "\tfldl %d(%%ebp)\n", slot_off(lay, in->rhs));
+            fprintf(fp, "\tfstpt (%s)\n", ist->regs[rp]);
         } else {
             fprintf(fp, "\tmovsd %s, (%s)\n", tmp, ist->regs[rp]);
         }
@@ -4324,10 +4457,17 @@ static void emit_i386_push_slot(FILE *fp, int off) {
     fprintf(fp, "\tpushl %d(%%ebp)\n", off);
 }
 
-static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay, int value, long *stack_bytes) {
+static void emit_i386_push_call_arg(FILE *fp, const cc_ssa_function_t *f, const slot_layout_t *lay,
+                                    const cc_ssa_instr_t *in, size_t arg_index, int value, long *stack_bytes) {
     int off = slot_off(lay, value);
 
-    if (f->value_types[value] == CC_VAL_F64) {
+    if (call_arg_is_ldouble_abi(in, arg_index)) {
+        fprintf(fp, "\tsubl $12, %%esp\n");
+        fprintf(fp, "\tfldl %d(%%ebp)\n", off);
+        fprintf(fp, "\tfstpt (%%esp)\n");
+        fprintf(fp, "\tmovw $0, 10(%%esp)\n");
+        *stack_bytes += 12;
+    } else if (f->value_types[value] == CC_VAL_F64) {
         emit_i386_push_slot(fp, off + 4);
         emit_i386_push_slot(fp, off);
         *stack_bytes += 8;
@@ -4378,7 +4518,7 @@ static int emit_i386_call(FILE *fp, const cc_ssa_function_t *f, const slot_layou
 
     int_regs_flush(fp, f, lay, ist);
     for (a = (long)in->arg_count - 1; a >= 0; --a) {
-        emit_i386_push_call_arg(fp, f, lay, in->args[a], &stack_bytes);
+        emit_i386_push_call_arg(fp, f, lay, in, (size_t)a, in->args[a], &stack_bytes);
     }
 
     emit_i386_call_target(fp, lay, in);
@@ -4419,7 +4559,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         } else {
             use_x87_fp = g_i386_has_sse2 ? 0 : 1;
         }
-        if (build_slot_layout(f, 8, &lay, diag) != 0) {
+        if (build_slot_layout(f, 16, &lay, diag) != 0) {
             return -1;
         }
         frame = lay.frame_bytes;
@@ -4477,7 +4617,17 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
             switch (in->op) {
             case CC_SSA_PARAM: {
                 int poff = i386_param_offset(f, in->param_index);
-                if (f->value_types[in->dst] == CC_VAL_F64) {
+                int param_is_ldouble =
+                    (f->param_abi != NULL && in->param_index >= 0 &&
+                     (size_t)in->param_index < f->param_count &&
+                     f->param_abi[in->param_index] == CC_CALL_ARG_ABI_LDOUBLE)
+                        ? 1
+                        : 0;
+                if (param_is_ldouble && f->value_types[in->dst] == CC_VAL_F64) {
+                    int_regs_flush(fp, f, &lay, &ist);
+                    fprintf(fp, "\tfldt %d(%%ebp)\n", poff);
+                    fprintf(fp, "\tfstpl %d(%%ebp)\n", slot_off(&lay, in->dst));
+                } else if (f->value_types[in->dst] == CC_VAL_F64) {
                     int_regs_flush(fp, f, &lay, &ist);
                     emit_i386_copy_f64_param_to_slot(fp, &lay, in->dst, poff);
                 } else {

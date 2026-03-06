@@ -13,6 +13,7 @@ void cc_ssa_instr_free(cc_ssa_instr_t *in) {
 
     free(in->sym);
     free(in->args);
+    free(in->call_arg_abi);
     free(in->asm_out_values);
     free(in->asm_out_sizes);
     if (in->asm_out_constraints != NULL) {

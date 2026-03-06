@@ -683,7 +683,6 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
             o->debug = 1;
             strvec_push(&o->c_flags, a);
             strvec_push(&o->as_flags, a);
-            strvec_push(&o->ld_flags, a);
             continue;
         }
         if (strcmp(a, "-fPIC") == 0) {
@@ -1003,6 +1002,12 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
         }
         if (strncmp(a, "-L", 2) == 0 || strncmp(a, "-l", 2) == 0) {
             if (strvec_push(&o->ld_flags, a) != 0) {
+                return -1;
+            }
+            continue;
+        }
+        if (strcmp(a, "-rdynamic") == 0) {
+            if (strvec_push(&o->ld_flags, "--export-dynamic") != 0) {
                 return -1;
             }
             continue;

@@ -1332,53 +1332,12 @@ static int printf_like_format_index(const char *name, size_t *idx_out) {
 }
 
 static char *rewrite_printf_long_double_format(const char *literal) {
-    size_t n;
-    char *out;
-    size_t i = 0;
-    size_t o = 0;
-    int changed = 0;
-    if (literal == NULL) {
-        return NULL;
-    }
-    n = strlen(literal);
-    out = (char *)malloc(n + 1);
-    if (out == NULL) {
-        return NULL;
-    }
-    while (i < n) {
-        if (literal[i] != '%') {
-            out[o++] = literal[i++];
-            continue;
-        }
-        out[o++] = literal[i++];
-        if (i < n && literal[i] == '%') {
-            out[o++] = literal[i++];
-            continue;
-        }
-        while (i < n) {
-            char c = literal[i];
-            if (c == 'L' && i + 1 < n &&
-                (literal[i + 1] == 'f' || literal[i + 1] == 'F' || literal[i + 1] == 'e' || literal[i + 1] == 'E' ||
-                 literal[i + 1] == 'g' || literal[i + 1] == 'G' || literal[i + 1] == 'a' || literal[i + 1] == 'A')) {
-                changed = 1;
-                i++;
-                continue;
-            }
-            out[o++] = c;
-            i++;
-            if (c == 'd' || c == 'i' || c == 'o' || c == 'u' || c == 'x' || c == 'X' || c == 'f' || c == 'F' ||
-                c == 'e' || c == 'E' || c == 'g' || c == 'G' || c == 'a' || c == 'A' || c == 'c' || c == 's' ||
-                c == 'p' || c == 'n') {
-                break;
-            }
-        }
-    }
-    out[o] = '\0';
-    if (!changed) {
-        free(out);
-        return NULL;
-    }
-    return out;
+    /*
+     * Keep literal format strings intact. Rewriting `%Lf` to `%f` breaks
+     * varargs ABI and causes argument desynchronization at runtime.
+     */
+    (void)literal;
+    return NULL;
 }
 
 static const cc_struct_member_t *find_union_cast_member(const cc_translation_unit_t *tu, int struct_id,
@@ -4313,7 +4272,7 @@ static int check_stmt(const cc_translation_unit_t *tu, cc_stmt_t *s, var_entry_t
                 return -1;
             }
             if (g_std_c17 && (s->storage & CC_STORAGE_REGISTER) != 0) {
-                if (emit_warning(diag, s->line, s->col, "'register' storage-class specifier is obsolescent in C17", 0) !=
+                if (emit_warning(diag, s->line, s->col, "'register' storage-class specifier is obsolescent in C17", 1) !=
                     0) {
                     return -1;
                 }
@@ -5229,7 +5188,7 @@ fail_global_item:
         if (g_std_c17 && !g_std_c23 && f->has_body && f->has_oldstyle_param_decls) {
             char msg[256];
             snprintf(msg, sizeof(msg), "old-style function definition is obsolescent in C17: %s", f->name);
-            if (emit_warning(diag, f->line, f->col, msg, 0) != 0) {
+            if (emit_warning(diag, f->line, f->col, msg, 1) != 0) {
                 goto fail_decl;
             }
         }
@@ -5386,7 +5345,7 @@ fail_decl:
             }
             if (g_std_c17 && (f->params[j].storage & CC_STORAGE_REGISTER) != 0) {
                 if (emit_warning(diag, f->line, f->col,
-                                 "'register' storage-class specifier is obsolescent in C17", 0) != 0) {
+                                 "'register' storage-class specifier is obsolescent in C17", 1) != 0) {
                     goto fail_func;
                 }
             }

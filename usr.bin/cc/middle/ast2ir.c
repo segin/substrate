@@ -669,6 +669,61 @@ static long expr_array_step_size_bytes(const cc_translation_unit_t *tu, const cc
     return scalar_size * stride;
 }
 
+static long array_decl_step_size_bytes(const cc_translation_unit_t *tu, cc_type_t array_type, int struct_id,
+                                       int array_ndim, const long array_dims[CC_MAX_ARRAY_DIMS], long fallback) {
+    long scalar_size;
+    long stride = 1;
+    int i;
+
+    if (array_ndim <= 0) {
+        return fallback;
+    }
+    scalar_size = array_decl_scalar_size_bytes(tu, array_type, struct_id, array_ndim);
+    if (scalar_size <= 0) {
+        return fallback;
+    }
+    for (i = 1; i < array_ndim; ++i) {
+        long dim = array_dims != NULL ? array_dims[i] : 0;
+        if (dim <= 0) {
+            dim = 1;
+        }
+        if (stride > LONG_MAX / dim) {
+            return fallback;
+        }
+        stride *= dim;
+    }
+    if (scalar_size > LONG_MAX / stride) {
+        return fallback;
+    }
+    return scalar_size * stride;
+}
+
+static long expr_decl_array_step_size_bytes(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count,
+                                            int depth, const cc_expr_t *ptr_expr, long fallback) {
+    int idx;
+    const cc_global_t *g;
+    const char *name;
+
+    if (ptr_expr == NULL) {
+        return fallback;
+    }
+    if (ptr_expr->kind != CC_EXPR_IDENT || ptr_expr->ident == NULL) {
+        return fallback;
+    }
+    name = ptr_expr->ident;
+
+    idx = var_find_visible(vars, var_count, name, depth);
+    if (idx >= 0 && vars[idx].array_ndim > 0) {
+        return array_decl_step_size_bytes(tu, vars[idx].type, vars[idx].struct_id, vars[idx].array_ndim,
+                                          vars[idx].array_dims, fallback);
+    }
+    g = find_global(tu, name);
+    if (g != NULL && g->array_ndim > 0) {
+        return array_decl_step_size_bytes(tu, g->type, g->type_struct_id, g->array_ndim, g->array_dims, fallback);
+    }
+    return fallback;
+}
+
 static int is_cmp_op(cc_binop_t op) {
     return op == CC_BIN_EQ || op == CC_BIN_NE || op == CC_BIN_LT || op == CC_BIN_LE || op == CC_BIN_GT ||
            op == CC_BIN_GE;
@@ -1675,6 +1730,49 @@ static int expr_is_array_pointer_chain(const cc_translation_unit_t *tu, var_entr
             return 1;
         }
         return expr_is_array_pointer_chain(tu, vars, var_count, depth, e->rhs);
+    }
+    return 0;
+}
+
+static int expr_decl_array_ndim(const cc_translation_unit_t *tu, var_entry_t *vars, size_t var_count, int depth,
+                                const cc_expr_t *e) {
+    int idx;
+    const cc_global_t *g;
+    int lnd;
+    int rnd;
+
+    if (e == NULL) {
+        return 0;
+    }
+    if (e->kind == CC_EXPR_IDENT && e->ident != NULL) {
+        idx = var_find_visible(vars, var_count, e->ident, depth);
+        if (idx >= 0) {
+            return vars[idx].array_ndim;
+        }
+        g = find_global(tu, e->ident);
+        if (g != NULL) {
+            return g->array_ndim;
+        }
+        return 0;
+    }
+    if (e->kind == CC_EXPR_MEMBER) {
+        const cc_struct_member_t *m = find_struct_member(tu, member_base_struct_id(e), e->ident);
+        if (m != NULL) {
+            return m->array_ndim;
+        }
+        return e->array_ndim;
+    }
+    if (e->kind == CC_EXPR_CAST) {
+        return expr_decl_array_ndim(tu, vars, var_count, depth, e->lhs);
+    }
+    if (e->kind == CC_EXPR_DEREF) {
+        int nd = expr_decl_array_ndim(tu, vars, var_count, depth, e->lhs);
+        return nd > 0 ? (nd - 1) : 0;
+    }
+    if (e->kind == CC_EXPR_BIN && (e->op == CC_BIN_ADD || e->op == CC_BIN_SUB)) {
+        lnd = expr_decl_array_ndim(tu, vars, var_count, depth, e->lhs);
+        rnd = expr_decl_array_ndim(tu, vars, var_count, depth, e->rhs);
+        return lnd > rnd ? lnd : rnd;
     }
     return 0;
 }
@@ -3267,6 +3365,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
     case CC_EXPR_DEREF:
     {
+        int chain_array_ndim = 0;
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
@@ -3274,9 +3373,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return cast_value(sf, lhs, CC_VAL_I64, diag);
         }
-        if (is_pointer_type(e->value_type) && e->array_ndim > 0 &&
-            (expr_is_array_pointer_chain(tu, vars, var_count, depth, e->lhs) ||
-             (e->lhs != NULL && e->lhs->array_ndim > 0))) {
+        chain_array_ndim = expr_decl_array_ndim(tu, vars, var_count, depth, e->lhs);
+        if (is_pointer_type(e->value_type) && (e->array_ndim > 0 || chain_array_ndim > 1)) {
             lhs = lower_expr(tu, sf, ctx, vars, var_count, depth, e->lhs, diag);
             if (lhs < 0) {
                 return -1;
@@ -3593,6 +3691,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
 
             elem_size = pointer_elem_size_bytes(tu, e->value_type, e->struct_id);
             elem_size = expr_array_step_size_bytes(tu, ptr_expr, elem_size);
+            elem_size = expr_decl_array_step_size_bytes(tu, vars, var_count, depth, ptr_expr, elem_size);
             if (elem_size <= 0) {
                 set_diag(diag, "unsupported pointer base type in lowering");
                 return -1;
@@ -3884,6 +3983,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 int overflow_ptr;
                 int regsave_ptr;
                 int use_fp = (e->aux_type == CC_TYPE_DOUBLE || e->aux_type == CC_TYPE_FLOAT) ? 1 : 0;
+                int use_ldouble = (e->aux_type == CC_TYPE_LDOUBLE) ? 1 : 0;
                 int off_ptr;
                 int offv;
                 int off_limit;
@@ -3941,6 +4041,78 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     return -1;
                 }
                 overflow_ptr = in.dst;
+
+                if (use_ldouble) {
+                    int align_add;
+                    int align_mask;
+                    int aligned_tmp;
+                    int aligned_ptr;
+                    int next_overflow_ld;
+                    int dst_ld;
+
+                    align_add = emit_const_i64_instr(sf, 15);
+                    align_mask = emit_const_i64_instr(sf, -16);
+                    if (align_add < 0 || align_mask < 0) {
+                        return -1;
+                    }
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_ADD;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = overflow_ptr;
+                    in.rhs = align_add;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory aligning va_arg long double pointer");
+                        return -1;
+                    }
+                    aligned_tmp = in.dst;
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_AND;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = aligned_tmp;
+                    in.rhs = align_mask;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory masking va_arg long double pointer alignment");
+                        return -1;
+                    }
+                    aligned_ptr = in.dst;
+
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_LOAD;
+                    in.dst = new_value(sf, type_to_val(e->aux_type));
+                    in.lhs = aligned_ptr;
+                    in.imm = mem_size;
+                    in.is_unsigned = 0;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory loading va_arg long double value");
+                        return -1;
+                    }
+                    dst_ld = in.dst;
+
+                    stack_incv = emit_const_i64_instr(sf, align_up_long(mem_size, 8));
+                    if (stack_incv < 0) {
+                        return -1;
+                    }
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_ADD;
+                    in.dst = new_value(sf, CC_VAL_I64);
+                    in.lhs = aligned_ptr;
+                    in.rhs = stack_incv;
+                    if (in.dst < 0 || push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory incrementing va_arg long double overflow pointer");
+                        return -1;
+                    }
+                    next_overflow_ld = in.dst;
+                    memset(&in, 0, sizeof(in));
+                    in.op = CC_SSA_STORE;
+                    in.lhs = overflow_ptr_ptr;
+                    in.rhs = next_overflow_ld;
+                    in.imm = 8;
+                    if (push_instr(sf, in) != 0) {
+                        set_diag(diag, "out of memory storing va_arg long double overflow pointer update");
+                        return -1;
+                    }
+                    return dst_ld;
+                }
 
                 regsave_ptr_ptr = emit_const_i64_instr(sf, 16);
                 if (regsave_ptr_ptr < 0) {
@@ -5469,7 +5641,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             in.sym = NULL;
         } else {
             in.op = CC_SSA_CALL;
-            in.call_is_variadic = (callee != NULL && callee->has_prototype) ? callee->is_variadic : 0;
+            /*
+             * For calls without a visible prototype, C applies default argument
+             * promotions and the real callee may be variadic. On SysV AMD64
+             * the caller must set %al to the number of vector register args for
+             * variadic-compatible calls; treating unknown/non-prototype calls as
+             * variadic-safe avoids ABI breakage in mixed K&R/prototype code.
+             */
+            in.call_is_variadic = (callee != NULL && callee->has_prototype) ? callee->is_variadic : 1;
             in.call_fixed_count =
                 (callee != NULL && callee->has_prototype && callee->is_variadic) ? (int)callee->param_count : 0;
             in.sym = xstrdup(e->ident);
@@ -5480,8 +5659,10 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         in.arg_count = e->arg_count;
         if (in.arg_count > 0) {
             in.args = (int *)calloc(in.arg_count, sizeof(*in.args));
-            if (in.args == NULL) {
+            in.call_arg_abi = (unsigned char *)calloc(in.arg_count, sizeof(*in.call_arg_abi));
+            if (in.args == NULL || in.call_arg_abi == NULL) {
                 free(in.sym);
+                free(in.args);
                 return -1;
             }
         }
@@ -5489,9 +5670,11 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         for (i = 0; i < in.arg_count; ++i) {
             cc_value_type_t want;
             int av = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[i], diag);
+            int arg_needs_ldouble_abi = 0;
             if (av < 0) {
                 free(in.sym);
                 free(in.args);
+                free(in.call_arg_abi);
                 return -1;
             }
             want = value_type(sf, av);
@@ -5502,6 +5685,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     if (av < 0) {
                         free(in.sym);
                         free(in.args);
+                        free(in.call_arg_abi);
                         return -1;
                     }
                     if (agg_size > 0 && agg_size <= g_pointer_size_bytes) {
@@ -5516,6 +5700,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         if (load_in.dst < 0 || push_instr(sf, load_in) != 0) {
                             free(in.sym);
                             free(in.args);
+                            free(in.call_arg_abi);
                             set_diag(diag, "out of memory lowering small aggregate call argument");
                             return -1;
                         }
@@ -5523,24 +5708,32 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                     }
                     want = CC_VAL_I64;
                 } else {
+                    if (callee->params[i].type == CC_TYPE_LDOUBLE) {
+                        arg_needs_ldouble_abi = 1;
+                    }
                     want = type_to_val(callee->params[i].type);
                     av = cast_value(sf, av, want, diag);
                     if (av < 0) {
                         free(in.sym);
                         free(in.args);
+                        free(in.call_arg_abi);
                         return -1;
                     }
                 }
+            } else if (e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_LDOUBLE) {
+                arg_needs_ldouble_abi = 1;
             }
             in.args[i] = av;
+            in.call_arg_abi[i] = (unsigned char)(arg_needs_ldouble_abi ? CC_CALL_ARG_ABI_LDOUBLE : CC_CALL_ARG_ABI_DEFAULT);
         }
-
+        in.call_ret_x87 = (e->value_type == CC_TYPE_LDOUBLE) ? 1 : 0;
         if (e->value_type == CC_TYPE_VOID && e->struct_id >= 0) {
             long agg_size = type_size_bytes_with_struct(tu, e->value_type, e->struct_id);
             int agg_addr;
             if (agg_size <= 0) {
                 free(in.sym);
                 free(in.args);
+                free(in.call_arg_abi);
                 set_diag(diag, "unsupported aggregate return size in call lowering");
                 return -1;
             }
@@ -5548,6 +5741,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (agg_addr < 0) {
                 free(in.sym);
                 free(in.args);
+                free(in.call_arg_abi);
                 return -1;
             }
             in.dst = agg_addr;
@@ -5569,12 +5763,14 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
         if (in.dst < 0) {
             free(in.sym);
             free(in.args);
+            free(in.call_arg_abi);
             return -1;
         }
 
         if (push_instr(sf, in) != 0) {
             free(in.sym);
             free(in.args);
+            free(in.call_arg_abi);
             return -1;
         }
         return in.dst;
@@ -11701,6 +11897,7 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                         af->ret_type == CC_TYPE_DECIMAL64 || af->ret_type == CC_TYPE_DECIMAL128)
                            ? CC_VAL_F64
                            : CC_VAL_I64;
+        sf->ret_abi = (unsigned char)(af->ret_type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE : CC_CALL_ARG_ABI_DEFAULT);
         sf->storage = af->storage;
         sf->attr_flags = eff_attr_flags;
         sf->attr_align = eff_attr_align;
@@ -11725,7 +11922,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
         sf->param_values = (int *)calloc(af->param_count == 0 ? 1 : af->param_count, sizeof(*sf->param_values));
         sf->param_types =
             (cc_value_type_t *)calloc(af->param_count == 0 ? 1 : af->param_count, sizeof(*sf->param_types));
-        if (sf->param_values == NULL || sf->param_types == NULL) {
+        sf->param_abi = (unsigned char *)calloc(af->param_count == 0 ? 1 : af->param_count, sizeof(*sf->param_abi));
+        if (sf->param_values == NULL || sf->param_types == NULL || sf->param_abi == NULL) {
             set_diag(diag, "out of memory allocating parameter map");
             cc_ssa_module_free(out);
             return -1;
@@ -11754,6 +11952,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
             }
             sf->param_values[j] = in.dst;
             sf->param_types[j] = type_to_val(af->params[j].type);
+            sf->param_abi[j] =
+                (unsigned char)(af->params[j].type == CC_TYPE_LDOUBLE ? CC_CALL_ARG_ABI_LDOUBLE : CC_CALL_ARG_ABI_DEFAULT);
             if (push_instr(sf, in) != 0) {
                 set_diag(diag, "out of memory appending SSA parameter instruction");
                 cc_ssa_module_free(out);
@@ -11797,7 +11997,8 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                 sf->param_values[j] = v;
             }
             if (var_define(&vars, &var_count, af->params[j].name, af->params[j].type, af->params[j].type_struct_id,
-                           -1, 0, NULL, v, 0, 0, NULL) != 0) {
+                           af->params[j].array_len, af->params[j].array_ndim, af->params[j].array_dims, v, 0, 0,
+                           NULL) != 0) {
                 set_diag(diag, "out of memory defining parameter variable");
                 cc_ssa_module_free(out);
                 return -1;
