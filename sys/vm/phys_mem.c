@@ -19,6 +19,8 @@ static size_t vm_phys_page_count;
 
 static size_t vm_phys_low_watermark = 128; // 512 KB target
 
+vm_page_t *vm_phys_paddr_to_page(uintptr_t pa);
+
 // Internal Helpers
 static void vm_phys_buddy_enqueue(int order, vm_page_t *page) {
     page->next = vm_phys_free_lists[order];
@@ -43,6 +45,20 @@ static void vm_phys_buddy_dequeue(int order, vm_page_t *page) {
     page->next = NULL;
     page->prev = NULL;
     page->flags &= ~PG_FREE;
+}
+
+static vm_page_t *vm_phys_find_free_block_head(uintptr_t pa, int *out_order) {
+    for (int order = PMM_MAX_ORDER - 1; order >= 0; order--) {
+        uintptr_t block_size = ((uintptr_t)1 << order) * PMM_BLOCK_SIZE;
+        uintptr_t block_base = pa & ~(block_size - 1);
+        vm_page_t *head = vm_phys_paddr_to_page(block_base);
+        if (!head) continue;
+        if ((head->flags & PG_FREE) && head->order == order) {
+            if (out_order) *out_order = order;
+            return head;
+        }
+    }
+    return NULL;
 }
 
 vm_page_t *vm_phys_paddr_to_page(uintptr_t pa) {
@@ -245,28 +261,63 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count) {
 }
 
 size_t vm_phys_get_free(void) {
-    return vm_phys_free_count;
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+    size_t free_count = vm_phys_free_count;
+    spinlock_release(&vm_phys_lock);
+    intr_restore(flags);
+    return free_count;
 }
 
 size_t vm_phys_get_used(void) {
-    /* Derive from total - free (no bitmap needed) */
-    return vm_phys_page_count - vm_phys_free_count;
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+    size_t used = vm_phys_page_count - vm_phys_free_count;
+    spinlock_release(&vm_phys_lock);
+    intr_restore(flags);
+    return used;
 }
 
 void vm_phys_mark_used(uintptr_t pa) {
-    /* Mark page as used by removing from buddy if free */
-    vm_page_t *page = vm_phys_paddr_to_page(pa);
-    if (!page) return;
+    uintptr_t target_pa = pa & ~(PMM_BLOCK_SIZE - 1);
+    vm_page_t *target = vm_phys_paddr_to_page(target_pa);
+    if (!target) return;
     
     uint32_t flags = intr_disable();
     spinlock_acquire(&vm_phys_lock);
-    
-    if (page->flags & PG_FREE) {
-        /* Page is in buddy - this is a reservation during boot */
-        /* For now, just mark the flag - proper removal would need buddy surgery */
-        page->flags &= ~PG_FREE;
-        if (vm_phys_free_count > 0) vm_phys_free_count--;
+
+    /*
+     * Find the free buddy block containing target_pa, split down to order 0,
+     * and reserve exactly one page.
+     */
+    int order = -1;
+    vm_page_t *head = vm_phys_find_free_block_head(target_pa, &order);
+    if (!head) {
+        spinlock_release(&vm_phys_lock);
+        intr_restore(flags);
+        return;
     }
+
+    vm_phys_buddy_dequeue(order, head);
+
+    while (order > 0) {
+        order--;
+        uintptr_t half_size = ((uintptr_t)1 << order) * PMM_BLOCK_SIZE;
+        vm_page_t *right = vm_phys_paddr_to_page(head->phys_addr + half_size);
+        if (!right) break;
+
+        if (target_pa < right->phys_addr) {
+            vm_phys_buddy_enqueue(order, right);
+        } else {
+            vm_phys_buddy_enqueue(order, head);
+            head = right;
+        }
+    }
+
+    head->flags &= ~PG_FREE;
+    head->order = 0;
+    head->ref_count = 1;
+    if (vm_phys_free_count > 0) vm_phys_free_count--;
     
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);

@@ -191,6 +191,27 @@ static void test_free_count_tracking(void) {
     TEST_PASS("free_count_tracking");
 }
 
+/* Test: vm_phys_mark_used reserves a single page inside a free buddy block */
+static void test_mark_used_single_page_reservation(void) {
+    vm_page_t *blk = vm_phys_alloc_contiguous(4);
+    TEST_ASSERT(blk != NULL, "mark_used: initial contiguous alloc failed");
+
+    uintptr_t target_pa = blk->phys_addr + 0x1000; /* non-head page within the block */
+    vm_phys_free_contiguous(blk, 4);
+
+    size_t free_before = vm_phys_get_free();
+    vm_phys_mark_used(target_pa);
+    size_t free_after = vm_phys_get_free();
+
+    TEST_ASSERT(free_after + 1 == free_before, "mark_used: free count did not decrease by one");
+
+    vm_page_t *marked = vm_phys_paddr_to_page(target_pa);
+    TEST_ASSERT(marked != NULL, "mark_used: reserved page lookup failed");
+    TEST_ASSERT(!(marked->flags & PG_FREE), "mark_used: reserved page still free");
+
+    TEST_PASS("mark_used_single_page_reservation");
+}
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");
@@ -205,6 +226,7 @@ void test_vm_phys(void) {
     test_paddr_to_page();
     test_contiguous_zero_count();
     test_free_count_tracking();
+    test_mark_used_single_page_reservation();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);
