@@ -13,6 +13,11 @@
 int secure_mode = 0;
 int batch_mode = 0;
 int visual_mode = 0;
+int recover_mode = 0;
+
+char **ex_args = NULL;
+int ex_argc = 0;
+int ex_arg_idx = 0;
 
 typedef struct line {
     struct line *prev;
@@ -327,6 +332,141 @@ void do_command(buffer_t *b, char *cmd) {
     // Commands implementation skeleton
     if (strcmp(cmd, "visual") == 0 || strcmp(cmd, "vi") == 0) {
         fprintf(stderr, "ex: visual mode not implemented in this build.\n");
+        return;
+    } else if (strncmp(cmd, "args", 4) == 0) {
+        if (ex_argc == 0) {
+            printf("No files\n");
+            return;
+        }
+        for (int i = 0; i < ex_argc; i++) {
+            if (i == ex_arg_idx) printf("[%s] ", ex_args[i]);
+            else printf("%s ", ex_args[i]);
+        }
+        printf("\n");
+        return;
+    } else if (strncmp(cmd, "next", 4) == 0 || strncmp(cmd, "n", 1) == 0) {
+        int force = (cmd[1] == '!' || cmd[4] == '!');
+        if (b->modified && !force) {
+            fprintf(stderr, "No write since last change (add ! to override)\n");
+            return;
+        }
+        if (ex_arg_idx + 1 >= ex_argc) {
+            fprintf(stderr, "No more files\n");
+            return;
+        }
+        ex_arg_idx++;
+        buf_free(b);
+        buf_init(b);
+        b->filename = strdup(ex_args[ex_arg_idx]);
+        buf_read_file(b, b->filename);
+        if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        return;
+    } else if (strncmp(cmd, "prev", 4) == 0) {
+        int force = (cmd[4] == '!');
+        if (b->modified && !force) {
+            fprintf(stderr, "No write since last change (add ! to override)\n");
+            return;
+        }
+        if (ex_arg_idx - 1 < 0) {
+            fprintf(stderr, "No previous files\n");
+            return;
+        }
+        ex_arg_idx--;
+        buf_free(b);
+        buf_init(b);
+        b->filename = strdup(ex_args[ex_arg_idx]);
+        buf_read_file(b, b->filename);
+        if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        return;
+    } else if (strncmp(cmd, "rewind", 6) == 0 || strncmp(cmd, "rew", 3) == 0) {
+        int force = (cmd[3] == '!' || cmd[6] == '!');
+        if (b->modified && !force) {
+            fprintf(stderr, "No write since last change (add ! to override)\n");
+            return;
+        }
+        if (ex_argc == 0) {
+            fprintf(stderr, "No files\n");
+            return;
+        }
+        ex_arg_idx = 0;
+        buf_free(b);
+        buf_init(b);
+        b->filename = strdup(ex_args[ex_arg_idx]);
+        buf_read_file(b, b->filename);
+        if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
+        return;
+    } else if (strncmp(cmd, "preserve", 8) == 0 || strncmp(cmd, "pre", 3) == 0) {
+        if (b->filename && b->modified && b->head) {
+            char path[1024];
+            snprintf(path, sizeof(path), "%s.recover", b->filename);
+            buf_write_file(b, path, 0);
+            printf("File preserved as %s\n", path);
+        } else {
+            fprintf(stderr, "No modifications or filename to preserve\n");
+        }
+        return;
+    } else if (strncmp(cmd, "recover", 7) == 0 || strncmp(cmd, "rec", 3) == 0) {
+        if (!b->filename) {
+            fprintf(stderr, "No current filename\n");
+            return;
+        }
+        char path[1024];
+        snprintf(path, sizeof(path), "%s.recover", b->filename);
+        buf_free(b);
+        buf_init(b);
+        buf_read_file(b, path);
+        printf("\"%s\" recovered, %d lines\n", b->filename, b->line_count);
+        b->modified = 1;
+        return;
+    } else if (strncmp(cmd, "tag", 3) == 0) {
+        char *ptr = cmd + 3;
+        while (*ptr && isspace((unsigned char)*ptr)) ptr++;
+        if (!*ptr) {
+            fprintf(stderr, "Usage: tag <name>\n");
+            return;
+        }
+        
+        FILE *f = fopen("tags", "r");
+        if (!f) {
+            fprintf(stderr, "No tags file\n");
+            return;
+        }
+        
+        char *line = NULL;
+        size_t cap = 0;
+        ssize_t ret;
+        int found = 0;
+        while ((ret = getline(&line, &cap, f)) != -1) {
+            if (ret > 0 && line[ret-1] == '\n') line[ret-1] = '\0';
+            char *tname = strtok(line, "\t ");
+            char *tfile = strtok(NULL, "\t ");
+            char *tcmd = strtok(NULL, "");
+            
+            if (tname && tfile && tcmd && strcmp(tname, ptr) == 0) {
+                if (b->modified) {
+                    fprintf(stderr, "No write since last change\n");
+                    free(line);
+                    fclose(f);
+                    return;
+                }
+                buf_free(b);
+                buf_init(b);
+                b->filename = strdup(tfile);
+                buf_read_file(b, b->filename);
+                if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
+                
+                // execute the tag command (usually a search or line number)
+                // Remove trailing comments from vim tags like;"
+                char *tcmt = strstr(tcmd, ";\"");
+                if (tcmt) *tcmt = '\0';
+                do_command(b, tcmd);
+                found = 1;
+                break;
+            }
+        }
+        free(line);
+        fclose(f);
+        if (!found) fprintf(stderr, "Tag not found: %s\n", ptr);
         return;
     } else if (cmd[0] == 'q' || (cmd[0] == 'x' && cmd[1] == 'i' && cmd[2] == 't') || (cmd[0] == 'w' && cmd[1] == 'q')) {
         if (cmd[0] == 'x' || cmd[0] == 'w') {
@@ -722,7 +862,7 @@ void do_command(buffer_t *b, char *cmd) {
 
 int main(int argc, char **argv) {
     int opt;
-    while ((opt = getopt(argc, argv, "sSv")) != -1) {
+    while ((opt = getopt(argc, argv, "sSvr")) != -1) {
         switch (opt) {
         case 's':
             batch_mode = 1;
@@ -733,8 +873,11 @@ int main(int argc, char **argv) {
         case 'v':
             visual_mode = 1;
             break;
+        case 'r':
+            recover_mode = 1;
+            break;
         default:
-            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [file]\n", argv[0]);
+            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [-r] [file ...]\n", argv[0]);
             exit(1);
         }
     }
@@ -746,8 +889,18 @@ int main(int argc, char **argv) {
     for (int i=0; i<27; i++) buf_init(&regs[i]);
 
     if (optind < argc) {
-        buf.filename = strdup(argv[optind]);
-        buf_read_file(&buf, buf.filename);
+        ex_args = argv + optind;
+        ex_argc = argc - optind;
+        ex_arg_idx = 0;
+        buf.filename = strdup(ex_args[ex_arg_idx]);
+        if (recover_mode) {
+            char path[1024];
+            snprintf(path, sizeof(path), "%s.recover", buf.filename);
+            buf_read_file(&buf, path);
+            buf.modified = 1;
+        } else {
+            buf_read_file(&buf, buf.filename);
+        }
     }
     
     if (visual_mode) {
