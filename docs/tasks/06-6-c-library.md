@@ -6,1646 +6,1646 @@
 ## Reimplemented Checklist (All Open)
 
 ### 6. C Library (`lib/c`)
-- [ ] **`sysctl` Userspace API (`lib/c`):**
-    - [ ] **Headers & ABI Contracts:**
-        - [ ] Define and export canonical declarations in `include/sys/sysctl.h`.
-        - [ ] Define and export stable userspace data types for MIB paths and metadata results.
-        - [ ] Add compile-time guards for structure size/alignment ABI stability.
-        - [ ] Document thread-safety guarantees and reentrancy expectations in headers.
-    - [ ] **Core libc Entry Points:**
-        - [ ] Implement `sysctl()` libc wrapper with strict argument validation.
-        - [ ] Implement `sysctlbyname()` using name-to-MIB translation helper flow.
-        - [ ] Implement `sysctlnametomib()` with deterministic retry behavior.
-        - [ ] Implement helper for dynamic buffer sizing/retry loop (`ENOMEM` growth pattern).
-        - [ ] Implement typed convenience helpers (`int`, `uint`, `quad`, `string`) with explicit bounds checks.
-    - [ ] **Thread Safety & Robustness:**
-        - [ ] Ensure no static mutable buffers in libc `sysctl` helpers.
-        - [ ] Ensure all helpers preserve `errno` semantics consistently on failure.
-        - [ ] Add cancellation-safety review for wrappers used in multi-threaded callers.
-        - [ ] Add overflow-safe arithmetic helpers for buffer growth and MIB conversion.
-    - [ ] **Testing (libc Side):**
-        - [ ] Add unit tests for wrapper argument validation and errno behavior.
-        - [ ] Add unit tests for name-to-MIB and MIB-to-name translation helpers.
-        - [ ] Add integration tests for size-probe + retry loops across changing kernel values.
-        - [ ] Add thread-stress tests for concurrent wrapper usage.
-        - [ ] Add fuzz tests for malformed dotted names and oversized MIB arrays.
-    - [ ] **Manpages & Usage Guidance:**
-        - [ ] Add `man/man3/sysctl.3` documenting libc contract and thread-safety.
-        - [ ] Add `man/man3/sysctlbyname.3` with buffer sizing examples.
-        - [ ] Add `man/man3/sysctlnametomib.3` with name/MIB conversion examples.
-        - [ ] Update `man/man2/sysctl.2` to align kernel syscall semantics with libc helper behavior.
-        - [ ] Add `SEE ALSO` cross-links between `sysctl(2)` and `sysctl(3)` pages.
-- [ ] **Stdio:**
-    - [ ] **`FILE` Structure & Buffer Management (`lib/c/src/stdio/`):**
-        - [ ] Define internal `FILE` structure (`_flags`, `_buf`, `_bufsiz`, `_cnt`, `_ptr`, `_fd`, `_lbfsize`, `_close`/`_read`/`_write`/`_seek` function pointers).
-        - [ ] Implement three buffer modes:
-            - [ ] `_IOFBF` (fully buffered): flush on buffer full or explicit `fflush()`.
-            - [ ] `_IOLBF` (line buffered): flush on newline or buffer full.
-            - [ ] `_IONBF` (unbuffered): every `fputc()`/`fwrite()` calls `write()` immediately.
-        - [ ] Implement `setvbuf(FILE *stream, char *buf, int mode, size_t size)`:
-            - [ ] Validate `mode` is `_IOFBF`, `_IOLBF`, or `_IONBF`.
-            - [ ] Allow user-supplied buffer or `NULL` for auto-allocation.
-            - [ ] Must be called after `fopen()` but before any I/O.
-            - [ ] Return 0 on success, non-zero on failure.
-        - [ ] Implement `setbuf(FILE *stream, char *buf)` as wrapper for `setvbuf()`.
-        - [ ] Implement `setlinebuf(FILE *stream)` (BSD extension).
-        - [ ] Implement `fflush(FILE *stream)`:
-            - [ ] Write buffered output data via `write()` syscall.
-            - [ ] Handle partial writes (retry loop).
-            - [ ] If `stream == NULL`, flush all open output streams.
-            - [ ] Return 0 on success, `EOF` on error (set `errno`).
-        - [ ] Pre-allocate `stdin`, `stdout`, `stderr` `FILE` objects:
-            - [ ] `stdin`: fd 0, `_IOLBF` default.
-            - [ ] `stdout`: fd 1, `_IOLBF` if `isatty()`, else `_IOFBF`.
-            - [ ] `stderr`: fd 2, `_IONBF` always.
-        - [ ] Implement `__sinit()` / stream initialization on first use (lazy init pattern).
-    - [ ] **File Open/Close Operations:**
-        - [ ] `fopen(const char *path, const char *mode)`:
-            - [ ] Parse mode string: `"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, with `"b"` (binary, no-op on POSIX) and `"x"` (C11 exclusive create).
-            - [ ] Map to `open()` flags: `O_RDONLY`, `O_WRONLY|O_CREAT|O_TRUNC`, `O_WRONLY|O_CREAT|O_APPEND`, etc.
-            - [ ] Allocate `FILE`, assign fd, set default buffer.
-            - [ ] Return `NULL` on failure (set `errno`).
-        - [ ] `fdopen(int fd, const char *mode)`: wrap existing fd in `FILE`.
-        - [ ] `freopen(const char *path, const char *mode, FILE *stream)`:
-            - [ ] Flush and close existing fd.
-            - [ ] Re-open with new path/mode, reuse `FILE` object.
-            - [ ] If `path == NULL`, change mode of existing fd (C99 extension).
-        - [ ] `fclose(FILE *stream)`:
-            - [ ] Flush output buffer via `fflush()`.
-            - [ ] Free allocated buffer (if library-allocated).
-            - [ ] `close()` underlying fd.
-            - [ ] Free `FILE` structure.
-            - [ ] Return 0 on success, `EOF` on error.
-        - [ ] `fcloseall()` (extension): close all open streams.
-    - [ ] **Character & Line I/O:**
-        - [ ] `fgetc(FILE *stream)` / `getc()` macro: read one byte from buffer or refill.
-        - [ ] `fputc(int c, FILE *stream)` / `putc()` macro: write one byte to buffer or flush.
-        - [ ] `getchar()` / `putchar()`: wrappers for `stdin`/`stdout`.
-        - [ ] `ungetc(int c, FILE *stream)`: push back one character (at least 1 byte guaranteed).
-        - [ ] `fgets(char *s, int n, FILE *stream)`: read line up to `n-1` chars or newline.
-        - [ ] `fputs(const char *s, FILE *stream)`: write string (no trailing newline).
-        - [ ] `gets_s()` (C11 bounds-checked, optional) — or `gets()` removed per C11.
-        - [ ] `puts(const char *s)`: write string + newline to `stdout`.
-    - [ ] **Block I/O:**
-        - [ ] `fread(void *ptr, size_t size, size_t nmemb, FILE *stream)`:
-            - [ ] Read `size * nmemb` bytes, buffered.
-            - [ ] Handle partial reads, return number of complete elements.
-            - [ ] Set EOF/error indicators on short read.
-        - [ ] `fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)`:
-            - [ ] Write `size * nmemb` bytes through buffer.
-            - [ ] Return number of complete elements written.
-    - [ ] **File Positioning:**
-        - [ ] `fseek(FILE *stream, long offset, int whence)`:
-            - [ ] Flush output buffer before seeking.
-            - [ ] Discard input buffer on seek.
-            - [ ] `whence`: `SEEK_SET`, `SEEK_CUR`, `SEEK_END`.
-            - [ ] Return 0 on success, -1 on error.
-        - [ ] `ftell(FILE *stream)`: return current position (accounting for buffer offset).
-        - [ ] `rewind(FILE *stream)`: `fseek(stream, 0, SEEK_SET)` + clear error indicator.
-        - [ ] `fgetpos(FILE *stream, fpos_t *pos)` / `fsetpos(FILE *stream, const fpos_t *pos)`: opaque position save/restore.
-        - [ ] `fseeko()` / `ftello()` (POSIX): `off_t` variants for large file support.
-    - [ ] **Error & EOF Handling:**
-        - [ ] `feof(FILE *stream)`: return non-zero if EOF indicator set.
-        - [ ] `ferror(FILE *stream)`: return non-zero if error indicator set.
-        - [ ] `clearerr(FILE *stream)`: clear both EOF and error indicators.
-        - [ ] `perror(const char *s)`: print `s: strerror(errno)\n` to `stderr`.
-    - [ ] **Temporary Files:**
-        - [ ] `tmpfile()`: create anonymous temporary `FILE` (deleted on close).
-        - [ ] `tmpnam(char *s)` (deprecated) / `mkstemp()` integration.
-    - [ ] **Complete `printf` Family Implementation (User & Kernel):**
-        - [ ] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation.
-        - [ ] **User:** `lib/c` implementation.
-        - [ ] **Flags:**
-            - [ ] `-` (Left-align within field width).
-            - [ ] `+` (Force sign for positive numbers).
-            - [ ] ` ` (Space prefix for positive numbers).
-            - [ ] `#` (Alternate form: 0x for hex, force decimal point).
-            - [ ] `0` (Zero-padding).
-        - [ ] **Width & Precision:**
-            - [ ] Numeric width (e.g., `%5d`).
-            - [ ] Dynamic width `*` (from argument).
-            - [ ] Numeric precision (e.g., `%.5d`).
-            - [ ] Dynamic precision `.*`(from argument).
-            - [ ] Combined width/precision (e.g., `%5.2f`).
-            - [ ] Negative width logic (treat as `-` flag + positive width).
-        - [ ] **Length Modifiers:**
-            - [ ] `hh` (signed/unsigned char).
-            - [ ] `h` (signed/unsigned short).
-            - [ ] `l` (long, wint_t).
-            - [ ] `ll` (long long).
-            - [ ] `j` (intmax_t, uintmax_t).
-            - [ ] `z` (size_t, ssize_t).
-            - [ ] `t` (ptrdiff_t).
-            - [ ] `L` (long double).
-        - [ ] **Conversion Specifiers:**
-            - [ ] **Integers:** `d`, `i` (signed decimal).
-            - [ ] **Unsigned:** `u` (decimal), `o` (octal).
-            - [ ] **Hex:** `x`, `X` (lower/upper case).
-            - [ ] **Floating Point (Basic):** `f`, `F` (decimal notation).
-            - [ ] **Scientific:** `e`, `E` (exponential notation).
-            - [ ] **Significant:** `g`, `G` (shortest representation).
-            - [ ] **Hex Float:** `a`, `A` (C99 hex float - placeholder).
-            - [ ] **Characters:** `c` (char), `lc` (wint_t).
-            - [ ] **Strings:** `s` (char*), `ls` (wchar_t*).
-            - [ ] **Pointer:** `p` (implementation defined, usually %08x or %016x).
-            - [ ] **Count:** `n` (store number of chars written to int*).
-            - [ ] **Literal:** `%` (print percent sign).
-        - [ ] **Complex/Compound Cases:**
-            - [ ] Prefix combinations (e.g., `%20#llx`).
-            - [ ] Leading zeroes with precision (e.g., `%03d` vs `%.3d`).
-            - [ ] "0" flag ignored if "-" is present.
-            - [ ] "0" flag ignored if precision is specified for integers.
-            - [ ] Space ignored if "+" is present.
-        - [ ] **`printf` Family Wrappers:**
-            - [ ] `fprintf(FILE *stream, const char *fmt, ...)`: output to `FILE` via buffer.
-            - [ ] `printf(const char *fmt, ...)`: wrapper for `fprintf(stdout, ...)`.
-            - [ ] `sprintf(char *str, const char *fmt, ...)`: output to string (no bounds check).
-            - [ ] `snprintf(char *str, size_t size, const char *fmt, ...)`: bounded output to string.
-            - [ ] `dprintf(int fd, const char *fmt, ...)` (POSIX): output to fd directly.
-            - [ ] `asprintf(char **ret, const char *fmt, ...)` (BSD extension): auto-allocating sprintf.
-            - [ ] `vfprintf()`, `vprintf()`, `vsprintf()`, `vsnprintf()`, `vdprintf()`, `vasprintf()`: `va_list` variants.
-    - [ ] **Complete `scanf` Family Implementation:**
-        - [ ] **Core `vfscanf()` Engine:**
-            - [ ] Literal character matching (non-`%` characters, whitespace collapsing).
-            - [ ] `%%` literal percent matching.
-            - [ ] Assignment suppression (`*` flag).
-            - [ ] Maximum field width.
-            - [ ] **Length Modifiers:** `hh`, `h`, `l`, `ll`, `j`, `z`, `t`, `L`.
-            - [ ] **Conversion Specifiers:**
-                - [ ] `d` (decimal integer), `i` (auto-detect base: 0x/0/decimal).
-                - [ ] `u` (unsigned decimal), `o` (octal), `x`/`X` (hex).
-                - [ ] `f`, `e`, `g`, `a` (floating-point input parsing).
-                - [ ] `c` (character, no whitespace skip), `s` (string, whitespace-delimited).
-                - [ ] `[` (scanset): character class matching, `^` negation, `]` as first char.
-                - [ ] `p` (pointer), `n` (store chars consumed).
-            - [ ] Return number of successfully assigned items, or `EOF`.
-            - [ ] Handle input exhaustion mid-conversion.
-        - [ ] **`scanf` Family Wrappers:**
-            - [ ] `fscanf(FILE *stream, const char *fmt, ...)`.
-            - [ ] `scanf(const char *fmt, ...)`: wrapper for `fscanf(stdin, ...)`.
-            - [ ] `sscanf(const char *str, const char *fmt, ...)`: scan from string.
-            - [ ] `vfscanf()`, `vscanf()`, `vsscanf()`: `va_list` variants.
-    - [ ] **Testing:**
-        - [ ] **Unit Tests (`tests/lib/c/unit/test_stdio.c`):**
-            - [ ] Test `fopen()`/`fclose()` for all mode strings (`"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, `"wx"`).
-            - [ ] Test `fopen()` returns `NULL` for non-existent file in `"r"` mode.
-            - [ ] Test `fdopen()` wraps existing fd correctly.
-            - [ ] Test `freopen()` changes mode and reuses `FILE`.
-            - [ ] Test `fread()`/`fwrite()` round-trip: write data, rewind, read back, compare.
-            - [ ] Test `fread()` partial read at EOF returns correct element count.
-            - [ ] Test `fwrite()` returns correct element count on success.
-            - [ ] Test `fgetc()`/`fputc()` byte-by-byte I/O.
-            - [ ] Test `ungetc()`: push back one char, re-read it.
-            - [ ] Test `ungetc(EOF)` is a no-op.
-            - [ ] Test `fgets()` reads up to newline, NUL-terminates.
-            - [ ] Test `fgets()` with buffer smaller than line.
-            - [ ] Test `fputs()`/`puts()` output correctness.
-            - [ ] Test `fseek()`/`ftell()` positioning in all `SEEK_*` modes.
-            - [ ] Test `rewind()` resets position and clears error.
-            - [ ] Test `fgetpos()`/`fsetpos()` round-trip.
-            - [ ] Test `feof()` returns non-zero only after read past end.
-            - [ ] Test `ferror()`/`clearerr()` flag management.
-            - [ ] Test `fflush(stdout)` forces write.
-            - [ ] Test `fflush(NULL)` flushes all streams.
-            - [ ] Test `setvbuf()` with `_IONBF` causes immediate writes.
-            - [ ] Test `setvbuf()` with `_IOLBF` flushes on newline.
-            - [ ] Test `setvbuf()` with `_IOFBF` accumulates until buffer full.
-            - [ ] Test `tmpfile()` returns valid `FILE` that is auto-deleted.
-            - [ ] Test `perror()` output format.
-        - [ ] **Unit Tests (`tests/lib/c/unit/test_printf.c`):**
-            - [ ] Test `sprintf()` all integer conversions with all length modifiers.
-            - [ ] Test `sprintf()` all floating-point conversions: `%f`, `%e`, `%g`, `%a`.
-            - [ ] Test `snprintf()` truncation: verify NUL-termination and returned count.
-            - [ ] Test `snprintf()` with `size == 0` returns required length without writing.
-            - [ ] Test `fprintf()` to file, then read back and compare.
-            - [ ] Test `dprintf()` to pipe fd.
-            - [ ] Test `asprintf()` allocates correct buffer size.
-            - [ ] Test `%n` conversion stores correct count.
-            - [ ] Test width, precision, flag combinations exhaustively.
-            - [ ] Test `%%` literal output.
-            - [ ] Test `NULL` string argument to `%s` (implementation-defined, should not crash).
-        - [ ] **Unit Tests (`tests/lib/c/unit/test_scanf.c`):**
-            - [ ] Test `sscanf()` integer conversions: `%d`, `%i`, `%u`, `%o`, `%x`.
-            - [ ] Test `sscanf()` `%i` auto-base detection: `0x` (hex), `0` (octal), decimal.
-            - [ ] Test `sscanf()` floating-point: `%f`, `%e`, `%g`.
-            - [ ] Test `sscanf()` `%c` reads exact count (no whitespace skip).
-            - [ ] Test `sscanf()` `%s` reads whitespace-delimited token.
-            - [ ] Test `sscanf()` `%[` scanset: `%[a-z]`, `%[^0-9]`, `%[]abc]`.
-            - [ ] Test `sscanf()` `%n` stores chars consumed.
-            - [ ] Test `sscanf()` assignment suppression: `%*d` skips but doesn't assign.
-            - [ ] Test `sscanf()` field width limits.
-            - [ ] Test `sscanf()` return value: count of successful assignments.
-            - [ ] Test `sscanf()` returns `EOF` on immediate input failure.
-            - [ ] Test `fscanf()` from file.
-            - [ ] Test `scanf()` length modifiers: `%hhd`, `%hd`, `%ld`, `%lld`, `%jd`, `%zd`, `%td`.
-        - [ ] **Property Tests (`tests/lib/c/property/prop_stdio.c`):**
-            - [ ] Property: `sprintf(buf, "%d", x); sscanf(buf, "%d", &y)` ⇒ `x == y` for all `int x`.
-            - [ ] Property: `sprintf(buf, "%u", x); sscanf(buf, "%u", &y)` ⇒ `x == y` for all `unsigned x`.
-            - [ ] Property: `snprintf(buf, n, fmt, ...)` return value ≥ 0 and ≤ what `sprintf` would produce.
-            - [ ] Property: `snprintf(buf, n, ...)` always NUL-terminates if `n > 0`.
-            - [ ] Property: `fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f)` ⇒ `memcmp(data, out, n) == 0`.
-            - [ ] Property: `ftell()` after `fseek(f, off, SEEK_SET)` returns `off`.
-            - [ ] Property: `ungetc(c, f); fgetc(f)` returns `c` for any valid `c` ≠ `EOF`.
-        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_printf.c`):**
-            - [ ] Fuzz `snprintf()` with random format strings and random arguments.
-            - [ ] Verify no buffer overflows (write to bounded buffer, check sentinel bytes).
-            - [ ] Verify return value consistency (re-call with larger buffer, compare output).
-            - [ ] Fuzz `vsnprintf()` with extreme widths/precisions.
-        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_scanf.c`):**
-            - [ ] Fuzz `sscanf()` with random format strings and random input strings.
-            - [ ] Verify no crashes, no buffer overflows, return value ≥ 0 or `EOF`.
-            - [ ] Fuzz scanset patterns (`%[...]`) with adversarial character classes.
-    - [ ] **Man Pages:**
-        - [ ] `man/man3/fopen.3` — File open. Covers `fopen()`, `fdopen()`, `freopen()`. Mode string parsing, `"x"` flag. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-        - [ ] `man/man3/fclose.3` — File close. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-        - [ ] `man/man3/fread.3` — Block I/O. Covers `fread()` and `fwrite()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
-        - [ ] `man/man3/fgets.3` — Line input. Covers `fgets()`, `fputs()`, `gets()` removal note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-        - [ ] `man/man3/fgetc.3` — Character I/O. Covers `fgetc()`, `getc()`, `getchar()`, `fputc()`, `putc()`, `putchar()`, `ungetc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
-        - [ ] `man/man3/fseek.3` — File positioning. Covers `fseek()`, `ftell()`, `rewind()`, `fgetpos()`, `fsetpos()`, `fseeko()`, `ftello()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-        - [ ] `man/man3/fflush.3` — Flush stream. Document `NULL` argument behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-        - [ ] `man/man3/setvbuf.3` — Set stream buffering. Covers `setvbuf()`, `setbuf()`, `setlinebuf()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-        - [ ] `man/man3/feof.3` — Stream status. Covers `feof()`, `ferror()`, `clearerr()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
-        - [ ] `man/man3/perror.3` — Print error message. SYNOPSIS, DESCRIPTION, SEE ALSO.
-        - [ ] `man/man3/tmpfile.3` — Temporary files. Covers `tmpfile()` and `tmpnam()` deprecation note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-        - [ ] `man/man3/printf.3` — Formatted output. Covers `printf()`, `fprintf()`, `sprintf()`, `snprintf()`, `dprintf()`, `asprintf()` and `v*` variants. Full format specification. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-        - [ ] `man/man3/scanf.3` — Formatted input. Covers `scanf()`, `fscanf()`, `sscanf()` and `v*` variants. Full format specification including scansets. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-- [ ] **String/Mem:**
-    - [ ] Optimize `memcpy`, `memset`, `memmove`.
+- [ ] **`sysctl` Userspace API (`lib/c`):** (REQ: REQ-06-0001)
+    - [ ] **Headers & ABI Contracts:** (REQ: REQ-06-0002)
+        - [ ] Define and export canonical declarations in `include/sys/sysctl.h`. (REQ: REQ-06-0003)
+        - [ ] Define and export stable userspace data types for MIB paths and metadata results. (REQ: REQ-06-0004)
+        - [ ] Add compile-time guards for structure size/alignment ABI stability. (REQ: REQ-06-0005)
+        - [ ] Document thread-safety guarantees and reentrancy expectations in headers. (REQ: REQ-06-0006)
+    - [ ] **Core libc Entry Points:** (REQ: REQ-06-0007)
+        - [ ] Implement `sysctl()` libc wrapper with strict argument validation. (REQ: REQ-06-0008)
+        - [ ] Implement `sysctlbyname()` using name-to-MIB translation helper flow. (REQ: REQ-06-0009)
+        - [ ] Implement `sysctlnametomib()` with deterministic retry behavior. (REQ: REQ-06-0010)
+        - [ ] Implement helper for dynamic buffer sizing/retry loop (`ENOMEM` growth pattern). (REQ: REQ-06-0011)
+        - [ ] Implement typed convenience helpers (`int`, `uint`, `quad`, `string`) with explicit bounds checks. (REQ: REQ-06-0012)
+    - [ ] **Thread Safety & Robustness:** (REQ: REQ-06-0013)
+        - [ ] Ensure no static mutable buffers in libc `sysctl` helpers. (REQ: REQ-06-0014)
+        - [ ] Ensure all helpers preserve `errno` semantics consistently on failure. (REQ: REQ-06-0015)
+        - [ ] Add cancellation-safety review for wrappers used in multi-threaded callers. (REQ: REQ-06-0016)
+        - [ ] Add overflow-safe arithmetic helpers for buffer growth and MIB conversion. (REQ: REQ-06-0017)
+    - [ ] **Testing (libc Side):** (REQ: REQ-06-0018)
+        - [ ] Add unit tests for wrapper argument validation and errno behavior. (REQ: REQ-06-0019)
+        - [ ] Add unit tests for name-to-MIB and MIB-to-name translation helpers. (REQ: REQ-06-0020)
+        - [ ] Add integration tests for size-probe + retry loops across changing kernel values. (REQ: REQ-06-0021)
+        - [ ] Add thread-stress tests for concurrent wrapper usage. (REQ: REQ-06-0022)
+        - [ ] Add fuzz tests for malformed dotted names and oversized MIB arrays. (REQ: REQ-06-0023)
+    - [ ] **Manpages & Usage Guidance:** (REQ: REQ-06-0024)
+        - [ ] Add `man/man3/sysctl.3` documenting libc contract and thread-safety. (REQ: REQ-06-0025)
+        - [ ] Add `man/man3/sysctlbyname.3` with buffer sizing examples. (REQ: REQ-06-0026)
+        - [ ] Add `man/man3/sysctlnametomib.3` with name/MIB conversion examples. (REQ: REQ-06-0027)
+        - [ ] Update `man/man2/sysctl.2` to align kernel syscall semantics with libc helper behavior. (REQ: REQ-06-0028)
+        - [ ] Add `SEE ALSO` cross-links between `sysctl(2)` and `sysctl(3)` pages. (REQ: REQ-06-0029)
+- [ ] **Stdio:** (REQ: REQ-06-0030)
+    - [ ] **`FILE` Structure & Buffer Management (`lib/c/src/stdio/`):** (REQ: REQ-06-0031)
+        - [ ] Define internal `FILE` structure (`_flags`, `_buf`, `_bufsiz`, `_cnt`, `_ptr`, `_fd`, `_lbfsize`, `_close`/`_read`/`_write`/`_seek` function pointers). (REQ: REQ-06-0032)
+        - [ ] Implement three buffer modes: (REQ: REQ-06-0033)
+            - [ ] `_IOFBF` (fully buffered): flush on buffer full or explicit `fflush()`. (REQ: REQ-06-0034)
+            - [ ] `_IOLBF` (line buffered): flush on newline or buffer full. (REQ: REQ-06-0035)
+            - [ ] `_IONBF` (unbuffered): every `fputc()`/`fwrite()` calls `write()` immediately. (REQ: REQ-06-0036)
+        - [ ] Implement `setvbuf(FILE *stream, char *buf, int mode, size_t size)`: (REQ: REQ-06-0037)
+            - [ ] Validate `mode` is `_IOFBF`, `_IOLBF`, or `_IONBF`. (REQ: REQ-06-0038)
+            - [ ] Allow user-supplied buffer or `NULL` for auto-allocation. (REQ: REQ-06-0039)
+            - [ ] Must be called after `fopen()` but before any I/O. (REQ: REQ-06-0040)
+            - [ ] Return 0 on success, non-zero on failure. (REQ: REQ-06-0041, REQ-06-0295)
+        - [ ] Implement `setbuf(FILE *stream, char *buf)` as wrapper for `setvbuf()`. (REQ: REQ-06-0042)
+        - [ ] Implement `setlinebuf(FILE *stream)` (BSD extension). (REQ: REQ-06-0043)
+        - [ ] Implement `fflush(FILE *stream)`: (REQ: REQ-06-0044)
+            - [ ] Write buffered output data via `write()` syscall. (REQ: REQ-06-0045)
+            - [ ] Handle partial writes (retry loop). (REQ: REQ-06-0046)
+            - [ ] If `stream == NULL`, flush all open output streams. (REQ: REQ-06-0044)
+            - [ ] Return 0 on success, `EOF` on error (set `errno`). (REQ: REQ-06-0048)
+        - [ ] Pre-allocate `stdin`, `stdout`, `stderr` `FILE` objects: (REQ: REQ-06-0049)
+            - [ ] `stdin`: fd 0, `_IOLBF` default. (REQ: REQ-06-0050)
+            - [ ] `stdout`: fd 1, `_IOLBF` if `isatty()`, else `_IOFBF`. (REQ: REQ-06-0051)
+            - [ ] `stderr`: fd 2, `_IONBF` always. (REQ: REQ-06-0052)
+        - [ ] Implement `__sinit()` / stream initialization on first use (lazy init pattern). (REQ: REQ-06-0053)
+    - [ ] **File Open/Close Operations:** (REQ: REQ-06-0054)
+        - [ ] `fopen(const char *path, const char *mode)`: (REQ: REQ-06-0055)
+            - [ ] Parse mode string: `"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, with `"b"` (binary, no-op on POSIX) and `"x"` (C11 exclusive create). (REQ: REQ-06-0056)
+            - [ ] Map to `open()` flags: `O_RDONLY`, `O_WRONLY|O_CREAT|O_TRUNC`, `O_WRONLY|O_CREAT|O_APPEND`, etc. (REQ: REQ-06-0057)
+            - [ ] Allocate `FILE`, assign fd, set default buffer. (REQ: REQ-06-0058)
+            - [ ] Return `NULL` on failure (set `errno`). (REQ: REQ-06-0059)
+        - [ ] `fdopen(int fd, const char *mode)`: wrap existing fd in `FILE`. (REQ: REQ-06-0060)
+        - [ ] `freopen(const char *path, const char *mode, FILE *stream)`: (REQ: REQ-06-0061)
+            - [ ] Flush and close existing fd. (REQ: REQ-06-0062)
+            - [ ] Re-open with new path/mode, reuse `FILE` object. (REQ: REQ-06-0063)
+            - [ ] If `path == NULL`, change mode of existing fd (C99 extension). (REQ: REQ-06-0061)
+        - [ ] `fclose(FILE *stream)`: (REQ: REQ-06-0065)
+            - [ ] Flush output buffer via `fflush()`. (REQ: REQ-06-0066)
+            - [ ] Free allocated buffer (if library-allocated). (REQ: REQ-06-0067)
+            - [ ] `close()` underlying fd. (REQ: REQ-06-0068)
+            - [ ] Free `FILE` structure. (REQ: REQ-06-0069)
+            - [ ] Return 0 on success, `EOF` on error. (REQ: REQ-06-0070)
+        - [ ] `fcloseall()` (extension): close all open streams. (REQ: REQ-06-0071)
+    - [ ] **Character & Line I/O:** (REQ: REQ-06-0072)
+        - [ ] `fgetc(FILE *stream)` / `getc()` macro: read one byte from buffer or refill. (REQ: REQ-06-0073)
+        - [ ] `fputc(int c, FILE *stream)` / `putc()` macro: write one byte to buffer or flush. (REQ: REQ-06-0074)
+        - [ ] `getchar()` / `putchar()`: wrappers for `stdin`/`stdout`. (REQ: REQ-06-0075)
+        - [ ] `ungetc(int c, FILE *stream)`: push back one character (at least 1 byte guaranteed). (REQ: REQ-06-0076)
+        - [ ] `fgets(char *s, int n, FILE *stream)`: read line up to `n-1` chars or newline. (REQ: REQ-06-0077)
+        - [ ] `fputs(const char *s, FILE *stream)`: write string (no trailing newline). (REQ: REQ-06-0078)
+        - [ ] `gets_s()` (C11 bounds-checked, optional) — or `gets()` removed per C11. (REQ: REQ-06-0079)
+        - [ ] `puts(const char *s)`: write string + newline to `stdout`. (REQ: REQ-06-0080)
+    - [ ] **Block I/O:** (REQ: REQ-06-0081)
+        - [ ] `fread(void *ptr, size_t size, size_t nmemb, FILE *stream)`: (REQ: REQ-06-0082)
+            - [ ] Read `size * nmemb` bytes, buffered. (REQ: REQ-06-0083)
+            - [ ] Handle partial reads, return number of complete elements. (REQ: REQ-06-0084)
+            - [ ] Set EOF/error indicators on short read. (REQ: REQ-06-0085)
+        - [ ] `fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream)`: (REQ: REQ-06-0086)
+            - [ ] Write `size * nmemb` bytes through buffer. (REQ: REQ-06-0087)
+            - [ ] Return number of complete elements written. (REQ: REQ-06-0088)
+    - [ ] **File Positioning:** (REQ: REQ-06-0089)
+        - [ ] `fseek(FILE *stream, long offset, int whence)`: (REQ: REQ-06-0090)
+            - [ ] Flush output buffer before seeking. (REQ: REQ-06-0091)
+            - [ ] Discard input buffer on seek. (REQ: REQ-06-0092)
+            - [ ] `whence`: `SEEK_SET`, `SEEK_CUR`, `SEEK_END`. (REQ: REQ-06-0093)
+            - [ ] Return 0 on success, -1 on error. (REQ: REQ-06-0094)
+        - [ ] `ftell(FILE *stream)`: return current position (accounting for buffer offset). (REQ: REQ-06-0095)
+        - [ ] `rewind(FILE *stream)`: `fseek(stream, 0, SEEK_SET)` + clear error indicator. (REQ: REQ-06-0096)
+        - [ ] `fgetpos(FILE *stream, fpos_t *pos)` / `fsetpos(FILE *stream, const fpos_t *pos)`: opaque position save/restore. (REQ: REQ-06-0097)
+        - [ ] `fseeko()` / `ftello()` (POSIX): `off_t` variants for large file support. (REQ: REQ-06-0098)
+    - [ ] **Error & EOF Handling:** (REQ: REQ-06-0099)
+        - [ ] `feof(FILE *stream)`: return non-zero if EOF indicator set. (REQ: REQ-06-0100)
+        - [ ] `ferror(FILE *stream)`: return non-zero if error indicator set. (REQ: REQ-06-0101)
+        - [ ] `clearerr(FILE *stream)`: clear both EOF and error indicators. (REQ: REQ-06-0102)
+        - [ ] `perror(const char *s)`: print `s: strerror(errno)\n` to `stderr`. (REQ: REQ-06-0103)
+    - [ ] **Temporary Files:** (REQ: REQ-06-0104)
+        - [ ] `tmpfile()`: create anonymous temporary `FILE` (deleted on close). (REQ: REQ-06-0105)
+        - [ ] `tmpnam(char *s)` (deprecated) / `mkstemp()` integration. (REQ: REQ-06-0106)
+    - [ ] **Complete `printf` Family Implementation (User & Kernel):** (REQ: REQ-06-0107)
+        - [ ] **Kernel:** Migrate `sys/kern/lib.c` simplistic `sprintf` to full implementation. (REQ: REQ-06-0108)
+        - [ ] **User:** `lib/c` implementation. (REQ: REQ-06-0109)
+        - [ ] **Flags:** (REQ: REQ-06-0110)
+            - [ ] `-` (Left-align within field width). (REQ: REQ-06-0111)
+            - [ ] `+` (Force sign for positive numbers). (REQ: REQ-06-0112)
+            - [ ] ` ` (Space prefix for positive numbers). (REQ: REQ-06-0113)
+            - [ ] `#` (Alternate form: 0x for hex, force decimal point). (REQ: REQ-06-0114)
+            - [ ] `0` (Zero-padding). (REQ: REQ-06-0115)
+        - [ ] **Width & Precision:** (REQ: REQ-06-0116)
+            - [ ] Numeric width (e.g., `%5d`). (REQ: REQ-06-0117)
+            - [ ] Dynamic width `*` (from argument). (REQ: REQ-06-0118)
+            - [ ] Numeric precision (e.g., `%.5d`). (REQ: REQ-06-0119)
+            - [ ] Dynamic precision `.*`(from argument). (REQ: REQ-06-0120)
+            - [ ] Combined width/precision (e.g., `%5.2f`). (REQ: REQ-06-0121)
+            - [ ] Negative width logic (treat as `-` flag + positive width). (REQ: REQ-06-0122)
+        - [ ] **Length Modifiers:** (REQ: REQ-06-0123)
+            - [ ] `hh` (signed/unsigned char). (REQ: REQ-06-0124)
+            - [ ] `h` (signed/unsigned short). (REQ: REQ-06-0125)
+            - [ ] `l` (long, wint_t). (REQ: REQ-06-0126)
+            - [ ] `ll` (long long). (REQ: REQ-06-0127)
+            - [ ] `j` (intmax_t, uintmax_t). (REQ: REQ-06-0128)
+            - [ ] `z` (size_t, ssize_t). (REQ: REQ-06-0129)
+            - [ ] `t` (ptrdiff_t). (REQ: REQ-06-0130)
+            - [ ] `L` (long double). (REQ: REQ-06-0131)
+        - [ ] **Conversion Specifiers:** (REQ: REQ-06-0132, REQ-06-0166)
+            - [ ] **Integers:** `d`, `i` (signed decimal). (REQ: REQ-06-0133)
+            - [ ] **Unsigned:** `u` (decimal), `o` (octal). (REQ: REQ-06-0134)
+            - [ ] **Hex:** `x`, `X` (lower/upper case). (REQ: REQ-06-0135)
+            - [ ] **Floating Point (Basic):** `f`, `F` (decimal notation). (REQ: REQ-06-0136)
+            - [ ] **Scientific:** `e`, `E` (exponential notation). (REQ: REQ-06-0137)
+            - [ ] **Significant:** `g`, `G` (shortest representation). (REQ: REQ-06-0138)
+            - [ ] **Hex Float:** `a`, `A` (C99 hex float - placeholder). (REQ: REQ-06-0139)
+            - [ ] **Characters:** `c` (char), `lc` (wint_t). (REQ: REQ-06-0140)
+            - [ ] **Strings:** `s` (char*), `ls` (wchar_t*). (REQ: REQ-06-0141)
+            - [ ] **Pointer:** `p` (implementation defined, usually %08x or %016x). (REQ: REQ-06-0142)
+            - [ ] **Count:** `n` (store number of chars written to int*). (REQ: REQ-06-0143)
+            - [ ] **Literal:** `%` (print percent sign). (REQ: REQ-06-0144)
+        - [ ] **Complex/Compound Cases:** (REQ: REQ-06-0145)
+            - [ ] Prefix combinations (e.g., `%20#llx`). (REQ: REQ-06-0146)
+            - [ ] Leading zeroes with precision (e.g., `%03d` vs `%.3d`). (REQ: REQ-06-0147)
+            - [ ] "0" flag ignored if "-" is present. (REQ: REQ-06-0148)
+            - [ ] "0" flag ignored if precision is specified for integers. (REQ: REQ-06-0149)
+            - [ ] Space ignored if "+" is present. (REQ: REQ-06-0150)
+        - [ ] **`printf` Family Wrappers:** (REQ: REQ-06-0151)
+            - [ ] `fprintf(FILE *stream, const char *fmt, ...)`: output to `FILE` via buffer. (REQ: REQ-06-0152)
+            - [ ] `printf(const char *fmt, ...)`: wrapper for `fprintf(stdout, ...)`. (REQ: REQ-06-0153)
+            - [ ] `sprintf(char *str, const char *fmt, ...)`: output to string (no bounds check). (REQ: REQ-06-0154)
+            - [ ] `snprintf(char *str, size_t size, const char *fmt, ...)`: bounded output to string. (REQ: REQ-06-0155)
+            - [ ] `dprintf(int fd, const char *fmt, ...)` (POSIX): output to fd directly. (REQ: REQ-06-0156)
+            - [ ] `asprintf(char **ret, const char *fmt, ...)` (BSD extension): auto-allocating sprintf. (REQ: REQ-06-0157)
+            - [ ] `vfprintf()`, `vprintf()`, `vsprintf()`, `vsnprintf()`, `vdprintf()`, `vasprintf()`: `va_list` variants. (REQ: REQ-06-0158)
+    - [ ] **Complete `scanf` Family Implementation:** (REQ: REQ-06-0159)
+        - [ ] **Core `vfscanf()` Engine:** (REQ: REQ-06-0160)
+            - [ ] Literal character matching (non-`%` characters, whitespace collapsing). (REQ: REQ-06-0161)
+            - [ ] `%%` literal percent matching. (REQ: REQ-06-0162)
+            - [ ] Assignment suppression (`*` flag). (REQ: REQ-06-0163)
+            - [ ] Maximum field width. (REQ: REQ-06-0164)
+            - [ ] **Length Modifiers:** `hh`, `h`, `l`, `ll`, `j`, `z`, `t`, `L`. (REQ: REQ-06-0165)
+            - [ ] **Conversion Specifiers:** (REQ: REQ-06-0132, REQ-06-0166)
+                - [ ] `d` (decimal integer), `i` (auto-detect base: 0x/0/decimal). (REQ: REQ-06-0167)
+                - [ ] `u` (unsigned decimal), `o` (octal), `x`/`X` (hex). (REQ: REQ-06-0168)
+                - [ ] `f`, `e`, `g`, `a` (floating-point input parsing). (REQ: REQ-06-0169)
+                - [ ] `c` (character, no whitespace skip), `s` (string, whitespace-delimited). (REQ: REQ-06-0170)
+                - [ ] `[` (scanset): character class matching, `^` negation, `]` as first char. (REQ: REQ-06-0171)
+                - [ ] `p` (pointer), `n` (store chars consumed). (REQ: REQ-06-0172)
+            - [ ] Return number of successfully assigned items, or `EOF`. (REQ: REQ-06-0173)
+            - [ ] Handle input exhaustion mid-conversion. (REQ: REQ-06-0174)
+        - [ ] **`scanf` Family Wrappers:** (REQ: REQ-06-0175)
+            - [ ] `fscanf(FILE *stream, const char *fmt, ...)`. (REQ: REQ-06-0176)
+            - [ ] `scanf(const char *fmt, ...)`: wrapper for `fscanf(stdin, ...)`. (REQ: REQ-06-0177)
+            - [ ] `sscanf(const char *str, const char *fmt, ...)`: scan from string. (REQ: REQ-06-0178)
+            - [ ] `vfscanf()`, `vscanf()`, `vsscanf()`: `va_list` variants. (REQ: REQ-06-0179)
+    - [ ] **Testing:** (REQ: REQ-06-0180, REQ-06-0364, REQ-06-1123, REQ-06-1219)
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_stdio.c`):** (REQ: REQ-06-0181)
+            - [ ] Test `fopen()`/`fclose()` for all mode strings (`"r"`, `"w"`, `"a"`, `"r+"`, `"w+"`, `"a+"`, `"wx"`). (REQ: REQ-06-0182)
+            - [ ] Test `fopen()` returns `NULL` for non-existent file in `"r"` mode. (REQ: REQ-06-0183)
+            - [ ] Test `fdopen()` wraps existing fd correctly. (REQ: REQ-06-0184)
+            - [ ] Test `freopen()` changes mode and reuses `FILE`. (REQ: REQ-06-0185)
+            - [ ] Test `fread()`/`fwrite()` round-trip: write data, rewind, read back, compare. (REQ: REQ-06-0186)
+            - [ ] Test `fread()` partial read at EOF returns correct element count. (REQ: REQ-06-0187)
+            - [ ] Test `fwrite()` returns correct element count on success. (REQ: REQ-06-0188)
+            - [ ] Test `fgetc()`/`fputc()` byte-by-byte I/O. (REQ: REQ-06-0189)
+            - [ ] Test `ungetc()`: push back one char, re-read it. (REQ: REQ-06-0190)
+            - [ ] Test `ungetc(EOF)` is a no-op. (REQ: REQ-06-0191)
+            - [ ] Test `fgets()` reads up to newline, NUL-terminates. (REQ: REQ-06-0192)
+            - [ ] Test `fgets()` with buffer smaller than line. (REQ: REQ-06-0193)
+            - [ ] Test `fputs()`/`puts()` output correctness. (REQ: REQ-06-0194)
+            - [ ] Test `fseek()`/`ftell()` positioning in all `SEEK_*` modes. (REQ: REQ-06-0195)
+            - [ ] Test `rewind()` resets position and clears error. (REQ: REQ-06-0196)
+            - [ ] Test `fgetpos()`/`fsetpos()` round-trip. (REQ: REQ-06-0197)
+            - [ ] Test `feof()` returns non-zero only after read past end. (REQ: REQ-06-0198)
+            - [ ] Test `ferror()`/`clearerr()` flag management. (REQ: REQ-06-0199)
+            - [ ] Test `fflush(stdout)` forces write. (REQ: REQ-06-0200)
+            - [ ] Test `fflush(NULL)` flushes all streams. (REQ: REQ-06-0201)
+            - [ ] Test `setvbuf()` with `_IONBF` causes immediate writes. (REQ: REQ-06-0202)
+            - [ ] Test `setvbuf()` with `_IOLBF` flushes on newline. (REQ: REQ-06-0203)
+            - [ ] Test `setvbuf()` with `_IOFBF` accumulates until buffer full. (REQ: REQ-06-0204)
+            - [ ] Test `tmpfile()` returns valid `FILE` that is auto-deleted. (REQ: REQ-06-0205)
+            - [ ] Test `perror()` output format. (REQ: REQ-06-0206)
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_printf.c`):** (REQ: REQ-06-0207)
+            - [ ] Test `sprintf()` all integer conversions with all length modifiers. (REQ: REQ-06-0208)
+            - [ ] Test `sprintf()` all floating-point conversions: `%f`, `%e`, `%g`, `%a`. (REQ: REQ-06-0209)
+            - [ ] Test `snprintf()` truncation: verify NUL-termination and returned count. (REQ: REQ-06-0210)
+            - [ ] Test `snprintf()` with `size == 0` returns required length without writing. (REQ: REQ-06-0211)
+            - [ ] Test `fprintf()` to file, then read back and compare. (REQ: REQ-06-0212)
+            - [ ] Test `dprintf()` to pipe fd. (REQ: REQ-06-0213)
+            - [ ] Test `asprintf()` allocates correct buffer size. (REQ: REQ-06-0214)
+            - [ ] Test `%n` conversion stores correct count. (REQ: REQ-06-0215)
+            - [ ] Test width, precision, flag combinations exhaustively. (REQ: REQ-06-0216)
+            - [ ] Test `%%` literal output. (REQ: REQ-06-0217)
+            - [ ] Test `NULL` string argument to `%s` (implementation-defined, should not crash). (REQ: REQ-06-0218)
+        - [ ] **Unit Tests (`tests/lib/c/unit/test_scanf.c`):** (REQ: REQ-06-0219)
+            - [ ] Test `sscanf()` integer conversions: `%d`, `%i`, `%u`, `%o`, `%x`. (REQ: REQ-06-0220)
+            - [ ] Test `sscanf()` `%i` auto-base detection: `0x` (hex), `0` (octal), decimal. (REQ: REQ-06-0221)
+            - [ ] Test `sscanf()` floating-point: `%f`, `%e`, `%g`. (REQ: REQ-06-0222)
+            - [ ] Test `sscanf()` `%c` reads exact count (no whitespace skip). (REQ: REQ-06-0223)
+            - [ ] Test `sscanf()` `%s` reads whitespace-delimited token. (REQ: REQ-06-0224)
+            - [ ] Test `sscanf()` `%[` scanset: `%[a-z]`, `%[^0-9]`, `%[]abc]`. (REQ: REQ-06-0225)
+            - [ ] Test `sscanf()` `%n` stores chars consumed. (REQ: REQ-06-0226)
+            - [ ] Test `sscanf()` assignment suppression: `%*d` skips but doesn't assign. (REQ: REQ-06-0227)
+            - [ ] Test `sscanf()` field width limits. (REQ: REQ-06-0228)
+            - [ ] Test `sscanf()` return value: count of successful assignments. (REQ: REQ-06-0229)
+            - [ ] Test `sscanf()` returns `EOF` on immediate input failure. (REQ: REQ-06-0230)
+            - [ ] Test `fscanf()` from file. (REQ: REQ-06-0231)
+            - [ ] Test `scanf()` length modifiers: `%hhd`, `%hd`, `%ld`, `%lld`, `%jd`, `%zd`, `%td`. (REQ: REQ-06-0232)
+        - [ ] **Property Tests (`tests/lib/c/property/prop_stdio.c`):** (REQ: REQ-06-0233)
+            - [ ] Property: `sprintf(buf, "%d", x); sscanf(buf, "%d", &y)` ⇒ `x == y` for all `int x`. (REQ: REQ-06-0234)
+            - [ ] Property: `sprintf(buf, "%u", x); sscanf(buf, "%u", &y)` ⇒ `x == y` for all `unsigned x`. (REQ: REQ-06-0235)
+            - [ ] Property: `snprintf(buf, n, fmt, ...)` return value ≥ 0 and ≤ what `sprintf` would produce. (REQ: REQ-06-0236)
+            - [ ] Property: `snprintf(buf, n, ...)` always NUL-terminates if `n > 0`. (REQ: REQ-06-0237)
+            - [ ] Property: `fwrite(data, 1, n, f); rewind(f); fread(out, 1, n, f)` ⇒ `memcmp(data, out, n) == 0`. (REQ: REQ-06-0238)
+            - [ ] Property: `ftell()` after `fseek(f, off, SEEK_SET)` returns `off`. (REQ: REQ-06-0239)
+            - [ ] Property: `ungetc(c, f); fgetc(f)` returns `c` for any valid `c` ≠ `EOF`. (REQ: REQ-06-0240)
+        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_printf.c`):** (REQ: REQ-06-0241)
+            - [ ] Fuzz `snprintf()` with random format strings and random arguments. (REQ: REQ-06-0242)
+            - [ ] Verify no buffer overflows (write to bounded buffer, check sentinel bytes). (REQ: REQ-06-0243)
+            - [ ] Verify return value consistency (re-call with larger buffer, compare output). (REQ: REQ-06-0244)
+            - [ ] Fuzz `vsnprintf()` with extreme widths/precisions. (REQ: REQ-06-0245)
+        - [ ] **Fuzz Tests (`tests/lib/c/fuzz/fuzz_scanf.c`):** (REQ: REQ-06-0246)
+            - [ ] Fuzz `sscanf()` with random format strings and random input strings. (REQ: REQ-06-0247)
+            - [ ] Verify no crashes, no buffer overflows, return value ≥ 0 or `EOF`. (REQ: REQ-06-0248)
+            - [ ] Fuzz scanset patterns (`%[...]`) with adversarial character classes. (REQ: REQ-06-0249)
+    - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+        - [ ] `man/man3/fopen.3` — File open. Covers `fopen()`, `fdopen()`, `freopen()`. Mode string parsing, `"x"` flag. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0251)
+        - [ ] `man/man3/fclose.3` — File close. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0252)
+        - [ ] `man/man3/fread.3` — Block I/O. Covers `fread()` and `fwrite()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. (REQ: REQ-06-0253)
+        - [ ] `man/man3/fgets.3` — Line input. Covers `fgets()`, `fputs()`, `gets()` removal note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0254)
+        - [ ] `man/man3/fgetc.3` — Character I/O. Covers `fgetc()`, `getc()`, `getchar()`, `fputc()`, `putc()`, `putchar()`, `ungetc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO. (REQ: REQ-06-0255)
+        - [ ] `man/man3/fseek.3` — File positioning. Covers `fseek()`, `ftell()`, `rewind()`, `fgetpos()`, `fsetpos()`, `fseeko()`, `ftello()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0256)
+        - [ ] `man/man3/fflush.3` — Flush stream. Document `NULL` argument behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0257)
+        - [ ] `man/man3/setvbuf.3` — Set stream buffering. Covers `setvbuf()`, `setbuf()`, `setlinebuf()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0258)
+        - [ ] `man/man3/feof.3` — Stream status. Covers `feof()`, `ferror()`, `clearerr()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO. (REQ: REQ-06-0259)
+        - [ ] `man/man3/perror.3` — Print error message. SYNOPSIS, DESCRIPTION, SEE ALSO. (REQ: REQ-06-0260)
+        - [ ] `man/man3/tmpfile.3` — Temporary files. Covers `tmpfile()` and `tmpnam()` deprecation note. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0261)
+        - [ ] `man/man3/printf.3` — Formatted output. Covers `printf()`, `fprintf()`, `sprintf()`, `snprintf()`, `dprintf()`, `asprintf()` and `v*` variants. Full format specification. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0262)
+        - [ ] `man/man3/scanf.3` — Formatted input. Covers `scanf()`, `fscanf()`, `sscanf()` and `v*` variants. Full format specification including scansets. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0263)
+- [ ] **String/Mem:** (REQ: REQ-06-0264)
+    - [ ] Optimize `memcpy`, `memset`, `memmove`. (REQ: REQ-06-0265)
     - [/] **Math Library (`lib/m/`):**
         - [/] **Architecture & Environment:**
-            - [ ] `math.h` header definition.
-            - [ ] `math_errhandling` (errno support).
-            - [ ] `__fpclassify` internal helper.
-            - [ ] **FENV (Floating-Point Environment):**
-                - [ ] **Header (`include/fenv.h`) Definition (C99/POSIX):**
-                    - [ ] Define `fenv_t` type (full x87 environment: CW, SW, TW, FIP, FCS, FDP, FDS, MXCSR on SSE-capable).
-                    - [ ] Define `fexcept_t` type (exception status word snapshot).
-                    - [ ] Define exception flag macros:
-                        - [ ] `FE_INVALID` (bit 0, x87 IE).
-                        - [ ] `FE_DENORMAL` (bit 1, x87 DE — non-standard extension, guard with `#ifdef`).
-                        - [ ] `FE_DIVBYZERO` (bit 2, x87 ZE).
-                        - [ ] `FE_OVERFLOW` (bit 3, x87 OE).
-                        - [ ] `FE_UNDERFLOW` (bit 4, x87 UE).
-                        - [ ] `FE_INEXACT` (bit 5, x87 PE).
-                        - [ ] `FE_ALL_EXCEPT` (bitwise OR of all supported exception flags).
-                    - [ ] Define rounding mode macros:
-                        - [ ] `FE_TONEAREST` (CW bits 10-11 = 00).
-                        - [ ] `FE_DOWNWARD` (CW bits 10-11 = 01).
-                        - [ ] `FE_UPWARD` (CW bits 10-11 = 10).
-                        - [ ] `FE_TOWARDZERO` (CW bits 10-11 = 11).
-                    - [ ] Define `FE_DFL_ENV` macro (pointer to default environment, `((const fenv_t *)-1)` or static).
-                    - [ ] Provide function prototypes for all `fe*` functions.
-                    - [ ] Include guard (`_FENV_H`) and C++ `extern "C"` wrapper.
-                - [ ] **Exception Handling Functions:**
-                    - [ ] `feclearexcept(int excepts)`:
-                        - [ ] Read x87 status word via `fnstsw`.
-                        - [ ] Clear requested exception bits.
-                        - [ ] Restore via `fldenv` (requires full env save/modify/restore cycle).
-                        - [ ] If SSE present, also clear bits in MXCSR via `ldmxcsr`.
-                        - [ ] Return 0 on success, non-zero on failure.
-                    - [ ] `fegetexceptflag(fexcept_t *flagp, int excepts)`:
-                        - [ ] Read x87 status word via `fnstsw`.
-                        - [ ] Mask with `excepts`, store into `*flagp`.
-                        - [ ] If SSE present, OR in MXCSR exception bits.
-                        - [ ] Return 0 on success.
-                    - [ ] `feraiseexcept(int excepts)`:
-                        - [ ] Raise specified exceptions by performing operations that trigger them (e.g., divide-by-zero for `FE_DIVBYZERO`, 0.0/0.0 for `FE_INVALID`).
-                        - [ ] Alternatively: save env, set SW bits, load env, then `fwait` to trigger trap.
-                        - [ ] Ensure `FE_OVERFLOW` and `FE_UNDERFLOW` also set `FE_INEXACT` per C99 7.6.2.3.
-                        - [ ] Return 0 on success.
-                    - [ ] `fesetexceptflag(const fexcept_t *flagp, int excepts)`:
-                        - [ ] Save full x87 environment via `fnstenv`.
-                        - [ ] Replace status word exception bits (masked by `excepts`) from `*flagp`.
-                        - [ ] Restore via `fldenv` — must NOT raise exceptions (set bits only).
-                        - [ ] If SSE present, update MXCSR accordingly.
-                        - [ ] Return 0 on success.
-                    - [ ] `fetestexcept(int excepts)`:
-                        - [ ] Read x87 status word via `fnstsw`.
-                        - [ ] If SSE present, OR in MXCSR sticky bits.
-                        - [ ] Return bitwise AND of current exceptions with `excepts`.
-                - [ ] **Rounding Mode Functions:**
-                    - [ ] `fegetround()`:
-                        - [ ] Read x87 control word via `fnstcw`.
-                        - [ ] Extract rounding mode bits (bits 10-11).
-                        - [ ] Return corresponding `FE_*` rounding constant.
-                    - [ ] `fesetround(int rdir)`:
-                        - [ ] Validate `rdir` is one of `FE_TONEAREST`, `FE_DOWNWARD`, `FE_UPWARD`, `FE_TOWARDZERO`.
-                        - [ ] Read x87 control word via `fnstcw`.
-                        - [ ] Modify rounding mode bits (bits 10-11).
-                        - [ ] Write back via `fldcw`.
-                        - [ ] If SSE present, also update MXCSR rounding bits (bits 13-14).
-                        - [ ] Return 0 on success, non-zero for invalid `rdir`.
-                - [ ] **Environment Save/Restore Functions:**
-                    - [ ] `fegetenv(fenv_t *envp)`:
-                        - [ ] Save full x87 environment via `fnstenv` into `*envp`.
-                        - [ ] Restore control word afterwards (x87 `fnstenv` masks all exceptions as side effect, so re-load CW).
-                        - [ ] If SSE present, also save MXCSR into `*envp`.
-                        - [ ] Return 0 on success.
-                    - [ ] `feholdexcept(fenv_t *envp)`:
-                        - [ ] Save current environment into `*envp` via `fnstenv`.
-                        - [ ] Clear all exception flags in status word.
-                        - [ ] Mask all exceptions in control word (set exception mask bits 0-5).
-                        - [ ] Install this non-stop environment via `fldenv`.
-                        - [ ] If SSE present, save and mask MXCSR similarly.
-                        - [ ] Return 0 on success.
-                        - [ ] This enables non-stop (non-trapping) FP mode for temporary computation.
-                    - [ ] `fesetenv(const fenv_t *envp)`:
-                        - [ ] If `envp == FE_DFL_ENV`, load default environment (e.g., `fninit` then adjust, or load a static default).
-                        - [ ] Else, load full x87 environment from `*envp` via `fldenv`.
-                        - [ ] If SSE present, also restore MXCSR from `*envp`.
-                        - [ ] Must NOT raise exceptions — install state silently.
-                        - [ ] Return 0 on success.
-                    - [ ] `feupdateenv(const fenv_t *envp)`:
-                        - [ ] Read currently raised exceptions via `fetestexcept(FE_ALL_EXCEPT)`.
-                        - [ ] Install `*envp` (or default) via `fesetenv(envp)`.
-                        - [ ] Re-raise the previously pending exceptions via `feraiseexcept()`.
-                        - [ ] Return 0 on success.
-                        - [ ] This is the "merge exceptions then restore" primitive.
-                - [ ] **`FENV_ACCESS` Pragma Support:**
-                    - [ ] Document compiler interaction: `#pragma STDC FENV_ACCESS ON` advisory.
-                    - [ ] Ensure `fenv.h` includes comment noting GCC `#pragma GCC optimize ("no-fast-math")` equivalent.
-                    - [ ] Add `FENV_ACCESS` documentation in header and man pages.
-                - [ ] **Implementation Details (i386/x87 Backend — `lib/m/src/fenv.c`):**
-                    - [ ] All functions implemented as i386 inline assembly or `.S` file for x87 `fnstcw`/`fldcw`/`fnstsw`/`fnstenv`/`fldenv`/`fnclex`/`fwait`.
-                    - [ ] SSE/MXCSR path gated by runtime or compile-time `__SSE__` check.
-                    - [ ] `fenv_t` layout must match x87 `fnstenv`/`fldenv` 28-byte block (+ optional MXCSR field).
-                    - [ ] Ensure `fninit` is used (not `finit`) to avoid waiting for pending exceptions during default-env setup.
-                    - [ ] All functions are `__attribute__((noinline))` to prevent optimizer from reordering FP state access.
-                - [ ] **Testing:**
-                    - [ ] **Unit Tests (`tests/lib/m/unit/test_fenv.c`):**
-                        - [ ] Test `feclearexcept()`: raise each exception, clear it, verify via `fetestexcept()`.
-                        - [ ] Test `feclearexcept(FE_ALL_EXCEPT)`: clear all, verify none pending.
-                        - [ ] Test `feclearexcept(0)`: no-op, verify no side effects.
-                        - [ ] Test `fegetexceptflag()` / `fesetexceptflag()`: round-trip flag save/restore.
-                        - [ ] Test `fesetexceptflag()` does NOT raise exceptions (just sets sticky bits).
-                        - [ ] Test `feraiseexcept()`: raise individual exceptions, verify via `fetestexcept()`.
-                        - [ ] Test `feraiseexcept(FE_OVERFLOW)` also sets `FE_INEXACT` (C99 requirement).
-                        - [ ] Test `feraiseexcept(FE_UNDERFLOW)` also sets `FE_INEXACT`.
-                        - [ ] Test `feraiseexcept()` with multiple flags ORed together.
-                        - [ ] Test `fetestexcept()`: verify returns only requested bits.
-                        - [ ] Test `fegetround()` default is `FE_TONEAREST`.
-                        - [ ] Test `fesetround()` / `fegetround()` round-trip for all four modes.
-                        - [ ] Test `fesetround()` with invalid argument returns non-zero.
-                        - [ ] Test `fesetround()` actually affects rounding: add 1.0 + tiny value and check direction.
-                        - [ ] Test `fegetenv()` / `fesetenv()` round-trip preserves full state.
-                        - [ ] Test `fesetenv(FE_DFL_ENV)` resets to default (no exceptions, `FE_TONEAREST`).
-                        - [ ] Test `feholdexcept()`: saves state, clears exceptions, masks all traps.
-                        - [ ] Test `feholdexcept()` followed by exception-raising operations don't trap.
-                        - [ ] Test `feupdateenv()`: merges pending exceptions from non-stop region back after restore.
-                        - [ ] Test `feupdateenv()` re-raises exceptions from before `feholdexcept()` was called.
-                        - [ ] Test interaction: `feholdexcept()` → compute with exceptions → `feupdateenv()` → verify merged.
-                    - [ ] **Property Tests (`tests/lib/m/property/prop_fenv.c`):**
-                        - [ ] Property: `fesetround(m); fegetround() == m` for all valid `m`.
-                        - [ ] Property: `fesetround(invalid)` returns non-zero and does not change mode.
-                        - [ ] Property: `feclearexcept(e); fetestexcept(e) == 0` for any valid exception mask `e`.
-                        - [ ] Property: `feraiseexcept(e); (fetestexcept(e) & e) == e` for any valid `e`.
-                        - [ ] Property: `fegetexceptflag(&f, e); feclearexcept(FE_ALL_EXCEPT); fesetexceptflag(&f, e); fetestexcept(e)` equals original.
-                        - [ ] Property: `fegetenv(&env); /* modify state */; fesetenv(&env)` restores original rounding and exceptions.
-                        - [ ] Property: `fesetenv(FE_DFL_ENV); fegetround() == FE_TONEAREST && fetestexcept(FE_ALL_EXCEPT) == 0`.
-                        - [ ] Property: `feholdexcept()` results in `fetestexcept(FE_ALL_EXCEPT) == 0` and non-stop mode.
-                        - [ ] Property: `feupdateenv()` preserves exceptions raised during non-stop region.
-                        - [ ] Property: exception flags are sticky — `feraiseexcept(e)` followed by unrelated FP ops retains `e`.
-                    - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_fenv.c`):**
-                        - [ ] Fuzz random combinations of exception flag bits to `feclearexcept()` / `feraiseexcept()` / `fetestexcept()`.
-                        - [ ] Fuzz random rounding mode values to `fesetround()` (including invalid values).
-                        - [ ] Fuzz random sequences of `fegetenv()`/`fesetenv()`/`feholdexcept()`/`feupdateenv()` interleaved with FP operations.
-                        - [ ] Fuzz random `fexcept_t` values through `fegetexceptflag()`/`fesetexceptflag()` round-trips.
-                        - [ ] Verify no crashes, no undefined behavior, status word consistency after each fuzzed sequence.
-                - [ ] **Man Pages:**
-                    - [ ] `man/man7/fenv.7` — Overview of floating-point environment, x87/SSE interaction, `FENV_ACCESS` pragma, and usage patterns.
-                    - [ ] `man/man3/feclearexcept.3` — Clear floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                    - [ ] `man/man3/fegetexceptflag.3` — Get floating-point exception flags. Covers `fegetexceptflag()` and `fesetexceptflag()` together (paired save/restore API). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                    - [ ] `man/man3/feraiseexcept.3` — Raise floating-point exceptions. Document `FE_OVERFLOW`/`FE_UNDERFLOW` implying `FE_INEXACT`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                    - [ ] `man/man3/fetestexcept.3` — Test floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
-                    - [ ] `man/man3/fegetround.3` — Get/set floating-point rounding mode. Covers `fegetround()` and `fesetround()` together. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                    - [ ] `man/man3/fegetenv.3` — Get/set floating-point environment. Covers `fegetenv()` and `fesetenv()`. SYNOPSIS, DESCRIPTION (document `FE_DFL_ENV`), RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                    - [ ] `man/man3/feholdexcept.3` — Save environment and enter non-stop mode. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES (show `feholdexcept()` → compute → `feupdateenv()` pattern), SEE ALSO.
-                    - [ ] `man/man3/feupdateenv.3` — Restore environment and re-raise saved exceptions. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-            - [ ] **Type Variants (f, l suffixes):**
-                - [ ] **Float Variants (`f` suffix — `lib/m/src/mathf.c`):**
-                    - [ ] Implement `sinf()`, `cosf()`, `tanf()`, `asinf()`, `acosf()`, `atanf()`, `atan2f()`.
-                    - [ ] Implement `sinhf()`, `coshf()`, `tanhf()`, `asinhf()`, `acoshf()`, `atanhf()`.
-                    - [ ] Implement `expf()`, `exp2f()`, `expm1f()`, `logf()`, `log2f()`, `log10f()`, `log1pf()`.
-                    - [ ] Implement `powf()`, `sqrtf()`, `cbrtf()`, `hypotf()`.
-                    - [ ] Implement `fabsf()`, `fmodf()`, `remainderf()`, `remquof()`, `fmaf()`.
-                    - [ ] Implement `fmaxf()`, `fminf()`, `fdimf()`.
-                    - [ ] Implement `ceilf()`, `floorf()`, `truncf()`, `roundf()`, `rintf()`, `nearbyintf()`.
-                    - [ ] Implement `lroundf()`, `llroundf()`, `lrintf()`, `llrintf()`.
-                    - [ ] Implement `frexpf()`, `ldexpf()`, `modff()`, `scalbnf()`, `scalblnf()`.
-                    - [ ] Implement `ilogbf()`, `logbf()`, `nextafterf()`, `nexttowardf()`, `copysignf()`, `nanf()`.
-                    - [ ] Implement `erff()`, `erfcf()`, `tgammaf()`, `lgammaf()`.
-                    - [ ] Implement `sincosf()`.
-                - [ ] **Long Double Variants (`l` suffix — `lib/m/src/mathl.c`):**
-                    - [ ] Implement `sinl()`, `cosl()`, `tanl()`, `asinl()`, `acosl()`, `atanl()`, `atan2l()`.
-                    - [ ] Implement `sinhl()`, `coshl()`, `tanhl()`, `asinhl()`, `acoshl()`, `atanhl()`.
-                    - [ ] Implement `expl()`, `exp2l()`, `expm1l()`, `logl()`, `log2l()`, `log10l()`, `log1pl()`.
-                    - [ ] Implement `powl()`, `sqrtl()`, `cbrtl()`, `hypotl()`.
-                    - [ ] Implement `fabsl()`, `fmodl()`, `remainderl()`, `remquol()`, `fmal()`.
-                    - [ ] Implement `fmaxl()`, `fminl()`, `fdiml()`.
-                    - [ ] Implement `ceill()`, `floorl()`, `truncl()`, `roundl()`, `rintl()`, `nearbyintl()`.
-                    - [ ] Implement `lroundl()`, `llroundl()`, `lrintl()`, `llrintl()`.
-                    - [ ] Implement `frexpl()`, `ldexpl()`, `modfl()`, `scalbnl()`, `scalblnl()`.
-                    - [ ] Implement `ilogbl()`, `logbl()`, `nextafterl()`, `nexttowardl()`, `copysignl()`, `nanl()`.
-                    - [ ] Implement `erfl()`, `erfcl()`, `tgammal()`, `lgammal()`.
-                    - [ ] Implement `sincosl()`.
-                - [ ] **i386 Note:** On x87, `long double` is 80-bit extended precision (native FPU format). `float`/`double` variants should use x87 internally and truncate on return.
-            - [ ] **Generic Math (`<tgmath.h>`):**
-                - [ ] Implement C99/C11 `<tgmath.h>` type-generic macros:
-                    - [ ] Dispatch to `f`, ` `, or `l` suffix based on argument type via `_Generic` (C11) or `__builtin_choose_expr` + `__builtin_types_compatible_p` (GCC extension).
-                    - [ ] Cover all math functions with type-generic wrappers: trig, hyperbolic, exp/log, pow/sqrt, rounding, manipulation, fenv-interacting.
-                    - [ ] Include complex variants dispatch (if/when `<complex.h>` is implemented).
-                    - [ ] Ensure macro expansion does not evaluate arguments multiple times (use statement expressions if needed).
-                - [ ] **Testing (`tests/lib/m/unit/test_tgmath.c`):**
-                    - [ ] Test type dispatch: `sin((float)x)` calls `sinf()`, `sin((double)x)` calls `sin()`, `sin((long double)x)` calls `sinl()`.
-                    - [ ] Test all covered function families dispatch correctly.
-                    - [ ] Test no double-evaluation of arguments with side effects.
-                - [ ] **Man Pages:**
-                    - [ ] `man/man7/tgmath.7` — Type-generic math macros overview, dispatch rules, C11 `_Generic` usage. SYNOPSIS, DESCRIPTION, EXAMPLES, SEE ALSO.
+            - [ ] `math.h` header definition. (REQ: REQ-06-0266)
+            - [ ] `math_errhandling` (errno support). (REQ: REQ-06-0267)
+            - [ ] `__fpclassify` internal helper. (REQ: REQ-06-0268)
+            - [ ] **FENV (Floating-Point Environment):** (REQ: REQ-06-0269)
+                - [ ] **Header (`include/fenv.h`) Definition (C99/POSIX):** (REQ: REQ-06-0270)
+                    - [ ] Define `fenv_t` type (full x87 environment: CW, SW, TW, FIP, FCS, FDP, FDS, MXCSR on SSE-capable). (REQ: REQ-06-0271)
+                    - [ ] Define `fexcept_t` type (exception status word snapshot). (REQ: REQ-06-0272)
+                    - [ ] Define exception flag macros: (REQ: REQ-06-0273)
+                        - [ ] `FE_INVALID` (bit 0, x87 IE). (REQ: REQ-06-0274)
+                        - [ ] `FE_DENORMAL` (bit 1, x87 DE — non-standard extension, guard with `#ifdef`). (REQ: REQ-06-0275)
+                        - [ ] `FE_DIVBYZERO` (bit 2, x87 ZE). (REQ: REQ-06-0276)
+                        - [ ] `FE_OVERFLOW` (bit 3, x87 OE). (REQ: REQ-06-0277)
+                        - [ ] `FE_UNDERFLOW` (bit 4, x87 UE). (REQ: REQ-06-0278)
+                        - [ ] `FE_INEXACT` (bit 5, x87 PE). (REQ: REQ-06-0279)
+                        - [ ] `FE_ALL_EXCEPT` (bitwise OR of all supported exception flags). (REQ: REQ-06-0280)
+                    - [ ] Define rounding mode macros: (REQ: REQ-06-0281)
+                        - [ ] `FE_TONEAREST` (CW bits 10-11 = 00). (REQ: REQ-06-0282)
+                        - [ ] `FE_DOWNWARD` (CW bits 10-11 = 01). (REQ: REQ-06-0283)
+                        - [ ] `FE_UPWARD` (CW bits 10-11 = 10). (REQ: REQ-06-0284)
+                        - [ ] `FE_TOWARDZERO` (CW bits 10-11 = 11). (REQ: REQ-06-0285)
+                    - [ ] Define `FE_DFL_ENV` macro (pointer to default environment, `((const fenv_t *)-1)` or static). (REQ: REQ-06-0286)
+                    - [ ] Provide function prototypes for all `fe*` functions. (REQ: REQ-06-0287)
+                    - [ ] Include guard (`_FENV_H`) and C++ `extern "C"` wrapper. (REQ: REQ-06-0288)
+                - [ ] **Exception Handling Functions:** (REQ: REQ-06-0289)
+                    - [ ] `feclearexcept(int excepts)`: (REQ: REQ-06-0290)
+                        - [ ] Read x87 status word via `fnstsw`. (REQ: REQ-06-0291, REQ-06-0297, REQ-06-0313)
+                        - [ ] Clear requested exception bits. (REQ: REQ-06-0292)
+                        - [ ] Restore via `fldenv` (requires full env save/modify/restore cycle). (REQ: REQ-06-0293)
+                        - [ ] If SSE present, also clear bits in MXCSR via `ldmxcsr`. (REQ: REQ-06-0290)
+                        - [ ] Return 0 on success, non-zero on failure. (REQ: REQ-06-0041, REQ-06-0295)
+                    - [ ] `fegetexceptflag(fexcept_t *flagp, int excepts)`: (REQ: REQ-06-0296)
+                        - [ ] Read x87 status word via `fnstsw`. (REQ: REQ-06-0291, REQ-06-0297, REQ-06-0313)
+                        - [ ] Mask with `excepts`, store into `*flagp`. (REQ: REQ-06-0298)
+                        - [ ] If SSE present, OR in MXCSR exception bits. (REQ: REQ-06-0296)
+                        - [ ] Return 0 on success. (REQ: REQ-06-0300, REQ-06-0305, REQ-06-0311, REQ-06-0333, REQ-06-0340, REQ-06-0347, REQ-06-0352)
+                    - [ ] `feraiseexcept(int excepts)`: (REQ: REQ-06-0301)
+                        - [ ] Raise specified exceptions by performing operations that trigger them (e.g., divide-by-zero for `FE_DIVBYZERO`, 0.0/0.0 for `FE_INVALID`). (REQ: REQ-06-0302)
+                        - [ ] Alternatively: save env, set SW bits, load env, then `fwait` to trigger trap. (REQ: REQ-06-0303)
+                        - [ ] Ensure `FE_OVERFLOW` and `FE_UNDERFLOW` also set `FE_INEXACT` per C99 7.6.2.3. (REQ: REQ-06-0304)
+                        - [ ] Return 0 on success. (REQ: REQ-06-0300, REQ-06-0305, REQ-06-0311, REQ-06-0333, REQ-06-0340, REQ-06-0347, REQ-06-0352)
+                    - [ ] `fesetexceptflag(const fexcept_t *flagp, int excepts)`: (REQ: REQ-06-0306)
+                        - [ ] Save full x87 environment via `fnstenv`. (REQ: REQ-06-0307)
+                        - [ ] Replace status word exception bits (masked by `excepts`) from `*flagp`. (REQ: REQ-06-0308)
+                        - [ ] Restore via `fldenv` — must NOT raise exceptions (set bits only). (REQ: REQ-06-0309)
+                        - [ ] If SSE present, update MXCSR accordingly. (REQ: REQ-06-0306)
+                        - [ ] Return 0 on success. (REQ: REQ-06-0300, REQ-06-0305, REQ-06-0311, REQ-06-0333, REQ-06-0340, REQ-06-0347, REQ-06-0352)
+                    - [ ] `fetestexcept(int excepts)`: (REQ: REQ-06-0312)
+                        - [ ] Read x87 status word via `fnstsw`. (REQ: REQ-06-0291, REQ-06-0297, REQ-06-0313)
+                        - [ ] If SSE present, OR in MXCSR sticky bits. (REQ: REQ-06-0312)
+                        - [ ] Return bitwise AND of current exceptions with `excepts`. (REQ: REQ-06-0315)
+                - [ ] **Rounding Mode Functions:** (REQ: REQ-06-0316)
+                    - [ ] `fegetround()`: (REQ: REQ-06-0317)
+                        - [ ] Read x87 control word via `fnstcw`. (REQ: REQ-06-0318, REQ-06-0323)
+                        - [ ] Extract rounding mode bits (bits 10-11). (REQ: REQ-06-0319)
+                        - [ ] Return corresponding `FE_*` rounding constant. (REQ: REQ-06-0320)
+                    - [ ] `fesetround(int rdir)`: (REQ: REQ-06-0321)
+                        - [ ] Validate `rdir` is one of `FE_TONEAREST`, `FE_DOWNWARD`, `FE_UPWARD`, `FE_TOWARDZERO`. (REQ: REQ-06-0322)
+                        - [ ] Read x87 control word via `fnstcw`. (REQ: REQ-06-0318, REQ-06-0323)
+                        - [ ] Modify rounding mode bits (bits 10-11). (REQ: REQ-06-0324)
+                        - [ ] Write back via `fldcw`. (REQ: REQ-06-0325)
+                        - [ ] If SSE present, also update MXCSR rounding bits (bits 13-14). (REQ: REQ-06-0321)
+                        - [ ] Return 0 on success, non-zero for invalid `rdir`. (REQ: REQ-06-0327)
+                - [ ] **Environment Save/Restore Functions:** (REQ: REQ-06-0328)
+                    - [ ] `fegetenv(fenv_t *envp)`: (REQ: REQ-06-0329)
+                        - [ ] Save full x87 environment via `fnstenv` into `*envp`. (REQ: REQ-06-0330)
+                        - [ ] Restore control word afterwards (x87 `fnstenv` masks all exceptions as side effect, so re-load CW). (REQ: REQ-06-0331)
+                        - [ ] If SSE present, also save MXCSR into `*envp`. (REQ: REQ-06-0329)
+                        - [ ] Return 0 on success. (REQ: REQ-06-0300, REQ-06-0305, REQ-06-0311, REQ-06-0333, REQ-06-0340, REQ-06-0347, REQ-06-0352)
+                    - [ ] `feholdexcept(fenv_t *envp)`: (REQ: REQ-06-0334)
+                        - [ ] Save current environment into `*envp` via `fnstenv`. (REQ: REQ-06-0335)
+                        - [ ] Clear all exception flags in status word. (REQ: REQ-06-0336)
+                        - [ ] Mask all exceptions in control word (set exception mask bits 0-5). (REQ: REQ-06-0337)
+                        - [ ] Install this non-stop environment via `fldenv`. (REQ: REQ-06-0338)
+                        - [ ] If SSE present, save and mask MXCSR similarly. (REQ: REQ-06-0334)
+                        - [ ] Return 0 on success. (REQ: REQ-06-0300, REQ-06-0305, REQ-06-0311, REQ-06-0333, REQ-06-0340, REQ-06-0347, REQ-06-0352)
+                        - [ ] This enables non-stop (non-trapping) FP mode for temporary computation. (REQ: REQ-06-0341)
+                    - [ ] `fesetenv(const fenv_t *envp)`: (REQ: REQ-06-0342)
+                        - [ ] If `envp == FE_DFL_ENV`, load default environment (e.g., `fninit` then adjust, or load a static default). (REQ: REQ-06-0342)
+                        - [ ] Else, load full x87 environment from `*envp` via `fldenv`. (REQ: REQ-06-0344)
+                        - [ ] If SSE present, also restore MXCSR from `*envp`. (REQ: REQ-06-0342)
+                        - [ ] Must NOT raise exceptions — install state silently. (REQ: REQ-06-0346)
+                        - [ ] Return 0 on success. (REQ: REQ-06-0300, REQ-06-0305, REQ-06-0311, REQ-06-0333, REQ-06-0340, REQ-06-0347, REQ-06-0352)
+                    - [ ] `feupdateenv(const fenv_t *envp)`: (REQ: REQ-06-0348)
+                        - [ ] Read currently raised exceptions via `fetestexcept(FE_ALL_EXCEPT)`. (REQ: REQ-06-0349)
+                        - [ ] Install `*envp` (or default) via `fesetenv(envp)`. (REQ: REQ-06-0350)
+                        - [ ] Re-raise the previously pending exceptions via `feraiseexcept()`. (REQ: REQ-06-0351)
+                        - [ ] Return 0 on success. (REQ: REQ-06-0300, REQ-06-0305, REQ-06-0311, REQ-06-0333, REQ-06-0340, REQ-06-0347, REQ-06-0352)
+                        - [ ] This is the "merge exceptions then restore" primitive. (REQ: REQ-06-0353)
+                - [ ] **`FENV_ACCESS` Pragma Support:** (REQ: REQ-06-0354)
+                    - [ ] Document compiler interaction: `#pragma STDC FENV_ACCESS ON` advisory. (REQ: REQ-06-0355)
+                    - [ ] Ensure `fenv.h` includes comment noting GCC `#pragma GCC optimize ("no-fast-math")` equivalent. (REQ: REQ-06-0356)
+                    - [ ] Add `FENV_ACCESS` documentation in header and man pages. (REQ: REQ-06-0357)
+                - [ ] **Implementation Details (i386/x87 Backend — `lib/m/src/fenv.c`):** (REQ: REQ-06-0358)
+                    - [ ] All functions implemented as i386 inline assembly or `.S` file for x87 `fnstcw`/`fldcw`/`fnstsw`/`fnstenv`/`fldenv`/`fnclex`/`fwait`. (REQ: REQ-06-0359)
+                    - [ ] SSE/MXCSR path gated by runtime or compile-time `__SSE__` check. (REQ: REQ-06-0360)
+                    - [ ] `fenv_t` layout must match x87 `fnstenv`/`fldenv` 28-byte block (+ optional MXCSR field). (REQ: REQ-06-0361)
+                    - [ ] Ensure `fninit` is used (not `finit`) to avoid waiting for pending exceptions during default-env setup. (REQ: REQ-06-0362)
+                    - [ ] All functions are `__attribute__((noinline))` to prevent optimizer from reordering FP state access. (REQ: REQ-06-0363)
+                - [ ] **Testing:** (REQ: REQ-06-0180, REQ-06-0364, REQ-06-1123, REQ-06-1219)
+                    - [ ] **Unit Tests (`tests/lib/m/unit/test_fenv.c`):** (REQ: REQ-06-0365)
+                        - [ ] Test `feclearexcept()`: raise each exception, clear it, verify via `fetestexcept()`. (REQ: REQ-06-0366)
+                        - [ ] Test `feclearexcept(FE_ALL_EXCEPT)`: clear all, verify none pending. (REQ: REQ-06-0367)
+                        - [ ] Test `feclearexcept(0)`: no-op, verify no side effects. (REQ: REQ-06-0368)
+                        - [ ] Test `fegetexceptflag()` / `fesetexceptflag()`: round-trip flag save/restore. (REQ: REQ-06-0369)
+                        - [ ] Test `fesetexceptflag()` does NOT raise exceptions (just sets sticky bits). (REQ: REQ-06-0370)
+                        - [ ] Test `feraiseexcept()`: raise individual exceptions, verify via `fetestexcept()`. (REQ: REQ-06-0371)
+                        - [ ] Test `feraiseexcept(FE_OVERFLOW)` also sets `FE_INEXACT` (C99 requirement). (REQ: REQ-06-0372)
+                        - [ ] Test `feraiseexcept(FE_UNDERFLOW)` also sets `FE_INEXACT`. (REQ: REQ-06-0373)
+                        - [ ] Test `feraiseexcept()` with multiple flags ORed together. (REQ: REQ-06-0374)
+                        - [ ] Test `fetestexcept()`: verify returns only requested bits. (REQ: REQ-06-0375)
+                        - [ ] Test `fegetround()` default is `FE_TONEAREST`. (REQ: REQ-06-0376)
+                        - [ ] Test `fesetround()` / `fegetround()` round-trip for all four modes. (REQ: REQ-06-0377)
+                        - [ ] Test `fesetround()` with invalid argument returns non-zero. (REQ: REQ-06-0378)
+                        - [ ] Test `fesetround()` actually affects rounding: add 1.0 + tiny value and check direction. (REQ: REQ-06-0379)
+                        - [ ] Test `fegetenv()` / `fesetenv()` round-trip preserves full state. (REQ: REQ-06-0380)
+                        - [ ] Test `fesetenv(FE_DFL_ENV)` resets to default (no exceptions, `FE_TONEAREST`). (REQ: REQ-06-0381)
+                        - [ ] Test `feholdexcept()`: saves state, clears exceptions, masks all traps. (REQ: REQ-06-0382)
+                        - [ ] Test `feholdexcept()` followed by exception-raising operations don't trap. (REQ: REQ-06-0383)
+                        - [ ] Test `feupdateenv()`: merges pending exceptions from non-stop region back after restore. (REQ: REQ-06-0384)
+                        - [ ] Test `feupdateenv()` re-raises exceptions from before `feholdexcept()` was called. (REQ: REQ-06-0385)
+                        - [ ] Test interaction: `feholdexcept()` → compute with exceptions → `feupdateenv()` → verify merged. (REQ: REQ-06-0386)
+                    - [ ] **Property Tests (`tests/lib/m/property/prop_fenv.c`):** (REQ: REQ-06-0387)
+                        - [ ] Property: `fesetround(m); fegetround() == m` for all valid `m`. (REQ: REQ-06-0388)
+                        - [ ] Property: `fesetround(invalid)` returns non-zero and does not change mode. (REQ: REQ-06-0389)
+                        - [ ] Property: `feclearexcept(e); fetestexcept(e) == 0` for any valid exception mask `e`. (REQ: REQ-06-0390)
+                        - [ ] Property: `feraiseexcept(e); (fetestexcept(e) & e) == e` for any valid `e`. (REQ: REQ-06-0391)
+                        - [ ] Property: `fegetexceptflag(&f, e); feclearexcept(FE_ALL_EXCEPT); fesetexceptflag(&f, e); fetestexcept(e)` equals original. (REQ: REQ-06-0392)
+                        - [ ] Property: `fegetenv(&env); /* modify state */; fesetenv(&env)` restores original rounding and exceptions. (REQ: REQ-06-0393)
+                        - [ ] Property: `fesetenv(FE_DFL_ENV); fegetround() == FE_TONEAREST && fetestexcept(FE_ALL_EXCEPT) == 0`. (REQ: REQ-06-0394)
+                        - [ ] Property: `feholdexcept()` results in `fetestexcept(FE_ALL_EXCEPT) == 0` and non-stop mode. (REQ: REQ-06-0395)
+                        - [ ] Property: `feupdateenv()` preserves exceptions raised during non-stop region. (REQ: REQ-06-0396)
+                        - [ ] Property: exception flags are sticky — `feraiseexcept(e)` followed by unrelated FP ops retains `e`. (REQ: REQ-06-0397)
+                    - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_fenv.c`):** (REQ: REQ-06-0398)
+                        - [ ] Fuzz random combinations of exception flag bits to `feclearexcept()` / `feraiseexcept()` / `fetestexcept()`. (REQ: REQ-06-0399)
+                        - [ ] Fuzz random rounding mode values to `fesetround()` (including invalid values). (REQ: REQ-06-0400)
+                        - [ ] Fuzz random sequences of `fegetenv()`/`fesetenv()`/`feholdexcept()`/`feupdateenv()` interleaved with FP operations. (REQ: REQ-06-0401)
+                        - [ ] Fuzz random `fexcept_t` values through `fegetexceptflag()`/`fesetexceptflag()` round-trips. (REQ: REQ-06-0402)
+                        - [ ] Verify no crashes, no undefined behavior, status word consistency after each fuzzed sequence. (REQ: REQ-06-0403)
+                - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                    - [ ] `man/man7/fenv.7` — Overview of floating-point environment, x87/SSE interaction, `FENV_ACCESS` pragma, and usage patterns. (REQ: REQ-06-0405)
+                    - [ ] `man/man3/feclearexcept.3` — Clear floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0406)
+                    - [ ] `man/man3/fegetexceptflag.3` — Get floating-point exception flags. Covers `fegetexceptflag()` and `fesetexceptflag()` together (paired save/restore API). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0407)
+                    - [ ] `man/man3/feraiseexcept.3` — Raise floating-point exceptions. Document `FE_OVERFLOW`/`FE_UNDERFLOW` implying `FE_INEXACT`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0408)
+                    - [ ] `man/man3/fetestexcept.3` — Test floating-point exception flags. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. (REQ: REQ-06-0409)
+                    - [ ] `man/man3/fegetround.3` — Get/set floating-point rounding mode. Covers `fegetround()` and `fesetround()` together. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0410)
+                    - [ ] `man/man3/fegetenv.3` — Get/set floating-point environment. Covers `fegetenv()` and `fesetenv()`. SYNOPSIS, DESCRIPTION (document `FE_DFL_ENV`), RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0411)
+                    - [ ] `man/man3/feholdexcept.3` — Save environment and enter non-stop mode. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES (show `feholdexcept()` → compute → `feupdateenv()` pattern), SEE ALSO. (REQ: REQ-06-0412)
+                    - [ ] `man/man3/feupdateenv.3` — Restore environment and re-raise saved exceptions. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0413)
+            - [ ] **Type Variants (f, l suffixes):** (REQ: REQ-06-0414)
+                - [ ] **Float Variants (`f` suffix — `lib/m/src/mathf.c`):** (REQ: REQ-06-0415)
+                    - [ ] Implement `sinf()`, `cosf()`, `tanf()`, `asinf()`, `acosf()`, `atanf()`, `atan2f()`. (REQ: REQ-06-0416)
+                    - [ ] Implement `sinhf()`, `coshf()`, `tanhf()`, `asinhf()`, `acoshf()`, `atanhf()`. (REQ: REQ-06-0417)
+                    - [ ] Implement `expf()`, `exp2f()`, `expm1f()`, `logf()`, `log2f()`, `log10f()`, `log1pf()`. (REQ: REQ-06-0418)
+                    - [ ] Implement `powf()`, `sqrtf()`, `cbrtf()`, `hypotf()`. (REQ: REQ-06-0419)
+                    - [ ] Implement `fabsf()`, `fmodf()`, `remainderf()`, `remquof()`, `fmaf()`. (REQ: REQ-06-0420)
+                    - [ ] Implement `fmaxf()`, `fminf()`, `fdimf()`. (REQ: REQ-06-0421)
+                    - [ ] Implement `ceilf()`, `floorf()`, `truncf()`, `roundf()`, `rintf()`, `nearbyintf()`. (REQ: REQ-06-0422)
+                    - [ ] Implement `lroundf()`, `llroundf()`, `lrintf()`, `llrintf()`. (REQ: REQ-06-0423)
+                    - [ ] Implement `frexpf()`, `ldexpf()`, `modff()`, `scalbnf()`, `scalblnf()`. (REQ: REQ-06-0424)
+                    - [ ] Implement `ilogbf()`, `logbf()`, `nextafterf()`, `nexttowardf()`, `copysignf()`, `nanf()`. (REQ: REQ-06-0425)
+                    - [ ] Implement `erff()`, `erfcf()`, `tgammaf()`, `lgammaf()`. (REQ: REQ-06-0426)
+                    - [ ] Implement `sincosf()`. (REQ: REQ-06-0427)
+                - [ ] **Long Double Variants (`l` suffix — `lib/m/src/mathl.c`):** (REQ: REQ-06-0428)
+                    - [ ] Implement `sinl()`, `cosl()`, `tanl()`, `asinl()`, `acosl()`, `atanl()`, `atan2l()`. (REQ: REQ-06-0429)
+                    - [ ] Implement `sinhl()`, `coshl()`, `tanhl()`, `asinhl()`, `acoshl()`, `atanhl()`. (REQ: REQ-06-0430)
+                    - [ ] Implement `expl()`, `exp2l()`, `expm1l()`, `logl()`, `log2l()`, `log10l()`, `log1pl()`. (REQ: REQ-06-0431)
+                    - [ ] Implement `powl()`, `sqrtl()`, `cbrtl()`, `hypotl()`. (REQ: REQ-06-0432)
+                    - [ ] Implement `fabsl()`, `fmodl()`, `remainderl()`, `remquol()`, `fmal()`. (REQ: REQ-06-0433)
+                    - [ ] Implement `fmaxl()`, `fminl()`, `fdiml()`. (REQ: REQ-06-0434)
+                    - [ ] Implement `ceill()`, `floorl()`, `truncl()`, `roundl()`, `rintl()`, `nearbyintl()`. (REQ: REQ-06-0435)
+                    - [ ] Implement `lroundl()`, `llroundl()`, `lrintl()`, `llrintl()`. (REQ: REQ-06-0436)
+                    - [ ] Implement `frexpl()`, `ldexpl()`, `modfl()`, `scalbnl()`, `scalblnl()`. (REQ: REQ-06-0437)
+                    - [ ] Implement `ilogbl()`, `logbl()`, `nextafterl()`, `nexttowardl()`, `copysignl()`, `nanl()`. (REQ: REQ-06-0438)
+                    - [ ] Implement `erfl()`, `erfcl()`, `tgammal()`, `lgammal()`. (REQ: REQ-06-0439)
+                    - [ ] Implement `sincosl()`. (REQ: REQ-06-0440)
+                - [ ] **i386 Note:** On x87, `long double` is 80-bit extended precision (native FPU format). `float`/`double` variants should use x87 internally and truncate on return. (REQ: REQ-06-0441)
+            - [ ] **Generic Math (`<tgmath.h>`):** (REQ: REQ-06-0442)
+                - [ ] Implement C99/C11 `<tgmath.h>` type-generic macros: (REQ: REQ-06-0443)
+                    - [ ] Dispatch to `f`, ` `, or `l` suffix based on argument type via `_Generic` (C11) or `__builtin_choose_expr` + `__builtin_types_compatible_p` (GCC extension). (REQ: REQ-06-0444)
+                    - [ ] Cover all math functions with type-generic wrappers: trig, hyperbolic, exp/log, pow/sqrt, rounding, manipulation, fenv-interacting. (REQ: REQ-06-0445)
+                    - [ ] Include complex variants dispatch (if/when `<complex.h>` is implemented). (REQ: REQ-06-0446)
+                    - [ ] Ensure macro expansion does not evaluate arguments multiple times (use statement expressions if needed). (REQ: REQ-06-0447)
+                - [ ] **Testing (`tests/lib/m/unit/test_tgmath.c`):** (REQ: REQ-06-0448)
+                    - [ ] Test type dispatch: `sin((float)x)` calls `sinf()`, `sin((double)x)` calls `sin()`, `sin((long double)x)` calls `sinl()`. (REQ: REQ-06-0449)
+                    - [ ] Test all covered function families dispatch correctly. (REQ: REQ-06-0450)
+                    - [ ] Test no double-evaluation of arguments with side effects. (REQ: REQ-06-0451)
+                - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                    - [ ] `man/man7/tgmath.7` — Type-generic math macros overview, dispatch rules, C11 `_Generic` usage. SYNOPSIS, DESCRIPTION, EXAMPLES, SEE ALSO. (REQ: REQ-06-0453)
         - [/] **Classification & Comparison (C99/C23/POSIX):**
-            - [ ] `fpclassify()`
-            - [ ] `isfinite()`
-            - [ ] `isinf()`
-            - [ ] `isnan()`
-            - [ ] `isnormal()`
-            - [ ] `signbit()`
-            - [ ] `isgreater()`, `isgreaterequal()`, `isless()`, `islessequal()`, `islessgreater()`, `isunordered()`:
-                - [ ] Implement as macros using `__builtin_isgreater` etc. (GCC) or manual quiet-NaN-safe comparisons.
-                - [ ] Must not raise `FE_INVALID` on unordered operands (unlike plain `<`/`>`).
-            - [ ] `iseqsig()`, `issignaling()` (C23):
-                - [ ] `iseqsig()`: equality comparison that DOES raise `FE_INVALID` on NaN.
-                - [ ] `issignaling()`: detect signaling NaN via bit pattern inspection.
-            - [ ] `iscanonical()`, `issubnormal()`, `iszero()` (C23):
-                - [ ] `iscanonical()`: always 1 for IEEE 754 binary formats (all values canonical).
-                - [ ] `issubnormal()`: `fpclassify(x) == FP_SUBNORMAL`.
-                - [ ] `iszero()`: `fpclassify(x) == FP_ZERO`.
-            - [ ] **Testing (`tests/lib/m/unit/test_classify.c`):**
-                - [ ] Test `fpclassify()` returns correct category for: `+0.0`, `-0.0`, `1.0`, `-1.0`, `INFINITY`, `-INFINITY`, `NAN`, `DBL_MIN/2` (denorm), `DBL_MAX`.
-                - [ ] Test `isfinite()` true for normals/denormals/zeros, false for inf/nan.
-                - [ ] Test `isinf()` true for `±INFINITY` only.
-                - [ ] Test `isnan()` true for `NAN`, quiet NaN, signaling NaN.
-                - [ ] Test `isnormal()` false for zero, denormal, inf, nan.
-                - [ ] Test `signbit()` for `+0.0`, `-0.0`, `+1.0`, `-1.0`, `+INFINITY`, `-INFINITY`, `NAN`, `-NAN`.
-                - [ ] Test `isgreater()` etc. do NOT raise `FE_INVALID` when one operand is NaN.
-                - [ ] Test `isunordered()` true iff either operand is NaN.
-                - [ ] Test `iseqsig()` raises `FE_INVALID` on NaN operand.
-                - [ ] Test `issignaling()` detects sNaN bit pattern.
-                - [ ] Test float, double, and long double variants.
-            - [ ] **Property Tests (`tests/lib/m/property/prop_classify.c`):**
-                - [ ] Property: exactly one of `isinf(x)`, `isnan(x)`, `isfinite(x)` is true for any `x`.
-                - [ ] Property: `isnormal(x)` implies `isfinite(x)`.
-                - [ ] Property: `issubnormal(x)` implies `isfinite(x) && !isnormal(x) && !iszero(x)`.
-                - [ ] Property: `signbit(-x) != signbit(x)` for all non-NaN `x`.
-                - [ ] Property: `isunordered(x, y)` iff `isnan(x) || isnan(y)`.
-            - [ ] **Man Pages:**
-                - [ ] `man/man3/fpclassify.3` — Floating-point classification. Covers `fpclassify()`, `isfinite()`, `isinf()`, `isnan()`, `isnormal()`, `signbit()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/isgreater.3` — Quiet comparison macros. Covers `isgreater()` through `isunordered()`. Document non-signaling NaN behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+            - [ ] `fpclassify()` (REQ: REQ-06-0454)
+            - [ ] `isfinite()` (REQ: REQ-06-0455)
+            - [ ] `isinf()` (REQ: REQ-06-0456)
+            - [ ] `isnan()` (REQ: REQ-06-0457)
+            - [ ] `isnormal()` (REQ: REQ-06-0458)
+            - [ ] `signbit()` (REQ: REQ-06-0459)
+            - [ ] `isgreater()`, `isgreaterequal()`, `isless()`, `islessequal()`, `islessgreater()`, `isunordered()`: (REQ: REQ-06-0460)
+                - [ ] Implement as macros using `__builtin_isgreater` etc. (GCC) or manual quiet-NaN-safe comparisons. (REQ: REQ-06-0461)
+                - [ ] Must not raise `FE_INVALID` on unordered operands (unlike plain `<`/`>`). (REQ: REQ-06-0462)
+            - [ ] `iseqsig()`, `issignaling()` (C23): (REQ: REQ-06-0463)
+                - [ ] `iseqsig()`: equality comparison that DOES raise `FE_INVALID` on NaN. (REQ: REQ-06-0464)
+                - [ ] `issignaling()`: detect signaling NaN via bit pattern inspection. (REQ: REQ-06-0465)
+            - [ ] `iscanonical()`, `issubnormal()`, `iszero()` (C23): (REQ: REQ-06-0466)
+                - [ ] `iscanonical()`: always 1 for IEEE 754 binary formats (all values canonical). (REQ: REQ-06-0467)
+                - [ ] `issubnormal()`: `fpclassify(x) == FP_SUBNORMAL`. (REQ: REQ-06-0468)
+                - [ ] `iszero()`: `fpclassify(x) == FP_ZERO`. (REQ: REQ-06-0469)
+            - [ ] **Testing (`tests/lib/m/unit/test_classify.c`):** (REQ: REQ-06-0470)
+                - [ ] Test `fpclassify()` returns correct category for: `+0.0`, `-0.0`, `1.0`, `-1.0`, `INFINITY`, `-INFINITY`, `NAN`, `DBL_MIN/2` (denorm), `DBL_MAX`. (REQ: REQ-06-0471)
+                - [ ] Test `isfinite()` true for normals/denormals/zeros, false for inf/nan. (REQ: REQ-06-0472)
+                - [ ] Test `isinf()` true for `±INFINITY` only. (REQ: REQ-06-0473)
+                - [ ] Test `isnan()` true for `NAN`, quiet NaN, signaling NaN. (REQ: REQ-06-0474)
+                - [ ] Test `isnormal()` false for zero, denormal, inf, nan. (REQ: REQ-06-0475)
+                - [ ] Test `signbit()` for `+0.0`, `-0.0`, `+1.0`, `-1.0`, `+INFINITY`, `-INFINITY`, `NAN`, `-NAN`. (REQ: REQ-06-0476)
+                - [ ] Test `isgreater()` etc. do NOT raise `FE_INVALID` when one operand is NaN. (REQ: REQ-06-0477)
+                - [ ] Test `isunordered()` true iff either operand is NaN. (REQ: REQ-06-0478)
+                - [ ] Test `iseqsig()` raises `FE_INVALID` on NaN operand. (REQ: REQ-06-0479)
+                - [ ] Test `issignaling()` detects sNaN bit pattern. (REQ: REQ-06-0480)
+                - [ ] Test float, double, and long double variants. (REQ: REQ-06-0481)
+            - [ ] **Property Tests (`tests/lib/m/property/prop_classify.c`):** (REQ: REQ-06-0482)
+                - [ ] Property: exactly one of `isinf(x)`, `isnan(x)`, `isfinite(x)` is true for any `x`. (REQ: REQ-06-0483)
+                - [ ] Property: `isnormal(x)` implies `isfinite(x)`. (REQ: REQ-06-0484)
+                - [ ] Property: `issubnormal(x)` implies `isfinite(x) && !isnormal(x) && !iszero(x)`. (REQ: REQ-06-0485)
+                - [ ] Property: `signbit(-x) != signbit(x)` for all non-NaN `x`. (REQ: REQ-06-0486)
+                - [ ] Property: `isunordered(x, y)` iff `isnan(x) || isnan(y)`. (REQ: REQ-06-0487)
+            - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                - [ ] `man/man3/fpclassify.3` — Floating-point classification. Covers `fpclassify()`, `isfinite()`, `isinf()`, `isnan()`, `isnormal()`, `signbit()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. (REQ: REQ-06-0489)
+                - [ ] `man/man3/isgreater.3` — Quiet comparison macros. Covers `isgreater()` through `isunordered()`. Document non-signaling NaN behavior. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO. (REQ: REQ-06-0490)
         - [/] **Basic Arithmetic:**
-            - [ ] `fabs()`
-            - [ ] `fmod()`
-            - [ ] `remainder()`
-            - [ ] `remquo()`:
-                - [ ] Compute remainder AND store low-order bits of quotient in `*quo`.
-                - [ ] Sign of `*quo` is sign of `x/y`.
-                - [ ] At least 3 bits of quotient stored.
-            - [ ] `fmax()`
-            - [ ] `fmin()`
-            - [ ] `fdim()`
-            - [ ] `fma()` (Fused Multiply-Add):
-                - [ ] Compute `(x * y) + z` with single rounding (as if infinite precision intermediate).
-                - [ ] Critical for numerical accuracy in dot-products, compensated summation.
-                - [ ] On x87: no hardware FMA — use software double-double decomposition or Dekker's algorithm.
-                - [ ] Raise `FE_INEXACT`/`FE_OVERFLOW`/`FE_UNDERFLOW` appropriately.
-            - [ ] `fmaximum()`, `fminimum()`, `fmaximum_num()`, `fminimum_num()`, `fmaximum_mag()`, `fminimum_mag()` (C23):
-                - [ ] `fmaximum()`/`fminimum()`: NaN-propagating (NaN if either operand is NaN).
-                - [ ] `fmaximum_num()`/`fminimum_num()`: NaN-ignoring (return the non-NaN operand).
-                - [ ] `fmaximum_mag()`/`fminimum_mag()`: Compare absolute values, NaN-propagating.
-                - [ ] All distinguish `+0.0` from `-0.0`: `fmaximum(+0.0, -0.0) == +0.0`.
-            - [ ] **Testing (`tests/lib/m/unit/test_arith.c`):**
-                - [ ] Test `fabs()`: positive, negative, zero, -0.0, ∞, -∞, NaN.
-                - [ ] Test `fmod()`: basic cases, sign of result matches dividend, zero dividend, NaN propagation.
-                - [ ] Test `remainder()`: IEEE remainder (can be negative), ties to even quotient.
-                - [ ] Test `remquo()`: remainder matches `remainder()`, quotient low bits correct.
-                - [ ] Test `fma()`: `fma(a, b, c)` vs naive `a*b+c` — detect cases where single rounding differs.
-                - [ ] Test `fma()` special values: 0×∞+NaN, ∞×finite±∞.
-                - [ ] Test `fmax()`/`fmin()`: NaN handling (return non-NaN), ±0.0 distinction.
-                - [ ] Test `fdim()`: positive difference, zero when x ≤ y, NaN propagation.
-                - [ ] Test C23 `fmaximum()`/`fminimum()` NaN propagation vs `fmax()`/`fmin()` NaN-ignoring.
-            - [ ] **Property Tests (`tests/lib/m/property/prop_arith.c`):**
-                - [ ] Property: `fabs(x) >= 0` for all `x` (including `-0.0` → `+0.0`).
-                - [ ] Property: `fmod(x, y)` has same sign as `x` and `|fmod(x,y)| < |y|`.
-                - [ ] Property: `fma(x, y, 0.0) == x * y` for exact products (no rounding needed).
-                - [ ] Property: `fmax(x, y) >= x && fmax(x, y) >= y` for non-NaN inputs.
-                - [ ] Property: `fdim(x, y) + y >= x` for finite non-NaN inputs.
-            - [ ] **Man Pages:**
-                - [ ] `man/man3/fabs.3` — Absolute value. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
-                - [ ] `man/man3/fmod.3` — Floating-point remainder. Covers `fmod()` and `remainder()` with IEEE semantics differences. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/remquo.3` — Remainder with quotient. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/fma.3` — Fused multiply-add. Document precision advantage. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/fmax.3` — Maximum/minimum. Covers `fmax()`, `fmin()`, `fdim()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
+            - [ ] `fabs()` (REQ: REQ-06-0491)
+            - [ ] `fmod()` (REQ: REQ-06-0492)
+            - [ ] `remainder()` (REQ: REQ-06-0493)
+            - [ ] `remquo()`: (REQ: REQ-06-0494)
+                - [ ] Compute remainder AND store low-order bits of quotient in `*quo`. (REQ: REQ-06-0495)
+                - [ ] Sign of `*quo` is sign of `x/y`. (REQ: REQ-06-0496)
+                - [ ] At least 3 bits of quotient stored. (REQ: REQ-06-0497)
+            - [ ] `fmax()` (REQ: REQ-06-0498)
+            - [ ] `fmin()` (REQ: REQ-06-0499)
+            - [ ] `fdim()` (REQ: REQ-06-0500)
+            - [ ] `fma()` (Fused Multiply-Add): (REQ: REQ-06-0501)
+                - [ ] Compute `(x * y) + z` with single rounding (as if infinite precision intermediate). (REQ: REQ-06-0502)
+                - [ ] Critical for numerical accuracy in dot-products, compensated summation. (REQ: REQ-06-0503)
+                - [ ] On x87: no hardware FMA — use software double-double decomposition or Dekker's algorithm. (REQ: REQ-06-0501)
+                - [ ] Raise `FE_INEXACT`/`FE_OVERFLOW`/`FE_UNDERFLOW` appropriately. (REQ: REQ-06-0505)
+            - [ ] `fmaximum()`, `fminimum()`, `fmaximum_num()`, `fminimum_num()`, `fmaximum_mag()`, `fminimum_mag()` (C23): (REQ: REQ-06-0506)
+                - [ ] `fmaximum()`/`fminimum()`: NaN-propagating (NaN if either operand is NaN). (REQ: REQ-06-0507)
+                - [ ] `fmaximum_num()`/`fminimum_num()`: NaN-ignoring (return the non-NaN operand). (REQ: REQ-06-0508)
+                - [ ] `fmaximum_mag()`/`fminimum_mag()`: Compare absolute values, NaN-propagating. (REQ: REQ-06-0509)
+                - [ ] All distinguish `+0.0` from `-0.0`: `fmaximum(+0.0, -0.0) == +0.0`. (REQ: REQ-06-0510)
+            - [ ] **Testing (`tests/lib/m/unit/test_arith.c`):** (REQ: REQ-06-0511)
+                - [ ] Test `fabs()`: positive, negative, zero, -0.0, ∞, -∞, NaN. (REQ: REQ-06-0512)
+                - [ ] Test `fmod()`: basic cases, sign of result matches dividend, zero dividend, NaN propagation. (REQ: REQ-06-0513)
+                - [ ] Test `remainder()`: IEEE remainder (can be negative), ties to even quotient. (REQ: REQ-06-0514)
+                - [ ] Test `remquo()`: remainder matches `remainder()`, quotient low bits correct. (REQ: REQ-06-0515)
+                - [ ] Test `fma()`: `fma(a, b, c)` vs naive `a*b+c` — detect cases where single rounding differs. (REQ: REQ-06-0516)
+                - [ ] Test `fma()` special values: 0×∞+NaN, ∞×finite±∞. (REQ: REQ-06-0517)
+                - [ ] Test `fmax()`/`fmin()`: NaN handling (return non-NaN), ±0.0 distinction. (REQ: REQ-06-0518)
+                - [ ] Test `fdim()`: positive difference, zero when x ≤ y, NaN propagation. (REQ: REQ-06-0519)
+                - [ ] Test C23 `fmaximum()`/`fminimum()` NaN propagation vs `fmax()`/`fmin()` NaN-ignoring. (REQ: REQ-06-0520)
+            - [ ] **Property Tests (`tests/lib/m/property/prop_arith.c`):** (REQ: REQ-06-0521)
+                - [ ] Property: `fabs(x) >= 0` for all `x` (including `-0.0` → `+0.0`). (REQ: REQ-06-0522)
+                - [ ] Property: `fmod(x, y)` has same sign as `x` and `|fmod(x,y)| < |y|`. (REQ: REQ-06-0523)
+                - [ ] Property: `fma(x, y, 0.0) == x * y` for exact products (no rounding needed). (REQ: REQ-06-0524)
+                - [ ] Property: `fmax(x, y) >= x && fmax(x, y) >= y` for non-NaN inputs. (REQ: REQ-06-0525)
+                - [ ] Property: `fdim(x, y) + y >= x` for finite non-NaN inputs. (REQ: REQ-06-0526)
+            - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                - [ ] `man/man3/fabs.3` — Absolute value. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO. (REQ: REQ-06-0528)
+                - [ ] `man/man3/fmod.3` — Floating-point remainder. Covers `fmod()` and `remainder()` with IEEE semantics differences. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0529)
+                - [ ] `man/man3/remquo.3` — Remainder with quotient. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0530)
+                - [ ] `man/man3/fma.3` — Fused multiply-add. Document precision advantage. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0531)
+                - [ ] `man/man3/fmax.3` — Maximum/minimum. Covers `fmax()`, `fmin()`, `fdim()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. (REQ: REQ-06-0532)
         - [/] **Rounding:**
-            - [ ] `ceil()`
-            - [ ] `floor()`
-            - [ ] `trunc()`
-            - [ ] `round()`
-            - [ ] `rint()`
-            - [ ] `nearbyint()`:
-                - [ ] Same as `rint()` but does NOT raise `FE_INEXACT`.
-                - [ ] On x87: save/mask inexact exception, call `frndint`, restore flags.
-            - [ ] `lround()`, `llround()`:
-                - [ ] Round to nearest, ties away from zero (like `round()`), return `long`/`long long`.
-                - [ ] Raise `FE_INVALID` and return `LONG_MIN`/`LONG_MAX` on overflow or NaN.
-            - [ ] `lrint()`, `llrint()`:
-                - [ ] Round using current rounding mode (like `rint()`), return `long`/`long long`.
-                - [ ] On x87: `fistp` stores directly to integer.
-                - [ ] Raise `FE_INVALID` on overflow/NaN, `FE_INEXACT` if value was not integer.
-            - [ ] `roundeven()` (C23):
-                - [ ] Round to nearest, ties to even (same as default `FE_TONEAREST` `rint()`).
-                - [ ] Explicit function — does not depend on current rounding mode.
-            - [ ] `fromfp()`, `fromfpx()`, `ufromfp()`, `ufromfpx()` (C23):
-                - [ ] Convert to integer type with explicit rounding mode and width.
-                - [ ] `fromfp()`: signed, `ufromfp()`: unsigned.
-                - [ ] `*x` variants raise `FE_INEXACT` on non-integer input; non-`x` variants do not.
-            - [ ] **Testing (`tests/lib/m/unit/test_round.c`):**
-                - [ ] Test `ceil()`: `ceil(1.1)==2.0`, `ceil(-1.1)==-1.0`, `ceil(0.0)==0.0`, `ceil(-0.0)==-0.0`.
-                - [ ] Test `floor()`: `floor(1.9)==1.0`, `floor(-1.1)==-2.0`.
-                - [ ] Test `trunc()`: `trunc(1.9)==1.0`, `trunc(-1.9)==-1.0`.
-                - [ ] Test `round()`: ties away from zero: `round(0.5)==1.0`, `round(-0.5)==-1.0`.
-                - [ ] Test `rint()`: honors current rounding mode (test with `fesetround()`).
-                - [ ] Test `nearbyint()`: same as `rint()` but does NOT raise `FE_INEXACT` (verify via `fetestexcept()`).
-                - [ ] Test `lround()`/`llround()`: overflow → `LONG_MAX`/`LONG_MIN` + `FE_INVALID`.
-                - [ ] Test `lrint()`/`llrint()`: current rounding mode, `FE_INEXACT` on non-integer.
-                - [ ] Test `roundeven()`: `roundeven(0.5)==0.0`, `roundeven(1.5)==2.0` (ties to even).
-                - [ ] Test all rounding functions with: ±0.0, ±∞, NaN, ±0.5, ±1.5, large values.
-            - [ ] **Property Tests (`tests/lib/m/property/prop_round.c`):**
-                - [ ] Property: `ceil(x) >= x` for all finite `x`.
-                - [ ] Property: `floor(x) <= x` for all finite `x`.
-                - [ ] Property: `|trunc(x)| <= |x|` for all finite `x`.
-                - [ ] Property: `floor(x) <= round(x) <= ceil(x)` for all `x` where the three are defined.
-                - [ ] Property: `rint(x) == x` for integer values of `x`.
-                - [ ] Property: rounding functions are idempotent: `ceil(ceil(x)) == ceil(x)`.
-            - [ ] **Man Pages:**
-                - [ ] `man/man3/ceil.3` — Round upward. Covers `ceil()`, `ceilf()`, `ceill()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
-                - [ ] `man/man3/floor.3` — Round downward. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
-                - [ ] `man/man3/round.3` — Round to nearest, ties away from zero. Covers `round()`, `lround()`, `llround()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-                - [ ] `man/man3/rint.3` — Round to nearest integer using current mode. Covers `rint()`, `nearbyint()`, `lrint()`, `llrint()`. Document `FE_INEXACT` difference. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-                - [ ] `man/man3/trunc.3` — Round toward zero. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
+            - [ ] `ceil()` (REQ: REQ-06-0533)
+            - [ ] `floor()` (REQ: REQ-06-0534)
+            - [ ] `trunc()` (REQ: REQ-06-0535)
+            - [ ] `round()` (REQ: REQ-06-0536)
+            - [ ] `rint()` (REQ: REQ-06-0537)
+            - [ ] `nearbyint()`: (REQ: REQ-06-0538)
+                - [ ] Same as `rint()` but does NOT raise `FE_INEXACT`. (REQ: REQ-06-0539)
+                - [ ] On x87: save/mask inexact exception, call `frndint`, restore flags. (REQ: REQ-06-0538)
+            - [ ] `lround()`, `llround()`: (REQ: REQ-06-0541)
+                - [ ] Round to nearest, ties away from zero (like `round()`), return `long`/`long long`. (REQ: REQ-06-0542)
+                - [ ] Raise `FE_INVALID` and return `LONG_MIN`/`LONG_MAX` on overflow or NaN. (REQ: REQ-06-0543)
+            - [ ] `lrint()`, `llrint()`: (REQ: REQ-06-0544)
+                - [ ] Round using current rounding mode (like `rint()`), return `long`/`long long`. (REQ: REQ-06-0545)
+                - [ ] On x87: `fistp` stores directly to integer. (REQ: REQ-06-0544)
+                - [ ] Raise `FE_INVALID` on overflow/NaN, `FE_INEXACT` if value was not integer. (REQ: REQ-06-0547)
+            - [ ] `roundeven()` (C23): (REQ: REQ-06-0548)
+                - [ ] Round to nearest, ties to even (same as default `FE_TONEAREST` `rint()`). (REQ: REQ-06-0549)
+                - [ ] Explicit function — does not depend on current rounding mode. (REQ: REQ-06-0550)
+            - [ ] `fromfp()`, `fromfpx()`, `ufromfp()`, `ufromfpx()` (C23): (REQ: REQ-06-0551)
+                - [ ] Convert to integer type with explicit rounding mode and width. (REQ: REQ-06-0552)
+                - [ ] `fromfp()`: signed, `ufromfp()`: unsigned. (REQ: REQ-06-0553)
+                - [ ] `*x` variants raise `FE_INEXACT` on non-integer input; non-`x` variants do not. (REQ: REQ-06-0554)
+            - [ ] **Testing (`tests/lib/m/unit/test_round.c`):** (REQ: REQ-06-0555)
+                - [ ] Test `ceil()`: `ceil(1.1)==2.0`, `ceil(-1.1)==-1.0`, `ceil(0.0)==0.0`, `ceil(-0.0)==-0.0`. (REQ: REQ-06-0556)
+                - [ ] Test `floor()`: `floor(1.9)==1.0`, `floor(-1.1)==-2.0`. (REQ: REQ-06-0557)
+                - [ ] Test `trunc()`: `trunc(1.9)==1.0`, `trunc(-1.9)==-1.0`. (REQ: REQ-06-0558)
+                - [ ] Test `round()`: ties away from zero: `round(0.5)==1.0`, `round(-0.5)==-1.0`. (REQ: REQ-06-0559)
+                - [ ] Test `rint()`: honors current rounding mode (test with `fesetround()`). (REQ: REQ-06-0560)
+                - [ ] Test `nearbyint()`: same as `rint()` but does NOT raise `FE_INEXACT` (verify via `fetestexcept()`). (REQ: REQ-06-0561)
+                - [ ] Test `lround()`/`llround()`: overflow → `LONG_MAX`/`LONG_MIN` + `FE_INVALID`. (REQ: REQ-06-0562)
+                - [ ] Test `lrint()`/`llrint()`: current rounding mode, `FE_INEXACT` on non-integer. (REQ: REQ-06-0563)
+                - [ ] Test `roundeven()`: `roundeven(0.5)==0.0`, `roundeven(1.5)==2.0` (ties to even). (REQ: REQ-06-0564)
+                - [ ] Test all rounding functions with: ±0.0, ±∞, NaN, ±0.5, ±1.5, large values. (REQ: REQ-06-0565)
+            - [ ] **Property Tests (`tests/lib/m/property/prop_round.c`):** (REQ: REQ-06-0566)
+                - [ ] Property: `ceil(x) >= x` for all finite `x`. (REQ: REQ-06-0567)
+                - [ ] Property: `floor(x) <= x` for all finite `x`. (REQ: REQ-06-0568)
+                - [ ] Property: `|trunc(x)| <= |x|` for all finite `x`. (REQ: REQ-06-0569)
+                - [ ] Property: `floor(x) <= round(x) <= ceil(x)` for all `x` where the three are defined. (REQ: REQ-06-0570)
+                - [ ] Property: `rint(x) == x` for integer values of `x`. (REQ: REQ-06-0571)
+                - [ ] Property: rounding functions are idempotent: `ceil(ceil(x)) == ceil(x)`. (REQ: REQ-06-0572)
+            - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                - [ ] `man/man3/ceil.3` — Round upward. Covers `ceil()`, `ceilf()`, `ceill()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO. (REQ: REQ-06-0574)
+                - [ ] `man/man3/floor.3` — Round downward. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO. (REQ: REQ-06-0575)
+                - [ ] `man/man3/round.3` — Round to nearest, ties away from zero. Covers `round()`, `lround()`, `llround()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0576)
+                - [ ] `man/man3/rint.3` — Round to nearest integer using current mode. Covers `rint()`, `nearbyint()`, `lrint()`, `llrint()`. Document `FE_INEXACT` difference. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0577)
+                - [ ] `man/man3/trunc.3` — Round toward zero. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO. (REQ: REQ-06-0578)
         - [/] **Exponential, Logarithmic & Power:**
-            - [ ] `exp()`
-            - [ ] `exp2()`
-            - [ ] `expm1()`
-            - [ ] `exp10()`, `exp10m1()`, `exp2m1()` (C23):
-                - [ ] `exp10(x)`: compute `10^x`. On x87: `x * log2(10)` → `f2xm1`/`fscale`.
-                - [ ] `exp10m1(x)`: compute `10^x - 1` accurately for small `x`.
-                - [ ] `exp2m1(x)`: compute `2^x - 1` accurately for small `x` (direct `f2xm1` for |x| < 1).
-            - [ ] `log()`
-            - [ ] `log2()`
-            - [ ] `log10()`
-            - [ ] `log1p()`
-            - [ ] `log10p1()`, `log2p1()`, `logp1()` (C23):
-                - [ ] `logp1(x)`: alias for `log1p(x)` — compute `ln(1+x)` accurately for small `x`.
-                - [ ] `log2p1(x)`: compute `log2(1+x)` accurately. On x87: use `fyl2xp1` for |x| < 1-√2/2.
-                - [ ] `log10p1(x)`: compute `log10(1+x)` accurately.
-            - [ ] `pow()`
-            - [ ] `pown()`, `powr()`, `rootn()`, `compound()` (C23):
-                - [ ] `pown(x, n)`: `x` raised to integer power `n` (`intmax_t`). Binary exponentiation.
-                - [ ] `powr(x, y)`: `e^(y * ln(x))`, domain x ≥ 0. Different NaN/±0 semantics from `pow()`.
-                - [ ] `rootn(x, n)`: n-th root of `x`. `rootn(x, 2) == sqrt(x)`, `rootn(x, 3) == cbrt(x)`.
-                - [ ] `compound(x, n)`: `(1+x)^n` computed stably for small `x`.
-            - [ ] `sqrt()`
-            - [ ] `rsqrt()` (C23):
-                - [ ] Reciprocal square root: `1/sqrt(x)`.
-                - [ ] On x87: `fsqrt` then `fdivr` with 1.0.
-            - [ ] `cbrt()`
-            - [ ] `hypot()`
-            - [ ] **Testing (`tests/lib/m/unit/test_explog.c`):**
-                - [ ] Test `exp(0)==1`, `exp(1)≈M_E`, `exp(-∞)==0`, `exp(+∞)==+∞`, `exp(NaN)==NaN`.
-                - [ ] Test `exp2(0)==1`, `exp2(10)==1024`.
-                - [ ] Test `expm1(0)==0`, `expm1(tiny)≈tiny` (accuracy for small x vs naive `exp(x)-1`).
-                - [ ] Test `log(1)==0`, `log(M_E)≈1`, `log(0)==-∞`, `log(-1)==NaN` + `FE_INVALID`, `log(+∞)==+∞`.
-                - [ ] Test `log2(1)==0`, `log2(1024)==10`.
-                - [ ] Test `log10(1)==0`, `log10(1000)==3`.
-                - [ ] Test `log1p(0)==0`, `log1p(tiny)≈tiny` (accuracy for small x).
-                - [ ] Test `pow(2,10)==1024`, `pow(-1,2)==1`, `pow(0,0)==1` (C99 convention).
-                - [ ] Test `pow(x, 0)==1` for all x (including ∞, NaN per C99 F.9.4.4).
-                - [ ] Test `sqrt(4)==2`, `sqrt(0)==0`, `sqrt(-1)==NaN`, `sqrt(+∞)==+∞`.
-                - [ ] Test `cbrt(-8)==-2`, `cbrt(0)==0`.
-                - [ ] Test `hypot(3,4)==5`, `hypot(x,0)==fabs(x)`, `hypot(∞,NaN)==∞`.
-                - [ ] Test `rsqrt(4)==0.5`, `rsqrt(0)==+∞`, `rsqrt(-1)==NaN`.
-            - [ ] **Property Tests (`tests/lib/m/property/prop_explog.c`):**
-                - [ ] Property: `exp(log(x)) ≈ x` for positive finite `x` (within ULP tolerance).
-                - [ ] Property: `log(exp(x)) ≈ x` for moderate `x` (no overflow/underflow).
-                - [ ] Property: `exp2(log2(x)) ≈ x` for positive finite `x`.
-                - [ ] Property: `sqrt(x) * sqrt(x) ≈ x` for positive `x`.
-                - [ ] Property: `hypot(x,y) >= fabs(x) && hypot(x,y) >= fabs(y)`.
-                - [ ] Property: `pow(x, 1.0) == x` for all `x`.
-                - [ ] Property: `expm1(x) + 1 ≈ exp(x)` for all `x` (accuracy comparison, not equality).
-                - [ ] Property: `log1p(expm1(x)) ≈ x` for moderate `x`.
-            - [ ] **Man Pages:**
-                - [ ] `man/man3/exp.3` — Exponential functions. Covers `exp()`, `exp2()`, `expm1()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/log.3` — Logarithmic functions. Covers `log()`, `log2()`, `log10()`, `log1p()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/pow.3` — Power functions. Covers `pow()`, `sqrt()`, `cbrt()`, `hypot()`. Document special value semantics extensively (C99 Annex F). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
+            - [ ] `exp()` (REQ: REQ-06-0579)
+            - [ ] `exp2()` (REQ: REQ-06-0580)
+            - [ ] `expm1()` (REQ: REQ-06-0581)
+            - [ ] `exp10()`, `exp10m1()`, `exp2m1()` (C23): (REQ: REQ-06-0582)
+                - [ ] `exp10(x)`: compute `10^x`. On x87: `x * log2(10)` → `f2xm1`/`fscale`. (REQ: REQ-06-0583)
+                - [ ] `exp10m1(x)`: compute `10^x - 1` accurately for small `x`. (REQ: REQ-06-0584)
+                - [ ] `exp2m1(x)`: compute `2^x - 1` accurately for small `x` (direct `f2xm1` for |x| < 1). (REQ: REQ-06-0585)
+            - [ ] `log()` (REQ: REQ-06-0586)
+            - [ ] `log2()` (REQ: REQ-06-0587)
+            - [ ] `log10()` (REQ: REQ-06-0588)
+            - [ ] `log1p()` (REQ: REQ-06-0589)
+            - [ ] `log10p1()`, `log2p1()`, `logp1()` (C23): (REQ: REQ-06-0590)
+                - [ ] `logp1(x)`: alias for `log1p(x)` — compute `ln(1+x)` accurately for small `x`. (REQ: REQ-06-0591)
+                - [ ] `log2p1(x)`: compute `log2(1+x)` accurately. On x87: use `fyl2xp1` for |x| < 1-√2/2. (REQ: REQ-06-0592)
+                - [ ] `log10p1(x)`: compute `log10(1+x)` accurately. (REQ: REQ-06-0593)
+            - [ ] `pow()` (REQ: REQ-06-0594)
+            - [ ] `pown()`, `powr()`, `rootn()`, `compound()` (C23): (REQ: REQ-06-0595)
+                - [ ] `pown(x, n)`: `x` raised to integer power `n` (`intmax_t`). Binary exponentiation. (REQ: REQ-06-0596)
+                - [ ] `powr(x, y)`: `e^(y * ln(x))`, domain x ≥ 0. Different NaN/±0 semantics from `pow()`. (REQ: REQ-06-0597)
+                - [ ] `rootn(x, n)`: n-th root of `x`. `rootn(x, 2) == sqrt(x)`, `rootn(x, 3) == cbrt(x)`. (REQ: REQ-06-0598)
+                - [ ] `compound(x, n)`: `(1+x)^n` computed stably for small `x`. (REQ: REQ-06-0599)
+            - [ ] `sqrt()` (REQ: REQ-06-0600)
+            - [ ] `rsqrt()` (C23): (REQ: REQ-06-0601)
+                - [ ] Reciprocal square root: `1/sqrt(x)`. (REQ: REQ-06-0602)
+                - [ ] On x87: `fsqrt` then `fdivr` with 1.0. (REQ: REQ-06-0601)
+            - [ ] `cbrt()` (REQ: REQ-06-0604)
+            - [ ] `hypot()` (REQ: REQ-06-0605)
+            - [ ] **Testing (`tests/lib/m/unit/test_explog.c`):** (REQ: REQ-06-0606)
+                - [ ] Test `exp(0)==1`, `exp(1)≈M_E`, `exp(-∞)==0`, `exp(+∞)==+∞`, `exp(NaN)==NaN`. (REQ: REQ-06-0607)
+                - [ ] Test `exp2(0)==1`, `exp2(10)==1024`. (REQ: REQ-06-0608)
+                - [ ] Test `expm1(0)==0`, `expm1(tiny)≈tiny` (accuracy for small x vs naive `exp(x)-1`). (REQ: REQ-06-0609)
+                - [ ] Test `log(1)==0`, `log(M_E)≈1`, `log(0)==-∞`, `log(-1)==NaN` + `FE_INVALID`, `log(+∞)==+∞`. (REQ: REQ-06-0610)
+                - [ ] Test `log2(1)==0`, `log2(1024)==10`. (REQ: REQ-06-0611)
+                - [ ] Test `log10(1)==0`, `log10(1000)==3`. (REQ: REQ-06-0612)
+                - [ ] Test `log1p(0)==0`, `log1p(tiny)≈tiny` (accuracy for small x). (REQ: REQ-06-0613)
+                - [ ] Test `pow(2,10)==1024`, `pow(-1,2)==1`, `pow(0,0)==1` (C99 convention). (REQ: REQ-06-0614)
+                - [ ] Test `pow(x, 0)==1` for all x (including ∞, NaN per C99 F.9.4.4). (REQ: REQ-06-0615)
+                - [ ] Test `sqrt(4)==2`, `sqrt(0)==0`, `sqrt(-1)==NaN`, `sqrt(+∞)==+∞`. (REQ: REQ-06-0616)
+                - [ ] Test `cbrt(-8)==-2`, `cbrt(0)==0`. (REQ: REQ-06-0617)
+                - [ ] Test `hypot(3,4)==5`, `hypot(x,0)==fabs(x)`, `hypot(∞,NaN)==∞`. (REQ: REQ-06-0618)
+                - [ ] Test `rsqrt(4)==0.5`, `rsqrt(0)==+∞`, `rsqrt(-1)==NaN`. (REQ: REQ-06-0619)
+            - [ ] **Property Tests (`tests/lib/m/property/prop_explog.c`):** (REQ: REQ-06-0620)
+                - [ ] Property: `exp(log(x)) ≈ x` for positive finite `x` (within ULP tolerance). (REQ: REQ-06-0621)
+                - [ ] Property: `log(exp(x)) ≈ x` for moderate `x` (no overflow/underflow). (REQ: REQ-06-0622)
+                - [ ] Property: `exp2(log2(x)) ≈ x` for positive finite `x`. (REQ: REQ-06-0623)
+                - [ ] Property: `sqrt(x) * sqrt(x) ≈ x` for positive `x`. (REQ: REQ-06-0624)
+                - [ ] Property: `hypot(x,y) >= fabs(x) && hypot(x,y) >= fabs(y)`. (REQ: REQ-06-0625)
+                - [ ] Property: `pow(x, 1.0) == x` for all `x`. (REQ: REQ-06-0626)
+                - [ ] Property: `expm1(x) + 1 ≈ exp(x)` for all `x` (accuracy comparison, not equality). (REQ: REQ-06-0627)
+                - [ ] Property: `log1p(expm1(x)) ≈ x` for moderate `x`. (REQ: REQ-06-0628)
+            - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                - [ ] `man/man3/exp.3` — Exponential functions. Covers `exp()`, `exp2()`, `expm1()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0630)
+                - [ ] `man/man3/log.3` — Logarithmic functions. Covers `log()`, `log2()`, `log10()`, `log1p()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0631)
+                - [ ] `man/man3/pow.3` — Power functions. Covers `pow()`, `sqrt()`, `cbrt()`, `hypot()`. Document special value semantics extensively (C99 Annex F). SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0632)
         - [/] **Trigonometric:**
-            - [ ] `sin()`
-            - [ ] `cos()`
-            - [ ] `tan()`
-            - [ ] `asin()`
-            - [ ] `acos()`
-            - [ ] `atan()`
-            - [ ] `atan2()`
-            - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23):
-                - [ ] `sinpi(x)`: compute `sin(π·x)` exactly at integer and half-integer points.
-                - [ ] `cospi(x)`: compute `cos(π·x)` exactly at integer and half-integer points.
-                - [ ] `tanpi(x)`: compute `tan(π·x)` exactly, including singularity at half-integers.
-                - [ ] Key benefit: exact values without `M_PI` multiplication error.
-            - [ ] `asinpi()`, `acospi()`, `atanpi()`, `atan2pi()` (C23):
-                - [ ] Inverse functions returning result in units of π (i.e., divided by π).
-                - [ ] `asinpi(x)` ∈ [-0.5, 0.5], `acospi(x)` ∈ [0, 1], `atanpi(x)` ∈ [-0.5, 0.5].
-                - [ ] `atan2pi(y, x)` ∈ [-1, 1].
-            - [ ] **Testing (`tests/lib/m/unit/test_trig.c`):**
-                - [ ] Test `sin(0)==0`, `sin(π/2)≈1`, `sin(π)≈0`, `sin(NaN)==NaN`.
-                - [ ] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`.
-                - [ ] Test `tan(0)==0`, `tan(π/4)≈1`.
-                - [ ] Test `asin(0)==0`, `asin(1)≈π/2`, `asin(2)==NaN` (domain error).
-                - [ ] Test `acos(1)==0`, `acos(0)≈π/2`, `acos(-1)≈π`.
-                - [ ] Test `atan(0)==0`, `atan(1)≈π/4`, `atan(+∞)≈π/2`.
-                - [ ] Test `atan2(0,1)==0`, `atan2(1,0)≈π/2`, `atan2(0,-1)≈π`, `atan2(-1,0)≈-π/2`.
-                - [ ] Test `sinpi(0.5)==1`, `sinpi(1)==0`, `sinpi(0)==0` (exact).
-                - [ ] Test `cospi(0)==1`, `cospi(0.5)==0`, `cospi(1)==-1` (exact).
-                - [ ] Test large argument accuracy: `sin(1e15)` — verify range reduction correctness.
-                - [ ] Test `sincos()` agrees with individual `sin()` and `cos()` calls.
-            - [ ] **Property Tests (`tests/lib/m/property/prop_trig.c`):**
-                - [ ] Property: `sin(x)² + cos(x)² ≈ 1` (Pythagorean identity) for all finite `x`.
-                - [ ] Property: `sin(-x) == -sin(x)` (odd function).
-                - [ ] Property: `cos(-x) == cos(x)` (even function).
-                - [ ] Property: `asin(sin(x)) ≈ x` for `x ∈ [-π/2, π/2]`.
-                - [ ] Property: `|sin(x)| <= 1` and `|cos(x)| <= 1` for all finite `x`.
-                - [ ] Property: `atan2(sin(x), cos(x)) ≈ x` for `x ∈ (-π, π]`.
-            - [ ] **Man Pages:**
-                - [ ] `man/man3/sin.3` — Trigonometric functions. Covers `sin()`, `cos()`, `tan()`, `sincos()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/asin.3` — Inverse trigonometric functions. Covers `asin()`, `acos()`, `atan()`, `atan2()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-        - [ ] **Hyperbolic:**
-            - [ ] `sinh()`
-            - [ ] `cosh()`
-            - [ ] `tanh()`
-            - [ ] `asinh()`
-            - [ ] `acosh()`
-            - [ ] `atanh()`
-            - [ ] **Testing (`tests/lib/m/unit/test_hyper.c`):**
-                - [ ] Test `sinh(0)==0`, `cosh(0)==1`, `tanh(0)==0`.
-                - [ ] Test `sinh(1)≈1.1752`, `cosh(1)≈1.5431`, `tanh(1)≈0.7616`.
-                - [ ] Test `sinh(+∞)==+∞`, `cosh(+∞)==+∞`, `tanh(+∞)==1`.
-                - [ ] Test `asinh(0)==0`, `acosh(1)==0`, `atanh(0)==0`.
-                - [ ] Test `acosh(x)` domain: `acosh(0.5)` → NaN/domain error.
-                - [ ] Test `atanh(±1)` → ±∞ (pole error).
-                - [ ] Test NaN propagation for all hyperbolic functions.
-            - [ ] **Property Tests (`tests/lib/m/property/prop_hyper.c`):**
-                - [ ] Property: `cosh(x)² - sinh(x)² ≈ 1` (hyperbolic Pythagorean identity).
-                - [ ] Property: `sinh(-x) == -sinh(x)` (odd).
-                - [ ] Property: `cosh(-x) == cosh(x)` (even).
-                - [ ] Property: `tanh(x) == sinh(x)/cosh(x)` for moderate `x`.
-                - [ ] Property: `asinh(sinh(x)) ≈ x` for all `x`.
-                - [ ] Property: `|tanh(x)| < 1` for all finite `x`.
-            - [ ] **Man Pages:**
-                - [ ] `man/man3/sinh.3` — Hyperbolic functions. Covers `sinh()`, `cosh()`, `tanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-                - [ ] `man/man3/asinh.3` — Inverse hyperbolic functions. Covers `asinh()`, `acosh()`, `atanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
+            - [ ] `sin()` (REQ: REQ-06-0633)
+            - [ ] `cos()` (REQ: REQ-06-0634)
+            - [ ] `tan()` (REQ: REQ-06-0635)
+            - [ ] `asin()` (REQ: REQ-06-0636)
+            - [ ] `acos()` (REQ: REQ-06-0637)
+            - [ ] `atan()` (REQ: REQ-06-0638)
+            - [ ] `atan2()` (REQ: REQ-06-0639)
+            - [ ] `sinpi()`, `cospi()`, `tanpi()` (C23): (REQ: REQ-06-0640)
+                - [ ] `sinpi(x)`: compute `sin(π·x)` exactly at integer and half-integer points. (REQ: REQ-06-0641)
+                - [ ] `cospi(x)`: compute `cos(π·x)` exactly at integer and half-integer points. (REQ: REQ-06-0642)
+                - [ ] `tanpi(x)`: compute `tan(π·x)` exactly, including singularity at half-integers. (REQ: REQ-06-0643)
+                - [ ] Key benefit: exact values without `M_PI` multiplication error. (REQ: REQ-06-0644)
+            - [ ] `asinpi()`, `acospi()`, `atanpi()`, `atan2pi()` (C23): (REQ: REQ-06-0645)
+                - [ ] Inverse functions returning result in units of π (i.e., divided by π). (REQ: REQ-06-0646)
+                - [ ] `asinpi(x)` ∈ [-0.5, 0.5], `acospi(x)` ∈ [0, 1], `atanpi(x)` ∈ [-0.5, 0.5]. (REQ: REQ-06-0647)
+                - [ ] `atan2pi(y, x)` ∈ [-1, 1]. (REQ: REQ-06-0648)
+            - [ ] **Testing (`tests/lib/m/unit/test_trig.c`):** (REQ: REQ-06-0649)
+                - [ ] Test `sin(0)==0`, `sin(π/2)≈1`, `sin(π)≈0`, `sin(NaN)==NaN`. (REQ: REQ-06-0650)
+                - [ ] Test `cos(0)==1`, `cos(π)≈-1`, `cos(π/2)≈0`. (REQ: REQ-06-0651)
+                - [ ] Test `tan(0)==0`, `tan(π/4)≈1`. (REQ: REQ-06-0652)
+                - [ ] Test `asin(0)==0`, `asin(1)≈π/2`, `asin(2)==NaN` (domain error). (REQ: REQ-06-0653)
+                - [ ] Test `acos(1)==0`, `acos(0)≈π/2`, `acos(-1)≈π`. (REQ: REQ-06-0654)
+                - [ ] Test `atan(0)==0`, `atan(1)≈π/4`, `atan(+∞)≈π/2`. (REQ: REQ-06-0655)
+                - [ ] Test `atan2(0,1)==0`, `atan2(1,0)≈π/2`, `atan2(0,-1)≈π`, `atan2(-1,0)≈-π/2`. (REQ: REQ-06-0656)
+                - [ ] Test `sinpi(0.5)==1`, `sinpi(1)==0`, `sinpi(0)==0` (exact). (REQ: REQ-06-0657)
+                - [ ] Test `cospi(0)==1`, `cospi(0.5)==0`, `cospi(1)==-1` (exact). (REQ: REQ-06-0658)
+                - [ ] Test large argument accuracy: `sin(1e15)` — verify range reduction correctness. (REQ: REQ-06-0659)
+                - [ ] Test `sincos()` agrees with individual `sin()` and `cos()` calls. (REQ: REQ-06-0660)
+            - [ ] **Property Tests (`tests/lib/m/property/prop_trig.c`):** (REQ: REQ-06-0661)
+                - [ ] Property: `sin(x)² + cos(x)² ≈ 1` (Pythagorean identity) for all finite `x`. (REQ: REQ-06-0662)
+                - [ ] Property: `sin(-x) == -sin(x)` (odd function). (REQ: REQ-06-0663)
+                - [ ] Property: `cos(-x) == cos(x)` (even function). (REQ: REQ-06-0664)
+                - [ ] Property: `asin(sin(x)) ≈ x` for `x ∈ [-π/2, π/2]`. (REQ: REQ-06-0665)
+                - [ ] Property: `|sin(x)| <= 1` and `|cos(x)| <= 1` for all finite `x`. (REQ: REQ-06-0666)
+                - [ ] Property: `atan2(sin(x), cos(x)) ≈ x` for `x ∈ (-π, π]`. (REQ: REQ-06-0667)
+            - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                - [ ] `man/man3/sin.3` — Trigonometric functions. Covers `sin()`, `cos()`, `tan()`, `sincos()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0669)
+                - [ ] `man/man3/asin.3` — Inverse trigonometric functions. Covers `asin()`, `acos()`, `atan()`, `atan2()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0670)
+        - [ ] **Hyperbolic:** (REQ: REQ-06-0671)
+            - [ ] `sinh()` (REQ: REQ-06-0672)
+            - [ ] `cosh()` (REQ: REQ-06-0673)
+            - [ ] `tanh()` (REQ: REQ-06-0674)
+            - [ ] `asinh()` (REQ: REQ-06-0675)
+            - [ ] `acosh()` (REQ: REQ-06-0676)
+            - [ ] `atanh()` (REQ: REQ-06-0677)
+            - [ ] **Testing (`tests/lib/m/unit/test_hyper.c`):** (REQ: REQ-06-0678)
+                - [ ] Test `sinh(0)==0`, `cosh(0)==1`, `tanh(0)==0`. (REQ: REQ-06-0679)
+                - [ ] Test `sinh(1)≈1.1752`, `cosh(1)≈1.5431`, `tanh(1)≈0.7616`. (REQ: REQ-06-0680)
+                - [ ] Test `sinh(+∞)==+∞`, `cosh(+∞)==+∞`, `tanh(+∞)==1`. (REQ: REQ-06-0681)
+                - [ ] Test `asinh(0)==0`, `acosh(1)==0`, `atanh(0)==0`. (REQ: REQ-06-0682)
+                - [ ] Test `acosh(x)` domain: `acosh(0.5)` → NaN/domain error. (REQ: REQ-06-0683)
+                - [ ] Test `atanh(±1)` → ±∞ (pole error). (REQ: REQ-06-0684)
+                - [ ] Test NaN propagation for all hyperbolic functions. (REQ: REQ-06-0685)
+            - [ ] **Property Tests (`tests/lib/m/property/prop_hyper.c`):** (REQ: REQ-06-0686)
+                - [ ] Property: `cosh(x)² - sinh(x)² ≈ 1` (hyperbolic Pythagorean identity). (REQ: REQ-06-0687)
+                - [ ] Property: `sinh(-x) == -sinh(x)` (odd). (REQ: REQ-06-0688)
+                - [ ] Property: `cosh(-x) == cosh(x)` (even). (REQ: REQ-06-0689)
+                - [ ] Property: `tanh(x) == sinh(x)/cosh(x)` for moderate `x`. (REQ: REQ-06-0690)
+                - [ ] Property: `asinh(sinh(x)) ≈ x` for all `x`. (REQ: REQ-06-0691)
+                - [ ] Property: `|tanh(x)| < 1` for all finite `x`. (REQ: REQ-06-0692)
+            - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                - [ ] `man/man3/sinh.3` — Hyperbolic functions. Covers `sinh()`, `cosh()`, `tanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0694)
+                - [ ] `man/man3/asinh.3` — Inverse hyperbolic functions. Covers `asinh()`, `acosh()`, `atanh()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0695)
         - [/] **Manipulation:**
-            - [ ] `frexp()`
-            - [ ] `ldexp()`
-            - [ ] `modf()`
-            - [ ] `scalbn()`
-            - [ ] `scalbln()`:
-                - [ ] Same as `scalbn()` but exponent is `long` instead of `int`.
-            - [ ] `ilogb()`, `logb()`:
-                - [ ] `ilogb(x)`: extract unbiased exponent as `int`. `ilogb(0)` → `FP_ILOGB0`, `ilogb(∞)` → `INT_MAX`, `ilogb(NaN)` → `FP_ILOGBNAN`.
-                - [ ] `logb(x)`: extract unbiased exponent as `double`. `logb(0)` → `-∞` (pole), `logb(±∞)` → `+∞`.
-            - [ ] `nextafter()`
-            - [ ] `nexttoward()`:
-                - [ ] Like `nextafter()` but second argument is `long double` for direction.
-            - [ ] `nextup()`, `nextdown()` (C23):
-                - [ ] `nextup(x)`: next representable value toward +∞.
-                - [ ] `nextdown(x)`: next representable value toward -∞.
-            - [ ] `copysign()`
-            - [ ] `nan()`:
-                - [ ] `nan(tagp)`: convert string tag to quiet NaN. `nan("") == NAN`, `nan("123")` → NaN with tag payload.
-            - [ ] **Testing (`tests/lib/m/unit/test_manip.c`):**
-                - [ ] Test `frexp()` / `ldexp()` round-trip: `ldexp(frexp(x, &e), e) == x`.
-                - [ ] Test `frexp()` result ∈ [0.5, 1.0) for positive normals.
-                - [ ] Test `frexp(0.0)` returns 0.0 with exponent 0.
-                - [ ] Test `modf()`: integer + fractional parts sum to original.
-                - [ ] Test `scalbn(x, n) == x * 2^n` for moderate `n`.
-                - [ ] Test `ilogb()`: `ilogb(1.0)==0`, `ilogb(2.0)==1`, `ilogb(0.5)==-1`.
-                - [ ] Test `ilogb(0)` returns `FP_ILOGB0`, `ilogb(NaN)` returns `FP_ILOGBNAN`.
-                - [ ] Test `logb()`: `logb(1.0)==0`, `logb(0)==-∞`.
-                - [ ] Test `nextafter(1.0, 2.0)` returns next representable above 1.0.
-                - [ ] Test `nextafter(0.0, 1.0)` returns smallest denormal.
-                - [ ] Test `nextafter(x, x) == x` for all `x`.
-                - [ ] Test `copysign(1.0, -1.0) == -1.0`.
-                - [ ] Test `nan("")` returns NaN, `isnan(nan("tag"))` is true.
-            - [ ] **Property Tests (`tests/lib/m/property/prop_manip.c`):**
-                - [ ] Property: `ldexp(frexp(x, &e), e) == x` for all finite non-zero `x`.
-                - [ ] Property: `modf(x, &i); (i + frac) == x` for finite `x`.
-                - [ ] Property: `copysign(fabs(x), y)` has sign of `y` and magnitude of `x`.
-                - [ ] Property: `nextafter(x, y) != x` when `x != y` (for finite `x`, `y`).
-                - [ ] Property: `scalbn(x, 0) == x`.
-            - [ ] **Man Pages:**
-                - [ ] `man/man3/frexp.3` — Extract mantissa and exponent. Covers `frexp()` and `ldexp()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/modf.3` — Decompose to integer and fractional parts. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/scalbn.3` — Scale by power of radix. Covers `scalbn()` and `scalbln()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-                - [ ] `man/man3/ilogb.3` — Extract exponent. Covers `ilogb()` and `logb()`. Document special return values. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-                - [ ] `man/man3/nextafter.3` — Next representable value. Covers `nextafter()`, `nexttoward()`, `nextup()`, `nextdown()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO.
-                - [ ] `man/man3/copysign.3` — Copy sign of a number. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO.
-                - [ ] `man/man3/nan.3` — Generate quiet NaN. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO.
-        - [ ] **Error & Gamma Functions (POSIX/C11):**
-            - [ ] `erf()`, `erfc()`:
-                - [ ] `erf(x)`: error function, `2/√π · ∫₀ˣ e^{-t²} dt`. Range: [-1, 1].
-                - [ ] `erfc(x)`: complementary error function, `1 - erf(x)`. More accurate than `1 - erf(x)` for large `x`.
-                - [ ] Implementation: rational polynomial approximation (Cody's or Abramowitz & Stegun).
-                - [ ] `erf(0)==0`, `erf(+∞)==1`, `erf(-∞)==-1`, `erfc(0)==1`, `erfc(+∞)==0`.
-            - [ ] `tgamma()`, `lgamma()` (with `signgam`):
-                - [ ] `tgamma(x)`: true Gamma function, `Γ(x)`.
-                - [ ] `tgamma(n) == (n-1)!` for positive integers.
-                - [ ] Poles at non-positive integers: `tgamma(0)` → ±∞, `tgamma(-1)` → NaN + `FE_INVALID`.
-                - [ ] `lgamma(x)`: natural log of absolute value of Gamma: `ln|Γ(x)|`.
-                - [ ] Set external `signgam` to sign of `Γ(x)` (+1 or -1).
-                - [ ] `lgamma_r(x, &signp)`: reentrant variant (BSD extension).
-                - [ ] Implementation: Stirling's approximation for large x, Lanczos or rational approximation for small x.
-            - [ ] **Testing (`tests/lib/m/unit/test_gamma.c`):**
-                - [ ] Test `erf(0)==0`, `erf(1)≈0.8427`, `erf(+∞)==1`, `erf(-∞)==-1`.
-                - [ ] Test `erfc(0)==1`, `erfc(+∞)==0`, `erfc(x) + erf(x) ≈ 1`.
-                - [ ] Test `tgamma(1)==1`, `tgamma(2)==1`, `tgamma(5)==24`, `tgamma(0.5)≈√π`.
-                - [ ] Test `tgamma(0)` → ±∞ (pole), `tgamma(-1)` → NaN.
-                - [ ] Test `lgamma(1)==0`, `lgamma(2)==0`, `lgamma(5)≈ln(24)`.
-                - [ ] Test `signgam` is set correctly after `lgamma()` calls.
-                - [ ] Test NaN propagation for all error/gamma functions.
-            - [ ] **Property Tests (`tests/lib/m/property/prop_gamma.c`):**
-                - [ ] Property: `erfc(x) + erf(x) ≈ 1.0` for all finite `x`.
-                - [ ] Property: `erf(-x) == -erf(x)` (odd function).
-                - [ ] Property: `exp(lgamma(x)) ≈ |tgamma(x)|` for `x` where `tgamma(x)` is finite.
-                - [ ] Property: `tgamma(x+1) ≈ x * tgamma(x)` for positive `x` (recurrence relation).
-            - [ ] **Man Pages:**
-                - [ ] `man/man3/erf.3` — Error functions. Covers `erf()` and `erfc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-                - [ ] `man/man3/tgamma.3` — Gamma functions. Covers `tgamma()`, `lgamma()`, `lgamma_r()`, `signgam`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-        - [ ] **Bessel Functions (POSIX/XSI):**
-            - [ ] `j0()`, `j1()`, `jn()`:
-                - [ ] Bessel functions of the first kind: `J₀(x)`, `J₁(x)`, `Jₙ(x)`.
-                - [ ] `j0(0)==1`, `j1(0)==0`, `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`.
-                - [ ] Implementation: polynomial/rational approximation for small x, asymptotic expansion for large x, Miller's backward recurrence for `jn()`.
-            - [ ] `y0()`, `y1()`, `yn()`:
-                - [ ] Bessel functions of the second kind: `Y₀(x)`, `Y₁(x)`, `Yₙ(x)`.
-                - [ ] Singular at `x=0`: `y0(0)==-∞`, `y1(0)==-∞`.
-                - [ ] Domain: `x > 0` only. `y0(-1)` → NaN + `FE_INVALID`.
-            - [ ] **Testing (`tests/lib/m/unit/test_bessel.c`):**
-                - [ ] Test `j0(0)==1`, `j1(0)==0`.
-                - [ ] Test `j0(x)` known values: `j0(2.4048...)≈0` (first zero).
-                - [ ] Test `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`.
-                - [ ] Test `y0(x)`, `y1(x)` known values.
-                - [ ] Test `y0(0)==-∞`, `y1(0)==-∞`.
-                - [ ] Test domain: `y0(-1)` → NaN, `y1(-1)` → NaN.
-                - [ ] Test NaN propagation.
-            - [ ] **Property Tests (`tests/lib/m/property/prop_bessel.c`):**
-                - [ ] Property: `jn(n, x)` satisfies Bessel recurrence: `J_{n-1}(x) + J_{n+1}(x) = (2n/x) * J_n(x)`.
-                - [ ] Property: `|j0(x)| <= 1` for all `x >= 0`.
-                - [ ] Property: `yn(n, x)` satisfies same recurrence.
-            - [ ] **Man Pages:**
-                - [ ] `man/man3/j0.3` — Bessel functions. Covers `j0()`, `j1()`, `jn()`, `y0()`, `y1()`, `yn()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO.
-    - [ ] **Comprehensive Math Library Tests (Cross-Cutting):**
-        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_math.c`):**
-            - [ ] Fuzz all implemented math functions with random `double` inputs (including denormals, ±0, ±∞, NaN, max/min values).
-            - [ ] Verify no crashes, no SIGFPE (unless expected), consistent NaN propagation.
-            - [ ] Verify errno is set correctly for domain/range errors.
-            - [ ] Verify `fetestexcept()` flags raised appropriately.
-        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_mathf.c`):**
-            - [ ] Same as above but for all `float` variant functions.
-        - [ ] **Accuracy Tests (`tests/lib/m/unit/test_accuracy.c`):**
-            - [ ] Compare all math functions against known high-precision reference values (MPFR or hardcoded tables).
-            - [ ] Verify results within 1 ULP for correctly-rounded functions, 2-3 ULP for faithfully-rounded.
-            - [ ] Test at boundary values: smallest/largest normal, smallest denormal, values near singularities.
-    - [ ] **Optimizations (i386/x87 Inline Assembly):**
-        - [ ] **Trigonometric Functions:**
-            - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions.
-            - [ ] `sincos()`: Use `fsincos` if supported, else combine.
-            - [ ] `tan()`: Use `fptan`; push `1.0` then `fptan`, ignore the 1.0.
-            - [ ] `atan2()`: Use `fpatan`.
-            - [ ] **Range Reduction:** Implement `fprem1` loop for arguments > 2^63 (Intel Manual reduction).
-        - [ ] **Logarithms & Exponentials:**
-            - [ ] `log2(x)`: Load 1.0, load x, use `fyl2x`.
-            - [ ] `log(x)`: Load ln(2), load x, use `fyl2x`.
-            - [ ] `log10(x)`: Load log10(2), load x, use `fyl2x`.
-            - [ ] `pow(x, y)`:
-                - [ ] If y is integer, use binary exponentiation.
-                - [ ] Else: `y * log2(x)` -> `frndint` -> `f2xm1` -> `fscale`.
-            - [ ] `exp2(x)`: `f2xm1` (for -1 < x < 1) with `fscale` for integer part.
-        - [ ] **Basic Arithmetic:**
-            - [ ] `sqrt()`: `fsqrt`.
-            - [ ] `fabs()`: `fabs`.
-            - [ ] `fmod()`: `fprem`.
-            - [ ] `remainder()`: `fprem1` (IEEE compliant remainder).
-        - [ ] **Rounding & Manipulation:**
-            - [ ] `rint()`: `frndint` (honors current CW rounding mode).
-            - [ ] `nearbyint()`: `frndint` (without raising inexact exception).
-            - [ ] `scalbn(x, n)`: Load x, load n, `fscale`.
-            - [ ] `lrint()` / `llrint()`: `fistp` (store integer).
-        - [ ] **Testing (`tests/lib/m/unit/test_x87_opt.c`):**
-            - [ ] Verify x87-optimized functions produce identical results to generic C implementations.
-            - [ ] Test x87 range reduction: `sin(x)` for `x > 2^63` matches software range reduction.
-            - [ ] Test `fprem` loop termination (C1 flag check).
-            - [ ] Benchmark x87 vs generic: verify speedup for core functions.
-            - [ ] Test `nearbyint()` x87 path does NOT raise `FE_INEXACT` (vs `rint()` which does).
-            - [ ] Test `fistp` path for `lrint()`/`llrint()` matches current rounding mode.
-        - [ ] **Man Pages:**
-            - [ ] `man/man7/math_x87.7` — i386/x87 math optimizations overview. Document which functions use hardware instructions, range reduction strategy, accuracy guarantees, and when generic fallback is used. SYNOPSIS, DESCRIPTION, NOTES, SEE ALSO.
-- [ ] **Dynamic Linker (`/libexec/ld.so`) - Production Quality BSD-Style Implementation:**
-    - [ ] **Implementation Checklist (Commit-Atomic, Production Gate):**
+            - [ ] `frexp()` (REQ: REQ-06-0696)
+            - [ ] `ldexp()` (REQ: REQ-06-0697)
+            - [ ] `modf()` (REQ: REQ-06-0698)
+            - [ ] `scalbn()` (REQ: REQ-06-0699)
+            - [ ] `scalbln()`: (REQ: REQ-06-0700)
+                - [ ] Same as `scalbn()` but exponent is `long` instead of `int`. (REQ: REQ-06-0701)
+            - [ ] `ilogb()`, `logb()`: (REQ: REQ-06-0702)
+                - [ ] `ilogb(x)`: extract unbiased exponent as `int`. `ilogb(0)` → `FP_ILOGB0`, `ilogb(∞)` → `INT_MAX`, `ilogb(NaN)` → `FP_ILOGBNAN`. (REQ: REQ-06-0703)
+                - [ ] `logb(x)`: extract unbiased exponent as `double`. `logb(0)` → `-∞` (pole), `logb(±∞)` → `+∞`. (REQ: REQ-06-0704)
+            - [ ] `nextafter()` (REQ: REQ-06-0705)
+            - [ ] `nexttoward()`: (REQ: REQ-06-0706)
+                - [ ] Like `nextafter()` but second argument is `long double` for direction. (REQ: REQ-06-0707)
+            - [ ] `nextup()`, `nextdown()` (C23): (REQ: REQ-06-0708)
+                - [ ] `nextup(x)`: next representable value toward +∞. (REQ: REQ-06-0709)
+                - [ ] `nextdown(x)`: next representable value toward -∞. (REQ: REQ-06-0710)
+            - [ ] `copysign()` (REQ: REQ-06-0711)
+            - [ ] `nan()`: (REQ: REQ-06-0712)
+                - [ ] `nan(tagp)`: convert string tag to quiet NaN. `nan("") == NAN`, `nan("123")` → NaN with tag payload. (REQ: REQ-06-0713)
+            - [ ] **Testing (`tests/lib/m/unit/test_manip.c`):** (REQ: REQ-06-0714)
+                - [ ] Test `frexp()` / `ldexp()` round-trip: `ldexp(frexp(x, &e), e) == x`. (REQ: REQ-06-0715)
+                - [ ] Test `frexp()` result ∈ [0.5, 1.0) for positive normals. (REQ: REQ-06-0716)
+                - [ ] Test `frexp(0.0)` returns 0.0 with exponent 0. (REQ: REQ-06-0717)
+                - [ ] Test `modf()`: integer + fractional parts sum to original. (REQ: REQ-06-0718)
+                - [ ] Test `scalbn(x, n) == x * 2^n` for moderate `n`. (REQ: REQ-06-0719)
+                - [ ] Test `ilogb()`: `ilogb(1.0)==0`, `ilogb(2.0)==1`, `ilogb(0.5)==-1`. (REQ: REQ-06-0720)
+                - [ ] Test `ilogb(0)` returns `FP_ILOGB0`, `ilogb(NaN)` returns `FP_ILOGBNAN`. (REQ: REQ-06-0721)
+                - [ ] Test `logb()`: `logb(1.0)==0`, `logb(0)==-∞`. (REQ: REQ-06-0722)
+                - [ ] Test `nextafter(1.0, 2.0)` returns next representable above 1.0. (REQ: REQ-06-0723)
+                - [ ] Test `nextafter(0.0, 1.0)` returns smallest denormal. (REQ: REQ-06-0724)
+                - [ ] Test `nextafter(x, x) == x` for all `x`. (REQ: REQ-06-0725)
+                - [ ] Test `copysign(1.0, -1.0) == -1.0`. (REQ: REQ-06-0726)
+                - [ ] Test `nan("")` returns NaN, `isnan(nan("tag"))` is true. (REQ: REQ-06-0727)
+            - [ ] **Property Tests (`tests/lib/m/property/prop_manip.c`):** (REQ: REQ-06-0728)
+                - [ ] Property: `ldexp(frexp(x, &e), e) == x` for all finite non-zero `x`. (REQ: REQ-06-0729)
+                - [ ] Property: `modf(x, &i); (i + frac) == x` for finite `x`. (REQ: REQ-06-0730)
+                - [ ] Property: `copysign(fabs(x), y)` has sign of `y` and magnitude of `x`. (REQ: REQ-06-0731)
+                - [ ] Property: `nextafter(x, y) != x` when `x != y` (for finite `x`, `y`). (REQ: REQ-06-0732)
+                - [ ] Property: `scalbn(x, 0) == x`. (REQ: REQ-06-0733)
+            - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                - [ ] `man/man3/frexp.3` — Extract mantissa and exponent. Covers `frexp()` and `ldexp()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. (REQ: REQ-06-0735)
+                - [ ] `man/man3/modf.3` — Decompose to integer and fractional parts. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. (REQ: REQ-06-0736)
+                - [ ] `man/man3/scalbn.3` — Scale by power of radix. Covers `scalbn()` and `scalbln()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0737)
+                - [ ] `man/man3/ilogb.3` — Extract exponent. Covers `ilogb()` and `logb()`. Document special return values. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0738)
+                - [ ] `man/man3/nextafter.3` — Next representable value. Covers `nextafter()`, `nexttoward()`, `nextup()`, `nextdown()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, SEE ALSO. (REQ: REQ-06-0739)
+                - [ ] `man/man3/copysign.3` — Copy sign of a number. SYNOPSIS, DESCRIPTION, RETURN VALUE, SEE ALSO. (REQ: REQ-06-0740)
+                - [ ] `man/man3/nan.3` — Generate quiet NaN. SYNOPSIS, DESCRIPTION, RETURN VALUE, EXAMPLES, SEE ALSO. (REQ: REQ-06-0741)
+        - [ ] **Error & Gamma Functions (POSIX/C11):** (REQ: REQ-06-0742)
+            - [ ] `erf()`, `erfc()`: (REQ: REQ-06-0743)
+                - [ ] `erf(x)`: error function, `2/√π · ∫₀ˣ e^{-t²} dt`. Range: [-1, 1]. (REQ: REQ-06-0744)
+                - [ ] `erfc(x)`: complementary error function, `1 - erf(x)`. More accurate than `1 - erf(x)` for large `x`. (REQ: REQ-06-0745)
+                - [ ] Implementation: rational polynomial approximation (Cody's or Abramowitz & Stegun). (REQ: REQ-06-0746)
+                - [ ] `erf(0)==0`, `erf(+∞)==1`, `erf(-∞)==-1`, `erfc(0)==1`, `erfc(+∞)==0`. (REQ: REQ-06-0747)
+            - [ ] `tgamma()`, `lgamma()` (with `signgam`): (REQ: REQ-06-0748)
+                - [ ] `tgamma(x)`: true Gamma function, `Γ(x)`. (REQ: REQ-06-0749)
+                - [ ] `tgamma(n) == (n-1)!` for positive integers. (REQ: REQ-06-0750)
+                - [ ] Poles at non-positive integers: `tgamma(0)` → ±∞, `tgamma(-1)` → NaN + `FE_INVALID`. (REQ: REQ-06-0751)
+                - [ ] `lgamma(x)`: natural log of absolute value of Gamma: `ln|Γ(x)|`. (REQ: REQ-06-0752)
+                - [ ] Set external `signgam` to sign of `Γ(x)` (+1 or -1). (REQ: REQ-06-0753)
+                - [ ] `lgamma_r(x, &signp)`: reentrant variant (BSD extension). (REQ: REQ-06-0754)
+                - [ ] Implementation: Stirling's approximation for large x, Lanczos or rational approximation for small x. (REQ: REQ-06-0755)
+            - [ ] **Testing (`tests/lib/m/unit/test_gamma.c`):** (REQ: REQ-06-0756)
+                - [ ] Test `erf(0)==0`, `erf(1)≈0.8427`, `erf(+∞)==1`, `erf(-∞)==-1`. (REQ: REQ-06-0757)
+                - [ ] Test `erfc(0)==1`, `erfc(+∞)==0`, `erfc(x) + erf(x) ≈ 1`. (REQ: REQ-06-0758)
+                - [ ] Test `tgamma(1)==1`, `tgamma(2)==1`, `tgamma(5)==24`, `tgamma(0.5)≈√π`. (REQ: REQ-06-0759)
+                - [ ] Test `tgamma(0)` → ±∞ (pole), `tgamma(-1)` → NaN. (REQ: REQ-06-0760)
+                - [ ] Test `lgamma(1)==0`, `lgamma(2)==0`, `lgamma(5)≈ln(24)`. (REQ: REQ-06-0761)
+                - [ ] Test `signgam` is set correctly after `lgamma()` calls. (REQ: REQ-06-0762)
+                - [ ] Test NaN propagation for all error/gamma functions. (REQ: REQ-06-0763)
+            - [ ] **Property Tests (`tests/lib/m/property/prop_gamma.c`):** (REQ: REQ-06-0764)
+                - [ ] Property: `erfc(x) + erf(x) ≈ 1.0` for all finite `x`. (REQ: REQ-06-0765)
+                - [ ] Property: `erf(-x) == -erf(x)` (odd function). (REQ: REQ-06-0766)
+                - [ ] Property: `exp(lgamma(x)) ≈ |tgamma(x)|` for `x` where `tgamma(x)` is finite. (REQ: REQ-06-0767)
+                - [ ] Property: `tgamma(x+1) ≈ x * tgamma(x)` for positive `x` (recurrence relation). (REQ: REQ-06-0768)
+            - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                - [ ] `man/man3/erf.3` — Error functions. Covers `erf()` and `erfc()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0770)
+                - [ ] `man/man3/tgamma.3` — Gamma functions. Covers `tgamma()`, `lgamma()`, `lgamma_r()`, `signgam`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0771)
+        - [ ] **Bessel Functions (POSIX/XSI):** (REQ: REQ-06-0772)
+            - [ ] `j0()`, `j1()`, `jn()`: (REQ: REQ-06-0773)
+                - [ ] Bessel functions of the first kind: `J₀(x)`, `J₁(x)`, `Jₙ(x)`. (REQ: REQ-06-0774)
+                - [ ] `j0(0)==1`, `j1(0)==0`, `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`. (REQ: REQ-06-0775)
+                - [ ] Implementation: polynomial/rational approximation for small x, asymptotic expansion for large x, Miller's backward recurrence for `jn()`. (REQ: REQ-06-0776)
+            - [ ] `y0()`, `y1()`, `yn()`: (REQ: REQ-06-0777)
+                - [ ] Bessel functions of the second kind: `Y₀(x)`, `Y₁(x)`, `Yₙ(x)`. (REQ: REQ-06-0778)
+                - [ ] Singular at `x=0`: `y0(0)==-∞`, `y1(0)==-∞`. (REQ: REQ-06-0779)
+                - [ ] Domain: `x > 0` only. `y0(-1)` → NaN + `FE_INVALID`. (REQ: REQ-06-0780)
+            - [ ] **Testing (`tests/lib/m/unit/test_bessel.c`):** (REQ: REQ-06-0781)
+                - [ ] Test `j0(0)==1`, `j1(0)==0`. (REQ: REQ-06-0782)
+                - [ ] Test `j0(x)` known values: `j0(2.4048...)≈0` (first zero). (REQ: REQ-06-0783)
+                - [ ] Test `jn(0, x)==j0(x)`, `jn(1, x)==j1(x)`. (REQ: REQ-06-0784)
+                - [ ] Test `y0(x)`, `y1(x)` known values. (REQ: REQ-06-0785)
+                - [ ] Test `y0(0)==-∞`, `y1(0)==-∞`. (REQ: REQ-06-0786)
+                - [ ] Test domain: `y0(-1)` → NaN, `y1(-1)` → NaN. (REQ: REQ-06-0787)
+                - [ ] Test NaN propagation. (REQ: REQ-06-0788)
+            - [ ] **Property Tests (`tests/lib/m/property/prop_bessel.c`):** (REQ: REQ-06-0789)
+                - [ ] Property: `jn(n, x)` satisfies Bessel recurrence: `J_{n-1}(x) + J_{n+1}(x) = (2n/x) * J_n(x)`. (REQ: REQ-06-0790)
+                - [ ] Property: `|j0(x)| <= 1` for all `x >= 0`. (REQ: REQ-06-0791)
+                - [ ] Property: `yn(n, x)` satisfies same recurrence. (REQ: REQ-06-0792)
+            - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+                - [ ] `man/man3/j0.3` — Bessel functions. Covers `j0()`, `j1()`, `jn()`, `y0()`, `y1()`, `yn()`. SYNOPSIS, DESCRIPTION, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO. (REQ: REQ-06-0794)
+    - [ ] **Comprehensive Math Library Tests (Cross-Cutting):** (REQ: REQ-06-0795)
+        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_math.c`):** (REQ: REQ-06-0796)
+            - [ ] Fuzz all implemented math functions with random `double` inputs (including denormals, ±0, ±∞, NaN, max/min values). (REQ: REQ-06-0797)
+            - [ ] Verify no crashes, no SIGFPE (unless expected), consistent NaN propagation. (REQ: REQ-06-0798)
+            - [ ] Verify errno is set correctly for domain/range errors. (REQ: REQ-06-0799)
+            - [ ] Verify `fetestexcept()` flags raised appropriately. (REQ: REQ-06-0800)
+        - [ ] **Fuzz Tests (`tests/lib/m/fuzz/fuzz_mathf.c`):** (REQ: REQ-06-0801)
+            - [ ] Same as above but for all `float` variant functions. (REQ: REQ-06-0802)
+        - [ ] **Accuracy Tests (`tests/lib/m/unit/test_accuracy.c`):** (REQ: REQ-06-0803)
+            - [ ] Compare all math functions against known high-precision reference values (MPFR or hardcoded tables). (REQ: REQ-06-0804)
+            - [ ] Verify results within 1 ULP for correctly-rounded functions, 2-3 ULP for faithfully-rounded. (REQ: REQ-06-0805)
+            - [ ] Test at boundary values: smallest/largest normal, smallest denormal, values near singularities. (REQ: REQ-06-0806)
+    - [ ] **Optimizations (i386/x87 Inline Assembly):** (REQ: REQ-06-0807)
+        - [ ] **Trigonometric Functions:** (REQ: REQ-06-0808)
+            - [ ] `sin()` / `cos()`: Use `fsin` / `fcos` instructions. (REQ: REQ-06-0809)
+            - [ ] `sincos()`: Use `fsincos` if supported, else combine. (REQ: REQ-06-0810)
+            - [ ] `tan()`: Use `fptan`; push `1.0` then `fptan`, ignore the 1.0. (REQ: REQ-06-0811)
+            - [ ] `atan2()`: Use `fpatan`. (REQ: REQ-06-0812)
+            - [ ] **Range Reduction:** Implement `fprem1` loop for arguments > 2^63 (Intel Manual reduction). (REQ: REQ-06-0813)
+        - [ ] **Logarithms & Exponentials:** (REQ: REQ-06-0814)
+            - [ ] `log2(x)`: Load 1.0, load x, use `fyl2x`. (REQ: REQ-06-0815)
+            - [ ] `log(x)`: Load ln(2), load x, use `fyl2x`. (REQ: REQ-06-0816)
+            - [ ] `log10(x)`: Load log10(2), load x, use `fyl2x`. (REQ: REQ-06-0817)
+            - [ ] `pow(x, y)`: (REQ: REQ-06-0818)
+                - [ ] If y is integer, use binary exponentiation. (REQ: REQ-06-0818)
+                - [ ] Else: `y * log2(x)` -> `frndint` -> `f2xm1` -> `fscale`. (REQ: REQ-06-0820)
+            - [ ] `exp2(x)`: `f2xm1` (for -1 < x < 1) with `fscale` for integer part. (REQ: REQ-06-0821)
+        - [ ] **Basic Arithmetic:** (REQ: REQ-06-0822)
+            - [ ] `sqrt()`: `fsqrt`. (REQ: REQ-06-0823)
+            - [ ] `fabs()`: `fabs`. (REQ: REQ-06-0824)
+            - [ ] `fmod()`: `fprem`. (REQ: REQ-06-0825)
+            - [ ] `remainder()`: `fprem1` (IEEE compliant remainder). (REQ: REQ-06-0826)
+        - [ ] **Rounding & Manipulation:** (REQ: REQ-06-0827)
+            - [ ] `rint()`: `frndint` (honors current CW rounding mode). (REQ: REQ-06-0828)
+            - [ ] `nearbyint()`: `frndint` (without raising inexact exception). (REQ: REQ-06-0829)
+            - [ ] `scalbn(x, n)`: Load x, load n, `fscale`. (REQ: REQ-06-0830)
+            - [ ] `lrint()` / `llrint()`: `fistp` (store integer). (REQ: REQ-06-0831)
+        - [ ] **Testing (`tests/lib/m/unit/test_x87_opt.c`):** (REQ: REQ-06-0832)
+            - [ ] Verify x87-optimized functions produce identical results to generic C implementations. (REQ: REQ-06-0833)
+            - [ ] Test x87 range reduction: `sin(x)` for `x > 2^63` matches software range reduction. (REQ: REQ-06-0834)
+            - [ ] Test `fprem` loop termination (C1 flag check). (REQ: REQ-06-0835)
+            - [ ] Benchmark x87 vs generic: verify speedup for core functions. (REQ: REQ-06-0836)
+            - [ ] Test `nearbyint()` x87 path does NOT raise `FE_INEXACT` (vs `rint()` which does). (REQ: REQ-06-0837)
+            - [ ] Test `fistp` path for `lrint()`/`llrint()` matches current rounding mode. (REQ: REQ-06-0838)
+        - [ ] **Man Pages:** (REQ: REQ-06-0250, REQ-06-0404, REQ-06-0452, REQ-06-0488, REQ-06-0527, REQ-06-0573, REQ-06-0629, REQ-06-0668, REQ-06-0693, REQ-06-0734, REQ-06-0769, REQ-06-0793, REQ-06-0839)
+            - [ ] `man/man7/math_x87.7` — i386/x87 math optimizations overview. Document which functions use hardware instructions, range reduction strategy, accuracy guarantees, and when generic fallback is used. SYNOPSIS, DESCRIPTION, NOTES, SEE ALSO. (REQ: REQ-06-0840)
+- [ ] **Dynamic Linker (`/libexec/ld.so`) - Production Quality BSD-Style Implementation:** (REQ: REQ-06-0841)
+    - [ ] **Implementation Checklist (Commit-Atomic, Production Gate):** (REQ: REQ-06-0842)
         - **1. Specification & Design**
-            - [ ] Freeze `ld.so` scope, ABI targets, and unsupported-feature policy.
+            - [ ] Freeze `ld.so` scope, ABI targets, and unsupported-feature policy. (REQ: REQ-06-0843)
                 - Files/Headers: `docs/ld.so-design.md`, `docs/abi/elf-rtld-scope.md`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/spec/test_scope_matrix.c`; property `tests/libexec/ld.so/property/prop_feature_matrix.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_parser.c`.
                 - Docs: define supported/deferred/rejected feature matrix in `docs/ld.so-design.md`.
                 - Acceptance: scope matrix exists and every targeted ELF feature has a disposition and rationale.
-            - [ ] Publish architecture relocation matrix for i386 now and x86_64 stub policy.
+            - [ ] Publish architecture relocation matrix for i386 now and x86_64 stub policy. (REQ: REQ-06-0844)
                 - Files/Headers: `docs/ld.so-reloc-matrix.md`, `libexec/ld.so/rtld_reloc_types.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_matrix_sync.c`; property `tests/libexec/ld.so/property/prop_reloc_matrix_totality.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_type_decoder.c`.
                 - Docs: add architecture matrix and unsupported relocation behavior.
                 - Acceptance: each relocation used by targeted ABIs maps to an implemented or explicitly rejected handler.
-            - [ ] Specify deterministic symbol-resolution precedence and scope graph rules.
+            - [ ] Specify deterministic symbol-resolution precedence and scope graph rules. (REQ: REQ-06-0845)
                 - Files/Headers: `docs/ld.so-symbol-resolution.md`, `libexec/ld.so/rtld_scope.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_scope_precedence.c`; property `tests/libexec/ld.so/property/prop_deterministic_lookup.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_inputs.c`.
                 - Docs: document preload/executable/dependency/path precedence and tie-breakers.
                 - Acceptance: two identical dependency graphs produce identical resolution results across runs.
-            - [ ] Specify DT_RPATH/DT_RUNPATH, DT_SONAME, and versioning policy.
+            - [ ] Specify DT_RPATH/DT_RUNPATH, DT_SONAME, and versioning policy. (REQ: REQ-06-0846)
                 - Files/Headers: `docs/ld.so-path-and-version-policy.md`, `include/link.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_runpath_policy.c`; property `tests/libexec/ld.so/property/prop_soname_identity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_runpath_tokens.c`.
                 - Docs: define RPATH vs RUNPATH behavior, SONAME matching, and versioned symbol policy.
                 - Acceptance: policy doc is authoritative and referenced by loader manpages.
         - **2. Loader Core: ELF Parsing & Mapping**
-            - [ ] Implement hardened ELF header/program-header parser with overflow guards.
+            - [ ] Implement hardened ELF header/program-header parser with overflow guards. (REQ: REQ-06-0847)
                 - Files/Headers: `libexec/ld.so/elf_parse.c`, `libexec/ld.so/elf_parse.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_elf_parse_headers.c`; property `tests/libexec/ld.so/property/prop_header_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_elf_headers.c`.
                 - Docs: document parser invariants and rejection reasons in `docs/ld.so-design.md`.
                 - Acceptance: malformed/truncated headers are rejected without crash or out-of-bounds access.
-            - [ ] Implement dynamic table parser for required `DT_*` entries with strict bounds checking.
+            - [ ] Implement dynamic table parser for required `DT_*` entries with strict bounds checking. (REQ: REQ-06-0848)
                 - Files/Headers: `libexec/ld.so/elf_dynamic.c`, `libexec/ld.so/elf_dynamic.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dynamic_table_parse.c`; property `tests/libexec/ld.so/property/prop_dt_tag_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dynamic_table.c`.
                 - Docs: add required/optional `DT_*` tag table.
                 - Acceptance: loader extracts required dynamic metadata and rejects conflicting/invalid tables.
-            - [ ] Implement page-aligned segment mapping with exact `PROT_*` transitions.
+            - [ ] Implement page-aligned segment mapping with exact `PROT_*` transitions. (REQ: REQ-06-0849)
                 - Files/Headers: `libexec/ld.so/elf_map.c`, `libexec/ld.so/elf_map.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_segment_mapping.c`; property `tests/libexec/ld.so/property/prop_mapping_alignment.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_segment_layouts.c`.
                 - Docs: document mapping/protection lifecycle and W^X constraints.
                 - Acceptance: mapped segment permissions match ELF flags and pass integration probes.
-            - [ ] Implement fallback read-into-memory path for unsupported mmap edge cases.
+            - [ ] Implement fallback read-into-memory path for unsupported mmap edge cases. (REQ: REQ-06-0850)
                 - Files/Headers: `libexec/ld.so/elf_map_fallback.c`, `libexec/ld.so/elf_map.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_map_fallback.c`; property `tests/libexec/ld.so/property/prop_fallback_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_map_fallback_inputs.c`.
                 - Docs: describe when fallback mode is used and performance/security tradeoffs.
                 - Acceptance: fallback path loads valid DSOs with identical runtime behavior to mmap path.
         - **3. Dependency Resolution & Loading Order**
-            - [ ] Implement recursive `DT_NEEDED` graph construction with cycle detection metadata.
+            - [ ] Implement recursive `DT_NEEDED` graph construction with cycle detection metadata. (REQ: REQ-06-0851)
                 - Files/Headers: `libexec/ld.so/rtld_dep.c`, `libexec/ld.so/rtld_dep.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dep_graph.c`; property `tests/libexec/ld.so/property/prop_cycle_termination.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_needed_graph.c`.
                 - Docs: describe cycle handling and graph node states.
                 - Acceptance: cyclic dependency sets terminate and produce deterministic load plans.
-            - [ ] Implement topological load-order planner for reloc/init phases.
+            - [ ] Implement topological load-order planner for reloc/init phases. (REQ: REQ-06-0852)
                 - Files/Headers: `libexec/ld.so/rtld_order.c`, `libexec/ld.so/rtld_order.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_load_order.c`; property `tests/libexec/ld.so/property/prop_topo_validity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_order_inputs.c`.
                 - Docs: define ordering differences for relocation and constructor traversal.
                 - Acceptance: planned order always satisfies dependency-before-dependent invariant.
-            - [ ] Implement per-process DSO registry with SONAME identity and refcounts.
+            - [ ] Implement per-process DSO registry with SONAME identity and refcounts. (REQ: REQ-06-0853)
                 - Files/Headers: `libexec/ld.so/rtld_obj.c`, `libexec/ld.so/rtld_obj.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dso_registry.c`; property `tests/libexec/ld.so/property/prop_refcount_balance.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dso_identity.c`.
                 - Docs: document object lifecycle states and refcount semantics.
                 - Acceptance: duplicate loads reuse existing objects and maintain correct reference counts.
-            - [ ] Implement full search policy (`LD_PRELOAD`, `LD_LIBRARY_PATH`, RUNPATH/RPATH, cache, defaults).
+            - [ ] Implement full search policy (`LD_PRELOAD`, `LD_LIBRARY_PATH`, RUNPATH/RPATH, cache, defaults). (REQ: REQ-06-0854)
                 - Files/Headers: `libexec/ld.so/rtld_search.c`, `libexec/ld.so/rtld_search.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_search_policy.c`; property `tests/libexec/ld.so/property/prop_search_precedence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_search_tokens.c`.
                 - Docs: add path precedence algorithm and token expansion rules.
                 - Acceptance: lookup order matches specification for all precedence edge cases.
         - **4. Relocations & Binding**
-            - [ ] Implement REL/RELA dispatcher and relocation pass sequencing.
+            - [ ] Implement REL/RELA dispatcher and relocation pass sequencing. (REQ: REQ-06-0855)
                 - Files/Headers: `libexec/ld.so/rtld_reloc.c`, `libexec/ld.so/rtld_reloc.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_dispatch.c`; property `tests/libexec/ld.so/property/prop_reloc_idempotence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_records.c`.
                 - Docs: document relocation pipeline and ordering guarantees.
                 - Acceptance: required relocation records execute in deterministic order without corruption.
-            - [ ] Implement core i386 relocation handlers (relative, absolute, pc-relative, glob-dat, jmp-slot).
+            - [ ] Implement core i386 relocation handlers (relative, absolute, pc-relative, glob-dat, jmp-slot). (REQ: REQ-06-0856)
                 - Files/Headers: `libexec/ld.so/rtld_reloc_i386.c`, `libexec/ld.so/rtld_reloc_i386.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_i386_core.c`; property `tests/libexec/ld.so/property/prop_i386_reloc_equations.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_i386_relocs.c`.
                 - Docs: enumerate implemented relocation formulas and constraints.
                 - Acceptance: relocation outputs match expected addresses for all supported i386 test fixtures.
-            - [ ] Implement copy relocation support with explicit executable-only safety checks.
+            - [ ] Implement copy relocation support with explicit executable-only safety checks. (REQ: REQ-06-0857)
                 - Files/Headers: `libexec/ld.so/rtld_copyreloc.c`, `libexec/ld.so/rtld_copyreloc.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_copy_reloc.c`; property `tests/libexec/ld.so/property/prop_copy_reloc_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_copy_reloc.c`.
                 - Docs: document copy-reloc constraints and rejection cases.
                 - Acceptance: data symbols requiring copy relocations initialize correctly without out-of-bounds copies.
-            - [ ] Implement lazy PLT resolver and GOT patch path.
+            - [ ] Implement lazy PLT resolver and GOT patch path. (REQ: REQ-06-0858)
                 - Files/Headers: `libexec/ld.so/rtld_plt.S`, `libexec/ld.so/rtld_bind.c`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_lazy_bind.c`; property `tests/libexec/ld.so/property/prop_bind_fixpoint.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_plt_indices.c`.
                 - Docs: describe PLT0 calling convention and resolver contract.
                 - Acceptance: first call resolves symbol and subsequent calls bypass resolver.
-            - [ ] Implement eager binding path for `RTLD_NOW` and `LD_BIND_NOW`.
+            - [ ] Implement eager binding path for `RTLD_NOW` and `LD_BIND_NOW`. (REQ: REQ-06-0859)
                 - Files/Headers: `libexec/ld.so/rtld_now.c`, `libexec/ld.so/rtld_bind.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_bind_now.c`; property `tests/libexec/ld.so/property/prop_now_equals_lazy_endstate.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_bind_modes.c`.
                 - Docs: document lazy vs eager behavioral differences.
                 - Acceptance: eager mode resolves all bindable PLT relocations before control transfer.
-            - [ ] Add atomic GOT patching and locking for concurrent lazy binding.
+            - [ ] Add atomic GOT patching and locking for concurrent lazy binding. (REQ: REQ-06-0860)
                 - Files/Headers: `libexec/ld.so/rtld_bind_lock.c`, `libexec/ld.so/rtld_lock.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_atomic_got_patch.c`; property `tests/libexec/ld.so/property/prop_no_double_patch.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_concurrent_bind.c`.
                 - Docs: define lock/atomic invariants for runtime binding.
                 - Acceptance: concurrent first-call binding is race-free and resolves exactly once per slot.
         - **5. Symbol Resolution & Interposition**
-            - [ ] Implement SYSV `DT_HASH` and GNU `DT_GNU_HASH` lookup backends.
+            - [ ] Implement SYSV `DT_HASH` and GNU `DT_GNU_HASH` lookup backends. (REQ: REQ-06-0861)
                 - Files/Headers: `libexec/ld.so/rtld_hash.c`, `libexec/ld.so/rtld_hash.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_hash_lookup.c`; property `tests/libexec/ld.so/property/prop_hash_backend_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_hash_tables.c`.
                 - Docs: document hash backend selection and fallback.
                 - Acceptance: symbol lookup returns identical results across supported hash table variants.
-            - [ ] Implement weak/strong, visibility, and undefined-weak rules.
+            - [ ] Implement weak/strong, visibility, and undefined-weak rules. (REQ: REQ-06-0862)
                 - Files/Headers: `libexec/ld.so/rtld_sym.c`, `libexec/ld.so/rtld_sym.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_symbol_strength.c`; property `tests/libexec/ld.so/property/prop_visibility_rules.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_symbol_attrs.c`.
                 - Docs: add symbol binding and visibility decision table.
                 - Acceptance: symbol selection follows ABI rules for weak/strong and visibility combinations.
-            - [ ] Implement preload-based interposition and global/local scope boundaries.
+            - [ ] Implement preload-based interposition and global/local scope boundaries. (REQ: REQ-06-0863)
                 - Files/Headers: `libexec/ld.so/rtld_scope.c`, `libexec/ld.so/rtld_scope.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_interposition.c`; property `tests/libexec/ld.so/property/prop_scope_isolation.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_scope_graphs.c`.
                 - Docs: document interposition precedence with `LD_PRELOAD`.
                 - Acceptance: preload libraries can override eligible global symbols without leaking local scope symbols.
-            - [ ] Implement versioned symbol matching (`DT_VERSYM`, `DT_VERNEED`, `DT_VERDEF`) when present.
+            - [ ] Implement versioned symbol matching (`DT_VERSYM`, `DT_VERNEED`, `DT_VERDEF`) when present. (REQ: REQ-06-0864)
                 - Files/Headers: `libexec/ld.so/rtld_versym.c`, `libexec/ld.so/rtld_versym.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_symbol_versions.c`; property `tests/libexec/ld.so/property/prop_version_match_totality.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_version_sections.c`.
                 - Docs: describe version requirement matching and failure messages.
                 - Acceptance: loader resolves only symbols satisfying requested versions and emits deterministic errors otherwise.
         - **6. TLS (Thread-Local Storage)**
-            - [ ] Implement `PT_TLS` parsing and per-module TLS metadata registration.
+            - [ ] Implement `PT_TLS` parsing and per-module TLS metadata registration. (REQ: REQ-06-0865)
                 - Files/Headers: `libexec/ld.so/rtld_tls.c`, `libexec/ld.so/rtld_tls.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_metadata.c`; property `tests/libexec/ld.so/property/prop_tls_layout_valid.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_segments.c`.
                 - Docs: document TLS metadata fields and invariants.
                 - Acceptance: each loaded module has validated TLS metadata with aligned sizes and offsets.
-            - [ ] Implement static TLS layout computation for startup objects.
+            - [ ] Implement static TLS layout computation for startup objects. (REQ: REQ-06-0866)
                 - Files/Headers: `libexec/ld.so/rtld_tls_layout.c`, `libexec/ld.so/rtld_tls_layout.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_static_tls_layout.c`; property `tests/libexec/ld.so/property/prop_tls_alignment.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_layout.c`.
                 - Docs: describe layout algorithm and alignment constraints.
                 - Acceptance: static TLS blocks are non-overlapping, aligned, and accessible for all startup modules.
-            - [ ] Implement dynamic TLS allocation and `__tls_get_addr()` resolver.
+            - [ ] Implement dynamic TLS allocation and `__tls_get_addr()` resolver. (REQ: REQ-06-0867)
                 - Files/Headers: `libexec/ld.so/rtld_tls_get_addr.S`, `libexec/ld.so/rtld_tls_dyn.c`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_get_addr.c`; property `tests/libexec/ld.so/property/prop_tls_addr_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_get_addr.c`.
                 - Docs: define `__tls_get_addr` ABI contract and failure modes.
                 - Acceptance: dynamic TLS lookups return correct per-thread addresses across repeated calls.
-            - [ ] Integrate TLS module lifecycle with `dlopen`/`dlclose` and pthread creation.
+            - [ ] Integrate TLS module lifecycle with `dlopen`/`dlclose` and pthread creation. (REQ: REQ-06-0868)
                 - Files/Headers: `libexec/ld.so/rtld_tls_lifecycle.c`, `lib/pthreads/pthread_tls_hooks.c`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_tls_dlopen.c`; property `tests/libexec/ld.so/property/prop_tls_isolation_threads.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_tls_lifecycle.c`.
                 - Docs: document TLS lifecycle events and teardown rules.
                 - Acceptance: TLS data is isolated per thread and modules loaded after startup are usable from all threads.
         - **7. Constructors / Destructors / Initialization Order**
-            - [ ] Implement parser for `DT_PREINIT_ARRAY`, `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI`, `DT_FINI_ARRAY`.
+            - [ ] Implement parser for `DT_PREINIT_ARRAY`, `DT_INIT`, `DT_INIT_ARRAY`, `DT_FINI`, `DT_FINI_ARRAY`. (REQ: REQ-06-0869)
                 - Files/Headers: `libexec/ld.so/rtld_init.c`, `libexec/ld.so/rtld_init.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_init_fini_parse.c`; property `tests/libexec/ld.so/property/prop_init_entry_validity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_init_arrays.c`.
                 - Docs: document supported initializer/finalizer sources.
                 - Acceptance: loader discovers all supported constructor/destructor entry points in fixtures.
-            - [ ] Implement dependency-respecting constructor execution order.
+            - [ ] Implement dependency-respecting constructor execution order. (REQ: REQ-06-0870)
                 - Files/Headers: `libexec/ld.so/rtld_init_order.c`, `libexec/ld.so/rtld_order.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ctor_order.c`; property `tests/libexec/ld.so/property/prop_ctor_partial_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ctor_graphs.c`.
                 - Docs: define constructor ordering algorithm and corner cases.
                 - Acceptance: constructors run once and in dependency-correct order for complex graphs.
-            - [ ] Implement reverse-order destructor execution for process exit and `dlclose`.
+            - [ ] Implement reverse-order destructor execution for process exit and `dlclose`. (REQ: REQ-06-0871)
                 - Files/Headers: `libexec/ld.so/rtld_fini.c`, `libexec/ld.so/rtld_fini.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_dtor_order.c`; property `tests/libexec/ld.so/property/prop_dtor_reverse_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_dtor_sequences.c`.
                 - Docs: describe exit vs unload finalization semantics.
                 - Acceptance: destructors run once in reverse dependency order under exit and unload paths.
         - **8. `dlopen` / `dlsym` / `dlclose` Runtime API**
-            - [ ] Implement `dlfcn.h` ABI surface and libdl entry points skeleton.
+            - [ ] Implement `dlfcn.h` ABI surface and libdl entry points skeleton. (REQ: REQ-06-0872)
                 - Files/Headers: `include/dlfcn.h`, `lib/dl/Makefile`, `lib/dl/dl_api.h`.
                 - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlfcn_header.c`; property `tests/lib/dl/property/prop_flag_roundtrip.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlfcn_inputs.c`.
                 - Docs: document exported API and flag support matrix.
                 - Acceptance: headers and exported symbols compile and link for target userland.
-            - [ ] Implement `dlopen()` with `RTLD_LAZY`, `RTLD_NOW`, `RTLD_LOCAL`, and `RTLD_GLOBAL`.
+            - [ ] Implement `dlopen()` with `RTLD_LAZY`, `RTLD_NOW`, `RTLD_LOCAL`, and `RTLD_GLOBAL`. (REQ: REQ-06-0873)
                 - Files/Headers: `lib/dl/dlopen.c`, `libexec/ld.so/rtld_dlopen.c`.
                 - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlopen_flags.c`; property `tests/lib/dl/property/prop_scope_visibility_flags.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlopen_flags.c`.
                 - Docs: add `dlopen(3)` flag semantics and examples.
                 - Acceptance: requested flags change scope and binding behavior exactly as documented.
-            - [ ] Implement `dlsym()` with `RTLD_DEFAULT`, `RTLD_NEXT`, and handle-scoped lookups.
+            - [ ] Implement `dlsym()` with `RTLD_DEFAULT`, `RTLD_NEXT`, and handle-scoped lookups. (REQ: REQ-06-0874)
                 - Files/Headers: `lib/dl/dlsym.c`, `libexec/ld.so/rtld_dlsym.c`.
                 - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlsym_handles.c`; property `tests/lib/dl/property/prop_dlsym_deterministic.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlsym_names.c`.
                 - Docs: define lookup origin and pseudo-handle behavior.
                 - Acceptance: pseudo-handle and explicit-handle lookups return expected symbols in precedence order.
-            - [ ] Implement `dlclose()` refcounting, unload decision, and `RTLD_NODELETE` behavior.
+            - [ ] Implement `dlclose()` refcounting, unload decision, and `RTLD_NODELETE` behavior. (REQ: REQ-06-0875)
                 - Files/Headers: `lib/dl/dlclose.c`, `libexec/ld.so/rtld_dlclose.c`.
                 - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlclose_refcount.c`; property `tests/lib/dl/property/prop_refcount_never_negative.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlclose_sequences.c`.
                 - Docs: document unload eligibility and nodelete semantics.
                 - Acceptance: unload occurs only when allowed and references are balanced.
-            - [ ] Implement `dlerror()` with thread-local last-error storage semantics.
+            - [ ] Implement `dlerror()` with thread-local last-error storage semantics. (REQ: REQ-06-0876)
                 - Files/Headers: `lib/dl/dlerror.c`, `libexec/ld.so/rtld_error.h`.
                 - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dlerror_tls.c`; property `tests/lib/dl/property/prop_dlerror_clear_once.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlerror_messages.c`.
                 - Docs: specify error lifecycle and thread safety guarantees.
                 - Acceptance: each thread observes independent last-error state that clears on retrieval.
-            - [ ] Implement `dladdr()` and `dlinfo()` for common tooling requests.
+            - [ ] Implement `dladdr()` and `dlinfo()` for common tooling requests. (REQ: REQ-06-0877)
                 - Files/Headers: `lib/dl/dladdr.c`, `lib/dl/dlinfo.c`, `include/link.h`.
                 - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dladdr_dlinfo.c`; property `tests/lib/dl/property/prop_addr_to_object.c`; fuzz `tests/lib/dl/fuzz/fuzz_dlinfo_requests.c`.
                 - Docs: add `dladdr(3)` and `dlinfo(3)` request coverage table.
                 - Acceptance: tooling-visible metadata is stable and accurate for loaded objects.
         - **9. Environment, Configuration & Security**
-            - [ ] Implement parser for supported `LD_*` variables with strict token validation.
+            - [ ] Implement parser for supported `LD_*` variables with strict token validation. (REQ: REQ-06-0878)
                 - Files/Headers: `libexec/ld.so/rtld_env.c`, `libexec/ld.so/rtld_env.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_env_parse.c`; property `tests/libexec/ld.so/property/prop_env_parse_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ld_env.c`.
                 - Docs: enumerate accepted variables and parse rules.
                 - Acceptance: malformed env values are rejected safely with deterministic errors.
-            - [ ] Enforce secure-exec mode to ignore all unsafe `LD_*` inputs.
+            - [ ] Enforce secure-exec mode to ignore all unsafe `LD_*` inputs. (REQ: REQ-06-0879)
                 - Files/Headers: `libexec/ld.so/rtld_secure.c`, `libexec/ld.so/rtld_secure.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_ignore_env.c`; property `tests/libexec/ld.so/property/prop_secure_env_zero_effect.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_secure_env.c`.
                 - Docs: document secure-exec behavior in design and manpages.
                 - Acceptance: setuid/setgid/secure mode ignores user-controlled `LD_*` knobs.
-            - [ ] Enforce secure preload policy (deny user-controlled preload paths and objects).
+            - [ ] Enforce secure preload policy (deny user-controlled preload paths and objects). (REQ: REQ-06-0880)
                 - Files/Headers: `libexec/ld.so/rtld_preload_secure.c`, `libexec/ld.so/rtld_search.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_preload.c`; property `tests/libexec/ld.so/property/prop_preload_secure_rejection.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_preload_secure.c`.
                 - Docs: specify trusted preload directories and rejection reasons.
                 - Acceptance: secure mode never loads preloads from untrusted/user-writable locations.
-            - [ ] Validate ownership and permissions of DSOs before secure-mode use.
+            - [ ] Validate ownership and permissions of DSOs before secure-mode use. (REQ: REQ-06-0881)
                 - Files/Headers: `libexec/ld.so/rtld_fs_secure.c`, `libexec/ld.so/rtld_fs_secure.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_secure_permissions.c`; property `tests/libexec/ld.so/property/prop_secure_path_monotonicity.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_secure_stat.c`.
                 - Docs: document permission and ownership checks for secure execution.
                 - Acceptance: libraries failing secure ownership/permission checks are rejected with explicit diagnostics.
-            - [ ] Implement `PT_GNU_RELRO` finalization and read-only remap after relocations.
+            - [ ] Implement `PT_GNU_RELRO` finalization and read-only remap after relocations. (REQ: REQ-06-0882)
                 - Files/Headers: `libexec/ld.so/rtld_relro.c`, `libexec/ld.so/rtld_relro.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_relro_apply.c`; property `tests/libexec/ld.so/property/prop_relro_write_blocked.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_relro_ranges.c`.
                 - Docs: add RELRO requirements and interaction with `BIND_NOW`.
                 - Acceptance: RELRO pages become read-only after relocation and remain non-writable.
-            - [ ] Implement sysroot/chroot-aware path canonicalization for loader lookups.
+            - [ ] Implement sysroot/chroot-aware path canonicalization for loader lookups. (REQ: REQ-06-0883)
                 - Files/Headers: `libexec/ld.so/rtld_path.c`, `libexec/ld.so/rtld_path.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_sysroot_paths.c`; property `tests/libexec/ld.so/property/prop_no_escape_from_sysroot.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_path_canon.c`.
                 - Docs: define path resolution behavior in chroot/container contexts.
                 - Acceptance: resolved library paths cannot escape configured root boundaries.
         - **10. Caching & `ldconfig`**
-            - [ ] Define `ld.so.cache` binary format and versioning contract.
+            - [ ] Define `ld.so.cache` binary format and versioning contract. (REQ: REQ-06-0884)
                 - Files/Headers: `include/ldso_cache.h`, `docs/ld.so-cache-format.md`.
                 - Tests (unit/property/fuzz): unit `tests/sbin/ldconfig/unit/test_cache_format.c`; property `tests/sbin/ldconfig/property/prop_cache_roundtrip.c`; fuzz `tests/sbin/ldconfig/fuzz/fuzz_cache_parser.c`.
                 - Docs: publish cache format, endianness, and compatibility policy.
                 - Acceptance: cache format spec is versioned and parser compatibility rules are explicit.
-            - [ ] Implement secure cache reader in loader with ownership/permission validation.
+            - [ ] Implement secure cache reader in loader with ownership/permission validation. (REQ: REQ-06-0885)
                 - Files/Headers: `libexec/ld.so/rtld_cache.c`, `libexec/ld.so/rtld_cache.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_cache_reader_secure.c`; property `tests/libexec/ld.so/property/prop_cache_lookup_consistency.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_cache_reader.c`.
                 - Docs: document cache trust model and fallback policy.
                 - Acceptance: untrusted/stale/corrupt cache is ignored safely and lookup falls back to path search.
-            - [ ] Implement `ldconfig(8)` cache writer and SONAME symlink management.
+            - [ ] Implement `ldconfig(8)` cache writer and SONAME symlink management. (REQ: REQ-06-0886)
                 - Files/Headers: `sbin/ldconfig/ldconfig.c`, `sbin/ldconfig/Makefile`.
                 - Tests (unit/property/fuzz): unit `tests/sbin/ldconfig/unit/test_ldconfig_scan.c`; property `tests/sbin/ldconfig/property/prop_soname_link_consistency.c`; fuzz `tests/sbin/ldconfig/fuzz/fuzz_ldconfig_inputs.c`.
                 - Docs: add `man/man8/ldconfig.8`.
                 - Acceptance: `ldconfig` generates a valid cache and expected SONAME symlinks for configured dirs.
         - **11. Performance & Optimizations**
-            - [ ] Optimize hash lookup fast path with GNU hash bloom prefilter.
+            - [ ] Optimize hash lookup fast path with GNU hash bloom prefilter. (REQ: REQ-06-0887)
                 - Files/Headers: `libexec/ld.so/rtld_hash_gnu.c`, `libexec/ld.so/rtld_hash.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_gnu_hash_bloom.c`; property `tests/libexec/ld.so/property/prop_hash_false_positive_bounds.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_gnu_hash.c`.
                 - Docs: record algorithm and expected complexity.
                 - Acceptance: lookup fast path is measurably faster than SYSV-only baseline on benchmark corpus.
-            - [ ] Batch relocations by page locality to reduce protection flips and page faults.
+            - [ ] Batch relocations by page locality to reduce protection flips and page faults. (REQ: REQ-06-0888)
                 - Files/Headers: `libexec/ld.so/rtld_reloc_batch.c`, `libexec/ld.so/rtld_reloc.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_reloc_batch.c`; property `tests/libexec/ld.so/property/prop_batch_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_reloc_batch.c`.
                 - Docs: document batching constraints and correctness invariants.
                 - Acceptance: batched relocation mode preserves correctness and reduces startup cost in benchmarks.
-            - [ ] Add optional prebinding/prelink experiment behind explicit build flag.
+            - [ ] Add optional prebinding/prelink experiment behind explicit build flag. (REQ: REQ-06-0889)
                 - Files/Headers: `libexec/ld.so/rtld_prebind.c`, `libexec/ld.so/config.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_prebind_flag.c`; property `tests/libexec/ld.so/property/prop_prebind_equivalence.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_prebind_metadata.c`.
                 - Docs: document prebinding as experimental and disabled by default.
                 - Acceptance: prebind mode is off by default and does not change default correctness guarantees.
         - **12. Diagnostics, Auditing & Tracing**
-            - [ ] Implement `LD_DEBUG` category parser and structured debug logger.
+            - [ ] Implement `LD_DEBUG` category parser and structured debug logger. (REQ: REQ-06-0890)
                 - Files/Headers: `libexec/ld.so/rtld_debug.c`, `libexec/ld.so/rtld_debug.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ld_debug_categories.c`; property `tests/libexec/ld.so/property/prop_debug_filtering.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_debug_env.c`.
                 - Docs: document debug categories and output format.
                 - Acceptance: selected debug categories produce stable, parseable logs without leaking unrelated events.
-            - [ ] Implement `r_debug` / `_dl_debug_state` updates for debugger attach flow.
+            - [ ] Implement `r_debug` / `_dl_debug_state` updates for debugger attach flow. (REQ: REQ-06-0891)
                 - Files/Headers: `libexec/ld.so/rtld_gdb.c`, `include/link.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_r_debug_states.c`; property `tests/libexec/ld.so/property/prop_debug_state_transitions.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_link_map_lists.c`.
                 - Docs: describe debugger handshake and state transitions.
                 - Acceptance: debugger-visible link-map state transitions are correct for add/remove events.
-            - [ ] Implement optional audit hook interface for load/bind events.
+            - [ ] Implement optional audit hook interface for load/bind events. (REQ: REQ-06-0892)
                 - Files/Headers: `libexec/ld.so/rtld_audit.c`, `libexec/ld.so/rtld_audit.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_audit_callbacks.c`; property `tests/libexec/ld.so/property/prop_audit_event_order.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_audit_modules.c`.
                 - Docs: publish audit hook ABI and safety caveats.
                 - Acceptance: enabled audit modules receive deterministic callbacks without changing default behavior.
-            - [ ] Add trace-friendly one-line event mode for ktrace/strace correlation.
+            - [ ] Add trace-friendly one-line event mode for ktrace/strace correlation. (REQ: REQ-06-0893)
                 - Files/Headers: `libexec/ld.so/rtld_trace.c`, `libexec/ld.so/rtld_trace.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_trace_format.c`; property `tests/libexec/ld.so/property/prop_trace_event_completeness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_trace_strings.c`.
                 - Docs: define stable trace keys and field semantics.
                 - Acceptance: trace mode emits machine-parseable events with stable keys.
         - **13. Error Handling & Robustness**
-            - [ ] Define centralized loader error catalog with stable error codes.
+            - [ ] Define centralized loader error catalog with stable error codes. (REQ: REQ-06-0894)
                 - Files/Headers: `libexec/ld.so/rtld_errcodes.h`, `libexec/ld.so/rtld_error.c`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_error_catalog.c`; property `tests/libexec/ld.so/property/prop_error_code_uniqueness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_error_format.c`.
                 - Docs: document error code meanings and operator guidance.
                 - Acceptance: each fatal/non-fatal condition maps to a unique, documented loader error code.
-            - [ ] Implement high-context unresolved-symbol and relocation-failure diagnostics.
+            - [ ] Implement high-context unresolved-symbol and relocation-failure diagnostics. (REQ: REQ-06-0895)
                 - Files/Headers: `libexec/ld.so/rtld_diag.c`, `libexec/ld.so/rtld_error.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_diag_unresolved.c`; property `tests/libexec/ld.so/property/prop_diag_contains_context.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_diag_tokens.c`.
                 - Docs: specify diagnostic format including SONAME/path/reloc offset.
                 - Acceptance: failures report symbol, requester, candidate scope, and failing location deterministically.
-            - [ ] Add fault-injection hooks for OOM, short-read, and mprotect failures.
+            - [ ] Add fault-injection hooks for OOM, short-read, and mprotect failures. (REQ: REQ-06-0896)
                 - Files/Headers: `libexec/ld.so/rtld_faultinject.c`, `libexec/ld.so/rtld_faultinject.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fault_injection.c`; property `tests/libexec/ld.so/property/prop_fault_paths_no_leak.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_fault_sequences.c`.
                 - Docs: document fault-injection controls for test-only builds.
                 - Acceptance: injected failures exit cleanly without deadlock, memory corruption, or descriptor leaks.
-            - [ ] Add malformed-DSO fuzzing harnesses for parser, relocator, and resolver subsystems.
+            - [ ] Add malformed-DSO fuzzing harnesses for parser, relocator, and resolver subsystems. (REQ: REQ-06-0897)
                 - Files/Headers: `tests/libexec/ld.so/fuzz/BUILD.md`, `tests/libexec/ld.so/fuzz/fuzz_rtld_driver.c`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fuzz_seed_regression.c`; property `tests/libexec/ld.so/property/prop_fuzz_seed_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_rtld_driver.c`.
                 - Docs: publish fuzz seed corpus management and crash triage workflow.
                 - Acceptance: fuzz targets run continuously in CI without known crashing seeds.
         - **14. Thread Safety & Concurrency**
-            - [ ] Implement documented loader lock hierarchy and invariants.
+            - [ ] Implement documented loader lock hierarchy and invariants. (REQ: REQ-06-0898)
                 - Files/Headers: `libexec/ld.so/rtld_lock.c`, `libexec/ld.so/rtld_lock.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_lock_hierarchy.c`; property `tests/libexec/ld.so/property/prop_lock_order_no_cycle.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_lock_sequences.c`.
                 - Docs: add lock-order and reentrancy rules to design docs.
                 - Acceptance: lock acquisition graph is acyclic and validated by stress tests.
-            - [ ] Make `dlopen`/`dlsym`/`dlclose` reentrant-safe under concurrent callers.
+            - [ ] Make `dlopen`/`dlsym`/`dlclose` reentrant-safe under concurrent callers. (REQ: REQ-06-0899)
                 - Files/Headers: `libexec/ld.so/rtld_api_locking.c`, `lib/dl/dl_thread.c`.
                 - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_api_thread_safety.c`; property `tests/lib/dl/property/prop_parallel_api_equivalence.c`; fuzz `tests/lib/dl/fuzz/fuzz_parallel_api.c`.
                 - Docs: define API-level thread-safety guarantees and caveats.
                 - Acceptance: high-concurrency stress suite shows no deadlocks or data races.
-            - [ ] Add concurrent lazy-bind stress runner with race-detection instrumentation.
+            - [ ] Add concurrent lazy-bind stress runner with race-detection instrumentation. (REQ: REQ-06-0900)
                 - Files/Headers: `tests/libexec/ld.so/integration/test_lazy_bind_race.c`, `tests/ci/test-ldso-race.sh`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_bind_race_guards.c`; property `tests/libexec/ld.so/property/prop_lazy_bind_single_winner.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_lazy_bind_interleave.c`.
                 - Docs: document race-stress methodology and expected invariants.
                 - Acceptance: resolver races are absent across repeated high-thread-count runs.
         - **15. Unloading & Resource Cleanup**
-            - [ ] Implement unload-eligibility analysis for reference graph and static TLS constraints.
+            - [ ] Implement unload-eligibility analysis for reference graph and static TLS constraints. (REQ: REQ-06-0901)
                 - Files/Headers: `libexec/ld.so/rtld_unload.c`, `libexec/ld.so/rtld_unload.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_unload_eligibility.c`; property `tests/libexec/ld.so/property/prop_no_unload_if_referenced.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_unload_graphs.c`.
                 - Docs: document reasons unloading can be denied.
                 - Acceptance: loader unloads only safe modules and reports explicit denial reason otherwise.
-            - [ ] Implement module teardown pipeline (dtors, TLS teardown, unmap, registry removal).
+            - [ ] Implement module teardown pipeline (dtors, TLS teardown, unmap, registry removal). (REQ: REQ-06-0902)
                 - Files/Headers: `libexec/ld.so/rtld_teardown.c`, `libexec/ld.so/rtld_obj.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_teardown_pipeline.c`; property `tests/libexec/ld.so/property/prop_teardown_no_dangling.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_teardown_paths.c`.
                 - Docs: define teardown ordering guarantees.
                 - Acceptance: successful unload leaves no mapped segments, live TLS entries, or stale link-map entries.
-            - [ ] Add long-run load/unload churn leak tests under sanitizers.
+            - [ ] Add long-run load/unload churn leak tests under sanitizers. (REQ: REQ-06-0903)
                 - Files/Headers: `tests/libexec/ld.so/integration/test_churn_leaks.c`, `tests/ci/test-ldso-leaks.sh`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_leak_accounting.c`; property `tests/libexec/ld.so/property/prop_churn_stable_memory.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_churn_sequences.c`.
                 - Docs: document churn-test thresholds and failure triage.
                 - Acceptance: leak and UAF checks remain clean after sustained churn workload.
         - **16. ABI & Tooling Compatibility**
-            - [ ] Implement `dl_iterate_phdr()` and stable `dl_phdr_info` traversal semantics.
+            - [ ] Implement `dl_iterate_phdr()` and stable `dl_phdr_info` traversal semantics. (REQ: REQ-06-0904)
                 - Files/Headers: `lib/dl/dl_iterate_phdr.c`, `include/link.h`.
                 - Tests (unit/property/fuzz): unit `tests/lib/dl/unit/test_dl_iterate_phdr.c`; property `tests/lib/dl/property/prop_phdr_iteration_complete.c`; fuzz `tests/lib/dl/fuzz/fuzz_phdr_callbacks.c`.
                 - Docs: add `man/man3/dl_iterate_phdr.3`.
                 - Acceptance: callbacks observe all loaded objects in a deterministic order.
-            - [ ] Export and maintain `link_map`/`r_debug` ABI for debuggers and unwinders.
+            - [ ] Export and maintain `link_map`/`r_debug` ABI for debuggers and unwinders. (REQ: REQ-06-0905)
                 - Files/Headers: `include/link.h`, `libexec/ld.so/rtld_linkmap.c`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_link_map_layout.c`; property `tests/libexec/ld.so/property/prop_link_map_consistency.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_link_map_ops.c`.
                 - Docs: define stable fields and compatibility guarantees.
                 - Acceptance: debugger and unwinder smoke tests consume exported link-map structures successfully.
-            - [ ] Add compatibility shims and behavioral toggles required by common third-party software.
+            - [ ] Add compatibility shims and behavioral toggles required by common third-party software. (REQ: REQ-06-0906)
                 - Files/Headers: `libexec/ld.so/rtld_compat.c`, `libexec/ld.so/rtld_compat.h`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_compat_modes.c`; property `tests/libexec/ld.so/property/prop_compat_toggle_isolation.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_compat_knobs.c`.
                 - Docs: document each shim, rationale, and default state.
                 - Acceptance: designated compatibility test corpus passes without regressing default semantics.
         - **17. Installer & Packaging**
-            - [ ] Define and enforce interpreter install path and `PT_INTERP` contract.
+            - [ ] Define and enforce interpreter install path and `PT_INTERP` contract. (REQ: REQ-06-0907)
                 - Files/Headers: `Makefile.inc`, `sys/exec/elf_interp.c`, `docs/ld.so-install-layout.md`.
                 - Tests (unit/property/fuzz): unit `tests/sys/exec/unit/test_interp_path.c`; property `tests/sys/exec/property/prop_interp_path_stability.c`; fuzz `tests/sys/exec/fuzz/fuzz_interp_strings.c`.
                 - Docs: specify canonical interpreter path and compatibility symlink policy.
                 - Acceptance: built executables reference installed loader path consistently.
-            - [ ] Add packaging rules for `ld.so`, `libdl.so`, symlinks, ownership, and mode bits.
+            - [ ] Add packaging rules for `ld.so`, `libdl.so`, symlinks, ownership, and mode bits. (REQ: REQ-06-0908)
                 - Files/Headers: `Makefile`, `lib/dl/Makefile`, `tools/pkg/ldso.manifest`.
                 - Tests (unit/property/fuzz): unit `tests/tools/pkg/unit/test_ldso_manifest.c`; property `tests/tools/pkg/property/prop_symlink_chain_valid.c`; fuzz `tests/tools/pkg/fuzz/fuzz_pkg_manifest.c`.
                 - Docs: document package contents and upgrade path.
                 - Acceptance: packaging output installs runtime linker assets with correct paths and permissions.
-            - [ ] Add upgrade/rollback safety checks for loader and cache transitions.
+            - [ ] Add upgrade/rollback safety checks for loader and cache transitions. (REQ: REQ-06-0909)
                 - Files/Headers: `tools/pkg/ldso-upgrade.sh`, `tools/pkg/ldso-rollback.sh`.
                 - Tests (unit/property/fuzz): unit `tests/tools/pkg/unit/test_upgrade_checks.c`; property `tests/tools/pkg/property/prop_upgrade_rollback_inverse.c`; fuzz `tests/tools/pkg/fuzz/fuzz_upgrade_metadata.c`.
                 - Docs: document operational playbook for loader upgrades.
                 - Acceptance: upgrade and rollback scripts preserve bootability and loader consistency.
         - **18. Tests & CI**
-            - [ ] Create dedicated `ld.so` unit-test targets in build system.
+            - [ ] Create dedicated `ld.so` unit-test targets in build system. (REQ: REQ-06-0910)
                 - Files/Headers: `tests/libexec/ld.so/Makefile`, `tests/Makefile`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_smoke_runner.c`; property `tests/libexec/ld.so/property/prop_runner_inputs.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_runner_bootstrap.c`.
                 - Docs: document test target names and invocation.
                 - Acceptance: `make` targets execute loader unit suites reliably in CI and local runs.
-            - [ ] Add property-test harness for symbol resolution and relocation invariants.
+            - [ ] Add property-test harness for symbol resolution and relocation invariants. (REQ: REQ-06-0911)
                 - Files/Headers: `tests/libexec/ld.so/property/prop_harness.c`, `tests/libexec/ld.so/property/fixtures/`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_property_seed_replay.c`; property `tests/libexec/ld.so/property/prop_harness.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_property_inputs.c`.
                 - Docs: describe property generation strategy and shrinking/repro workflow.
                 - Acceptance: property suite consistently exercises randomized dependency/relocation scenarios with reproducible seeds.
-            - [ ] Add coverage-guided fuzz targets and corpus minimization workflow.
+            - [ ] Add coverage-guided fuzz targets and corpus minimization workflow. (REQ: REQ-06-0912)
                 - Files/Headers: `tests/libexec/ld.so/fuzz/CMakeLists.txt`, `tests/libexec/ld.so/fuzz/corpus/`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_fuzz_harness_build.c`; property `tests/libexec/ld.so/property/prop_corpus_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_elf_fullstack.c`.
                 - Docs: define fuzz runtime budgets and crash-handling policy.
                 - Acceptance: fuzz jobs run in CI with a managed corpus and no untriaged crashes.
-            - [ ] Add sanitizer CI matrix (ASAN/UBSAN required; optional TSAN where supported).
+            - [ ] Add sanitizer CI matrix (ASAN/UBSAN required; optional TSAN where supported). (REQ: REQ-06-0913)
                 - Files/Headers: `tests/ci/test-ldso.sh`, `.github/workflows/ci.yml`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_sanitizer_smoke.c`; property `tests/libexec/ld.so/property/prop_sanitizer_determinism.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_sanitizer_mode.c`.
                 - Docs: document sanitizer expectations and suppression policy.
                 - Acceptance: all loader tests pass under required sanitizers in CI.
-            - [ ] Add multi-arch job plan (i386 active, x86_64 gated) and regression baseline snapshots.
+            - [ ] Add multi-arch job plan (i386 active, x86_64 gated) and regression baseline snapshots. (REQ: REQ-06-0914)
                 - Files/Headers: `tests/ci/test-ldso-matrix.sh`, `tests/libexec/ld.so/regressions/`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_matrix_config.c`; property `tests/libexec/ld.so/property/prop_regression_snapshot_stability.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_matrix_inputs.c`.
                 - Docs: document CI matrix and architecture readiness criteria.
                 - Acceptance: CI records stable regression baselines and gates changes by architecture policy.
         - **19. Documentation & Manpages**
-            - [ ] Write `ld.so(8)` covering runtime behavior, search paths, env vars, secure mode, and diagnostics.
+            - [ ] Write `ld.so(8)` covering runtime behavior, search paths, env vars, secure mode, and diagnostics. (REQ: REQ-06-0915)
                 - Files/Headers: `man/man8/ld.so.8`.
                 - Tests (unit/property/fuzz): unit `tests/man/unit/test_ldso_man_sections.c`; property `tests/man/property/prop_ldso_man_examples_build.c`; fuzz `tests/man/fuzz/fuzz_man_escape_sequences.c`.
                 - Docs: ensure required sections include DESCRIPTION, SECURITY, ENVIRONMENT, FILES, SEE ALSO.
                 - Acceptance: manpage is complete, reviewable, and matches implemented behavior.
-            - [ ] Write `dlopen(3)`, `dlsym(3)`, `dlclose(3)`, and `dlerror(3)` with error semantics and examples.
+            - [ ] Write `dlopen(3)`, `dlsym(3)`, `dlclose(3)`, and `dlerror(3)` with error semantics and examples. (REQ: REQ-06-0916)
                 - Files/Headers: `man/man3/dlopen.3`, `man/man3/dlsym.3`, `man/man3/dlclose.3`, `man/man3/dlerror.3`.
                 - Tests (unit/property/fuzz): unit `tests/man/unit/test_dlfcn_man_sections.c`; property `tests/man/property/prop_dlfcn_examples_compile.c`; fuzz `tests/man/fuzz/fuzz_dlfcn_man_tokens.c`.
                 - Docs: include LIBRARY, RETURN VALUE, ERRORS, EXAMPLES, SEE ALSO sections.
                 - Acceptance: API manpages compile with documentation checks and reflect runtime flags accurately.
-            - [ ] Write `dladdr(3)`, `dlinfo(3)`, and `dl_iterate_phdr(3)` tooling-focused documentation.
+            - [ ] Write `dladdr(3)`, `dlinfo(3)`, and `dl_iterate_phdr(3)` tooling-focused documentation. (REQ: REQ-06-0917)
                 - Files/Headers: `man/man3/dladdr.3`, `man/man3/dlinfo.3`, `man/man3/dl_iterate_phdr.3`.
                 - Tests (unit/property/fuzz): unit `tests/man/unit/test_linker_tooling_man_sections.c`; property `tests/man/property/prop_tooling_examples_compile.c`; fuzz `tests/man/fuzz/fuzz_tooling_man_markup.c`.
                 - Docs: document supported requests, callbacks, and structure fields.
                 - Acceptance: tooling manpages align with exported headers and runtime behavior.
-            - [ ] Publish loader security threat model and operational hardening guide.
+            - [ ] Publish loader security threat model and operational hardening guide. (REQ: REQ-06-0918)
                 - Files/Headers: `docs/security/ldso-threat-model.md`, `docs/security/ldso-hardening.md`.
                 - Tests (unit/property/fuzz): unit `tests/docs/unit/test_security_doc_links.c`; property `tests/docs/property/prop_security_rule_coverage.c`; fuzz `tests/docs/fuzz/fuzz_security_doc_parser.c`.
                 - Docs: include trust boundaries, attack surfaces, and mitigation checklist.
                 - Acceptance: threat model is reviewed and maps to implemented safeguards and tests.
         - **20. Refactor & Audit Directive**
-            - [ ] Audit existing loader/runtime code and record reuse/refactor/delete decisions per file.
+            - [ ] Audit existing loader/runtime code and record reuse/refactor/delete decisions per file. (REQ: REQ-06-0919)
                 - Files/Headers: `docs/ldso-audit-inventory.md`, `libexec/ld.so/`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_audit_inventory_sync.c`; property `tests/libexec/ld.so/property/prop_inventory_complete.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_inventory_parser.c`.
                 - Docs: maintain decision log with risk classification for each legacy file.
                 - Acceptance: inventory lists all relevant files and assigns an explicit action with rationale.
-            - [ ] Convert loader-related TODO/FIXME markers into standalone commit-atomic tasks.
+            - [ ] Convert loader-related TODO/FIXME markers into standalone commit-atomic tasks. (REQ: REQ-06-0920)
                 - Files/Headers: `TASKS.md`, `libexec/ld.so/*.c`, `lib/dl/*.c`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_no_untracked_todos.c`; property `tests/libexec/ld.so/property/prop_todo_to_task_bijection.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_todo_scanner_input.c`.
                 - Docs: update audit inventory with TODO migration status.
                 - Acceptance: no loader TODO/FIXME remains without a corresponding tracked checklist item.
-            - [ ] Add final ship gate checklist for correctness, security, performance, docs, and CI sign-off.
+            - [ ] Add final ship gate checklist for correctness, security, performance, docs, and CI sign-off. (REQ: REQ-06-0921)
                 - Files/Headers: `docs/ldso-ship-gate.md`, `tests/ci/test-ldso-ship-gate.sh`.
                 - Tests (unit/property/fuzz): unit `tests/libexec/ld.so/unit/test_ship_gate_schema.c`; property `tests/libexec/ld.so/property/prop_ship_gate_all_required.c`; fuzz `tests/libexec/ld.so/fuzz/fuzz_ship_gate_yaml.c`.
                 - Docs: define required sign-off artifacts and rollback criteria.
                 - Acceptance: release is blocked until all ship-gate checks are green and documented.
-- [ ] **System Interface Libraries:**
+- [ ] **System Interface Libraries:** (REQ: REQ-06-0922)
 
-    - [ ] **Native Kernel Introspection (`libsys` / `libkernel`):**
+    - [ ] **Native Kernel Introspection (`libsys` / `libkernel`):** (REQ: REQ-06-0923)
 
         > **Files:** `lib/sys/`, `lib/sys/include/sys/sysinfo.h`.
         >
         > **Architecture:** Thin wrapper over syscalls + structured parsing
         > of `/proc` and `/sys`. Thread-safe with per-thread error state.
 
-        - [ ] **Core Architecture:**
-            - [ ] Define `libsys` as the canonical native interface to kernel internals.
-            - [ ] Thin wrapper over syscalls + structured `/proc` and `/sys` parsing.
-            - [ ] Sync and async query modes (for monitoring tools).
-            - [ ] Thread-safe design with per-thread error state (`errno`-like).
-            - [ ] Versioned ABI with `libsys.so.1` soname.
-        - [ ] **Data Sources:**
-            - [ ] **`sysctl` MIBs (System Control):**
-                - [ ] **`kern` (Kernel):**
-                    - [ ] `kern.ostype` (string): OS name (e.g., "Substrate").
-                    - [ ] `kern.osrelease` (string): release version.
-                    - [ ] `kern.osrevision` (int): revision number.
-                    - [ ] `kern.version` (string): full version string.
-                    - [ ] `kern.hostname` (string): system hostname (RW).
-                    - [ ] `kern.domainname` (string): NIS domain name (RW).
-                    - [ ] `kern.boottime` (struct timeval): boot timestamp.
-                    - [ ] `kern.maxproc` (int): maximum processes.
-                    - [ ] `kern.maxfiles` (int): maximum open files system-wide.
-                    - [ ] `kern.securelevel` (int): security level (RW, monotonically increasing).
-                    - [ ] `kern.argmax` (int): maximum `exec` argument length.
-                    - [ ] `kern.ngroups` (int): maximum supplementary groups.
-                - [ ] **`hw` (Hardware):**
-                    - [ ] `hw.machine` (string): machine architecture (e.g., "i386").
-                    - [ ] `hw.model` (string): CPU model name.
-                    - [ ] `hw.ncpu` (int): number of active CPUs.
-                    - [ ] `hw.ncpuonline` (int): number of online CPUs.
-                    - [ ] `hw.byteorder` (int): 4321 (big) or 1234 (little).
-                    - [ ] `hw.physmem` (long): total physical memory bytes.
-                    - [ ] `hw.usermem` (long): non-kernel memory bytes.
-                    - [ ] `hw.pagesize` (int): system page size (4096).
-                    - [ ] `hw.disknames` (string): comma-separated disk device names.
-                    - [ ] `hw.sensors` (struct): hardware sensor data (temperature, fan, voltage).
-                - [ ] **`vm` (Virtual Memory):**
-                    - [ ] `vm.loadavg` (struct loadavg): 1, 5, 15 min load averages.
-                    - [ ] `vm.swap_usage` (struct swap_stat): swap total/used/free.
-                    - [ ] `vm.vmtotal` (struct vmtotal): system-wide VM statistics.
-                    - [ ] `vm.overcommit` (int): memory overcommit policy.
-                    - [ ] `vm.swappiness` (int): page-out aggressiveness.
-                    - [ ] `vm.vfs_cache_pressure` (int): VFS inode/dentry cache reclaim pressure.
-                - [ ] **`net` (Network):**
-                    - [ ] `net.inet.ip.stats` (struct ipstat): IP packet counters.
-                    - [ ] `net.inet.ip.forwarding` (int): IPv4 forwarding enabled.
-                    - [ ] `net.inet.tcp.stats` (struct tcpstat): TCP connection stats.
-                    - [ ] `net.inet.udp.stats` (struct udpstat): UDP packet stats.
-                    - [ ] `net.link.generic.system.ifcount` (int): interface count.
-                    - [ ] `net.inet.icmp.stats` (struct icmpstat): ICMP packet stats.
-                - [ ] **`debug` (Debugging):**
-                    - [ ] `debug.klog` (string): kernel log ring buffer.
-                    - [ ] `debug.traceflags` (int): kernel tracing flags.
-            - [ ] **`procfs` Structures (Process Filesystem):**
-                - [ ] `/proc/[pid]/stat`: process state, stats, metrics (Linux-compatible format).
-                - [ ] `/proc/[pid]/status`: human-readable status info.
-                - [ ] `/proc/[pid]/maps`: memory map regions and permissions.
-                - [ ] `/proc/[pid]/cmdline`: command line arguments (NUL-separated).
-                - [ ] `/proc/[pid]/environ`: environment variables (NUL-separated).
-                - [ ] `/proc/[pid]/fd/`: open file descriptors (symlinks to paths).
-                - [ ] `/proc/[pid]/cwd`: symlink to current working directory.
-                - [ ] `/proc/[pid]/exe`: symlink to executable.
-                - [ ] `/proc/[pid]/root`: symlink to root directory.
-                - [ ] `/proc/[pid]/task/`: per-thread subdirectories.
-                - [ ] `/proc/meminfo`: global memory usage.
-                - [ ] `/proc/cpuinfo`: CPU capabilities and model info.
-                - [ ] `/proc/uptime`: system uptime and idle time.
-                - [ ] `/proc/loadavg`: load averages and process counts.
-                - [ ] `/proc/vmstat`: VM statistics counters.
-                - [ ] `/proc/self`: symlink to calling process's `/proc/[pid]`.
-            - [ ] **`sysfs` Structures (System Filesystem):**
-                - [ ] `/sys/class/net/`: network interface properties.
-                - [ ] `/sys/block/`: block device attributes (`size`, `stat`, `queue/`).
-                - [ ] `/sys/devices/system/cpu/`: CPU topology and frequency scaling.
-                - [ ] `/sys/devices/system/memory/`: memory block hotplug.
-                - [ ] `/sys/kernel/`: misc kernel tunables.
-            - [ ] **Netlink Sockets (Linux Compatibility):**
-                - [ ] `NETLINK_ROUTE`: interface/address/route management (`RTM_*` messages).
-                - [ ] `NETLINK_KOBJECT_UEVENT`: hotplug/device events.
-                - [ ] `NETLINK_GENERIC`: generic netlink families.
-            - [ ] **Direct Standard Syscalls:**
-                - [ ] `sysinfo()`: system uptime, total RAM, free RAM, procs.
-                - [ ] `uname()`: system identification (sysname, nodename, release, version, machine).
-                - [ ] `getrlimit()` / `setrlimit()`: process resource limits.
-                - [ ] `clock_gettime()`: high-resolution system clocks.
-                - [ ] `sysctl()`: generic MIB interface.
-        - [ ] **Process Information API (`lib/sys`):**
-            - [ ] `sys_proc_count()`: total number of processes.
-            - [ ] `sys_proc_list(pid_t *pids, size_t *count)`: list all PIDs.
-            - [ ] `sys_proc_info(pid_t pid, sys_procinfo_t *info)`: detailed process info (incl. `bitness`).
-            - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)`: list threads.
-            - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)`: list open FDs.
-            - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)`: memory mappings.
-            - [ ] `sys_proc_cwd(pid_t pid, char *buf, size_t len)`: current working directory.
-            - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)`: executable path.
-            - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)`: command line.
-            - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)`: environment.
-            - [ ] **Deep Requirements (Architecture-Critical):**
-                - [ ] Define stable, versioned semantics for every `sys_procinfo_t` field (required/optional/zeroed).
-                - [ ] Standardize two-pass sizing contract for variable-length APIs (`*_list`, `*_threads`, `*_fds`, `*_maps`, `*_cmdline`, `*_environ`).
-                - [ ] Define permission model for cross-process visibility (self, same-uid, privileged).
-                - [ ] Add regression tests proving deterministic output ordering and snapshot consistency.
-                - [ ] Primary consumers: `bin/ps`, `bin/top`, future `libkvm` compatibility layer.
-        - [ ] **Memory Statistics API (`lib/sys`):**
-            - [ ] `sys_vm_stats(sys_vmstat_t *stats)`: global VM statistics.
-            - [ ] `sys_vm_info(sys_vminfo_t *info)`: memory zone info (DMA, Normal, HighMem).
-            - [ ] `sys_vm_swap(sys_swapinfo_t *swap)`: swap usage statistics.
-            - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)`: buffer cache statistics.
-            - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)`: slab allocator stats.
-            - [ ] **Deep Requirements (Architecture-Critical):**
-                - [ ] Standardize all units (bytes/pages/KB) and document conversion rules in headers and man pages.
-                - [ ] Guarantee monotonic/coherent read semantics for counters exposed in one structure read.
-                - [ ] Define overflow-safe 32-bit userspace behavior for 64-bit counters.
-                - [ ] Add tests comparing `sys_vm_*` outputs to kernel PMM/VM internal counters.
-                - [ ] Primary consumers: `bin/free`, future `bin/top` memory panes, monitoring tools.
-        - [ ] **CPU Information API (`lib/sys`):**
-            - [ ] `sys_cpu_count()`: number of CPUs (online/possible/present).
-            - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)`: per-CPU info (model, MHz, cache).
-            - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)`: per-CPU time accounting.
-            - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)`: load averages.
-            - [ ] `sys_cpu_topology(int cpu, sys_cputopo_t *topo)`: socket/core/thread topology.
-            - [ ] **Deep Requirements (Architecture-Critical):**
-                - [ ] Define online/offline CPU semantics and hotplug behavior for `sys_cpu_count()`.
-                - [ ] Define per-CPU sampling interval and normalization for `sys_cpu_times()`.
-                - [ ] Document canonical load-average representation and rounding behavior.
-                - [ ] Add SMP-aware correctness tests under CPU affinity and migration.
-                - [ ] Primary consumers: `bin/top`, scheduler diagnostics, performance tooling.
-        - [ ] **System Information API (`lib/sys`):**
-            - [ ] `sys_uptime(struct timespec *ts)`: system uptime.
-            - [ ] `sys_boottime(struct timespec *ts)`: boot timestamp.
-            - [ ] `sys_hostname(char *buf, size_t len)`: system hostname.
-            - [ ] `sys_domainname(char *buf, size_t len)`: NIS/YP domain name.
-            - [ ] `sys_kernel_version(sys_version_t *ver)`: kernel version info.
-            - [ ] **Deep Requirements (Architecture-Critical):**
-                - [ ] Define clock source and monotonic/realtime guarantees for uptime/boottime.
-                - [ ] Unify hostname/domainname behavior between `sysctl`, `uname`, and `sys_*` APIs.
-                - [ ] Add ABI stability tests for `sys_version_t` layout and string truncation rules.
-                - [ ] Primary consumers: shell/session tools, telemetry headers in `top`/`free`/`ps`.
-        - [ ] **Network Information API (`lib/sys`):**
-            - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)`: list interfaces.
-            - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)`: addresses.
-            - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)`: interface statistics.
-            - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)`: routing table.
-            - [ ] `sys_net_arp(sys_arpentry_t *entries, size_t *count)`: ARP table.
-        - [ ] **Disk / Storage Information API (`lib/sys`):**
-            - [ ] `sys_disk_list(sys_diskinfo_t *disks, size_t *count)`: list block devices.
-            - [ ] `sys_disk_stats(const char *dev, sys_diskstat_t *stats)`: I/O stats per device.
-            - [ ] `sys_mount_list(sys_mountinfo_t *mounts, size_t *count)`: mounted filesystems.
-            - [ ] **Deep Requirements (Architecture-Critical):**
-                - [ ] Define canonical mount-entry ordering, mount flags normalization, and option representation.
-                - [ ] Guarantee consistency between mount control path (`mount(2)`, `umount(2)`) and reporting path (`sys_mount_list`).
-                - [ ] Add integration tests validating `bin/mount` output against `sys_mount_list`.
-                - [ ] Primary consumers: `bin/mount`, `bin/umount`, future storage dashboards.
-        - [ ] **Data Structures (`lib/sys/include/sys/sysinfo.h`):**
-            - [ ] `sys_procinfo_t`: pid, ppid, pgid, sid, uid, gid, state, name, times, memory.
-            - [ ] `sys_vmstat_t`: total, free, available, buffers, cached, swap_total, swap_free.
-            - [ ] `sys_cpuinfo_t`: vendor, model, family, stepping, mhz, cache_size, flags.
-            - [ ] `sys_cputopo_t`: socket_id, core_id, thread_id, numa_node.
-            - [ ] `sys_netif_t`: name, index, flags, mtu, hwaddr, type.
-            - [ ] `sys_diskinfo_t`: name, size, sector_size, model, serial.
-            - [ ] `sys_mountinfo_t`: device, mountpoint, fstype, flags.
+        - [ ] **Core Architecture:** (REQ: REQ-06-0924)
+            - [ ] Define `libsys` as the canonical native interface to kernel internals. (REQ: REQ-06-0925)
+            - [ ] Thin wrapper over syscalls + structured `/proc` and `/sys` parsing. (REQ: REQ-06-0926)
+            - [ ] Sync and async query modes (for monitoring tools). (REQ: REQ-06-0927)
+            - [ ] Thread-safe design with per-thread error state (`errno`-like). (REQ: REQ-06-0928)
+            - [ ] Versioned ABI with `libsys.so.1` soname. (REQ: REQ-06-0929)
+        - [ ] **Data Sources:** (REQ: REQ-06-0930)
+            - [ ] **`sysctl` MIBs (System Control):** (REQ: REQ-06-0931)
+                - [ ] **`kern` (Kernel):** (REQ: REQ-06-0932)
+                    - [ ] `kern.ostype` (string): OS name (e.g., "Substrate"). (REQ: REQ-06-0933)
+                    - [ ] `kern.osrelease` (string): release version. (REQ: REQ-06-0934)
+                    - [ ] `kern.osrevision` (int): revision number. (REQ: REQ-06-0935)
+                    - [ ] `kern.version` (string): full version string. (REQ: REQ-06-0936)
+                    - [ ] `kern.hostname` (string): system hostname (RW). (REQ: REQ-06-0937)
+                    - [ ] `kern.domainname` (string): NIS domain name (RW). (REQ: REQ-06-0938)
+                    - [ ] `kern.boottime` (struct timeval): boot timestamp. (REQ: REQ-06-0939)
+                    - [ ] `kern.maxproc` (int): maximum processes. (REQ: REQ-06-0940)
+                    - [ ] `kern.maxfiles` (int): maximum open files system-wide. (REQ: REQ-06-0941)
+                    - [ ] `kern.securelevel` (int): security level (RW, monotonically increasing). (REQ: REQ-06-0942)
+                    - [ ] `kern.argmax` (int): maximum `exec` argument length. (REQ: REQ-06-0943)
+                    - [ ] `kern.ngroups` (int): maximum supplementary groups. (REQ: REQ-06-0944)
+                - [ ] **`hw` (Hardware):** (REQ: REQ-06-0945)
+                    - [ ] `hw.machine` (string): machine architecture (e.g., "i386"). (REQ: REQ-06-0946)
+                    - [ ] `hw.model` (string): CPU model name. (REQ: REQ-06-0947)
+                    - [ ] `hw.ncpu` (int): number of active CPUs. (REQ: REQ-06-0948)
+                    - [ ] `hw.ncpuonline` (int): number of online CPUs. (REQ: REQ-06-0949)
+                    - [ ] `hw.byteorder` (int): 4321 (big) or 1234 (little). (REQ: REQ-06-0950)
+                    - [ ] `hw.physmem` (long): total physical memory bytes. (REQ: REQ-06-0951)
+                    - [ ] `hw.usermem` (long): non-kernel memory bytes. (REQ: REQ-06-0952)
+                    - [ ] `hw.pagesize` (int): system page size (4096). (REQ: REQ-06-0953)
+                    - [ ] `hw.disknames` (string): comma-separated disk device names. (REQ: REQ-06-0954)
+                    - [ ] `hw.sensors` (struct): hardware sensor data (temperature, fan, voltage). (REQ: REQ-06-0955)
+                - [ ] **`vm` (Virtual Memory):** (REQ: REQ-06-0956)
+                    - [ ] `vm.loadavg` (struct loadavg): 1, 5, 15 min load averages. (REQ: REQ-06-0957)
+                    - [ ] `vm.swap_usage` (struct swap_stat): swap total/used/free. (REQ: REQ-06-0958)
+                    - [ ] `vm.vmtotal` (struct vmtotal): system-wide VM statistics. (REQ: REQ-06-0959)
+                    - [ ] `vm.overcommit` (int): memory overcommit policy. (REQ: REQ-06-0960)
+                    - [ ] `vm.swappiness` (int): page-out aggressiveness. (REQ: REQ-06-0961)
+                    - [ ] `vm.vfs_cache_pressure` (int): VFS inode/dentry cache reclaim pressure. (REQ: REQ-06-0962)
+                - [ ] **`net` (Network):** (REQ: REQ-06-0963)
+                    - [ ] `net.inet.ip.stats` (struct ipstat): IP packet counters. (REQ: REQ-06-0964)
+                    - [ ] `net.inet.ip.forwarding` (int): IPv4 forwarding enabled. (REQ: REQ-06-0965)
+                    - [ ] `net.inet.tcp.stats` (struct tcpstat): TCP connection stats. (REQ: REQ-06-0966)
+                    - [ ] `net.inet.udp.stats` (struct udpstat): UDP packet stats. (REQ: REQ-06-0967)
+                    - [ ] `net.link.generic.system.ifcount` (int): interface count. (REQ: REQ-06-0968)
+                    - [ ] `net.inet.icmp.stats` (struct icmpstat): ICMP packet stats. (REQ: REQ-06-0969)
+                - [ ] **`debug` (Debugging):** (REQ: REQ-06-0970)
+                    - [ ] `debug.klog` (string): kernel log ring buffer. (REQ: REQ-06-0971)
+                    - [ ] `debug.traceflags` (int): kernel tracing flags. (REQ: REQ-06-0972)
+            - [ ] **`procfs` Structures (Process Filesystem):** (REQ: REQ-06-0973)
+                - [ ] `/proc/[pid]/stat`: process state, stats, metrics (Linux-compatible format). (REQ: REQ-06-0974)
+                - [ ] `/proc/[pid]/status`: human-readable status info. (REQ: REQ-06-0975)
+                - [ ] `/proc/[pid]/maps`: memory map regions and permissions. (REQ: REQ-06-0976)
+                - [ ] `/proc/[pid]/cmdline`: command line arguments (NUL-separated). (REQ: REQ-06-0977)
+                - [ ] `/proc/[pid]/environ`: environment variables (NUL-separated). (REQ: REQ-06-0978)
+                - [ ] `/proc/[pid]/fd/`: open file descriptors (symlinks to paths). (REQ: REQ-06-0979)
+                - [ ] `/proc/[pid]/cwd`: symlink to current working directory. (REQ: REQ-06-0980)
+                - [ ] `/proc/[pid]/exe`: symlink to executable. (REQ: REQ-06-0981)
+                - [ ] `/proc/[pid]/root`: symlink to root directory. (REQ: REQ-06-0982)
+                - [ ] `/proc/[pid]/task/`: per-thread subdirectories. (REQ: REQ-06-0983)
+                - [ ] `/proc/meminfo`: global memory usage. (REQ: REQ-06-0984)
+                - [ ] `/proc/cpuinfo`: CPU capabilities and model info. (REQ: REQ-06-0985)
+                - [ ] `/proc/uptime`: system uptime and idle time. (REQ: REQ-06-0986)
+                - [ ] `/proc/loadavg`: load averages and process counts. (REQ: REQ-06-0987)
+                - [ ] `/proc/vmstat`: VM statistics counters. (REQ: REQ-06-0988)
+                - [ ] `/proc/self`: symlink to calling process's `/proc/[pid]`. (REQ: REQ-06-0989)
+            - [ ] **`sysfs` Structures (System Filesystem):** (REQ: REQ-06-0990)
+                - [ ] `/sys/class/net/`: network interface properties. (REQ: REQ-06-0991)
+                - [ ] `/sys/block/`: block device attributes (`size`, `stat`, `queue/`). (REQ: REQ-06-0992)
+                - [ ] `/sys/devices/system/cpu/`: CPU topology and frequency scaling. (REQ: REQ-06-0993)
+                - [ ] `/sys/devices/system/memory/`: memory block hotplug. (REQ: REQ-06-0994)
+                - [ ] `/sys/kernel/`: misc kernel tunables. (REQ: REQ-06-0995)
+            - [ ] **Netlink Sockets (Linux Compatibility):** (REQ: REQ-06-0996)
+                - [ ] `NETLINK_ROUTE`: interface/address/route management (`RTM_*` messages). (REQ: REQ-06-0997)
+                - [ ] `NETLINK_KOBJECT_UEVENT`: hotplug/device events. (REQ: REQ-06-0998)
+                - [ ] `NETLINK_GENERIC`: generic netlink families. (REQ: REQ-06-0999)
+            - [ ] **Direct Standard Syscalls:** (REQ: REQ-06-1000)
+                - [ ] `sysinfo()`: system uptime, total RAM, free RAM, procs. (REQ: REQ-06-1001)
+                - [ ] `uname()`: system identification (sysname, nodename, release, version, machine). (REQ: REQ-06-1002)
+                - [ ] `getrlimit()` / `setrlimit()`: process resource limits. (REQ: REQ-06-1003)
+                - [ ] `clock_gettime()`: high-resolution system clocks. (REQ: REQ-06-1004)
+                - [ ] `sysctl()`: generic MIB interface. (REQ: REQ-06-1005)
+        - [ ] **Process Information API (`lib/sys`):** (REQ: REQ-06-1006)
+            - [ ] `sys_proc_count()`: total number of processes. (REQ: REQ-06-1007)
+            - [ ] `sys_proc_list(pid_t *pids, size_t *count)`: list all PIDs. (REQ: REQ-06-1008)
+            - [ ] `sys_proc_info(pid_t pid, sys_procinfo_t *info)`: detailed process info (incl. `bitness`). (REQ: REQ-06-1009)
+            - [ ] `sys_proc_threads(pid_t pid, tid_t *tids, size_t *count)`: list threads. (REQ: REQ-06-1010)
+            - [ ] `sys_proc_fds(pid_t pid, sys_fd_t *fds, size_t *count)`: list open FDs. (REQ: REQ-06-1011)
+            - [ ] `sys_proc_maps(pid_t pid, sys_map_t *maps, size_t *count)`: memory mappings. (REQ: REQ-06-1012)
+            - [ ] `sys_proc_cwd(pid_t pid, char *buf, size_t len)`: current working directory. (REQ: REQ-06-1013)
+            - [ ] `sys_proc_exe(pid_t pid, char *buf, size_t len)`: executable path. (REQ: REQ-06-1014)
+            - [ ] `sys_proc_cmdline(pid_t pid, char **argv, size_t *argc)`: command line. (REQ: REQ-06-1015)
+            - [ ] `sys_proc_environ(pid_t pid, char **envp, size_t *envc)`: environment. (REQ: REQ-06-1016)
+            - [ ] **Deep Requirements (Architecture-Critical):** (REQ: REQ-06-1006)
+                - [ ] Define stable, versioned semantics for every `sys_procinfo_t` field (required/optional/zeroed). (REQ: REQ-06-1006)
+                - [ ] Standardize two-pass sizing contract for variable-length APIs (`*_list`, `*_threads`, `*_fds`, `*_maps`, `*_cmdline`, `*_environ`). (REQ: REQ-06-1006)
+                - [ ] Define permission model for cross-process visibility (self, same-uid, privileged). (REQ: REQ-06-1006)
+                - [ ] Add regression tests proving deterministic output ordering and snapshot consistency. (REQ: REQ-06-1006)
+                - [ ] Primary consumers: `bin/ps`, `bin/top`, future `libkvm` compatibility layer. (REQ: REQ-06-1006)
+        - [ ] **Memory Statistics API (`lib/sys`):** (REQ: REQ-06-1017)
+            - [ ] `sys_vm_stats(sys_vmstat_t *stats)`: global VM statistics. (REQ: REQ-06-1018)
+            - [ ] `sys_vm_info(sys_vminfo_t *info)`: memory zone info (DMA, Normal, HighMem). (REQ: REQ-06-1019)
+            - [ ] `sys_vm_swap(sys_swapinfo_t *swap)`: swap usage statistics. (REQ: REQ-06-1020)
+            - [ ] `sys_vm_buffers(sys_bufinfo_t *buf)`: buffer cache statistics. (REQ: REQ-06-1021)
+            - [ ] `sys_vm_slabs(sys_slabinfo_t *slabs, size_t *count)`: slab allocator stats. (REQ: REQ-06-1022)
+            - [ ] **Deep Requirements (Architecture-Critical):** (REQ: REQ-06-1017)
+                - [ ] Standardize all units (bytes/pages/KB) and document conversion rules in headers and man pages. (REQ: REQ-06-1017)
+                - [ ] Guarantee monotonic/coherent read semantics for counters exposed in one structure read. (REQ: REQ-06-1017)
+                - [ ] Define overflow-safe 32-bit userspace behavior for 64-bit counters. (REQ: REQ-06-1017)
+                - [ ] Add tests comparing `sys_vm_*` outputs to kernel PMM/VM internal counters. (REQ: REQ-06-1017)
+                - [ ] Primary consumers: `bin/free`, future `bin/top` memory panes, monitoring tools. (REQ: REQ-06-1017)
+        - [ ] **CPU Information API (`lib/sys`):** (REQ: REQ-06-1023)
+            - [ ] `sys_cpu_count()`: number of CPUs (online/possible/present). (REQ: REQ-06-1024)
+            - [ ] `sys_cpu_info(int cpu, sys_cpuinfo_t *info)`: per-CPU info (model, MHz, cache). (REQ: REQ-06-1025)
+            - [ ] `sys_cpu_times(int cpu, sys_cputimes_t *times)`: per-CPU time accounting. (REQ: REQ-06-1026)
+            - [ ] `sys_cpu_loadavg(double *avg1, double *avg5, double *avg15)`: load averages. (REQ: REQ-06-1027)
+            - [ ] `sys_cpu_topology(int cpu, sys_cputopo_t *topo)`: socket/core/thread topology. (REQ: REQ-06-1028)
+            - [ ] **Deep Requirements (Architecture-Critical):** (REQ: REQ-06-1023)
+                - [ ] Define online/offline CPU semantics and hotplug behavior for `sys_cpu_count()`. (REQ: REQ-06-1023)
+                - [ ] Define per-CPU sampling interval and normalization for `sys_cpu_times()`. (REQ: REQ-06-1023)
+                - [ ] Document canonical load-average representation and rounding behavior. (REQ: REQ-06-1023)
+                - [ ] Add SMP-aware correctness tests under CPU affinity and migration. (REQ: REQ-06-1023)
+                - [ ] Primary consumers: `bin/top`, scheduler diagnostics, performance tooling. (REQ: REQ-06-1023)
+        - [ ] **System Information API (`lib/sys`):** (REQ: REQ-06-1029)
+            - [ ] `sys_uptime(struct timespec *ts)`: system uptime. (REQ: REQ-06-1030)
+            - [ ] `sys_boottime(struct timespec *ts)`: boot timestamp. (REQ: REQ-06-1031)
+            - [ ] `sys_hostname(char *buf, size_t len)`: system hostname. (REQ: REQ-06-1032)
+            - [ ] `sys_domainname(char *buf, size_t len)`: NIS/YP domain name. (REQ: REQ-06-1033)
+            - [ ] `sys_kernel_version(sys_version_t *ver)`: kernel version info. (REQ: REQ-06-1034)
+            - [ ] **Deep Requirements (Architecture-Critical):** (REQ: REQ-06-1029)
+                - [ ] Define clock source and monotonic/realtime guarantees for uptime/boottime. (REQ: REQ-06-1029)
+                - [ ] Unify hostname/domainname behavior between `sysctl`, `uname`, and `sys_*` APIs. (REQ: REQ-06-1029)
+                - [ ] Add ABI stability tests for `sys_version_t` layout and string truncation rules. (REQ: REQ-06-1029)
+                - [ ] Primary consumers: shell/session tools, telemetry headers in `top`/`free`/`ps`. (REQ: REQ-06-1029)
+        - [ ] **Network Information API (`lib/sys`):** (REQ: REQ-06-1035)
+            - [ ] `sys_net_interfaces(sys_netif_t *ifs, size_t *count)`: list interfaces. (REQ: REQ-06-1036)
+            - [ ] `sys_net_addrs(const char *ifname, sys_netaddr_t *addrs, size_t *count)`: addresses. (REQ: REQ-06-1037)
+            - [ ] `sys_net_stats(const char *ifname, sys_netstats_t *stats)`: interface statistics. (REQ: REQ-06-1038)
+            - [ ] `sys_net_routes(sys_route_t *routes, size_t *count)`: routing table. (REQ: REQ-06-1039)
+            - [ ] `sys_net_arp(sys_arpentry_t *entries, size_t *count)`: ARP table. (REQ: REQ-06-1040)
+        - [ ] **Disk / Storage Information API (`lib/sys`):** (REQ: REQ-06-1041)
+            - [ ] `sys_disk_list(sys_diskinfo_t *disks, size_t *count)`: list block devices. (REQ: REQ-06-1042)
+            - [ ] `sys_disk_stats(const char *dev, sys_diskstat_t *stats)`: I/O stats per device. (REQ: REQ-06-1043)
+            - [ ] `sys_mount_list(sys_mountinfo_t *mounts, size_t *count)`: mounted filesystems. (REQ: REQ-06-1044)
+            - [ ] **Deep Requirements (Architecture-Critical):** (REQ: REQ-06-1041)
+                - [ ] Define canonical mount-entry ordering, mount flags normalization, and option representation. (REQ: REQ-06-1041)
+                - [ ] Guarantee consistency between mount control path (`mount(2)`, `umount(2)`) and reporting path (`sys_mount_list`). (REQ: REQ-06-1041)
+                - [ ] Add integration tests validating `bin/mount` output against `sys_mount_list`. (REQ: REQ-06-1041)
+                - [ ] Primary consumers: `bin/mount`, `bin/umount`, future storage dashboards. (REQ: REQ-06-1041)
+        - [ ] **Data Structures (`lib/sys/include/sys/sysinfo.h`):** (REQ: REQ-06-1045)
+            - [ ] `sys_procinfo_t`: pid, ppid, pgid, sid, uid, gid, state, name, times, memory. (REQ: REQ-06-1046)
+            - [ ] `sys_vmstat_t`: total, free, available, buffers, cached, swap_total, swap_free. (REQ: REQ-06-1047)
+            - [ ] `sys_cpuinfo_t`: vendor, model, family, stepping, mhz, cache_size, flags. (REQ: REQ-06-1048)
+            - [ ] `sys_cputopo_t`: socket_id, core_id, thread_id, numa_node. (REQ: REQ-06-1049)
+            - [ ] `sys_netif_t`: name, index, flags, mtu, hwaddr, type. (REQ: REQ-06-1050)
+            - [ ] `sys_diskinfo_t`: name, size, sector_size, model, serial. (REQ: REQ-06-1051)
+            - [ ] `sys_mountinfo_t`: device, mountpoint, fstype, flags. (REQ: REQ-06-1052)
 
-    - [ ] **BSD Compatibility Shim (`libkvm`):**
+    - [ ] **BSD Compatibility Shim (`libkvm`):** (REQ: REQ-06-1053)
 
         > **Architecture:** Userspace-only implementation using `libsys` —
         > no `/dev/kmem` access. Source-level compatibility with FreeBSD/
         > NetBSD/OpenBSD `libkvm` API.
 
-        - [ ] **Design Goals:**
-            - [ ] FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility.
-            - [ ] Implement entirely in userspace using `libsys`.
-            - [ ] Support `kinfo_proc`, `kinfo_vmentry`, `kinfo_file` structures.
-            - [ ] Maintain BSD ABI for source-level portability.
-        - [ ] **Wrapper Layer:**
-            - [ ] Map `kvm_*` calls to equivalent `libsys` functions.
-            - [ ] Structure translation between native `sys_procinfo_t` and BSD `kinfo_proc`.
-            - [ ] Error message buffering (`kvm_geterr`).
-        - [ ] **Core Functions:**
-            - [ ] `kvm_open(execfile, corefile, swapfile, flags, errstr)`: initialize context.
-            - [ ] `kvm_openfiles(...)`: extended open.
-            - [ ] `kvm_close(kd)`: close and free.
-            - [ ] `kvm_geterr(kd)`: error message from last failure.
-        - [ ] **Process Functions:**
-            - [ ] `kvm_getprocs(kd, op, arg, cnt)`: process list as `kinfo_proc` array.
-                - [ ] `KERN_PROC_ALL`: all processes.
-                - [ ] `KERN_PROC_PID`: specific PID.
-                - [ ] `KERN_PROC_PGRP`: by process group.
-                - [ ] `KERN_PROC_SESSION`: by session.
-                - [ ] `KERN_PROC_UID`: by user ID.
-                - [ ] `KERN_PROC_RUID`: by real user ID.
-                - [ ] `KERN_PROC_TTY`: by controlling terminal.
-            - [ ] `kvm_getargv(kd, kp, nchr)`: command line arguments.
-            - [ ] `kvm_getenvv(kd, kp, nchr)`: environment variables.
-            - [ ] `kvm_getproc2(kd, op, arg, elem_size, cnt)`: extended proc info.
-        - [ ] **Virtual Memory Functions:**
-            - [ ] `kvm_getfiles(kd, op, arg, cnt)`: open file list.
-            - [ ] `kvm_getvmmap(kd, kp, cnt)`: VM mappings for process.
-        - [ ] **Kernel Symbol Functions:**
-            - [ ] `kvm_nlist(kd, nl)`: look up kernel symbols from `/proc/kallsyms` or kernel ELF.
-            - [ ] `kvm_read(kd, addr, buf, len)`: read kernel memory (via `/proc/kcore`).
-            - [ ] `kvm_write(kd, addr, buf, len)`: write kernel memory (privileged).
-        - [ ] **Data Structures (BSD-compatible):**
-            - [ ] `struct kinfo_proc`: BSD process info (ki_pid, ki_ppid, ki_pgid, ki_uid, ki_comm, ki_stat, etc.).
-            - [ ] `struct kinfo_vmentry`: BSD VM mapping (kve_start, kve_end, kve_protection, kve_path).
-            - [ ] `struct kinfo_file`: BSD open file (kf_fd, kf_type, kf_offset, kf_path).
-            - [ ] `struct nlist`: symbol lookup request/response (n_name, n_type, n_value).
+        - [ ] **Design Goals:** (REQ: REQ-06-1054)
+            - [ ] FreeBSD/NetBSD/OpenBSD `libkvm` API compatibility. (REQ: REQ-06-1055)
+            - [ ] Implement entirely in userspace using `libsys`. (REQ: REQ-06-1056)
+            - [ ] Support `kinfo_proc`, `kinfo_vmentry`, `kinfo_file` structures. (REQ: REQ-06-1057)
+            - [ ] Maintain BSD ABI for source-level portability. (REQ: REQ-06-1058)
+        - [ ] **Wrapper Layer:** (REQ: REQ-06-1059)
+            - [ ] Map `kvm_*` calls to equivalent `libsys` functions. (REQ: REQ-06-1060)
+            - [ ] Structure translation between native `sys_procinfo_t` and BSD `kinfo_proc`. (REQ: REQ-06-1061)
+            - [ ] Error message buffering (`kvm_geterr`). (REQ: REQ-06-1062)
+        - [ ] **Core Functions:** (REQ: REQ-06-1063)
+            - [ ] `kvm_open(execfile, corefile, swapfile, flags, errstr)`: initialize context. (REQ: REQ-06-1064)
+            - [ ] `kvm_openfiles(...)`: extended open. (REQ: REQ-06-1065)
+            - [ ] `kvm_close(kd)`: close and free. (REQ: REQ-06-1066)
+            - [ ] `kvm_geterr(kd)`: error message from last failure. (REQ: REQ-06-1067)
+        - [ ] **Process Functions:** (REQ: REQ-06-1068)
+            - [ ] `kvm_getprocs(kd, op, arg, cnt)`: process list as `kinfo_proc` array. (REQ: REQ-06-1069)
+                - [ ] `KERN_PROC_ALL`: all processes. (REQ: REQ-06-1070)
+                - [ ] `KERN_PROC_PID`: specific PID. (REQ: REQ-06-1071)
+                - [ ] `KERN_PROC_PGRP`: by process group. (REQ: REQ-06-1072)
+                - [ ] `KERN_PROC_SESSION`: by session. (REQ: REQ-06-1073)
+                - [ ] `KERN_PROC_UID`: by user ID. (REQ: REQ-06-1074)
+                - [ ] `KERN_PROC_RUID`: by real user ID. (REQ: REQ-06-1075)
+                - [ ] `KERN_PROC_TTY`: by controlling terminal. (REQ: REQ-06-1076)
+            - [ ] `kvm_getargv(kd, kp, nchr)`: command line arguments. (REQ: REQ-06-1077)
+            - [ ] `kvm_getenvv(kd, kp, nchr)`: environment variables. (REQ: REQ-06-1078)
+            - [ ] `kvm_getproc2(kd, op, arg, elem_size, cnt)`: extended proc info. (REQ: REQ-06-1079)
+        - [ ] **Virtual Memory Functions:** (REQ: REQ-06-1080)
+            - [ ] `kvm_getfiles(kd, op, arg, cnt)`: open file list. (REQ: REQ-06-1081)
+            - [ ] `kvm_getvmmap(kd, kp, cnt)`: VM mappings for process. (REQ: REQ-06-1082)
+        - [ ] **Kernel Symbol Functions:** (REQ: REQ-06-1083)
+            - [ ] `kvm_nlist(kd, nl)`: look up kernel symbols from `/proc/kallsyms` or kernel ELF. (REQ: REQ-06-1084)
+            - [ ] `kvm_read(kd, addr, buf, len)`: read kernel memory (via `/proc/kcore`). (REQ: REQ-06-1085)
+            - [ ] `kvm_write(kd, addr, buf, len)`: write kernel memory (privileged). (REQ: REQ-06-1086)
+        - [ ] **Data Structures (BSD-compatible):** (REQ: REQ-06-1087)
+            - [ ] `struct kinfo_proc`: BSD process info (ki_pid, ki_ppid, ki_pgid, ki_uid, ki_comm, ki_stat, etc.). (REQ: REQ-06-1088)
+            - [ ] `struct kinfo_vmentry`: BSD VM mapping (kve_start, kve_end, kve_protection, kve_path). (REQ: REQ-06-1089)
+            - [ ] `struct kinfo_file`: BSD open file (kf_fd, kf_type, kf_offset, kf_path). (REQ: REQ-06-1090)
+            - [ ] `struct nlist`: symbol lookup request/response (n_name, n_type, n_value). (REQ: REQ-06-1091)
 
-    - [ ] **Linux Compatibility Shim (`libproc`):**
+    - [ ] **Linux Compatibility Shim (`libproc`):** (REQ: REQ-06-1092)
 
         > **Architecture:** `libprocps`/`procps-ng` compatible API backed by
         > `libsys` and `/proc` parsing.
 
-        - [ ] `openproc(flags, ...)`: process enumeration context with filtering.
-            - [ ] `PROC_FILLMEM`: fill memory statistics.
-            - [ ] `PROC_FILLCOM`: fill command name.
-            - [ ] `PROC_FILLARG`: fill command line arguments.
-            - [ ] `PROC_FILLENV`: fill environment.
-            - [ ] `PROC_FILLSTATUS`: fill status info.
-            - [ ] `PROC_FILLUSR`: fill user/group names.
-            - [ ] `PROC_PID`: filter by PID list.
-            - [ ] `PROC_UID`: filter by UID list.
-        - [ ] `closeproc(pt)`: close context and free resources.
-        - [ ] `readproc(pt, p)`: read next process entry.
-        - [ ] `readproctab(flags, ...)`: read all processes into array.
-        - [ ] `look_up_our_self(p)`: get info about calling process.
-        - [ ] `get_proc_stats(pid, ps)`: per-process `/proc/[pid]/stat` parsing.
-        - [ ] **`proc_t` Structure:**
-            - [ ] PID, PPID, PGID, SID, TPGID.
-            - [ ] State, priority, nice.
-            - [ ] User/system/start times.
-            - [ ] RSS, VSize, shared, text, data.
-            - [ ] Command name, command line.
-        - [ ] **System-wide:**
-            - [ ] `meminfo()`: parse `/proc/meminfo`.
-            - [ ] `cpuinfo()`: parse `/proc/cpuinfo`.
-            - [ ] `uptime(uptime, idle)`: parse `/proc/uptime`.
-            - [ ] `loadavg(av1, av5, av15)`: parse `/proc/loadavg`.
+        - [ ] `openproc(flags, ...)`: process enumeration context with filtering. (REQ: REQ-06-1093)
+            - [ ] `PROC_FILLMEM`: fill memory statistics. (REQ: REQ-06-1094)
+            - [ ] `PROC_FILLCOM`: fill command name. (REQ: REQ-06-1095)
+            - [ ] `PROC_FILLARG`: fill command line arguments. (REQ: REQ-06-1096)
+            - [ ] `PROC_FILLENV`: fill environment. (REQ: REQ-06-1097)
+            - [ ] `PROC_FILLSTATUS`: fill status info. (REQ: REQ-06-1098)
+            - [ ] `PROC_FILLUSR`: fill user/group names. (REQ: REQ-06-1099)
+            - [ ] `PROC_PID`: filter by PID list. (REQ: REQ-06-1100)
+            - [ ] `PROC_UID`: filter by UID list. (REQ: REQ-06-1101)
+        - [ ] `closeproc(pt)`: close context and free resources. (REQ: REQ-06-1102)
+        - [ ] `readproc(pt, p)`: read next process entry. (REQ: REQ-06-1103)
+        - [ ] `readproctab(flags, ...)`: read all processes into array. (REQ: REQ-06-1104)
+        - [ ] `look_up_our_self(p)`: get info about calling process. (REQ: REQ-06-1105)
+        - [ ] `get_proc_stats(pid, ps)`: per-process `/proc/[pid]/stat` parsing. (REQ: REQ-06-1106)
+        - [ ] **`proc_t` Structure:** (REQ: REQ-06-1107)
+            - [ ] PID, PPID, PGID, SID, TPGID. (REQ: REQ-06-1108)
+            - [ ] State, priority, nice. (REQ: REQ-06-1109)
+            - [ ] User/system/start times. (REQ: REQ-06-1110)
+            - [ ] RSS, VSize, shared, text, data. (REQ: REQ-06-1111)
+            - [ ] Command name, command line. (REQ: REQ-06-1112)
+        - [ ] **System-wide:** (REQ: REQ-06-1113)
+            - [ ] `meminfo()`: parse `/proc/meminfo`. (REQ: REQ-06-1114)
+            - [ ] `cpuinfo()`: parse `/proc/cpuinfo`. (REQ: REQ-06-1115)
+            - [ ] `uptime(uptime, idle)`: parse `/proc/uptime`. (REQ: REQ-06-1116)
+            - [ ] `loadavg(av1, av5, av15)`: parse `/proc/loadavg`. (REQ: REQ-06-1117)
 
-    - [ ] **Dependencies:**
-        - [ ] Kernel syscall interfaces for introspection (no `/dev/kmem`).
-        - [ ] `/proc` filesystem with Linux-compatible structure.
-        - [ ] `/sys` filesystem for hardware introspection.
-        - [ ] Kernel symbol export mechanism for `kvm_nlist()`.
+    - [ ] **Dependencies:** (REQ: REQ-06-1118)
+        - [ ] Kernel syscall interfaces for introspection (no `/dev/kmem`). (REQ: REQ-06-1119)
+        - [ ] `/proc` filesystem with Linux-compatible structure. (REQ: REQ-06-1120)
+        - [ ] `/sys` filesystem for hardware introspection. (REQ: REQ-06-1121)
+        - [ ] Kernel symbol export mechanism for `kvm_nlist()`. (REQ: REQ-06-1122)
 
-    - [ ] **Testing:**
-        - [ ] **libsys:**
-            - [ ] Unit: each `sys_proc_*` function against known process state.
-            - [ ] Unit: each `sys_vm_*` function returns sane values.
-            - [ ] Unit: each `sys_cpu_*` function with multi-CPU QEMU.
-            - [ ] Unit: each `sys_net_*` function with loopback interface.
-            - [ ] Unit: `sysctl` MIB reads for all `kern.*`, `hw.*`, `vm.*` nodes.
-            - [ ] Property: `sys_proc_list` count matches `sys_proc_count`.
-            - [ ] Thread safety: concurrent calls from 8 threads.
-            - [ ] Performance: 10000 `sys_proc_info` calls latency benchmark.
-        - [ ] **libkvm:**
-            - [ ] Unit: `kvm_open` / `kvm_close` lifecycle.
-            - [ ] Unit: `kvm_getprocs` with each `KERN_PROC_*` filter.
-            - [ ] Unit: `kvm_getargv` / `kvm_getenvv` string retrieval.
-            - [ ] Unit: `kvm_nlist` symbol lookup.
-            - [ ] Compatibility: compile and run BSD `top`, `ps`, `fstat` against libkvm.
-        - [ ] **libproc:**
-            - [ ] Unit: `openproc` / `readproc` / `closeproc` cycle.
-            - [ ] Unit: filter flags (PROC_PID, PROC_UID) correctness.
-            - [ ] Compatibility: compile and run `procps-ng` tools (ps, top, free, vmstat).
-    - [ ] **Documentation:**
-        - [ ] Man pages: `libsys(3)`, `sysctl(3)`, `kvm_open(3)`, `kvm_getprocs(3)`.
-        - [ ] Man pages: `openproc(3)`, `readproc(3)`, `readproctab(3)`.
-        - [ ] Internal doc: libsys → libkvm → libproc layering.
+    - [ ] **Testing:** (REQ: REQ-06-0180, REQ-06-0364, REQ-06-1123, REQ-06-1219)
+        - [ ] **libsys:** (REQ: REQ-06-1124)
+            - [ ] Unit: each `sys_proc_*` function against known process state. (REQ: REQ-06-1125)
+            - [ ] Unit: each `sys_vm_*` function returns sane values. (REQ: REQ-06-1126)
+            - [ ] Unit: each `sys_cpu_*` function with multi-CPU QEMU. (REQ: REQ-06-1127)
+            - [ ] Unit: each `sys_net_*` function with loopback interface. (REQ: REQ-06-1128)
+            - [ ] Unit: `sysctl` MIB reads for all `kern.*`, `hw.*`, `vm.*` nodes. (REQ: REQ-06-1129)
+            - [ ] Property: `sys_proc_list` count matches `sys_proc_count`. (REQ: REQ-06-1130)
+            - [ ] Thread safety: concurrent calls from 8 threads. (REQ: REQ-06-1131)
+            - [ ] Performance: 10000 `sys_proc_info` calls latency benchmark. (REQ: REQ-06-1132)
+        - [ ] **libkvm:** (REQ: REQ-06-1133)
+            - [ ] Unit: `kvm_open` / `kvm_close` lifecycle. (REQ: REQ-06-1134)
+            - [ ] Unit: `kvm_getprocs` with each `KERN_PROC_*` filter. (REQ: REQ-06-1135)
+            - [ ] Unit: `kvm_getargv` / `kvm_getenvv` string retrieval. (REQ: REQ-06-1136)
+            - [ ] Unit: `kvm_nlist` symbol lookup. (REQ: REQ-06-1137)
+            - [ ] Compatibility: compile and run BSD `top`, `ps`, `fstat` against libkvm. (REQ: REQ-06-1138)
+        - [ ] **libproc:** (REQ: REQ-06-1139)
+            - [ ] Unit: `openproc` / `readproc` / `closeproc` cycle. (REQ: REQ-06-1140)
+            - [ ] Unit: filter flags (PROC_PID, PROC_UID) correctness. (REQ: REQ-06-1141)
+            - [ ] Compatibility: compile and run `procps-ng` tools (ps, top, free, vmstat). (REQ: REQ-06-1142)
+    - [ ] **Documentation:** (REQ: REQ-06-1143, REQ-06-1232)
+        - [ ] Man pages: `libsys(3)`, `sysctl(3)`, `kvm_open(3)`, `kvm_getprocs(3)`. (REQ: REQ-06-1144)
+        - [ ] Man pages: `openproc(3)`, `readproc(3)`, `readproctab(3)`. (REQ: REQ-06-1145)
+        - [ ] Internal doc: libsys → libkvm → libproc layering. (REQ: REQ-06-1146)
 
-    - [ ] **User Authentication Library (`lib/auth/`):**
+    - [ ] **User Authentication Library (`lib/auth/`):** (REQ: REQ-06-1147)
 
         > **Files:** `lib/auth/passwd.c`, `lib/auth/shadow.c`,
         > `lib/auth/crypt.c`, `lib/auth/group.c`, `lib/auth/auth.c`.
 
-        - [ ] **Password Database (`/etc/passwd`):**
-            - [ ] **Structures:** `struct passwd` (pw_name, pw_passwd, pw_uid, pw_gid, pw_gecos, pw_dir, pw_shell).
-            - [ ] **Parser:** tokenize `user:pwd:uid:gid:gecos:home:shell` (colon-delimited).
-            - [ ] **Lookup API:**
-                - [ ] `getpwnam(const char *name)`: look up by name.
-                - [ ] `getpwuid(uid_t uid)`: look up by UID.
-            - [ ] **Iteration API:**
-                - [ ] `setpwent()`: open/rewind passwd database.
-                - [ ] `getpwent()`: get next entry.
-                - [ ] `endpwent()`: close database.
-            - [ ] **Thread Safety:**
-                - [ ] `getpwnam_r(name, pwd, buf, buflen, result)`: reentrant variant.
-                - [ ] `getpwuid_r(uid, pwd, buf, buflen, result)`: reentrant variant.
-                - [ ] `getpwent_r(pwd, buf, buflen, result)`: reentrant variant.
-            - [ ] **Edge Cases:**
-                - [ ] Handle malformed lines (missing fields, non-numeric uid/gid).
-                - [ ] Handle NIS/YP `+` entries (stub or pass-through).
-                - [ ] Handle entries with empty gecos or shell fields.
+        - [ ] **Password Database (`/etc/passwd`):** (REQ: REQ-06-1148)
+            - [ ] **Structures:** `struct passwd` (pw_name, pw_passwd, pw_uid, pw_gid, pw_gecos, pw_dir, pw_shell). (REQ: REQ-06-1149)
+            - [ ] **Parser:** tokenize `user:pwd:uid:gid:gecos:home:shell` (colon-delimited). (REQ: REQ-06-1150)
+            - [ ] **Lookup API:** (REQ: REQ-06-1151, REQ-06-1169)
+                - [ ] `getpwnam(const char *name)`: look up by name. (REQ: REQ-06-1152)
+                - [ ] `getpwuid(uid_t uid)`: look up by UID. (REQ: REQ-06-1153)
+            - [ ] **Iteration API:** (REQ: REQ-06-1154)
+                - [ ] `setpwent()`: open/rewind passwd database. (REQ: REQ-06-1155)
+                - [ ] `getpwent()`: get next entry. (REQ: REQ-06-1156)
+                - [ ] `endpwent()`: close database. (REQ: REQ-06-1157)
+            - [ ] **Thread Safety:** (REQ: REQ-06-1158)
+                - [ ] `getpwnam_r(name, pwd, buf, buflen, result)`: reentrant variant. (REQ: REQ-06-1159)
+                - [ ] `getpwuid_r(uid, pwd, buf, buflen, result)`: reentrant variant. (REQ: REQ-06-1160)
+                - [ ] `getpwent_r(pwd, buf, buflen, result)`: reentrant variant. (REQ: REQ-06-1161)
+            - [ ] **Edge Cases:** (REQ: REQ-06-1162)
+                - [ ] Handle malformed lines (missing fields, non-numeric uid/gid). (REQ: REQ-06-1163)
+                - [ ] Handle NIS/YP `+` entries (stub or pass-through). (REQ: REQ-06-1164)
+                - [ ] Handle entries with empty gecos or shell fields. (REQ: REQ-06-1165)
 
-        - [ ] **Group Database (`/etc/group`):**
-            - [ ] **Structures:** `struct group` (gr_name, gr_passwd, gr_gid, gr_mem).
-            - [ ] **Parser:** tokenize `name:passwd:gid:member1,member2,...`.
-            - [ ] **Lookup API:**
-                - [ ] `getgrnam(const char *name)`: look up by name.
-                - [ ] `getgrgid(gid_t gid)`: look up by GID.
-            - [ ] **Iteration API:** `setgrent()`, `getgrent()`, `endgrent()`.
-            - [ ] **Thread Safety:** `getgrnam_r()`, `getgrgid_r()`, `getgrent_r()`.
-            - [ ] **Supplementary Groups:**
-                - [ ] `getgrouplist(user, group, groups, ngroups)`: enumerate memberships.
-                - [ ] `initgroups(user, group)`: set supplementary groups for process.
+        - [ ] **Group Database (`/etc/group`):** (REQ: REQ-06-1166)
+            - [ ] **Structures:** `struct group` (gr_name, gr_passwd, gr_gid, gr_mem). (REQ: REQ-06-1167)
+            - [ ] **Parser:** tokenize `name:passwd:gid:member1,member2,...`. (REQ: REQ-06-1168)
+            - [ ] **Lookup API:** (REQ: REQ-06-1151, REQ-06-1169)
+                - [ ] `getgrnam(const char *name)`: look up by name. (REQ: REQ-06-1170)
+                - [ ] `getgrgid(gid_t gid)`: look up by GID. (REQ: REQ-06-1171)
+            - [ ] **Iteration API:** `setgrent()`, `getgrent()`, `endgrent()`. (REQ: REQ-06-1172)
+            - [ ] **Thread Safety:** `getgrnam_r()`, `getgrgid_r()`, `getgrent_r()`. (REQ: REQ-06-1173)
+            - [ ] **Supplementary Groups:** (REQ: REQ-06-1174)
+                - [ ] `getgrouplist(user, group, groups, ngroups)`: enumerate memberships. (REQ: REQ-06-1175)
+                - [ ] `initgroups(user, group)`: set supplementary groups for process. (REQ: REQ-06-1176)
 
-        - [ ] **Shadow Database (`/etc/shadow`):**
-            - [ ] **Structures:** `struct spwd` (sp_namp, sp_pwdp, sp_lstchg, sp_min, sp_max, sp_warn, sp_inact, sp_expire, sp_flag).
-            - [ ] **Parser:** tokenize `user:hash:lastchg:min:max:warn:inact:expire:flag`.
-            - [ ] **API:** `getspnam(name)`, `setspent()`, `getspent()`, `endspent()`.
-            - [ ] **Thread Safety:** `getspnam_r()`, `getspent_r()`.
-            - [ ] **Security:**
-                - [ ] File permissions: readable only by root (mode 0600).
-                - [ ] Refuse to open if euid ≠ 0.
-                - [ ] Lock file during writes (advisory locking).
+        - [ ] **Shadow Database (`/etc/shadow`):** (REQ: REQ-06-1177)
+            - [ ] **Structures:** `struct spwd` (sp_namp, sp_pwdp, sp_lstchg, sp_min, sp_max, sp_warn, sp_inact, sp_expire, sp_flag). (REQ: REQ-06-1178)
+            - [ ] **Parser:** tokenize `user:hash:lastchg:min:max:warn:inact:expire:flag`. (REQ: REQ-06-1179)
+            - [ ] **API:** `getspnam(name)`, `setspent()`, `getspent()`, `endspent()`. (REQ: REQ-06-1180)
+            - [ ] **Thread Safety:** `getspnam_r()`, `getspent_r()`. (REQ: REQ-06-1181)
+            - [ ] **Security:** (REQ: REQ-06-1182)
+                - [ ] File permissions: readable only by root (mode 0600). (REQ: REQ-06-1183)
+                - [ ] Refuse to open if euid ≠ 0. (REQ: REQ-06-1184)
+                - [ ] Lock file during writes (advisory locking). (REQ: REQ-06-1185)
 
-        - [ ] **Cryptography (Password Hashing):**
-            - [ ] **`crypt(key, salt)` Interface:**
-                - [ ] Detect hash type by salt prefix (`$1$`, `$5$`, `$6$`, `$2b$`).
-                - [ ] Legacy DES for salts without `$` prefix.
-                - [ ] Return hash string in thread-local static buffer.
-            - [ ] **`crypt_r(key, salt, data)` Reentrant:**
-                - [ ] Thread-safe version with caller-provided `struct crypt_data`.
-            - [ ] **Algorithms:**
-                - [ ] **DES:** legacy support (8-char key limit, 2-char salt).
-                - [ ] **MD5 (`$1$`):** BSD/Linux standard, 1000 rounds.
-                - [ ] **SHA-256 (`$5$`):** configurable rounds (default 5000).
-                - [ ] **SHA-512 (`$6$`):** configurable rounds (default 5000), preferred.
-                - [ ] **Bcrypt (`$2b$`):** cost-factor based, memory-hard (optional).
-            - [ ] **Salt Generation:**
-                - [ ] `crypt_gensalt(prefix, count, rbytes, nrbytes)`: generate random salt.
-                - [ ] Use `/dev/urandom` for entropy.
-                - [ ] Base64 encoding for salt string.
+        - [ ] **Cryptography (Password Hashing):** (REQ: REQ-06-1186)
+            - [ ] **`crypt(key, salt)` Interface:** (REQ: REQ-06-1187)
+                - [ ] Detect hash type by salt prefix (`$1$`, `$5$`, `$6$`, `$2b$`). (REQ: REQ-06-1188)
+                - [ ] Legacy DES for salts without `$` prefix. (REQ: REQ-06-1189)
+                - [ ] Return hash string in thread-local static buffer. (REQ: REQ-06-1190)
+            - [ ] **`crypt_r(key, salt, data)` Reentrant:** (REQ: REQ-06-1191)
+                - [ ] Thread-safe version with caller-provided `struct crypt_data`. (REQ: REQ-06-1192)
+            - [ ] **Algorithms:** (REQ: REQ-06-1193)
+                - [ ] **DES:** legacy support (8-char key limit, 2-char salt). (REQ: REQ-06-1194)
+                - [ ] **MD5 (`$1$`):** BSD/Linux standard, 1000 rounds. (REQ: REQ-06-1195)
+                - [ ] **SHA-256 (`$5$`):** configurable rounds (default 5000). (REQ: REQ-06-1196)
+                - [ ] **SHA-512 (`$6$`):** configurable rounds (default 5000), preferred. (REQ: REQ-06-1197)
+                - [ ] **Bcrypt (`$2b$`):** cost-factor based, memory-hard (optional). (REQ: REQ-06-1198)
+            - [ ] **Salt Generation:** (REQ: REQ-06-1199)
+                - [ ] `crypt_gensalt(prefix, count, rbytes, nrbytes)`: generate random salt. (REQ: REQ-06-1200)
+                - [ ] Use `/dev/urandom` for entropy. (REQ: REQ-06-1201)
+                - [ ] Base64 encoding for salt string. (REQ: REQ-06-1202)
 
-        - [ ] **High-Level Authentication:**
-            - [ ] `auth_verify_password(user, clear_text)`:
-                - [ ] Retrieve shadow entry (requires root or shadow group).
-                - [ ] Extract salt from stored hash.
-                - [ ] Hash clear_text with extracted salt via `crypt()`.
-                - [ ] Constant-time comparison of computed vs stored hash.
-                - [ ] Return 0 on success, -1 on failure (no timing leak).
-            - [ ] `auth_check_expiry(user)`:
-                - [ ] Check password expiry (`sp_max`, `sp_lstchg`).
-                - [ ] Check account expiry (`sp_expire`).
-                - [ ] Check inactive days (`sp_inact`).
-                - [ ] Return status: OK, WARN, EXPIRED, LOCKED.
+        - [ ] **High-Level Authentication:** (REQ: REQ-06-1203)
+            - [ ] `auth_verify_password(user, clear_text)`: (REQ: REQ-06-1204)
+                - [ ] Retrieve shadow entry (requires root or shadow group). (REQ: REQ-06-1205)
+                - [ ] Extract salt from stored hash. (REQ: REQ-06-1206)
+                - [ ] Hash clear_text with extracted salt via `crypt()`. (REQ: REQ-06-1207)
+                - [ ] Constant-time comparison of computed vs stored hash. (REQ: REQ-06-1208)
+                - [ ] Return 0 on success, -1 on failure (no timing leak). (REQ: REQ-06-1209)
+            - [ ] `auth_check_expiry(user)`: (REQ: REQ-06-1210)
+                - [ ] Check password expiry (`sp_max`, `sp_lstchg`). (REQ: REQ-06-1211)
+                - [ ] Check account expiry (`sp_expire`). (REQ: REQ-06-1212)
+                - [ ] Check inactive days (`sp_inact`). (REQ: REQ-06-1213)
+                - [ ] Return status: OK, WARN, EXPIRED, LOCKED. (REQ: REQ-06-1214)
 
-        - [ ] **PAM Integration (future):**
-            - [ ] Define PAM module interface (`pam_sm_authenticate`, etc.).
-            - [ ] Implement `pam_unix.so` using `lib/auth` functions.
-            - [ ] Configuration via `/etc/pam.d/` or `/etc/pam.conf`.
+        - [ ] **PAM Integration (future):** (REQ: REQ-06-1215)
+            - [ ] Define PAM module interface (`pam_sm_authenticate`, etc.). (REQ: REQ-06-1216)
+            - [ ] Implement `pam_unix.so` using `lib/auth` functions. (REQ: REQ-06-1217)
+            - [ ] Configuration via `/etc/pam.d/` or `/etc/pam.conf`. (REQ: REQ-06-1218)
 
-        - [ ] **Testing:**
-            - [ ] Unit: `getpwnam` / `getpwuid` with known `/etc/passwd` content.
-            - [ ] Unit: `getgrnam` / `getgrgid` with known `/etc/group` content.
-            - [ ] Unit: `getspnam` with known `/etc/shadow` content.
-            - [ ] Unit: `crypt()` produces correct hash for each algorithm ($1$, $5$, $6$).
-            - [ ] Unit: `crypt_gensalt` produces valid salts.
-            - [ ] Unit: `auth_verify_password` correct + incorrect passwords.
-            - [ ] Unit: `auth_check_expiry` for OK, WARN, EXPIRED, LOCKED states.
-            - [ ] Unit: reentrant `_r` variants are thread-safe.
-            - [ ] Property: `getpwent` iteration covers all entries in `/etc/passwd`.
-            - [ ] Property: constant-time comparison — timing does not vary with input.
-            - [ ] Security: `getspnam` fails if euid ≠ 0.
-            - [ ] Fuzz: parser handles malformed `/etc/passwd`, `/etc/group`, `/etc/shadow`.
-        - [ ] **Documentation:**
-            - [ ] Man pages: `getpwnam(3)`, `getpwuid(3)`, `getpwent(3)`.
-            - [ ] Man pages: `getgrnam(3)`, `getgrgid(3)`, `getgrent(3)`.
-            - [ ] Man pages: `getspnam(3)`, `shadow(5)`.
-            - [ ] Man pages: `crypt(3)`, `crypt_gensalt(3)`.
-            - [ ] Man pages: `passwd(5)`, `group(5)`.
+        - [ ] **Testing:** (REQ: REQ-06-0180, REQ-06-0364, REQ-06-1123, REQ-06-1219)
+            - [ ] Unit: `getpwnam` / `getpwuid` with known `/etc/passwd` content. (REQ: REQ-06-1220)
+            - [ ] Unit: `getgrnam` / `getgrgid` with known `/etc/group` content. (REQ: REQ-06-1221)
+            - [ ] Unit: `getspnam` with known `/etc/shadow` content. (REQ: REQ-06-1222)
+            - [ ] Unit: `crypt()` produces correct hash for each algorithm ($1$, $5$, $6$). (REQ: REQ-06-1223)
+            - [ ] Unit: `crypt_gensalt` produces valid salts. (REQ: REQ-06-1224)
+            - [ ] Unit: `auth_verify_password` correct + incorrect passwords. (REQ: REQ-06-1225)
+            - [ ] Unit: `auth_check_expiry` for OK, WARN, EXPIRED, LOCKED states. (REQ: REQ-06-1226)
+            - [ ] Unit: reentrant `_r` variants are thread-safe. (REQ: REQ-06-1227)
+            - [ ] Property: `getpwent` iteration covers all entries in `/etc/passwd`. (REQ: REQ-06-1228)
+            - [ ] Property: constant-time comparison — timing does not vary with input. (REQ: REQ-06-1229)
+            - [ ] Security: `getspnam` fails if euid ≠ 0. (REQ: REQ-06-1230)
+            - [ ] Fuzz: parser handles malformed `/etc/passwd`, `/etc/group`, `/etc/shadow`. (REQ: REQ-06-1231)
+        - [ ] **Documentation:** (REQ: REQ-06-1143, REQ-06-1232)
+            - [ ] Man pages: `getpwnam(3)`, `getpwuid(3)`, `getpwent(3)`. (REQ: REQ-06-1233)
+            - [ ] Man pages: `getgrnam(3)`, `getgrgid(3)`, `getgrent(3)`. (REQ: REQ-06-1234)
+            - [ ] Man pages: `getspnam(3)`, `shadow(5)`. (REQ: REQ-06-1235)
+            - [ ] Man pages: `crypt(3)`, `crypt_gensalt(3)`. (REQ: REQ-06-1236)
+            - [ ] Man pages: `passwd(5)`, `group(5)`. (REQ: REQ-06-1237)
 
 
 ## User Stories

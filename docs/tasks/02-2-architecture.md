@@ -6,80 +6,80 @@
 ## Reimplemented Checklist (All Open)
 
 ### 2. Architecture (`sys/arch`)
-- [ ] **i386:**
-    - [ ] Complete GDT/TSS setup for user-mode switching.
-    - [ ] **Verification:**
-        - [ ] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33
-        - [ ] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies -->
-    - [ ] Implement Exception Handling (Page Fault, GPF, etc.).
-    - [ ] **Diagnostics:** Full register dumps and visual panic banners matching requirements.
-    - [ ] **Advanced Diagnostics (Missing):** <!-- All items complete -->
-        - [ ] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it -->
-        - [ ] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() -->
-        - [ ] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() -->
-        - [ ] **Invalid Opcode Decoding:** Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 -->
-    - [ ] **VM86 Mode (i386 only):** <!-- All items complete -->
-        - [ ] **Initialization:** <!-- All items complete -->
-            - [ ] Set `EFLAGS.VM` bit. <!-- vm86.c:47 sets 0x20000 -->
-            - [ ] Setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range -->
-        - [ ] **GPF Handler:** <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler -->
-            - [ ] Detect if fault occurred in VM86 mode. <!-- idt.c:192 checks (regs->eflags & 0x20000) -->
-            - [ ] **Opcode Emulation:** <!-- All items complete -->
-                - [ ] Emulate `CLI` / `STI` (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF -->
-                - [ ] Emulate `PUSHF` / `POPF`. <!-- vm86.c: 0x9C/0x9D -->
-                - [ ] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) -->
-                - [ ] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE -->
-        - [ ] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() -->
-    - [ ] **LDT & 16-bit Support:**
-        - [ ] **Baseline Audit + Scope Freeze (existing code path):**
-            - [ ] Audit current implementation in `sys/arch/i386/ldt.c`, scheduler hook in `sys/arch/i386/sched.c`, and tests in `tests/sys/test_ldt.c`.
-            - [ ] Produce gap list: what is already implemented vs missing for production-safe 16-bit support.
-            - [ ] Freeze ownership model (per-process LDT attached to `process_t`) and locking policy.
-            - [ ] **Acceptance:** Gap report merged and this checklist updated with resolved scope.
-        - [ ] **API, ABI, and Privilege Model:**
-            - [ ] Unify `struct user_desc` definitions (`sys/include/sys/ldt.h` vs `sys/arch/i386/syscall.h`) into one authoritative ABI header.
-            - [ ] Define supported `modify_ldt` operations and exact return semantics (`LDT_READ`, `LDT_WRITE`, `LDT_READ_DEFAULT`).
-            - [ ] Define permission model:
-                - [ ] Current kernel policy (root/euid checks) for privileged operations.
-                - [ ] Forward-compatible mapping to `CAP_SYS_ADMIN` once capability framework lands.
-            - [ ] Define hard rejection rules (system descriptors, kernel DPL, invalid type bits, malformed 16-bit flags).
-            - [ ] Document ABI and errors (`EINVAL`, `EFAULT`, `EPERM`, `ENOMEM`, `ENOSYS`) in `ARCHITECTURE.md` and `man/man2/modify_ldt.2`.
-            - [ ] **Acceptance:** Header/API contract is single-sourced and syscall behavior is documented.
-        - [ ] **Kernel LDT Core Hardening (`sys/arch/i386/ldt.c`):**
-            - [ ] Refactor into explicit helpers (`ldt_alloc`, `ldt_set`, `ldt_clear`, `ldt_free`) with one validation entry point.
-            - [ ] Add strict descriptor validation for 16-bit semantics (`seg_32bit=0`, granularity/type constraints, DPL=3 only for user).
-            - [ ] Ensure all pointer arguments use safe `copyin`/`copyout` handling and bounded lengths.
-            - [ ] Add bounds checks for index/count and reject partial/ambiguous user_desc payloads.
-            - [ ] Add internal diagnostics/counters for validation failures and allocation failures.
-            - [ ] **Acceptance:** Invalid descriptors are deterministically rejected and stress alloc/set/free has no leaks/corruption.
-        - [ ] **Syscall + Personality + `lib/sys` Integration:**
-            - [ ] Keep native personality (`perso_native.c`) wired to hardened `sys_modify_ldt`.
-            - [ ] Add Linux personality wiring for `modify_ldt` compatibility path (or explicit `ENOSYS` until complete).
-            - [ ] Add userspace wrapper in `lib/sys/` (`modify_ldt.c`) and include it in `lib/sys/Makefile`.
-            - [ ] Add public userspace declaration in `include/sys/ldt.h` (or equivalent exported syscall header).
-            - [ ] Ensure syscall prototypes come from headers only (no manual file-local `extern` declarations).
-            - [ ] **Acceptance:** `libsys` exposes `modify_ldt()` and personality behavior is explicit/tested.
-        - [ ] **Lifecycle Safety (switch/fork/exec/exit/SMP):**
-            - [ ] Ensure context switch path loads/clears `LDTR` correctly for LDT and no-LDT processes.
-            - [ ] Add LDT inheritance policy in `proc_fork` (`sys/pm/process.c`) with explicit copy/reference behavior.
-            - [ ] Add LDT replacement/cleanup in exec path (`exec_dispatch`/ELF load path) so stale LDT state cannot survive exec.
-            - [ ] Add guaranteed LDT cleanup in process exit path (`proc_exit`) and process teardown.
-            - [ ] Define SMP safety for LDT updates (reload rules for running thread vs remote CPUs).
-            - [ ] **Acceptance:** fork/exec/exit stress shows no stale selectors, no cross-process bleed, no double-free.
-        - [ ] **Verification Matrix (expand existing LDT tests):**
-            - [ ] Extend `tests/sys/test_ldt.c` with negative cases (bad DPL/type/system descriptors/index overflow).
-            - [ ] Add unit/property tests for descriptor encode/decode invariants (host-friendly where possible).
-            - [ ] Add fuzz target for `sys_modify_ldt` argument space (size, flags, malformed descriptors, race sequences).
-            - [ ] Add integration test with 16-bit path (VM86 and/or ELKS personality) validating CS/DS/SS behavior.
-            - [ ] Add regression tests for lifecycle events (fork inheritance, exec replacement, exit cleanup).
-            - [ ] Wire tests into regular test targets (`make -C tests/sys`, CI scripts) with pass/fail gates.
-            - [ ] **Acceptance:** All LDT unit/property/fuzz/integration tests pass and no existing suites regress.
-- [ ] **x86_64:** <!-- boot/, gdt.c, idt.c, isr.S, switch.S -->
-    - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup -->
-    - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks -->
-    - [ ] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC -->
-    - [ ] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub -->
-    - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 -->
+- [ ] **i386:** (REQ: REQ-02-0001)
+    - [ ] Complete GDT/TSS setup for user-mode switching. (REQ: REQ-02-0002)
+    - [ ] **Verification:** (REQ: REQ-02-0003)
+        - [ ] Verify GDT segments: Code 0x1B, Data 0x23, TLS 0x33 (REQ: REQ-02-0004)
+        - [ ] Ensure PTE_USER bit set for all user-accessible pages <!-- pmap.c:497-498 sets PTE_U, test_pte_user.c verifies --> (REQ: REQ-02-0005)
+    - [ ] Implement Exception Handling (Page Fault, GPF, etc.). (REQ: REQ-02-0006)
+    - [ ] **Diagnostics:** Full register dumps and visual panic banners matching requirements. (REQ: REQ-02-0007)
+    - [ ] **Advanced Diagnostics (Missing):** <!-- All items complete --> (REQ: REQ-02-0008)
+        - [ ] **Stack Trace:** Unwind stack frames (EBP chain) on panic. <!-- stacktrace.c:stack_trace(), panic.c calls it --> (REQ: REQ-02-0009)
+        - [ ] **Symbol Resolution:** Map EIP to kernel function names (parsing map/sym file). <!-- ksyms.c, stacktrace.c uses ksym_resolve() --> (REQ: REQ-02-0010)
+        - [ ] **NULL Protection:** Ensure page 0 is unmapped by default, but allow overrides for VM86/Legacy personalities. <!-- pmap.c:pmap_null_protect(), pmap_null_allow() --> (REQ: REQ-02-0011)
+        - [ ] **Invalid Opcode Decoding:** Dump instruction bytes at EIP. <!-- idt.c:isr_handler() dumps 16 bytes at EIP for ISR 6 --> (REQ: REQ-02-0012)
+    - [ ] **VM86 Mode (i386 only):** <!-- All items complete --> (REQ: REQ-02-0013)
+        - [ ] **Initialization:** <!-- All items complete --> (REQ: REQ-02-0014)
+            - [ ] Set `EFLAGS.VM` bit. <!-- vm86.c:47 sets 0x20000 --> (REQ: REQ-02-0015)
+            - [ ] Setup TSS I/O Bitmap (allow/deny ports). <!-- gdt.h:iomap[8192], gdt.c:tss_set_iomap/tss_set_iomap_range --> (REQ: REQ-02-0016)
+        - [ ] **GPF Handler:** <!-- idt.c:192 checks EFLAGS.VM and dispatches to vm86_gpf_handler --> (REQ: REQ-02-0017)
+            - [ ] Detect if fault occurred in VM86 mode. <!-- idt.c:192 checks (regs->eflags & 0x20000) --> (REQ: REQ-02-0018)
+            - [ ] **Opcode Emulation:** <!-- All items complete --> (REQ: REQ-02-0019)
+                - [ ] Emulate `CLI` / `STI` (modify virtual interrupt flag). <!-- vm86.c: 0xFA/0xFB toggle EFLAGS.IF --> (REQ: REQ-02-0020)
+                - [ ] Emulate `PUSHF` / `POPF`. <!-- vm86.c: 0x9C/0x9D --> (REQ: REQ-02-0021)
+                - [ ] Emulate `INT n` / `IRET`. <!-- vm86.c: 0xCD (INT) 0xCF (IRET) --> (REQ: REQ-02-0022)
+                - [ ] Emulate `IN` / `OUT` instructions (store/load from emulated ports). <!-- vm86.c: 0xE4/0xE6/0xEC/0xEE --> (REQ: REQ-02-0023)
+        - [ ] **Monitor:** V86 monitor task to manage virtual machine state. <!-- vm86.c: vm86_monitor struct, vm86_monitor_init() --> (REQ: REQ-02-0024)
+    - [ ] **LDT & 16-bit Support:** (REQ: REQ-02-0025)
+        - [ ] **Baseline Audit + Scope Freeze (existing code path):** (REQ: REQ-02-0026)
+            - [ ] Audit current implementation in `sys/arch/i386/ldt.c`, scheduler hook in `sys/arch/i386/sched.c`, and tests in `tests/sys/test_ldt.c`. (REQ: REQ-02-0027)
+            - [ ] Produce gap list: what is already implemented vs missing for production-safe 16-bit support. (REQ: REQ-02-0028)
+            - [ ] Freeze ownership model (per-process LDT attached to `process_t`) and locking policy. (REQ: REQ-02-0029)
+            - [ ] **Acceptance:** Gap report merged and this checklist updated with resolved scope. (REQ: REQ-02-0030)
+        - [ ] **API, ABI, and Privilege Model:** (REQ: REQ-02-0031)
+            - [ ] Unify `struct user_desc` definitions (`sys/include/sys/ldt.h` vs `sys/arch/i386/syscall.h`) into one authoritative ABI header. (REQ: REQ-02-0032)
+            - [ ] Define supported `modify_ldt` operations and exact return semantics (`LDT_READ`, `LDT_WRITE`, `LDT_READ_DEFAULT`). (REQ: REQ-02-0033)
+            - [ ] Define permission model: (REQ: REQ-02-0034)
+                - [ ] Current kernel policy (root/euid checks) for privileged operations. (REQ: REQ-02-0035)
+                - [ ] Forward-compatible mapping to `CAP_SYS_ADMIN` once capability framework lands. (REQ: REQ-02-0036)
+            - [ ] Define hard rejection rules (system descriptors, kernel DPL, invalid type bits, malformed 16-bit flags). (REQ: REQ-02-0037)
+            - [ ] Document ABI and errors (`EINVAL`, `EFAULT`, `EPERM`, `ENOMEM`, `ENOSYS`) in `ARCHITECTURE.md` and `man/man2/modify_ldt.2`. (REQ: REQ-02-0038)
+            - [ ] **Acceptance:** Header/API contract is single-sourced and syscall behavior is documented. (REQ: REQ-02-0039)
+        - [ ] **Kernel LDT Core Hardening (`sys/arch/i386/ldt.c`):** (REQ: REQ-02-0040)
+            - [ ] Refactor into explicit helpers (`ldt_alloc`, `ldt_set`, `ldt_clear`, `ldt_free`) with one validation entry point. (REQ: REQ-02-0041)
+            - [ ] Add strict descriptor validation for 16-bit semantics (`seg_32bit=0`, granularity/type constraints, DPL=3 only for user). (REQ: REQ-02-0042)
+            - [ ] Ensure all pointer arguments use safe `copyin`/`copyout` handling and bounded lengths. (REQ: REQ-02-0043)
+            - [ ] Add bounds checks for index/count and reject partial/ambiguous user_desc payloads. (REQ: REQ-02-0044)
+            - [ ] Add internal diagnostics/counters for validation failures and allocation failures. (REQ: REQ-02-0045)
+            - [ ] **Acceptance:** Invalid descriptors are deterministically rejected and stress alloc/set/free has no leaks/corruption. (REQ: REQ-02-0046)
+        - [ ] **Syscall + Personality + `lib/sys` Integration:** (REQ: REQ-02-0047)
+            - [ ] Keep native personality (`perso_native.c`) wired to hardened `sys_modify_ldt`. (REQ: REQ-02-0048)
+            - [ ] Add Linux personality wiring for `modify_ldt` compatibility path (or explicit `ENOSYS` until complete). (REQ: REQ-02-0049)
+            - [ ] Add userspace wrapper in `lib/sys/` (`modify_ldt.c`) and include it in `lib/sys/Makefile`. (REQ: REQ-02-0050)
+            - [ ] Add public userspace declaration in `include/sys/ldt.h` (or equivalent exported syscall header). (REQ: REQ-02-0051)
+            - [ ] Ensure syscall prototypes come from headers only (no manual file-local `extern` declarations). (REQ: REQ-02-0052)
+            - [ ] **Acceptance:** `libsys` exposes `modify_ldt()` and personality behavior is explicit/tested. (REQ: REQ-02-0053)
+        - [ ] **Lifecycle Safety (switch/fork/exec/exit/SMP):** (REQ: REQ-02-0054)
+            - [ ] Ensure context switch path loads/clears `LDTR` correctly for LDT and no-LDT processes. (REQ: REQ-02-0055)
+            - [ ] Add LDT inheritance policy in `proc_fork` (`sys/pm/process.c`) with explicit copy/reference behavior. (REQ: REQ-02-0056)
+            - [ ] Add LDT replacement/cleanup in exec path (`exec_dispatch`/ELF load path) so stale LDT state cannot survive exec. (REQ: REQ-02-0057)
+            - [ ] Add guaranteed LDT cleanup in process exit path (`proc_exit`) and process teardown. (REQ: REQ-02-0058)
+            - [ ] Define SMP safety for LDT updates (reload rules for running thread vs remote CPUs). (REQ: REQ-02-0059)
+            - [ ] **Acceptance:** fork/exec/exit stress shows no stale selectors, no cross-process bleed, no double-free. (REQ: REQ-02-0060)
+        - [ ] **Verification Matrix (expand existing LDT tests):** (REQ: REQ-02-0061)
+            - [ ] Extend `tests/sys/test_ldt.c` with negative cases (bad DPL/type/system descriptors/index overflow). (REQ: REQ-02-0062)
+            - [ ] Add unit/property tests for descriptor encode/decode invariants (host-friendly where possible). (REQ: REQ-02-0063)
+            - [ ] Add fuzz target for `sys_modify_ldt` argument space (size, flags, malformed descriptors, race sequences). (REQ: REQ-02-0064)
+            - [ ] Add integration test with 16-bit path (VM86 and/or ELKS personality) validating CS/DS/SS behavior. (REQ: REQ-02-0065)
+            - [ ] Add regression tests for lifecycle events (fork inheritance, exec replacement, exit cleanup). (REQ: REQ-02-0066)
+            - [ ] Wire tests into regular test targets (`make -C tests/sys`, CI scripts) with pass/fail gates. (REQ: REQ-02-0067)
+            - [ ] **Acceptance:** All LDT unit/property/fuzz/integration tests pass and no existing suites regress. (REQ: REQ-02-0068)
+- [ ] **x86_64:** <!-- boot/, gdt.c, idt.c, isr.S, switch.S --> (REQ: REQ-02-0069)
+    - [ ] **Bootstrap:** Implement Long Mode entry (`boot.S`). <!-- boot/boot.S: Multiboot2, 4-level paging, CR3/EFER/CR0 setup --> (REQ: REQ-02-0070)
+    - [ ] **GDT/TSS:** Setup 64-bit GDT and TSS (no hardware task switching). <!-- gdt.c: SYSRET-compat layout, IST stacks --> (REQ: REQ-02-0071)
+    - [ ] **IDT/Exceptions:** Implement IDT and ISR stubs for 64-bit mode. <!-- idt.c, isr.S: 256 vectors, IST for NMI/DF/MC --> (REQ: REQ-02-0072)
+    - [ ] **Syscall Entry:** Implement `syscall`/`sysret` (MSR LSTAR). <!-- syscall.c exists, enhanced with isr128 stub --> (REQ: REQ-02-0073)
+    - [ ] **Context Switching:** Implement `switch_to` for 64-bit registers (r12-r15, rbx, rbp). <!-- switch.S: callee-saved + SSE/x87 --> (REQ: REQ-02-0074)
 
 
 ## User Stories

@@ -6,971 +6,971 @@
 ## Reimplemented Checklist (All Open)
 
 ### 5. System Calls & Personalities
-- [ ] **System Call ABI (64-bit Clean):**
-    - [ ] **Type Definitions:**
-        - [ ] Define `off_t`, `time_t`, `ino_t`, `blkcnt_t` as 64-bit types in `sys/types.h`.
-        - [ ] Verify alignment requirements (8-byte alignment for 64-bit types on i386 stack).
-    - [ ] **System Call Audit:**
-        - [ ] Audit all existing syscalls for argument types (int vs long vs long long).
-        - [ ] Identify syscalls needing 64-bit arguments pair splitting on 32-bit (e.g. `lseek`, `truncate`, `mmap`).
-    - [ ] **Kernel Refactoring:**
-        - [ ] Native `sys_lseek` takes 64-bit offset (split hi/lo on 32-bit stack).
-        - [ ] Native `sys_ftruncate` takes 64-bit length (split hi/lo on 32-bit stack).
-        - [ ] `sys_mmap` offset is 64-bit (using split words on i386).
-        - [ ] `struct stat` uses 64-bit `ino_t`, `off_t`, `blkcnt_t`, `time_t`.
-    - [ ] **LibC Wrappers:**
-        - [ ] Update `lseek` wrapper to pass high/low words on 32-bit.
-        - [ ] Update `ftruncate` wrapper.
-        - [ ] Update `stat`/`fstat` wrappers.
-    - [ ] **Personality Compatibility:**
-        - [ ] Ensure 32-bit Linux personality handles register splitting for 64-bit args correctly.
-        - [ ] Ensure native personality mandates 64-bit types.
-    - [ ] **Testing:**
-        - [ ] **Large File Support (LFS):** Test creating/seeking > 2GB files.
-        - [ ] **Y2038:** Test time_t overflow handling.
-- [ ] **Mechanisms:**
-        - [ ] **PTY Subsystem (Unix98/System V) - Massive Expansion:**
-            - [ ] **Core PTY Driver (`/dev/pts/` + `/dev/ptmx`):**
-                - [ ] **DevPTS Filesystem (`pts_fs`):**
-                    - [ ] `pts_mount()`: Mount logic.
-                    - [ ] `pts_lookup()`: Resolve PTY indices to vnodes.
-                    - [ ] `pts_getattr()`: Synthesize attributes (uid/gid/mode).
-                    - [ ] `pts_readdir()`: List active PTYs.
-                - [ ] **Multiplexer (`/dev/ptmx`):**
-                    - [ ] `ptmx_open()`: Allocate next free `pts` index (0..255+).
-                    - [ ] Create master/slave `tty` structures.
-                    - [ ] Initialize queues and termios defaults.
-                - [ ] **Data Path:**
-                    - [ ] **Master Write:** Input to Slave Read queue.
-                    - [ ] **Slave Write:** Input to Master Read queue.
-                    - [ ] **Ring Buffers:** Lockless (or locked) circular buffers.
-            - [ ] **IOCTL API (`libc` support):**
-                - [ ] `TIOCGPTN` (Get PTY Number): Return index for `ptsname()`.
-                - [ ] `TIOCSPTLCK` (Lock/Unlock): Handle `unlockpt()` (prevent race conditions).
-                - [ ] `TIOCGPKT` (Packet Mode): Control byte for master (flush/stop/start/ioctl).
-                - [ ] `TIOCSIG` (Signal): Send specific signal to slave process group.
-            - [ ] **Line Discipline (`N_TTY`):**
-                - [ ] **Input Processing (`c_iflag`):**
-                    - [ ] `IGNBRK`, `BRKINT` (Break handling).
-                    - [ ] `IGNPAR`, `PARMRK`, `INPCK` (Parity).
-                    - [ ] `ISTRIP` (Strip 8th bit).
-                    - [ ] `INLCR`, `IGNCR`, `ICRNL` (CR/LF mapping).
-                    - [ ] `IXON`, `IXOFF` (Software flow control XON/XOFF).
-                - [ ] **Output Processing (`c_oflag`):**
-                    - [ ] `OPOST` (Enable processing).
-                    - [ ] `ONLCR` (NL -> CR/NL translation).
-                - [ ] **Local Processing (`c_lflag`):**
-                    - [ ] `ISIG` (Signal generation: VINTR, VQUIT, VSUSP).
-                    - [ ] `ICANON` (Canonical mode / Line editing).
-                    - [ ] `ECHO`, `ECHOE` (Erase), `ECHOK` (Kill), `ECHONL`.
-                    - [ ] `IEXTEN` (Extended processing).
-                    - [ ] `TOSTOP` (Background write SIGTTOU).
-                - [ ] **Control Characters (`c_cc`):**
-                    - [ ] `VEOF`, `VEOL` (End of file/line).
-                    - [ ] `VERASE`, `VKILL` (Editing).
-                    - [ ] `VMIN`, `VTIME` (Non-canonical read timing).
+- [ ] **System Call ABI (64-bit Clean):** (REQ: REQ-05-0001)
+    - [ ] **Type Definitions:** (REQ: REQ-05-0002)
+        - [ ] Define `off_t`, `time_t`, `ino_t`, `blkcnt_t` as 64-bit types in `sys/types.h`. (REQ: REQ-05-0003)
+        - [ ] Verify alignment requirements (8-byte alignment for 64-bit types on i386 stack). (REQ: REQ-05-0004)
+    - [ ] **System Call Audit:** (REQ: REQ-05-0005, REQ-05-0352)
+        - [ ] Audit all existing syscalls for argument types (int vs long vs long long). (REQ: REQ-05-0006)
+        - [ ] Identify syscalls needing 64-bit arguments pair splitting on 32-bit (e.g. `lseek`, `truncate`, `mmap`). (REQ: REQ-05-0007)
+    - [ ] **Kernel Refactoring:** (REQ: REQ-05-0008, REQ-05-0357)
+        - [ ] Native `sys_lseek` takes 64-bit offset (split hi/lo on 32-bit stack). (REQ: REQ-05-0009)
+        - [ ] Native `sys_ftruncate` takes 64-bit length (split hi/lo on 32-bit stack). (REQ: REQ-05-0010)
+        - [ ] `sys_mmap` offset is 64-bit (using split words on i386). (REQ: REQ-05-0011)
+        - [ ] `struct stat` uses 64-bit `ino_t`, `off_t`, `blkcnt_t`, `time_t`. (REQ: REQ-05-0012)
+    - [ ] **LibC Wrappers:** (REQ: REQ-05-0013)
+        - [ ] Update `lseek` wrapper to pass high/low words on 32-bit. (REQ: REQ-05-0014)
+        - [ ] Update `ftruncate` wrapper. (REQ: REQ-05-0015)
+        - [ ] Update `stat`/`fstat` wrappers. (REQ: REQ-05-0016)
+    - [ ] **Personality Compatibility:** (REQ: REQ-05-0017, REQ-05-0366)
+        - [ ] Ensure 32-bit Linux personality handles register splitting for 64-bit args correctly. (REQ: REQ-05-0018)
+        - [ ] Ensure native personality mandates 64-bit types. (REQ: REQ-05-0019)
+    - [ ] **Testing:** (REQ: REQ-05-0020)
+        - [ ] **Large File Support (LFS):** Test creating/seeking > 2GB files. (REQ: REQ-05-0021)
+        - [ ] **Y2038:** Test time_t overflow handling. (REQ: REQ-05-0022)
+- [ ] **Mechanisms:** (REQ: REQ-05-0023)
+        - [ ] **PTY Subsystem (Unix98/System V) - Massive Expansion:** (REQ: REQ-05-0024)
+            - [ ] **Core PTY Driver (`/dev/pts/` + `/dev/ptmx`):** (REQ: REQ-05-0025)
+                - [ ] **DevPTS Filesystem (`pts_fs`):** (REQ: REQ-05-0026)
+                    - [ ] `pts_mount()`: Mount logic. (REQ: REQ-05-0027)
+                    - [ ] `pts_lookup()`: Resolve PTY indices to vnodes. (REQ: REQ-05-0028)
+                    - [ ] `pts_getattr()`: Synthesize attributes (uid/gid/mode). (REQ: REQ-05-0029)
+                    - [ ] `pts_readdir()`: List active PTYs. (REQ: REQ-05-0030)
+                - [ ] **Multiplexer (`/dev/ptmx`):** (REQ: REQ-05-0031)
+                    - [ ] `ptmx_open()`: Allocate next free `pts` index (0..255+). (REQ: REQ-05-0032)
+                    - [ ] Create master/slave `tty` structures. (REQ: REQ-05-0033)
+                    - [ ] Initialize queues and termios defaults. (REQ: REQ-05-0034)
+                - [ ] **Data Path:** (REQ: REQ-05-0035)
+                    - [ ] **Master Write:** Input to Slave Read queue. (REQ: REQ-05-0036)
+                    - [ ] **Slave Write:** Input to Master Read queue. (REQ: REQ-05-0037)
+                    - [ ] **Ring Buffers:** Lockless (or locked) circular buffers. (REQ: REQ-05-0038)
+            - [ ] **IOCTL API (`libc` support):** (REQ: REQ-05-0039)
+                - [ ] `TIOCGPTN` (Get PTY Number): Return index for `ptsname()`. (REQ: REQ-05-0040)
+                - [ ] `TIOCSPTLCK` (Lock/Unlock): Handle `unlockpt()` (prevent race conditions). (REQ: REQ-05-0041)
+                - [ ] `TIOCGPKT` (Packet Mode): Control byte for master (flush/stop/start/ioctl). (REQ: REQ-05-0042)
+                - [ ] `TIOCSIG` (Signal): Send specific signal to slave process group. (REQ: REQ-05-0043)
+            - [ ] **Line Discipline (`N_TTY`):** (REQ: REQ-05-0044)
+                - [ ] **Input Processing (`c_iflag`):** (REQ: REQ-05-0045)
+                    - [ ] `IGNBRK`, `BRKINT` (Break handling). (REQ: REQ-05-0046)
+                    - [ ] `IGNPAR`, `PARMRK`, `INPCK` (Parity). (REQ: REQ-05-0047)
+                    - [ ] `ISTRIP` (Strip 8th bit). (REQ: REQ-05-0048)
+                    - [ ] `INLCR`, `IGNCR`, `ICRNL` (CR/LF mapping). (REQ: REQ-05-0049)
+                    - [ ] `IXON`, `IXOFF` (Software flow control XON/XOFF). (REQ: REQ-05-0050)
+                - [ ] **Output Processing (`c_oflag`):** (REQ: REQ-05-0051)
+                    - [ ] `OPOST` (Enable processing). (REQ: REQ-05-0052)
+                    - [ ] `ONLCR` (NL -> CR/NL translation). (REQ: REQ-05-0053)
+                - [ ] **Local Processing (`c_lflag`):** (REQ: REQ-05-0054)
+                    - [ ] `ISIG` (Signal generation: VINTR, VQUIT, VSUSP). (REQ: REQ-05-0055)
+                    - [ ] `ICANON` (Canonical mode / Line editing). (REQ: REQ-05-0056)
+                    - [ ] `ECHO`, `ECHOE` (Erase), `ECHOK` (Kill), `ECHONL`. (REQ: REQ-05-0057)
+                    - [ ] `IEXTEN` (Extended processing). (REQ: REQ-05-0058)
+                    - [ ] `TOSTOP` (Background write SIGTTOU). (REQ: REQ-05-0059)
+                - [ ] **Control Characters (`c_cc`):** (REQ: REQ-05-0060)
+                    - [ ] `VEOF`, `VEOL` (End of file/line). (REQ: REQ-05-0061)
+                    - [ ] `VERASE`, `VKILL` (Editing). (REQ: REQ-05-0062)
+                    - [ ] `VMIN`, `VTIME` (Non-canonical read timing). (REQ: REQ-05-0063)
     
-        - [ ] **`sys_statvfs`:** Filesystem statistics.
-            - [ ] Implement `sys_statvfs`/`sys_fstatvfs`.
-            - [ ] Integrate with `vfs_statfs`.
+        - [ ] **`sys_statvfs`:** Filesystem statistics. (REQ: REQ-05-0064)
+            - [ ] Implement `sys_statvfs`/`sys_fstatvfs`. (REQ: REQ-05-0065)
+            - [ ] Integrate with `vfs_statfs`. (REQ: REQ-05-0066)
 
-        - [ ] **BSD-style Sys_mount Interface & Mount Framework:**
-            - [ ] **ABI Application Interface:**
-                - [ ] Define `sys_mount` syscall signature (type, source, target, flags, data/len).
-                - [ ] Create `sys/sys/mount.h` with syscall definitions.
-                - [ ] Define `struct mount_args` equivalent for versioned arguments.
-                - [ ] Document calling conventions and flag semantics in comments.
-                - [ ] Add build-time assertions for structure size and alignment.
-            - [ ] **Filesystem Type Registration:**
-                - [ ] Define `struct vfsconf` or equivalent for filesystem metadata.
-                - [ ] Create `vfs_register()` / `vfs_unregister()` API.
-                - [ ] Implement internal hashtable/list for filesystem types.
-                - [ ] Add capability reporting per filesystem type.
-                - [ ] Ensure filesystem names are validated and namespaced.
-            - [ ] **Mount Lifecycle & VFS Integration:**
-                - [ ] Define `struct mount` (kernel generic mount structure).
-                - [ ] Implement `vfs_mount_alloc()` and `vfs_mount_free()`.
-                - [ ] Implement mount binding to VFS namespace (vnode attachment).
-                - [ ] Implement reference counting and busy checks.
-                - [ ] Ensure mounts can be stacked or nested safely.
-            - [ ] **Generic Option Parsing:**
-                - [ ] Design generic mount option parser (key=value string/blob).
-                - [ ] Create API for filesystems to retrieve options.
-                - [ ] Implement type-safe option getters (int, string, bool).
-                - [ ] Validate standard options (ro, nosuid, nodev, noexec) generically.
-                - [ ] Ensure strict validation and copying of userspace data.
-            - [ ] **Virtual Filesystem Support (`/dev`, `/proc`):**
-                - [ ] Define mount handler for `devfs` (mounting `/dev`).
-                - [ ] Define mount handler for `procfs` (mounting `/proc`).
-                - [ ] Implement userspace-driven mounting of virtual filesystems via `sys_mount`.
-                - [ ] Ensure root vnodes are correctly tied to mount points.
-            - [ ] **Privilege & Security Model:**
-                - [ ] Add `suser()` / `cap_check()` for mount syscall.
-                - [ ] Implement `sys_mount` flag validation (detect conflicting flags).
-                - [ ] Ensure mount points are valid directories.
-                - [ ] Prevent mounting over critical system paths without override.
-                - [ ] Audit for mount-related vulnerabilities (symlinks, race conditions).
-            - [ ] **Error Handling & Diagnostics:**
-                - [ ] Define `EUNKNOWNFS` and other specific error codes.
-                - [ ] Propagate errors from filesystem-specific init back to syscall.
-                - [ ] Add kernel logging for failed mount attempts.
-            - [ ] **Unmount Semantics:**
-                - [ ] Define `sys_unmount` syscall signature and flags (FORCE, DETACH).
-                - [ ] Implement VFS layer unmount logic (busy checks).
-                - [ ] Add filesystem-specific `unmount` callback.
-                - [ ] Safe teardown of virtual and real filesystems.
-            - [ ] **Userland Interfaces & Tooling:**
-                - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc.
-                - [ ] Create/Update `mount(8)` utility in `bin/` capable of mounting `/dev`.
-                - [ ] Support `mount -t type dev dir` syntax.
-                - [ ] Update early boot (init) to mount `/dev` and `/proc` explicitly.
-            - [ ] **Testing & Verification:**
-                - [ ] Unit tests for mount argument parsing and validation.
-                - [ ] Integration tests mounting and unmounting `/dev` and `/proc` from userspace.
-                - [ ] Tests for error conditions (invalid FS type, bad options, permission failure).
-                - [ ] Property and fuzz tests targeting mount option parsing.
-            - [ ] **Audit & Refactor:**
-                - [ ] Audit existing VFS code for assumptions preventing userspace mounting.
-                - [ ] Remove hardcoded kernel mounts once userspace tools work.
-                - [ ] Clean up temporary hacks in `vfs_init`.
-            - [ ] **Documentation:**
-                - [ ] Create `man/man2/mount.2` describing syscall ABI and flags.
-                - [ ] Create `man/man2/unmount.2`.
-                - [ ] Write Filesystem Developer Guide describing how to implement a mount handler.
-        - [ ] Implement `sys_ioctl` framework.
-        - [ ] Implement `sys_pipe` and `sys_dup2`.
-        - [ ] **Compatibility Syscalls (Deep Dive):**
-            - [ ] **BSD-style `sys_mount` Framework:**
-                - [ ] **Group 1: `sys_mount` ABI Definition**
-                    - [ ] Define canonical `mount(2)` signature with options blob support. <!-- sys/include/sys/syscall.h, sys/kern/syscall.c -->
+        - [ ] **BSD-style Sys_mount Interface & Mount Framework:** (REQ: REQ-05-0067)
+            - [ ] **ABI Application Interface:** (REQ: REQ-05-0068)
+                - [ ] Define `sys_mount` syscall signature (type, source, target, flags, data/len). (REQ: REQ-05-0069)
+                - [ ] Create `sys/sys/mount.h` with syscall definitions. (REQ: REQ-05-0070)
+                - [ ] Define `struct mount_args` equivalent for versioned arguments. (REQ: REQ-05-0071)
+                - [ ] Document calling conventions and flag semantics in comments. (REQ: REQ-05-0072)
+                - [ ] Add build-time assertions for structure size and alignment. (REQ: REQ-05-0073)
+            - [ ] **Filesystem Type Registration:** (REQ: REQ-05-0074)
+                - [ ] Define `struct vfsconf` or equivalent for filesystem metadata. (REQ: REQ-05-0075)
+                - [ ] Create `vfs_register()` / `vfs_unregister()` API. (REQ: REQ-05-0076)
+                - [ ] Implement internal hashtable/list for filesystem types. (REQ: REQ-05-0077)
+                - [ ] Add capability reporting per filesystem type. (REQ: REQ-05-0078)
+                - [ ] Ensure filesystem names are validated and namespaced. (REQ: REQ-05-0079)
+            - [ ] **Mount Lifecycle & VFS Integration:** (REQ: REQ-05-0080)
+                - [ ] Define `struct mount` (kernel generic mount structure). (REQ: REQ-05-0081)
+                - [ ] Implement `vfs_mount_alloc()` and `vfs_mount_free()`. (REQ: REQ-05-0082)
+                - [ ] Implement mount binding to VFS namespace (vnode attachment). (REQ: REQ-05-0083)
+                - [ ] Implement reference counting and busy checks. (REQ: REQ-05-0084)
+                - [ ] Ensure mounts can be stacked or nested safely. (REQ: REQ-05-0085)
+            - [ ] **Generic Option Parsing:** (REQ: REQ-05-0086)
+                - [ ] Design generic mount option parser (key=value string/blob). (REQ: REQ-05-0087)
+                - [ ] Create API for filesystems to retrieve options. (REQ: REQ-05-0088)
+                - [ ] Implement type-safe option getters (int, string, bool). (REQ: REQ-05-0089)
+                - [ ] Validate standard options (ro, nosuid, nodev, noexec) generically. (REQ: REQ-05-0090)
+                - [ ] Ensure strict validation and copying of userspace data. (REQ: REQ-05-0091)
+            - [ ] **Virtual Filesystem Support (`/dev`, `/proc`):** (REQ: REQ-05-0092)
+                - [ ] Define mount handler for `devfs` (mounting `/dev`). (REQ: REQ-05-0093)
+                - [ ] Define mount handler for `procfs` (mounting `/proc`). (REQ: REQ-05-0094)
+                - [ ] Implement userspace-driven mounting of virtual filesystems via `sys_mount`. (REQ: REQ-05-0095)
+                - [ ] Ensure root vnodes are correctly tied to mount points. (REQ: REQ-05-0096)
+            - [ ] **Privilege & Security Model:** (REQ: REQ-05-0097)
+                - [ ] Add `suser()` / `cap_check()` for mount syscall. (REQ: REQ-05-0098)
+                - [ ] Implement `sys_mount` flag validation (detect conflicting flags). (REQ: REQ-05-0099)
+                - [ ] Ensure mount points are valid directories. (REQ: REQ-05-0100)
+                - [ ] Prevent mounting over critical system paths without override. (REQ: REQ-05-0101)
+                - [ ] Audit for mount-related vulnerabilities (symlinks, race conditions). (REQ: REQ-05-0102)
+            - [ ] **Error Handling & Diagnostics:** (REQ: REQ-05-0103)
+                - [ ] Define `EUNKNOWNFS` and other specific error codes. (REQ: REQ-05-0104)
+                - [ ] Propagate errors from filesystem-specific init back to syscall. (REQ: REQ-05-0105)
+                - [ ] Add kernel logging for failed mount attempts. (REQ: REQ-05-0106)
+            - [ ] **Unmount Semantics:** (REQ: REQ-05-0107)
+                - [ ] Define `sys_unmount` syscall signature and flags (FORCE, DETACH). (REQ: REQ-05-0108)
+                - [ ] Implement VFS layer unmount logic (busy checks). (REQ: REQ-05-0109)
+                - [ ] Add filesystem-specific `unmount` callback. (REQ: REQ-05-0110)
+                - [ ] Safe teardown of virtual and real filesystems. (REQ: REQ-05-0111)
+            - [ ] **Userland Interfaces & Tooling:** (REQ: REQ-05-0112)
+                - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc. (REQ: REQ-05-0113)
+                - [ ] Create/Update `mount(8)` utility in `bin/` capable of mounting `/dev`. (REQ: REQ-05-0114)
+                - [ ] Support `mount -t type dev dir` syntax. (REQ: REQ-05-0115)
+                - [ ] Update early boot (init) to mount `/dev` and `/proc` explicitly. (REQ: REQ-05-0116)
+            - [ ] **Testing & Verification:** (REQ: REQ-05-0117, REQ-05-0369)
+                - [ ] Unit tests for mount argument parsing and validation. (REQ: REQ-05-0118)
+                - [ ] Integration tests mounting and unmounting `/dev` and `/proc` from userspace. (REQ: REQ-05-0119)
+                - [ ] Tests for error conditions (invalid FS type, bad options, permission failure). (REQ: REQ-05-0120)
+                - [ ] Property and fuzz tests targeting mount option parsing. (REQ: REQ-05-0121)
+            - [ ] **Audit & Refactor:** (REQ: REQ-05-0122)
+                - [ ] Audit existing VFS code for assumptions preventing userspace mounting. (REQ: REQ-05-0123)
+                - [ ] Remove hardcoded kernel mounts once userspace tools work. (REQ: REQ-05-0124)
+                - [ ] Clean up temporary hacks in `vfs_init`. (REQ: REQ-05-0125)
+            - [ ] **Documentation:** (REQ: REQ-05-0126, REQ-05-0373)
+                - [ ] Create `man/man2/mount.2` describing syscall ABI and flags. (REQ: REQ-05-0127)
+                - [ ] Create `man/man2/unmount.2`. (REQ: REQ-05-0128)
+                - [ ] Write Filesystem Developer Guide describing how to implement a mount handler. (REQ: REQ-05-0129)
+        - [ ] Implement `sys_ioctl` framework. (REQ: REQ-05-0130)
+        - [ ] Implement `sys_pipe` and `sys_dup2`. (REQ: REQ-05-0131)
+        - [ ] **Compatibility Syscalls (Deep Dive):** (REQ: REQ-05-0132)
+            - [ ] **BSD-style `sys_mount` Framework:** (REQ: REQ-05-0133)
+                - [ ] **Group 1: `sys_mount` ABI Definition** (REQ: REQ-05-0134)
+                    - [ ] Define canonical `mount(2)` signature with options blob support. <!-- sys/include/sys/syscall.h, sys/kern/syscall.c --> (REQ: REQ-05-0135)
                         - Affected: `sys/include/sys/syscall.h`.
                         - Signature: `int sys_mount(const char *type, const char *path, int flags, void *data, size_t datalen)`.
                         - Acceptance: Syscall table updated.
-                    - [ ] Implement versioned `struct mount_args` for ABI stability. <!-- include/sys/mount.h -->
+                    - [ ] Implement versioned `struct mount_args` for ABI stability. <!-- include/sys/mount.h --> (REQ: REQ-05-0136)
                         - Affected: `include/sys/mount.h`.
                         - Logic: Include struct size/version field.
                         - Acceptance: Kernel validates struct boundaries from userspace.
-                    - [ ] Document MNT_* flags and error code semantics (EFAULT, EINVAL, EPERM). <!-- docs/abi/mount.md -->
+                    - [ ] Document MNT_* flags and error code semantics (EFAULT, EINVAL, EPERM). <!-- docs/abi/mount.md --> (REQ: REQ-05-0137)
                         - Affected: Documentation/ABI guide.
                         - Acceptance: Developer documentation exists.
-                    - [ ] Add runtime validation for userspace structure alignment and size. <!-- sys/kern/vfs_mount.c -->
+                    - [ ] Add runtime validation for userspace structure alignment and size. <!-- sys/kern/vfs_mount.c --> (REQ: REQ-05-0138)
                         - Affected: `sys/kern/vfs_mount.c`.
                         - Acceptance: Improperly aligned pointers from userland trigger EFAULT.
-                - [ ] **Group 2: Filesystem Type Registration**
-                    - [ ] Implement central `vfs_register` string-to-vfsops registry. <!-- sys/vfs/vfs_conf.c -->
+                - [ ] **Group 2: Filesystem Type Registration** (REQ: REQ-05-0139)
+                    - [ ] Implement central `vfs_register` string-to-vfsops registry. <!-- sys/vfs/vfs_conf.c --> (REQ: REQ-05-0140)
                         - Affected: `sys/vfs/vfs_conf.c`, `struct vfsconf`.
                         - Acceptance: `get_vfs_by_name()` returns correct ops vector.
-                    - [ ] Implement `vfs_unregister` for safe filesystem module removal. <!-- sys/vfs/vfs_conf.c -->
+                    - [ ] Implement `vfs_unregister` for safe filesystem module removal. <!-- sys/vfs/vfs_conf.c --> (REQ: REQ-05-0141)
                         - Affected: `sys/vfs/vfs_conf.c`.
                         - Logic: Prevent unregistering if mounts still exist.
                         - Acceptance: `rmmod` equivalent is safe.
-                    - [ ] Add capability reporting to `struct vfsops` (e.g. read-only only). <!-- sys/vfs/vfs.h -->
+                    - [ ] Add capability reporting to `struct vfsops` (e.g. read-only only). <!-- sys/vfs/vfs.h --> (REQ: REQ-05-0142)
                         - Affected: `sys/include/vfs/vfs.h`.
                         - Acceptance: VFS layer rejects writable mount requests for RO-only filesystems.
-                    - [ ] Implement FS name validation and namespacing logic. <!-- sys/vfs/vfs_conf.c -->
+                    - [ ] Implement FS name validation and namespacing logic. <!-- sys/vfs/vfs_conf.c --> (REQ: REQ-05-0143)
                         - Affected: `sys/vfs/vfs_conf.c`.
                         - Acceptance: FS names are alphanumeric and unique.
-                - [ ] **Group 3: Mount Lifecycle & VFS Integration**
-                    - [ ] Implement `vfs_mount_alloc()` to initialize `struct mount` instances. <!-- sys/vfs/vfs_mount.c -->
+                - [ ] **Group 3: Mount Lifecycle & VFS Integration** (REQ: REQ-05-0144)
+                    - [ ] Implement `vfs_mount_alloc()` to initialize `struct mount` instances. <!-- sys/vfs/vfs_mount.c --> (REQ: REQ-05-0145)
                         - Affected: `sys/vfs/vfs_mount.c`, `struct mount`.
                         - Acceptance: Mount structure initialized with default refcounts and flags.
-                    - [ ] Implement binding logic to attach root vnode to namespace. <!-- sys/vfs/vfs_mount.c -->
+                    - [ ] Implement binding logic to attach root vnode to namespace. <!-- sys/vfs/vfs_mount.c --> (REQ: REQ-05-0146)
                         - Affected: `namei`, `v_mountedhere`.
                         - Acceptance: `namei` correctly crosses into new mount points.
-                    - [ ] Implement mount reference-counting for safety during unmount. <!-- sys/vfs/vfs_mount.c -->
+                    - [ ] Implement mount reference-counting for safety during unmount. <!-- sys/vfs/vfs_mount.c --> (REQ: REQ-05-0147)
                         - Affected: `struct mount: mnt_ref`.
                         - Acceptance: Mount structure is not freed while vnodes are active.
-                    - [ ] Implement nested mount support and loop detection. <!-- sys/vfs/vfs_mount.c -->
+                    - [ ] Implement nested mount support and loop detection. <!-- sys/vfs/vfs_mount.c --> (REQ: REQ-05-0148)
                         - Affected: `sys_mount` lookup logic.
                         - Acceptance: Mounting on a directory within another mount works.
-                - [ ] **Group 4: Userspace Mount Option Handling**
-                    - [ ] Implement generic mount option parser for key-value strings. <!-- sys/vfs/vfs_options.c -->
+                - [ ] **Group 4: Userspace Mount Option Handling** (REQ: REQ-05-0149)
+                    - [ ] Implement generic mount option parser for key-value strings. <!-- sys/vfs/vfs_options.c --> (REQ: REQ-05-0150)
                         - Affected: `sys/vfs/vfs_options.c`.
                         - Logic: Safe parsing of `key=val,key2=val2`.
                         - Acceptance: Option blob correctly converted to internal dict/struct.
-                    - [ ] Implement safe copying and validation of userspace option blobs. <!-- sys/vfs/vfs_options.c -->
+                    - [ ] Implement safe copying and validation of userspace option blobs. <!-- sys/vfs/vfs_options.c --> (REQ: REQ-05-0151)
                         - Affected: `copyin()` in `sys_mount`.
                         - Acceptance: No direct kernel dereference of user-provided option strings.
-                    - [ ] Support filesystem-specific options passed via the parser. <!-- sys/vfs/vfs_options.c -->
+                    - [ ] Support filesystem-specific options passed via the parser. <!-- sys/vfs/vfs_options.c --> (REQ: REQ-05-0152)
                         - Affected: `vfsops: mount` callback receives parsed options.
                         - Acceptance: FS-specific flags (e.g., `uid=1000`) reach the driver.
-                    - [ ] Define and document option precedence and fallback behaviors. <!-- man/man2/mount.2 -->
+                    - [ ] Define and document option precedence and fallback behaviors. <!-- man/man2/mount.2 --> (REQ: REQ-05-0153)
                         - Affected: `man/man2/mount.2`.
                         - Acceptance: Clear rules for conflicting flags vs. options.
-                - [ ] **Group 5: Virtual Filesystem Mounting (`/dev`, `/proc`)**
-                    - [ ] Define DevFS mount handler with root vnode generation. <!-- sys/fs/devfs/devfs_vfsops.c -->
+                - [ ] **Group 5: Virtual Filesystem Mounting (`/dev`, `/proc`)** (REQ: REQ-05-0154)
+                    - [ ] Define DevFS mount handler with root vnode generation. <!-- sys/fs/devfs/devfs_vfsops.c --> (REQ: REQ-05-0155)
                         - Affected: `sys/fs/devfs/`.
                         - Acceptance: `/dev` can be mounted via `sys_mount`.
-                    - [ ] Define ProcFS mount handler with dynamic PID-based population. <!-- sys/fs/procfs/procfs_vfsops.c -->
+                    - [ ] Define ProcFS mount handler with dynamic PID-based population. <!-- sys/fs/procfs/procfs_vfsops.c --> (REQ: REQ-05-0156)
                         - Affected: `sys/fs/procfs/`.
                         - Acceptance: `/proc` can be mounted via `sys_mount`.
-                    - [ ] Implement userspace-driven mounting of `/dev` and `/proc` entirely from `init`. <!-- bin/init/main.c -->
+                    - [ ] Implement userspace-driven mounting of `/dev` and `/proc` entirely from `init`. <!-- bin/init/main.c --> (REQ: REQ-05-0157)
                         - Affected: `init` source, startup sequence.
                         - Acceptance: `/dev` and `/proc` are established by userspace, not kernel core.
-                    - [ ] Define mandatory mount options for virtual filesystems. <!-- sys/fs/virtual_fs.h -->
+                    - [ ] Define mandatory mount options for virtual filesystems. <!-- sys/fs/virtual_fs.h --> (REQ: REQ-05-0158)
                         - Affected: `devfs`, `procfs` drivers.
                         - Acceptance: Attempts to mount virtual FS with invalid options are rejected.
-                - [ ] **Group 6: Permission & Security Model**
-                    - [ ] Implement capability-checks (CAP_SYS_ADMIN) for `sys_mount`. <!-- sys/kern/vfs_mount.c -->
+                - [ ] **Group 6: Permission & Security Model** (REQ: REQ-05-0159)
+                    - [ ] Implement capability-checks (CAP_SYS_ADMIN) for `sys_mount`. <!-- sys/kern/vfs_mount.c --> (REQ: REQ-05-0160)
                         - Affected: `sys/kern/vfs_mount.c`, `cap_check()`.
                         - Acceptance: Non-privileged users cannot execute `mount`.
-                    - [ ] Implement `MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV` enforcement. <!-- sys/vfs/vfs_vnode.c -->
+                    - [ ] Implement `MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV` enforcement. <!-- sys/vfs/vfs_vnode.c --> (REQ: REQ-05-0161)
                         - Affected: VFS permission checks.
                         - Acceptance: Vnode operations honor mount-level security flags.
-                    - [ ] Audit and harden against mount-point escape attacks. <!-- sys/vfs/vfs_lookup.c -->
+                    - [ ] Audit and harden against mount-point escape attacks. <!-- sys/vfs/vfs_lookup.c --> (REQ: REQ-05-0162)
                         - Affected: `namei`, `..` handling across mounts.
                         - Acceptance: `..` from a mount root stays within the covering directory.
-                    - [ ] Implement mount-point target validation (must be directory, must be owned). <!-- sys/vfs/vfs_mount.c -->
+                    - [ ] Implement mount-point target validation (must be directory, must be owned). <!-- sys/vfs/vfs_mount.c --> (REQ: REQ-05-0163)
                         - Affected: `sys_mount` preamble.
                         - Acceptance: Mounting on files or inaccessible directories fails with ENOTDIR/EPERM.
-                - [ ] **Group 7: Error Handling & Diagnostics**
-                    - [ ] Define granular E* error codes for mount failures (ENODEV, EINVAL, ENOTDIR, EBUSY). <!-- sys/include/sys/errno.h -->
+                - [ ] **Group 7: Error Handling & Diagnostics** (REQ: REQ-05-0164)
+                    - [ ] Define granular E* error codes for mount failures (ENODEV, EINVAL, ENOTDIR, EBUSY). <!-- sys/include/sys/errno.h --> (REQ: REQ-05-0165)
                         - Affected: `sys/include/sys/errno.h`.
                         - Acceptance: Errors distinguish between "FS not found" vs "Invalid options".
-                    - [ ] Implement structured kernel logging for mount/unmount operations. <!-- sys/vfs/vfs_mount.c -->
+                    - [ ] Implement structured kernel logging for mount/unmount operations. <!-- sys/vfs/vfs_mount.c --> (REQ: REQ-05-0166)
                         - Affected: `klog`, `printf`.
                         - Acceptance: Mount attempts (success/fail) are recorded in dmesg.
-                    - [ ] Ensure clean error propagation from FS driver to userspace. <!-- sys/vfs/vfs_mount.c -->
+                    - [ ] Ensure clean error propagation from FS driver to userspace. <!-- sys/vfs/vfs_mount.c --> (REQ: REQ-05-0167)
                         - Affected: `vfsops` return values.
                         - Acceptance: Driver-specific errors reach the syscall return value.
-                - [ ] **Group 8: Unmount Support**
-                    - [ ] Define `sys_unmount(path, flags)` syscall interface. <!-- sys/include/sys/syscall.h -->
+                - [ ] **Group 8: Unmount Support** (REQ: REQ-05-0168)
+                    - [ ] Define `sys_unmount(path, flags)` syscall interface. <!-- sys/include/sys/syscall.h --> (REQ: REQ-05-0169)
                         - Affected: `sys/kern/vfs_mount.c`.
                         - Acceptance: Unmount capability exposed to userspace.
-                    - [ ] Implement `vfs_unmount()` core with resource reclamation. <!-- sys/vfs/vfs_mount.c -->
+                    - [ ] Implement `vfs_unmount()` core with resource reclamation. <!-- sys/vfs/vfs_mount.c --> (REQ: REQ-05-0170)
                         - Affected: `struct mount`, `vfsops: unmount`.
                         - Acceptance: Unmounting frees all related kernel memory.
-                    - [ ] Implement `MNT_FORCE` and `MNT_DEFERRED` unmount logic. <!-- sys/vfs/vfs_mount.c -->
+                    - [ ] Implement `MNT_FORCE` and `MNT_DEFERRED` unmount logic. <!-- sys/vfs/vfs_mount.c --> (REQ: REQ-05-0171)
                         - Affected: `vfs_unmount()`.
                         - Logic: Force unmount even if busy; Deferred unmount when last ref drops.
                         - Acceptance: Busy filesystems can be forcefully detached.
-                - [ ] **Group 9: Userland Interfaces & Tooling**
-                    - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc. <!-- lib/libc/sys/mount.S -->
+                - [ ] **Group 9: Userland Interfaces & Tooling** (REQ: REQ-05-0172)
+                    - [ ] Add `mount(2)` and `unmount(2)` wrappers to libc. <!-- lib/libc/sys/mount.S --> (REQ: REQ-05-0173)
                         - Affected: `lib/libc/include/sys/mount.h`, wrappers.
                         - Acceptance: Standard C programs can call `mount()`.
-                    - [ ] Implement basic `mount(8)` utility for shell usage. <!-- bin/mount/mount.c -->
+                    - [ ] Implement basic `mount(8)` utility for shell usage. <!-- bin/mount/mount.c --> (REQ: REQ-05-0174)
                         - Affected: `bin/mount/`.
                         - Acceptance: `mount -t proc proc /proc` works from the shell.
-                    - [ ] Document required invocation patterns for early boot mounting in `/sbin/init`. <!-- docs/boot.md -->
+                    - [ ] Document required invocation patterns for early boot mounting in `/sbin/init`. <!-- docs/boot.md --> (REQ: REQ-05-0175)
                         - Affected: Boot documentation.
                         - Acceptance: Clear guide on establishing `/dev` and `/proc`.
-                - [ ] **Group 10: Testing & Verification**
-                    - [ ] Unit tests for `mount_args` parsing and alignment validation. <!-- sys/tests/test_vfs_mount.c -->
+                - [ ] **Group 10: Testing & Verification** (REQ: REQ-05-0176)
+                    - [ ] Unit tests for `mount_args` parsing and alignment validation. <!-- sys/tests/test_vfs_mount.c --> (REQ: REQ-05-0177)
                         - Affected: `sys/tests/`.
                         - Acceptance: Fuzzed ABI structures are handled safely.
-                    - [ ] Integration test: Mount/unmount sequence for DevFS and ProcFS. <!-- sys/tests/test_vfs_integration.c -->
+                    - [ ] Integration test: Mount/unmount sequence for DevFS and ProcFS. <!-- sys/tests/test_vfs_integration.c --> (REQ: REQ-05-0178)
                         - Affected: `sys/tests/`.
                         - Acceptance: Real-world virtual FS lifecycle works.
-                    - [ ] Negative tests for error conditions (unknown FS, bad options, permission failure). <!-- sys/tests/test_vfs_errors.c -->
+                    - [ ] Negative tests for error conditions (unknown FS, bad options, permission failure). <!-- sys/tests/test_vfs_errors.c --> (REQ: REQ-05-0179)
                         - Affected: `sys/tests/`.
                         - Acceptance: All edge cases return correct errno.
-                    - [ ] Property and fuzz tests targeting mount option parsing. <!-- sys/tests/test_vfs_fuzz.c -->
+                    - [ ] Property and fuzz tests targeting mount option parsing. <!-- sys/tests/test_vfs_fuzz.c --> (REQ: REQ-05-0180)
                         - Affected: `sys/tests/`.
                         - Acceptance: Parser handles arbitrarily corrupted strings without crashing kernel.
-                - [ ] **Group 11: Audit & Refactor**
-                    - [ ] Audit existing VFS code for assumptions precluding userspace mounting. <!-- sys/vfs/ -->
+                - [ ] **Group 11: Audit & Refactor** (REQ: REQ-05-0181)
+                    - [ ] Audit existing VFS code for assumptions precluding userspace mounting. <!-- sys/vfs/ --> (REQ: REQ-05-0182)
                         - Affected: `vfs` core.
                         - Acceptance: Refactor any hardcoded kernel-private mount logic.
-                    - [ ] Eliminate existing TODOs in `vfs_mount.c` and `syscall.c`. <!-- sys/kern/syscall.c -->
+                    - [ ] Eliminate existing TODOs in `vfs_mount.c` and `syscall.c`. <!-- sys/kern/syscall.c --> (REQ: REQ-05-0183)
                         - Affected: `sys_mount` implementation.
                         - Acceptance: No placeholder mount paths remain.
-                - [ ] **Group 12: Documentation**
-                    - [ ] Create `mount(2)` manpage describing ABI, flags, and options. <!-- man/man2/mount.2 -->
+                - [ ] **Group 12: Documentation** (REQ: REQ-05-0184)
+                    - [ ] Create `mount(2)` manpage describing ABI, flags, and options. <!-- man/man2/mount.2 --> (REQ: REQ-05-0185)
                         - Affected: `man/`.
                         - Acceptance: Complete reference for system programmers.
-                    - [ ] Create Filesystem Developer Guide for `vfsops` implementations. <!-- docs/vfs_dev.md -->
+                    - [ ] Create Filesystem Developer Guide for `vfsops` implementations. <!-- docs/vfs_dev.md --> (REQ: REQ-05-0186)
                         - Affected: `docs/`.
                         - Acceptance: Guide exists for new FS type authors.
-                    - [ ] Document virtual filesystem mount semantics and expected behaviors. <!-- docs/virtual_fs.md -->
+                    - [ ] Document virtual filesystem mount semantics and expected behaviors. <!-- docs/virtual_fs.md --> (REQ: REQ-05-0187)
                         - Affected: `docs/`.
                         - Acceptance: Behavior of `/dev` and `/proc` is well-defined.
-                - [ ] **Commit-Atomic Expansion (`sys_mount`/mount framework)**
-                    - [ ] **Execution Rule:** Enforce "one checklist item = one commit" for all items in this expansion.
+                - [ ] **Commit-Atomic Expansion (`sys_mount`/mount framework)** (REQ: REQ-05-0188)
+                    - [ ] **Execution Rule:** Enforce "one checklist item = one commit" for all items in this expansion. (REQ: REQ-05-0189)
                         - Affected: `TASKS.md`, PR/commit policy for `sys_mount` series.
                         - Required tests: N/A (process/policy task; verify by commit history review).
                         - Acceptance: Every item below lands as an isolated commit with matching scope and message.
-                    - [ ] **1. `sys_mount` ABI Definition**
-                        - [ ] Reserve and wire canonical syscall numbers for `SYS_mount` and `SYS_unmount` in native/Linux/FreeBSD personality dispatch tables.
+                    - [ ] **1. `sys_mount` ABI Definition** (REQ: REQ-05-0190)
+                        - [ ] Reserve and wire canonical syscall numbers for `SYS_mount` and `SYS_unmount` in native/Linux/FreeBSD personality dispatch tables. (REQ: REQ-05-0191)
                             - Affected: `sys/include/sys/syscall.h`, `sys/kern/syscall.c`, `sys/exec/perso/perso_native.c`, `sys/exec/perso/perso_linux.c`, `sys/exec/perso/perso_freebsd.c`.
                             - Required tests: syscall table regression (`sys/tests/test_syscall_dispatch.c`), personality dispatch smoke tests.
                             - Acceptance: `mount`/`unmount` numbers are stable and routed correctly across supported personalities.
-                        - [ ] Define canonical kernel entry signature for `sys_mount` with filesystem type, source, target, flags, and options blob pointer/length.
+                        - [ ] Define canonical kernel entry signature for `sys_mount` with filesystem type, source, target, flags, and options blob pointer/length. (REQ: REQ-05-0192)
                             - Affected: `sys/include/sys/syscall.h`, `sys/kern/vfs_mount.c`.
                             - Required tests: compile-time prototype checks, syscall invocation smoke test from `libsys`.
                             - Acceptance: Kernel exposes one extensible ABI surface for all filesystem types.
-                        - [ ] Introduce versioned userspace ABI container (`struct mount_args`/`mount_args_v1`) with size/version fields and explicit reserved bytes.
+                        - [ ] Introduce versioned userspace ABI container (`struct mount_args`/`mount_args_v1`) with size/version fields and explicit reserved bytes. (REQ: REQ-05-0193)
                             - Affected: `include/sys/mount.h`, `sys/include/sys/mount.h`, `lib/sys/include/sys/mount.h`.
                             - Required tests: ABI layout test (`tests/include/test_mount_args_layout.c`), cross-header consistency test.
                             - Acceptance: ABI structure is forward-compatible and identical between kernel/userspace headers.
-                        - [ ] Add compile-time `_Static_assert` checks for `struct mount_args` size/alignment/field offsets in both kernel and userspace headers.
+                        - [ ] Add compile-time `_Static_assert` checks for `struct mount_args` size/alignment/field offsets in both kernel and userspace headers. (REQ: REQ-05-0194)
                             - Affected: `include/sys/mount.h`, `sys/include/sys/mount.h`.
                             - Required tests: build-time assertion pass in `make -C sys`, `make -C lib/c`, `make -C bin`.
                             - Acceptance: Builds fail immediately if ABI layout drifts.
-                        - [ ] Add runtime ABI validation in `sys_mount` for userspace struct size/version/alignment and reserved-field zeroing.
+                        - [ ] Add runtime ABI validation in `sys_mount` for userspace struct size/version/alignment and reserved-field zeroing. (REQ: REQ-05-0195)
                             - Affected: `sys/kern/vfs_mount.c`.
                             - Required tests: negative ABI tests (`sys/tests/test_mount_abi_validation.c`) for short/oversized/misaligned payloads.
                             - Acceptance: Invalid ABI payloads return deterministic `EINVAL`/`EFAULT` without kernel memory exposure.
-                        - [ ] Document calling convention, flag semantics, and baseline errno contract for `sys_mount` ABI.
+                        - [ ] Document calling convention, flag semantics, and baseline errno contract for `sys_mount` ABI. (REQ: REQ-05-0196)
                             - Affected: `docs/abi/mount.md`.
                             - Required tests: docs review + manpage cross-check task linkage.
                             - Acceptance: ABI doc explicitly describes arguments, ownership rules, and error mapping.
-                    - [ ] **2. Filesystem Type Registration**
-                        - [ ] Define `vfsconf`/filesystem-type descriptor with name, mount callbacks, and capability vector.
+                    - [ ] **2. Filesystem Type Registration** (REQ: REQ-05-0197)
+                        - [ ] Define `vfsconf`/filesystem-type descriptor with name, mount callbacks, and capability vector. (REQ: REQ-05-0198)
                             - Affected: `sys/vfs/vfs.h`, `sys/vfs/vfs_conf.h`.
                             - Required tests: unit tests for descriptor initialization (`sys/tests/test_vfsconf.c`).
                             - Acceptance: Every filesystem registers through one shared descriptor contract.
-                        - [ ] Implement central filesystem registry (name to mount-handler map) with lookup, duplicate detection, and lifecycle hooks.
+                        - [ ] Implement central filesystem registry (name to mount-handler map) with lookup, duplicate detection, and lifecycle hooks. (REQ: REQ-05-0199)
                             - Affected: `sys/vfs/vfs_conf.c`.
                             - Required tests: registry tests (`sys/tests/test_vfs_registry.c`) for add/find/duplicate handling.
                             - Acceptance: Registry supports deterministic lookup and rejects conflicting registrations.
-                        - [ ] Add built-in filesystem registration path during VFS init with explicit ordering and failure handling.
+                        - [ ] Add built-in filesystem registration path during VFS init with explicit ordering and failure handling. (REQ: REQ-05-0200)
                             - Affected: `sys/vfs/vfs_init.c`, `sys/vfs/vfs_conf.c`, built-in FS init files.
                             - Required tests: boot-time VFS init test, kernel smoke boot with registry dump.
                             - Acceptance: Built-in filesystems are visible in registry before first mount request.
-                        - [ ] Add loadable-module registration API (`vfs_register_module`/`vfs_unregister_module`) with busy-mount rejection on unload.
+                        - [ ] Add loadable-module registration API (`vfs_register_module`/`vfs_unregister_module`) with busy-mount rejection on unload. (REQ: REQ-05-0201)
                             - Affected: `sys/vfs/vfs_conf.c`, module interface headers.
                             - Required tests: module lifecycle tests (`tests/sys/test_vfs_module_registry.c`) including unload-while-mounted rejection.
                             - Acceptance: Module-backed filesystems can register/unregister safely without dangling handlers.
-                        - [ ] Require each filesystem to publish mount capability bits (virtual, device-backed, supports_force_unmount, supports_ro, etc.).
+                        - [ ] Require each filesystem to publish mount capability bits (virtual, device-backed, supports_force_unmount, supports_ro, etc.). (REQ: REQ-05-0202)
                             - Affected: `sys/vfs/vfs.h`, per-filesystem `*_vfsops.c`.
                             - Required tests: capability contract tests (`sys/tests/test_vfs_capabilities.c`).
                             - Acceptance: VFS can enforce behavior based on advertised filesystem capabilities.
-                        - [ ] Enforce filesystem name validation and namespacing policy (e.g., `virt.procfs`, `virt.devfs`, `disk.ext2`) at registration.
+                        - [ ] Enforce filesystem name validation and namespacing policy (e.g., `virt.procfs`, `virt.devfs`, `disk.ext2`) at registration. (REQ: REQ-05-0203)
                             - Affected: `sys/vfs/vfs_conf.c`, `sys/vfs/vfs_conf.h`.
                             - Required tests: invalid-name/namespace collision tests in `sys/tests/test_vfs_registry.c`.
                             - Acceptance: Non-conforming filesystem names are rejected with `EINVAL`.
-                    - [ ] **3. Mount Lifecycle and VFS Integration**
-                        - [ ] Define mount object lifecycle states (`NEW`, `ALLOCATED`, `BOUND`, `ROOT_ATTACHED`, `ACTIVE`, `DYING`, `DEAD`) and legal transitions.
+                    - [ ] **3. Mount Lifecycle and VFS Integration** (REQ: REQ-05-0204)
+                        - [ ] Define mount object lifecycle states (`NEW`, `ALLOCATED`, `BOUND`, `ROOT_ATTACHED`, `ACTIVE`, `DYING`, `DEAD`) and legal transitions. (REQ: REQ-05-0205)
                             - Affected: `sys/vfs/mount.h`, `sys/vfs/vfs_mount.c`.
                             - Required tests: lifecycle state machine tests (`sys/tests/test_mount_state_machine.c`).
                             - Acceptance: Mount state transitions are explicit and invalid transitions are rejected/asserted.
-                        - [ ] Implement `vfs_mount_alloc()`/`vfs_mount_free()` with refcount initialization, lock setup, and failure rollback.
+                        - [ ] Implement `vfs_mount_alloc()`/`vfs_mount_free()` with refcount initialization, lock setup, and failure rollback. (REQ: REQ-05-0206)
                             - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/mount.h`.
                             - Required tests: allocation/rollback tests (`sys/tests/test_vfs_mount_alloc.c`).
                             - Acceptance: No leaks or partial objects remain after failed allocation/mount setup.
-                        - [ ] Implement namespace bind step that attaches mount instance to target vnode (`v_mountedhere`) and records covering vnode.
+                        - [ ] Implement namespace bind step that attaches mount instance to target vnode (`v_mountedhere`) and records covering vnode. (REQ: REQ-05-0207)
                             - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vnode.h`, `sys/vfs/namei.c`.
                             - Required tests: integration traversal tests (`sys/tests/test_mount_namespace_bind.c`).
                             - Acceptance: Path resolution crosses into mounted root vnode correctly.
-                        - [ ] Implement root-vnode attach/activate flow so filesystem mount handler returns root vnode before mount activation.
+                        - [ ] Implement root-vnode attach/activate flow so filesystem mount handler returns root vnode before mount activation. (REQ: REQ-05-0208)
                             - Affected: `sys/vfs/vfs_mount.c`, per-filesystem mount handlers.
                             - Required tests: mount activation tests (`sys/tests/test_mount_activation.c`) for success/failure paths.
                             - Acceptance: Mount is only visible as active after root vnode is valid and pinned.
-                        - [ ] Define unmount reference-counting and busy rules (active vnode refs, cwd/root refs, open fds) with deterministic `EBUSY` behavior.
+                        - [ ] Define unmount reference-counting and busy rules (active vnode refs, cwd/root refs, open fds) with deterministic `EBUSY` behavior. (REQ: REQ-05-0209)
                             - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vnode.c`.
                             - Required tests: busy-reference integration tests (`sys/tests/test_unmount_busy_refs.c`).
                             - Acceptance: Busy filesystems cannot unmount unless allowed by force policy.
-                        - [ ] Implement safe nested/stacked mount handling and mount-loop detection for recursive or cyclic bind attempts.
+                        - [ ] Implement safe nested/stacked mount handling and mount-loop detection for recursive or cyclic bind attempts. (REQ: REQ-05-0210)
                             - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/namei.c`.
                             - Required tests: nested mount tests and loop rejection tests (`sys/tests/test_mount_nested.c`).
                             - Acceptance: Legitimate nested mounts work; loop/cycle attempts fail with defined errno.
-                        - [ ] Define mount propagation behavior (private/shared/slave) and implement either support or explicit `ENOTSUP` for non-private modes.
+                        - [ ] Define mount propagation behavior (private/shared/slave) and implement either support or explicit `ENOTSUP` for non-private modes. (REQ: REQ-05-0211)
                             - Affected: `sys/vfs/mount.h`, `sys/kern/vfs_mount.c`, `docs/abi/mount.md`.
                             - Required tests: propagation flag tests (`sys/tests/test_mount_propagation_flags.c`).
                             - Acceptance: Semantics are explicit; unsupported propagation flags are rejected predictably.
-                    - [ ] **4. Userspace Mount Option Handling**
-                        - [ ] Define generic kernel mount-option format and parser API for userspace-provided option strings/blobs.
+                    - [ ] **4. Userspace Mount Option Handling** (REQ: REQ-05-0212)
+                        - [ ] Define generic kernel mount-option format and parser API for userspace-provided option strings/blobs. (REQ: REQ-05-0213)
                             - Affected: `sys/vfs/vfs_options.h`, `sys/vfs/vfs_options.c`, `include/sys/mount.h`.
                             - Required tests: parser unit tests (`sys/tests/test_mount_options_parser.c`).
                             - Acceptance: Generic parser produces typed option map without filesystem coupling.
-                        - [ ] Implement `copyin`-first option ingestion with strict length limits, NUL termination rules, and integer overflow checks.
+                        - [ ] Implement `copyin`-first option ingestion with strict length limits, NUL termination rules, and integer overflow checks. (REQ: REQ-05-0214)
                             - Affected: `sys/kern/vfs_mount.c`, `sys/vfs/vfs_options.c`.
                             - Required tests: boundary/overflow negative tests (`sys/tests/test_mount_options_copyin.c`).
                             - Acceptance: Kernel never dereferences userspace option pointers directly.
-                        - [ ] Add typed getters/validators for standard options (`ro`, `rw`, `nosuid`, `nodev`, `noexec`) in generic layer.
+                        - [ ] Add typed getters/validators for standard options (`ro`, `rw`, `nosuid`, `nodev`, `noexec`) in generic layer. (REQ: REQ-05-0215)
                             - Affected: `sys/vfs/vfs_options.c`, `sys/vfs/mount.h`.
                             - Required tests: standard-option validation tests (`sys/tests/test_mount_options_standard.c`).
                             - Acceptance: Standard options are parsed and validated consistently across filesystems.
-                        - [ ] Add pass-through mechanism for filesystem-specific options with per-filesystem schema validation callback.
+                        - [ ] Add pass-through mechanism for filesystem-specific options with per-filesystem schema validation callback. (REQ: REQ-05-0216)
                             - Affected: `sys/vfs/vfs_options.c`, `sys/vfs/vfs.h`, per-filesystem mount handlers.
                             - Required tests: FS-specific option tests (`sys/tests/test_mount_options_fs_specific.c`) for ext2/devfs/procfs.
                             - Acceptance: Filesystem-specific options flow through generic framework and fail cleanly on schema mismatch.
-                        - [ ] Define option precedence and defaulting rules (syscall flags vs generic options vs filesystem defaults).
+                        - [ ] Define option precedence and defaulting rules (syscall flags vs generic options vs filesystem defaults). (REQ: REQ-05-0217)
                             - Affected: `sys/kern/vfs_mount.c`, `docs/abi/mount.md`, `man/man2/mount.2`.
                             - Required tests: precedence matrix tests (`sys/tests/test_mount_option_precedence.c`).
                             - Acceptance: Conflicting inputs resolve deterministically and are documented.
-                    - [ ] **5. Virtual Filesystem Mounting (`/dev`, `/proc`)**
-                        - [ ] Register `devfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, `nodev-safe` behavior).
+                    - [ ] **5. Virtual Filesystem Mounting (`/dev`, `/proc`)** (REQ: REQ-05-0218)
+                        - [ ] Register `devfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, `nodev-safe` behavior). (REQ: REQ-05-0219)
                             - Affected: `sys/fs/devfs/devfs_vfsops.c`, `sys/vfs/vfs_conf.c`.
                             - Required tests: devfs registration tests (`sys/tests/test_devfs_registry.c`).
                             - Acceptance: `devfs` is mountable only via generic `sys_mount` path.
-                        - [ ] Register `procfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, dynamic entries).
+                        - [ ] Register `procfs` mount handler through the generic filesystem registry with explicit capability declaration (`virtual`, dynamic entries). (REQ: REQ-05-0220)
                             - Affected: `sys/fs/procfs/procfs_vfsops.c`, `sys/vfs/vfs_conf.c`.
                             - Required tests: procfs registration tests (`sys/tests/test_procfs_registry.c`).
                             - Acceptance: `procfs` is mountable only via generic `sys_mount` path.
-                        - [ ] Implement userspace-driven mount flow in early init to mount `/dev` and `/proc` through `sys_mount` (no kernel-only implicit mount path).
+                        - [ ] Implement userspace-driven mount flow in early init to mount `/dev` and `/proc` through `sys_mount` (no kernel-only implicit mount path). (REQ: REQ-05-0221)
                             - Affected: `sbin/init/*`, boot init scripts, `docs/boot.md`.
                             - Required tests: boot integration test (`tests/integration/test_boot_mount_virtual_fs.sh`).
                             - Acceptance: System boots with `/dev` and `/proc` established by userspace `mount` calls.
-                        - [ ] Ensure virtual filesystem handlers always provide a root vnode and support required dynamic population semantics.
+                        - [ ] Ensure virtual filesystem handlers always provide a root vnode and support required dynamic population semantics. (REQ: REQ-05-0222)
                             - Affected: `sys/fs/devfs/*`, `sys/fs/procfs/*`, `sys/vfs/vfs_mount.c`.
                             - Required tests: runtime vnode population tests (`sys/tests/test_virtualfs_root_vnode.c`).
                             - Acceptance: Root vnode is valid immediately after mount; dynamic nodes appear correctly.
-                        - [ ] Define and enforce allowed mount options for `devfs`/`procfs` (including explicit "no options" policy where applicable).
+                        - [ ] Define and enforce allowed mount options for `devfs`/`procfs` (including explicit "no options" policy where applicable). (REQ: REQ-05-0223)
                             - Affected: `sys/fs/devfs/devfs_vfsops.c`, `sys/fs/procfs/procfs_vfsops.c`, `man/man5/procfs.5`, `man/man5/devfs.5`.
                             - Required tests: virtual-fs option validation tests (`sys/tests/test_virtualfs_mount_options.c`).
                             - Acceptance: Unsupported options return `EINVAL` and accepted options are applied.
-                    - [ ] **6. Permission and Security Model**
-                        - [ ] Define mount authorization policy (`superuser` and/or `CAP_SYS_ADMIN` equivalent) and enforce it in syscall entry path.
+                    - [ ] **6. Permission and Security Model** (REQ: REQ-05-0224)
+                        - [ ] Define mount authorization policy (`superuser` and/or `CAP_SYS_ADMIN` equivalent) and enforce it in syscall entry path. (REQ: REQ-05-0225)
                             - Affected: `sys/kern/vfs_mount.c`, capability framework headers.
                             - Required tests: permission tests (`sys/tests/test_mount_permissions.c`) for privileged/unprivileged callers.
                             - Acceptance: Unauthorized mount/unmount attempts fail with `EPERM`.
-                        - [ ] Implement and enforce mount security flags (`MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV`) in VFS operation paths.
+                        - [ ] Implement and enforce mount security flags (`MNT_RDONLY`, `MNT_NOEXEC`, `MNT_NOSUID`, `MNT_NODEV`) in VFS operation paths. (REQ: REQ-05-0226)
                             - Affected: `sys/vfs/vnode_ops.c`, `sys/vfs/exec.c`, device open paths.
                             - Required tests: security-flag behavior tests (`sys/tests/test_mount_security_flags.c`).
                             - Acceptance: Runtime behavior matches each security flag's contract.
-                        - [ ] Harden target path resolution against symlink races and traversal escapes during mount.
+                        - [ ] Harden target path resolution against symlink races and traversal escapes during mount. (REQ: REQ-05-0227)
                             - Affected: `sys/vfs/namei.c`, `sys/kern/vfs_mount.c`.
                             - Required tests: race/symlink attack tests (`sys/tests/test_mount_path_race.c`).
                             - Acceptance: Mount operation resolves target atomically and cannot be redirected post-validation.
-                        - [ ] Enforce namespace isolation constraints so mount operations cannot escape caller namespace/chroot boundaries.
+                        - [ ] Enforce namespace isolation constraints so mount operations cannot escape caller namespace/chroot boundaries. (REQ: REQ-05-0228)
                             - Affected: `sys/vfs/vfs_mount.c`, process namespace/chroot handling.
                             - Required tests: namespace isolation tests (`sys/tests/test_mount_namespace_isolation.c`).
                             - Acceptance: Mount scope stays confined to caller-visible namespace.
-                        - [ ] Perform mount-security audit pass and land hardening fixes for common vulnerabilities (`..` escape, TOCTOU, malformed options, refcount abuse).
+                        - [ ] Perform mount-security audit pass and land hardening fixes for common vulnerabilities (`..` escape, TOCTOU, malformed options, refcount abuse). (REQ: REQ-05-0229)
                             - Affected: `sys/vfs/*`, `sys/kern/vfs_mount.c`, audit notes in `docs/security/mount_audit.md`.
                             - Required tests: regression suite (`sys/tests/test_mount_security_regression.c`).
                             - Acceptance: Audit findings are tracked and all identified high-risk issues are closed or explicitly deferred with rationale.
-                    - [ ] **7. Error Handling and Diagnostics**
-                        - [ ] Define canonical errno mapping table for mount/unmount failures (unknown fs, invalid options, permission, busy target, invalid target).
+                    - [ ] **7. Error Handling and Diagnostics** (REQ: REQ-05-0230)
+                        - [ ] Define canonical errno mapping table for mount/unmount failures (unknown fs, invalid options, permission, busy target, invalid target). (REQ: REQ-05-0231)
                             - Affected: `sys/kern/vfs_mount.c`, `docs/abi/mount.md`.
                             - Required tests: errno mapping tests (`sys/tests/test_mount_errno_map.c`).
                             - Acceptance: Each failure class returns stable, documented errno.
-                        - [ ] Ensure filesystem-specific mount errors propagate unchanged through VFS core and syscall boundary when safe.
+                        - [ ] Ensure filesystem-specific mount errors propagate unchanged through VFS core and syscall boundary when safe. (REQ: REQ-05-0232)
                             - Affected: `sys/vfs/vfs_mount.c`, per-filesystem `*_vfsops.c`.
                             - Required tests: per-filesystem error propagation tests (`sys/tests/test_mount_error_passthrough.c`).
                             - Acceptance: Userspace receives actionable FS-specific failure codes.
-                        - [ ] Add structured kernel logging for mount/unmount attempts (caller, fs type, source, target, flags, result).
+                        - [ ] Add structured kernel logging for mount/unmount attempts (caller, fs type, source, target, flags, result). (REQ: REQ-05-0233)
                             - Affected: `sys/kern/vfs_mount.c`, kernel logging subsystem.
                             - Required tests: log-format tests (`sys/tests/test_mount_logging.c`) and integration checks from boot logs.
                             - Acceptance: Successful and failed operations emit consistent diagnostic records.
-                        - [ ] Add diagnostic counters for mount/unmount successes/failures by errno and filesystem type.
+                        - [ ] Add diagnostic counters for mount/unmount successes/failures by errno and filesystem type. (REQ: REQ-05-0234)
                             - Affected: `sys/vfs/vfs_stats.c`, `/proc` or sysctl exposure.
                             - Required tests: stats counter tests (`sys/tests/test_mount_stats.c`).
                             - Acceptance: Counters are queryable and match observed operation totals.
-                    - [ ] **8. Unmount Support**
-                        - [ ] Define `sys_unmount` ABI (`target`, `flags`) including supported lazy/force semantics and unsupported-flag behavior.
+                    - [ ] **8. Unmount Support** (REQ: REQ-05-0235)
+                        - [ ] Define `sys_unmount` ABI (`target`, `flags`) including supported lazy/force semantics and unsupported-flag behavior. (REQ: REQ-05-0236)
                             - Affected: `include/sys/mount.h`, `sys/include/sys/syscall.h`, `docs/abi/mount.md`.
                             - Required tests: ABI/flag validation tests (`sys/tests/test_unmount_abi.c`).
                             - Acceptance: `sys_unmount` contract is explicit and version-stable.
-                        - [ ] Implement core unmount teardown pipeline (deactivate mount, detach namespace, flush/release resources, final free).
+                        - [ ] Implement core unmount teardown pipeline (deactivate mount, detach namespace, flush/release resources, final free). (REQ: REQ-05-0237)
                             - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/mount.h`.
                             - Required tests: teardown integration tests (`sys/tests/test_unmount_teardown.c`).
                             - Acceptance: Unmount reclaims resources without leaks or dangling mount links.
-                        - [ ] Enforce busy unmount rejection by default and force-unmount override only for filesystems that advertise support.
+                        - [ ] Enforce busy unmount rejection by default and force-unmount override only for filesystems that advertise support. (REQ: REQ-05-0238)
                             - Affected: `sys/vfs/vfs_mount.c`, `sys/vfs/vfs.h`, per-filesystem capability declarations.
                             - Required tests: busy/force policy tests (`sys/tests/test_unmount_force_policy.c`).
                             - Acceptance: Busy mounts return `EBUSY` unless force is both requested and supported.
-                        - [ ] Validate safe teardown parity for both virtual and device-backed filesystems.
+                        - [ ] Validate safe teardown parity for both virtual and device-backed filesystems. (REQ: REQ-05-0239)
                             - Affected: `sys/fs/devfs/*`, `sys/fs/procfs/*`, `sys/fs/ext2/*`, `sys/vfs/vfs_mount.c`.
                             - Required tests: mixed filesystem teardown integration tests (`sys/tests/test_unmount_virtual_real.c`).
                             - Acceptance: Unmount sequence is correct for `/dev`, `/proc`, and real filesystems.
-                    - [ ] **9. Userland Interfaces and Tooling**
-                        - [ ] Add `mount(2)` and `unmount(2)` wrappers in `libsys` and exported libc headers using the canonical ABI.
+                    - [ ] **9. Userland Interfaces and Tooling** (REQ: REQ-05-0240)
+                        - [ ] Add `mount(2)` and `unmount(2)` wrappers in `libsys` and exported libc headers using the canonical ABI. (REQ: REQ-05-0241)
                             - Affected: `lib/sys/`, `include/sys/mount.h`, libc syscall wrapper wiring.
                             - Required tests: wrapper syscall tests (`tests/libsys/test_mount_wrappers.c`).
                             - Acceptance: Userland C programs can call wrappers without raw syscall usage.
-                        - [ ] Implement/extend `mount(8)` utility to issue generic `sys_mount` requests and support both real and virtual filesystem targets.
+                        - [ ] Implement/extend `mount(8)` utility to issue generic `sys_mount` requests and support both real and virtual filesystem targets. (REQ: REQ-05-0242)
                             - Affected: `bin/mount/*`, build files under `bin/`.
                             - Required tests: utility integration tests (`tests/bin/mount/test_mount_cli.sh`).
                             - Acceptance: `mount` utility can mount `/dev`, `/proc`, and at least one real filesystem type.
-                        - [ ] Align `mount(8)` invocation semantics with Substrate conventions (`mount <device> <mount_point> <filesystem_type>`) while retaining option support.
+                        - [ ] Align `mount(8)` invocation semantics with Substrate conventions (`mount <device> <mount_point> <filesystem_type>`) while retaining option support. (REQ: REQ-05-0243)
                             - Affected: `bin/mount/*`, `man/man8/mount.8`.
                             - Required tests: CLI argument parsing tests (`tests/bin/mount/test_mount_args.c`).
                             - Acceptance: Utility accepts documented Substrate command form and rejects ambiguous input.
-                        - [ ] Update early initialization flow to mount mandatory virtual filesystems (`/dev`, `/proc`) from userspace before dependent services start.
+                        - [ ] Update early initialization flow to mount mandatory virtual filesystems (`/dev`, `/proc`) from userspace before dependent services start. (REQ: REQ-05-0244)
                             - Affected: `sbin/init/*`, `etc/init.sh`, boot docs.
                             - Required tests: boot-sequence integration test (`tests/integration/test_init_mount_order.sh`).
                             - Acceptance: Services relying on `/dev` and `/proc` start only after successful userspace mounts.
-                    - [ ] **10. Testing and Verification**
-                        - [ ] Add kernel unit tests for `mount_args` ABI parsing, size/version/alignment validation, and userspace copy safety.
+                    - [ ] **10. Testing and Verification** (REQ: REQ-05-0245)
+                        - [ ] Add kernel unit tests for `mount_args` ABI parsing, size/version/alignment validation, and userspace copy safety. (REQ: REQ-05-0246)
                             - Affected: `sys/tests/test_mount_abi_validation.c`.
                             - Required tests: `make -C sys/tests test_mount_abi_validation`.
                             - Acceptance: ABI parser handles valid/invalid inputs deterministically without faults.
-                        - [ ] Add kernel unit tests for filesystem registry behavior (register/lookup/duplicate/unregister busy path).
+                        - [ ] Add kernel unit tests for filesystem registry behavior (register/lookup/duplicate/unregister busy path). (REQ: REQ-05-0247)
                             - Affected: `sys/tests/test_vfs_registry.c`.
                             - Required tests: `make -C sys/tests test_vfs_registry`.
                             - Acceptance: Registry invariants hold under normal and error paths.
-                        - [ ] Add integration tests for mounting and unmounting `/dev` and `/proc` fully from userspace.
+                        - [ ] Add integration tests for mounting and unmounting `/dev` and `/proc` fully from userspace. (REQ: REQ-05-0248)
                             - Affected: `tests/integration/test_mount_virtual_fs.sh`.
                             - Required tests: full-system boot/integration run including init path.
                             - Acceptance: Virtual filesystems can be mounted/unmounted repeatedly without reboot or leaks.
-                        - [ ] Add negative integration tests for unknown filesystem names, malformed options, invalid targets, permission failures, and busy unmounts.
+                        - [ ] Add negative integration tests for unknown filesystem names, malformed options, invalid targets, permission failures, and busy unmounts. (REQ: REQ-05-0249)
                             - Affected: `tests/integration/test_mount_errors.sh`.
                             - Required tests: integration error suite execution in CI.
                             - Acceptance: Each failure mode returns expected errno and leaves namespace unchanged.
-                        - [ ] Add property and fuzz targets for option parser and syscall boundary handling (size fuzzing, pointer fuzzing, option grammar fuzzing).
+                        - [ ] Add property and fuzz targets for option parser and syscall boundary handling (size fuzzing, pointer fuzzing, option grammar fuzzing). (REQ: REQ-05-0250)
                             - Affected: `tests/property/test_mount_options_prop.c`, `tests/fuzz/fuzz_mount_syscall.c`.
                             - Required tests: property runner + fuzz runner with crash-free threshold.
                             - Acceptance: No crashes, memory corruption, or unbounded parse behavior under fuzzed inputs.
-                    - [ ] **11. Audit and Refactor**
-                        - [ ] Audit VFS core, filesystem drivers, and init path for assumptions that mounts are kernel-internal only.
+                    - [ ] **11. Audit and Refactor** (REQ: REQ-05-0251)
+                        - [ ] Audit VFS core, filesystem drivers, and init path for assumptions that mounts are kernel-internal only. (REQ: REQ-05-0252)
                             - Affected: `sys/vfs/*`, `sys/fs/*`, `sys/core/main.c`, init sources.
                             - Required tests: audit checklist review + regression boot tests.
                             - Acceptance: All blockers to userspace-driven mounting are identified and tracked.
-                        - [ ] Refactor minimal/placeholder mount logic to require filesystem-specific mount handlers through shared VFS contracts.
+                        - [ ] Refactor minimal/placeholder mount logic to require filesystem-specific mount handlers through shared VFS contracts. (REQ: REQ-05-0253)
                             - Affected: `sys/vfs/vfs_mount.c`, filesystem `*_vfsops.c`.
                             - Required tests: filesystem mount-path integration tests.
                             - Acceptance: No filesystem bypasses generic mount framework.
-                        - [ ] Remove hardcoded or implicit virtual filesystem mount paths from kernel bootstrap once userspace flow is in place.
+                        - [ ] Remove hardcoded or implicit virtual filesystem mount paths from kernel bootstrap once userspace flow is in place. (REQ: REQ-05-0254)
                             - Affected: `sys/core/*`, `sys/kern/*` boot mount code.
                             - Required tests: boot integration tests with userspace-only `/dev`/`/proc` mounting.
                             - Acceptance: Kernel no longer auto-mounts `/dev` or `/proc` outside explicit compatibility mode.
-                        - [ ] Resolve or remove TODO/FIXME placeholders in mount/syscall/VFS paths with complete implementation tasks.
+                        - [ ] Resolve or remove TODO/FIXME placeholders in mount/syscall/VFS paths with complete implementation tasks. (REQ: REQ-05-0255)
                             - Affected: `sys/kern/vfs_mount.c`, `sys/vfs/*`, related headers/docs.
                             - Required tests: full mount test matrix + static grep check for stale mount TODO markers.
                             - Acceptance: Mount path has no placeholder logic in active code paths.
-                    - [ ] **12. Documentation**
-                        - [ ] Write `mount(2)` man page documenting syscall ABI, argument ownership, flags, and errno behavior.
+                    - [ ] **12. Documentation** (REQ: REQ-05-0256)
+                        - [ ] Write `mount(2)` man page documenting syscall ABI, argument ownership, flags, and errno behavior. (REQ: REQ-05-0257)
                             - Affected: `man/man2/mount.2`.
                             - Required tests: manpage lint + ABI cross-check against `include/sys/mount.h`.
                             - Acceptance: `mount(2)` man page is complete and matches implemented ABI.
-                        - [ ] Write `unmount(2)` man page documenting teardown semantics, busy/force behavior, and error codes.
+                        - [ ] Write `unmount(2)` man page documenting teardown semantics, busy/force behavior, and error codes. (REQ: REQ-05-0258)
                             - Affected: `man/man2/unmount.2`.
                             - Required tests: manpage lint + integration behavior cross-check.
                             - Acceptance: `unmount(2)` man page covers supported flags and edge cases.
-                        - [ ] Write filesystem developer guide for mount handler implementation, registration, and capability reporting.
+                        - [ ] Write filesystem developer guide for mount handler implementation, registration, and capability reporting. (REQ: REQ-05-0259)
                             - Affected: `docs/filesystems/mount-handler-guide.md`.
                             - Required tests: doc review checklist with at least one existing filesystem validated against guide.
                             - Acceptance: Guide is sufficient for adding a new filesystem mount handler without tribal knowledge.
-                        - [ ] Document virtual filesystem mount semantics for `/dev` and `/proc`, including expected behavior during early boot.
+                        - [ ] Document virtual filesystem mount semantics for `/dev` and `/proc`, including expected behavior during early boot. (REQ: REQ-05-0260)
                             - Affected: `docs/vfs/virtual-mounts.md`, `man/man5/devfs.5`, `man/man5/procfs.5`, `docs/boot.md`.
                             - Required tests: documentation consistency review with init scripts and integration tests.
                             - Acceptance: `/dev` and `/proc` behavior and required boot invocation patterns are explicitly specified.
-            - [ ] **`sys_clone` (Process/Thread Creation):**
-                - [ ] **Context Duplication:**
-                    - [ ] `CLONE_VM`: Share address space (refcount pmap).
-                    - [ ] `CLONE_FS`: Share cwd/root (refcount nodes).
-                    - [ ] `CLONE_FILES`: Share FD table (refcount table).
-                    - [ ] `CLONE_SIGHAND`: Share signal handlers.
-                - [ ] **Stack & TLS:**
-                    - [ ] Switch to user-provided stack (`child_stack`).
-                    - [ ] Implement `CLONE_SETTLS`: Set GDT entries (GS base).
-                - [ ] **Thread Grouping:**
-                    - [ ] `CLONE_THREAD`: Join thread group (`pgrp`/`tgid`).
-                    - [ ] `CLONE_PARENT`: Share parent process.
-            - [ ] **Event Notification:**
-                - [ ] **`sys_select` / `sys_poll`:**
-                    - [ ] `select_wait` queueing logic.
-                        - [ ] Define `struct poll_table` (wait queue list).
-                        - [ ] Implement `poll_initwait()` / `poll_freewait()`.
-                        - [ ] Per-FD `poll` method calls `poll_wait(wait_queue, poll_table)`.
-                    - [ ] Timeout handling (sleep with timeout).
-                        - [ ] Convert `struct timeval` / `int timeout_ms` to kernel ticks.
-                        - [ ] Use `sched_sleep_timeout(chan, ticks)` or similar.
-                        - [ ] Handle `EINTR` on signal during sleep.
-                    - [ ] Bitmask/Revents populating.
-                        - [ ] `select`: Populate `readfds`, `writefds`, `exceptfds` bitmasks.
-                        - [ ] `poll`: Populate `revents` field in each `struct pollfd`.
-                        - [ ] Return count of ready FDs.
-                    - [ ] **Wait Queue Infrastructure:**
-                        - [ ] Define `struct wait_queue_head` (spinlock + list head).
-                        - [ ] Define `struct wait_queue_entry` (thread ref + callback).
-                        - [ ] Implement `init_waitqueue_head()`.
-                        - [ ] Implement `add_wait_queue()` / `remove_wait_queue()`.
-                        - [ ] Implement `wake_up()` / `wake_up_interruptible()`.
-                    - [ ] **Driver Integration:**
-                        - [ ] Add `poll` method to `fs_node_t` (already done).
-                        - [ ] TTY: Wake readers on `tty_flip_buffer_push`.
-                        - [ ] Pipe: Wake readers/writers on data availability.
-                        - [ ] Socket: Wake on connection/data events.
-                - [ ] **`sys_epoll`:**
-                    - [ ] `epoll_create`: Allocate event context.
-                        - [ ] Define `struct eventpoll` (rb-tree of interests, ready list).
-                        - [ ] Allocate anonymous FD pointing to `eventpoll`.
-                        - [ ] Initialize spinlock and wait queue.
-                    - [ ] `epoll_ctl`: Add/Modify/Remove file descriptors (O(1) logic).
-                        - [ ] `EPOLL_CTL_ADD`: Insert into rb-tree, register callback with target FD.
-                        - [ ] `EPOLL_CTL_MOD`: Update event mask in existing entry.
-                        - [ ] `EPOLL_CTL_DEL`: Remove from rb-tree, unregister callback.
-                        - [ ] Handle `EEXIST`/`ENOENT` error cases.
-                    - [ ] `epoll_wait`: Block on event list.
-                        - [ ] Check ready list (events already triggered).
-                        - [ ] If empty, sleep on eventpoll wait queue.
-                        - [ ] Copy ready events to userspace `struct epoll_event` array.
-                        - [ ] Handle `maxevents` limit and timeout.
-                        - [ ] Edge-triggered (`EPOLLET`): Remove from ready list after report.
-                        - [ ] Level-triggered: Keep in ready list if still active.
-            - [ ] **`sys_execve` (Loader Dispatch):**
-                - [ ] Path lookup and permission check.
-                - [ ] Read first 128 bytes (Shebang/Magic detection).
-                - [ ] Dispatch to correct loader (ELF, Script, COFF, PE).
-                - [ ] Argument/Environment copying to new userspace stack.
-                - [ ] **Bitness Integration:** Update loaders (ELF/PE/AOUT) to set process bitness based on binary format.
-            - [ ] **IPC Subsystem:**
-                - [ ] **SysV Shared Memory:**
-                    - [ ] `shmid_ds` structure and key lookup.
-                    - [ ] `shmget`: Create/Find segment.
-                    - [ ] `shmat`: Map segment into `vm_map`.
-                    - [ ] `shmdt`: Unmap.
-                - [ ] **SysV Semaphores:**
-                    - [ ] `semid_ds` and semaphore arrays.
-                    - [ ] `semop`: Atomic increment/decrement/wait.
-                    - [ ] SEM_UNDO logic.
-                - [ ] **SysV Message Queues:**
-                    - [ ] `msqid_ds` and message linked list.
-                    - [ ] `msgsnd`/`msgrcv`: Blocking and non-blocking delivery.
-                - [ ] **POSIX Shared Memory:**
-                    - [ ] `/dev/shm` TmpFS integration.
-                    - [ ] `shm_open`: File descriptor based access.
-                - [ ] **POSIX Semaphores:**
-                    - [ ] Named (`sem_open`) vs Unnamed (`sem_init`).
-                    - [ ] `sem_t` structure.
+            - [ ] **`sys_clone` (Process/Thread Creation):** (REQ: REQ-05-0261)
+                - [ ] **Context Duplication:** (REQ: REQ-05-0262)
+                    - [ ] `CLONE_VM`: Share address space (refcount pmap). (REQ: REQ-05-0263)
+                    - [ ] `CLONE_FS`: Share cwd/root (refcount nodes). (REQ: REQ-05-0264)
+                    - [ ] `CLONE_FILES`: Share FD table (refcount table). (REQ: REQ-05-0265)
+                    - [ ] `CLONE_SIGHAND`: Share signal handlers. (REQ: REQ-05-0266, REQ-05-0573)
+                - [ ] **Stack & TLS:** (REQ: REQ-05-0267)
+                    - [ ] Switch to user-provided stack (`child_stack`). (REQ: REQ-05-0268)
+                    - [ ] Implement `CLONE_SETTLS`: Set GDT entries (GS base). (REQ: REQ-05-0269)
+                - [ ] **Thread Grouping:** (REQ: REQ-05-0270)
+                    - [ ] `CLONE_THREAD`: Join thread group (`pgrp`/`tgid`). (REQ: REQ-05-0271)
+                    - [ ] `CLONE_PARENT`: Share parent process. (REQ: REQ-05-0272)
+            - [ ] **Event Notification:** (REQ: REQ-05-0273)
+                - [ ] **`sys_select` / `sys_poll`:** (REQ: REQ-05-0274)
+                    - [ ] `select_wait` queueing logic. (REQ: REQ-05-0275)
+                        - [ ] Define `struct poll_table` (wait queue list). (REQ: REQ-05-0276)
+                        - [ ] Implement `poll_initwait()` / `poll_freewait()`. (REQ: REQ-05-0277)
+                        - [ ] Per-FD `poll` method calls `poll_wait(wait_queue, poll_table)`. (REQ: REQ-05-0278)
+                    - [ ] Timeout handling (sleep with timeout). (REQ: REQ-05-0279)
+                        - [ ] Convert `struct timeval` / `int timeout_ms` to kernel ticks. (REQ: REQ-05-0280)
+                        - [ ] Use `sched_sleep_timeout(chan, ticks)` or similar. (REQ: REQ-05-0281)
+                        - [ ] Handle `EINTR` on signal during sleep. (REQ: REQ-05-0282)
+                    - [ ] Bitmask/Revents populating. (REQ: REQ-05-0283)
+                        - [ ] `select`: Populate `readfds`, `writefds`, `exceptfds` bitmasks. (REQ: REQ-05-0284)
+                        - [ ] `poll`: Populate `revents` field in each `struct pollfd`. (REQ: REQ-05-0285)
+                        - [ ] Return count of ready FDs. (REQ: REQ-05-0286)
+                    - [ ] **Wait Queue Infrastructure:** (REQ: REQ-05-0287)
+                        - [ ] Define `struct wait_queue_head` (spinlock + list head). (REQ: REQ-05-0288)
+                        - [ ] Define `struct wait_queue_entry` (thread ref + callback). (REQ: REQ-05-0289)
+                        - [ ] Implement `init_waitqueue_head()`. (REQ: REQ-05-0290)
+                        - [ ] Implement `add_wait_queue()` / `remove_wait_queue()`. (REQ: REQ-05-0291)
+                        - [ ] Implement `wake_up()` / `wake_up_interruptible()`. (REQ: REQ-05-0292)
+                    - [ ] **Driver Integration:** (REQ: REQ-05-0293)
+                        - [ ] Add `poll` method to `fs_node_t` (already done). (REQ: REQ-05-0294)
+                        - [ ] TTY: Wake readers on `tty_flip_buffer_push`. (REQ: REQ-05-0295)
+                        - [ ] Pipe: Wake readers/writers on data availability. (REQ: REQ-05-0296)
+                        - [ ] Socket: Wake on connection/data events. (REQ: REQ-05-0297)
+                - [ ] **`sys_epoll`:** (REQ: REQ-05-0298)
+                    - [ ] `epoll_create`: Allocate event context. (REQ: REQ-05-0299)
+                        - [ ] Define `struct eventpoll` (rb-tree of interests, ready list). (REQ: REQ-05-0300)
+                        - [ ] Allocate anonymous FD pointing to `eventpoll`. (REQ: REQ-05-0301)
+                        - [ ] Initialize spinlock and wait queue. (REQ: REQ-05-0302)
+                    - [ ] `epoll_ctl`: Add/Modify/Remove file descriptors (O(1) logic). (REQ: REQ-05-0303)
+                        - [ ] `EPOLL_CTL_ADD`: Insert into rb-tree, register callback with target FD. (REQ: REQ-05-0304)
+                        - [ ] `EPOLL_CTL_MOD`: Update event mask in existing entry. (REQ: REQ-05-0305)
+                        - [ ] `EPOLL_CTL_DEL`: Remove from rb-tree, unregister callback. (REQ: REQ-05-0306)
+                        - [ ] Handle `EEXIST`/`ENOENT` error cases. (REQ: REQ-05-0307)
+                    - [ ] `epoll_wait`: Block on event list. (REQ: REQ-05-0308)
+                        - [ ] Check ready list (events already triggered). (REQ: REQ-05-0309)
+                        - [ ] If empty, sleep on eventpoll wait queue. (REQ: REQ-05-0308)
+                        - [ ] Copy ready events to userspace `struct epoll_event` array. (REQ: REQ-05-0311)
+                        - [ ] Handle `maxevents` limit and timeout. (REQ: REQ-05-0312)
+                        - [ ] Edge-triggered (`EPOLLET`): Remove from ready list after report. (REQ: REQ-05-0313)
+                        - [ ] Level-triggered: Keep in ready list if still active. (REQ: REQ-05-0314)
+            - [ ] **`sys_execve` (Loader Dispatch):** (REQ: REQ-05-0315)
+                - [ ] Path lookup and permission check. (REQ: REQ-05-0316)
+                - [ ] Read first 128 bytes (Shebang/Magic detection). (REQ: REQ-05-0317)
+                - [ ] Dispatch to correct loader (ELF, Script, COFF, PE). (REQ: REQ-05-0318)
+                - [ ] Argument/Environment copying to new userspace stack. (REQ: REQ-05-0319)
+                - [ ] **Bitness Integration:** Update loaders (ELF/PE/AOUT) to set process bitness based on binary format. (REQ: REQ-05-0320)
+            - [ ] **IPC Subsystem:** (REQ: REQ-05-0321)
+                - [ ] **SysV Shared Memory:** (REQ: REQ-05-0322)
+                    - [ ] `shmid_ds` structure and key lookup. (REQ: REQ-05-0323)
+                    - [ ] `shmget`: Create/Find segment. (REQ: REQ-05-0324)
+                    - [ ] `shmat`: Map segment into `vm_map`. (REQ: REQ-05-0325)
+                    - [ ] `shmdt`: Unmap. (REQ: REQ-05-0326)
+                - [ ] **SysV Semaphores:** (REQ: REQ-05-0327)
+                    - [ ] `semid_ds` and semaphore arrays. (REQ: REQ-05-0328)
+                    - [ ] `semop`: Atomic increment/decrement/wait. (REQ: REQ-05-0329)
+                    - [ ] SEM_UNDO logic. (REQ: REQ-05-0330)
+                - [ ] **SysV Message Queues:** (REQ: REQ-05-0331)
+                    - [ ] `msqid_ds` and message linked list. (REQ: REQ-05-0332)
+                    - [ ] `msgsnd`/`msgrcv`: Blocking and non-blocking delivery. (REQ: REQ-05-0333)
+                - [ ] **POSIX Shared Memory:** (REQ: REQ-05-0334)
+                    - [ ] `/dev/shm` TmpFS integration. (REQ: REQ-05-0335)
+                    - [ ] `shm_open`: File descriptor based access. (REQ: REQ-05-0336)
+                - [ ] **POSIX Semaphores:** (REQ: REQ-05-0337)
+                    - [ ] Named (`sem_open`) vs Unnamed (`sem_init`). (REQ: REQ-05-0338)
+                    - [ ] `sem_t` structure. (REQ: REQ-05-0339)
 
-    - [ ] Implement `sys_time` and RTC reading.
-    - [ ] **Emulation Path Lookup:** Check `/perso/<perso>/` before root for foreign personalities.
-    - [ ] **Debugging & Tracing:**
-        - [ ] **KDB:** Built-in kernel debugger (peek/poke memory, register dump, stack trace).
-        - [ ] **Serial Console:** Interactive GDB stub over UART.
-        - [ ] **DTrace:** (As planned in ideas) Dynamic tracing framework.
-- [ ] **64-bit System Call ABI Enforcement:**
-    - [ ] **Type Definitions & Alignment:**
-        - [ ] Define `off_t`, `time_t`, `ino_t`, `dev_t` as 64-bit integers in all architectures (i386/x86_64).
-        - [ ] Verify `size_t` and `ssize_t` match register width but critical structures use explicit width types (e.g., `uint64_t`).
-        - [ ] Audit `stat`, `statfs` structures for 64-bit alignment and padding.
-        - [ ] Ensure `struct timespec` and `struct timeval` use 64-bit seconds types.
-    - [ ] **System Call Audit:**
-        - [ ] Audit all file system calls (`open`, `seek`, `truncate`, `mmap`) for 64-bit offset support.
-        - [ ] Audit time-related syscalls (`clock_gettime`, `nanosleep`, `utimensat`) for 64-bit timespecs.
-        - [ ] Audit resource limit syscalls (`getrlimit`, `setrlimit`) for 64-bit values.
-        - [ ] Audit `recvmsg`/`sendmsg` for `struct msghdr` compatibility.
-    - [ ] **Kernel Refactoring:**
-        - [ ] Refactor `sys_lseek` to take 64-bit offset (split high/low registers on 32-bit if needed, or use register pairs).
-        - [ ] Refactor `sys_truncate` / `sys_ftruncate` for 64-bit lengths.
-        - [ ] Ensure VFS layer uses 64-bit offsets exclusively.
-        - [ ] Implement `sys_pselect6` / `sys_ppoll` with 64-bit timeout support.
-    - [ ] **LibC Wrappers (`lib/c`):**
-        - [ ] Update `lseek` to pass 64-bit arguments correctly (EDX:EAX on i386).
-        - [ ] Ensure `_FILE_OFFSET_BITS=64` semantics are default.
-        - [ ] Implement `stat` wrapper mapping to 64-bit kernel structure.
-    - [ ] **Personality Compatibility:**
-        - [ ] Implement translation for legacy 32-bit syscalls (Linux `old_mmap`, `stat64` vs `stat`).
-        - [ ] FreeBSD 32-bit shim layer updates per ABI.
-    - [ ] **Testing & Verification:**
-        - [ ] Add regression tests for large file support (>2GB and >4GB).
-        - [ ] Verify time_t overflow behavior (Year 2038 compliance).
-        - [ ] Verify structure layout with `pahole` or offsets test.
-    - [ ] **Documentation:**
-        - [ ] Document the 64-bit ABI in `docs/kernel/syscall_abi.md`.
-        - [ ] Update `man2` pages for affected syscalls.
-- [ ] **Personalities:**
-    - [ ] **Xenix & SCO Compatibility (The 6 Flavors):**
-        - [ ] **Variants:**
-            - [ ] **Microsoft Xenix 8086 (`MS-X/86`):**
-                - [ ] **Loader:** Support Magic `0x140` (Old Microsoft 8086 `x.out`).
-                - [ ] **Execution:** Pure Real Mode / VM86 Container.
-                - [ ] **Memory:** Small/Middle Memory Models (Separate I/D segments).
-                - [ ] **Emulation:** Trap `int 10h`/`int 13h` BIOS calls if used.
-            - [ ] **SCO Xenix 8086 (`SCO-X/86`):**
-                - [ ] **Validation:** Verify syscall differences from MS variant.
-                - [ ] **Extensions:** Support early SCO-specific `ioctl`s or IPC.
-            - [ ] **Microsoft Xenix 286 (`MS-X/286`):** Protected mode (LDTs).
-            - [ ] **SCO Xenix 286 (`SCO-X/286`):** Enhanced 286 support.
-            - [ ] **Microsoft Xenix 386 (`MS-X/386`):** Early 32-bit (pre-1987).
-            - [ ] **SCO Xenix 386 (`SCO-X/386`):** The widespread 32-bit standard (v2.3).
-            - [ ] **SCO Unix 3.2v2 (`SCO-U/3.2v2`):** COFF based, SVR3.2 compat.
-            - [ ] **SCO Unix 3.2v4 (`SCO-U/ODT3`):** Enhanced System V ABI (ODT 3.0).
-            - [ ] **SCO OpenServer 5 (`SCO-OSR5`):** Advanced COFF/ELF hybrid features.
-        - [ ] **Binary Loaders:**
-            - [ ] **`x.out` (Microsoft / Xenix):**
-                - [ ] **Header:** Magic 0x206 (286 Small), 0x20C (N86), 0x140 (8086).
-                - [ ] **Segments:** TEXT (RX), DATA (RW), BSS (Zero).
-                - [ ] **Symbol Table:** Generic Xenix symbol format.
-            - [ ] **COFF (Common Object File Format) - SCO/SVR3:**
-                - [ ] **File Header (`filehdr`):**
-                    - [ ] Magic: 0x14C (i386).
-                    - [ ] Number of sections.
-                    - [ ] Time/Date stamp (ignored or used for link verification).
-                    - [ ] Pointer to symbol table / Number of symbols.
-                - [ ] **Optional Header (`aouthdr`):**
-                    - [ ] Magic: 0x10B (ZMAGIC - Demand Paged).
-                        - [ ] Define `AOUT_ZMAGIC` constant (0x10B).
-                        - [ ] Validate magic number, reject unsupported types (OMAGIC, NMAGIC).
-                    - [ ] `tsize` (Text size), `dsize` (Data size), `bsize` (BSS size).
-                        - [ ] Parse `tsize` from offset 4 (uint32_t).
-                        - [ ] Parse `dsize` from offset 8 (uint32_t).
-                        - [ ] Parse `bsize` from offset 12 (uint32_t).
-                        - [ ] Validate sizes are reasonable (< 2GB, page-aligned for ZMAGIC).
-                    - [ ] `entry` (Entry point virtual address).
-                        - [ ] Parse `entry` from offset 16 (uint32_t).
-                        - [ ] Validate entry is within `.text` segment bounds.
-                    - [ ] `text_start`, `data_start`.
-                        - [ ] Parse `text_start` from offset 20 (uint32_t).
-                        - [ ] Parse `data_start` from offset 24 (uint32_t).
-                        - [ ] Validate `text_start` < `data_start` or handle BSS-only cases.
-                - [ ] **Section Headers (`scnhdr`):**
-                    - [ ] Name (`.text`, `.data`, `.bss`, `.lib`).
-                        - [ ] Parse 8-byte section name (may be NUL-padded).
-                        - [ ] Handle long names (pointer to string table, `/offset` format).
-                        - [ ] Identify special sections (`.lib`, `.comment`, `.debug`).
-                    - [ ] `paddr` (Physical), `vaddr` (Virtual).
-                        - [ ] Parse `paddr` from offset 8 (uint32_t).
-                        - [ ] Parse `vaddr` from offset 12 (uint32_t).
-                        - [ ] Validate `vaddr` is user-space address (< 0xC0000000).
-                    - [ ] `size`, `scnptr` (File offset).
-                        - [ ] Parse `size` from offset 16 (uint32_t).
-                        - [ ] Parse `scnptr` from offset 20 (uint32_t).
-                        - [ ] Validate `scnptr + size` <= file size.
-                    - [ ] Flags (`STYP_TEXT`, `STYP_DATA`, `STYP_BSS`).
-                        - [ ] Define flag constants: `STYP_TEXT=0x20`, `STYP_DATA=0x40`, `STYP_BSS=0x80`.
-                        - [ ] Map flags to pmap protections (RX, RW, RW-zero).
-                        - [ ] Handle `STYP_LIB` (0x800) for shared library sections.
-                - [ ] **SCO Shared Libraries (`.lib` section):**
-                    - [ ] Parse `.lib` section header.
-                        - [ ] Locate section with name `.lib` or flag `STYP_LIB`.
-                        - [ ] Read section content from `scnptr` offset.
-                    - [ ] **Path entries:** Absolute path to shared library.
-                        - [ ] Parse path table offset from `.lib` header.
-                        - [ ] Iterate path entries (NUL-terminated strings).
-                        - [ ] Resolve library path (search `/shlib`, `/usr/shlib`).
-                        - [ ] Load and map referenced shared libraries recursively.
-                    - [ ] **Offset entries:** Import method (static jump table).
-                        - [ ] Parse import table offset and count.
-                        - [ ] Build jump table at fixed address (`0x08000000` typical).
-                        - [ ] Populate jump stubs (`jmp [addr]`) for each import.
-                        - [ ] Handle import ordinals vs. named imports.
-            - [ ] **OMF (Intel Object Module Format) - 286/386:**
-                - [ ] **Record Types:**
-                    - [ ] `0x80` (`THEADR`): Module Name.
-                    - [ ] `0x88` (`COMENT`): Compiler info / Memory model.
-                    - [ ] `0x98` (`SEGDEF`): Segment Definition (Attributes, Size).
-                    - [ ] `0x9A` (`GRPDEF`): Group Definition (DGROUP).
-                    - [ ] `0xA0` (`LEDATA`): Logical Enumerated Data (Content).
-                    - [ ] `0xB0` (`FIXUPP`): Relocation Records (Segment-relative, Self-relative).
-                    - [ ] `0x8A` (`MODEND`): Module End (Main entry point).
-                - [ ] **Loading Logic:** Multi-pass linker/loader to resolve inter-segment references.
-        - [ ] **System Call Interface:**
-            - [ ] **Mechanisms (ABI Differences):**
-                - [ ] **iBCS2 / SCO:**
-                    - [ ] `lcall 7,0` (Call Gate 0).
-                - [ ] **Linux:**
-                    - [ ] `int 0x80` (Interrupt Vector 128).
-                - [ ] **Legacy / Special:**
-                    - [ ] `int 0x21` (DOS emulation in VM86).
-                    - [ ] `int 0x7F` (Older Xenix).
-            - [ ] **ABI Translation:**
-            - [ ] **ABI Translation (iBCS2):**
-                - [ ] **Stack Frame Decoding:**
-                    - [ ] 16-bit client: arguments at `SS:SP+2` (2-byte words).
-                    - [ ] 32-bit client: arguments at `SS:ESP+4` (4-byte words).
-                - [ ] **CXENIX Dispatcher (Syscall 0x07):**
-                    - [ ] Sub-function handling (table driven) for Xenix extensions.
-                    - [ ] `rdchk` (check for data), `nap` (millisecond sleep).
-                    - [ ] `ftime` (System V time).
-                - [ ] **Shared Memory (Xenix):**
-                    - [ ] `sdget`, `sdfree` (Create/Destroy shared data).
-                    - [ ] `sdenter`, `sdleave` (Attach/Detach).
-                    - [ ] **Memory mapping:** Map high memory segments via LDT.
-                    - [ ] `xsbrk` (Extended break for huge data).
-                - [ ] **VM86 Support:**
-                    - [ ] `v86_init`: Initialize VM86 task state.
-                    - [ ] `v86_sleep`: Wait for interrupt/event.
-                    - [ ] Monitor BIOS calls trapped via GPF/Invalid Opcode.
-    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:**
-    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:**
-        - [ ] **16-Bit Execution Environment:**
-            - [ ] **LDT Setup:**
-                - [ ] Descriptor 0: NULL.
-                - [ ] Descriptor 1: CS (Code), 16-bit conforming/non-conforming.
-                - [ ] Descriptor 2: DS (Data), 16-bit expand-up/down.
-            - [ ] **Segmentation Logic:**
-                - [ ] **Small Model:** CS != DS/SS.
-                - [ ] **Tiny Model:** CS == DS == SS (COM file style).
-                - [ ] **Stack:** 16-bit Stack Pointer (`SP`) wraparound handling.
-        - [ ] **Loader (`a.out` Minix):**
-            - [ ] **Header:** 32-byte header (Magic, HeaderLen, Text/Data/Bss sizes).
-            - [ ] **Load:** Read segments into allocated low-memory pages.
-            - [ ] **Relocation:** Applying fixups if not position independent.
-        - [ ] **Syscall Interface (`int 0x80`):**
-            - [ ] **Trap:** IDT entry 0x80 handling 16-bit caller.
-            - [ ] **Argument Fetch:**
-                - [ ] Read `BX` (First arg), `CX` (Second), `DX` (Third), `SI`, `DI`.
-                - [ ] Or read stack arguments if used.
-            - [ ] **Pointer Thunking:**
-                - [ ] Convert `DS:BX` (16:16) -> Linear Address (`LDT[DS].Base + BX`).
-                - [ ] Bounds checking against segment limit.
-    - [ ] **Linux (Massive Expansion):**
-        - [ ] ELF Loader personality detection (brandelf support).
-        - [ ] **Signal Compatibility:**
-            - [ ] **Mapping:** Translate Linux signal numbers to native (e.g., SIGCHLD, SIGSTOP).
-            - [ ] **Sigaction:** Translate `linux_sigaction` structure (mask bits).
-            - [ ] **Trampoline:** Linux-compatible signal return trampoline.
-        - [ ] **Error Codes:**
-            - [ ] Map internal errno to Linux errno (arch-specific).
-        - [ ] **FS Path Translation:**
-            - [ ] `/proc` -> `/compat/linux/proc` redirection.
-            - [ ] `/sys` -> `/compat/linux/sys` redirection.
-            - [ ] `at()` syscalls family support.
-        - [ ] **Networking (`socketcall`):**
-            - [ ] Multiplexer syscall 102 (`sys_socketcall`).
-            - [ ] **Socket Creation & Binding:**
-                - [ ] `SYS_SOCKET`: Validate domain/type/proto, allocate socket.
-                - [ ] `SYS_BIND`: Copy address from user, call internal bind.
-                - [ ] `SYS_CONNECT`: Copy address, initiate connection.
-            - [ ] **Data Flow:**
-                - [ ] `SYS_SEND`/`SYS_RECV`: Simple IO wrappers.
-                - [ ] `SYS_SENDTO`/`SYS_RECVFROM`: UDP/Connectionless wrappers.
-                - [ ] `SYS_SENDMSG`/`SYS_RECVMSG`: Complex message structure scatter/gather.
-            - [ ] **State & Options:**
-                - [ ] `SYS_LISTEN`: Set backlog.
-                - [ ] `SYS_ACCEPT`: New socket file descriptor creation.
-                - [ ] `SYS_GETSOCKNAME`/`SYS_GETPEERNAME`: Address retrieval.
-                - [ ] `SYS_SETSOCKOPT`/`SYS_GETSOCKOPT`: Option translation (Linux <-> Native).
-                - [ ] `SYS_SHUTDOWN`: Connection termination.
-                - [ ] `SYS_SOCKETPAIR`: Connected pair creation.
-        - [ ] **IPC Multiplexer (`sys_ipc`):**
-            - [ ] Multiplexer syscall 117.
-            - [ ] **Semaphores (`sem*`):**
-                - [ ] `SEMOP`: Atomic array operations.
-                - [ ] `SEMGET`: Get/Create semaphore set.
-                - [ ] `SEMCTL`: Control operations (GETVAL, SETVAL, IPC_RMID).
-            - [ ] **Message Queues (`msg*`):**
-                - [ ] `MSGSND`: Send message with priority.
-                - [ ] `MSGRCV`: Receive message (blocking/non-blocking).
-                - [ ] `MSGGET`: Get/Create message queue.
-                - [ ] `MSGCTL`: Control operations.
-            - [ ] **Shared Memory (`shm*`):**
-                - [ ] `SHMAT`: Attach segment to address space.
-                - [ ] `SHMDT`: Detach segment.
-                - [ ] `SHMGET`: Get/Create shared memory segment.
-                - [ ] `SHMCTL`: Control operations (lock/unlock/remove).
-        - [ ] **Ioctls (`sys_ioctl`):**
-            - [ ] **Termios:**
-                - [ ] `TCGETS`: Translate native termios to Linux termios.
-                - [ ] `TCSETS`/`TCSETSW`/`TCSETSF`: Translate Linux termios to native.
-            - [ ] **Sockio:**
-                - [ ] `SIOCGIFNAME`: Get interface name by index.
-                - [ ] `SIOCGIFADDR`: Get interface IP address.
-                - [ ] `SIOCGIFBRDADDR`: Get broadcast address.
-                - [ ] `SIOCGIFNETMASK`: Get network mask.
-        - [ ] **Process Creation (`sys_clone` extended):**
-            - [ ] **Flags Handling:**
-                - [ ] `CLONE_PARENT_SETTID`: Store Child TID at `parent_tidptr`.
-                - [ ] `CLONE_CHILD_CLEARTID`: Store Child TID at `child_tidptr` and clear on exit.
-                - [ ] `CLONE_SETTLS`: Set GDT/FS/GS base for Thread Local Storage.
-                - [ ] `CLONE_FILES`: Share file descriptor table (refcounting).
-                - [ ] `CLONE_FS`: Share filesystem info (cwd, root).
-                - [ ] `CLONE_SIGHAND`: Share signal handlers.
-                - [ ] `CLONE_VM`: Share address space (threads).
-    - [ ] **Minix/386:**
-        - [ ] Implement `send`/`receive` message passing syscalls.
-        - [ ] Map Minix 3 kernel messages to native calls.
-    - [ ] **FreeBSD:**
-        - [ ] ELF Loader personality detection.
-        - [ ] Complete `thr_new` implementation.
-        - [ ] **FreeBSD 14.3 Compatibility (i386):**
-            - [ ] Implement `struct kinfo_proc` (FreeBSD 14.3 layout).
-            - [ ] **Binary Compatibility:**
-                - [ ] Investigate need for virtual `/dev/kmem` emulation for legacy binaries.
-            - [ ] **Native Porting:**
-                - [ ] Implement `libkvm` shim in `libsys` for porting BSD tools to native ABI.
-            - [ ] **Process Translation:** Logic to map native `process_t` to `kinfo_proc`.
-    - [ ] **BSD-Style `sysctl` Syscall Surface (Native + Compat):**
-        - [ ] **Native Syscall ABI Contract:**
-            - [ ] Define canonical native `sysctl` syscall argument contract with versioned request structure.
-            - [ ] Define strict userspace pointer/length validation rules for old/new buffers.
-            - [ ] Define canonical atomic read/write semantics when both old and new values are present.
-            - [ ] Define canonical size-discovery semantics when old buffer pointer is NULL.
-            - [ ] Define canonical subtree-enumeration request contract for user tooling.
-            - [ ] Define canonical metadata-query request contract (type, flags, description, ABI class).
-            - [ ] Add syscall table entries and personality dispatch wiring for native ABI.
-        - [ ] **MIB + Name Resolution Paths:**
-            - [ ] Implement MIB-based syscall path end-to-end (`int *name`, `u_int namelen`).
-            - [ ] Implement kernel name-to-MIB translation operation for userspace helpers.
-            - [ ] Implement kernel MIB-to-name translation operation for diagnostics/tooling.
-            - [ ] Define max name depth and token-length limits with explicit `EINVAL` behavior.
-            - [ ] Add strict rejection path for mixed name/MIB invocation modes.
-        - [ ] **Error and Compatibility Semantics:**
-            - [ ] Define BSD-consistent errno mapping (`ENOENT`, `ENOMEM`, `EINVAL`, `EFAULT`, `EPERM`, `EACCES`, `ENOTDIR`).
-            - [ ] Implement forward-compat handling for unknown request-structure extensions.
-            - [ ] Implement backward-compat handling for older request versions.
-            - [ ] Add compatibility tests for partial reads, retry loops, and concurrent value mutation.
-        - [ ] **Permission & Capability Enforcement:**
-            - [ ] Wire syscall path into unified `sysctl` access-control hooks.
-            - [ ] Enforce read/write separation at syscall boundary before handler invocation.
-            - [ ] Enforce capability-gated writes for privileged nodes.
-            - [ ] Add per-personality gate checks before exposing compatibility namespace nodes.
-        - [ ] **Personality Integration & Overlays:**
-            - [ ] Define personality overlay model (native base tree + personality-specific branches).
-            - [ ] Implement FreeBSD compatibility overlay for `__sysctl` expectations.
-            - [ ] Implement NetBSD/OpenBSD compatibility overlay scaffolding with explicit unsupported-node behavior.
-            - [ ] Implement per-personality node visibility filters in traversal and enumeration paths.
-            - [ ] Add compatibility shims translating personality-specific MIBs to native internal nodes where feasible.
-        - [ ] **Userspace ABI Tests (Syscall Layer):**
-            - [ ] Add integration tests for native MIB reads/writes, size probes, and metadata queries.
-            - [ ] Add integration tests for enumeration of children and deep subtree walks.
-            - [ ] Add negative tests for malformed pointers, truncated MIBs, and invalid type writes.
-            - [ ] Add race tests for concurrent read/write against lock-protected nodes.
-            - [ ] Add ABI snapshot tests ensuring stable syscall behavior across kernel revisions.
-    - [ ] **BSD Family (NetBSD/OpenBSD):**
-        - [ ] Implement `__sysctl` personality entrypoint backed by shared native `sysctl` core.
-        - [ ] Implement NetBSD/OpenBSD-specific compatibility mapping table for legacy MIB constants.
-        - [ ] Add personality tests validating expected `__sysctl` behavior and errno semantics.
-        - [ ] Support BSD-specific syscalls (`ktrace`, `pledge`/`unveil`).
-    - [ ] **Solaris (SVR4):**
-        - [ ] Implement SVR4 syscalls (`getdents64`, `stream` ioctls).
-        - [ ] Support Solaris door IPC emulation.
+    - [ ] Implement `sys_time` and RTC reading. (REQ: REQ-05-0340)
+    - [ ] **Emulation Path Lookup:** Check `/perso/<perso>/` before root for foreign personalities. (REQ: REQ-05-0341)
+    - [ ] **Debugging & Tracing:** (REQ: REQ-05-0342)
+        - [ ] **KDB:** Built-in kernel debugger (peek/poke memory, register dump, stack trace). (REQ: REQ-05-0343)
+        - [ ] **Serial Console:** Interactive GDB stub over UART. (REQ: REQ-05-0344)
+        - [ ] **DTrace:** (As planned in ideas) Dynamic tracing framework. (REQ: REQ-05-0345)
+- [ ] **64-bit System Call ABI Enforcement:** (REQ: REQ-05-0346)
+    - [ ] **Type Definitions & Alignment:** (REQ: REQ-05-0347)
+        - [ ] Define `off_t`, `time_t`, `ino_t`, `dev_t` as 64-bit integers in all architectures (i386/x86_64). (REQ: REQ-05-0348)
+        - [ ] Verify `size_t` and `ssize_t` match register width but critical structures use explicit width types (e.g., `uint64_t`). (REQ: REQ-05-0349)
+        - [ ] Audit `stat`, `statfs` structures for 64-bit alignment and padding. (REQ: REQ-05-0350)
+        - [ ] Ensure `struct timespec` and `struct timeval` use 64-bit seconds types. (REQ: REQ-05-0351)
+    - [ ] **System Call Audit:** (REQ: REQ-05-0005, REQ-05-0352)
+        - [ ] Audit all file system calls (`open`, `seek`, `truncate`, `mmap`) for 64-bit offset support. (REQ: REQ-05-0353)
+        - [ ] Audit time-related syscalls (`clock_gettime`, `nanosleep`, `utimensat`) for 64-bit timespecs. (REQ: REQ-05-0354)
+        - [ ] Audit resource limit syscalls (`getrlimit`, `setrlimit`) for 64-bit values. (REQ: REQ-05-0355)
+        - [ ] Audit `recvmsg`/`sendmsg` for `struct msghdr` compatibility. (REQ: REQ-05-0356)
+    - [ ] **Kernel Refactoring:** (REQ: REQ-05-0008, REQ-05-0357)
+        - [ ] Refactor `sys_lseek` to take 64-bit offset (split high/low registers on 32-bit if needed, or use register pairs). (REQ: REQ-05-0358)
+        - [ ] Refactor `sys_truncate` / `sys_ftruncate` for 64-bit lengths. (REQ: REQ-05-0359)
+        - [ ] Ensure VFS layer uses 64-bit offsets exclusively. (REQ: REQ-05-0360)
+        - [ ] Implement `sys_pselect6` / `sys_ppoll` with 64-bit timeout support. (REQ: REQ-05-0361)
+    - [ ] **LibC Wrappers (`lib/c`):** (REQ: REQ-05-0362)
+        - [ ] Update `lseek` to pass 64-bit arguments correctly (EDX:EAX on i386). (REQ: REQ-05-0363)
+        - [ ] Ensure `_FILE_OFFSET_BITS=64` semantics are default. (REQ: REQ-05-0364)
+        - [ ] Implement `stat` wrapper mapping to 64-bit kernel structure. (REQ: REQ-05-0365)
+    - [ ] **Personality Compatibility:** (REQ: REQ-05-0017, REQ-05-0366)
+        - [ ] Implement translation for legacy 32-bit syscalls (Linux `old_mmap`, `stat64` vs `stat`). (REQ: REQ-05-0367)
+        - [ ] FreeBSD 32-bit shim layer updates per ABI. (REQ: REQ-05-0368)
+    - [ ] **Testing & Verification:** (REQ: REQ-05-0117, REQ-05-0369)
+        - [ ] Add regression tests for large file support (>2GB and >4GB). (REQ: REQ-05-0370)
+        - [ ] Verify time_t overflow behavior (Year 2038 compliance). (REQ: REQ-05-0371)
+        - [ ] Verify structure layout with `pahole` or offsets test. (REQ: REQ-05-0372)
+    - [ ] **Documentation:** (REQ: REQ-05-0126, REQ-05-0373)
+        - [ ] Document the 64-bit ABI in `docs/kernel/syscall_abi.md`. (REQ: REQ-05-0374)
+        - [ ] Update `man2` pages for affected syscalls. (REQ: REQ-05-0375)
+- [ ] **Personalities:** (REQ: REQ-05-0376)
+    - [ ] **Xenix & SCO Compatibility (The 6 Flavors):** (REQ: REQ-05-0377)
+        - [ ] **Variants:** (REQ: REQ-05-0378)
+            - [ ] **Microsoft Xenix 8086 (`MS-X/86`):** (REQ: REQ-05-0379)
+                - [ ] **Loader:** Support Magic `0x140` (Old Microsoft 8086 `x.out`). (REQ: REQ-05-0380)
+                - [ ] **Execution:** Pure Real Mode / VM86 Container. (REQ: REQ-05-0381)
+                - [ ] **Memory:** Small/Middle Memory Models (Separate I/D segments). (REQ: REQ-05-0382)
+                - [ ] **Emulation:** Trap `int 10h`/`int 13h` BIOS calls if used. (REQ: REQ-05-0383)
+            - [ ] **SCO Xenix 8086 (`SCO-X/86`):** (REQ: REQ-05-0384)
+                - [ ] **Validation:** Verify syscall differences from MS variant. (REQ: REQ-05-0385)
+                - [ ] **Extensions:** Support early SCO-specific `ioctl`s or IPC. (REQ: REQ-05-0386)
+            - [ ] **Microsoft Xenix 286 (`MS-X/286`):** Protected mode (LDTs). (REQ: REQ-05-0387)
+            - [ ] **SCO Xenix 286 (`SCO-X/286`):** Enhanced 286 support. (REQ: REQ-05-0388)
+            - [ ] **Microsoft Xenix 386 (`MS-X/386`):** Early 32-bit (pre-1987). (REQ: REQ-05-0389)
+            - [ ] **SCO Xenix 386 (`SCO-X/386`):** The widespread 32-bit standard (v2.3). (REQ: REQ-05-0390)
+            - [ ] **SCO Unix 3.2v2 (`SCO-U/3.2v2`):** COFF based, SVR3.2 compat. (REQ: REQ-05-0391)
+            - [ ] **SCO Unix 3.2v4 (`SCO-U/ODT3`):** Enhanced System V ABI (ODT 3.0). (REQ: REQ-05-0392)
+            - [ ] **SCO OpenServer 5 (`SCO-OSR5`):** Advanced COFF/ELF hybrid features. (REQ: REQ-05-0393)
+        - [ ] **Binary Loaders:** (REQ: REQ-05-0394)
+            - [ ] **`x.out` (Microsoft / Xenix):** (REQ: REQ-05-0395)
+                - [ ] **Header:** Magic 0x206 (286 Small), 0x20C (N86), 0x140 (8086). (REQ: REQ-05-0396)
+                - [ ] **Segments:** TEXT (RX), DATA (RW), BSS (Zero). (REQ: REQ-05-0397)
+                - [ ] **Symbol Table:** Generic Xenix symbol format. (REQ: REQ-05-0398)
+            - [ ] **COFF (Common Object File Format) - SCO/SVR3:** (REQ: REQ-05-0399)
+                - [ ] **File Header (`filehdr`):** (REQ: REQ-05-0400)
+                    - [ ] Magic: 0x14C (i386). (REQ: REQ-05-0401)
+                    - [ ] Number of sections. (REQ: REQ-05-0402)
+                    - [ ] Time/Date stamp (ignored or used for link verification). (REQ: REQ-05-0403)
+                    - [ ] Pointer to symbol table / Number of symbols. (REQ: REQ-05-0404)
+                - [ ] **Optional Header (`aouthdr`):** (REQ: REQ-05-0405)
+                    - [ ] Magic: 0x10B (ZMAGIC - Demand Paged). (REQ: REQ-05-0406)
+                        - [ ] Define `AOUT_ZMAGIC` constant (0x10B). (REQ: REQ-05-0407)
+                        - [ ] Validate magic number, reject unsupported types (OMAGIC, NMAGIC). (REQ: REQ-05-0408)
+                    - [ ] `tsize` (Text size), `dsize` (Data size), `bsize` (BSS size). (REQ: REQ-05-0409)
+                        - [ ] Parse `tsize` from offset 4 (uint32_t). (REQ: REQ-05-0410)
+                        - [ ] Parse `dsize` from offset 8 (uint32_t). (REQ: REQ-05-0411)
+                        - [ ] Parse `bsize` from offset 12 (uint32_t). (REQ: REQ-05-0412)
+                        - [ ] Validate sizes are reasonable (< 2GB, page-aligned for ZMAGIC). (REQ: REQ-05-0413)
+                    - [ ] `entry` (Entry point virtual address). (REQ: REQ-05-0414)
+                        - [ ] Parse `entry` from offset 16 (uint32_t). (REQ: REQ-05-0415)
+                        - [ ] Validate entry is within `.text` segment bounds. (REQ: REQ-05-0416)
+                    - [ ] `text_start`, `data_start`. (REQ: REQ-05-0417)
+                        - [ ] Parse `text_start` from offset 20 (uint32_t). (REQ: REQ-05-0418)
+                        - [ ] Parse `data_start` from offset 24 (uint32_t). (REQ: REQ-05-0419)
+                        - [ ] Validate `text_start` < `data_start` or handle BSS-only cases. (REQ: REQ-05-0420)
+                - [ ] **Section Headers (`scnhdr`):** (REQ: REQ-05-0421)
+                    - [ ] Name (`.text`, `.data`, `.bss`, `.lib`). (REQ: REQ-05-0422)
+                        - [ ] Parse 8-byte section name (may be NUL-padded). (REQ: REQ-05-0423)
+                        - [ ] Handle long names (pointer to string table, `/offset` format). (REQ: REQ-05-0424)
+                        - [ ] Identify special sections (`.lib`, `.comment`, `.debug`). (REQ: REQ-05-0425)
+                    - [ ] `paddr` (Physical), `vaddr` (Virtual). (REQ: REQ-05-0426)
+                        - [ ] Parse `paddr` from offset 8 (uint32_t). (REQ: REQ-05-0427)
+                        - [ ] Parse `vaddr` from offset 12 (uint32_t). (REQ: REQ-05-0428)
+                        - [ ] Validate `vaddr` is user-space address (< 0xC0000000). (REQ: REQ-05-0429)
+                    - [ ] `size`, `scnptr` (File offset). (REQ: REQ-05-0430)
+                        - [ ] Parse `size` from offset 16 (uint32_t). (REQ: REQ-05-0431)
+                        - [ ] Parse `scnptr` from offset 20 (uint32_t). (REQ: REQ-05-0432)
+                        - [ ] Validate `scnptr + size` <= file size. (REQ: REQ-05-0433)
+                    - [ ] Flags (`STYP_TEXT`, `STYP_DATA`, `STYP_BSS`). (REQ: REQ-05-0434)
+                        - [ ] Define flag constants: `STYP_TEXT=0x20`, `STYP_DATA=0x40`, `STYP_BSS=0x80`. (REQ: REQ-05-0435)
+                        - [ ] Map flags to pmap protections (RX, RW, RW-zero). (REQ: REQ-05-0436)
+                        - [ ] Handle `STYP_LIB` (0x800) for shared library sections. (REQ: REQ-05-0437)
+                - [ ] **SCO Shared Libraries (`.lib` section):** (REQ: REQ-05-0438)
+                    - [ ] Parse `.lib` section header. (REQ: REQ-05-0439)
+                        - [ ] Locate section with name `.lib` or flag `STYP_LIB`. (REQ: REQ-05-0440)
+                        - [ ] Read section content from `scnptr` offset. (REQ: REQ-05-0441)
+                    - [ ] **Path entries:** Absolute path to shared library. (REQ: REQ-05-0442)
+                        - [ ] Parse path table offset from `.lib` header. (REQ: REQ-05-0443)
+                        - [ ] Iterate path entries (NUL-terminated strings). (REQ: REQ-05-0444)
+                        - [ ] Resolve library path (search `/shlib`, `/usr/shlib`). (REQ: REQ-05-0445)
+                        - [ ] Load and map referenced shared libraries recursively. (REQ: REQ-05-0446)
+                    - [ ] **Offset entries:** Import method (static jump table). (REQ: REQ-05-0447)
+                        - [ ] Parse import table offset and count. (REQ: REQ-05-0448)
+                        - [ ] Build jump table at fixed address (`0x08000000` typical). (REQ: REQ-05-0449)
+                        - [ ] Populate jump stubs (`jmp [addr]`) for each import. (REQ: REQ-05-0450)
+                        - [ ] Handle import ordinals vs. named imports. (REQ: REQ-05-0451)
+            - [ ] **OMF (Intel Object Module Format) - 286/386:** (REQ: REQ-05-0452)
+                - [ ] **Record Types:** (REQ: REQ-05-0453)
+                    - [ ] `0x80` (`THEADR`): Module Name. (REQ: REQ-05-0454)
+                    - [ ] `0x88` (`COMENT`): Compiler info / Memory model. (REQ: REQ-05-0455)
+                    - [ ] `0x98` (`SEGDEF`): Segment Definition (Attributes, Size). (REQ: REQ-05-0456)
+                    - [ ] `0x9A` (`GRPDEF`): Group Definition (DGROUP). (REQ: REQ-05-0457)
+                    - [ ] `0xA0` (`LEDATA`): Logical Enumerated Data (Content). (REQ: REQ-05-0458)
+                    - [ ] `0xB0` (`FIXUPP`): Relocation Records (Segment-relative, Self-relative). (REQ: REQ-05-0459)
+                    - [ ] `0x8A` (`MODEND`): Module End (Main entry point). (REQ: REQ-05-0460)
+                - [ ] **Loading Logic:** Multi-pass linker/loader to resolve inter-segment references. (REQ: REQ-05-0461)
+        - [ ] **System Call Interface:** (REQ: REQ-05-0462)
+            - [ ] **Mechanisms (ABI Differences):** (REQ: REQ-05-0463)
+                - [ ] **iBCS2 / SCO:** (REQ: REQ-05-0464)
+                    - [ ] `lcall 7,0` (Call Gate 0). (REQ: REQ-05-0465)
+                - [ ] **Linux:** (REQ: REQ-05-0466)
+                    - [ ] `int 0x80` (Interrupt Vector 128). (REQ: REQ-05-0467)
+                - [ ] **Legacy / Special:** (REQ: REQ-05-0468)
+                    - [ ] `int 0x21` (DOS emulation in VM86). (REQ: REQ-05-0469)
+                    - [ ] `int 0x7F` (Older Xenix). (REQ: REQ-05-0470)
+            - [ ] **ABI Translation:** (REQ: REQ-05-0471)
+            - [ ] **ABI Translation (iBCS2):** (REQ: REQ-05-0472)
+                - [ ] **Stack Frame Decoding:** (REQ: REQ-05-0473)
+                    - [ ] 16-bit client: arguments at `SS:SP+2` (2-byte words). (REQ: REQ-05-0474)
+                    - [ ] 32-bit client: arguments at `SS:ESP+4` (4-byte words). (REQ: REQ-05-0475)
+                - [ ] **CXENIX Dispatcher (Syscall 0x07):** (REQ: REQ-05-0476)
+                    - [ ] Sub-function handling (table driven) for Xenix extensions. (REQ: REQ-05-0477)
+                    - [ ] `rdchk` (check for data), `nap` (millisecond sleep). (REQ: REQ-05-0478)
+                    - [ ] `ftime` (System V time). (REQ: REQ-05-0479)
+                - [ ] **Shared Memory (Xenix):** (REQ: REQ-05-0480)
+                    - [ ] `sdget`, `sdfree` (Create/Destroy shared data). (REQ: REQ-05-0481)
+                    - [ ] `sdenter`, `sdleave` (Attach/Detach). (REQ: REQ-05-0482)
+                    - [ ] **Memory mapping:** Map high memory segments via LDT. (REQ: REQ-05-0483)
+                    - [ ] `xsbrk` (Extended break for huge data). (REQ: REQ-05-0484)
+                - [ ] **VM86 Support:** (REQ: REQ-05-0485)
+                    - [ ] `v86_init`: Initialize VM86 task state. (REQ: REQ-05-0486)
+                    - [ ] `v86_sleep`: Wait for interrupt/event. (REQ: REQ-05-0487)
+                    - [ ] Monitor BIOS calls trapped via GPF/Invalid Opcode. (REQ: REQ-05-0488)
+    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:** (REQ: REQ-05-0489, REQ-05-0490)
+    - [ ] **ELKS (Embeddable Linux Kernel Subset) - 16-bit Mode:** (REQ: REQ-05-0489, REQ-05-0490)
+        - [ ] **16-Bit Execution Environment:** (REQ: REQ-05-0491)
+            - [ ] **LDT Setup:** (REQ: REQ-05-0492)
+                - [ ] Descriptor 0: NULL. (REQ: REQ-05-0493)
+                - [ ] Descriptor 1: CS (Code), 16-bit conforming/non-conforming. (REQ: REQ-05-0494)
+                - [ ] Descriptor 2: DS (Data), 16-bit expand-up/down. (REQ: REQ-05-0495)
+            - [ ] **Segmentation Logic:** (REQ: REQ-05-0496)
+                - [ ] **Small Model:** CS != DS/SS. (REQ: REQ-05-0497)
+                - [ ] **Tiny Model:** CS == DS == SS (COM file style). (REQ: REQ-05-0498)
+                - [ ] **Stack:** 16-bit Stack Pointer (`SP`) wraparound handling. (REQ: REQ-05-0499)
+        - [ ] **Loader (`a.out` Minix):** (REQ: REQ-05-0500)
+            - [ ] **Header:** 32-byte header (Magic, HeaderLen, Text/Data/Bss sizes). (REQ: REQ-05-0501)
+            - [ ] **Load:** Read segments into allocated low-memory pages. (REQ: REQ-05-0502)
+            - [ ] **Relocation:** Applying fixups if not position independent. (REQ: REQ-05-0503)
+        - [ ] **Syscall Interface (`int 0x80`):** (REQ: REQ-05-0504)
+            - [ ] **Trap:** IDT entry 0x80 handling 16-bit caller. (REQ: REQ-05-0505)
+            - [ ] **Argument Fetch:** (REQ: REQ-05-0506)
+                - [ ] Read `BX` (First arg), `CX` (Second), `DX` (Third), `SI`, `DI`. (REQ: REQ-05-0507)
+                - [ ] Or read stack arguments if used. (REQ: REQ-05-0508)
+            - [ ] **Pointer Thunking:** (REQ: REQ-05-0509)
+                - [ ] Convert `DS:BX` (16:16) -> Linear Address (`LDT[DS].Base + BX`). (REQ: REQ-05-0510)
+                - [ ] Bounds checking against segment limit. (REQ: REQ-05-0511)
+    - [ ] **Linux (Massive Expansion):** (REQ: REQ-05-0512)
+        - [ ] ELF Loader personality detection (brandelf support). (REQ: REQ-05-0513)
+        - [ ] **Signal Compatibility:** (REQ: REQ-05-0514)
+            - [ ] **Mapping:** Translate Linux signal numbers to native (e.g., SIGCHLD, SIGSTOP). (REQ: REQ-05-0515)
+            - [ ] **Sigaction:** Translate `linux_sigaction` structure (mask bits). (REQ: REQ-05-0516)
+            - [ ] **Trampoline:** Linux-compatible signal return trampoline. (REQ: REQ-05-0517)
+        - [ ] **Error Codes:** (REQ: REQ-05-0518)
+            - [ ] Map internal errno to Linux errno (arch-specific). (REQ: REQ-05-0519)
+        - [ ] **FS Path Translation:** (REQ: REQ-05-0520)
+            - [ ] `/proc` -> `/compat/linux/proc` redirection. (REQ: REQ-05-0521)
+            - [ ] `/sys` -> `/compat/linux/sys` redirection. (REQ: REQ-05-0522)
+            - [ ] `at()` syscalls family support. (REQ: REQ-05-0523)
+        - [ ] **Networking (`socketcall`):** (REQ: REQ-05-0524)
+            - [ ] Multiplexer syscall 102 (`sys_socketcall`). (REQ: REQ-05-0525)
+            - [ ] **Socket Creation & Binding:** (REQ: REQ-05-0526)
+                - [ ] `SYS_SOCKET`: Validate domain/type/proto, allocate socket. (REQ: REQ-05-0527)
+                - [ ] `SYS_BIND`: Copy address from user, call internal bind. (REQ: REQ-05-0528)
+                - [ ] `SYS_CONNECT`: Copy address, initiate connection. (REQ: REQ-05-0529)
+            - [ ] **Data Flow:** (REQ: REQ-05-0530)
+                - [ ] `SYS_SEND`/`SYS_RECV`: Simple IO wrappers. (REQ: REQ-05-0531)
+                - [ ] `SYS_SENDTO`/`SYS_RECVFROM`: UDP/Connectionless wrappers. (REQ: REQ-05-0532)
+                - [ ] `SYS_SENDMSG`/`SYS_RECVMSG`: Complex message structure scatter/gather. (REQ: REQ-05-0533)
+            - [ ] **State & Options:** (REQ: REQ-05-0534)
+                - [ ] `SYS_LISTEN`: Set backlog. (REQ: REQ-05-0535)
+                - [ ] `SYS_ACCEPT`: New socket file descriptor creation. (REQ: REQ-05-0536)
+                - [ ] `SYS_GETSOCKNAME`/`SYS_GETPEERNAME`: Address retrieval. (REQ: REQ-05-0537)
+                - [ ] `SYS_SETSOCKOPT`/`SYS_GETSOCKOPT`: Option translation (Linux <-> Native). (REQ: REQ-05-0538)
+                - [ ] `SYS_SHUTDOWN`: Connection termination. (REQ: REQ-05-0539)
+                - [ ] `SYS_SOCKETPAIR`: Connected pair creation. (REQ: REQ-05-0540)
+        - [ ] **IPC Multiplexer (`sys_ipc`):** (REQ: REQ-05-0541)
+            - [ ] Multiplexer syscall 117. (REQ: REQ-05-0542)
+            - [ ] **Semaphores (`sem*`):** (REQ: REQ-05-0543)
+                - [ ] `SEMOP`: Atomic array operations. (REQ: REQ-05-0544)
+                - [ ] `SEMGET`: Get/Create semaphore set. (REQ: REQ-05-0545)
+                - [ ] `SEMCTL`: Control operations (GETVAL, SETVAL, IPC_RMID). (REQ: REQ-05-0546)
+            - [ ] **Message Queues (`msg*`):** (REQ: REQ-05-0547)
+                - [ ] `MSGSND`: Send message with priority. (REQ: REQ-05-0548)
+                - [ ] `MSGRCV`: Receive message (blocking/non-blocking). (REQ: REQ-05-0549)
+                - [ ] `MSGGET`: Get/Create message queue. (REQ: REQ-05-0550)
+                - [ ] `MSGCTL`: Control operations. (REQ: REQ-05-0551)
+            - [ ] **Shared Memory (`shm*`):** (REQ: REQ-05-0552)
+                - [ ] `SHMAT`: Attach segment to address space. (REQ: REQ-05-0553)
+                - [ ] `SHMDT`: Detach segment. (REQ: REQ-05-0554)
+                - [ ] `SHMGET`: Get/Create shared memory segment. (REQ: REQ-05-0555)
+                - [ ] `SHMCTL`: Control operations (lock/unlock/remove). (REQ: REQ-05-0556)
+        - [ ] **Ioctls (`sys_ioctl`):** (REQ: REQ-05-0557)
+            - [ ] **Termios:** (REQ: REQ-05-0558)
+                - [ ] `TCGETS`: Translate native termios to Linux termios. (REQ: REQ-05-0559)
+                - [ ] `TCSETS`/`TCSETSW`/`TCSETSF`: Translate Linux termios to native. (REQ: REQ-05-0560)
+            - [ ] **Sockio:** (REQ: REQ-05-0561)
+                - [ ] `SIOCGIFNAME`: Get interface name by index. (REQ: REQ-05-0562)
+                - [ ] `SIOCGIFADDR`: Get interface IP address. (REQ: REQ-05-0563)
+                - [ ] `SIOCGIFBRDADDR`: Get broadcast address. (REQ: REQ-05-0564)
+                - [ ] `SIOCGIFNETMASK`: Get network mask. (REQ: REQ-05-0565)
+        - [ ] **Process Creation (`sys_clone` extended):** (REQ: REQ-05-0566)
+            - [ ] **Flags Handling:** (REQ: REQ-05-0567)
+                - [ ] `CLONE_PARENT_SETTID`: Store Child TID at `parent_tidptr`. (REQ: REQ-05-0568)
+                - [ ] `CLONE_CHILD_CLEARTID`: Store Child TID at `child_tidptr` and clear on exit. (REQ: REQ-05-0569)
+                - [ ] `CLONE_SETTLS`: Set GDT/FS/GS base for Thread Local Storage. (REQ: REQ-05-0570)
+                - [ ] `CLONE_FILES`: Share file descriptor table (refcounting). (REQ: REQ-05-0571)
+                - [ ] `CLONE_FS`: Share filesystem info (cwd, root). (REQ: REQ-05-0572)
+                - [ ] `CLONE_SIGHAND`: Share signal handlers. (REQ: REQ-05-0266, REQ-05-0573)
+                - [ ] `CLONE_VM`: Share address space (threads). (REQ: REQ-05-0574)
+    - [ ] **Minix/386:** (REQ: REQ-05-0575)
+        - [ ] Implement `send`/`receive` message passing syscalls. (REQ: REQ-05-0576)
+        - [ ] Map Minix 3 kernel messages to native calls. (REQ: REQ-05-0577)
+    - [ ] **FreeBSD:** (REQ: REQ-05-0578)
+        - [ ] ELF Loader personality detection. (REQ: REQ-05-0579)
+        - [ ] Complete `thr_new` implementation. (REQ: REQ-05-0580)
+        - [ ] **FreeBSD 14.3 Compatibility (i386):** (REQ: REQ-05-0581)
+            - [ ] Implement `struct kinfo_proc` (FreeBSD 14.3 layout). (REQ: REQ-05-0582)
+            - [ ] **Binary Compatibility:** (REQ: REQ-05-0583)
+                - [ ] Investigate need for virtual `/dev/kmem` emulation for legacy binaries. (REQ: REQ-05-0584)
+            - [ ] **Native Porting:** (REQ: REQ-05-0585)
+                - [ ] Implement `libkvm` shim in `libsys` for porting BSD tools to native ABI. (REQ: REQ-05-0586)
+            - [ ] **Process Translation:** Logic to map native `process_t` to `kinfo_proc`. (REQ: REQ-05-0587)
+    - [ ] **BSD-Style `sysctl` Syscall Surface (Native + Compat):** (REQ: REQ-05-0588)
+        - [ ] **Native Syscall ABI Contract:** (REQ: REQ-05-0589)
+            - [ ] Define canonical native `sysctl` syscall argument contract with versioned request structure. (REQ: REQ-05-0590)
+            - [ ] Define strict userspace pointer/length validation rules for old/new buffers. (REQ: REQ-05-0591)
+            - [ ] Define canonical atomic read/write semantics when both old and new values are present. (REQ: REQ-05-0592)
+            - [ ] Define canonical size-discovery semantics when old buffer pointer is NULL. (REQ: REQ-05-0593)
+            - [ ] Define canonical subtree-enumeration request contract for user tooling. (REQ: REQ-05-0594)
+            - [ ] Define canonical metadata-query request contract (type, flags, description, ABI class). (REQ: REQ-05-0595)
+            - [ ] Add syscall table entries and personality dispatch wiring for native ABI. (REQ: REQ-05-0596)
+        - [ ] **MIB + Name Resolution Paths:** (REQ: REQ-05-0597)
+            - [ ] Implement MIB-based syscall path end-to-end (`int *name`, `u_int namelen`). (REQ: REQ-05-0598)
+            - [ ] Implement kernel name-to-MIB translation operation for userspace helpers. (REQ: REQ-05-0599)
+            - [ ] Implement kernel MIB-to-name translation operation for diagnostics/tooling. (REQ: REQ-05-0600)
+            - [ ] Define max name depth and token-length limits with explicit `EINVAL` behavior. (REQ: REQ-05-0601)
+            - [ ] Add strict rejection path for mixed name/MIB invocation modes. (REQ: REQ-05-0602)
+        - [ ] **Error and Compatibility Semantics:** (REQ: REQ-05-0603)
+            - [ ] Define BSD-consistent errno mapping (`ENOENT`, `ENOMEM`, `EINVAL`, `EFAULT`, `EPERM`, `EACCES`, `ENOTDIR`). (REQ: REQ-05-0604)
+            - [ ] Implement forward-compat handling for unknown request-structure extensions. (REQ: REQ-05-0605)
+            - [ ] Implement backward-compat handling for older request versions. (REQ: REQ-05-0606)
+            - [ ] Add compatibility tests for partial reads, retry loops, and concurrent value mutation. (REQ: REQ-05-0607)
+        - [ ] **Permission & Capability Enforcement:** (REQ: REQ-05-0608)
+            - [ ] Wire syscall path into unified `sysctl` access-control hooks. (REQ: REQ-05-0609)
+            - [ ] Enforce read/write separation at syscall boundary before handler invocation. (REQ: REQ-05-0610)
+            - [ ] Enforce capability-gated writes for privileged nodes. (REQ: REQ-05-0611)
+            - [ ] Add per-personality gate checks before exposing compatibility namespace nodes. (REQ: REQ-05-0612)
+        - [ ] **Personality Integration & Overlays:** (REQ: REQ-05-0613)
+            - [ ] Define personality overlay model (native base tree + personality-specific branches). (REQ: REQ-05-0614)
+            - [ ] Implement FreeBSD compatibility overlay for `__sysctl` expectations. (REQ: REQ-05-0615)
+            - [ ] Implement NetBSD/OpenBSD compatibility overlay scaffolding with explicit unsupported-node behavior. (REQ: REQ-05-0616)
+            - [ ] Implement per-personality node visibility filters in traversal and enumeration paths. (REQ: REQ-05-0617)
+            - [ ] Add compatibility shims translating personality-specific MIBs to native internal nodes where feasible. (REQ: REQ-05-0618)
+        - [ ] **Userspace ABI Tests (Syscall Layer):** (REQ: REQ-05-0619)
+            - [ ] Add integration tests for native MIB reads/writes, size probes, and metadata queries. (REQ: REQ-05-0620)
+            - [ ] Add integration tests for enumeration of children and deep subtree walks. (REQ: REQ-05-0621)
+            - [ ] Add negative tests for malformed pointers, truncated MIBs, and invalid type writes. (REQ: REQ-05-0622)
+            - [ ] Add race tests for concurrent read/write against lock-protected nodes. (REQ: REQ-05-0623)
+            - [ ] Add ABI snapshot tests ensuring stable syscall behavior across kernel revisions. (REQ: REQ-05-0624)
+    - [ ] **BSD Family (NetBSD/OpenBSD):** (REQ: REQ-05-0625)
+        - [ ] Implement `__sysctl` personality entrypoint backed by shared native `sysctl` core. (REQ: REQ-05-0626)
+        - [ ] Implement NetBSD/OpenBSD-specific compatibility mapping table for legacy MIB constants. (REQ: REQ-05-0627)
+        - [ ] Add personality tests validating expected `__sysctl` behavior and errno semantics. (REQ: REQ-05-0628)
+        - [ ] Support BSD-specific syscalls (`ktrace`, `pledge`/`unveil`). (REQ: REQ-05-0629)
+    - [ ] **Solaris (SVR4):** (REQ: REQ-05-0630)
+        - [ ] Implement SVR4 syscalls (`getdents64`, `stream` ioctls). (REQ: REQ-05-0631)
+        - [ ] Support Solaris door IPC emulation. (REQ: REQ-05-0632)
     - [/] **Exec Implementation & Binary Loaders:**
-        - [ ] **ELF Loader Improvements:**
-            - [ ] **Stack Setup:** Properly terminate argv/envp vectors.
-            - [ ] **Default Environment:** Populate PATH and TERM.
-            - [ ] **Auxiliary Vector:** Populate AT_PHDR/PHENT/PHNUM/ENTRY for TLS support.
-            - [ ] **Interpreter:** Handle `PT_INTERP` (load ld.so).
-            - [ ] **Auxiliary Vector:**
-                - [ ] Populate `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`.
-                - [ ] Populate `AT_ENTRY`, `AT_BASE` (interpreter base).
-                - [ ] Populate `AT_EXECFN`, `AT_PLATFORM`.
-                - [ ] Populate `AT_RANDOM`, `AT_SECURE`.
-        - [ ] **Shebang Support (`exec_script`):**
-            - [ ] Parse `#!` line.
-            - [ ] Handle recursion depth limits (prevent loops).
-            - [ ] Argument parsing (`#! /bin/sh -x`).
-        - [ ] **COFF Loader (Legacy/Static):**
-            - [ ] Parse File Header and Optional Header.
-            - [ ] Map Sections (Text, Data, BSS) to fixed addresses.
-            - [ ] Basic relocation support (for Xenix 386).
-        - [ ] **PE Loader (EFI/Native):**
-            - [ ] Parse DOS Header -> PE Header.
-            - [ ] Parse Data Directories (Import/Export/Reloc).
-            - [ ] Map Image Base and Sections.
-            - [ ] **EFI Support:**
-                - [ ] Implement IAT (Import Address Table) patching.
-            - [ ] **Substrate Native PE:**
-                - [ ] Define Subsystem ID for Substrate (e.g., in `sys/pe.h`).
-                - [ ] **Native Syscalls:** Thunks for syscall instruction directly in PE text.
-                - [ ] **Relocations:** Full `.reloc` processing (Base Relocations) for ASLR/PIC.
-        - [ ] **a.out Loader (Legacy/Multi-OS):**
+        - [ ] **ELF Loader Improvements:** (REQ: REQ-05-0633)
+            - [ ] **Stack Setup:** Properly terminate argv/envp vectors. (REQ: REQ-05-0634)
+            - [ ] **Default Environment:** Populate PATH and TERM. (REQ: REQ-05-0635)
+            - [ ] **Auxiliary Vector:** Populate AT_PHDR/PHENT/PHNUM/ENTRY for TLS support. (REQ: REQ-05-0636)
+            - [ ] **Interpreter:** Handle `PT_INTERP` (load ld.so). (REQ: REQ-05-0637)
+            - [ ] **Auxiliary Vector:** (REQ: REQ-05-0638)
+                - [ ] Populate `AT_PHDR`, `AT_PHENT`, `AT_PHNUM`. (REQ: REQ-05-0639)
+                - [ ] Populate `AT_ENTRY`, `AT_BASE` (interpreter base). (REQ: REQ-05-0640)
+                - [ ] Populate `AT_EXECFN`, `AT_PLATFORM`. (REQ: REQ-05-0641)
+                - [ ] Populate `AT_RANDOM`, `AT_SECURE`. (REQ: REQ-05-0642)
+        - [ ] **Shebang Support (`exec_script`):** (REQ: REQ-05-0643)
+            - [ ] Parse `#!` line. (REQ: REQ-05-0644)
+            - [ ] Handle recursion depth limits (prevent loops). (REQ: REQ-05-0645)
+            - [ ] Argument parsing (`#! /bin/sh -x`). (REQ: REQ-05-0646)
+        - [ ] **COFF Loader (Legacy/Static):** (REQ: REQ-05-0647)
+            - [ ] Parse File Header and Optional Header. (REQ: REQ-05-0648)
+            - [ ] Map Sections (Text, Data, BSS) to fixed addresses. (REQ: REQ-05-0649)
+            - [ ] Basic relocation support (for Xenix 386). (REQ: REQ-05-0650)
+        - [ ] **PE Loader (EFI/Native):** (REQ: REQ-05-0651)
+            - [ ] Parse DOS Header -> PE Header. (REQ: REQ-05-0652)
+            - [ ] Parse Data Directories (Import/Export/Reloc). (REQ: REQ-05-0653)
+            - [ ] Map Image Base and Sections. (REQ: REQ-05-0654)
+            - [ ] **EFI Support:** (REQ: REQ-05-0655)
+                - [ ] Implement IAT (Import Address Table) patching. (REQ: REQ-05-0656)
+            - [ ] **Substrate Native PE:** (REQ: REQ-05-0657)
+                - [ ] Define Subsystem ID for Substrate (e.g., in `sys/pe.h`). (REQ: REQ-05-0658)
+                - [ ] **Native Syscalls:** Thunks for syscall instruction directly in PE text. (REQ: REQ-05-0659)
+                - [ ] **Relocations:** Full `.reloc` processing (Base Relocations) for ASLR/PIC. (REQ: REQ-05-0660)
+        - [ ] **a.out Loader (Legacy/Multi-OS):** (REQ: REQ-05-0661)
              > See [docs/aout_loader_spec.md](docs/aout_loader_spec.md) for implementation specs.
-            - [ ] **Legacy a.out:** Implement `exec_aout` for OMAGIC/QMAGIC/ZMAGIC binaries.
-            - [ ] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic.
-            - [ ] **SunOS 4.0.x (Sun386i):** Support Sun386i `a.out` format and personality.
-        - [ ] **Personality / Migration:**
-            - [ ] **Syscall Translation:** Remap foreign syscall numbers to native.
-            - [ ] **Errno Translation:** Remap error codes.
-            - [ ] **Signal Translation:** Remap signal numbers.
-        - [ ] **fork() Completeness:**
-            - [ ] **Copy-on-Write:** Duplication of VM space (refcounts).
-            - [ ] **File Descriptors:** Increment refcounts on all FDs.
-            - [ ] `vfork`: Shared VM space, parent blocked until child exec/exit.
+            - [ ] **Legacy a.out:** Implement `exec_aout` for OMAGIC/QMAGIC/ZMAGIC binaries. (REQ: REQ-05-0662)
+            - [ ] **Unified a.out Loader:** Create a common `exec_aout` loader for 32-bit `a.out` (Linux/BSD/Minix) that dispatches based on machine ID/magic. (REQ: REQ-05-0663)
+            - [ ] **SunOS 4.0.x (Sun386i):** Support Sun386i `a.out` format and personality. (REQ: REQ-05-0664)
+        - [ ] **Personality / Migration:** (REQ: REQ-05-0665)
+            - [ ] **Syscall Translation:** Remap foreign syscall numbers to native. (REQ: REQ-05-0666)
+            - [ ] **Errno Translation:** Remap error codes. (REQ: REQ-05-0667)
+            - [ ] **Signal Translation:** Remap signal numbers. (REQ: REQ-05-0668)
+        - [ ] **fork() Completeness:** (REQ: REQ-05-0669)
+            - [ ] **Copy-on-Write:** Duplication of VM space (refcounts). (REQ: REQ-05-0670)
+            - [ ] **File Descriptors:** Increment refcounts on all FDs. (REQ: REQ-05-0671)
+            - [ ] `vfork`: Shared VM space, parent blocked until child exec/exit. (REQ: REQ-05-0672)
 
 ### 5.x Syscall ABI/Dispatch Reality Audit (March 2026)
-- [ ] **Personality ABI Consistency:**
-    - [ ] Document and enforce a single argument ABI contract per personality, including native (`substrate`) stack argument extraction in `syscall_handler`.
-    - [ ] Add tests proving native, Linux, and FreeBSD personality argument decoding for 0-8 argument paths.
-- [ ] **Dispatch Table Completeness:**
-    - [ ] Reconcile syscall numbers defined in `sys/arch/i386/syscall.h` with native dispatch wiring (`SYS_WAITPID`, `SYS_BRK`, `SYS_MUNMAP`, `SYS_CLOCK_GETTIME`, and others currently defined but not mapped).
-    - [ ] Ensure each mapped native syscall has matching man-page coverage and test coverage.
-- [ ] **Process Introspection Completion:**
-    - [ ] Replace `sys_proc_threads`, `sys_proc_fds`, `sys_proc_maps`, `sys_proc_cwd`, `sys_proc_exe`, `sys_proc_cmdline`, and `sys_proc_environ` stubs with real implementations.
-    - [ ] Define stable buffer sizing and truncation semantics for all `sys_proc_*` array-returning calls.
-- [ ] **VM Introspection Completion:**
-    - [ ] Extend kernel-side VM introspection beyond `sys_vm_stats` to support `sys_vm_info`, `sys_vm_swap`, `sys_vm_buffers`, and `sys_vm_slabs`.
-    - [ ] Standardize memory units and conversion semantics (`bytes` vs pages) across `sysinfo` and `sys_vm_*`.
-- [ ] **Error ABI Normalization:**
-    - [ ] Normalize kernel syscall error returns to a single policy and remove mixed positive errno / negative errno / `-1` patterns.
-    - [ ] Add personality-level errno translation tests to validate stable behavior for native/Linux/FreeBSD paths.
-- [ ] **Documentation/Traceability:**
-    - [ ] Keep `docs/syscalls/native-syscall-catalog.md`, `docs/syscalls/sys-proc-family.md`, and `docs/syscalls/sys-vm-family.md` synchronized with syscall table and handler changes.
+- [ ] **Personality ABI Consistency:** (REQ: REQ-05-9001)
+    - [ ] Document and enforce a single argument ABI contract per personality, including native (`substrate`) stack argument extraction in `syscall_handler`. (REQ: REQ-05-0376)
+    - [ ] Add tests proving native, Linux, and FreeBSD personality argument decoding for 0-8 argument paths. (REQ: REQ-05-0376)
+- [ ] **Dispatch Table Completeness:** (REQ: REQ-05-9002)
+    - [ ] Reconcile syscall numbers defined in `sys/arch/i386/syscall.h` with native dispatch wiring (`SYS_WAITPID`, `SYS_BRK`, `SYS_MUNMAP`, `SYS_CLOCK_GETTIME`, and others currently defined but not mapped). (REQ: REQ-05-0376)
+    - [ ] Ensure each mapped native syscall has matching man-page coverage and test coverage. (REQ: REQ-05-0376)
+- [ ] **Process Introspection Completion:** (REQ: REQ-05-9003)
+    - [ ] Replace `sys_proc_threads`, `sys_proc_fds`, `sys_proc_maps`, `sys_proc_cwd`, `sys_proc_exe`, `sys_proc_cmdline`, and `sys_proc_environ` stubs with real implementations. (REQ: REQ-05-0376)
+    - [ ] Define stable buffer sizing and truncation semantics for all `sys_proc_*` array-returning calls. (REQ: REQ-05-0376)
+- [ ] **VM Introspection Completion:** (REQ: REQ-05-9004)
+    - [ ] Extend kernel-side VM introspection beyond `sys_vm_stats` to support `sys_vm_info`, `sys_vm_swap`, `sys_vm_buffers`, and `sys_vm_slabs`. (REQ: REQ-05-0376)
+    - [ ] Standardize memory units and conversion semantics (`bytes` vs pages) across `sysinfo` and `sys_vm_*`. (REQ: REQ-05-0376)
+- [ ] **Error ABI Normalization:** (REQ: REQ-05-9005)
+    - [ ] Normalize kernel syscall error returns to a single policy and remove mixed positive errno / negative errno / `-1` patterns. (REQ: REQ-05-0376)
+    - [ ] Add personality-level errno translation tests to validate stable behavior for native/Linux/FreeBSD paths. (REQ: REQ-05-0376)
+- [ ] **Documentation/Traceability:** (REQ: REQ-05-0376)
+    - [ ] Keep `docs/syscalls/native-syscall-catalog.md`, `docs/syscalls/sys-proc-family.md`, and `docs/syscalls/sys-vm-family.md` synchronized with syscall table and handler changes. (REQ: REQ-05-0376)
 
 #### Added User Stories (Delta)
 

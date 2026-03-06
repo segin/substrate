@@ -6,34 +6,34 @@
 ## Reimplemented Checklist (All Open)
 
 ### 6. Userspace/Tools (`usr.bin/yacc`)
-- [ ] **Yacc Implementation (POSIX-Compliant):**
-    - [ ] **1. Infrastructure & Symbol Table:**
-        - [ ] Create `usr.bin/yacc` directory and Makefile.
-        - [ ] Implement `main.c` argument parsing (POSIX options `-d`, `-l`, `-t`, `-v`, `-b`, `-p`).
-        - [ ] Implement Symbol Table (buckets, hashing) for tokens and non-terminals.
-    - [ ] **2. Grammar Reader (`reader.c`):**
-        - [ ] Implement Lexical Analyzer for Yacc input (C code vs Declarations vs Rules).
-        - [ ] Parse Declarations (`%token`, `%type`, `%union`, `%start`, precedence).
-        - [ ] Parse Grammar Rules and Actions (handling `{}` blocks).
-    - [ ] **3. LR(0) Construction (`lr0.c`, `closure.c`):**
-        - [ ] Implement Item Set computation.
-        - [ ] Implement Closure algorithm.
-        - [ ] Implement GOTO graph construction.
-    - [ ] **4. LALR(1) Lookahead (`lalr.c`):**
-        - [ ] Compute DR (Direct Read) and READ (Relation) sets.
-        - [ ] Compute Lookaheads for each kernel item (Digraph algorithm).
-    - [ ] **5. Tables & Conflicts (`mkpar.c`):**
-        - [ ] Generate ACTION and GOTO tables.
-        - [ ] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence.
-        - [ ] Generate Default Reductions.
-    - [ ] **6. Code Generation (`output.c`):**
-        - [ ] generate `y.tab.c` (parser skeleton + user actions).
-        - [ ] generate `y.tab.h` (token defines, `YYSTYPE`).
-        - [ ] generate `y.output` (verbose state descriptions).
-    - [ ] **7. Validation & Tests:**
-        - [ ] Basic Calculator Test (Precedence/Associativity).
-        - [ ] Conflict Reporting Test.
-        - [ ] Error Recovery Test (`error` token).
+- [ ] **Yacc Implementation (POSIX-Compliant):** (REQ: REQ-21-0001)
+    - [ ] **1. Infrastructure & Symbol Table:** (REQ: REQ-21-0002)
+        - [ ] Create `usr.bin/yacc` directory and Makefile. (REQ: REQ-21-0003)
+        - [ ] Implement `main.c` argument parsing (POSIX options `-d`, `-l`, `-t`, `-v`, `-b`, `-p`). (REQ: REQ-21-0004)
+        - [ ] Implement Symbol Table (buckets, hashing) for tokens and non-terminals. (REQ: REQ-21-0005)
+    - [ ] **2. Grammar Reader (`reader.c`):** (REQ: REQ-21-0006)
+        - [ ] Implement Lexical Analyzer for Yacc input (C code vs Declarations vs Rules). (REQ: REQ-21-0007)
+        - [ ] Parse Declarations (`%token`, `%type`, `%union`, `%start`, precedence). (REQ: REQ-21-0008)
+        - [ ] Parse Grammar Rules and Actions (handling `{}` blocks). (REQ: REQ-21-0009)
+    - [ ] **3. LR(0) Construction (`lr0.c`, `closure.c`):** (REQ: REQ-21-0010)
+        - [ ] Implement Item Set computation. (REQ: REQ-21-0011)
+        - [ ] Implement Closure algorithm. (REQ: REQ-21-0012)
+        - [ ] Implement GOTO graph construction. (REQ: REQ-21-0013)
+    - [ ] **4. LALR(1) Lookahead (`lalr.c`):** (REQ: REQ-21-0014)
+        - [ ] Compute DR (Direct Read) and READ (Relation) sets. (REQ: REQ-21-0015)
+        - [ ] Compute Lookaheads for each kernel item (Digraph algorithm). (REQ: REQ-21-0016)
+    - [ ] **5. Tables & Conflicts (`mkpar.c`):** (REQ: REQ-21-0017)
+        - [ ] Generate ACTION and GOTO tables. (REQ: REQ-21-0018)
+        - [ ] Implement Conflict Resolution (Shift/Reduce, Reduce/Reduce) using precedence. (REQ: REQ-21-0019)
+        - [ ] Generate Default Reductions. (REQ: REQ-21-0020)
+    - [ ] **6. Code Generation (`output.c`):** (REQ: REQ-21-0021)
+        - [ ] generate `y.tab.c` (parser skeleton + user actions). (REQ: REQ-21-0022)
+        - [ ] generate `y.tab.h` (token defines, `YYSTYPE`). (REQ: REQ-21-0023)
+        - [ ] generate `y.output` (verbose state descriptions). (REQ: REQ-21-0024)
+    - [ ] **7. Validation & Tests:** (REQ: REQ-21-0025)
+        - [ ] Basic Calculator Test (Precedence/Associativity). (REQ: REQ-21-0026)
+        - [ ] Conflict Reporting Test. (REQ: REQ-21-0027)
+        - [ ] Error Recovery Test (`error` token). (REQ: REQ-21-0028)
 
 ## User Stories
 

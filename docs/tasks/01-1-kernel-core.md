@@ -6,490 +6,490 @@
 ## Reimplemented Checklist (All Open)
 
 ### 1. Kernel Core (`sys/core`, `sys/kern`)
-- [ ] **Memory Management:**
-    - [ ] **Physical Memory Manager (PMM Refactor):**
+- [ ] **Memory Management:** (REQ: REQ-01-0001)
+    - [ ] **Physical Memory Manager (PMM Refactor):** (REQ: REQ-01-0002)
 
         > **Files:** `sys/core/pmm.c`, `sys/vm/phys_mem.c`, `sys/vm/vm_page.h`.
         >
         > **Architecture:** Two-phase allocator — watermark (bootstrap) →
         > buddy (runtime). Returns kernel virtual addresses (0xC0000000+).
 
-        - [ ] **Boot Memory Detection:**
-            - [ ] Parse Multiboot Memory Map (`mmap`).
-            - [ ] Parse e820 Memory Map (legacy BIOS fallback).
-            - [ ] **Hardening:**
-                - [ ] Sanitize memory map entries: validate type, clamp to 32‑bit address space.
-                - [ ] Reject overlapping or zero‑length regions.
-                - [ ] Calculate and report total usable RAM (64‑bit accumulation for >4 GB physical).
-                - [ ] Identify kernel physical bounds from linker symbols (`_kernel_start`, `_kernel_end`).
-                - [ ] Exclude kernel text/data/BSS region from free pool.
-                - [ ] Exclude Multiboot info structure and module regions.
-                - [ ] Reserve BIOS/ACPI regions (type 3/4) and memory holes.
-        - [ ] **Bootstrap Watermark Allocator:**
-            - [ ] Bump allocator for early boot before buddy is ready.
-            - [ ] `pmm_watermark_init(start, end)`: initialize allocator with usable range.
-            - [ ] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment.
-            - [ ] `pmm_watermark_used()`: report bytes consumed.
-            - [ ] Used for: `vm_page_t` array, initial page tables, kernel stacks.
-            - [ ] Watermark region clamped to avoid exceeding available low memory.
-        - [ ] **Dynamic Metadata:**
-            - [ ] Calculate `vm_page_t` array size based on actual detected RAM.
-            - [ ] Allocate array via watermark allocator.
-            - [ ] Remove hardcoded 128 MB static limit.
-            - [ ] Fallback to static bitmap if RAM < 4 MB (constrained environments).
-        - [ ] **Buddy Allocator:**
-            - [ ] Orders 0–10 (4 KB – 4 MB pages).
-            - [ ] **Free Lists:** per‑order doubly‑linked free page lists.
-            - [ ] `vm_phys_alloc_page()`: O(1) single-page allocation from order‑0 free list.
-            - [ ] `vm_phys_alloc_contiguous(order)`: allocate 2^order contiguous pages.
-            - [ ] `vm_phys_free_page(page)`: return page and coalesce with buddy if free.
-            - [ ] `vm_phys_free_contiguous(page, order)`: return and coalesce multi-page block.
-            - [ ] **Buddy Coalescing:** merge adjacent free pages up through orders.
-            - [ ] **Buddy Splitting:** split higher-order blocks when lower order is empty.
-            - [ ] Interrupt‑safe: disable interrupts during alloc/free.
-        - [ ] **Public API (returning kernel virtual addresses):**
-            - [ ] `pmm_alloc_block()`: allocate single page, return 0xC0000000+ virtual address.
-            - [ ] `pmm_free_block(vaddr)`: free single page given virtual address.
-            - [ ] `pmm_alloc_contiguous(count)`: allocate `count` contiguous pages.
-            - [ ] `pmm_free_contiguous(vaddr, count)`: free contiguous block.
-            - [ ] `pmm_get_page(phys_addr)`: look up `vm_page_t` for physical address.
-        - [ ] **Safety & Integration:**
-            - [ ] Fine-grained spinlock for SMP access (`vm_phys_lock`).
-            - [ ] Interrupt disable/restore guards in all API entry points.
-            - [ ] Direct interface with `vm_page.c` queues.
-            - [ ] Low memory watermark: warn when free pages drop below threshold.
-        - [ ] **NUMA-Aware Allocation (deferred):**
-            - [ ] Per-node free lists.
-            - [ ] Node affinity for allocation (prefer local node).
-            - [ ] Cross-node fallback when local node exhausted.
-        - [ ] **Testing:**
-            - [ ] Unit: watermark allocator — sequential allocations, alignment, exhaustion.
-            - [ ] Unit: buddy allocator — alloc/free single pages, verify O(1) behavior.
-            - [ ] Unit: buddy coalescing — free adjacent pages, verify order promotion.
-            - [ ] Unit: buddy splitting — exhaust order 0, verify split from higher order.
-            - [ ] Unit: contiguous allocation — various orders, verify alignment.
-            - [ ] Unit: memory map parsing — Multiboot and e820 with edge cases (overlaps, holes).
-            - [ ] Property: `alloc → free → alloc` returns same page (no leak).
-            - [ ] Property: free page count + allocated count = total pages (invariant).
-            - [ ] Property: buddy free list integrity (no cycles, all entries valid).
-            - [ ] Integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU.
-        - [ ] **Documentation:**
-            - [ ] Internal doc: PMM architecture (watermark → buddy transition).
-            - [ ] Internal doc: virtual vs physical address API convention.
+        - [ ] **Boot Memory Detection:** (REQ: REQ-01-0003)
+            - [ ] Parse Multiboot Memory Map (`mmap`). (REQ: REQ-01-0004)
+            - [ ] Parse e820 Memory Map (legacy BIOS fallback). (REQ: REQ-01-0005)
+            - [ ] **Hardening:** (REQ: REQ-01-0006)
+                - [ ] Sanitize memory map entries: validate type, clamp to 32‑bit address space. (REQ: REQ-01-0007)
+                - [ ] Reject overlapping or zero‑length regions. (REQ: REQ-01-0008)
+                - [ ] Calculate and report total usable RAM (64‑bit accumulation for >4 GB physical). (REQ: REQ-01-0009)
+                - [ ] Identify kernel physical bounds from linker symbols (`_kernel_start`, `_kernel_end`). (REQ: REQ-01-0010)
+                - [ ] Exclude kernel text/data/BSS region from free pool. (REQ: REQ-01-0011)
+                - [ ] Exclude Multiboot info structure and module regions. (REQ: REQ-01-0012)
+                - [ ] Reserve BIOS/ACPI regions (type 3/4) and memory holes. (REQ: REQ-01-0013)
+        - [ ] **Bootstrap Watermark Allocator:** (REQ: REQ-01-0014)
+            - [ ] Bump allocator for early boot before buddy is ready. (REQ: REQ-01-0015)
+            - [ ] `pmm_watermark_init(start, end)`: initialize allocator with usable range. (REQ: REQ-01-0016)
+            - [ ] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment. (REQ: REQ-01-0017)
+            - [ ] `pmm_watermark_used()`: report bytes consumed. (REQ: REQ-01-0018)
+            - [ ] Used for: `vm_page_t` array, initial page tables, kernel stacks. (REQ: REQ-01-0019)
+            - [ ] Watermark region clamped to avoid exceeding available low memory. (REQ: REQ-01-0020)
+        - [ ] **Dynamic Metadata:** (REQ: REQ-01-0021)
+            - [ ] Calculate `vm_page_t` array size based on actual detected RAM. (REQ: REQ-01-0022)
+            - [ ] Allocate array via watermark allocator. (REQ: REQ-01-0023)
+            - [ ] Remove hardcoded 128 MB static limit. (REQ: REQ-01-0024)
+            - [ ] Fallback to static bitmap if RAM < 4 MB (constrained environments). (REQ: REQ-01-0025)
+        - [ ] **Buddy Allocator:** (REQ: REQ-01-0026)
+            - [ ] Orders 0–10 (4 KB – 4 MB pages). (REQ: REQ-01-0027)
+            - [ ] **Free Lists:** per‑order doubly‑linked free page lists. (REQ: REQ-01-0028)
+            - [ ] `vm_phys_alloc_page()`: O(1) single-page allocation from order‑0 free list. (REQ: REQ-01-0029)
+            - [ ] `vm_phys_alloc_contiguous(order)`: allocate 2^order contiguous pages. (REQ: REQ-01-0030)
+            - [ ] `vm_phys_free_page(page)`: return page and coalesce with buddy if free. (REQ: REQ-01-0031)
+            - [ ] `vm_phys_free_contiguous(page, order)`: return and coalesce multi-page block. (REQ: REQ-01-0032)
+            - [ ] **Buddy Coalescing:** merge adjacent free pages up through orders. (REQ: REQ-01-0033)
+            - [ ] **Buddy Splitting:** split higher-order blocks when lower order is empty. (REQ: REQ-01-0034)
+            - [ ] Interrupt‑safe: disable interrupts during alloc/free. (REQ: REQ-01-0035)
+        - [ ] **Public API (returning kernel virtual addresses):** (REQ: REQ-01-0036)
+            - [ ] `pmm_alloc_block()`: allocate single page, return 0xC0000000+ virtual address. (REQ: REQ-01-0037)
+            - [ ] `pmm_free_block(vaddr)`: free single page given virtual address. (REQ: REQ-01-0038)
+            - [ ] `pmm_alloc_contiguous(count)`: allocate `count` contiguous pages. (REQ: REQ-01-0039)
+            - [ ] `pmm_free_contiguous(vaddr, count)`: free contiguous block. (REQ: REQ-01-0040)
+            - [ ] `pmm_get_page(phys_addr)`: look up `vm_page_t` for physical address. (REQ: REQ-01-0041)
+        - [ ] **Safety & Integration:** (REQ: REQ-01-0042)
+            - [ ] Fine-grained spinlock for SMP access (`vm_phys_lock`). (REQ: REQ-01-0043)
+            - [ ] Interrupt disable/restore guards in all API entry points. (REQ: REQ-01-0044)
+            - [ ] Direct interface with `vm_page.c` queues. (REQ: REQ-01-0045)
+            - [ ] Low memory watermark: warn when free pages drop below threshold. (REQ: REQ-01-0046)
+        - [ ] **NUMA-Aware Allocation (deferred):** (REQ: REQ-01-0047)
+            - [ ] Per-node free lists. (REQ: REQ-01-0048)
+            - [ ] Node affinity for allocation (prefer local node). (REQ: REQ-01-0049)
+            - [ ] Cross-node fallback when local node exhausted. (REQ: REQ-01-0050)
+        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [ ] Unit: watermark allocator — sequential allocations, alignment, exhaustion. (REQ: REQ-01-0052)
+            - [ ] Unit: buddy allocator — alloc/free single pages, verify O(1) behavior. (REQ: REQ-01-0053)
+            - [ ] Unit: buddy coalescing — free adjacent pages, verify order promotion. (REQ: REQ-01-0054)
+            - [ ] Unit: buddy splitting — exhaust order 0, verify split from higher order. (REQ: REQ-01-0055)
+            - [ ] Unit: contiguous allocation — various orders, verify alignment. (REQ: REQ-01-0056)
+            - [ ] Unit: memory map parsing — Multiboot and e820 with edge cases (overlaps, holes). (REQ: REQ-01-0057)
+            - [ ] Property: `alloc → free → alloc` returns same page (no leak). (REQ: REQ-01-0058)
+            - [ ] Property: free page count + allocated count = total pages (invariant). (REQ: REQ-01-0059)
+            - [ ] Property: buddy free list integrity (no cycles, all entries valid). (REQ: REQ-01-0060)
+            - [ ] Integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU. (REQ: REQ-01-0061)
+        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+            - [ ] Internal doc: PMM architecture (watermark → buddy transition). (REQ: REQ-01-0063)
+            - [ ] Internal doc: virtual vs physical address API convention. (REQ: REQ-01-0064)
 
-    - [ ] **Memory Management (BSD/Mach Design):**
+    - [ ] **Memory Management (BSD/Mach Design):** (REQ: REQ-01-0065)
 
-        - [ ] **Physical Memory (Machine Independent):**
+        - [ ] **Physical Memory (Machine Independent):** (REQ: REQ-01-0066)
 
             > **Files:** `sys/vm/vm_page.h`, `sys/vm/vm_page.c`, `sys/vm/phys_mem.c`.
 
-            - [ ] **`vm_page_t` Structure:**
-                - [ ] `phys_addr`: physical address of this page frame.
-                - [ ] `flags`: state flags (see below).
-                - [ ] `wire_count`: wired reference count (cannot be paged out while > 0).
-                - [ ] `ref_count`: general reference count (for COW sharing).
-                - [ ] `order`: buddy allocator order (0 = single page).
-                - [ ] `object`: back-pointer to owning `vm_object` (anonymous, vnode, device).
-                - [ ] `pindex`: page index within owning object.
-                - [ ] `pv_list`: list of `pv_entry` structs for pmap backlinks (which PTEs map this page).
-                - [ ] **State Flags:**
-                    - [ ] `PG_BUSY`: page is being I/O'd (don't touch).
-                    - [ ] `PG_VALID`: page contains valid data.
-                    - [ ] `PG_DIRTY`: page has been modified since last writeback.
-                    - [ ] `PG_ACTIVE`: page is on active queue.
-                    - [ ] `PG_INACTIVE`: page is on inactive queue.
-                    - [ ] `PG_FREE`: page is on free queue.
-                    - [ ] `PG_ZERO`: page is known to be zeroed.
-                    - [ ] `PG_SWAPPED`: page contents are on swap.
-                - [ ] **Initialization:**
-                    - [ ] Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator).
-                    - [ ] Initialize all pages as `PG_FREE`, link into free lists.
-                - [ ] **Accessors:**
-                    - [ ] `pmm_get_page(pa)`: PA-to-page lookup (O(1) via array index).
-                    - [ ] `vm_page_to_phys(page)`: page-to-PA conversion.
-                - [ ] **Ownership Tracking:**
-                    - [ ] Track which `vm_object` (anonymous, vnode, device) owns each page.
-                    - [ ] `vm_page_insert(page, object, pindex)`: link page to object.
-                    - [ ] `vm_page_remove(page)`: unlink page from object.
-                - [ ] **Pmap Backlinks (`pv_entry`):**
-                    - [ ] Track which pmaps/PTEs reference this physical page.
-                    - [ ] `pv_entry`: `{pmap, va, next}` — singly-linked list per page.
-                    - [ ] Used for reverse mapping: given a physical page, find all virtual mappings.
-                    - [ ] Essential for TLB shootdown and page eviction.
+            - [ ] **`vm_page_t` Structure:** (REQ: REQ-01-0067)
+                - [ ] `phys_addr`: physical address of this page frame. (REQ: REQ-01-0068)
+                - [ ] `flags`: state flags (see below). (REQ: REQ-01-0069)
+                - [ ] `wire_count`: wired reference count (cannot be paged out while > 0). (REQ: REQ-01-0070)
+                - [ ] `ref_count`: general reference count (for COW sharing). (REQ: REQ-01-0071)
+                - [ ] `order`: buddy allocator order (0 = single page). (REQ: REQ-01-0072)
+                - [ ] `object`: back-pointer to owning `vm_object` (anonymous, vnode, device). (REQ: REQ-01-0073)
+                - [ ] `pindex`: page index within owning object. (REQ: REQ-01-0074)
+                - [ ] `pv_list`: list of `pv_entry` structs for pmap backlinks (which PTEs map this page). (REQ: REQ-01-0075)
+                - [ ] **State Flags:** (REQ: REQ-01-0076)
+                    - [ ] `PG_BUSY`: page is being I/O'd (don't touch). (REQ: REQ-01-0077)
+                    - [ ] `PG_VALID`: page contains valid data. (REQ: REQ-01-0078)
+                    - [ ] `PG_DIRTY`: page has been modified since last writeback. (REQ: REQ-01-0079)
+                    - [ ] `PG_ACTIVE`: page is on active queue. (REQ: REQ-01-0080)
+                    - [ ] `PG_INACTIVE`: page is on inactive queue. (REQ: REQ-01-0081)
+                    - [ ] `PG_FREE`: page is on free queue. (REQ: REQ-01-0082)
+                    - [ ] `PG_ZERO`: page is known to be zeroed. (REQ: REQ-01-0083)
+                    - [ ] `PG_SWAPPED`: page contents are on swap. (REQ: REQ-01-0084)
+                - [ ] **Initialization:** (REQ: REQ-01-0085)
+                    - [ ] Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator). (REQ: REQ-01-0086)
+                    - [ ] Initialize all pages as `PG_FREE`, link into free lists. (REQ: REQ-01-0087)
+                - [ ] **Accessors:** (REQ: REQ-01-0088)
+                    - [ ] `pmm_get_page(pa)`: PA-to-page lookup (O(1) via array index). (REQ: REQ-01-0089)
+                    - [ ] `vm_page_to_phys(page)`: page-to-PA conversion. (REQ: REQ-01-0090)
+                - [ ] **Ownership Tracking:** (REQ: REQ-01-0091)
+                    - [ ] Track which `vm_object` (anonymous, vnode, device) owns each page. (REQ: REQ-01-0092)
+                    - [ ] `vm_page_insert(page, object, pindex)`: link page to object. (REQ: REQ-01-0093)
+                    - [ ] `vm_page_remove(page)`: unlink page from object. (REQ: REQ-01-0094)
+                - [ ] **Pmap Backlinks (`pv_entry`):** (REQ: REQ-01-0095)
+                    - [ ] Track which pmaps/PTEs reference this physical page. (REQ: REQ-01-0096)
+                    - [ ] `pv_entry`: `{pmap, va, next}` — singly-linked list per page. (REQ: REQ-01-0097)
+                    - [ ] Used for reverse mapping: given a physical page, find all virtual mappings. (REQ: REQ-01-0098)
+                    - [ ] Essential for TLB shootdown and page eviction. (REQ: REQ-01-0099)
 
-            - [ ] **Page Queues:**
-                - [ ] **Queue Types:**
-                    - [ ] **Free Queue:** pages available for immediate allocation.
-                    - [ ] **Active Queue:** recently accessed pages (LRU head).
-                    - [ ] **Inactive Queue:** eviction candidates (LRU tail).
-                    - [ ] **Wired Queue:** kernel/DMA pages that cannot be paged out.
-                    - [ ] **Laundry Queue:** dirty pages waiting to be written to backing store.
-                - [ ] **Queue Operations:**
-                    - [ ] `vm_page_activate(page)`: move to active queue, set `PG_ACTIVE`.
-                    - [ ] `vm_page_deactivate(page)`: move to inactive queue, clear `PG_ACTIVE`.
-                    - [ ] `vm_page_wire(page)`: increment wire count, move to wired queue.
-                    - [ ] `vm_page_unwire(page)`: decrement wire count, move to inactive if count reaches 0.
-                    - [ ] `vm_page_free(page)`: return to free queue, clear all flags.
-                    - [ ] `vm_page_launder(page)`: move to laundry queue for async writeback.
-                - [ ] **LRU Scanning (`vm_pageout_scan`):**
-                    - [ ] Periodic scan of active queue.
-                    - [ ] Check PTE accessed (A) bit via `pmap_is_referenced()`.
-                    - [ ] Clear A bit via `pmap_clear_reference()`.
-                    - [ ] Move unreferenced pages to inactive queue tail.
-                    - [ ] Second-chance algorithm: pages touched again stay active.
-                - [ ] **Page Daemon (`vm_pageout`):**
-                    - [ ] Background kernel thread (`pagedaemon`).
-                    - [ ] Sleep on `vm_pages_needed` wakeup channel.
-                    - [ ] `vm_page_launder()`: write dirty pages to backing store.
-                    - [ ] `vm_page_try_to_free()`: attempt to free clean inactive pages.
-                    - [ ] Priority-based scanning phases: Inactive → Laundry → Active.
-                    - [ ] OOM killer hook: kill process if cannot free memory.
-                - [ ] **Thresholds:**
-                    - [ ] `vm_page_free_min`: absolute minimum free pages (16 default; panic below).
-                    - [ ] `vm_page_free_target`: target free pages (64 default; daemon sleeps above).
-                    - [ ] `vm_page_inactive_target`: target inactive queue length.
-                    - [ ] `vm_page_free_reserved`: reserved for kernel emergencies (8 default).
-                    - [ ] Dynamic threshold adjustment based on total RAM.
-                - [ ] **Statistics (`vm_stat`):**
-                    - [ ] `free_count`, `active_count`, `inactive_count`, `wire_count`, `laundry_count`.
-                    - [ ] `pageins`: pages read from disk.
-                    - [ ] `pageouts`: pages written to disk.
-                    - [ ] `faults`: total page faults handled.
-                    - [ ] `cow_faults`: copy-on-write faults.
-                    - [ ] `reactivations`: pages moved back to active.
-                    - [ ] `zero_fill_pages`: pages satisfied by zero-fill.
-                    - [ ] `/proc/vmstat` or sysctl interface for userspace exposure.
+            - [ ] **Page Queues:** (REQ: REQ-01-0100)
+                - [ ] **Queue Types:** (REQ: REQ-01-0101)
+                    - [ ] **Free Queue:** pages available for immediate allocation. (REQ: REQ-01-0102)
+                    - [ ] **Active Queue:** recently accessed pages (LRU head). (REQ: REQ-01-0103)
+                    - [ ] **Inactive Queue:** eviction candidates (LRU tail). (REQ: REQ-01-0104)
+                    - [ ] **Wired Queue:** kernel/DMA pages that cannot be paged out. (REQ: REQ-01-0105)
+                    - [ ] **Laundry Queue:** dirty pages waiting to be written to backing store. (REQ: REQ-01-0106)
+                - [ ] **Queue Operations:** (REQ: REQ-01-0107)
+                    - [ ] `vm_page_activate(page)`: move to active queue, set `PG_ACTIVE`. (REQ: REQ-01-0108)
+                    - [ ] `vm_page_deactivate(page)`: move to inactive queue, clear `PG_ACTIVE`. (REQ: REQ-01-0109)
+                    - [ ] `vm_page_wire(page)`: increment wire count, move to wired queue. (REQ: REQ-01-0110)
+                    - [ ] `vm_page_unwire(page)`: decrement wire count, move to inactive if count reaches 0. (REQ: REQ-01-0111)
+                    - [ ] `vm_page_free(page)`: return to free queue, clear all flags. (REQ: REQ-01-0112)
+                    - [ ] `vm_page_launder(page)`: move to laundry queue for async writeback. (REQ: REQ-01-0113)
+                - [ ] **LRU Scanning (`vm_pageout_scan`):** (REQ: REQ-01-0114)
+                    - [ ] Periodic scan of active queue. (REQ: REQ-01-0115)
+                    - [ ] Check PTE accessed (A) bit via `pmap_is_referenced()`. (REQ: REQ-01-0116)
+                    - [ ] Clear A bit via `pmap_clear_reference()`. (REQ: REQ-01-0117)
+                    - [ ] Move unreferenced pages to inactive queue tail. (REQ: REQ-01-0118)
+                    - [ ] Second-chance algorithm: pages touched again stay active. (REQ: REQ-01-0119)
+                - [ ] **Page Daemon (`vm_pageout`):** (REQ: REQ-01-0120)
+                    - [ ] Background kernel thread (`pagedaemon`). (REQ: REQ-01-0121)
+                    - [ ] Sleep on `vm_pages_needed` wakeup channel. (REQ: REQ-01-0122)
+                    - [ ] `vm_page_launder()`: write dirty pages to backing store. (REQ: REQ-01-0123)
+                    - [ ] `vm_page_try_to_free()`: attempt to free clean inactive pages. (REQ: REQ-01-0124)
+                    - [ ] Priority-based scanning phases: Inactive → Laundry → Active. (REQ: REQ-01-0125)
+                    - [ ] OOM killer hook: kill process if cannot free memory. (REQ: REQ-01-0126)
+                - [ ] **Thresholds:** (REQ: REQ-01-0127)
+                    - [ ] `vm_page_free_min`: absolute minimum free pages (16 default; panic below). (REQ: REQ-01-0128)
+                    - [ ] `vm_page_free_target`: target free pages (64 default; daemon sleeps above). (REQ: REQ-01-0129)
+                    - [ ] `vm_page_inactive_target`: target inactive queue length. (REQ: REQ-01-0130)
+                    - [ ] `vm_page_free_reserved`: reserved for kernel emergencies (8 default). (REQ: REQ-01-0131)
+                    - [ ] Dynamic threshold adjustment based on total RAM. (REQ: REQ-01-0132)
+                - [ ] **Statistics (`vm_stat`):** (REQ: REQ-01-0133)
+                    - [ ] `free_count`, `active_count`, `inactive_count`, `wire_count`, `laundry_count`. (REQ: REQ-01-0134)
+                    - [ ] `pageins`: pages read from disk. (REQ: REQ-01-0135)
+                    - [ ] `pageouts`: pages written to disk. (REQ: REQ-01-0136)
+                    - [ ] `faults`: total page faults handled. (REQ: REQ-01-0137)
+                    - [ ] `cow_faults`: copy-on-write faults. (REQ: REQ-01-0138)
+                    - [ ] `reactivations`: pages moved back to active. (REQ: REQ-01-0139)
+                    - [ ] `zero_fill_pages`: pages satisfied by zero-fill. (REQ: REQ-01-0140)
+                    - [ ] `/proc/vmstat` or sysctl interface for userspace exposure. (REQ: REQ-01-0141)
 
-            - [ ] **Testing:**
-                - [ ] Unit: page queue transitions (free→active→inactive→laundry→free).
-                - [ ] Unit: wire/unwire reference counting.
-                - [ ] Unit: `vm_page_insert` / `vm_page_remove` object linkage.
-                - [ ] Unit: `pv_entry` list manipulation (insert, remove, lookup).
-                - [ ] Unit: page daemon thresholds — verify scan triggers at correct free count.
-                - [ ] Property: queue length invariant — sum of all queue counts = total pages.
-                - [ ] Property: no page appears on two queues simultaneously.
-            - [ ] **Documentation:**
-                - [ ] Internal doc: page queue state machine and transitions.
-                - [ ] Internal doc: page daemon algorithm and tuning parameters.
+            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+                - [ ] Unit: page queue transitions (free→active→inactive→laundry→free). (REQ: REQ-01-0143)
+                - [ ] Unit: wire/unwire reference counting. (REQ: REQ-01-0144)
+                - [ ] Unit: `vm_page_insert` / `vm_page_remove` object linkage. (REQ: REQ-01-0145)
+                - [ ] Unit: `pv_entry` list manipulation (insert, remove, lookup). (REQ: REQ-01-0146)
+                - [ ] Unit: page daemon thresholds — verify scan triggers at correct free count. (REQ: REQ-01-0147)
+                - [ ] Property: queue length invariant — sum of all queue counts = total pages. (REQ: REQ-01-0148)
+                - [ ] Property: no page appears on two queues simultaneously. (REQ: REQ-01-0149)
+            - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+                - [ ] Internal doc: page queue state machine and transitions. (REQ: REQ-01-0151)
+                - [ ] Internal doc: page daemon algorithm and tuning parameters. (REQ: REQ-01-0152)
 
-        - [ ] **PMAP Layer (Machine Dependent — i386):**
+        - [ ] **PMAP Layer (Machine Dependent — i386):** (REQ: REQ-01-0153)
 
             > **Files:** `sys/arch/i386/pmap.c`, `pmap.h`.
             >
             > **Architecture:** Two-level page tables (PD + PT). 3 GB/1 GB
             > user/kernel split. Recursive mapping at PDE 1023.
 
-            - [ ] **Initialization (`pmap_bootstrap`):**
-                - [ ] Initialize kernel page directory from static bootstrap allocation.
-                - [ ] Set up recursive mapping at PD entry 1023 (self-reference at 0xFFC00000).
-                - [ ] Map kernel space (0xC0000000+) with global flag if CPUID reports PGE.
-                - [ ] Detect CPU features: PSE (4 MB pages), PGE (global pages), PAE (36‑bit physical).
-                - [ ] Initialize pmap lock for SMP safety.
-                - [ ] Identity-map LAPIC MMIO region (0xFEE00000) with PCD flag.
-                - [ ] Record `kernel_pmap` as authoritative kernel address space.
+            - [ ] **Initialization (`pmap_bootstrap`):** (REQ: REQ-01-0154, REQ-01-0334)
+                - [ ] Initialize kernel page directory from static bootstrap allocation. (REQ: REQ-01-0155)
+                - [ ] Set up recursive mapping at PD entry 1023 (self-reference at 0xFFC00000). (REQ: REQ-01-0156)
+                - [ ] Map kernel space (0xC0000000+) with global flag if CPUID reports PGE. (REQ: REQ-01-0157)
+                - [ ] Detect CPU features: PSE (4 MB pages), PGE (global pages), PAE (36‑bit physical). (REQ: REQ-01-0158)
+                - [ ] Initialize pmap lock for SMP safety. (REQ: REQ-01-0159, REQ-01-0338)
+                - [ ] Identity-map LAPIC MMIO region (0xFEE00000) with PCD flag. (REQ: REQ-01-0160)
+                - [ ] Record `kernel_pmap` as authoritative kernel address space. (REQ: REQ-01-0161)
 
-            - [ ] **Core PTE Manipulation:**
-                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: insert/update PTE.
-                    - [ ] Allocate page table on demand when PDE is empty.
-                    - [ ] Set `PG_U` (user), `PG_W` (write), `PG_G` (global) flags per `prot`.
-                    - [ ] Invalidate TLB entry for updated VA.
-                    - [ ] Update `pv_entry` list for the physical page.
-                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB.
-                    - [ ] Remove `pv_entry` for this mapping.
-                    - [ ] Free page table if all entries empty (optional reclamation).
-                - [ ] `pmap_kenter(va, pa)`: kernel-only fast path (no locking, no pv_entry).
-                - [ ] `pmap_kremove(va)`: kernel-only removal.
-                - [ ] `pmap_extract(pmap, va)`: return physical address for VA (read PTE).
-                - [ ] `pmap_zero_page(phys)`: zero a physical page via temporary mapping.
-                - [ ] `pmap_copy_page(src_phys, dst_phys)`: copy between physical pages.
+            - [ ] **Core PTE Manipulation:** (REQ: REQ-01-0162, REQ-01-0341)
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: insert/update PTE. (REQ: REQ-01-0163)
+                    - [ ] Allocate page table on demand when PDE is empty. (REQ: REQ-01-0164)
+                    - [ ] Set `PG_U` (user), `PG_W` (write), `PG_G` (global) flags per `prot`. (REQ: REQ-01-0165)
+                    - [ ] Invalidate TLB entry for updated VA. (REQ: REQ-01-0166)
+                    - [ ] Update `pv_entry` list for the physical page. (REQ: REQ-01-0167)
+                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB. (REQ: REQ-01-0168, REQ-01-0346)
+                    - [ ] Remove `pv_entry` for this mapping. (REQ: REQ-01-0169)
+                    - [ ] Free page table if all entries empty (optional reclamation). (REQ: REQ-01-0170)
+                - [ ] `pmap_kenter(va, pa)`: kernel-only fast path (no locking, no pv_entry). (REQ: REQ-01-0171)
+                - [ ] `pmap_kremove(va)`: kernel-only removal. (REQ: REQ-01-0172)
+                - [ ] `pmap_extract(pmap, va)`: return physical address for VA (read PTE). (REQ: REQ-01-0173)
+                - [ ] `pmap_zero_page(phys)`: zero a physical page via temporary mapping. (REQ: REQ-01-0174)
+                - [ ] `pmap_copy_page(src_phys, dst_phys)`: copy between physical pages. (REQ: REQ-01-0175)
 
-            - [ ] **Context Switch (`pmap_activate`):**
-                - [ ] Load `pmap->pdir_phys` into CR3.
-                - [ ] Update `curpmap` thread-local pointer.
-                - [ ] Set TSS ESP0 for kernel stack (scheduler integration).
+            - [ ] **Context Switch (`pmap_activate`):** (REQ: REQ-01-0176, REQ-01-0350)
+                - [ ] Load `pmap->pdir_phys` into CR3. (REQ: REQ-01-0177)
+                - [ ] Update `curpmap` thread-local pointer. (REQ: REQ-01-0178)
+                - [ ] Set TSS ESP0 for kernel stack (scheduler integration). (REQ: REQ-01-0179)
 
-            - [ ] **Recursive Paging:**
-                - [ ] Reserve PDE 1023 for self-referencing.
-                - [ ] `V_PD` macro: access current PD at 0xFFFFF000.
-                - [ ] `V_PT(n)` macro: access page table `n` at 0xFFC00000 + n×4096.
-                - [ ] All PTE manipulation uses recursive window (no temporary mappings needed).
+            - [ ] **Recursive Paging:** (REQ: REQ-01-0180, REQ-01-0355)
+                - [ ] Reserve PDE 1023 for self-referencing. (REQ: REQ-01-0181)
+                - [ ] `V_PD` macro: access current PD at 0xFFFFF000. (REQ: REQ-01-0182)
+                - [ ] `V_PT(n)` macro: access page table `n` at 0xFFC00000 + n×4096. (REQ: REQ-01-0183)
+                - [ ] All PTE manipulation uses recursive window (no temporary mappings needed). (REQ: REQ-01-0184)
 
-            - [ ] **Higher-Half Transition:**
-                - [ ] Stable 3 GB/1 GB split: user 0x00000000–0xBFFFFFFF, kernel 0xC0000000–0xFFFFFFFF.
-                - [ ] LMA=0x100000 (1 MB), VMA=0xC0100000 (kernel linked at high address).
-                - [ ] Boot trampoline in `boot.S` enables paging with identity + high mapping.
+            - [ ] **Higher-Half Transition:** (REQ: REQ-01-0185)
+                - [ ] Stable 3 GB/1 GB split: user 0x00000000–0xBFFFFFFF, kernel 0xC0000000–0xFFFFFFFF. (REQ: REQ-01-0186)
+                - [ ] LMA=0x100000 (1 MB), VMA=0xC0100000 (kernel linked at high address). (REQ: REQ-01-0187)
+                - [ ] Boot trampoline in `boot.S` enables paging with identity + high mapping. (REQ: REQ-01-0188)
 
-            - [ ] **Per-Process Address Space (`pmap_t`):**
-                - [ ] **Data Structure:**
-                    - [ ] `pdir` / `pdir_phys`: virtual and physical address of page directory.
-                    - [ ] `ref_count`: reference count for COW sharing.
-                    - [ ] `resident_count`: count of resident pages.
-                    - [ ] `wired_count`: count of wired (unpageable) pages.
-                    - [ ] `stats` (`pmap_stats`): per-pmap counters (faults, cow_faults, zero_fills, protection changes).
-                    - [ ] `lock`: spinlock for SMP safety.
-                    - [ ] `asid`: address space ID (future PCID support, currently 0).
-                    - [ ] `list_entry`: linkage for global pmap list (TLB shootdown).
-                - [ ] **`pmap_create()` — Create New Address Space:**
-                    - [ ] Allocate one 4 KB page for page directory.
-                    - [ ] Zero user portion (PDEs 0–767).
-                    - [ ] Copy kernel PDEs (768–1022) from `kernel_pmap` (shared by reference).
-                    - [ ] Set up recursive mapping in PDE 1023.
-                    - [ ] Initialize reference count to 1.
-                    - [ ] Add to global pmap list.
-                    - [ ] Minimum overhead: 1 PD (4 KB) + PTs allocated on demand.
-                - [ ] **`pmap_destroy()` — Destroy Address Space:**
-                    - [ ] Decrement reference count; return if still referenced (COW children).
-                    - [ ] Walk all user PDEs (0–767):
-                        - [ ] For each present PDE, walk all 1024 PTEs.
-                        - [ ] For each present PTE, free physical page (or decrement refcount).
-                        - [ ] Free page table page.
-                    - [ ] Free page directory page.
-                    - [ ] Remove from global pmap list.
-                - [ ] **`pmap_reference()` / `pmap_release()`:**
-                    - [ ] Atomic increment/decrement of reference count.
-                    - [ ] `pmap_release()`: call `pmap_destroy()` if refcount reaches 0.
-                - [ ] **`pmap_fork()` — Copy-on-Write Fork:**
-                    - [ ] Create new pmap via `pmap_create()`.
-                    - [ ] Walk parent's user PTEs:
-                        - [ ] Copy PTE to child with write bit cleared.
-                        - [ ] Clear write bit in parent too (both now COW).
-                        - [ ] Increment physical page reference count.
-                    - [ ] Track COW pages in pmap stats.
-                - [ ] **Kernel PDE Synchronization:**
-                    - [ ] `kernel_pmap` is authoritative for PDEs 768–1022.
-                    - [ ] `pmap_create()` copies kernel PDEs on creation.
-                    - [ ] `pmap_growkernel(va)`: when kernel maps new pages (vmalloc), update all pmaps.
-                        - [ ] Walk global pmap list and copy new kernel PDEs.
-                    - [ ] Alternatively share kernel PTs by reference (current approach).
+            - [ ] **Per-Process Address Space (`pmap_t`):** (REQ: REQ-01-0189)
+                - [ ] **Data Structure:** (REQ: REQ-01-0190)
+                    - [ ] `pdir` / `pdir_phys`: virtual and physical address of page directory. (REQ: REQ-01-0191)
+                    - [ ] `ref_count`: reference count for COW sharing. (REQ: REQ-01-0192)
+                    - [ ] `resident_count`: count of resident pages. (REQ: REQ-01-0193)
+                    - [ ] `wired_count`: count of wired (unpageable) pages. (REQ: REQ-01-0194)
+                    - [ ] `stats` (`pmap_stats`): per-pmap counters (faults, cow_faults, zero_fills, protection changes). (REQ: REQ-01-0195)
+                    - [ ] `lock`: spinlock for SMP safety. (REQ: REQ-01-0196)
+                    - [ ] `asid`: address space ID (future PCID support, currently 0). (REQ: REQ-01-0197)
+                    - [ ] `list_entry`: linkage for global pmap list (TLB shootdown). (REQ: REQ-01-0198)
+                - [ ] **`pmap_create()` — Create New Address Space:** (REQ: REQ-01-0199)
+                    - [ ] Allocate one 4 KB page for page directory. (REQ: REQ-01-0200)
+                    - [ ] Zero user portion (PDEs 0–767). (REQ: REQ-01-0201)
+                    - [ ] Copy kernel PDEs (768–1022) from `kernel_pmap` (shared by reference). (REQ: REQ-01-0202)
+                    - [ ] Set up recursive mapping in PDE 1023. (REQ: REQ-01-0203)
+                    - [ ] Initialize reference count to 1. (REQ: REQ-01-0204)
+                    - [ ] Add to global pmap list. (REQ: REQ-01-0205)
+                    - [ ] Minimum overhead: 1 PD (4 KB) + PTs allocated on demand. (REQ: REQ-01-0206)
+                - [ ] **`pmap_destroy()` — Destroy Address Space:** (REQ: REQ-01-0207)
+                    - [ ] Decrement reference count; return if still referenced (COW children). (REQ: REQ-01-0208)
+                    - [ ] Walk all user PDEs (0–767): (REQ: REQ-01-0209)
+                        - [ ] For each present PDE, walk all 1024 PTEs. (REQ: REQ-01-0210)
+                        - [ ] For each present PTE, free physical page (or decrement refcount). (REQ: REQ-01-0211)
+                        - [ ] Free page table page. (REQ: REQ-01-0212)
+                    - [ ] Free page directory page. (REQ: REQ-01-0213)
+                    - [ ] Remove from global pmap list. (REQ: REQ-01-0214)
+                - [ ] **`pmap_reference()` / `pmap_release()`:** (REQ: REQ-01-0215)
+                    - [ ] Atomic increment/decrement of reference count. (REQ: REQ-01-0216)
+                    - [ ] `pmap_release()`: call `pmap_destroy()` if refcount reaches 0. (REQ: REQ-01-0217)
+                - [ ] **`pmap_fork()` — Copy-on-Write Fork:** (REQ: REQ-01-0218)
+                    - [ ] Create new pmap via `pmap_create()`. (REQ: REQ-01-0219)
+                    - [ ] Walk parent's user PTEs: (REQ: REQ-01-0220)
+                        - [ ] Copy PTE to child with write bit cleared. (REQ: REQ-01-0221)
+                        - [ ] Clear write bit in parent too (both now COW). (REQ: REQ-01-0222)
+                        - [ ] Increment physical page reference count. (REQ: REQ-01-0223)
+                    - [ ] Track COW pages in pmap stats. (REQ: REQ-01-0224)
+                - [ ] **Kernel PDE Synchronization:** (REQ: REQ-01-0225)
+                    - [ ] `kernel_pmap` is authoritative for PDEs 768–1022. (REQ: REQ-01-0226)
+                    - [ ] `pmap_create()` copies kernel PDEs on creation. (REQ: REQ-01-0227)
+                    - [ ] `pmap_growkernel(va)`: when kernel maps new pages (vmalloc), update all pmaps. (REQ: REQ-01-0228)
+                        - [ ] Walk global pmap list and copy new kernel PDEs. (REQ: REQ-01-0229)
+                    - [ ] Alternatively share kernel PTs by reference (current approach). (REQ: REQ-01-0230)
 
-            - [ ] **`pmap_protect()` — Change Page Protections:**
-                - [ ] Walk range and update PTE protection bits (R/W, U/S).
-                - [ ] Handle protection upgrade (read → read/write) and downgrade.
-                - [ ] Track protection changes for COW handling.
-                - [ ] Batch TLB invalidations for large ranges (`TLB_BATCH_THRESHOLD`).
+            - [ ] **`pmap_protect()` — Change Page Protections:** (REQ: REQ-01-0231)
+                - [ ] Walk range and update PTE protection bits (R/W, U/S). (REQ: REQ-01-0232)
+                - [ ] Handle protection upgrade (read → read/write) and downgrade. (REQ: REQ-01-0233)
+                - [ ] Track protection changes for COW handling. (REQ: REQ-01-0234)
+                - [ ] Batch TLB invalidations for large ranges (`TLB_BATCH_THRESHOLD`). (REQ: REQ-01-0235)
 
-            - [ ] **`pmap_copy()` — Copy Mappings Between Address Spaces:**
-                - [ ] Copy PTE entries from source to destination pmap.
-                - [ ] Set up COW if requested (clear write bit in both).
-                - [ ] Increment physical page reference counts.
-                - [ ] Support partial range copy (for `vfork`/`clone`).
-                - [ ] Handle mixed COW and private mappings (`PG_PRIVATE` check).
+            - [ ] **`pmap_copy()` — Copy Mappings Between Address Spaces:** (REQ: REQ-01-0236)
+                - [ ] Copy PTE entries from source to destination pmap. (REQ: REQ-01-0237)
+                - [ ] Set up COW if requested (clear write bit in both). (REQ: REQ-01-0238)
+                - [ ] Increment physical page reference counts. (REQ: REQ-01-0239)
+                - [ ] Support partial range copy (for `vfork`/`clone`). (REQ: REQ-01-0240)
+                - [ ] Handle mixed COW and private mappings (`PG_PRIVATE` check). (REQ: REQ-01-0241)
 
-            - [ ] **Page Reference/Modification Tracking:**
-                - [ ] `pmap_is_referenced(pmap, va)`: check PTE Accessed (A) bit.
-                - [ ] `pmap_is_modified(pmap, va)`: check PTE Dirty (D) bit.
-                - [ ] `pmap_clear_reference(pmap, va)`: clear A bit, invalidate TLB.
-                - [ ] `pmap_clear_modify(pmap, va)`: clear D bit, invalidate TLB.
-                - [ ] `pmap_test_and_clear_ref(page)`: atomic test-and-clear for A bit across all mappings.
-                - [ ] `pmap_test_and_clear_modify(page)`: atomic test-and-clear for D bit.
-                - [ ] Batch variants: `pmap_is_referenced_range()`, `pmap_is_modified_range()`.
-                - [ ] `pmap_track_access(page)`: per-page access frequency tracking for aging.
-                - [ ] Export referenced/modified info to VM layer for page replacement decisions.
+            - [ ] **Page Reference/Modification Tracking:** (REQ: REQ-01-0242)
+                - [ ] `pmap_is_referenced(pmap, va)`: check PTE Accessed (A) bit. (REQ: REQ-01-0243)
+                - [ ] `pmap_is_modified(pmap, va)`: check PTE Dirty (D) bit. (REQ: REQ-01-0244)
+                - [ ] `pmap_clear_reference(pmap, va)`: clear A bit, invalidate TLB. (REQ: REQ-01-0245)
+                - [ ] `pmap_clear_modify(pmap, va)`: clear D bit, invalidate TLB. (REQ: REQ-01-0246)
+                - [ ] `pmap_test_and_clear_ref(page)`: atomic test-and-clear for A bit across all mappings. (REQ: REQ-01-0247)
+                - [ ] `pmap_test_and_clear_modify(page)`: atomic test-and-clear for D bit. (REQ: REQ-01-0248)
+                - [ ] Batch variants: `pmap_is_referenced_range()`, `pmap_is_modified_range()`. (REQ: REQ-01-0249)
+                - [ ] `pmap_track_access(page)`: per-page access frequency tracking for aging. (REQ: REQ-01-0250)
+                - [ ] Export referenced/modified info to VM layer for page replacement decisions. (REQ: REQ-01-0251)
 
-            - [ ] **Copy-on-Write System:**
-                - [ ] Mark shared pages read-only in both parent and child.
-                - [ ] **COW Fault Handler:**
-                    - [ ] On write fault to COW page: allocate new physical page.
-                    - [ ] Copy contents from original page.
-                    - [ ] Map new page R/W at faulting VA.
-                    - [ ] Decrement original page refcount.
-                    - [ ] If refcount == 1, optionally remap original R/W in remaining owner.
-                - [ ] `pmap_page_is_cow(page)`: check if page is COW-shared.
-                - [ ] COW statistics: faults, pages saved, duplications.
-                - [ ] `SYS_GET_COW_STATS` (241) syscall and `/proc/cow_stats` procfs entry.
+            - [ ] **Copy-on-Write System:** (REQ: REQ-01-0252)
+                - [ ] Mark shared pages read-only in both parent and child. (REQ: REQ-01-0253)
+                - [ ] **COW Fault Handler:** (REQ: REQ-01-0254)
+                    - [ ] On write fault to COW page: allocate new physical page. (REQ: REQ-01-0254)
+                    - [ ] Copy contents from original page. (REQ: REQ-01-0256)
+                    - [ ] Map new page R/W at faulting VA. (REQ: REQ-01-0257)
+                    - [ ] Decrement original page refcount. (REQ: REQ-01-0258, REQ-01-0472)
+                    - [ ] If refcount == 1, optionally remap original R/W in remaining owner. (REQ: REQ-01-0254)
+                - [ ] `pmap_page_is_cow(page)`: check if page is COW-shared. (REQ: REQ-01-0260)
+                - [ ] COW statistics: faults, pages saved, duplications. (REQ: REQ-01-0261)
+                - [ ] `SYS_GET_COW_STATS` (241) syscall and `/proc/cow_stats` procfs entry. (REQ: REQ-01-0262)
 
-            - [ ] **TLB Management:**
-                - [ ] **Single CPU:**
-                    - [ ] `invlpg(va)`: invalidate single page.
-                    - [ ] CR3 reload: flush entire TLB (expensive, avoid when possible).
-                    - [ ] Track flush statistics.
-                - [ ] **SMP TLB Shootdown:**
-                    - [ ] IPI (Inter-Processor Interrupt) mechanism.
-                    - [ ] `pmap_shootdown_page(va)`: invalidate single page on all CPUs.
-                    - [ ] `pmap_shootdown_range(va, len)`: invalidate range.
-                    - [ ] `pmap_shootdown_all()`: full TLB flush on all CPUs.
-                    - [ ] Deferred shootdown for batch operations.
-                    - [ ] Shootdown completion barrier (wait for all CPUs to acknowledge).
-                - [ ] **INVPCID (future x86_64):**
-                    - [ ] Detect INVPCID support via CPUID.
-                    - [ ] Invalidate by PCID+VA, PCID only, or all-except-global.
+            - [ ] **TLB Management:** (REQ: REQ-01-0263, REQ-01-0369)
+                - [ ] **Single CPU:** (REQ: REQ-01-0264)
+                    - [ ] `invlpg(va)`: invalidate single page. (REQ: REQ-01-0265)
+                    - [ ] CR3 reload: flush entire TLB (expensive, avoid when possible). (REQ: REQ-01-0266)
+                    - [ ] Track flush statistics. (REQ: REQ-01-0267)
+                - [ ] **SMP TLB Shootdown:** (REQ: REQ-01-0268)
+                    - [ ] IPI (Inter-Processor Interrupt) mechanism. (REQ: REQ-01-0269)
+                    - [ ] `pmap_shootdown_page(va)`: invalidate single page on all CPUs. (REQ: REQ-01-0270)
+                    - [ ] `pmap_shootdown_range(va, len)`: invalidate range. (REQ: REQ-01-0271)
+                    - [ ] `pmap_shootdown_all()`: full TLB flush on all CPUs. (REQ: REQ-01-0272)
+                    - [ ] Deferred shootdown for batch operations. (REQ: REQ-01-0273)
+                    - [ ] Shootdown completion barrier (wait for all CPUs to acknowledge). (REQ: REQ-01-0274)
+                - [ ] **INVPCID (future x86_64):** (REQ: REQ-01-0275)
+                    - [ ] Detect INVPCID support via CPUID. (REQ: REQ-01-0276)
+                    - [ ] Invalidate by PCID+VA, PCID only, or all-except-global. (REQ: REQ-01-0277)
 
-            - [ ] **Large Page Support:**
-                - [ ] **4 MB PSE Pages (i386):**
-                    - [ ] Detect PSE via CPUID, set CR4.PSE.
-                    - [ ] Use PDE with PS=1 for 4 MB mappings.
-                    - [ ] `pmap_enter_large(pmap, va, pa, prot, flags)`: create 4 MB mapping.
-                    - [ ] Align VA and PA to 4 MB boundary.
-                    - [ ] Use for kernel text/data to reduce TLB pressure.
-                    - [ ] Demotion: split 4 MB page into 1024 × 4 KB on partial unmap/protect.
-                    - [ ] Promotion: coalesce 1024 aligned 4 KB pages into 4 MB (deferred).
-                - [ ] **2 MB / 1 GB Pages (x86_64 — see x86_64 PMAP below).**
+            - [ ] **Large Page Support:** (REQ: REQ-01-0278, REQ-01-0376)
+                - [ ] **4 MB PSE Pages (i386):** (REQ: REQ-01-0279)
+                    - [ ] Detect PSE via CPUID, set CR4.PSE. (REQ: REQ-01-0280)
+                    - [ ] Use PDE with PS=1 for 4 MB mappings. (REQ: REQ-01-0281)
+                    - [ ] `pmap_enter_large(pmap, va, pa, prot, flags)`: create 4 MB mapping. (REQ: REQ-01-0282)
+                    - [ ] Align VA and PA to 4 MB boundary. (REQ: REQ-01-0283)
+                    - [ ] Use for kernel text/data to reduce TLB pressure. (REQ: REQ-01-0284)
+                    - [ ] Demotion: split 4 MB page into 1024 × 4 KB on partial unmap/protect. (REQ: REQ-01-0285)
+                    - [ ] Promotion: coalesce 1024 aligned 4 KB pages into 4 MB (deferred). (REQ: REQ-01-0286)
+                - [ ] **2 MB / 1 GB Pages (x86_64 — see x86_64 PMAP below).** (REQ: REQ-01-0287)
 
-            - [ ] **Global Page Support (PGE):**
-                - [ ] Detect PGE via CPUID, set CR4.PGE.
-                - [ ] Mark kernel pages with `PG_G` flag.
-                - [ ] Global pages survive CR3 reload (not flushed).
-                - [ ] Use CR4 toggle or `INVPCID` to flush global pages when needed.
+            - [ ] **Global Page Support (PGE):** (REQ: REQ-01-0288, REQ-01-0387)
+                - [ ] Detect PGE via CPUID, set CR4.PGE. (REQ: REQ-01-0289)
+                - [ ] Mark kernel pages with `PG_G` flag. (REQ: REQ-01-0290)
+                - [ ] Global pages survive CR3 reload (not flushed). (REQ: REQ-01-0291)
+                - [ ] Use CR4 toggle or `INVPCID` to flush global pages when needed. (REQ: REQ-01-0292)
 
-            - [ ] **ASID/PCID Support (future x86_64):**
-                - [ ] ASID pool management (allocate, free, recycle).
-                - [ ] Assign ASID on pmap creation.
-                - [ ] Include ASID in CR3 on context switch.
-                - [ ] Avoid full TLB flush when switching between processes with different ASIDs.
+            - [ ] **ASID/PCID Support (future x86_64):** (REQ: REQ-01-0293)
+                - [ ] ASID pool management (allocate, free, recycle). (REQ: REQ-01-0294)
+                - [ ] Assign ASID on pmap creation. (REQ: REQ-01-0295)
+                - [ ] Include ASID in CR3 on context switch. (REQ: REQ-01-0296)
+                - [ ] Avoid full TLB flush when switching between processes with different ASIDs. (REQ: REQ-01-0297)
 
-            - [ ] **PAE Mode (Physical Address Extension — deferred):**
-                - [ ] Three-level page tables: PDPT (4 entries) → PD → PT.
-                - [ ] 64‑bit PTEs: support for NX (No Execute) bit.
-                - [ ] Physical addresses up to 36 bits (64 GB).
-                - [ ] PDPT must be in first 4 GB and 32‑byte aligned.
+            - [ ] **PAE Mode (Physical Address Extension — deferred):** (REQ: REQ-01-0298)
+                - [ ] Three-level page tables: PDPT (4 entries) → PD → PT. (REQ: REQ-01-0299)
+                - [ ] 64‑bit PTEs: support for NX (No Execute) bit. (REQ: REQ-01-0300)
+                - [ ] Physical addresses up to 36 bits (64 GB). (REQ: REQ-01-0301)
+                - [ ] PDPT must be in first 4 GB and 32‑byte aligned. (REQ: REQ-01-0302)
 
-            - [ ] **PMAP Statistics and Debugging:**
-                - [ ] Per-pmap counters: resident, wired, mapped, faults, cow_faults.
-                - [ ] Global counters: total_pmaps, active_pmaps.
-                - [ ] `pmap_dump(pmap)`: debug dump of pmap contents (PDEs + PTEs).
-                - [ ] `pmap_check(pmap)`: consistency verification (detect leaked pages, orphan PTs).
-                - [ ] Export stats via syscall (`sys_pmap_stats`).
+            - [ ] **PMAP Statistics and Debugging:** (REQ: REQ-01-0303, REQ-01-0407)
+                - [ ] Per-pmap counters: resident, wired, mapped, faults, cow_faults. (REQ: REQ-01-0304)
+                - [ ] Global counters: total_pmaps, active_pmaps. (REQ: REQ-01-0305)
+                - [ ] `pmap_dump(pmap)`: debug dump of pmap contents (PDEs + PTEs). (REQ: REQ-01-0306)
+                - [ ] `pmap_check(pmap)`: consistency verification (detect leaked pages, orphan PTs). (REQ: REQ-01-0307)
+                - [ ] Export stats via syscall (`sys_pmap_stats`). (REQ: REQ-01-0308)
 
-            - [ ] **Page Aging Algorithm Integration:**
-                - [ ] Periodic scanning of all resident pages.
-                - [ ] Decrement age counter if not referenced.
-                - [ ] Pages with age 0 become eviction candidates.
-                - [ ] Support for multiple aging policies (Clock, LRU approximation).
-                - [ ] Hardware A/D bit emulation not needed on x86 (native support).
+            - [ ] **Page Aging Algorithm Integration:** (REQ: REQ-01-0309)
+                - [ ] Periodic scanning of all resident pages. (REQ: REQ-01-0310)
+                - [ ] Decrement age counter if not referenced. (REQ: REQ-01-0311)
+                - [ ] Pages with age 0 become eviction candidates. (REQ: REQ-01-0312)
+                - [ ] Support for multiple aging policies (Clock, LRU approximation). (REQ: REQ-01-0313)
+                - [ ] Hardware A/D bit emulation not needed on x86 (native support). (REQ: REQ-01-0314)
 
-            - [ ] **Testing:**
-                - [ ] Unit: `pmap_create` → `pmap_destroy` lifecycle (no leaked pages).
-                - [ ] Unit: `pmap_enter` + `pmap_extract` round-trip.
-                - [ ] Unit: `pmap_protect` upgrade and downgrade.
-                - [ ] Unit: `pmap_fork` COW — write to child triggers fault, parent unaffected.
-                - [ ] Unit: `pmap_copy` partial range with mixed COW/private.
-                - [ ] Unit: reference/modification tracking — set/clear/test A and D bits.
-                - [ ] Unit: large page enter/remove (4 MB PSE).
-                - [ ] Unit: TLB shootdown — verify `invlpg` called on remote CPUs.
-                - [ ] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`).
-                - [ ] Property: `pmap_destroy` frees exactly `resident_count` pages.
-                - [ ] Property: recursive mapping at PDE 1023 is self-consistent.
-                - [ ] Integration: fork process, write to COW pages, verify isolation in QEMU.
-                - [ ] Integration: stress test — 100 `pmap_create`/`pmap_destroy` cycles, verify no PMM leak.
-            - [ ] **Documentation:**
-                - [ ] Internal doc: i386 pmap architecture (2-level, recursive, COW).
-                - [ ] Internal doc: TLB management strategy (single CPU + SMP shootdown).
-                - [ ] Internal doc: per-process address space layout (3 GB/1 GB split).
+            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+                - [ ] Unit: `pmap_create` → `pmap_destroy` lifecycle (no leaked pages). (REQ: REQ-01-0316)
+                - [ ] Unit: `pmap_enter` + `pmap_extract` round-trip. (REQ: REQ-01-0317)
+                - [ ] Unit: `pmap_protect` upgrade and downgrade. (REQ: REQ-01-0318)
+                - [ ] Unit: `pmap_fork` COW — write to child triggers fault, parent unaffected. (REQ: REQ-01-0319)
+                - [ ] Unit: `pmap_copy` partial range with mixed COW/private. (REQ: REQ-01-0320)
+                - [ ] Unit: reference/modification tracking — set/clear/test A and D bits. (REQ: REQ-01-0321)
+                - [ ] Unit: large page enter/remove (4 MB PSE). (REQ: REQ-01-0322)
+                - [ ] Unit: TLB shootdown — verify `invlpg` called on remote CPUs. (REQ: REQ-01-0323)
+                - [ ] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`). (REQ: REQ-01-0324)
+                - [ ] Property: `pmap_destroy` frees exactly `resident_count` pages. (REQ: REQ-01-0325)
+                - [ ] Property: recursive mapping at PDE 1023 is self-consistent. (REQ: REQ-01-0326)
+                - [ ] Integration: fork process, write to COW pages, verify isolation in QEMU. (REQ: REQ-01-0327)
+                - [ ] Integration: stress test — 100 `pmap_create`/`pmap_destroy` cycles, verify no PMM leak. (REQ: REQ-01-0328)
+            - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+                - [ ] Internal doc: i386 pmap architecture (2-level, recursive, COW). (REQ: REQ-01-0330)
+                - [ ] Internal doc: TLB management strategy (single CPU + SMP shootdown). (REQ: REQ-01-0331)
+                - [ ] Internal doc: per-process address space layout (3 GB/1 GB split). (REQ: REQ-01-0332)
 
-        - [ ] **PMAP Layer (Machine Dependent — x86_64):**
+        - [ ] **PMAP Layer (Machine Dependent — x86_64):** (REQ: REQ-01-0333)
 
             > **Files:** `sys/arch/x86_64/pmap.c`, `pmap.h`.
             >
             > **Architecture:** Four-level page tables (PML4 → PDPT → PD → PT).
             > Recursive mapping at PML4 entry 510. Canonical 48-bit virtual addressing.
 
-            - [ ] **Initialization (`pmap_bootstrap`):**
-                - [ ] Initialize kernel PML4 from static bootstrap allocation.
-                - [ ] Set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000).
-                - [ ] Map kernel space at canonical upper half (−2 GB).
-                - [ ] Initialize pmap lock for SMP safety.
-                - [ ] Enable NX bit via IA32_EFER.NXE.
-                - [ ] Detect CPU features: PCID, INVPCID, 1 GB pages, PGE.
+            - [ ] **Initialization (`pmap_bootstrap`):** (REQ: REQ-01-0154, REQ-01-0334)
+                - [ ] Initialize kernel PML4 from static bootstrap allocation. (REQ: REQ-01-0335)
+                - [ ] Set up recursive mapping at PML4 entry 510 (0xFFFF_FF00_0000_0000). (REQ: REQ-01-0336)
+                - [ ] Map kernel space at canonical upper half (−2 GB). (REQ: REQ-01-0337)
+                - [ ] Initialize pmap lock for SMP safety. (REQ: REQ-01-0159, REQ-01-0338)
+                - [ ] Enable NX bit via IA32_EFER.NXE. (REQ: REQ-01-0339)
+                - [ ] Detect CPU features: PCID, INVPCID, 1 GB pages, PGE. (REQ: REQ-01-0340)
 
-            - [ ] **Core PTE Manipulation:**
-                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: walk PML4 → PDPT → PD → PT.
-                    - [ ] Allocate intermediate page table levels on demand.
-                    - [ ] Set NX (No Execute) bit for data pages.
-                    - [ ] Handle user/supervisor, read/write, global flags.
-                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB.
-                - [ ] `pmap_kenter(va, pa)` / `pmap_kremove(va)`: kernel fast paths.
-                - [ ] `pmap_extract(pmap, va)`: return physical address.
-                - [ ] `pmap_zero_page(phys)` / `pmap_copy_page(src, dst)`: page utilities.
+            - [ ] **Core PTE Manipulation:** (REQ: REQ-01-0162, REQ-01-0341)
+                - [ ] `pmap_enter(pmap, va, pa, prot, flags)`: walk PML4 → PDPT → PD → PT. (REQ: REQ-01-0342)
+                    - [ ] Allocate intermediate page table levels on demand. (REQ: REQ-01-0343)
+                    - [ ] Set NX (No Execute) bit for data pages. (REQ: REQ-01-0344)
+                    - [ ] Handle user/supervisor, read/write, global flags. (REQ: REQ-01-0345)
+                - [ ] `pmap_remove(pmap, va)`: clear PTE, invalidate TLB. (REQ: REQ-01-0168, REQ-01-0346)
+                - [ ] `pmap_kenter(va, pa)` / `pmap_kremove(va)`: kernel fast paths. (REQ: REQ-01-0347)
+                - [ ] `pmap_extract(pmap, va)`: return physical address. (REQ: REQ-01-0348)
+                - [ ] `pmap_zero_page(phys)` / `pmap_copy_page(src, dst)`: page utilities. (REQ: REQ-01-0349)
 
-            - [ ] **Context Switch (`pmap_activate`):**
-                - [ ] Load `pmap->pml4_phys` into CR3.
-                - [ ] Handle PCID if available (include PCID in CR3 bits 11:0).
-                - [ ] Set `noflush` bit (CR3 bit 63) to avoid TLB flush on PCID switch.
-                - [ ] Update `curpmap` pointer.
+            - [ ] **Context Switch (`pmap_activate`):** (REQ: REQ-01-0176, REQ-01-0350)
+                - [ ] Load `pmap->pml4_phys` into CR3. (REQ: REQ-01-0351)
+                - [ ] Handle PCID if available (include PCID in CR3 bits 11:0). (REQ: REQ-01-0352)
+                - [ ] Set `noflush` bit (CR3 bit 63) to avoid TLB flush on PCID switch. (REQ: REQ-01-0353)
+                - [ ] Update `curpmap` pointer. (REQ: REQ-01-0354)
 
-            - [ ] **Recursive Paging:**
-                - [ ] Reserve PML4 entry 510 for self-referencing.
-                - [ ] `V_PML4`, `V_PDPT(n)`, `V_PD(n)`, `V_PT(n)` macros for accessing page table levels.
-                - [ ] All PTE manipulation via recursive window.
+            - [ ] **Recursive Paging:** (REQ: REQ-01-0180, REQ-01-0355)
+                - [ ] Reserve PML4 entry 510 for self-referencing. (REQ: REQ-01-0356)
+                - [ ] `V_PML4`, `V_PDPT(n)`, `V_PD(n)`, `V_PT(n)` macros for accessing page table levels. (REQ: REQ-01-0357)
+                - [ ] All PTE manipulation via recursive window. (REQ: REQ-01-0358)
 
-            - [ ] **Per-Process Address Space:**
-                - [ ] `pmap_create()`: allocate new PML4, copy kernel mappings (entries 256–511).
-                - [ ] `pmap_destroy()`: free all user page table levels (PT → PD → PDPT → PML4) and PML4 itself.
-                - [ ] `pmap_reference()` / `pmap_release()`: reference counting.
-                - [ ] `pmap_fork()`: COW fork with 4-level walk.
+            - [ ] **Per-Process Address Space:** (REQ: REQ-01-0359)
+                - [ ] `pmap_create()`: allocate new PML4, copy kernel mappings (entries 256–511). (REQ: REQ-01-0360)
+                - [ ] `pmap_destroy()`: free all user page table levels (PT → PD → PDPT → PML4) and PML4 itself. (REQ: REQ-01-0361)
+                - [ ] `pmap_reference()` / `pmap_release()`: reference counting. (REQ: REQ-01-0362)
+                - [ ] `pmap_fork()`: COW fork with 4-level walk. (REQ: REQ-01-0363)
 
-            - [ ] **`pmap_protect`:** walk range, update PTE bits (R/W, NX, U/S), invalidate TLB.
+            - [ ] **`pmap_protect`:** walk range, update PTE bits (R/W, NX, U/S), invalidate TLB. (REQ: REQ-01-0364)
 
-            - [ ] **Reference/Modification Tracking:**
-                - [ ] Same API as i386: `pmap_is_referenced`, `pmap_is_modified`, `pmap_clear_*`, `pmap_test_and_clear_*`.
-                - [ ] Range and batch variants.
+            - [ ] **Reference/Modification Tracking:** (REQ: REQ-01-0365)
+                - [ ] Same API as i386: `pmap_is_referenced`, `pmap_is_modified`, `pmap_clear_*`, `pmap_test_and_clear_*`. (REQ: REQ-01-0366)
+                - [ ] Range and batch variants. (REQ: REQ-01-0367)
 
-            - [ ] **Copy-on-Write:** same architecture as i386 (`pmap_fork`, `pmap_page_is_cow`).
+            - [ ] **Copy-on-Write:** same architecture as i386 (`pmap_fork`, `pmap_page_is_cow`). (REQ: REQ-01-0368)
 
-            - [ ] **TLB Management:**
-                - [ ] IPI-based SMP shootdown (`pmap_shootdown_page/range/all`).
-                - [ ] INVPCID instruction support (if available):
-                    - [ ] Type 0: invalidate specific PCID + VA.
-                    - [ ] Type 1: invalidate all entries for a PCID.
-                    - [ ] Type 2: invalidate all entries including globals.
-                    - [ ] Type 3: invalidate all entries except globals.
+            - [ ] **TLB Management:** (REQ: REQ-01-0263, REQ-01-0369)
+                - [ ] IPI-based SMP shootdown (`pmap_shootdown_page/range/all`). (REQ: REQ-01-0370)
+                - [ ] INVPCID instruction support (if available): (REQ: REQ-01-0371)
+                    - [ ] Type 0: invalidate specific PCID + VA. (REQ: REQ-01-0372)
+                    - [ ] Type 1: invalidate all entries for a PCID. (REQ: REQ-01-0373)
+                    - [ ] Type 2: invalidate all entries including globals. (REQ: REQ-01-0374)
+                    - [ ] Type 3: invalidate all entries except globals. (REQ: REQ-01-0375)
 
-            - [ ] **Large Page Support:**
-                - [ ] **2 MB Pages:** PDE with PS=1, no PT needed.
-                    - [ ] `pmap_enter_2mb(pmap, va, pa, prot, flags)`.
-                    - [ ] `pmap_remove_2mb(pmap, va)`.
-                    - [ ] Automatic promotion: coalesce 512 adjacent 4 KB pages.
-                    - [ ] Demotion: split on partial unmap/protect.
-                - [ ] **1 GB Pages:** PDPTE with PS=1, no PD/PT needed.
-                    - [ ] `pmap_enter_1gb(pmap, va, pa, prot, flags)`.
-                    - [ ] `pmap_remove_1gb(pmap, va)`.
-                    - [ ] Detect support via CPUID (leaf 0x80000001, bit 26).
-                    - [ ] Use for large kernel mappings and huge anonymous regions.
+            - [ ] **Large Page Support:** (REQ: REQ-01-0278, REQ-01-0376)
+                - [ ] **2 MB Pages:** PDE with PS=1, no PT needed. (REQ: REQ-01-0377)
+                    - [ ] `pmap_enter_2mb(pmap, va, pa, prot, flags)`. (REQ: REQ-01-0378)
+                    - [ ] `pmap_remove_2mb(pmap, va)`. (REQ: REQ-01-0379)
+                    - [ ] Automatic promotion: coalesce 512 adjacent 4 KB pages. (REQ: REQ-01-0380)
+                    - [ ] Demotion: split on partial unmap/protect. (REQ: REQ-01-0381)
+                - [ ] **1 GB Pages:** PDPTE with PS=1, no PD/PT needed. (REQ: REQ-01-0382)
+                    - [ ] `pmap_enter_1gb(pmap, va, pa, prot, flags)`. (REQ: REQ-01-0383)
+                    - [ ] `pmap_remove_1gb(pmap, va)`. (REQ: REQ-01-0384)
+                    - [ ] Detect support via CPUID (leaf 0x80000001, bit 26). (REQ: REQ-01-0385)
+                    - [ ] Use for large kernel mappings and huge anonymous regions. (REQ: REQ-01-0386)
 
-            - [ ] **Global Page Support (PGE):**
-                - [ ] Set CR4.PGE, mark kernel pages with `PG_G`.
-                - [ ] `pmap_set_global(pmap, va)` / `pmap_mark_kernel_global()`.
+            - [ ] **Global Page Support (PGE):** (REQ: REQ-01-0288, REQ-01-0387)
+                - [ ] Set CR4.PGE, mark kernel pages with `PG_G`. (REQ: REQ-01-0388)
+                - [ ] `pmap_set_global(pmap, va)` / `pmap_mark_kernel_global()`. (REQ: REQ-01-0389)
 
-            - [ ] **PCID Support (Process Context Identifiers):**
-                - [ ] Detect PCID via CPUID (leaf 1, ECX bit 17).
-                - [ ] Detect INVPCID via CPUID (leaf 7, EBX bit 10).
-                - [ ] Set CR4.PCIDE to enable.
-                - [ ] PCID pool: allocate 12-bit IDs (max 4096), recycle via generation counter.
-                - [ ] `pmap_pcid_alloc()` / `pmap_pcid_free()`: pool management.
-                - [ ] Assign PCID on `pmap_create()`, include in CR3 on activate.
-                - [ ] Avoid TLB flush on context switch between different PCIDs.
+            - [ ] **PCID Support (Process Context Identifiers):** (REQ: REQ-01-0390)
+                - [ ] Detect PCID via CPUID (leaf 1, ECX bit 17). (REQ: REQ-01-0391)
+                - [ ] Detect INVPCID via CPUID (leaf 7, EBX bit 10). (REQ: REQ-01-0392)
+                - [ ] Set CR4.PCIDE to enable. (REQ: REQ-01-0393)
+                - [ ] PCID pool: allocate 12-bit IDs (max 4096), recycle via generation counter. (REQ: REQ-01-0394)
+                - [ ] `pmap_pcid_alloc()` / `pmap_pcid_free()`: pool management. (REQ: REQ-01-0395)
+                - [ ] Assign PCID on `pmap_create()`, include in CR3 on activate. (REQ: REQ-01-0396)
+                - [ ] Avoid TLB flush on context switch between different PCIDs. (REQ: REQ-01-0397)
 
-            - [ ] **NX (No Execute) Bit:**
-                - [ ] Enable via IA32_EFER.NXE MSR.
-                - [ ] Set NX (bit 63 of PTE) for stack, heap, data pages.
-                - [ ] Clear NX for code pages.
-                - [ ] Enforce W^X: pages cannot be both writable and executable.
+            - [ ] **NX (No Execute) Bit:** (REQ: REQ-01-0398)
+                - [ ] Enable via IA32_EFER.NXE MSR. (REQ: REQ-01-0399)
+                - [ ] Set NX (bit 63 of PTE) for stack, heap, data pages. (REQ: REQ-01-0400)
+                - [ ] Clear NX for code pages. (REQ: REQ-01-0401)
+                - [ ] Enforce W^X: pages cannot be both writable and executable. (REQ: REQ-01-0402)
 
-            - [ ] **5-Level Paging (LA57 — deferred):**
-                - [ ] Detect via CPUID (leaf 7, ECX bit 16).
-                - [ ] PML5 adds 57-bit virtual addressing (128 PB).
-                - [ ] Recursive mapping adjustment for 5 levels.
+            - [ ] **5-Level Paging (LA57 — deferred):** (REQ: REQ-01-0403)
+                - [ ] Detect via CPUID (leaf 7, ECX bit 16). (REQ: REQ-01-0404)
+                - [ ] PML5 adds 57-bit virtual addressing (128 PB). (REQ: REQ-01-0405)
+                - [ ] Recursive mapping adjustment for 5 levels. (REQ: REQ-01-0406)
 
-            - [ ] **PMAP Statistics and Debugging:**
-                - [ ] Same per-pmap and global counters as i386.
-                - [ ] `pmap_dump(pmap)`: debug dump of 4-level page tables.
-                - [ ] `pmap_check(pmap)`: consistency verification.
+            - [ ] **PMAP Statistics and Debugging:** (REQ: REQ-01-0303, REQ-01-0407)
+                - [ ] Same per-pmap and global counters as i386. (REQ: REQ-01-0408)
+                - [ ] `pmap_dump(pmap)`: debug dump of 4-level page tables. (REQ: REQ-01-0409)
+                - [ ] `pmap_check(pmap)`: consistency verification. (REQ: REQ-01-0410)
 
-            - [ ] **Testing:**
-                - [ ] Unit: 4-level page table walk — `pmap_enter` at various canonical addresses.
-                - [ ] Unit: NX enforcement — execute from NX page triggers fault.
-                - [ ] Unit: PCID allocation and recycling under exhaustion.
-                - [ ] Unit: 2 MB page enter/remove.
-                - [ ] Unit: 1 GB page enter/remove (if CPU supports).
-                - [ ] Unit: `pmap_fork` with 4-level walk — COW isolation.
-                - [ ] Unit: INVPCID types 0–3 dispatch.
-                - [ ] Property: PML4 entries 256–511 always match `kernel_pmap`.
-                - [ ] Integration: boot x86_64 kernel, verify user processes get isolated address spaces.
-            - [ ] **Documentation:**
-                - [ ] Internal doc: x86_64 pmap architecture (4-level, PCID, NX).
-                - [ ] Internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros).
-                - [ ] Internal doc: large page promotion/demotion strategy.
-        - [ ] **VM Subsystem (Machine Independent):**
+            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+                - [ ] Unit: 4-level page table walk — `pmap_enter` at various canonical addresses. (REQ: REQ-01-0412)
+                - [ ] Unit: NX enforcement — execute from NX page triggers fault. (REQ: REQ-01-0413)
+                - [ ] Unit: PCID allocation and recycling under exhaustion. (REQ: REQ-01-0414)
+                - [ ] Unit: 2 MB page enter/remove. (REQ: REQ-01-0415)
+                - [ ] Unit: 1 GB page enter/remove (if CPU supports). (REQ: REQ-01-0416)
+                - [ ] Unit: `pmap_fork` with 4-level walk — COW isolation. (REQ: REQ-01-0417)
+                - [ ] Unit: INVPCID types 0–3 dispatch. (REQ: REQ-01-0418)
+                - [ ] Property: PML4 entries 256–511 always match `kernel_pmap`. (REQ: REQ-01-0419)
+                - [ ] Integration: boot x86_64 kernel, verify user processes get isolated address spaces. (REQ: REQ-01-0420)
+            - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+                - [ ] Internal doc: x86_64 pmap architecture (4-level, PCID, NX). (REQ: REQ-01-0422)
+                - [ ] Internal doc: recursive paging at 4 levels (PML4/PDPT/PD/PT access macros). (REQ: REQ-01-0423)
+                - [ ] Internal doc: large page promotion/demotion strategy. (REQ: REQ-01-0424)
+        - [ ] **VM Subsystem (Machine Independent):** (REQ: REQ-01-0425)
 
             > **Files:** `sys/vm/vm_map.c`, `vm_fault.c`, `vm_object.c`,
             > `vm_page.c`, `vm_pager.c`, `vm_swap.c`, `uma_core.c`.
@@ -497,608 +497,608 @@
             > **Architecture:** BSD/Mach-inspired VM with vm_map → vm_map_entry →
             > vm_object → vm_page hierarchy. Shadow objects for COW.
 
-            - [ ] **VM Map (`vm_map`):**
-                - [ ] `vm_map` structure representing a process's virtual address space.
-                - [ ] Red-black tree of `vm_map_entry` for O(log N) lookup by VA.
-                - [ ] Linked list of entries for sequential traversal.
-                - [ ] `vm_map_create(pmap, min, max)`: create new map.
-                - [ ] `vm_map_destroy(map)`: tear down entire map.
-                - [ ] `vm_map_lock` / `vm_map_unlock`: reader/writer locking.
-            - [ ] **VM Map Entries (`vm_map_entry`):**
-                - [ ] Represent contiguous virtual regions (text, data, stack, mmap).
-                - [ ] Fields: `start`, `end`, `offset`, `protection`, `max_protection`.
-                - [ ] `object`: backing `vm_object` (anonymous or vnode-backed).
-                - [ ] `inheritance`: share, copy, none (for fork behavior).
-                - [ ] `wired_count`: prevent pageout for this region.
-                - [ ] `vm_map_insert(map, object, offset, start, end, prot)`.
-                - [ ] `vm_map_remove(map, start, end)`: remove entries in range.
-                - [ ] `vm_map_lookup(map, va, &entry)`: find entry containing VA.
-                - [ ] `vm_map_protect(map, start, end, new_prot)`.
-                - [ ] `vm_map_inherit(map, start, end, inheritance)`.
-                - [ ] Entry merging: coalesce adjacent entries with same attributes.
-            - [ ] **VM Objects (`vm_object`):**
-                - [ ] Abstract backing store (anonymous memory, vnode/file, device).
-                - [ ] `resident_pages`: radix tree or hash of `vm_page_t` by page index.
-                - [ ] `ref_count`: number of map entries referencing this object.
-                - [ ] `shadow`: pointer to shadow object (for COW chains).
-                - [ ] `pager`: associated pager (swap, vnode, device, default).
-                - [ ] `vm_object_allocate(size)`: create anonymous object.
-                - [ ] `vm_object_reference(obj)` / `vm_object_deallocate(obj)`.
-                - [ ] `vm_object_page_lookup(obj, pindex)`: find resident page.
-                - [ ] `vm_object_page_insert(obj, page, pindex)`.
-                - [ ] `vm_object_shadow(obj, offset, size)`: create shadow for COW.
-                - [ ] `vm_object_collapse(obj)`: collapse shadow chain when possible.
-            - [ ] **Fault Handler (`vm_fault`):**
-                - [ ] High-level page fault resolution.
-                - [ ] `vm_fault(map, va, fault_type)`: main entry point.
-                - [ ] Look up `vm_map_entry` for faulting VA.
-                - [ ] Check protection against fault type.
-                - [ ] Walk shadow object chain to find page or pager.
-                - [ ] If page found in object: map it via `pmap_enter`.
-                - [ ] If page not found: call pager to fetch from backing store.
-                - [ ] **Zero-fill on demand:** anonymous pages filled with zeros on first access.
-                - [ ] **Prefaulting:** heuristic to load surrounding pages during I/O.
-            - [ ] **Copy-on-Write (COW):**
-                - [ ] `vm_fault` logic for write to read-only shared page.
-                - [ ] Create shadow object on fork.
-                - [ ] Mark parent entries as copy-on-write.
-                - [ ] On write fault: allocate new page, copy contents, update PTE.
-                - [ ] Decrement original page refcount.
-                - [ ] Shadow chain collapse: when shadow has all pages, absorb parent.
-            - [ ] **Swap Subsystem:**
-                - [ ] **Swap Pager (`vm_pager`):**
-                    - [ ] Generic pager interface: `pager_get(obj, pindex)`, `pager_put(obj, pindex)`.
-                    - [ ] Swap pager: move pages to/from swap device.
-                    - [ ] Vnode pager: read/write file-backed pages via VFS.
-                    - [ ] Device pager: direct mapping of device memory (framebuffer, MMIO).
-                    - [ ] Default pager: zero-fill for anonymous memory.
-                - [ ] **Backing Store (`vm_swap`):**
-                    - [ ] Support swap partitions and swap files.
-                    - [ ] Swap space allocation bitmap.
-                    - [ ] `swapon(path)` / `swapoff(path)` syscalls.
-                    - [ ] Per-page swap block tracking.
-                - [ ] **Page Replacement Policy:**
-                    - [ ] Clock/LRU algorithm using A/D bits.
-                    - [ ] Integration with page daemon and page queues.
-            - [ ] **Advanced Features:**
-                - [ ] **File-backed mmap (`MAP_FILE`):**
-                    - [ ] Vnode pager triggers VFS `read` on page fault.
-                    - [ ] Dirty page tracking and `msync` writeback.
-                    - [ ] `MAP_PRIVATE`: COW on write (shadow object).
-                    - [ ] `MAP_SHARED`: write-through to file.
-                - [ ] **Reference Counting & Shared Memory:**
-                    - [ ] `vm_page_t` refcounts: track mappings to each physical frame.
-                    - [ ] `vm_object` refcounts: track regions sharing backing store.
-                    - [ ] `MAP_SHARED` write-through for multi-process shared memory.
-                - [ ] **Lazy Faulting:**
-                    - [ ] Demand paging: allocate frames only on access (zero-fill on demand).
-                    - [ ] Prefaulting: heuristic to load surrounding pages during I/O.
-                    - [ ] Read-ahead for sequential file access patterns.
-            - [ ] **Testing:**
-                - [ ] Unit: vm_map insert/remove/lookup/protect.
-                - [ ] Unit: vm_object create/reference/deallocate/shadow/collapse.
-                - [ ] Unit: vm_fault resolution for anonymous, file-backed, and COW pages.
-                - [ ] Unit: swap pager round-trip (page out → page in).
-                - [ ] Property: vm_map entries are non-overlapping and sorted.
-                - [ ] Property: vm_object refcount reaches 0 only when no entries reference it.
-                - [ ] Integration: mmap anonymous memory, write, fork, verify COW isolation.
-                - [ ] Integration: mmap file, read, modify, msync, verify on-disk.
-            - [ ] **Documentation:**
-                - [ ] Internal doc: VM hierarchy (map → entry → object → page).
-                - [ ] Internal doc: COW shadow chain and collapse algorithm.
-                - [ ] Internal doc: pager interface contract.
+            - [ ] **VM Map (`vm_map`):** (REQ: REQ-01-0426)
+                - [ ] `vm_map` structure representing a process's virtual address space. (REQ: REQ-01-0427)
+                - [ ] Red-black tree of `vm_map_entry` for O(log N) lookup by VA. (REQ: REQ-01-0428)
+                - [ ] Linked list of entries for sequential traversal. (REQ: REQ-01-0429)
+                - [ ] `vm_map_create(pmap, min, max)`: create new map. (REQ: REQ-01-0430)
+                - [ ] `vm_map_destroy(map)`: tear down entire map. (REQ: REQ-01-0431)
+                - [ ] `vm_map_lock` / `vm_map_unlock`: reader/writer locking. (REQ: REQ-01-0432)
+            - [ ] **VM Map Entries (`vm_map_entry`):** (REQ: REQ-01-0433)
+                - [ ] Represent contiguous virtual regions (text, data, stack, mmap). (REQ: REQ-01-0434)
+                - [ ] Fields: `start`, `end`, `offset`, `protection`, `max_protection`. (REQ: REQ-01-0435)
+                - [ ] `object`: backing `vm_object` (anonymous or vnode-backed). (REQ: REQ-01-0436)
+                - [ ] `inheritance`: share, copy, none (for fork behavior). (REQ: REQ-01-0437)
+                - [ ] `wired_count`: prevent pageout for this region. (REQ: REQ-01-0438)
+                - [ ] `vm_map_insert(map, object, offset, start, end, prot)`. (REQ: REQ-01-0439)
+                - [ ] `vm_map_remove(map, start, end)`: remove entries in range. (REQ: REQ-01-0440)
+                - [ ] `vm_map_lookup(map, va, &entry)`: find entry containing VA. (REQ: REQ-01-0441)
+                - [ ] `vm_map_protect(map, start, end, new_prot)`. (REQ: REQ-01-0442)
+                - [ ] `vm_map_inherit(map, start, end, inheritance)`. (REQ: REQ-01-0443)
+                - [ ] Entry merging: coalesce adjacent entries with same attributes. (REQ: REQ-01-0444)
+            - [ ] **VM Objects (`vm_object`):** (REQ: REQ-01-0445)
+                - [ ] Abstract backing store (anonymous memory, vnode/file, device). (REQ: REQ-01-0446)
+                - [ ] `resident_pages`: radix tree or hash of `vm_page_t` by page index. (REQ: REQ-01-0447)
+                - [ ] `ref_count`: number of map entries referencing this object. (REQ: REQ-01-0448)
+                - [ ] `shadow`: pointer to shadow object (for COW chains). (REQ: REQ-01-0449)
+                - [ ] `pager`: associated pager (swap, vnode, device, default). (REQ: REQ-01-0450)
+                - [ ] `vm_object_allocate(size)`: create anonymous object. (REQ: REQ-01-0451)
+                - [ ] `vm_object_reference(obj)` / `vm_object_deallocate(obj)`. (REQ: REQ-01-0452)
+                - [ ] `vm_object_page_lookup(obj, pindex)`: find resident page. (REQ: REQ-01-0453)
+                - [ ] `vm_object_page_insert(obj, page, pindex)`. (REQ: REQ-01-0454)
+                - [ ] `vm_object_shadow(obj, offset, size)`: create shadow for COW. (REQ: REQ-01-0455)
+                - [ ] `vm_object_collapse(obj)`: collapse shadow chain when possible. (REQ: REQ-01-0456)
+            - [ ] **Fault Handler (`vm_fault`):** (REQ: REQ-01-0457)
+                - [ ] High-level page fault resolution. (REQ: REQ-01-0458)
+                - [ ] `vm_fault(map, va, fault_type)`: main entry point. (REQ: REQ-01-0459)
+                - [ ] Look up `vm_map_entry` for faulting VA. (REQ: REQ-01-0460)
+                - [ ] Check protection against fault type. (REQ: REQ-01-0461)
+                - [ ] Walk shadow object chain to find page or pager. (REQ: REQ-01-0462)
+                - [ ] If page found in object: map it via `pmap_enter`. (REQ: REQ-01-0457)
+                - [ ] If page not found: call pager to fetch from backing store. (REQ: REQ-01-0457)
+                - [ ] **Zero-fill on demand:** anonymous pages filled with zeros on first access. (REQ: REQ-01-0465)
+                - [ ] **Prefaulting:** heuristic to load surrounding pages during I/O. (REQ: REQ-01-0466, REQ-01-0501)
+            - [ ] **Copy-on-Write (COW):** (REQ: REQ-01-0467)
+                - [ ] `vm_fault` logic for write to read-only shared page. (REQ: REQ-01-0468)
+                - [ ] Create shadow object on fork. (REQ: REQ-01-0469)
+                - [ ] Mark parent entries as copy-on-write. (REQ: REQ-01-0470)
+                - [ ] On write fault: allocate new page, copy contents, update PTE. (REQ: REQ-01-0467)
+                - [ ] Decrement original page refcount. (REQ: REQ-01-0258, REQ-01-0472)
+                - [ ] Shadow chain collapse: when shadow has all pages, absorb parent. (REQ: REQ-01-0473)
+            - [ ] **Swap Subsystem:** (REQ: REQ-01-0474)
+                - [ ] **Swap Pager (`vm_pager`):** (REQ: REQ-01-0475)
+                    - [ ] Generic pager interface: `pager_get(obj, pindex)`, `pager_put(obj, pindex)`. (REQ: REQ-01-0476)
+                    - [ ] Swap pager: move pages to/from swap device. (REQ: REQ-01-0477)
+                    - [ ] Vnode pager: read/write file-backed pages via VFS. (REQ: REQ-01-0478)
+                    - [ ] Device pager: direct mapping of device memory (framebuffer, MMIO). (REQ: REQ-01-0479)
+                    - [ ] Default pager: zero-fill for anonymous memory. (REQ: REQ-01-0480)
+                - [ ] **Backing Store (`vm_swap`):** (REQ: REQ-01-0481)
+                    - [ ] Support swap partitions and swap files. (REQ: REQ-01-0482)
+                    - [ ] Swap space allocation bitmap. (REQ: REQ-01-0483)
+                    - [ ] `swapon(path)` / `swapoff(path)` syscalls. (REQ: REQ-01-0484)
+                    - [ ] Per-page swap block tracking. (REQ: REQ-01-0485)
+                - [ ] **Page Replacement Policy:** (REQ: REQ-01-0486)
+                    - [ ] Clock/LRU algorithm using A/D bits. (REQ: REQ-01-0487)
+                    - [ ] Integration with page daemon and page queues. (REQ: REQ-01-0488)
+            - [ ] **Advanced Features:** (REQ: REQ-01-0489, REQ-01-0671)
+                - [ ] **File-backed mmap (`MAP_FILE`):** (REQ: REQ-01-0490)
+                    - [ ] Vnode pager triggers VFS `read` on page fault. (REQ: REQ-01-0491)
+                    - [ ] Dirty page tracking and `msync` writeback. (REQ: REQ-01-0492)
+                    - [ ] `MAP_PRIVATE`: COW on write (shadow object). (REQ: REQ-01-0493)
+                    - [ ] `MAP_SHARED`: write-through to file. (REQ: REQ-01-0494)
+                - [ ] **Reference Counting & Shared Memory:** (REQ: REQ-01-0495)
+                    - [ ] `vm_page_t` refcounts: track mappings to each physical frame. (REQ: REQ-01-0496)
+                    - [ ] `vm_object` refcounts: track regions sharing backing store. (REQ: REQ-01-0497)
+                    - [ ] `MAP_SHARED` write-through for multi-process shared memory. (REQ: REQ-01-0498)
+                - [ ] **Lazy Faulting:** (REQ: REQ-01-0499)
+                    - [ ] Demand paging: allocate frames only on access (zero-fill on demand). (REQ: REQ-01-0500)
+                    - [ ] Prefaulting: heuristic to load surrounding pages during I/O. (REQ: REQ-01-0466, REQ-01-0501)
+                    - [ ] Read-ahead for sequential file access patterns. (REQ: REQ-01-0502)
+            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+                - [ ] Unit: vm_map insert/remove/lookup/protect. (REQ: REQ-01-0504)
+                - [ ] Unit: vm_object create/reference/deallocate/shadow/collapse. (REQ: REQ-01-0505)
+                - [ ] Unit: vm_fault resolution for anonymous, file-backed, and COW pages. (REQ: REQ-01-0506)
+                - [ ] Unit: swap pager round-trip (page out → page in). (REQ: REQ-01-0507)
+                - [ ] Property: vm_map entries are non-overlapping and sorted. (REQ: REQ-01-0508)
+                - [ ] Property: vm_object refcount reaches 0 only when no entries reference it. (REQ: REQ-01-0509)
+                - [ ] Integration: mmap anonymous memory, write, fork, verify COW isolation. (REQ: REQ-01-0510)
+                - [ ] Integration: mmap file, read, modify, msync, verify on-disk. (REQ: REQ-01-0511)
+            - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+                - [ ] Internal doc: VM hierarchy (map → entry → object → page). (REQ: REQ-01-0513)
+                - [ ] Internal doc: COW shadow chain and collapse algorithm. (REQ: REQ-01-0514)
+                - [ ] Internal doc: pager interface contract. (REQ: REQ-01-0515)
 
-    - [ ] **Kernel Allocator (UMA/Slab):**
+    - [ ] **Kernel Allocator (UMA/Slab):** (REQ: REQ-01-0516)
 
         > **Files:** `sys/vm/uma_core.c`, `sys/vm/vm_kmem.c`.
 
-        - [ ] **UMA Core (`uma_core.c`):**
-            - [ ] Zone creation: `uma_zcreate(name, size, ctor, dtor, init, fini, align, flags)`.
-            - [ ] Zone destruction: `uma_zdestroy(zone)`.
-            - [ ] `uma_zalloc(zone, flags)`: allocate object from zone.
-            - [ ] `uma_zfree(zone, item)`: free object to zone.
-            - [ ] **Per-CPU Caches (Magazines):**
-                - [ ] Lockless fast-path allocations via per-CPU magazine layer.
-                - [ ] Magazine swap on empty/full (loaded ↔ previous).
-                - [ ] Depot layer: global pool of full/empty magazines.
-            - [ ] **Slab Management:**
-                - [ ] Slab allocation from VM (page-sized).
-                - [ ] Free list within slab for object tracking.
-                - [ ] Partial/full/empty slab lists per zone.
-            - [ ] **Alignment/Coloring:**
-                - [ ] CPU cache line alignment for objects.
-                - [ ] Slab coloring to reduce cache set conflicts.
-            - [ ] **Constructors/Destructors:**
-                - [ ] `ctor` callback on allocation (after init).
-                - [ ] `dtor` callback on free (before fini).
-                - [ ] `init` once per slab object lifetime.
-                - [ ] `fini` once when slab freed.
-            - [ ] **Reclamation:**
-                - [ ] Shrinker callbacks to free unused slabs under memory pressure.
-                - [ ] Bucket draining back to slabs.
-                - [ ] Memory pressure feedback integration with page daemon.
-        - [ ] **Debugging & Safety:**
-            - [ ] **Redzones:** guard bytes before/after objects with canary values.
-            - [ ] **Poisoning:** fill freed memory with 0xDEADBEEF to catch use-after-free.
-            - [ ] **Leak Detection:** track active allocations per zone.
-            - [ ] **Foreign Pointer Protection:** validate pointer belongs to zone on free.
-            - [ ] **`uma_find_slab()` Optimization:** replace O(N) linear search with hash table.
-        - [ ] **General Allocator (`kmalloc`/`kfree`):**
-            - [ ] Power-of-two zones: back `kmalloc` with UMA zones for sizes 16, 32, 64, ..., 4096.
-            - [ ] Large allocations: bypass UMA for >4 KB (direct `vm_map` allocation).
-            - [ ] `krealloc(ptr, size)`: resize allocation.
-            - [ ] Statistics: track memory usage by `malloc_type` (subsystem).
-        - [ ] **Testing:**
-            - [ ] Unit: zone create/alloc/free/destroy lifecycle.
-            - [ ] Unit: per-CPU cache hit/miss paths.
-            - [ ] Unit: slab allocation and free list integrity.
-            - [ ] Unit: ctor/dtor/init/fini callback ordering.
-            - [ ] Unit: redzone corruption detection.
-            - [ ] Unit: poison detection on use-after-free.
-            - [ ] Property: total allocated + free = zone capacity.
-            - [ ] Stress: 10000 alloc/free cycles across multiple zones.
-        - [ ] **Documentation:**
-            - [ ] Internal doc: UMA architecture (zone → slab → magazine → per-CPU cache).
-            - [ ] Internal doc: `kmalloc` power-of-two zone selection.
+        - [ ] **UMA Core (`uma_core.c`):** (REQ: REQ-01-0517)
+            - [ ] Zone creation: `uma_zcreate(name, size, ctor, dtor, init, fini, align, flags)`. (REQ: REQ-01-0518)
+            - [ ] Zone destruction: `uma_zdestroy(zone)`. (REQ: REQ-01-0519)
+            - [ ] `uma_zalloc(zone, flags)`: allocate object from zone. (REQ: REQ-01-0520)
+            - [ ] `uma_zfree(zone, item)`: free object to zone. (REQ: REQ-01-0521)
+            - [ ] **Per-CPU Caches (Magazines):** (REQ: REQ-01-0522)
+                - [ ] Lockless fast-path allocations via per-CPU magazine layer. (REQ: REQ-01-0523)
+                - [ ] Magazine swap on empty/full (loaded ↔ previous). (REQ: REQ-01-0524)
+                - [ ] Depot layer: global pool of full/empty magazines. (REQ: REQ-01-0525)
+            - [ ] **Slab Management:** (REQ: REQ-01-0526)
+                - [ ] Slab allocation from VM (page-sized). (REQ: REQ-01-0527)
+                - [ ] Free list within slab for object tracking. (REQ: REQ-01-0528)
+                - [ ] Partial/full/empty slab lists per zone. (REQ: REQ-01-0529)
+            - [ ] **Alignment/Coloring:** (REQ: REQ-01-0530)
+                - [ ] CPU cache line alignment for objects. (REQ: REQ-01-0531)
+                - [ ] Slab coloring to reduce cache set conflicts. (REQ: REQ-01-0532)
+            - [ ] **Constructors/Destructors:** (REQ: REQ-01-0533)
+                - [ ] `ctor` callback on allocation (after init). (REQ: REQ-01-0534)
+                - [ ] `dtor` callback on free (before fini). (REQ: REQ-01-0535)
+                - [ ] `init` once per slab object lifetime. (REQ: REQ-01-0536)
+                - [ ] `fini` once when slab freed. (REQ: REQ-01-0537)
+            - [ ] **Reclamation:** (REQ: REQ-01-0538)
+                - [ ] Shrinker callbacks to free unused slabs under memory pressure. (REQ: REQ-01-0539)
+                - [ ] Bucket draining back to slabs. (REQ: REQ-01-0540)
+                - [ ] Memory pressure feedback integration with page daemon. (REQ: REQ-01-0541)
+        - [ ] **Debugging & Safety:** (REQ: REQ-01-0542)
+            - [ ] **Redzones:** guard bytes before/after objects with canary values. (REQ: REQ-01-0543)
+            - [ ] **Poisoning:** fill freed memory with 0xDEADBEEF to catch use-after-free. (REQ: REQ-01-0544)
+            - [ ] **Leak Detection:** track active allocations per zone. (REQ: REQ-01-0545)
+            - [ ] **Foreign Pointer Protection:** validate pointer belongs to zone on free. (REQ: REQ-01-0546)
+            - [ ] **`uma_find_slab()` Optimization:** replace O(N) linear search with hash table. (REQ: REQ-01-0547)
+        - [ ] **General Allocator (`kmalloc`/`kfree`):** (REQ: REQ-01-0548)
+            - [ ] Power-of-two zones: back `kmalloc` with UMA zones for sizes 16, 32, 64, ..., 4096. (REQ: REQ-01-0549)
+            - [ ] Large allocations: bypass UMA for >4 KB (direct `vm_map` allocation). (REQ: REQ-01-0550)
+            - [ ] `krealloc(ptr, size)`: resize allocation. (REQ: REQ-01-0551)
+            - [ ] Statistics: track memory usage by `malloc_type` (subsystem). (REQ: REQ-01-0552)
+        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [ ] Unit: zone create/alloc/free/destroy lifecycle. (REQ: REQ-01-0554)
+            - [ ] Unit: per-CPU cache hit/miss paths. (REQ: REQ-01-0555)
+            - [ ] Unit: slab allocation and free list integrity. (REQ: REQ-01-0556)
+            - [ ] Unit: ctor/dtor/init/fini callback ordering. (REQ: REQ-01-0557)
+            - [ ] Unit: redzone corruption detection. (REQ: REQ-01-0558)
+            - [ ] Unit: poison detection on use-after-free. (REQ: REQ-01-0559)
+            - [ ] Property: total allocated + free = zone capacity. (REQ: REQ-01-0560)
+            - [ ] Stress: 10000 alloc/free cycles across multiple zones. (REQ: REQ-01-0561)
+        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+            - [ ] Internal doc: UMA architecture (zone → slab → magazine → per-CPU cache). (REQ: REQ-01-0563)
+            - [ ] Internal doc: `kmalloc` power-of-two zone selection. (REQ: REQ-01-0564)
 
-    - [ ] **User Memory Syscalls:**
-        - [ ] `sys_mmap(addr, len, prot, flags, fd, offset)`: map memory.
-            - [ ] `MAP_ANONYMOUS`: zero-fill anonymous mapping.
-            - [ ] `MAP_PRIVATE`: file-backed COW mapping.
-            - [ ] `MAP_SHARED`: file-backed write-through mapping.
-            - [ ] `MAP_FIXED`: map at exact address (unmap existing).
-            - [ ] Alignment to page boundary.
-        - [ ] `sys_munmap(addr, len)`: unmap region.
-        - [ ] `sys_mprotect(addr, len, prot)`: change protection.
-        - [ ] `sys_brk(addr)` / `sys_sbrk(incr)`: adjust data segment.
-        - [ ] `sys_msync(addr, len, flags)`: sync dirty pages to backing store.
+    - [ ] **User Memory Syscalls:** (REQ: REQ-01-0565)
+        - [ ] `sys_mmap(addr, len, prot, flags, fd, offset)`: map memory. (REQ: REQ-01-0566)
+            - [ ] `MAP_ANONYMOUS`: zero-fill anonymous mapping. (REQ: REQ-01-0567)
+            - [ ] `MAP_PRIVATE`: file-backed COW mapping. (REQ: REQ-01-0568)
+            - [ ] `MAP_SHARED`: file-backed write-through mapping. (REQ: REQ-01-0569)
+            - [ ] `MAP_FIXED`: map at exact address (unmap existing). (REQ: REQ-01-0570)
+            - [ ] Alignment to page boundary. (REQ: REQ-01-0571)
+        - [ ] `sys_munmap(addr, len)`: unmap region. (REQ: REQ-01-0572)
+        - [ ] `sys_mprotect(addr, len, prot)`: change protection. (REQ: REQ-01-0573)
+        - [ ] `sys_brk(addr)` / `sys_sbrk(incr)`: adjust data segment. (REQ: REQ-01-0574)
+        - [ ] `sys_msync(addr, len, flags)`: sync dirty pages to backing store. (REQ: REQ-01-0575)
 
-    - [ ] **SMP & Interrupts:**
+    - [ ] **SMP & Interrupts:** (REQ: REQ-01-0576)
 
         > **Files:** `sys/arch/i386/apic.c`, `sys/arch/i386/ioapic.c`,
         > `sys/arch/i386/smp.c`, `sys/kern/percpu.c`.
 
-        - [ ] **Discovery:**
-            - [ ] Parse ACPI MADT (APIC) to find processor entries.
-            - [ ] Fallback: parse MP Tables (Intel MultiProcessor Spec).
-            - [ ] Record BSP and AP LAPIC IDs.
-        - [ ] **Local APIC (LAPIC):**
-            - [ ] Map LAPIC MMIO base (default 0xFEE00000).
-            - [ ] Set Spurious Interrupt Vector Register (SVR): enable APIC, set vector.
-            - [ ] **Timer:**
-                - [ ] Calibrate against PIT or ACPI PM Timer.
-                - [ ] Set Divider Configuration Register (DCR).
-                - [ ] Periodic mode for scheduler tick.
-                - [ ] One-shot mode for high-resolution sleeps.
-            - [ ] Error Status Register (ESR) and LVT Error vector.
-            - [ ] **IPI (Inter-Processor Interrupt):**
-                - [ ] ICR (Interrupt Command Register) writing logic.
-                - [ ] Send fixed, lowest priority, NMI, INIT, SIPI IPIs.
-                - [ ] Wait for delivery status (busy bit clear).
-        - [ ] **I/O APIC:**
-            - [ ] Enumerate I/O APICs from MADT.
-            - [ ] `ioapic_read` / `ioapic_write` via index/window registers.
-            - [ ] **Redirection Table:**
-                - [ ] Mask/unmask IRQs.
-                - [ ] Set delivery mode (fixed, lowest priority).
-                - [ ] Set destination (physical/logical).
-                - [ ] Set polarity and trigger mode (active high/low, edge/level).
-            - [ ] Legacy ISA IRQ (0–15) → Global System Interrupt (GSI) mapping.
-        - [ ] **AP Bootstrap:**
-            - [ ] Allocate low-memory trampoline page (under 1 MB).
-            - [ ] Copy 16-bit real mode entry code to trampoline.
-            - [ ] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence.
-            - [ ] AP enters protected mode, enables paging, jumps to C entry.
-        - [ ] **Per-CPU Data:**
-            - [ ] GS-base (or FS-base) for CPU-local variable access.
-            - [ ] Per-CPU GDTs and TSSs.
-            - [ ] Per-CPU scheduler runqueues.
-            - [ ] Per-CPU interrupt stacks.
-        - [ ] **Synchronization:**
-            - [ ] Spinlock implementation (ticket locks or MCS locks).
-            - [ ] `lock` prefix for atomic operations.
-            - [ ] Deadlock detection (lock ordering validation).
-            - [ ] Audit all global data structures for race conditions.
-        - [ ] **Testing:**
-            - [ ] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`.
-            - [ ] Unit: LAPIC timer calibration accuracy.
-            - [ ] Unit: IPI send/receive between CPUs.
-            - [ ] Unit: per-CPU data isolation.
+        - [ ] **Discovery:** (REQ: REQ-01-0577)
+            - [ ] Parse ACPI MADT (APIC) to find processor entries. (REQ: REQ-01-0578)
+            - [ ] Fallback: parse MP Tables (Intel MultiProcessor Spec). (REQ: REQ-01-0579)
+            - [ ] Record BSP and AP LAPIC IDs. (REQ: REQ-01-0580)
+        - [ ] **Local APIC (LAPIC):** (REQ: REQ-01-0581)
+            - [ ] Map LAPIC MMIO base (default 0xFEE00000). (REQ: REQ-01-0582)
+            - [ ] Set Spurious Interrupt Vector Register (SVR): enable APIC, set vector. (REQ: REQ-01-0583)
+            - [ ] **Timer:** (REQ: REQ-01-0584)
+                - [ ] Calibrate against PIT or ACPI PM Timer. (REQ: REQ-01-0585)
+                - [ ] Set Divider Configuration Register (DCR). (REQ: REQ-01-0586)
+                - [ ] Periodic mode for scheduler tick. (REQ: REQ-01-0587)
+                - [ ] One-shot mode for high-resolution sleeps. (REQ: REQ-01-0588)
+            - [ ] Error Status Register (ESR) and LVT Error vector. (REQ: REQ-01-0589)
+            - [ ] **IPI (Inter-Processor Interrupt):** (REQ: REQ-01-0590)
+                - [ ] ICR (Interrupt Command Register) writing logic. (REQ: REQ-01-0591)
+                - [ ] Send fixed, lowest priority, NMI, INIT, SIPI IPIs. (REQ: REQ-01-0592)
+                - [ ] Wait for delivery status (busy bit clear). (REQ: REQ-01-0593)
+        - [ ] **I/O APIC:** (REQ: REQ-01-0594)
+            - [ ] Enumerate I/O APICs from MADT. (REQ: REQ-01-0595)
+            - [ ] `ioapic_read` / `ioapic_write` via index/window registers. (REQ: REQ-01-0596)
+            - [ ] **Redirection Table:** (REQ: REQ-01-0597)
+                - [ ] Mask/unmask IRQs. (REQ: REQ-01-0598)
+                - [ ] Set delivery mode (fixed, lowest priority). (REQ: REQ-01-0599)
+                - [ ] Set destination (physical/logical). (REQ: REQ-01-0600)
+                - [ ] Set polarity and trigger mode (active high/low, edge/level). (REQ: REQ-01-0601)
+            - [ ] Legacy ISA IRQ (0–15) → Global System Interrupt (GSI) mapping. (REQ: REQ-01-0602)
+        - [ ] **AP Bootstrap:** (REQ: REQ-01-0603)
+            - [ ] Allocate low-memory trampoline page (under 1 MB). (REQ: REQ-01-0604)
+            - [ ] Copy 16-bit real mode entry code to trampoline. (REQ: REQ-01-0605)
+            - [ ] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence. (REQ: REQ-01-0606)
+            - [ ] AP enters protected mode, enables paging, jumps to C entry. (REQ: REQ-01-0607)
+        - [ ] **Per-CPU Data:** (REQ: REQ-01-0608)
+            - [ ] GS-base (or FS-base) for CPU-local variable access. (REQ: REQ-01-0609)
+            - [ ] Per-CPU GDTs and TSSs. (REQ: REQ-01-0610)
+            - [ ] Per-CPU scheduler runqueues. (REQ: REQ-01-0611)
+            - [ ] Per-CPU interrupt stacks. (REQ: REQ-01-0612)
+        - [ ] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
+            - [ ] Spinlock implementation (ticket locks or MCS locks). (REQ: REQ-01-0614)
+            - [ ] `lock` prefix for atomic operations. (REQ: REQ-01-0615)
+            - [ ] Deadlock detection (lock ordering validation). (REQ: REQ-01-0616)
+            - [ ] Audit all global data structures for race conditions. (REQ: REQ-01-0617)
+        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [ ] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`. (REQ: REQ-01-0619)
+            - [ ] Unit: LAPIC timer calibration accuracy. (REQ: REQ-01-0620)
+            - [ ] Unit: IPI send/receive between CPUs. (REQ: REQ-01-0621)
+            - [ ] Unit: per-CPU data isolation. (REQ: REQ-01-0622)
 
-    - [ ] **Scheduling (MLFQ Scheduler):**
+    - [ ] **Scheduling (MLFQ Scheduler):** (REQ: REQ-01-0623)
 
         > **Files:** `sys/kern/sched.c`, `sys/kern/sched_smp.c`,
         > `sys/kern/turnstile.c`, `sys/kern/sleepq.c`.
 
-        - [ ] **Algorithm (ULE/MLFQ):**
-            - [ ] Multilevel queues: Realtime, Timeshare, Idle priority classes.
-            - [ ] Interactiveness heuristics: boost I/O-bound threads.
-            - [ ] Priority decay for CPU-bound threads.
-            - [ ] Time slice assignment based on priority class.
-        - [ ] **SMP Scalability:**
-            - [ ] Per-CPU runqueues (eliminate global scheduler lock).
-            - [ ] Work-stealing load balancing when a CPU goes idle.
-            - [ ] CPU affinity (`sched_setaffinity` masks).
-            - [ ] IPI-based preemption of remote CPUs.
-        - [ ] **Synchronization Primitives:**
-            - [ ] **Turnstiles:** priority inheritance for mutexes (prevent priority inversion).
-            - [ ] **Sleep Queues:** hashed wait queues for `sleep`/`wakeup` (O(1) lookup).
-        - [ ] **Context Switching:**
-            - [ ] FPU lazy save: CR0.TS exception for deferred FPU context.
-            - [ ] PCB: refined for thread/process separation.
-            - [ ] `switch_to(old, new)`: save/restore callee-saved registers, swap stacks.
-        - [ ] **Kernel Process (PID 0 — Swapper/Idle):**
-            - [ ] Pageout daemon work in idle loop.
-            - [ ] Ensures valid process context always exists.
-        - [ ] **Process Bitness Tracking:**
-            - [ ] `enum proc_bitness` (16/32/64) field in process struct.
-            - [ ] `proc_set_bitness()` / `proc_get_bitness()` with permission checks.
-            - [ ] Bitness inheritance on fork, transition on exec.
-        - [ ] **Testing:**
-            - [ ] Unit: priority queue insertion/removal ordering.
-            - [ ] Unit: turnstile priority inheritance chain.
-            - [ ] Unit: sleep queue hash distribution.
-            - [ ] Integration: verify load balancing with CPU-intensive workload.
-            - [ ] Integration: verify interactiveness boost for I/O workload.
-        - [ ] **Documentation:**
-            - [ ] Internal doc: MLFQ algorithm and priority classes.
-            - [ ] Internal doc: SMP load balancing and work stealing.
+        - [ ] **Algorithm (ULE/MLFQ):** (REQ: REQ-01-0624)
+            - [ ] Multilevel queues: Realtime, Timeshare, Idle priority classes. (REQ: REQ-01-0625)
+            - [ ] Interactiveness heuristics: boost I/O-bound threads. (REQ: REQ-01-0626)
+            - [ ] Priority decay for CPU-bound threads. (REQ: REQ-01-0627)
+            - [ ] Time slice assignment based on priority class. (REQ: REQ-01-0628)
+        - [ ] **SMP Scalability:** (REQ: REQ-01-0629)
+            - [ ] Per-CPU runqueues (eliminate global scheduler lock). (REQ: REQ-01-0630)
+            - [ ] Work-stealing load balancing when a CPU goes idle. (REQ: REQ-01-0631)
+            - [ ] CPU affinity (`sched_setaffinity` masks). (REQ: REQ-01-0632)
+            - [ ] IPI-based preemption of remote CPUs. (REQ: REQ-01-0633)
+        - [ ] **Synchronization Primitives:** (REQ: REQ-01-0634)
+            - [ ] **Turnstiles:** priority inheritance for mutexes (prevent priority inversion). (REQ: REQ-01-0635)
+            - [ ] **Sleep Queues:** hashed wait queues for `sleep`/`wakeup` (O(1) lookup). (REQ: REQ-01-0636)
+        - [ ] **Context Switching:** (REQ: REQ-01-0637)
+            - [ ] FPU lazy save: CR0.TS exception for deferred FPU context. (REQ: REQ-01-0638)
+            - [ ] PCB: refined for thread/process separation. (REQ: REQ-01-0639)
+            - [ ] `switch_to(old, new)`: save/restore callee-saved registers, swap stacks. (REQ: REQ-01-0640)
+        - [ ] **Kernel Process (PID 0 — Swapper/Idle):** (REQ: REQ-01-0641)
+            - [ ] Pageout daemon work in idle loop. (REQ: REQ-01-0642)
+            - [ ] Ensures valid process context always exists. (REQ: REQ-01-0643)
+        - [ ] **Process Bitness Tracking:** (REQ: REQ-01-0644)
+            - [ ] `enum proc_bitness` (16/32/64) field in process struct. (REQ: REQ-01-0645)
+            - [ ] `proc_set_bitness()` / `proc_get_bitness()` with permission checks. (REQ: REQ-01-0646)
+            - [ ] Bitness inheritance on fork, transition on exec. (REQ: REQ-01-0647)
+        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [ ] Unit: priority queue insertion/removal ordering. (REQ: REQ-01-0649)
+            - [ ] Unit: turnstile priority inheritance chain. (REQ: REQ-01-0650)
+            - [ ] Unit: sleep queue hash distribution. (REQ: REQ-01-0651)
+            - [ ] Integration: verify load balancing with CPU-intensive workload. (REQ: REQ-01-0652)
+            - [ ] Integration: verify interactiveness boost for I/O workload. (REQ: REQ-01-0653)
+        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+            - [ ] Internal doc: MLFQ algorithm and priority classes. (REQ: REQ-01-0655)
+            - [ ] Internal doc: SMP load balancing and work stealing. (REQ: REQ-01-0656)
 
-    - [ ] **Synchronization:**
+    - [ ] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
 
-        - [ ] **Kernel Primitives:**
-            - [ ] Spinlocks (with GCC C11 atomic builtins).
-            - [ ] Mutexes (backed by sleep queues).
-            - [ ] Semaphores (counting, backed by sleep queues).
-            - [ ] Reader/writer locks.
+        - [ ] **Kernel Primitives:** (REQ: REQ-01-0658)
+            - [ ] Spinlocks (with GCC C11 atomic builtins). (REQ: REQ-01-0659)
+            - [ ] Mutexes (backed by sleep queues). (REQ: REQ-01-0660)
+            - [ ] Semaphores (counting, backed by sleep queues). (REQ: REQ-01-0661)
+            - [ ] Reader/writer locks. (REQ: REQ-01-0662)
 
-        - [ ] **Userspace Synchronization (Futex):**
+        - [ ] **Userspace Synchronization (Futex):** (REQ: REQ-01-0663)
 
             > **Files:** `sys/kern/futex.c`, `sys/kern/futex.h`.
 
-            - [ ] **Core Operations:**
-                - [ ] `FUTEX_WAIT`: atomic compare-and-sleep on user-space word.
-                    - [ ] `futex_cmpxchg_user()`: validated userspace CMPXCHG.
-                    - [ ] `validate_uaddr()`: ensure address is in user space.
-                - [ ] `FUTEX_WAKE`: wake up N waiters on a futex word.
-                - [ ] `FUTEX_REQUEUE`: move waiters from one futex to another.
-                    - [ ] Atomic compare before requeue (`FUTEX_CMP_REQUEUE`).
-            - [ ] **Advanced Features:**
-                - [ ] `FUTEX_ROBUST_LIST`: handle owner death.
-                    - [ ] `sys_set_robust_list()` / `sys_get_robust_list()`.
-                    - [ ] `futex_exit_cleanup()`: walk robust list on process exit.
-                    - [ ] Mark owned futexes as `FUTEX_OWNER_DIED`.
-                - [ ] `FUTEX_PI`: priority inheritance support.
-                    - [ ] `futex_lock_pi()` / `futex_unlock_pi()`.
-                    - [ ] `pi_boost_owner()` / `pi_deboost_owner()`.
-                    - [ ] Lock holder inherits waiter's priority.
-            - [ ] **Performance:**
-                - [ ] Hash table bucketing for wait queues (O(1) lookup by address).
-                - [ ] Per-bucket spinlocks.
-            - [ ] **Testing:**
-                - [ ] Unit: FUTEX_WAIT/WAKE basic handshake.
-                - [ ] Unit: FUTEX_REQUEUE moves waiters correctly.
-                - [ ] Unit: robust list cleanup on exit.
-                - [ ] Unit: PI inheritance — low priority holder boosted.
-                - [ ] Property: no orphaned waiters after process exit.
+            - [ ] **Core Operations:** (REQ: REQ-01-0664)
+                - [ ] `FUTEX_WAIT`: atomic compare-and-sleep on user-space word. (REQ: REQ-01-0665)
+                    - [ ] `futex_cmpxchg_user()`: validated userspace CMPXCHG. (REQ: REQ-01-0666)
+                    - [ ] `validate_uaddr()`: ensure address is in user space. (REQ: REQ-01-0667)
+                - [ ] `FUTEX_WAKE`: wake up N waiters on a futex word. (REQ: REQ-01-0668)
+                - [ ] `FUTEX_REQUEUE`: move waiters from one futex to another. (REQ: REQ-01-0669)
+                    - [ ] Atomic compare before requeue (`FUTEX_CMP_REQUEUE`). (REQ: REQ-01-0670)
+            - [ ] **Advanced Features:** (REQ: REQ-01-0489, REQ-01-0671)
+                - [ ] `FUTEX_ROBUST_LIST`: handle owner death. (REQ: REQ-01-0672)
+                    - [ ] `sys_set_robust_list()` / `sys_get_robust_list()`. (REQ: REQ-01-0673)
+                    - [ ] `futex_exit_cleanup()`: walk robust list on process exit. (REQ: REQ-01-0674)
+                    - [ ] Mark owned futexes as `FUTEX_OWNER_DIED`. (REQ: REQ-01-0675)
+                - [ ] `FUTEX_PI`: priority inheritance support. (REQ: REQ-01-0676)
+                    - [ ] `futex_lock_pi()` / `futex_unlock_pi()`. (REQ: REQ-01-0677)
+                    - [ ] `pi_boost_owner()` / `pi_deboost_owner()`. (REQ: REQ-01-0678)
+                    - [ ] Lock holder inherits waiter's priority. (REQ: REQ-01-0679)
+            - [ ] **Performance:** (REQ: REQ-01-0680)
+                - [ ] Hash table bucketing for wait queues (O(1) lookup by address). (REQ: REQ-01-0681)
+                - [ ] Per-bucket spinlocks. (REQ: REQ-01-0682)
+            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+                - [ ] Unit: FUTEX_WAIT/WAKE basic handshake. (REQ: REQ-01-0684)
+                - [ ] Unit: FUTEX_REQUEUE moves waiters correctly. (REQ: REQ-01-0685)
+                - [ ] Unit: robust list cleanup on exit. (REQ: REQ-01-0686)
+                - [ ] Unit: PI inheritance — low priority holder boosted. (REQ: REQ-01-0687)
+                - [ ] Property: no orphaned waiters after process exit. (REQ: REQ-01-0688)
 
-        - [ ] **NTSYNC Driver (Windows NT Sync Primitives):**
+        - [ ] **NTSYNC Driver (Windows NT Sync Primitives):** (REQ: REQ-01-0689)
 
             > **Files:** `sys/kern/ntsync.c`, `sys/kern/ntsync.h`.
 
-            - [ ] **Core Infrastructure:**
-                - [ ] `/dev/ntsync` char device with instance-based isolation.
-                - [ ] `ntsync_instance` structure per open file description.
-                - [ ] Object handle management (object FDs returned from ioctls).
-            - [ ] **Semaphore Object:**
-                - [ ] `NTSYNC_IOC_CREATE_SEM`: create semaphore (count, max).
-                - [ ] `NTSYNC_IOC_SEM_POST`: increment semaphore count.
-                - [ ] `NTSYNC_IOC_READ_SEM`: query semaphore state.
-            - [ ] **Mutex Object:**
-                - [ ] `NTSYNC_IOC_CREATE_MUTEX`: create mutex (owner, count).
-                - [ ] `NTSYNC_IOC_MUTEX_UNLOCK`: release mutex ownership.
-                - [ ] `NTSYNC_IOC_READ_MUTEX`: query mutex state.
-                - [ ] `NTSYNC_IOC_KILL_OWNER`: mark mutex as abandoned.
-            - [ ] **Event Object:**
-                - [ ] `NTSYNC_IOC_CREATE_EVENT`: create event (signaled, manual/auto-reset).
-                - [ ] `NTSYNC_IOC_SET_EVENT` / `NTSYNC_IOC_RESET_EVENT` / `NTSYNC_IOC_PULSE_EVENT`.
-                - [ ] `NTSYNC_IOC_READ_EVENT`: query event state.
-            - [ ] **Wait Operations:**
-                - [ ] `NTSYNC_IOC_WAIT_ANY`: wait for any of N objects.
-                - [ ] `NTSYNC_IOC_WAIT_ALL`: wait for all N objects simultaneously.
-                - [ ] Alert event support (optional extra wakeup source).
-                - [ ] Timeout handling (MONOTONIC/REALTIME clocks).
-            - [ ] **Internal Mechanics:**
-                - [ ] Wait queue per object with priority ordering.
-                - [ ] Atomic acquisition semantics (spinlock-protected).
-                - [ ] Cross-object atomicity for WAIT_ALL (multi-lock).
-            - [ ] **Testing:**
-                - [ ] Unit: semaphore create/post/read lifecycle.
-                - [ ] Unit: mutex create/lock/unlock/abandon.
-                - [ ] Unit: event set/reset/pulse.
-                - [ ] Unit: WAIT_ANY with mixed object types.
-                - [ ] Unit: WAIT_ALL atomicity (all-or-nothing).
-                - [ ] Unit: timeout expiry (WNOHANG equivalent).
+            - [ ] **Core Infrastructure:** (REQ: REQ-01-0690)
+                - [ ] `/dev/ntsync` char device with instance-based isolation. (REQ: REQ-01-0691)
+                - [ ] `ntsync_instance` structure per open file description. (REQ: REQ-01-0692)
+                - [ ] Object handle management (object FDs returned from ioctls). (REQ: REQ-01-0693)
+            - [ ] **Semaphore Object:** (REQ: REQ-01-0694)
+                - [ ] `NTSYNC_IOC_CREATE_SEM`: create semaphore (count, max). (REQ: REQ-01-0695)
+                - [ ] `NTSYNC_IOC_SEM_POST`: increment semaphore count. (REQ: REQ-01-0696)
+                - [ ] `NTSYNC_IOC_READ_SEM`: query semaphore state. (REQ: REQ-01-0697)
+            - [ ] **Mutex Object:** (REQ: REQ-01-0698)
+                - [ ] `NTSYNC_IOC_CREATE_MUTEX`: create mutex (owner, count). (REQ: REQ-01-0699)
+                - [ ] `NTSYNC_IOC_MUTEX_UNLOCK`: release mutex ownership. (REQ: REQ-01-0700)
+                - [ ] `NTSYNC_IOC_READ_MUTEX`: query mutex state. (REQ: REQ-01-0701)
+                - [ ] `NTSYNC_IOC_KILL_OWNER`: mark mutex as abandoned. (REQ: REQ-01-0702)
+            - [ ] **Event Object:** (REQ: REQ-01-0703)
+                - [ ] `NTSYNC_IOC_CREATE_EVENT`: create event (signaled, manual/auto-reset). (REQ: REQ-01-0704)
+                - [ ] `NTSYNC_IOC_SET_EVENT` / `NTSYNC_IOC_RESET_EVENT` / `NTSYNC_IOC_PULSE_EVENT`. (REQ: REQ-01-0705)
+                - [ ] `NTSYNC_IOC_READ_EVENT`: query event state. (REQ: REQ-01-0706)
+            - [ ] **Wait Operations:** (REQ: REQ-01-0707)
+                - [ ] `NTSYNC_IOC_WAIT_ANY`: wait for any of N objects. (REQ: REQ-01-0708)
+                - [ ] `NTSYNC_IOC_WAIT_ALL`: wait for all N objects simultaneously. (REQ: REQ-01-0709)
+                - [ ] Alert event support (optional extra wakeup source). (REQ: REQ-01-0710)
+                - [ ] Timeout handling (MONOTONIC/REALTIME clocks). (REQ: REQ-01-0711)
+            - [ ] **Internal Mechanics:** (REQ: REQ-01-0712)
+                - [ ] Wait queue per object with priority ordering. (REQ: REQ-01-0713)
+                - [ ] Atomic acquisition semantics (spinlock-protected). (REQ: REQ-01-0714)
+                - [ ] Cross-object atomicity for WAIT_ALL (multi-lock). (REQ: REQ-01-0715)
+            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+                - [ ] Unit: semaphore create/post/read lifecycle. (REQ: REQ-01-0717)
+                - [ ] Unit: mutex create/lock/unlock/abandon. (REQ: REQ-01-0718)
+                - [ ] Unit: event set/reset/pulse. (REQ: REQ-01-0719)
+                - [ ] Unit: WAIT_ANY with mixed object types. (REQ: REQ-01-0720)
+                - [ ] Unit: WAIT_ALL atomicity (all-or-nothing). (REQ: REQ-01-0721)
+                - [ ] Unit: timeout expiry (WNOHANG equivalent). (REQ: REQ-01-0722)
 
-    - [ ] **Signals:**
+    - [ ] **Signals:** (REQ: REQ-01-0723)
 
         > **Files:** `sys/kern/signal.c`, `sys/kern/sigprop.c`,
         > `sys/arch/i386/signal.c` (arch-specific delivery).
 
-        - [ ] **Signal Infrastructure:**
-            - [ ] **Per-Process State (`process_t`):**
-                - [ ] `sig_actions[NSIG]`: array of `struct sigaction` per signal.
-                - [ ] `sig_catch`: bitmask of signals with handlers.
-                - [ ] `sig_ignore`: bitmask of signals set to SIG_IGN.
-            - [ ] **Per-Thread State (`thread_t`):**
-                - [ ] `sig_pending`: bitmask of pending signals.
-                - [ ] `sig_mask`: current signal mask (blocked signals).
-                - [ ] `sig_alt_stack`: alternative signal stack (`stack_t`).
-                - [ ] `sig_on_stack`: flag for currently executing on alt stack.
-            - [ ] **Signal Properties Table (`sigprop.c`):**
-                - [ ] Default actions: Terminate, Core, Stop, Ignore, Continue.
-                - [ ] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT.
-                - [ ] Unmaskable: SIGKILL, SIGSTOP (SA_CANTMASK).
+        - [ ] **Signal Infrastructure:** (REQ: REQ-01-0724)
+            - [ ] **Per-Process State (`process_t`):** (REQ: REQ-01-0725)
+                - [ ] `sig_actions[NSIG]`: array of `struct sigaction` per signal. (REQ: REQ-01-0726)
+                - [ ] `sig_catch`: bitmask of signals with handlers. (REQ: REQ-01-0727)
+                - [ ] `sig_ignore`: bitmask of signals set to SIG_IGN. (REQ: REQ-01-0728)
+            - [ ] **Per-Thread State (`thread_t`):** (REQ: REQ-01-0729)
+                - [ ] `sig_pending`: bitmask of pending signals. (REQ: REQ-01-0730)
+                - [ ] `sig_mask`: current signal mask (blocked signals). (REQ: REQ-01-0731)
+                - [ ] `sig_alt_stack`: alternative signal stack (`stack_t`). (REQ: REQ-01-0732)
+                - [ ] `sig_on_stack`: flag for currently executing on alt stack. (REQ: REQ-01-0733)
+            - [ ] **Signal Properties Table (`sigprop.c`):** (REQ: REQ-01-0734)
+                - [ ] Default actions: Terminate, Core, Stop, Ignore, Continue. (REQ: REQ-01-0735)
+                - [ ] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT. (REQ: REQ-01-0736)
+                - [ ] Unmaskable: SIGKILL, SIGSTOP (SA_CANTMASK). (REQ: REQ-01-0737)
 
-        - [ ] **Signal Syscalls:**
-            - [ ] **`sys_sigaction(sig, act, oact)`:**
-                - [ ] Validate signal number (1 ≤ sig ≤ NSIG, not SIGKILL/SIGSTOP).
-                - [ ] Return old action in `oact`, install new from `act`.
-                - [ ] Update `sig_catch`/`sig_ignore` bitmasks.
-                - [ ] Handle flags: `SA_RESETHAND`, `SA_NODEFER`, `SA_RESTART`, `SA_NOCLDSTOP`, `SA_NOCLDWAIT`, `SA_SIGINFO`, `SA_ONSTACK`.
-            - [ ] **`sys_sigprocmask(how, set, oset)`:**
-                - [ ] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK.
-                - [ ] Filter out SIGKILL/SIGSTOP from mask.
-            - [ ] **`sys_sigpending(set)`:** return pending & ~masked signals.
-            - [ ] **`sys_sigsuspend(mask)`:** atomically set mask and sleep; restore on return; always EINTR.
-            - [ ] **`sys_sigaltstack(ss, oss)`:**
-                - [ ] Install/query alternative signal stack.
-                - [ ] Validate `ss_size ≥ MINSIGSTKSZ`.
-                - [ ] Handle `SS_DISABLE`; error if on alt stack.
-            - [ ] **`sys_kill(pid, sig)`:**
-                - [ ] `pid > 0`: specific process.
-                - [ ] `pid == 0`: current process group.
-                - [ ] `pid == -1`: all processes (except init).
-                - [ ] `pid < -1`: process group `|pid|`.
-                - [ ] `sig == 0`: permission check only.
-                - [ ] Permission: same UID or CAP_KILL.
-            - [ ] **`sys_sigreturn(scp)`:**
-                - [ ] Validate sigcontext pointer.
-                - [ ] Verify CS/SS have RPL=3 (user mode).
-                - [ ] Restore GPRs, eflags (mask IOPL/VM/RF), eip.
-                - [ ] Restore signal mask from context.
-            - [ ] **`sys_sigwait(set, sig)`:** synchronous signal consumption (no handler).
-            - [ ] **`sys_sigtimedwait(set, info, timeout)`:** like sigwait with timeout + siginfo.
+        - [ ] **Signal Syscalls:** (REQ: REQ-01-0738)
+            - [ ] **`sys_sigaction(sig, act, oact)`:** (REQ: REQ-01-0739)
+                - [ ] Validate signal number (1 ≤ sig ≤ NSIG, not SIGKILL/SIGSTOP). (REQ: REQ-01-0740)
+                - [ ] Return old action in `oact`, install new from `act`. (REQ: REQ-01-0741)
+                - [ ] Update `sig_catch`/`sig_ignore` bitmasks. (REQ: REQ-01-0742)
+                - [ ] Handle flags: `SA_RESETHAND`, `SA_NODEFER`, `SA_RESTART`, `SA_NOCLDSTOP`, `SA_NOCLDWAIT`, `SA_SIGINFO`, `SA_ONSTACK`. (REQ: REQ-01-0743)
+            - [ ] **`sys_sigprocmask(how, set, oset)`:** (REQ: REQ-01-0744)
+                - [ ] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK. (REQ: REQ-01-0745)
+                - [ ] Filter out SIGKILL/SIGSTOP from mask. (REQ: REQ-01-0746)
+            - [ ] **`sys_sigpending(set)`:** return pending & ~masked signals. (REQ: REQ-01-0747)
+            - [ ] **`sys_sigsuspend(mask)`:** atomically set mask and sleep; restore on return; always EINTR. (REQ: REQ-01-0748)
+            - [ ] **`sys_sigaltstack(ss, oss)`:** (REQ: REQ-01-0749)
+                - [ ] Install/query alternative signal stack. (REQ: REQ-01-0750)
+                - [ ] Validate `ss_size ≥ MINSIGSTKSZ`. (REQ: REQ-01-0751)
+                - [ ] Handle `SS_DISABLE`; error if on alt stack. (REQ: REQ-01-0752)
+            - [ ] **`sys_kill(pid, sig)`:** (REQ: REQ-01-0753)
+                - [ ] `pid > 0`: specific process. (REQ: REQ-01-0754)
+                - [ ] `pid == 0`: current process group. (REQ: REQ-01-0755)
+                - [ ] `pid == -1`: all processes (except init). (REQ: REQ-01-0756)
+                - [ ] `pid < -1`: process group `|pid|`. (REQ: REQ-01-0757, REQ-01-0934)
+                - [ ] `sig == 0`: permission check only. (REQ: REQ-01-0758)
+                - [ ] Permission: same UID or CAP_KILL. (REQ: REQ-01-0759)
+            - [ ] **`sys_sigreturn(scp)`:** (REQ: REQ-01-0760)
+                - [ ] Validate sigcontext pointer. (REQ: REQ-01-0761)
+                - [ ] Verify CS/SS have RPL=3 (user mode). (REQ: REQ-01-0762)
+                - [ ] Restore GPRs, eflags (mask IOPL/VM/RF), eip. (REQ: REQ-01-0763)
+                - [ ] Restore signal mask from context. (REQ: REQ-01-0764)
+            - [ ] **`sys_sigwait(set, sig)`:** synchronous signal consumption (no handler). (REQ: REQ-01-0765)
+            - [ ] **`sys_sigtimedwait(set, info, timeout)`:** like sigwait with timeout + siginfo. (REQ: REQ-01-0766)
 
-        - [ ] **Signal Generation:**
-            - [ ] `psignal(p, sig)`: send to process.
-                - [ ] Init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1.
-                - [ ] Select best thread for delivery (not masked).
-                - [ ] If SIGCONT, wake stopped threads; clear pending stops.
-                - [ ] If sleeping interruptibly, wake thread.
-            - [ ] `pgsignal(pgrp, sig)`: send to process group.
-            - [ ] `trapsignal(p, sig, code)`: synchronous trap signal (from exception handler).
-                - [ ] Pass `code` via `siginfo_t` (`si_code`).
-                - [ ] Sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL.
-            - [ ] `sigexit(p, sig)`: terminate with signal.
-                - [ ] Core dump if SA_CORE: call `coredump()`.
-                - [ ] Set exit status to indicate signal termination.
-            - [ ] **Terminal Signals (TTY):**
-                - [ ] SIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp.
-                - [ ] SIGTSTP (Ctrl+Z) to foreground pgrp.
-                - [ ] SIGTTIN: background process reads from TTY.
-                - [ ] SIGTTOU: background process writes to TTY (if TOSTOP).
-                - [ ] SIGHUP: controlling terminal hangup.
+        - [ ] **Signal Generation:** (REQ: REQ-01-0767)
+            - [ ] `psignal(p, sig)`: send to process. (REQ: REQ-01-0768)
+                - [ ] Init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1. (REQ: REQ-01-0769)
+                - [ ] Select best thread for delivery (not masked). (REQ: REQ-01-0770)
+                - [ ] If SIGCONT, wake stopped threads; clear pending stops. (REQ: REQ-01-0768)
+                - [ ] If sleeping interruptibly, wake thread. (REQ: REQ-01-0768)
+            - [ ] `pgsignal(pgrp, sig)`: send to process group. (REQ: REQ-01-0773)
+            - [ ] `trapsignal(p, sig, code)`: synchronous trap signal (from exception handler). (REQ: REQ-01-0774)
+                - [ ] Pass `code` via `siginfo_t` (`si_code`). (REQ: REQ-01-0775)
+                - [ ] Sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL. (REQ: REQ-01-0776)
+            - [ ] `sigexit(p, sig)`: terminate with signal. (REQ: REQ-01-0777)
+                - [ ] Core dump if SA_CORE: call `coredump()`. (REQ: REQ-01-0778)
+                - [ ] Set exit status to indicate signal termination. (REQ: REQ-01-0779)
+            - [ ] **Terminal Signals (TTY):** (REQ: REQ-01-0780)
+                - [ ] SIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp. (REQ: REQ-01-0781)
+                - [ ] SIGTSTP (Ctrl+Z) to foreground pgrp. (REQ: REQ-01-0782)
+                - [ ] SIGTTIN: background process reads from TTY. (REQ: REQ-01-0783)
+                - [ ] SIGTTOU: background process writes to TTY (if TOSTOP). (REQ: REQ-01-0784)
+                - [ ] SIGHUP: controlling terminal hangup. (REQ: REQ-01-0785)
 
-        - [ ] **Signal Delivery (Architecture-Specific — i386):**
-            - [ ] **`sendsig()` — Frame Construction:**
-                - [ ] Calculate user stack pointer from `regs->useresp`.
-                - [ ] Subtract `sizeof(struct sigframe)`.
-                - [ ] Align stack to 16-byte boundary (System V ABI).
-            - [ ] **`struct sigframe` Layout:**
-                - [ ] `retaddr`: return address pointing to trampoline.
-                - [ ] `sig`: signal number (first handler argument).
-                - [ ] `sc`: `struct sigcontext` with saved registers.
-            - [ ] **`struct sigcontext` Population:**
-                - [ ] Save segment registers (gs, fs, es, ds).
-                - [ ] Save GPRs (edi, esi, ebp, esp, ebx, edx, ecx, eax).
-                - [ ] Save trap info (trapno, err).
-                - [ ] Save control (eip, cs, eflags, user_esp, user_ss).
-            - [ ] **Handler Invocation:**
-                - [ ] `copyout()` frame to user stack (with fault handling).
-                - [ ] Set `regs->useresp` and `regs->eip` to frame/handler.
-            - [ ] **SA_SIGINFO Extended Frame:**
-                - [ ] Construct `siginfo_t` (si_signo, si_code, si_addr, etc.).
-                - [ ] Construct `ucontext_t` with machine context.
-                - [ ] Handler signature: `void handler(int, siginfo_t *, void *)`.
-            - [ ] **Alt Stack Handling:**
-                - [ ] If `SA_ONSTACK` and alt stack configured: use alt stack SP.
-                - [ ] Set `sig_on_stack` flag.
+        - [ ] **Signal Delivery (Architecture-Specific — i386):** (REQ: REQ-01-0786)
+            - [ ] **`sendsig()` — Frame Construction:** (REQ: REQ-01-0787)
+                - [ ] Calculate user stack pointer from `regs->useresp`. (REQ: REQ-01-0788)
+                - [ ] Subtract `sizeof(struct sigframe)`. (REQ: REQ-01-0789)
+                - [ ] Align stack to 16-byte boundary (System V ABI). (REQ: REQ-01-0790)
+            - [ ] **`struct sigframe` Layout:** (REQ: REQ-01-0791)
+                - [ ] `retaddr`: return address pointing to trampoline. (REQ: REQ-01-0792)
+                - [ ] `sig`: signal number (first handler argument). (REQ: REQ-01-0793)
+                - [ ] `sc`: `struct sigcontext` with saved registers. (REQ: REQ-01-0794)
+            - [ ] **`struct sigcontext` Population:** (REQ: REQ-01-0795)
+                - [ ] Save segment registers (gs, fs, es, ds). (REQ: REQ-01-0796)
+                - [ ] Save GPRs (edi, esi, ebp, esp, ebx, edx, ecx, eax). (REQ: REQ-01-0797)
+                - [ ] Save trap info (trapno, err). (REQ: REQ-01-0798)
+                - [ ] Save control (eip, cs, eflags, user_esp, user_ss). (REQ: REQ-01-0799)
+            - [ ] **Handler Invocation:** (REQ: REQ-01-0800)
+                - [ ] `copyout()` frame to user stack (with fault handling). (REQ: REQ-01-0801)
+                - [ ] Set `regs->useresp` and `regs->eip` to frame/handler. (REQ: REQ-01-0802)
+            - [ ] **SA_SIGINFO Extended Frame:** (REQ: REQ-01-0803)
+                - [ ] Construct `siginfo_t` (si_signo, si_code, si_addr, etc.). (REQ: REQ-01-0804)
+                - [ ] Construct `ucontext_t` with machine context. (REQ: REQ-01-0805)
+                - [ ] Handler signature: `void handler(int, siginfo_t *, void *)`. (REQ: REQ-01-0806)
+            - [ ] **Alt Stack Handling:** (REQ: REQ-01-0807)
+                - [ ] If `SA_ONSTACK` and alt stack configured: use alt stack SP. (REQ: REQ-01-0807)
+                - [ ] Set `sig_on_stack` flag. (REQ: REQ-01-0809)
 
-        - [ ] **Signal Trampoline:**
-            - [ ] Map trampoline page at fixed address (e.g., 0xFFFF1000).
-            - [ ] Page: user-readable, executable, not writable.
-            - [ ] Code: `mov $SYS_sigreturn, %eax; int $0x80`.
-            - [ ] **VDSO Integration (future):**
-                - [ ] Embed trampoline in VDSO page.
-                - [ ] Use `AT_SYSINFO` auxiliary vector entry.
+        - [ ] **Signal Trampoline:** (REQ: REQ-01-0810)
+            - [ ] Map trampoline page at fixed address (e.g., 0xFFFF1000). (REQ: REQ-01-0811)
+            - [ ] Page: user-readable, executable, not writable. (REQ: REQ-01-0812)
+            - [ ] Code: `mov $SYS_sigreturn, %eax; int $0x80`. (REQ: REQ-01-0813)
+            - [ ] **VDSO Integration (future):** (REQ: REQ-01-0814)
+                - [ ] Embed trampoline in VDSO page. (REQ: REQ-01-0815)
+                - [ ] Use `AT_SYSINFO` auxiliary vector entry. (REQ: REQ-01-0816)
 
-        - [ ] **Signal Mask Management:**
-            - [ ] During handler: block current signal (unless SA_NODEFER) + `sa_mask`.
-            - [ ] Restore original mask in `sys_sigreturn`.
-            - [ ] **Inheritance:**
-                - [ ] `fork()`: child inherits pending signals and mask.
-                - [ ] `exec()`: reset all handlers to SIG_DFL (except SIG_IGN).
+        - [ ] **Signal Mask Management:** (REQ: REQ-01-0817)
+            - [ ] During handler: block current signal (unless SA_NODEFER) + `sa_mask`. (REQ: REQ-01-0818)
+            - [ ] Restore original mask in `sys_sigreturn`. (REQ: REQ-01-0819)
+            - [ ] **Inheritance:** (REQ: REQ-01-0820)
+                - [ ] `fork()`: child inherits pending signals and mask. (REQ: REQ-01-0821)
+                - [ ] `exec()`: reset all handlers to SIG_DFL (except SIG_IGN). (REQ: REQ-01-0822)
 
-        - [ ] **Signal Checking Points:**
-            - [ ] Return from interrupt/exception: `signal_handle_pending()` if returning to user mode.
-            - [ ] Return from syscall: check pending, return EINTR if interruptible.
-            - [ ] Sleep wakeup: `sched_sleep()` returns on signal (EINTR).
+        - [ ] **Signal Checking Points:** (REQ: REQ-01-0823)
+            - [ ] Return from interrupt/exception: `signal_handle_pending()` if returning to user mode. (REQ: REQ-01-0824)
+            - [ ] Return from syscall: check pending, return EINTR if interruptible. (REQ: REQ-01-0825)
+            - [ ] Sleep wakeup: `sched_sleep()` returns on signal (EINTR). (REQ: REQ-01-0826)
 
-        - [ ] **Special Signal Handling:**
-            - [ ] SIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads.
-            - [ ] SIGSTOP: cannot be caught/blocked/ignored; stops all threads.
-            - [ ] SIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED.
-            - [ ] SIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics.
-            - [ ] Job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore.
+        - [ ] **Special Signal Handling:** (REQ: REQ-01-0827)
+            - [ ] SIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads. (REQ: REQ-01-0828)
+            - [ ] SIGSTOP: cannot be caught/blocked/ignored; stops all threads. (REQ: REQ-01-0829)
+            - [ ] SIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED. (REQ: REQ-01-0830)
+            - [ ] SIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics. (REQ: REQ-01-0831)
+            - [ ] Job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore. (REQ: REQ-01-0832)
 
-        - [ ] **PID 1 (Init) Protection:**
-            - [ ] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler.
-            - [ ] If init exits, system halts/panics.
-            - [ ] Init adopts orphaned processes.
+        - [ ] **PID 1 (Init) Protection:** (REQ: REQ-01-0833)
+            - [ ] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler. (REQ: REQ-01-0834)
+            - [ ] If init exits, system halts/panics. (REQ: REQ-01-0833)
+            - [ ] Init adopts orphaned processes. (REQ: REQ-01-0836)
 
-        - [ ] **Core Dump (future):**
-            - [ ] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS.
-            - [ ] `coredump()`: write ELF core format (`/cores/core.PID`).
-            - [ ] Respect `RLIMIT_CORE`.
+        - [ ] **Core Dump (future):** (REQ: REQ-01-0837)
+            - [ ] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS. (REQ: REQ-01-0838)
+            - [ ] `coredump()`: write ELF core format (`/cores/core.PID`). (REQ: REQ-01-0839)
+            - [ ] Respect `RLIMIT_CORE`. (REQ: REQ-01-0840)
 
-        - [ ] **Testing:**
-            - [ ] Unit: `sys_sigaction` install/replace/reset handler.
-            - [ ] Unit: `sys_sigprocmask` block/unblock/setmask.
-            - [ ] Unit: `sys_kill` to specific PID, pgrp, all.
-            - [ ] Unit: `psignal` thread selection (prefer unmasked).
-            - [ ] Unit: `sendsig` frame construction and `sigreturn` restoration.
-            - [ ] Unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU.
-            - [ ] Unit: SA_RESTART — interrupted syscall restarted.
-            - [ ] Unit: SA_SIGINFO — extended frame with siginfo + ucontext.
-            - [ ] Property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant).
-            - [ ] Integration: fork, send SIGINT to child, verify termination.
-            - [ ] Integration: job control stop/continue cycle.
-        - [ ] **Documentation:**
-            - [ ] Internal doc: signal lifecycle (generation → delivery → handler → sigreturn).
-            - [ ] Internal doc: i386 signal frame layout.
-            - [ ] Internal doc: signal checking points and SA_RESTART logic.
+        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [ ] Unit: `sys_sigaction` install/replace/reset handler. (REQ: REQ-01-0842)
+            - [ ] Unit: `sys_sigprocmask` block/unblock/setmask. (REQ: REQ-01-0843)
+            - [ ] Unit: `sys_kill` to specific PID, pgrp, all. (REQ: REQ-01-0844)
+            - [ ] Unit: `psignal` thread selection (prefer unmasked). (REQ: REQ-01-0845)
+            - [ ] Unit: `sendsig` frame construction and `sigreturn` restoration. (REQ: REQ-01-0846)
+            - [ ] Unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU. (REQ: REQ-01-0847)
+            - [ ] Unit: SA_RESTART — interrupted syscall restarted. (REQ: REQ-01-0848)
+            - [ ] Unit: SA_SIGINFO — extended frame with siginfo + ucontext. (REQ: REQ-01-0849)
+            - [ ] Property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant). (REQ: REQ-01-0850)
+            - [ ] Integration: fork, send SIGINT to child, verify termination. (REQ: REQ-01-0851)
+            - [ ] Integration: job control stop/continue cycle. (REQ: REQ-01-0852)
+        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+            - [ ] Internal doc: signal lifecycle (generation → delivery → handler → sigreturn). (REQ: REQ-01-0854)
+            - [ ] Internal doc: i386 signal frame layout. (REQ: REQ-01-0855)
+            - [ ] Internal doc: signal checking points and SA_RESTART logic. (REQ: REQ-01-0856)
 
-    - [ ] **Refactor kmain:**
-        - [ ] Move early i386 boot code to `sys/arch/i386/early_boot.c`.
-        - [ ] Create `init_memory` helper.
-        - [ ] Create `init_root_fs` helper.
-        - [ ] Clean up `kmain` flow.
+    - [ ] **Refactor kmain:** (REQ: REQ-01-0857)
+        - [ ] Move early i386 boot code to `sys/arch/i386/early_boot.c`. (REQ: REQ-01-0858)
+        - [ ] Create `init_memory` helper. (REQ: REQ-01-0859)
+        - [ ] Create `init_root_fs` helper. (REQ: REQ-01-0860)
+        - [ ] Clean up `kmain` flow. (REQ: REQ-01-0861)
 
-    - [ ] **Kernel Core Maintenance:**
-        - [ ] Refactor `spinlock.c` to use GCC C11 atomic builtins.
-        - [ ] Rewrite `swapper.c` idle loop (race-free).
-        - [ ] Cleanup `sleepq.c` formatting and style.
-        - [ ] Remove obsolete `sys/kern/stubs.c`.
-        - [ ] Modularize `sys/kern/lib.c` into `sys/lib/`.
-        - [ ] Audit `mutex.c` and `semaphore.c` for race conditions.
-        - [ ] Fix `sched_smp.c` CPU ID assumption.
+    - [ ] **Kernel Core Maintenance:** (REQ: REQ-01-0862)
+        - [ ] Refactor `spinlock.c` to use GCC C11 atomic builtins. (REQ: REQ-01-0863)
+        - [ ] Rewrite `swapper.c` idle loop (race-free). (REQ: REQ-01-0864)
+        - [ ] Cleanup `sleepq.c` formatting and style. (REQ: REQ-01-0865)
+        - [ ] Remove obsolete `sys/kern/stubs.c`. (REQ: REQ-01-0866)
+        - [ ] Modularize `sys/kern/lib.c` into `sys/lib/`. (REQ: REQ-01-0867)
+        - [ ] Audit `mutex.c` and `semaphore.c` for race conditions. (REQ: REQ-01-0868)
+        - [ ] Fix `sched_smp.c` CPU ID assumption. (REQ: REQ-01-0869)
 
-    - [ ] **Update Kernel Documentation:**
-        - [ ] Document Console/UART subsystem changes.
-        - [ ] Document kmain initialization flow.
-        - [ ] Update ARCHITECTURE.md.
+    - [ ] **Update Kernel Documentation:** (REQ: REQ-01-0870)
+        - [ ] Document Console/UART subsystem changes. (REQ: REQ-01-0871)
+        - [ ] Document kmain initialization flow. (REQ: REQ-01-0872)
+        - [ ] Update ARCHITECTURE.md. (REQ: REQ-01-0873)
 
-    - [ ] **Process Lifecycle & Job Control:**
+    - [ ] **Process Lifecycle & Job Control:** (REQ: REQ-01-0874)
 
-        - [ ] **Process Termination (`exit` / `_exit`):**
+        - [ ] **Process Termination (`exit` / `_exit`):** (REQ: REQ-01-0875)
 
             > `sys_exit(status)` and `sys__exit(status)` both call internal `proc_exit(code)`.
 
-            - [ ] **Phase 1 — State Transition (RUNNING → DYING):**
-                - [ ] Set `p_state` = SDYING.
-                - [ ] Record exit status in `p_xstat`.
-                - [ ] Prevent further scheduling.
-            - [ ] **Phase 2 — Resource Release:**
-                - [ ] **File Descriptors:** `fd_close_all(p)` — close all, decrement refcounts.
-                - [ ] **Virtual Memory:** `pmap_release(p->pmap)` — free user page tables, switch to kernel pmap.
-                - [ ] **VM Map:** release `vm_map` and all `vm_map_entry` structures.
-                - [ ] **CWD / Root:** decrement cwd and root vnode refcounts.
-                - [ ] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY.
-                - [ ] **Pending Signals:** clear all.
-                - [ ] **Timers:** cancel ITIMER_REAL/VIRTUAL/PROF and alarm().
-                - [ ] **System V IPC:** detach shmem, undo semaphores, remove owned msg queues.
-                - [ ] **POSIX IPC:** unlink owned semaphores/shared memory.
-                - [ ] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters.
-                - [ ] **Kernel Locks:** release held mutexes, cancel pending lock requests.
-            - [ ] **Phase 3 — Thread Termination:**
-                - [ ] Set `t->state = THREAD_ZOMBIE` for each thread.
-                - [ ] Interrupt non-current threads, wait for zombie state.
-                - [ ] Free thread stacks and structures.
-                - [ ] Current thread becomes reaper.
-            - [ ] **Phase 4 — Resource Usage Finalization:**
-                - [ ] `rusage_finalize(p)`: accumulate thread times.
-                - [ ] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`.
-            - [ ] **Phase 5 — Orphan Reparenting:**
-                - [ ] `proc_reparent_children(p)`: move children to init.
-                - [ ] Acquire `proctree_lock`.
-                - [ ] For each child: set `p_parent = init`, move to init's children list.
-                - [ ] Wake init if child is zombie.
-                - [ ] If init dying: reparent to swapper (PID 0) or panic.
-            - [ ] **Phase 6 — Process Group / Session Cleanup:**
-                - [ ] Remove from process group; free `struct pgrp` if last member.
-                - [ ] If session leader: SIGHUP to foreground, revoke TTY, mark no leader.
-                - [ ] Check for orphaned process groups → SIGHUP + SIGCONT.
-            - [ ] **Phase 7 — Parent Notification:**
-                - [ ] `psignal(parent, SIGCHLD)`.
-                - [ ] If SA_NOCLDWAIT: auto-reap (no zombie).
-                - [ ] Wake parent on `p_children` channel.
-            - [ ] **Phase 8 — Zombie State (DYING → ZOMBIE):**
-                - [ ] Set `p_state` = SZOMB.
-                - [ ] Only pid, ppid, xstat, rusage remain valid.
-            - [ ] **Phase 9 — Final Context Switch:**
-                - [ ] `current_thread->state = THREAD_ZOMBIE`.
-                - [ ] `sched_yield()` — never returns.
-            - [ ] **Accounting:**
-                - [ ] `acct_process(code)`: write accounting record (command, times, status).
+            - [ ] **Phase 1 — State Transition (RUNNING → DYING):** (REQ: REQ-01-0876)
+                - [ ] Set `p_state` = SDYING. (REQ: REQ-01-0877)
+                - [ ] Record exit status in `p_xstat`. (REQ: REQ-01-0878)
+                - [ ] Prevent further scheduling. (REQ: REQ-01-0879)
+            - [ ] **Phase 2 — Resource Release:** (REQ: REQ-01-0880)
+                - [ ] **File Descriptors:** `fd_close_all(p)` — close all, decrement refcounts. (REQ: REQ-01-0881)
+                - [ ] **Virtual Memory:** `pmap_release(p->pmap)` — free user page tables, switch to kernel pmap. (REQ: REQ-01-0882)
+                - [ ] **VM Map:** release `vm_map` and all `vm_map_entry` structures. (REQ: REQ-01-0883)
+                - [ ] **CWD / Root:** decrement cwd and root vnode refcounts. (REQ: REQ-01-0884)
+                - [ ] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY. (REQ: REQ-01-0885)
+                - [ ] **Pending Signals:** clear all. (REQ: REQ-01-0886)
+                - [ ] **Timers:** cancel ITIMER_REAL/VIRTUAL/PROF and alarm(). (REQ: REQ-01-0887)
+                - [ ] **System V IPC:** detach shmem, undo semaphores, remove owned msg queues. (REQ: REQ-01-0888)
+                - [ ] **POSIX IPC:** unlink owned semaphores/shared memory. (REQ: REQ-01-0889)
+                - [ ] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters. (REQ: REQ-01-0890)
+                - [ ] **Kernel Locks:** release held mutexes, cancel pending lock requests. (REQ: REQ-01-0891)
+            - [ ] **Phase 3 — Thread Termination:** (REQ: REQ-01-0892)
+                - [ ] Set `t->state = THREAD_ZOMBIE` for each thread. (REQ: REQ-01-0893)
+                - [ ] Interrupt non-current threads, wait for zombie state. (REQ: REQ-01-0894)
+                - [ ] Free thread stacks and structures. (REQ: REQ-01-0895)
+                - [ ] Current thread becomes reaper. (REQ: REQ-01-0896)
+            - [ ] **Phase 4 — Resource Usage Finalization:** (REQ: REQ-01-0897)
+                - [ ] `rusage_finalize(p)`: accumulate thread times. (REQ: REQ-01-0898)
+                - [ ] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`. (REQ: REQ-01-0899)
+            - [ ] **Phase 5 — Orphan Reparenting:** (REQ: REQ-01-0900)
+                - [ ] `proc_reparent_children(p)`: move children to init. (REQ: REQ-01-0901)
+                - [ ] Acquire `proctree_lock`. (REQ: REQ-01-0902)
+                - [ ] For each child: set `p_parent = init`, move to init's children list. (REQ: REQ-01-0903)
+                - [ ] Wake init if child is zombie. (REQ: REQ-01-0904)
+                - [ ] If init dying: reparent to swapper (PID 0) or panic. (REQ: REQ-01-0900)
+            - [ ] **Phase 6 — Process Group / Session Cleanup:** (REQ: REQ-01-0906)
+                - [ ] Remove from process group; free `struct pgrp` if last member. (REQ: REQ-01-0907)
+                - [ ] If session leader: SIGHUP to foreground, revoke TTY, mark no leader. (REQ: REQ-01-0906)
+                - [ ] Check for orphaned process groups → SIGHUP + SIGCONT. (REQ: REQ-01-0909)
+            - [ ] **Phase 7 — Parent Notification:** (REQ: REQ-01-0910)
+                - [ ] `psignal(parent, SIGCHLD)`. (REQ: REQ-01-0911)
+                - [ ] If SA_NOCLDWAIT: auto-reap (no zombie). (REQ: REQ-01-0910)
+                - [ ] Wake parent on `p_children` channel. (REQ: REQ-01-0913)
+            - [ ] **Phase 8 — Zombie State (DYING → ZOMBIE):** (REQ: REQ-01-0914)
+                - [ ] Set `p_state` = SZOMB. (REQ: REQ-01-0915)
+                - [ ] Only pid, ppid, xstat, rusage remain valid. (REQ: REQ-01-0916)
+            - [ ] **Phase 9 — Final Context Switch:** (REQ: REQ-01-0917)
+                - [ ] `current_thread->state = THREAD_ZOMBIE`. (REQ: REQ-01-0918)
+                - [ ] `sched_yield()` — never returns. (REQ: REQ-01-0919)
+            - [ ] **Accounting:** (REQ: REQ-01-0920)
+                - [ ] `acct_process(code)`: write accounting record (command, times, status). (REQ: REQ-01-0921)
 
-        - [ ] **Edge Cases:**
-            - [ ] Init (PID 1) exit: kernel halts/panics with warning.
-            - [ ] Killed by signal during exit: ignore signals once SDYING.
-            - [ ] Locks held during exit: log warning, force release.
-            - [ ] OOM during exit: must not allocate (only free).
-            - [ ] Vfork exit: wake parent immediately.
-            - [ ] Thread group exit: all threads terminated on any `exit()`.
+        - [ ] **Edge Cases:** (REQ: REQ-01-0922)
+            - [ ] Init (PID 1) exit: kernel halts/panics with warning. (REQ: REQ-01-0923)
+            - [ ] Killed by signal during exit: ignore signals once SDYING. (REQ: REQ-01-0924)
+            - [ ] Locks held during exit: log warning, force release. (REQ: REQ-01-0925)
+            - [ ] OOM during exit: must not allocate (only free). (REQ: REQ-01-0926)
+            - [ ] Vfork exit: wake parent immediately. (REQ: REQ-01-0927)
+            - [ ] Thread group exit: all threads terminated on any `exit()`. (REQ: REQ-01-0928)
 
-        - [ ] **Wait Subsystem (`wait4` / `waitpid`):**
-            - [ ] **Search Logic:**
-                - [ ] `pid > 0`: specific child.
-                - [ ] `pid == -1`: any child.
-                - [ ] `pid == 0`: same process group.
-                - [ ] `pid < -1`: process group `|pid|`.
-            - [ ] **WNOHANG:** return 0 if no zombies, ECHILD if no children.
-            - [ ] **Blocking Wait:** `sched_sleep(&p_children)`, handle EINTR, re-scan.
-            - [ ] **Reaping (ZOMBIE → FREE):**
-                - [ ] Copy xstat and rusage to user buffer.
-                - [ ] Remove from siblings list and process group.
-                - [ ] Free process structure.
-            - [ ] **Job Control (`WUNTRACED` / `WCONTINUED`):**
-                - [ ] Report stopped children (SSTOP).
-                - [ ] Report continued children (P_CONTINUED flag).
+        - [ ] **Wait Subsystem (`wait4` / `waitpid`):** (REQ: REQ-01-0929)
+            - [ ] **Search Logic:** (REQ: REQ-01-0930)
+                - [ ] `pid > 0`: specific child. (REQ: REQ-01-0931)
+                - [ ] `pid == -1`: any child. (REQ: REQ-01-0932)
+                - [ ] `pid == 0`: same process group. (REQ: REQ-01-0933)
+                - [ ] `pid < -1`: process group `|pid|`. (REQ: REQ-01-0757, REQ-01-0934)
+            - [ ] **WNOHANG:** return 0 if no zombies, ECHILD if no children. (REQ: REQ-01-0935)
+            - [ ] **Blocking Wait:** `sched_sleep(&p_children)`, handle EINTR, re-scan. (REQ: REQ-01-0936)
+            - [ ] **Reaping (ZOMBIE → FREE):** (REQ: REQ-01-0937)
+                - [ ] Copy xstat and rusage to user buffer. (REQ: REQ-01-0938)
+                - [ ] Remove from siblings list and process group. (REQ: REQ-01-0939)
+                - [ ] Free process structure. (REQ: REQ-01-0940)
+            - [ ] **Job Control (`WUNTRACED` / `WCONTINUED`):** (REQ: REQ-01-0941)
+                - [ ] Report stopped children (SSTOP). (REQ: REQ-01-0942)
+                - [ ] Report continued children (P_CONTINUED flag). (REQ: REQ-01-0943)
 
-        - [ ] **Process Groups & Sessions:**
-            - [ ] **Core Structures:**
-                - [ ] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr).
-                - [ ] `struct session`: `s_id`, `s_leader`, `s_ttyvp`, `s_login`.
-                - [ ] Invariants: every process → one group → one session.
-            - [ ] **Session Management:**
-                - [ ] `sys_setsid()`: create new session + pgrp; EPERM if already leader; detach CTTY.
-                - [ ] `sys_getsid(pid)`: return session ID.
-            - [ ] **Group Management:**
-                - [ ] `sys_setpgid(pid, pgid)`: join/create group; must be same session.
-                - [ ] `sys_getpgid(pid)`: return group ID.
-            - [ ] **Controlling Terminal (CTTY):**
-                - [ ] `TIOCSCTTY`: assign CTTY (session leader, no existing CTTY, TTY unowned).
-                - [ ] `TIOCNOTTY`: release CTTY, SIGHUP to foreground group.
-                - [ ] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check).
-            - [ ] **Orphaned Process Groups:**
-                - [ ] Detection: no member with parent in different group of same session.
-                - [ ] Action: SIGHUP + SIGCONT to stopped members.
+        - [ ] **Process Groups & Sessions:** (REQ: REQ-01-0944)
+            - [ ] **Core Structures:** (REQ: REQ-01-0945)
+                - [ ] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr). (REQ: REQ-01-0946)
+                - [ ] `struct session`: `s_id`, `s_leader`, `s_ttyvp`, `s_login`. (REQ: REQ-01-0947)
+                - [ ] Invariants: every process → one group → one session. (REQ: REQ-01-0948)
+            - [ ] **Session Management:** (REQ: REQ-01-0949)
+                - [ ] `sys_setsid()`: create new session + pgrp; EPERM if already leader; detach CTTY. (REQ: REQ-01-0950)
+                - [ ] `sys_getsid(pid)`: return session ID. (REQ: REQ-01-0951)
+            - [ ] **Group Management:** (REQ: REQ-01-0952)
+                - [ ] `sys_setpgid(pid, pgid)`: join/create group; must be same session. (REQ: REQ-01-0953)
+                - [ ] `sys_getpgid(pid)`: return group ID. (REQ: REQ-01-0954)
+            - [ ] **Controlling Terminal (CTTY):** (REQ: REQ-01-0955)
+                - [ ] `TIOCSCTTY`: assign CTTY (session leader, no existing CTTY, TTY unowned). (REQ: REQ-01-0956)
+                - [ ] `TIOCNOTTY`: release CTTY, SIGHUP to foreground group. (REQ: REQ-01-0957)
+                - [ ] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check). (REQ: REQ-01-0958)
+            - [ ] **Orphaned Process Groups:** (REQ: REQ-01-0959)
+                - [ ] Detection: no member with parent in different group of same session. (REQ: REQ-01-0960)
+                - [ ] Action: SIGHUP + SIGCONT to stopped members. (REQ: REQ-01-0961)
 
-        - [ ] **Testing:**
-            - [ ] Unit: proc_exit phases 1–9 ordering and resource cleanup.
-            - [ ] Unit: wait4 search logic (specific, any, pgrp).
-            - [ ] Unit: WNOHANG returns 0 / ECHILD correctly.
-            - [ ] Unit: orphan reparenting to init.
-            - [ ] Unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY.
-            - [ ] Unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery.
-            - [ ] Property: no zombie leaks (all zombies eventually reaped or auto-reaped).
-            - [ ] Integration: fork → exec → exit → waitpid cycle.
-            - [ ] Integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED.
-        - [ ] **Documentation:**
-            - [ ] Internal doc: process exit 9-phase teardown.
-            - [ ] Internal doc: wait4 search semantics and blocking.
-            - [ ] Internal doc: session/pgrp lifecycle and CTTY ownership.
+        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [ ] Unit: proc_exit phases 1–9 ordering and resource cleanup. (REQ: REQ-01-0963)
+            - [ ] Unit: wait4 search logic (specific, any, pgrp). (REQ: REQ-01-0964)
+            - [ ] Unit: WNOHANG returns 0 / ECHILD correctly. (REQ: REQ-01-0965)
+            - [ ] Unit: orphan reparenting to init. (REQ: REQ-01-0966)
+            - [ ] Unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY. (REQ: REQ-01-0967)
+            - [ ] Unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery. (REQ: REQ-01-0968)
+            - [ ] Property: no zombie leaks (all zombies eventually reaped or auto-reaped). (REQ: REQ-01-0969)
+            - [ ] Integration: fork → exec → exit → waitpid cycle. (REQ: REQ-01-0970)
+            - [ ] Integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED. (REQ: REQ-01-0971)
+        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+            - [ ] Internal doc: process exit 9-phase teardown. (REQ: REQ-01-0973)
+            - [ ] Internal doc: wait4 search semantics and blocking. (REQ: REQ-01-0974)
+            - [ ] Internal doc: session/pgrp lifecycle and CTTY ownership. (REQ: REQ-01-0975)
 
 
 ## User Stories

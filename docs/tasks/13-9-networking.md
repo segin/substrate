@@ -6,87 +6,87 @@
 ## Reimplemented Checklist (All Open)
 
 ### 9. Networking (Future)
-- [ ] **Layer 0: Driver Framework (Hardware Abstraction):**
-    - [ ] **Interface Structure (`struct ifnet`):**
-        - [ ] Common fields: Name (`eth0`), MTU, Flags (UP, BROADCAST, PROMISC), Hardware Address.
-        - [ ] **Methods:** `init`, `start` (tx), `stop`, `ioctl` (config), `watchdog`.
-    - [ ] **Buffer Management (`mbuf` / `sk_buff`):**
-        - [ ] Chainable buffer structures for zero-copy handling.
-        - [ ] Header/Data split for localized protocol processing.
-    - [ ] **Device Registry:** Central list of attached network devices.
-        - [ ] **DevFS Exposure:** Publish interfaces as `/dev/network/ifname` (e.g., `ne0`, `bge0`).
-- [ ] **Layer 1: Network Interface Drivers (Kernel):**
-    - [ ] **Driver Compliance:** All drivers must implement `struct ifnet` methods.
-    - [ ] **Loopback:** Virtual interface implementation.
-    - [ ] **NE2000:**
-        - [ ] ISA/PCI attachment.
-        - [ ] 8390 NIC core logic (Ring buffer management).
-        - [ ] PIO data transfer (ports 0x10, 0x300).
-        - [ ] IRQ handling (ISR/IMR).
-    - [ ] **RTL8139:**
-        - [ ] PCI Bus Mastering.
-        - [ ] C+ Mode (Descriptor-based) optimized support.
-        - [ ] Rx/Tx DMA integration.
-    - [ ] **E1000 (Intel Pro/1000):**
-        - [ ] PCI/PCI-X/PCIe support.
-        - [ ] Advanced Descriptor rings.
-        - [ ] Interrupt Throttling.
-    - [ ] **VirtIO Net:**
-        - [ ] Virtqueue setup (Rx/Tx/Control).
-        - [ ] Feature negotiation (CSUM, TSO, etc.).
-- [ ] **Layer 2: Packet Interface Layer**
-    - [ ] Define abstract packet structure (`mbuf`).
-    - [ ] Implement packet queuing (`if_snd`, `if_fastq`) and dispatching.
-    - [ ] Implement `ifconfig` style interface management (up/down/flags/mtu).
-- [ ] **Layer 3: Protocol Drivers (Kernel Stack)**
-    - [ ] **Ethernet (L2):**
-        - [ ] Frame parsing (EtherType dispatch).
-        - [ ] ARP/RARP encapsulation.
-    - [ ] **ARP (L2.5):**
-        - [ ] Resolution (IP -> MAC).
-        - [ ] Caching (Hash table with timeout).
-        - [ ] Gratuitous ARP on up.
-    - [ ] **IPv4 (L3):**
-        - [ ] Packet validation (Checksum, Version, HL).
-        - [ ] Routing table lookup (LPM - Longest Prefix Match).
-        - [ ] Fragmentation/Reassembly logic.
-    - [ ] **IPv6 (L3):**
-        - [ ] Packet parsing and extension headers.
-        - [ ] NDP (Neighbor Discovery) state machine.
-        - [ ] SLAAC autoconfiguration.
-    - [ ] **ICMPv4/v6 (L3):**
-        - [ ] Echo Request/Reply (Ping).
-        - [ ] Destination Unreachable / Time Exceeded.
-    - [ ] **UDP (L4):**
-        - [ ] PCB list (Port binding).
-        - [ ] Datagram sending/receiving.
-    - [ ] **TCP (L4):**
-        - [ ] **State Machine:** LISTEN, SYN_SENT, SYN_RCVD, ESTABLISHED, FIN_WAIT...
-        - [ ] **Window Management:** Sliding window, Flow control.
-        - [ ] **Congestion Control:** Slow Start, Congestion Avoidance.
-        - [ ] **Timers:** Retransmission, Keepalive, TIME_WAIT.
-- [ ] **Layer 4: Socket API**
-    - [ ] **VFS Integration:** Map sockets to file descriptors.
-    - [ ] **Syscalls:** `socket`, `bind`, `connect`, `listen`, `accept`, `setsockopt`.
-    - [ ] **I/O:** `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg`.
-    - [ ] **Multiplexing:** `select`/`poll`/`epoll`.
-- [ ] **Supplemental: Userspace & Extensibility**
-    - [ ] **NetUSE API:** Interface for running NIC drivers in userspace.
-    - [ ] **Userspace Stacks:** TUN/TAP style interface.
-- [ ] **Userland Tools**
-    - [ ] **Diagnostic:**
-        - [ ] `ping`
-        - [ ] `ping6`
-        - [ ] `traceroute`
-        - [ ] `tracepath`
-    - [ ] **Configuration:**
-        - [ ] `ifconfig`
-        - [ ] `ip` (Netlink-style)
-        - [ ] `route`
-    - [ ] **Clients:**
-        - [ ] `dhcp` (custom DHCP client)
-        - [ ] basic `netcat`
-    - [ ] **Analysis:** `tcpdump` (requires BPF or raw socket support).
+- [ ] **Layer 0: Driver Framework (Hardware Abstraction):** (REQ: REQ-13-0001)
+    - [ ] **Interface Structure (`struct ifnet`):** (REQ: REQ-13-0002)
+        - [ ] Common fields: Name (`eth0`), MTU, Flags (UP, BROADCAST, PROMISC), Hardware Address. (REQ: REQ-13-0003)
+        - [ ] **Methods:** `init`, `start` (tx), `stop`, `ioctl` (config), `watchdog`. (REQ: REQ-13-0004)
+    - [ ] **Buffer Management (`mbuf` / `sk_buff`):** (REQ: REQ-13-0005)
+        - [ ] Chainable buffer structures for zero-copy handling. (REQ: REQ-13-0006)
+        - [ ] Header/Data split for localized protocol processing. (REQ: REQ-13-0007)
+    - [ ] **Device Registry:** Central list of attached network devices. (REQ: REQ-13-0008)
+        - [ ] **DevFS Exposure:** Publish interfaces as `/dev/network/ifname` (e.g., `ne0`, `bge0`). (REQ: REQ-13-0009)
+- [ ] **Layer 1: Network Interface Drivers (Kernel):** (REQ: REQ-13-0010)
+    - [ ] **Driver Compliance:** All drivers must implement `struct ifnet` methods. (REQ: REQ-13-0011)
+    - [ ] **Loopback:** Virtual interface implementation. (REQ: REQ-13-0012)
+    - [ ] **NE2000:** (REQ: REQ-13-0013)
+        - [ ] ISA/PCI attachment. (REQ: REQ-13-0014)
+        - [ ] 8390 NIC core logic (Ring buffer management). (REQ: REQ-13-0015)
+        - [ ] PIO data transfer (ports 0x10, 0x300). (REQ: REQ-13-0016)
+        - [ ] IRQ handling (ISR/IMR). (REQ: REQ-13-0017)
+    - [ ] **RTL8139:** (REQ: REQ-13-0018)
+        - [ ] PCI Bus Mastering. (REQ: REQ-13-0019)
+        - [ ] C+ Mode (Descriptor-based) optimized support. (REQ: REQ-13-0020)
+        - [ ] Rx/Tx DMA integration. (REQ: REQ-13-0021)
+    - [ ] **E1000 (Intel Pro/1000):** (REQ: REQ-13-0022)
+        - [ ] PCI/PCI-X/PCIe support. (REQ: REQ-13-0023)
+        - [ ] Advanced Descriptor rings. (REQ: REQ-13-0024)
+        - [ ] Interrupt Throttling. (REQ: REQ-13-0025)
+    - [ ] **VirtIO Net:** (REQ: REQ-13-0026)
+        - [ ] Virtqueue setup (Rx/Tx/Control). (REQ: REQ-13-0027)
+        - [ ] Feature negotiation (CSUM, TSO, etc.). (REQ: REQ-13-0028)
+- [ ] **Layer 2: Packet Interface Layer** (REQ: REQ-13-0029)
+    - [ ] Define abstract packet structure (`mbuf`). (REQ: REQ-13-0030)
+    - [ ] Implement packet queuing (`if_snd`, `if_fastq`) and dispatching. (REQ: REQ-13-0031)
+    - [ ] Implement `ifconfig` style interface management (up/down/flags/mtu). (REQ: REQ-13-0032)
+- [ ] **Layer 3: Protocol Drivers (Kernel Stack)** (REQ: REQ-13-0033)
+    - [ ] **Ethernet (L2):** (REQ: REQ-13-0034)
+        - [ ] Frame parsing (EtherType dispatch). (REQ: REQ-13-0035)
+        - [ ] ARP/RARP encapsulation. (REQ: REQ-13-0036)
+    - [ ] **ARP (L2.5):** (REQ: REQ-13-0037)
+        - [ ] Resolution (IP -> MAC). (REQ: REQ-13-0038)
+        - [ ] Caching (Hash table with timeout). (REQ: REQ-13-0039)
+        - [ ] Gratuitous ARP on up. (REQ: REQ-13-0040)
+    - [ ] **IPv4 (L3):** (REQ: REQ-13-0041)
+        - [ ] Packet validation (Checksum, Version, HL). (REQ: REQ-13-0042)
+        - [ ] Routing table lookup (LPM - Longest Prefix Match). (REQ: REQ-13-0043)
+        - [ ] Fragmentation/Reassembly logic. (REQ: REQ-13-0044)
+    - [ ] **IPv6 (L3):** (REQ: REQ-13-0045)
+        - [ ] Packet parsing and extension headers. (REQ: REQ-13-0046)
+        - [ ] NDP (Neighbor Discovery) state machine. (REQ: REQ-13-0047)
+        - [ ] SLAAC autoconfiguration. (REQ: REQ-13-0048)
+    - [ ] **ICMPv4/v6 (L3):** (REQ: REQ-13-0049)
+        - [ ] Echo Request/Reply (Ping). (REQ: REQ-13-0050)
+        - [ ] Destination Unreachable / Time Exceeded. (REQ: REQ-13-0051)
+    - [ ] **UDP (L4):** (REQ: REQ-13-0052)
+        - [ ] PCB list (Port binding). (REQ: REQ-13-0053)
+        - [ ] Datagram sending/receiving. (REQ: REQ-13-0054)
+    - [ ] **TCP (L4):** (REQ: REQ-13-0055)
+        - [ ] **State Machine:** LISTEN, SYN_SENT, SYN_RCVD, ESTABLISHED, FIN_WAIT... (REQ: REQ-13-0056)
+        - [ ] **Window Management:** Sliding window, Flow control. (REQ: REQ-13-0057)
+        - [ ] **Congestion Control:** Slow Start, Congestion Avoidance. (REQ: REQ-13-0058)
+        - [ ] **Timers:** Retransmission, Keepalive, TIME_WAIT. (REQ: REQ-13-0059)
+- [ ] **Layer 4: Socket API** (REQ: REQ-13-0060)
+    - [ ] **VFS Integration:** Map sockets to file descriptors. (REQ: REQ-13-0061)
+    - [ ] **Syscalls:** `socket`, `bind`, `connect`, `listen`, `accept`, `setsockopt`. (REQ: REQ-13-0062)
+    - [ ] **I/O:** `send`, `recv`, `sendto`, `recvfrom`, `sendmsg`, `recvmsg`. (REQ: REQ-13-0063)
+    - [ ] **Multiplexing:** `select`/`poll`/`epoll`. (REQ: REQ-13-0064)
+- [ ] **Supplemental: Userspace & Extensibility** (REQ: REQ-13-0065)
+    - [ ] **NetUSE API:** Interface for running NIC drivers in userspace. (REQ: REQ-13-0066)
+    - [ ] **Userspace Stacks:** TUN/TAP style interface. (REQ: REQ-13-0067)
+- [ ] **Userland Tools** (REQ: REQ-13-0068)
+    - [ ] **Diagnostic:** (REQ: REQ-13-0069)
+        - [ ] `ping` (REQ: REQ-13-0070)
+        - [ ] `ping6` (REQ: REQ-13-0071)
+        - [ ] `traceroute` (REQ: REQ-13-0072)
+        - [ ] `tracepath` (REQ: REQ-13-0073)
+    - [ ] **Configuration:** (REQ: REQ-13-0074)
+        - [ ] `ifconfig` (REQ: REQ-13-0075)
+        - [ ] `ip` (Netlink-style) (REQ: REQ-13-0076)
+        - [ ] `route` (REQ: REQ-13-0077)
+    - [ ] **Clients:** (REQ: REQ-13-0078)
+        - [ ] `dhcp` (custom DHCP client) (REQ: REQ-13-0079)
+        - [ ] basic `netcat` (REQ: REQ-13-0080)
+    - [ ] **Analysis:** `tcpdump` (requires BPF or raw socket support). (REQ: REQ-13-0081)
 
 
 ## User Stories

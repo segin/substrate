@@ -6,7 +6,7 @@
 ## Reimplemented Checklist (All Open)
 
 ### 4. Filesystem (`sys/fs`, `sys/vfs`)
-- [ ] **VFS Subsystem Refactor (BSD-style):**
+- [ ] **VFS Subsystem Refactor (BSD-style):** (REQ: REQ-04-0001)
 
     > **Files:** `sys/vfs/vfs.h`, `vfs.c`, `vnode.h`, `vnode_ops.c`,
     > `namecache.c`, `bio.c`, `buf.h`, `vnode_lock.c`, `vfs_mount.c`.
@@ -14,401 +14,401 @@
     > **Architecture:** BSD-style VFS with vnodes, mount points, namei
     > lookup, buffer cache, and per-filesystem operations vectors.
 
-    - [ ] **Core Structures & Life Cycle:**
-        - [ ] **`struct vnode`:**
-            - [ ] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD.
-            - [ ] `v_tag`: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc.
-            - [ ] `v_op` (operations vector), `v_data` (private fs data).
-            - [ ] `v_mount` (pointer to mount point).
-            - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache).
-            - [ ] `v_writecount` (writers count).
-            - [ ] `v_flag`: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc.
-            - [ ] `v_lock` (exclusive/shared lockmgr lock).
-            - [ ] `v_numoutput` (pending async writes for fsync).
-            - [ ] `v_hash` (hash chain for vnode cache lookup).
-            - [ ] **Life Cycle:**
-                - [ ] `getnewvnode(tag, mp, ops, vpp)`: allocate from zone, recycle LRU if pool full.
-                - [ ] `vref(vp)`: increment use count.
-                - [ ] `vrele(vp)`: decrement use count, trigger inactive/reclaim if zero.
-                - [ ] `vput(vp)`: unlock and vrele.
-                - [ ] `vget(vp, flags)`: lock and vref (with LK_NOWAIT support).
-                - [ ] `vgone(vp)`: mark for doom/destruction.
-                - [ ] `vclean(vp, flags)`: disassociate from filesystem data.
-                - [ ] `vinvalbuf(vp, flags)`: invalidate all buffers for vnode.
-                - [ ] `vflush(mp, skipvp, flags)`: flush all vnodes for mount point.
-        - [ ] **`struct mount`:**
-            - [ ] `mnt_vnodecovered` (vnode mounted on).
-            - [ ] `mnt_op` (VFS ops vector).
-            - [ ] `mnt_data` (private fs data).
-            - [ ] `mnt_flag`: MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS, MNT_ASYNC, MNT_UNION, MNT_LOCAL.
-            - [ ] `mnt_nvnodelist` (list of active vnodes).
-            - [ ] `mnt_stat` (cached `struct statfs`).
-            - [ ] `mnt_maxsymlinklen`: max symlink target stored inline.
-            - [ ] `mnt_lock`: mount-level reader/writer lock.
-        - [ ] **`struct file`:**
-            - [ ] `f_type`: DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE.
-            - [ ] `f_data` (pointer to vnode/socket/pipe).
-            - [ ] `f_flag`: FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT, O_CLOEXEC.
-            - [ ] `f_ops` (file operations vector: read, write, ioctl, poll, close, stat).
-            - [ ] `f_offset` (current file offset, atomic for concurrent access).
-            - [ ] `f_count` (reference count).
-            - [ ] `f_cred` (credentials at open time).
+    - [ ] **Core Structures & Life Cycle:** (REQ: REQ-04-0002)
+        - [ ] **`struct vnode`:** (REQ: REQ-04-0003)
+            - [ ] `v_type`: VREG, VDIR, VBLK, VCHR, VLNK, VSOCK, VFIFO, VBAD. (REQ: REQ-04-0004)
+            - [ ] `v_tag`: VT_UFS, VT_NFS, VT_EXT2, VT_PROCFS, etc. (REQ: REQ-04-0005)
+            - [ ] `v_op` (operations vector), `v_data` (private fs data). (REQ: REQ-04-0006)
+            - [ ] `v_mount` (pointer to mount point). (REQ: REQ-04-0007)
+            - [ ] `v_usecount` (active references), `v_holdcount` (weak refs for cache). (REQ: REQ-04-0008)
+            - [ ] `v_writecount` (writers count). (REQ: REQ-04-0009)
+            - [ ] `v_flag`: VROOT, VTEXT, VSYSTEM, VISTTY, VEXECMAP, etc. (REQ: REQ-04-0010)
+            - [ ] `v_lock` (exclusive/shared lockmgr lock). (REQ: REQ-04-0011)
+            - [ ] `v_numoutput` (pending async writes for fsync). (REQ: REQ-04-0012)
+            - [ ] `v_hash` (hash chain for vnode cache lookup). (REQ: REQ-04-0013)
+            - [ ] **Life Cycle:** (REQ: REQ-04-0014)
+                - [ ] `getnewvnode(tag, mp, ops, vpp)`: allocate from zone, recycle LRU if pool full. (REQ: REQ-04-0015)
+                - [ ] `vref(vp)`: increment use count. (REQ: REQ-04-0016)
+                - [ ] `vrele(vp)`: decrement use count, trigger inactive/reclaim if zero. (REQ: REQ-04-0017)
+                - [ ] `vput(vp)`: unlock and vrele. (REQ: REQ-04-0018)
+                - [ ] `vget(vp, flags)`: lock and vref (with LK_NOWAIT support). (REQ: REQ-04-0019)
+                - [ ] `vgone(vp)`: mark for doom/destruction. (REQ: REQ-04-0020)
+                - [ ] `vclean(vp, flags)`: disassociate from filesystem data. (REQ: REQ-04-0021)
+                - [ ] `vinvalbuf(vp, flags)`: invalidate all buffers for vnode. (REQ: REQ-04-0022)
+                - [ ] `vflush(mp, skipvp, flags)`: flush all vnodes for mount point. (REQ: REQ-04-0023)
+        - [ ] **`struct mount`:** (REQ: REQ-04-0024)
+            - [ ] `mnt_vnodecovered` (vnode mounted on). (REQ: REQ-04-0025)
+            - [ ] `mnt_op` (VFS ops vector). (REQ: REQ-04-0026)
+            - [ ] `mnt_data` (private fs data). (REQ: REQ-04-0027)
+            - [ ] `mnt_flag`: MNT_RDONLY, MNT_NOEXEC, MNT_NOSUID, MNT_NODEV, MNT_SYNCHRONOUS, MNT_ASYNC, MNT_UNION, MNT_LOCAL. (REQ: REQ-04-0028)
+            - [ ] `mnt_nvnodelist` (list of active vnodes). (REQ: REQ-04-0029)
+            - [ ] `mnt_stat` (cached `struct statfs`). (REQ: REQ-04-0030)
+            - [ ] `mnt_maxsymlinklen`: max symlink target stored inline. (REQ: REQ-04-0031)
+            - [ ] `mnt_lock`: mount-level reader/writer lock. (REQ: REQ-04-0032)
+        - [ ] **`struct file`:** (REQ: REQ-04-0033)
+            - [ ] `f_type`: DTYPE_VNODE, DTYPE_SOCKET, DTYPE_PIPE, DTYPE_KQUEUE. (REQ: REQ-04-0034)
+            - [ ] `f_data` (pointer to vnode/socket/pipe). (REQ: REQ-04-0035)
+            - [ ] `f_flag`: FREAD, FWRITE, FNONBLOCK, FAPPEND, O_DIRECT, O_CLOEXEC. (REQ: REQ-04-0036)
+            - [ ] `f_ops` (file operations vector: read, write, ioctl, poll, close, stat). (REQ: REQ-04-0037)
+            - [ ] `f_offset` (current file offset, atomic for concurrent access). (REQ: REQ-04-0038)
+            - [ ] `f_count` (reference count). (REQ: REQ-04-0039)
+            - [ ] `f_cred` (credentials at open time). (REQ: REQ-04-0040)
 
-    - [ ] **Pathname Lookup (`namei`):**
-        - [ ] **`struct nameidata`:** lookup state, path string, purpose (LOOKUP/CREATE/DELETE/RENAME).
-        - [ ] **`struct componentname`:** current component, `cn_flags`, `cn_nameptr`, `cn_namelen`.
-        - [ ] **Lookup Logic:**
-            - [ ] Parse `/` delimiters, handle multiple consecutive slashes.
-            - [ ] Handle `.` (current directory) and `..` (parent directory).
-            - [ ] Cross mount points via `mnt_vnodecovered`/`v_mountedhere`.
-            - [ ] Symbolic link resolution with recursion limit (MAXSYMLINKS = 32).
-            - [ ] Handle trailing slash on non-directory (ENOTDIR).
-            - [ ] Handle `AT_FDCWD` and `*at()` syscall relative lookups.
-        - [ ] **Name Cache (`nchash`):**
-            - [ ] Global hash table: `(directory vnode, name)` → target vnode.
-            - [ ] Negative entries: cache "does not exist" results.
-            - [ ] `cache_lookup(dvp, vpp, cnp)`: check cache.
-            - [ ] `cache_enter(dvp, vp, cnp)`: add to cache.
-            - [ ] `cache_purge(vp)`: remove all entries for vnode.
-            - [ ] `cache_purgevfs(mp)`: remove all entries for mount point.
-            - [ ] LRU eviction of cache entries under memory pressure.
-            - [ ] Reader/writer lock for SMP scalability.
+    - [ ] **Pathname Lookup (`namei`):** (REQ: REQ-04-0041)
+        - [ ] **`struct nameidata`:** lookup state, path string, purpose (LOOKUP/CREATE/DELETE/RENAME). (REQ: REQ-04-0042)
+        - [ ] **`struct componentname`:** current component, `cn_flags`, `cn_nameptr`, `cn_namelen`. (REQ: REQ-04-0043)
+        - [ ] **Lookup Logic:** (REQ: REQ-04-0044)
+            - [ ] Parse `/` delimiters, handle multiple consecutive slashes. (REQ: REQ-04-0045)
+            - [ ] Handle `.` (current directory) and `..` (parent directory). (REQ: REQ-04-0046)
+            - [ ] Cross mount points via `mnt_vnodecovered`/`v_mountedhere`. (REQ: REQ-04-0047)
+            - [ ] Symbolic link resolution with recursion limit (MAXSYMLINKS = 32). (REQ: REQ-04-0048)
+            - [ ] Handle trailing slash on non-directory (ENOTDIR). (REQ: REQ-04-0049)
+            - [ ] Handle `AT_FDCWD` and `*at()` syscall relative lookups. (REQ: REQ-04-0050)
+        - [ ] **Name Cache (`nchash`):** (REQ: REQ-04-0051)
+            - [ ] Global hash table: `(directory vnode, name)` → target vnode. (REQ: REQ-04-0052)
+            - [ ] Negative entries: cache "does not exist" results. (REQ: REQ-04-0053)
+            - [ ] `cache_lookup(dvp, vpp, cnp)`: check cache. (REQ: REQ-04-0054)
+            - [ ] `cache_enter(dvp, vp, cnp)`: add to cache. (REQ: REQ-04-0055)
+            - [ ] `cache_purge(vp)`: remove all entries for vnode. (REQ: REQ-04-0056)
+            - [ ] `cache_purgevfs(mp)`: remove all entries for mount point. (REQ: REQ-04-0057)
+            - [ ] LRU eviction of cache entries under memory pressure. (REQ: REQ-04-0058)
+            - [ ] Reader/writer lock for SMP scalability. (REQ: REQ-04-0059)
 
-    - [ ] **Operations Vectors:**
-        - [ ] **`vfs_ops` (Filesystem-level):**
-            - [ ] `vfs_mount(mp, path, data, ndp, p)`: mount filesystem at path.
-            - [ ] `vfs_start(mp, flags, p)`: post-mount initialization.
-            - [ ] `vfs_unmount(mp, mntflags, p)`: unmount, flush, free.
-                - [ ] `MNT_FORCE`: forced unmount (kill active references).
-            - [ ] `vfs_root(mp, vpp)`: return root vnode.
-            - [ ] `vfs_statfs(mp, sbp, p)`: fill `struct statfs` (f_blocks, f_bfree, f_bavail, f_files, f_ffree).
-            - [ ] `vfs_sync(mp, waitfor, cred, p)`: sync dirty buffers.
-                - [ ] `MNT_WAIT` (synchronous) / `MNT_NOWAIT` (asynchronous).
-            - [ ] `vfs_vget(mp, ino, vpp)`: get vnode by inode number.
-            - [ ] `vfs_fhtovp(mp, fhp, vpp)`: NFS file handle → vnode.
-            - [ ] `vfs_init(vfsp)`: filesystem type initialization (register).
-            - [ ] `vfs_uninit(vfsp)`: filesystem type teardown (unregister).
-        - [ ] **`vnode_ops` (File-level):**
-            - [ ] **Name Resolution:**
-                - [ ] `vop_lookup(dvp, vpp, cnp)`: look up component in directory.
-                - [ ] `vop_cachedlookup(dvp, vpp, cnp)`: cache-first wrapper.
-            - [ ] **Creation/Deletion:**
-                - [ ] `vop_create(dvp, vpp, cnp, vap)`: create regular file.
-                - [ ] `vop_mknod(dvp, vpp, cnp, vap)`: create device node (block/char/FIFO).
-                - [ ] `vop_mkdir(dvp, vpp, cnp, vap)`: create directory (with `.` and `..`).
-                - [ ] `vop_whiteout(dvp, cnp, flags)`: UnionFS whiteout entry.
-                - [ ] `vop_remove(dvp, vp, cnp)`: unlink directory entry.
-                - [ ] `vop_rmdir(dvp, vp, cnp)`: remove empty directory.
-            - [ ] **Access/Attributes:**
-                - [ ] `vop_access(vp, mode, cred, p)`: check r/w/x permissions (POSIX semantics).
-                - [ ] `vop_getattr(vp, vap, cred, p)`: stat (mode, nlink, uid, gid, size, times).
-                - [ ] `vop_setattr(vp, vap, cred, p)`: chmod/chown/truncate/utimes.
-                - [ ] `vop_pathconf(vp, name, retval)`: POSIX pathconf (`_PC_LINK_MAX`, `_PC_NAME_MAX`, etc.).
-            - [ ] **I/O Operations:**
-                - [ ] `vop_open(vp, mode, cred, p)`: open callback (access check, device init).
-                - [ ] `vop_close(vp, fflag, cred, p)`: close callback (sync on last close).
-                - [ ] `vop_read(vp, uio, ioflag, cred)`: read via buffer cache, update atime.
-                - [ ] `vop_write(vp, uio, ioflag, cred)`: write, extend file, update mtime.
-                    - [ ] Flags: `IO_APPEND`, `IO_SYNC`, `IO_UNIT`.
-                - [ ] `vop_ioctl(vp, cmd, data, fflag, cred, p)`: device control.
-                - [ ] `vop_poll(vp, events, cred, p)`: select/poll (POLLIN/POLLOUT/POLLHUP/POLLERR).
-                - [ ] `vop_fsync(vp, cred, waitfor, p)`: flush dirty data.
-                - [ ] `vop_bmap(vp, bn, vpp, bnp, runp)`: logical→physical block mapping.
-                - [ ] `vop_strategy(vp, bp)`: submit buffer to block device.
-            - [ ] **Directories:**
-                - [ ] `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`: read `struct dirent` entries.
-            - [ ] **Links:**
-                - [ ] `vop_link(dvp, vp, cnp)`: create hard link (increment nlink).
-                - [ ] `vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp)`: rename/move (atomic within FS).
-                    - [ ] Same-directory rename, cross-directory rename, overwrite existing.
-                    - [ ] Directory rename: update `..` entry, detect cycles.
-                - [ ] `vop_symlink(dvp, vpp, cnp, vap, target)`: create symbolic link.
-                - [ ] `vop_readlink(vp, uio, cred)`: read symlink target.
-            - [ ] **VM/Memory Integration:**
-                - [ ] `vop_inactive(vp, p)`: last FD closed — truncate if nlink=0, sync dirty.
-                - [ ] `vop_reclaim(vp, p)`: vnode recycled — free fs-private data.
-                - [ ] `vop_lock(vp, flags, p)`: lockmgr lock (LK_SHARED/EXCLUSIVE/NOWAIT/UPGRADE).
-                - [ ] `vop_unlock(vp, flags, p)`: lockmgr unlock.
-                - [ ] `vop_islocked(vp, p)`: query lock status.
-                - [ ] `vop_print(vp)`: debug dump (type, flags, refcount, fs info).
-                - [ ] `vop_advlock(vp, id, op, fl, flags)`: POSIX advisory locking (F_GETLK/F_SETLK/F_SETLKW).
+    - [ ] **Operations Vectors:** (REQ: REQ-04-0060)
+        - [ ] **`vfs_ops` (Filesystem-level):** (REQ: REQ-04-0061)
+            - [ ] `vfs_mount(mp, path, data, ndp, p)`: mount filesystem at path. (REQ: REQ-04-0062)
+            - [ ] `vfs_start(mp, flags, p)`: post-mount initialization. (REQ: REQ-04-0063)
+            - [ ] `vfs_unmount(mp, mntflags, p)`: unmount, flush, free. (REQ: REQ-04-0064)
+                - [ ] `MNT_FORCE`: forced unmount (kill active references). (REQ: REQ-04-0065)
+            - [ ] `vfs_root(mp, vpp)`: return root vnode. (REQ: REQ-04-0066)
+            - [ ] `vfs_statfs(mp, sbp, p)`: fill `struct statfs` (f_blocks, f_bfree, f_bavail, f_files, f_ffree). (REQ: REQ-04-0067)
+            - [ ] `vfs_sync(mp, waitfor, cred, p)`: sync dirty buffers. (REQ: REQ-04-0068)
+                - [ ] `MNT_WAIT` (synchronous) / `MNT_NOWAIT` (asynchronous). (REQ: REQ-04-0069)
+            - [ ] `vfs_vget(mp, ino, vpp)`: get vnode by inode number. (REQ: REQ-04-0070)
+            - [ ] `vfs_fhtovp(mp, fhp, vpp)`: NFS file handle → vnode. (REQ: REQ-04-0071)
+            - [ ] `vfs_init(vfsp)`: filesystem type initialization (register). (REQ: REQ-04-0072)
+            - [ ] `vfs_uninit(vfsp)`: filesystem type teardown (unregister). (REQ: REQ-04-0073)
+        - [ ] **`vnode_ops` (File-level):** (REQ: REQ-04-0074)
+            - [ ] **Name Resolution:** (REQ: REQ-04-0075)
+                - [ ] `vop_lookup(dvp, vpp, cnp)`: look up component in directory. (REQ: REQ-04-0076)
+                - [ ] `vop_cachedlookup(dvp, vpp, cnp)`: cache-first wrapper. (REQ: REQ-04-0077)
+            - [ ] **Creation/Deletion:** (REQ: REQ-04-0078)
+                - [ ] `vop_create(dvp, vpp, cnp, vap)`: create regular file. (REQ: REQ-04-0079)
+                - [ ] `vop_mknod(dvp, vpp, cnp, vap)`: create device node (block/char/FIFO). (REQ: REQ-04-0080)
+                - [ ] `vop_mkdir(dvp, vpp, cnp, vap)`: create directory (with `.` and `..`). (REQ: REQ-04-0081)
+                - [ ] `vop_whiteout(dvp, cnp, flags)`: UnionFS whiteout entry. (REQ: REQ-04-0082)
+                - [ ] `vop_remove(dvp, vp, cnp)`: unlink directory entry. (REQ: REQ-04-0083)
+                - [ ] `vop_rmdir(dvp, vp, cnp)`: remove empty directory. (REQ: REQ-04-0084)
+            - [ ] **Access/Attributes:** (REQ: REQ-04-0085)
+                - [ ] `vop_access(vp, mode, cred, p)`: check r/w/x permissions (POSIX semantics). (REQ: REQ-04-0086)
+                - [ ] `vop_getattr(vp, vap, cred, p)`: stat (mode, nlink, uid, gid, size, times). (REQ: REQ-04-0087)
+                - [ ] `vop_setattr(vp, vap, cred, p)`: chmod/chown/truncate/utimes. (REQ: REQ-04-0088)
+                - [ ] `vop_pathconf(vp, name, retval)`: POSIX pathconf (`_PC_LINK_MAX`, `_PC_NAME_MAX`, etc.). (REQ: REQ-04-0089)
+            - [ ] **I/O Operations:** (REQ: REQ-04-0090)
+                - [ ] `vop_open(vp, mode, cred, p)`: open callback (access check, device init). (REQ: REQ-04-0091)
+                - [ ] `vop_close(vp, fflag, cred, p)`: close callback (sync on last close). (REQ: REQ-04-0092)
+                - [ ] `vop_read(vp, uio, ioflag, cred)`: read via buffer cache, update atime. (REQ: REQ-04-0093)
+                - [ ] `vop_write(vp, uio, ioflag, cred)`: write, extend file, update mtime. (REQ: REQ-04-0094)
+                    - [ ] Flags: `IO_APPEND`, `IO_SYNC`, `IO_UNIT`. (REQ: REQ-04-0095)
+                - [ ] `vop_ioctl(vp, cmd, data, fflag, cred, p)`: device control. (REQ: REQ-04-0096)
+                - [ ] `vop_poll(vp, events, cred, p)`: select/poll (POLLIN/POLLOUT/POLLHUP/POLLERR). (REQ: REQ-04-0097)
+                - [ ] `vop_fsync(vp, cred, waitfor, p)`: flush dirty data. (REQ: REQ-04-0098)
+                - [ ] `vop_bmap(vp, bn, vpp, bnp, runp)`: logical→physical block mapping. (REQ: REQ-04-0099)
+                - [ ] `vop_strategy(vp, bp)`: submit buffer to block device. (REQ: REQ-04-0100)
+            - [ ] **Directories:** (REQ: REQ-04-0101)
+                - [ ] `vop_readdir(vp, uio, cred, eofflag, ncookies, cookies)`: read `struct dirent` entries. (REQ: REQ-04-0102)
+            - [ ] **Links:** (REQ: REQ-04-0103)
+                - [ ] `vop_link(dvp, vp, cnp)`: create hard link (increment nlink). (REQ: REQ-04-0104)
+                - [ ] `vop_rename(fdvp, fvp, fcnp, tdvp, tvp, tcnp)`: rename/move (atomic within FS). (REQ: REQ-04-0105)
+                    - [ ] Same-directory rename, cross-directory rename, overwrite existing. (REQ: REQ-04-0106)
+                    - [ ] Directory rename: update `..` entry, detect cycles. (REQ: REQ-04-0107)
+                - [ ] `vop_symlink(dvp, vpp, cnp, vap, target)`: create symbolic link. (REQ: REQ-04-0108)
+                - [ ] `vop_readlink(vp, uio, cred)`: read symlink target. (REQ: REQ-04-0109)
+            - [ ] **VM/Memory Integration:** (REQ: REQ-04-0110)
+                - [ ] `vop_inactive(vp, p)`: last FD closed — truncate if nlink=0, sync dirty. (REQ: REQ-04-0111)
+                - [ ] `vop_reclaim(vp, p)`: vnode recycled — free fs-private data. (REQ: REQ-04-0112)
+                - [ ] `vop_lock(vp, flags, p)`: lockmgr lock (LK_SHARED/EXCLUSIVE/NOWAIT/UPGRADE). (REQ: REQ-04-0113)
+                - [ ] `vop_unlock(vp, flags, p)`: lockmgr unlock. (REQ: REQ-04-0114)
+                - [ ] `vop_islocked(vp, p)`: query lock status. (REQ: REQ-04-0115)
+                - [ ] `vop_print(vp)`: debug dump (type, flags, refcount, fs info). (REQ: REQ-04-0116)
+                - [ ] `vop_advlock(vp, id, op, fl, flags)`: POSIX advisory locking (F_GETLK/F_SETLK/F_SETLKW). (REQ: REQ-04-0117)
 
-    - [ ] **Native Build Integration (`native_dist`):**
-        - [ ] Update `native_dist` target to build userspace with `HOSTCC`.
-        - [ ] Sanitize `Makefile.inc` for non-cross builds.
-        - [ ] Verify `bin/` and `sbin/` builds on host.
-        - [ ] Host output directory: `host_dist`.
+    - [ ] **Native Build Integration (`native_dist`):** (REQ: REQ-04-0118)
+        - [ ] Update `native_dist` target to build userspace with `HOSTCC`. (REQ: REQ-04-0119)
+        - [ ] Sanitize `Makefile.inc` for non-cross builds. (REQ: REQ-04-0120)
+        - [ ] Verify `bin/` and `sbin/` builds on host. (REQ: REQ-04-0121)
+        - [ ] Host output directory: `host_dist`. (REQ: REQ-04-0122)
 
-    - [ ] **Compiler Construction Tools:**
-        - [ ] **`yacc` (LALR(1) Parser Generator):**
-            - [ ] Initial skeleton (`usr.bin/yacc`).
-            - [ ] Grammar file parsing (rules, precedence, %token/%type).
-            - [ ] LALR(1) parse table generation (states, actions, gotos).
-            - [ ] Conflict resolution (shift/reduce, reduce/reduce).
-            - [ ] Output `y.tab.c` and `y.tab.h`.
-            - [ ] `-d` flag for header generation.
-            - [ ] `-v` flag for verbose state output (`y.output`).
-        - [ ] **`lex` (Lexical Analyzer Generator):**
-            - [ ] Regular expression to NFA conversion (Thompson's construction).
-            - [ ] NFA to DFA conversion (subset construction).
-            - [ ] DFA minimization (Hopcroft's algorithm).
-            - [ ] Output `lex.yy.c`.
-            - [ ] Character class support (`[a-zA-Z]`, POSIX classes).
-            - [ ] Start conditions (exclusive/inclusive).
-            - [ ] `yywrap()` and `yylex()` interface.
+    - [ ] **Compiler Construction Tools:** (REQ: REQ-04-0123)
+        - [ ] **`yacc` (LALR(1) Parser Generator):** (REQ: REQ-04-0124)
+            - [ ] Initial skeleton (`usr.bin/yacc`). (REQ: REQ-04-0125)
+            - [ ] Grammar file parsing (rules, precedence, %token/%type). (REQ: REQ-04-0126)
+            - [ ] LALR(1) parse table generation (states, actions, gotos). (REQ: REQ-04-0127)
+            - [ ] Conflict resolution (shift/reduce, reduce/reduce). (REQ: REQ-04-0128)
+            - [ ] Output `y.tab.c` and `y.tab.h`. (REQ: REQ-04-0129)
+            - [ ] `-d` flag for header generation. (REQ: REQ-04-0130)
+            - [ ] `-v` flag for verbose state output (`y.output`). (REQ: REQ-04-0131)
+        - [ ] **`lex` (Lexical Analyzer Generator):** (REQ: REQ-04-0132)
+            - [ ] Regular expression to NFA conversion (Thompson's construction). (REQ: REQ-04-0133)
+            - [ ] NFA to DFA conversion (subset construction). (REQ: REQ-04-0134)
+            - [ ] DFA minimization (Hopcroft's algorithm). (REQ: REQ-04-0135)
+            - [ ] Output `lex.yy.c`. (REQ: REQ-04-0136)
+            - [ ] Character class support (`[a-zA-Z]`, POSIX classes). (REQ: REQ-04-0137)
+            - [ ] Start conditions (exclusive/inclusive). (REQ: REQ-04-0138)
+            - [ ] `yywrap()` and `yylex()` interface. (REQ: REQ-04-0139)
 
-    - [ ] **Buffer Cache Integration (`bio`):**
+    - [ ] **Buffer Cache Integration (`bio`):** (REQ: REQ-04-0140)
 
         > **Files:** `sys/vfs/buf.h`, `sys/vfs/bio.c`.
         >
         > **Architecture:** Traditional BSD buffer cache with delayed write,
         > LRU eviction, and VM page integration.
 
-        - [ ] **`struct buf` Definition:**
-            - [ ] Fields: `b_flags`, `b_data`, `b_bcount`, `b_blkno`, `b_lblkno`, `b_vp`, `b_rcred`, `b_wcred`, `b_resid`, `b_iodone`, `b_error`.
-            - [ ] Flags: `B_BUSY`, `B_DONE`, `B_ERROR`, `B_DELWRI`, `B_PHYS`, `B_READ`, `B_WRITE`, `B_ASYNC`, `B_INVAL`, `B_NOCACHE`, `B_CACHE`.
-            - [ ] Hash chain linkage for lookup by `(vp, blkno)`.
-        - [ ] **Buffer Queues:**
-            - [ ] `BQ_LOCKED`: buffers currently in use.
-            - [ ] `BQ_CLEAN`: clean LRU (eligible for reuse).
-            - [ ] `BQ_DIRTY`: delayed write queue.
-            - [ ] `BQ_EMPTY`: free buffer headers without data.
-        - [ ] **Buffer Cache Functions:**
-            - [ ] `getblk(vp, blkno, size, slpflag, slptimeo)`: get from cache or allocate.
-            - [ ] `bread(vp, blkno, size, cred, bpp)`: synchronous read (getblk + I/O + biowait).
-            - [ ] `breada(vp, blkno, size, rablkno, rabsize, cred, bpp)`: read-ahead variant.
-            - [ ] `bwrite(bp)`: synchronous write.
-            - [ ] `bawrite(bp)`: asynchronous write (initiate, return immediately).
-            - [ ] `bdwrite(bp)`: delayed write (mark B_DELWRI, release).
-            - [ ] `brelse(bp)`: release buffer to appropriate queue.
-            - [ ] `incore(vp, blkno)`: check if block is in cache.
-        - [ ] **Synchronization:**
-            - [ ] `biowait(bp)`: sleep until B_DONE.
-            - [ ] `biodone(bp)`: mark complete, call `b_iodone`, wakeup.
-        - [ ] **Flushing:**
-            - [ ] `bufsync(freq)`: periodic daemon to write dirty buffers.
-            - [ ] `sync()` syscall: flush all dirty buffers.
-            - [ ] `update` daemon (`syncer` kthread): periodic sync every 30 seconds.
+        - [ ] **`struct buf` Definition:** (REQ: REQ-04-0141)
+            - [ ] Fields: `b_flags`, `b_data`, `b_bcount`, `b_blkno`, `b_lblkno`, `b_vp`, `b_rcred`, `b_wcred`, `b_resid`, `b_iodone`, `b_error`. (REQ: REQ-04-0142)
+            - [ ] Flags: `B_BUSY`, `B_DONE`, `B_ERROR`, `B_DELWRI`, `B_PHYS`, `B_READ`, `B_WRITE`, `B_ASYNC`, `B_INVAL`, `B_NOCACHE`, `B_CACHE`. (REQ: REQ-04-0143)
+            - [ ] Hash chain linkage for lookup by `(vp, blkno)`. (REQ: REQ-04-0144)
+        - [ ] **Buffer Queues:** (REQ: REQ-04-0145)
+            - [ ] `BQ_LOCKED`: buffers currently in use. (REQ: REQ-04-0146)
+            - [ ] `BQ_CLEAN`: clean LRU (eligible for reuse). (REQ: REQ-04-0147)
+            - [ ] `BQ_DIRTY`: delayed write queue. (REQ: REQ-04-0148)
+            - [ ] `BQ_EMPTY`: free buffer headers without data. (REQ: REQ-04-0149)
+        - [ ] **Buffer Cache Functions:** (REQ: REQ-04-0150)
+            - [ ] `getblk(vp, blkno, size, slpflag, slptimeo)`: get from cache or allocate. (REQ: REQ-04-0151)
+            - [ ] `bread(vp, blkno, size, cred, bpp)`: synchronous read (getblk + I/O + biowait). (REQ: REQ-04-0152)
+            - [ ] `breada(vp, blkno, size, rablkno, rabsize, cred, bpp)`: read-ahead variant. (REQ: REQ-04-0153)
+            - [ ] `bwrite(bp)`: synchronous write. (REQ: REQ-04-0154)
+            - [ ] `bawrite(bp)`: asynchronous write (initiate, return immediately). (REQ: REQ-04-0155)
+            - [ ] `bdwrite(bp)`: delayed write (mark B_DELWRI, release). (REQ: REQ-04-0156)
+            - [ ] `brelse(bp)`: release buffer to appropriate queue. (REQ: REQ-04-0157)
+            - [ ] `incore(vp, blkno)`: check if block is in cache. (REQ: REQ-04-0158)
+        - [ ] **Synchronization:** (REQ: REQ-04-0159)
+            - [ ] `biowait(bp)`: sleep until B_DONE. (REQ: REQ-04-0160)
+            - [ ] `biodone(bp)`: mark complete, call `b_iodone`, wakeup. (REQ: REQ-04-0161)
+        - [ ] **Flushing:** (REQ: REQ-04-0162)
+            - [ ] `bufsync(freq)`: periodic daemon to write dirty buffers. (REQ: REQ-04-0163)
+            - [ ] `sync()` syscall: flush all dirty buffers. (REQ: REQ-04-0164)
+            - [ ] `update` daemon (`syncer` kthread): periodic sync every 30 seconds. (REQ: REQ-04-0165)
 
-    - [ ] **VM Integration (Unified Buffer Cache):**
-        - [ ] **VNode Pager:**
-            - [ ] `vnode_pager_getpages()`: read pages from vnode into `vm_page` array.
-            - [ ] `vnode_pager_putpages()`: write dirty pages to vnode.
-            - [ ] Integrate with buffer cache (shared backing pages).
-        - [ ] **Page Cache Integration:**
-            - [ ] Buffer data backed by `vm_page_t` (not `kmalloc`).
-            - [ ] Unified memory accounting for file cache and buffer cache.
-            - [ ] Zero-copy I/O: mmap shares pages with buffer cache.
+    - [ ] **VM Integration (Unified Buffer Cache):** (REQ: REQ-04-0166)
+        - [ ] **VNode Pager:** (REQ: REQ-04-0167)
+            - [ ] `vnode_pager_getpages()`: read pages from vnode into `vm_page` array. (REQ: REQ-04-0168)
+            - [ ] `vnode_pager_putpages()`: write dirty pages to vnode. (REQ: REQ-04-0169)
+            - [ ] Integrate with buffer cache (shared backing pages). (REQ: REQ-04-0170)
+        - [ ] **Page Cache Integration:** (REQ: REQ-04-0171)
+            - [ ] Buffer data backed by `vm_page_t` (not `kmalloc`). (REQ: REQ-04-0172)
+            - [ ] Unified memory accounting for file cache and buffer cache. (REQ: REQ-04-0173)
+            - [ ] Zero-copy I/O: mmap shares pages with buffer cache. (REQ: REQ-04-0174)
 
-    - [ ] **Concurrency & Locking:**
-        - [ ] **VNode Locks (`lockmgr`):**
-            - [ ] `lockmgr(lkp, flags, interlock, p)`: unified lock manager.
-            - [ ] Modes: `LK_SHARED`, `LK_EXCLUSIVE`, `LK_UPGRADE`, `LK_DOWNGRADE`, `LK_DRAIN`.
-            - [ ] `LK_NOWAIT`: non-blocking (return EBUSY).
-            - [ ] Priority inheritance for blocked threads.
-            - [ ] Multiple concurrent readers, single exclusive writer.
-        - [ ] **Interlock:** `v_interlock` mutex for vnode fields (v_usecount, v_flag, v_numoutput).
-        - [ ] **Mount Lock:** `mnt_lock` prevents unmount during vnode operations.
-        - [ ] **Namecache Lock:** reader/writer lock on `nchash` for concurrent lookups.
-        - [ ] **Buffer Lock:** per-buffer `B_BUSY` flag with sleep/wakeup.
+    - [ ] **Concurrency & Locking:** (REQ: REQ-04-0175)
+        - [ ] **VNode Locks (`lockmgr`):** (REQ: REQ-04-0176)
+            - [ ] `lockmgr(lkp, flags, interlock, p)`: unified lock manager. (REQ: REQ-04-0177)
+            - [ ] Modes: `LK_SHARED`, `LK_EXCLUSIVE`, `LK_UPGRADE`, `LK_DOWNGRADE`, `LK_DRAIN`. (REQ: REQ-04-0178)
+            - [ ] `LK_NOWAIT`: non-blocking (return EBUSY). (REQ: REQ-04-0179)
+            - [ ] Priority inheritance for blocked threads. (REQ: REQ-04-0180)
+            - [ ] Multiple concurrent readers, single exclusive writer. (REQ: REQ-04-0181)
+        - [ ] **Interlock:** `v_interlock` mutex for vnode fields (v_usecount, v_flag, v_numoutput). (REQ: REQ-04-0182)
+        - [ ] **Mount Lock:** `mnt_lock` prevents unmount during vnode operations. (REQ: REQ-04-0183)
+        - [ ] **Namecache Lock:** reader/writer lock on `nchash` for concurrent lookups. (REQ: REQ-04-0184)
+        - [ ] **Buffer Lock:** per-buffer `B_BUSY` flag with sleep/wakeup. (REQ: REQ-04-0185)
 
-    - [ ] **Testing:**
-        - [ ] Unit: vnode lifecycle — `getnewvnode`, `vref`, `vrele`, `vput`, `vget`, `vgone`.
-        - [ ] Unit: name cache — `cache_lookup` hit/miss, `cache_enter`, `cache_purge`, negative entries.
-        - [ ] Unit: namei — simple path, `.`/`..`, mount crossing, symlink resolution, MAXSYMLINKS.
-        - [ ] Unit: vop_create/remove/mkdir/rmdir on ext2.
-        - [ ] Unit: vop_rename same-dir and cross-dir.
-        - [ ] Unit: vop_read/write/fsync round-trip.
-        - [ ] Unit: buffer cache — getblk/bread/bwrite/brelse lifecycle.
-        - [ ] Unit: buffer cache — bdwrite delayed write, then sync flushes.
-        - [ ] Unit: lockmgr — shared/exclusive/upgrade/downgrade/nowait.
-        - [ ] Property: vnode refcount never goes negative.
-        - [ ] Property: no buffer leaks after mount/unmount cycle.
-        - [ ] Integration: mount ext2 → create file → write → read → unlink → unmount.
-        - [ ] Integration: mount FAT32 → readdir → LFN resolution.
-    - [ ] **Documentation:**
-        - [ ] Man pages: `vnode(9)`, `namei(9)`, `VOP_LOOKUP(9)`, `VOP_READ(9)`, `VOP_WRITE(9)`.
-        - [ ] Man pages: `bread(9)`, `bwrite(9)`, `getblk(9)`, `brelse(9)`, `biodone(9)`.
-        - [ ] Man pages: `lockmgr(9)`, `VFS_MOUNT(9)`, `VFS_UNMOUNT(9)`.
-        - [ ] Internal doc: VFS architecture (vnode→mount→vfs_ops→vnode_ops).
-        - [ ] Internal doc: buffer cache lifecycle (getblk→bread→bdwrite→sync).
+    - [ ] **Testing:** (REQ: REQ-04-0186, REQ-04-0224, REQ-04-0244, REQ-04-0277, REQ-04-0305, REQ-04-0328, REQ-04-0339, REQ-04-0360)
+        - [ ] Unit: vnode lifecycle — `getnewvnode`, `vref`, `vrele`, `vput`, `vget`, `vgone`. (REQ: REQ-04-0187)
+        - [ ] Unit: name cache — `cache_lookup` hit/miss, `cache_enter`, `cache_purge`, negative entries. (REQ: REQ-04-0188)
+        - [ ] Unit: namei — simple path, `.`/`..`, mount crossing, symlink resolution, MAXSYMLINKS. (REQ: REQ-04-0189)
+        - [ ] Unit: vop_create/remove/mkdir/rmdir on ext2. (REQ: REQ-04-0190)
+        - [ ] Unit: vop_rename same-dir and cross-dir. (REQ: REQ-04-0191)
+        - [ ] Unit: vop_read/write/fsync round-trip. (REQ: REQ-04-0192)
+        - [ ] Unit: buffer cache — getblk/bread/bwrite/brelse lifecycle. (REQ: REQ-04-0193)
+        - [ ] Unit: buffer cache — bdwrite delayed write, then sync flushes. (REQ: REQ-04-0194)
+        - [ ] Unit: lockmgr — shared/exclusive/upgrade/downgrade/nowait. (REQ: REQ-04-0195)
+        - [ ] Property: vnode refcount never goes negative. (REQ: REQ-04-0196)
+        - [ ] Property: no buffer leaks after mount/unmount cycle. (REQ: REQ-04-0197)
+        - [ ] Integration: mount ext2 → create file → write → read → unlink → unmount. (REQ: REQ-04-0198)
+        - [ ] Integration: mount FAT32 → readdir → LFN resolution. (REQ: REQ-04-0199)
+    - [ ] **Documentation:** (REQ: REQ-04-0200, REQ-04-0282)
+        - [ ] Man pages: `vnode(9)`, `namei(9)`, `VOP_LOOKUP(9)`, `VOP_READ(9)`, `VOP_WRITE(9)`. (REQ: REQ-04-0201)
+        - [ ] Man pages: `bread(9)`, `bwrite(9)`, `getblk(9)`, `brelse(9)`, `biodone(9)`. (REQ: REQ-04-0202)
+        - [ ] Man pages: `lockmgr(9)`, `VFS_MOUNT(9)`, `VFS_UNMOUNT(9)`. (REQ: REQ-04-0203)
+        - [ ] Internal doc: VFS architecture (vnode→mount→vfs_ops→vnode_ops). (REQ: REQ-04-0204)
+        - [ ] Internal doc: buffer cache lifecycle (getblk→bread→bdwrite→sync). (REQ: REQ-04-0205)
 
-- [ ] **Legacy/Feature Gaps:**
-    - [ ] Ensure all FS drivers implement complete write paths.
-    - [ ] **`fsck`:** port e2fsprogs or implement native consistency checker.
-    - [ ] **Quotas:** per-user/group disk quotas (UFS/ext2).
+- [ ] **Legacy/Feature Gaps:** (REQ: REQ-04-0206)
+    - [ ] Ensure all FS drivers implement complete write paths. (REQ: REQ-04-0207)
+    - [ ] **`fsck`:** port e2fsprogs or implement native consistency checker. (REQ: REQ-04-0208)
+    - [ ] **Quotas:** per-user/group disk quotas (UFS/ext2). (REQ: REQ-04-0209)
 
-- [ ] **EXT2 (Native Filesystem):**
+- [ ] **EXT2 (Native Filesystem):** (REQ: REQ-04-0210)
 
     > **Files:** `sys/fs/ext2/ext2.c`, `ext2.h`, `ext2_vfsops.c`, `ext2_vnops.c`.
 
-    - [ ] Inode allocation/freeing (bitmap-based).
-    - [ ] Block allocation/freeing (bitmap-based, block groups).
-    - [ ] Directory entry creation/deletion.
-    - [ ] **Extended Features:**
-        - [ ] ext2 revision 1: variable inode size, file type in dir entry.
-        - [ ] Sparse superblock: superblock copies only in select block groups.
-        - [ ] Large file support (>2 GB via triple-indirect blocks).
-    - [ ] **VFS Integration:**
-        - [ ] Implement `ext2_mount` / `ext2_unmount` / `ext2_root` / `ext2_statfs`.
-        - [ ] Implement `ext2_lookup` / `ext2_create` / `ext2_remove` / `ext2_rename`.
-        - [ ] Implement `ext2_read` / `ext2_write` / `ext2_fsync`.
-        - [ ] Implement `ext2_readdir` / `ext2_mkdir` / `ext2_rmdir`.
-        - [ ] Implement `ext2_link` / `ext2_symlink` / `ext2_readlink`.
-    - [ ] **Testing:**
-        - [ ] Unit: inode/block alloc/free round-trip.
-        - [ ] Unit: directory entry CRUD.
-        - [ ] Integration: create ext2 image, mount, file ops, unmount, fsck verify.
-        - [ ] Fuzz: mount corrupted ext2 images (malformed superblock, bitmap, inodes).
+    - [ ] Inode allocation/freeing (bitmap-based). (REQ: REQ-04-0211)
+    - [ ] Block allocation/freeing (bitmap-based, block groups). (REQ: REQ-04-0212)
+    - [ ] Directory entry creation/deletion. (REQ: REQ-04-0213)
+    - [ ] **Extended Features:** (REQ: REQ-04-0214)
+        - [ ] ext2 revision 1: variable inode size, file type in dir entry. (REQ: REQ-04-0215)
+        - [ ] Sparse superblock: superblock copies only in select block groups. (REQ: REQ-04-0216)
+        - [ ] Large file support (>2 GB via triple-indirect blocks). (REQ: REQ-04-0217)
+    - [ ] **VFS Integration:** (REQ: REQ-04-0218, REQ-04-0233, REQ-04-0353)
+        - [ ] Implement `ext2_mount` / `ext2_unmount` / `ext2_root` / `ext2_statfs`. (REQ: REQ-04-0219)
+        - [ ] Implement `ext2_lookup` / `ext2_create` / `ext2_remove` / `ext2_rename`. (REQ: REQ-04-0220)
+        - [ ] Implement `ext2_read` / `ext2_write` / `ext2_fsync`. (REQ: REQ-04-0221)
+        - [ ] Implement `ext2_readdir` / `ext2_mkdir` / `ext2_rmdir`. (REQ: REQ-04-0222)
+        - [ ] Implement `ext2_link` / `ext2_symlink` / `ext2_readlink`. (REQ: REQ-04-0223)
+    - [ ] **Testing:** (REQ: REQ-04-0186, REQ-04-0224, REQ-04-0244, REQ-04-0277, REQ-04-0305, REQ-04-0328, REQ-04-0339, REQ-04-0360)
+        - [ ] Unit: inode/block alloc/free round-trip. (REQ: REQ-04-0225)
+        - [ ] Unit: directory entry CRUD. (REQ: REQ-04-0226)
+        - [ ] Integration: create ext2 image, mount, file ops, unmount, fsck verify. (REQ: REQ-04-0227)
+        - [ ] Fuzz: mount corrupted ext2 images (malformed superblock, bitmap, inodes). (REQ: REQ-04-0228)
 
-- [ ] **FAT16/32:**
+- [ ] **FAT16/32:** (REQ: REQ-04-0229)
 
     > **Files:** `sys/fs/fat/fat.c`, `fat.h`.
 
-    - [ ] FAT parsing and cluster chain following.
-    - [ ] Long File Name (LFN) support (VFAT entries).
-    - [ ] **FAT12 Support:** for floppy disk images.
-    - [ ] **VFS Integration:**
-        - [ ] Implement `fat_mount` / `fat_unmount` / `fat_root` / `fat_statfs`.
-        - [ ] Implement `fat_lookup` / `fat_create` / `fat_remove` / `fat_rename`.
-        - [ ] Implement `fat_read` / `fat_write`.
-        - [ ] Implement `fat_readdir` (8.3 + LFN merging).
-        - [ ] Implement `fat_mkdir` / `fat_rmdir`.
-    - [ ] **Write Support:**
-        - [ ] FAT table update (both copies).
-        - [ ] Cluster allocation/freeing.
-        - [ ] Directory entry creation with LFN slots.
-        - [ ] File truncation (free cluster chain).
-    - [ ] **Testing:**
-        - [ ] Unit: FAT chain parsing (FAT12, FAT16, FAT32).
-        - [ ] Unit: LFN slot reassembly.
-        - [ ] Integration: create FAT image, mount, file ops, unmount, verify with `dosfsck`.
-        - [ ] Fuzz: mount corrupted FAT images.
+    - [ ] FAT parsing and cluster chain following. (REQ: REQ-04-0230)
+    - [ ] Long File Name (LFN) support (VFAT entries). (REQ: REQ-04-0231)
+    - [ ] **FAT12 Support:** for floppy disk images. (REQ: REQ-04-0232)
+    - [ ] **VFS Integration:** (REQ: REQ-04-0218, REQ-04-0233, REQ-04-0353)
+        - [ ] Implement `fat_mount` / `fat_unmount` / `fat_root` / `fat_statfs`. (REQ: REQ-04-0234)
+        - [ ] Implement `fat_lookup` / `fat_create` / `fat_remove` / `fat_rename`. (REQ: REQ-04-0235)
+        - [ ] Implement `fat_read` / `fat_write`. (REQ: REQ-04-0236)
+        - [ ] Implement `fat_readdir` (8.3 + LFN merging). (REQ: REQ-04-0237)
+        - [ ] Implement `fat_mkdir` / `fat_rmdir`. (REQ: REQ-04-0238)
+    - [ ] **Write Support:** (REQ: REQ-04-0239)
+        - [ ] FAT table update (both copies). (REQ: REQ-04-0240)
+        - [ ] Cluster allocation/freeing. (REQ: REQ-04-0241)
+        - [ ] Directory entry creation with LFN slots. (REQ: REQ-04-0242)
+        - [ ] File truncation (free cluster chain). (REQ: REQ-04-0243)
+    - [ ] **Testing:** (REQ: REQ-04-0186, REQ-04-0224, REQ-04-0244, REQ-04-0277, REQ-04-0305, REQ-04-0328, REQ-04-0339, REQ-04-0360)
+        - [ ] Unit: FAT chain parsing (FAT12, FAT16, FAT32). (REQ: REQ-04-0245)
+        - [ ] Unit: LFN slot reassembly. (REQ: REQ-04-0246)
+        - [ ] Integration: create FAT image, mount, file ops, unmount, verify with `dosfsck`. (REQ: REQ-04-0247)
+        - [ ] Fuzz: mount corrupted FAT images. (REQ: REQ-04-0248)
 
-- [ ] **UDF (Universal Disk Format):**
+- [ ] **UDF (Universal Disk Format):** (REQ: REQ-04-0249)
 
     > **Files:** `sys/fs/udf/udf.h`, `udf.c`, `udf_write.c`.
 
-    - [ ] **On-Disk Structures (`udf.h`):**
-        - [ ] `udf_tag` (Descriptor Tag — 16 bytes, CRC).
-        - [ ] `udf_avdp` (Anchor Volume Descriptor Pointer).
-        - [ ] `udf_pvd` (Primary Volume Descriptor).
-        - [ ] `udf_pd` (Partition Descriptor).
-        - [ ] `udf_lvd` (Logical Volume Descriptor).
-        - [ ] `udf_fsd` (File Set Descriptor).
-        - [ ] `udf_fe` / `udf_efe` (File Entry / Extended File Entry).
-        - [ ] `udf_fid` (File Identifier Descriptor).
-        - [ ] `udf_short_ad` / `udf_long_ad` (Allocation Descriptors).
-    - [ ] **Read-Only Support (`udf.c`):**
-        - [ ] `udf_read_tag()`: tag CRC verification.
-        - [ ] `udf_find_avdp()`: locate Anchor at sector 256.
-        - [ ] `udf_read_vds()`: parse Volume Descriptor Sequence.
-        - [ ] `udf_read_partition()` / `udf_read_lvd()` / `udf_read_fsd()`.
-        - [ ] `udf_read_fe()`: read File Entry (inode equivalent).
-        - [ ] `udf_read_file()`: read file data via allocation descriptors.
-        - [ ] `udf_readdir()`: iterate directory FIDs.
-        - [ ] `udf_finddir()`: lookup by name.
-        - [ ] `udf_mount()`: VFS mount integration.
-    - [ ] **Write Support (`udf_write.c`):**
-        - [ ] `udf_read_space_bitmap()`: parse unallocated space.
-        - [ ] `udf_alloc_block()` / `udf_free_block()`: space bitmap management.
-        - [ ] `udf_create_fe()`: create new File Entry.
-        - [ ] `udf_write_file()`: write file data.
-        - [ ] `udf_add_fid()` / `udf_remove_fid()`: directory entry management.
-        - [ ] `udf_truncate()`: truncate/extend file.
-    - [ ] **Testing:**
-        - [ ] Unit: tag CRC verification.
-        - [ ] Unit: allocation/deallocation round-trip.
-        - [ ] Property: alloc→free→alloc returns same block.
-        - [ ] Fuzz: mount corrupted UDF images (bad descriptors, invalid CRCs).
-    - [ ] **Documentation:**
-        - [ ] Man pages: `udf(5)` (filesystem description), `udf(4)` (kernel driver).
+    - [ ] **On-Disk Structures (`udf.h`):** (REQ: REQ-04-0250)
+        - [ ] `udf_tag` (Descriptor Tag — 16 bytes, CRC). (REQ: REQ-04-0251)
+        - [ ] `udf_avdp` (Anchor Volume Descriptor Pointer). (REQ: REQ-04-0252)
+        - [ ] `udf_pvd` (Primary Volume Descriptor). (REQ: REQ-04-0253)
+        - [ ] `udf_pd` (Partition Descriptor). (REQ: REQ-04-0254)
+        - [ ] `udf_lvd` (Logical Volume Descriptor). (REQ: REQ-04-0255)
+        - [ ] `udf_fsd` (File Set Descriptor). (REQ: REQ-04-0256)
+        - [ ] `udf_fe` / `udf_efe` (File Entry / Extended File Entry). (REQ: REQ-04-0257)
+        - [ ] `udf_fid` (File Identifier Descriptor). (REQ: REQ-04-0258)
+        - [ ] `udf_short_ad` / `udf_long_ad` (Allocation Descriptors). (REQ: REQ-04-0259)
+    - [ ] **Read-Only Support (`udf.c`):** (REQ: REQ-04-0260)
+        - [ ] `udf_read_tag()`: tag CRC verification. (REQ: REQ-04-0261)
+        - [ ] `udf_find_avdp()`: locate Anchor at sector 256. (REQ: REQ-04-0262)
+        - [ ] `udf_read_vds()`: parse Volume Descriptor Sequence. (REQ: REQ-04-0263)
+        - [ ] `udf_read_partition()` / `udf_read_lvd()` / `udf_read_fsd()`. (REQ: REQ-04-0264)
+        - [ ] `udf_read_fe()`: read File Entry (inode equivalent). (REQ: REQ-04-0265)
+        - [ ] `udf_read_file()`: read file data via allocation descriptors. (REQ: REQ-04-0266)
+        - [ ] `udf_readdir()`: iterate directory FIDs. (REQ: REQ-04-0267)
+        - [ ] `udf_finddir()`: lookup by name. (REQ: REQ-04-0268)
+        - [ ] `udf_mount()`: VFS mount integration. (REQ: REQ-04-0269)
+    - [ ] **Write Support (`udf_write.c`):** (REQ: REQ-04-0270)
+        - [ ] `udf_read_space_bitmap()`: parse unallocated space. (REQ: REQ-04-0271)
+        - [ ] `udf_alloc_block()` / `udf_free_block()`: space bitmap management. (REQ: REQ-04-0272)
+        - [ ] `udf_create_fe()`: create new File Entry. (REQ: REQ-04-0273)
+        - [ ] `udf_write_file()`: write file data. (REQ: REQ-04-0274)
+        - [ ] `udf_add_fid()` / `udf_remove_fid()`: directory entry management. (REQ: REQ-04-0275)
+        - [ ] `udf_truncate()`: truncate/extend file. (REQ: REQ-04-0276)
+    - [ ] **Testing:** (REQ: REQ-04-0186, REQ-04-0224, REQ-04-0244, REQ-04-0277, REQ-04-0305, REQ-04-0328, REQ-04-0339, REQ-04-0360)
+        - [ ] Unit: tag CRC verification. (REQ: REQ-04-0278)
+        - [ ] Unit: allocation/deallocation round-trip. (REQ: REQ-04-0279)
+        - [ ] Property: alloc→free→alloc returns same block. (REQ: REQ-04-0280)
+        - [ ] Fuzz: mount corrupted UDF images (bad descriptors, invalid CRCs). (REQ: REQ-04-0281)
+    - [ ] **Documentation:** (REQ: REQ-04-0200, REQ-04-0282)
+        - [ ] Man pages: `udf(5)` (filesystem description), `udf(4)` (kernel driver). (REQ: REQ-04-0283)
 
-- [ ] **ISO 9660 / CD-ROM (future):**
-    - [ ] Primary Volume Descriptor parsing.
-    - [ ] Rock Ridge extensions (POSIX metadata).
-    - [ ] Joliet extensions (Unicode filenames).
-    - [ ] Multi-session support.
-    - [ ] El Torito boot catalog parsing (informational).
+- [ ] **ISO 9660 / CD-ROM (future):** (REQ: REQ-04-0284)
+    - [ ] Primary Volume Descriptor parsing. (REQ: REQ-04-0285)
+    - [ ] Rock Ridge extensions (POSIX metadata). (REQ: REQ-04-0286)
+    - [ ] Joliet extensions (Unicode filenames). (REQ: REQ-04-0287)
+    - [ ] Multi-session support. (REQ: REQ-04-0288)
+    - [ ] El Torito boot catalog parsing (informational). (REQ: REQ-04-0289)
 
-- [ ] **DevFS (`/dev`):**
-    - [ ] Device Registry: drivers register character/block devices.
-    - [ ] VFS glue: auto-generate vnode nodes on device registration.
-    - [ ] **Device Nodes:**
-        - [ ] `null`, `zero`, `full` (data sink/source/full-error).
-        - [ ] `random` / `urandom` (CSPRNG).
-        - [ ] `tty` (proxy to current process controlling terminal).
-        - [ ] `mem` / `kmem` (physical/kernel memory access).
-        - [ ] `port` (I/O port access).
-        - [ ] `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/0,1,2`).
-        - [ ] `console` (system console).
-        - [ ] `ptmx` (pseudo-terminal master multiplexer).
-    - [ ] **Dynamic Updates:**
-        - [ ] Hot-plug: add/remove nodes on device attach/detach.
-        - [ ] Permissions: default mode from driver, overridable via `devfs.rules`.
-    - [ ] **Testing:**
-        - [ ] Unit: register/unregister device nodes.
-        - [ ] Unit: read from `/dev/zero`, write to `/dev/null`, read from `/dev/random`.
-        - [ ] Unit: `/dev/full` returns ENOSPC on write.
+- [ ] **DevFS (`/dev`):** (REQ: REQ-04-0290)
+    - [ ] Device Registry: drivers register character/block devices. (REQ: REQ-04-0291)
+    - [ ] VFS glue: auto-generate vnode nodes on device registration. (REQ: REQ-04-0292)
+    - [ ] **Device Nodes:** (REQ: REQ-04-0293)
+        - [ ] `null`, `zero`, `full` (data sink/source/full-error). (REQ: REQ-04-0294)
+        - [ ] `random` / `urandom` (CSPRNG). (REQ: REQ-04-0295)
+        - [ ] `tty` (proxy to current process controlling terminal). (REQ: REQ-04-0296)
+        - [ ] `mem` / `kmem` (physical/kernel memory access). (REQ: REQ-04-0297)
+        - [ ] `port` (I/O port access). (REQ: REQ-04-0298)
+        - [ ] `stdin`, `stdout`, `stderr` symlinks (`/proc/self/fd/0,1,2`). (REQ: REQ-04-0299)
+        - [ ] `console` (system console). (REQ: REQ-04-0300)
+        - [ ] `ptmx` (pseudo-terminal master multiplexer). (REQ: REQ-04-0301)
+    - [ ] **Dynamic Updates:** (REQ: REQ-04-0302)
+        - [ ] Hot-plug: add/remove nodes on device attach/detach. (REQ: REQ-04-0303)
+        - [ ] Permissions: default mode from driver, overridable via `devfs.rules`. (REQ: REQ-04-0304)
+    - [ ] **Testing:** (REQ: REQ-04-0186, REQ-04-0224, REQ-04-0244, REQ-04-0277, REQ-04-0305, REQ-04-0328, REQ-04-0339, REQ-04-0360)
+        - [ ] Unit: register/unregister device nodes. (REQ: REQ-04-0306)
+        - [ ] Unit: read from `/dev/zero`, write to `/dev/null`, read from `/dev/random`. (REQ: REQ-04-0307)
+        - [ ] Unit: `/dev/full` returns ENOSPC on write. (REQ: REQ-04-0308)
 
-- [ ] **ProcFS (`/proc`):**
-    - [ ] **Per-Process:**
-        - [ ] `/proc/[pid]/stat`: process state (Linux-compatible format).
-        - [ ] `/proc/[pid]/status`: human-readable status.
-        - [ ] `/proc/[pid]/maps`: memory map regions.
-        - [ ] `/proc/[pid]/cmdline`: NUL-separated command line.
-        - [ ] `/proc/[pid]/environ`: NUL-separated environment.
-        - [ ] `/proc/[pid]/fd/`: open FD symlinks.
-        - [ ] `/proc/[pid]/cwd`, `/proc/[pid]/exe`, `/proc/[pid]/root`: symlinks.
-        - [ ] `/proc/[pid]/task/`: per-thread subdirectories.
-    - [ ] **System-wide:**
-        - [ ] `/proc/cpuinfo`, `/proc/meminfo`, `/proc/uptime`, `/proc/loadavg`.
-        - [ ] `/proc/vmstat`: VM statistics counters.
-        - [ ] `/proc/filesystems`: registered filesystem types.
-        - [ ] `/proc/mounts`: mounted filesystems.
-        - [ ] `/proc/partitions`: block device partitions.
-    - [ ] `/proc/self`: symlink to calling process PID.
-    - [ ] Dynamic content generation: virtual files populated on `read()`.
-    - [ ] Personality awareness: detect caller (Linux/FreeBSD) and adjust format.
-    - [ ] **Testing:**
-        - [ ] Unit: each `/proc` file returns valid parseable content.
-        - [ ] Unit: `/proc/self` resolves to calling PID.
-        - [ ] Integration: `ps` and `top` read from procfs correctly.
+- [ ] **ProcFS (`/proc`):** (REQ: REQ-04-0309)
+    - [ ] **Per-Process:** (REQ: REQ-04-0310)
+        - [ ] `/proc/[pid]/stat`: process state (Linux-compatible format). (REQ: REQ-04-0311)
+        - [ ] `/proc/[pid]/status`: human-readable status. (REQ: REQ-04-0312)
+        - [ ] `/proc/[pid]/maps`: memory map regions. (REQ: REQ-04-0313)
+        - [ ] `/proc/[pid]/cmdline`: NUL-separated command line. (REQ: REQ-04-0314)
+        - [ ] `/proc/[pid]/environ`: NUL-separated environment. (REQ: REQ-04-0315)
+        - [ ] `/proc/[pid]/fd/`: open FD symlinks. (REQ: REQ-04-0316)
+        - [ ] `/proc/[pid]/cwd`, `/proc/[pid]/exe`, `/proc/[pid]/root`: symlinks. (REQ: REQ-04-0317)
+        - [ ] `/proc/[pid]/task/`: per-thread subdirectories. (REQ: REQ-04-0318)
+    - [ ] **System-wide:** (REQ: REQ-04-0319)
+        - [ ] `/proc/cpuinfo`, `/proc/meminfo`, `/proc/uptime`, `/proc/loadavg`. (REQ: REQ-04-0320)
+        - [ ] `/proc/vmstat`: VM statistics counters. (REQ: REQ-04-0321)
+        - [ ] `/proc/filesystems`: registered filesystem types. (REQ: REQ-04-0322)
+        - [ ] `/proc/mounts`: mounted filesystems. (REQ: REQ-04-0323)
+        - [ ] `/proc/partitions`: block device partitions. (REQ: REQ-04-0324)
+    - [ ] `/proc/self`: symlink to calling process PID. (REQ: REQ-04-0325)
+    - [ ] Dynamic content generation: virtual files populated on `read()`. (REQ: REQ-04-0326)
+    - [ ] Personality awareness: detect caller (Linux/FreeBSD) and adjust format. (REQ: REQ-04-0327)
+    - [ ] **Testing:** (REQ: REQ-04-0186, REQ-04-0224, REQ-04-0244, REQ-04-0277, REQ-04-0305, REQ-04-0328, REQ-04-0339, REQ-04-0360)
+        - [ ] Unit: each `/proc` file returns valid parseable content. (REQ: REQ-04-0329)
+        - [ ] Unit: `/proc/self` resolves to calling PID. (REQ: REQ-04-0330)
+        - [ ] Integration: `ps` and `top` read from procfs correctly. (REQ: REQ-04-0331)
 
-- [ ] **SysFS (`/sys`):**
-    - [ ] KObject hierarchy: represent kernel objects (drivers, buses, devices).
-    - [ ] Attributes: map kernel variables to readable/writable files.
-    - [ ] `/sys/class/net/`: network interface properties.
-    - [ ] `/sys/block/`: block device attributes.
-    - [ ] `/sys/devices/system/cpu/`: CPU topology.
-    - [ ] `/sys/kernel/`: misc kernel tunables.
-    - [ ] **Testing:**
-        - [ ] Unit: kobj create/register/unregister.
-        - [ ] Unit: attribute read/write.
+- [ ] **SysFS (`/sys`):** (REQ: REQ-04-0332)
+    - [ ] KObject hierarchy: represent kernel objects (drivers, buses, devices). (REQ: REQ-04-0333)
+    - [ ] Attributes: map kernel variables to readable/writable files. (REQ: REQ-04-0334)
+    - [ ] `/sys/class/net/`: network interface properties. (REQ: REQ-04-0335)
+    - [ ] `/sys/block/`: block device attributes. (REQ: REQ-04-0336)
+    - [ ] `/sys/devices/system/cpu/`: CPU topology. (REQ: REQ-04-0337)
+    - [ ] `/sys/kernel/`: misc kernel tunables. (REQ: REQ-04-0338)
+    - [ ] **Testing:** (REQ: REQ-04-0186, REQ-04-0224, REQ-04-0244, REQ-04-0277, REQ-04-0305, REQ-04-0328, REQ-04-0339, REQ-04-0360)
+        - [ ] Unit: kobj create/register/unregister. (REQ: REQ-04-0340)
+        - [ ] Unit: attribute read/write. (REQ: REQ-04-0341)
 
-- [ ] **9P Filesystem (Plan 9):**
+- [ ] **9P Filesystem (Plan 9):** (REQ: REQ-04-0342)
 
     > **Files:** `sys/fs/9p/`.
 
-    - [ ] **Protocol:**
-        - [ ] Tversion/Rversion (protocol negotiation).
-        - [ ] Tattach/Rattach (mount).
-        - [ ] Twalk/Rwalk (path traversal).
-        - [ ] Topen/Ropen (file open).
-        - [ ] Tread/Rread / Twrite/Rwrite (data transfer).
-        - [ ] Tclunk/Rclunk (close FID).
-        - [ ] Tstat/Rstat / Twstat/Rwstat (metadata).
-        - [ ] Tcreate/Rcreate (create file/directory).
-        - [ ] Tremove/Rremove (remove file/directory).
-    - [ ] **VFS Integration:**
-        - [ ] `p9fs_mount` / `p9fs_unmount`.
-        - [ ] `p9fs_lookup` / `p9fs_readdir`.
-        - [ ] `p9fs_read` / `p9fs_write`.
-    - [ ] **Transport:**
-        - [ ] VirtIO-9P transport (via `virtio_9p` driver).
-        - [ ] TCP transport (for networked 9P).
-    - [ ] **Testing:**
-        - [ ] Integration: mount 9P share from QEMU host, read/write files.
+    - [ ] **Protocol:** (REQ: REQ-04-0343)
+        - [ ] Tversion/Rversion (protocol negotiation). (REQ: REQ-04-0344)
+        - [ ] Tattach/Rattach (mount). (REQ: REQ-04-0345)
+        - [ ] Twalk/Rwalk (path traversal). (REQ: REQ-04-0346)
+        - [ ] Topen/Ropen (file open). (REQ: REQ-04-0347)
+        - [ ] Tread/Rread / Twrite/Rwrite (data transfer). (REQ: REQ-04-0348)
+        - [ ] Tclunk/Rclunk (close FID). (REQ: REQ-04-0349)
+        - [ ] Tstat/Rstat / Twstat/Rwstat (metadata). (REQ: REQ-04-0350)
+        - [ ] Tcreate/Rcreate (create file/directory). (REQ: REQ-04-0351)
+        - [ ] Tremove/Rremove (remove file/directory). (REQ: REQ-04-0352)
+    - [ ] **VFS Integration:** (REQ: REQ-04-0218, REQ-04-0233, REQ-04-0353)
+        - [ ] `p9fs_mount` / `p9fs_unmount`. (REQ: REQ-04-0354)
+        - [ ] `p9fs_lookup` / `p9fs_readdir`. (REQ: REQ-04-0355)
+        - [ ] `p9fs_read` / `p9fs_write`. (REQ: REQ-04-0356)
+    - [ ] **Transport:** (REQ: REQ-04-0357)
+        - [ ] VirtIO-9P transport (via `virtio_9p` driver). (REQ: REQ-04-0358)
+        - [ ] TCP transport (for networked 9P). (REQ: REQ-04-0359)
+    - [ ] **Testing:** (REQ: REQ-04-0186, REQ-04-0224, REQ-04-0244, REQ-04-0277, REQ-04-0305, REQ-04-0328, REQ-04-0339, REQ-04-0360)
+        - [ ] Integration: mount 9P share from QEMU host, read/write files. (REQ: REQ-04-0361)
 
 ## User Stories
 

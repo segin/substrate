@@ -6,77 +6,77 @@
 ## Reimplemented Checklist (All Open)
 
 ### 6a. System Call Wrapper Library (`lib/sys`)
-- [ ] **Foundation:**
-    - [ ] Create `lib/sys/` directory structure.
-    - [ ] Implement `syscall.S`: Raw i386 `int $0x80` entry (6 args via ebx-ebp).
-    - [ ] Create `include/sys/syscall.h`: `SYS_*` constants and `syscall()` prototype.
-    - [ ] Add to `lib/Makefile` SUBDIRS.
-- [ ] **VM Information Syscalls:**
-    - [ ] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages.
-        - [ ] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`.
-        - [ ] `lib/sys/sysinfo.c`: Wrapper function.
-        - [ ] Man page: `sysinfo(2)`.
-    - [ ] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386).
-        - [ ] `lib/sys/getpagesize.c`: Wrapper function.
-        - [ ] Man page: `getpagesize(2)`.
-    - [ ] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM.
-        - [ ] `lib/sys/mlock.c`: Wrapper functions.
-        - [ ] Man pages: `mlock(2)`, `munlock(2)`.
-- [ ] **Process Information Syscalls:**
-    - [ ] `getpid()`/`getppid()` wrappers.
-        - [ ] `lib/sys/getpid.c`: Wrapper functions.
-        - [ ] Man pages: `getpid(2)`, `getppid(2)`.
-    - [ ] `getuid()`/`getgid()`/`geteuid()`/`getegid()` wrappers.
-        - [ ] `lib/sys/getuid.c`: Wrapper functions.
-        - [ ] Man pages: `getuid(2)`, `getgid(2)`, `geteuid(2)`, `getegid(2)`.
-    - [ ] `getpgid()`/`setpgid()`/`getpgrp()` wrappers.
-        - [ ] `lib/sys/pgrp.c`: Wrapper functions.
-        - [ ] Man pages: `getpgid(2)`, `setpgid(2)`, `getpgrp(2)`.
-    - [ ] `getsid()`/`setsid()` wrappers.
-        - [ ] `lib/sys/pgrp.c`: Wrapper functions.
-        - [ ] Man pages: `getsid(2)`, `setsid(2)`.
-    - [ ] `getrusage()` wrapper: Resource usage (user/sys time, memory).
-        - [ ] Kernel: Hooked up `sys_getrusage()`.
-        - [ ] `lib/sys/getrusage.c`: Wrapper function.
-        - [ ] Man page: `getrusage(2)`.
-    - [ ] `times()` wrapper: Process times (user, sys, children).
-        - [ ] Kernel: Hooked up `sys_times()`.
-        - [ ] `lib/sys/times.c`: Wrapper function.
-        - [ ] Man page: `times(2)`.
-- [ ] **Special-Purpose Syscalls:**
-    - [ ] `vm86()` wrapper (SYS_vm86): Enter VM86 mode.
-        - [ ] `lib/sys/vm86.c`: Typed wrapper.
-        - [ ] Man page: `vm86(2)`.
-    - [ ] `ptrace()` wrapper: Process tracing.
-        - [ ] `lib/sys/ptrace.c`: Wrapper function.
-        - [ ] Man page: `ptrace(2)`.
-    - [ ] `reboot()` wrapper: System reboot/power off.
-        - [ ] `lib/sys/reboot.c`: Wrapper function.
-        - [ ] Man page: `reboot(2)`.
-- [ ] **Sysctl Interface:**
-    - [ ] `sysctl()` wrapper: Kernel tunable access.
-        - [ ] Kernel: Hooked up `sys_sysctl()` MIB tree.
-        - [ ] `lib/sys/sysctl.c`: Wrapper function.
-        - [ ] Man page: `sysctl(2)`.
+- [ ] **Foundation:** (REQ: REQ-07-0001)
+    - [ ] Create `lib/sys/` directory structure. (REQ: REQ-07-0002)
+    - [ ] Implement `syscall.S`: Raw i386 `int $0x80` entry (6 args via ebx-ebp). (REQ: REQ-07-0003)
+    - [ ] Create `include/sys/syscall.h`: `SYS_*` constants and `syscall()` prototype. (REQ: REQ-07-0004)
+    - [ ] Add to `lib/Makefile` SUBDIRS. (REQ: REQ-07-0005)
+- [ ] **VM Information Syscalls:** (REQ: REQ-07-0006)
+    - [ ] `sysinfo()` wrapper (`SYS_sysinfo`): Total/free RAM, uptime, load averages. (REQ: REQ-07-0007)
+        - [ ] Kernel: Implement `sys_sysinfo()` returning `struct sysinfo`. (REQ: REQ-07-0008)
+        - [ ] `lib/sys/sysinfo.c`: Wrapper function. (REQ: REQ-07-0009)
+        - [ ] Man page: `sysinfo(2)`. (REQ: REQ-07-0010)
+    - [ ] `getpagesize()` wrapper: Return `PAGE_SIZE` (4096 on i386). (REQ: REQ-07-0011)
+        - [ ] `lib/sys/getpagesize.c`: Wrapper function. (REQ: REQ-07-0012)
+        - [ ] Man page: `getpagesize(2)`. (REQ: REQ-07-0013)
+    - [ ] `mlock()`/`munlock()` wrappers: Lock/unlock pages in RAM. (REQ: REQ-07-0014)
+        - [ ] `lib/sys/mlock.c`: Wrapper functions. (REQ: REQ-07-0015)
+        - [ ] Man pages: `mlock(2)`, `munlock(2)`. (REQ: REQ-07-0016)
+- [ ] **Process Information Syscalls:** (REQ: REQ-07-0017)
+    - [ ] `getpid()`/`getppid()` wrappers. (REQ: REQ-07-0018)
+        - [ ] `lib/sys/getpid.c`: Wrapper functions. (REQ: REQ-07-0019)
+        - [ ] Man pages: `getpid(2)`, `getppid(2)`. (REQ: REQ-07-0020)
+    - [ ] `getuid()`/`getgid()`/`geteuid()`/`getegid()` wrappers. (REQ: REQ-07-0021)
+        - [ ] `lib/sys/getuid.c`: Wrapper functions. (REQ: REQ-07-0022)
+        - [ ] Man pages: `getuid(2)`, `getgid(2)`, `geteuid(2)`, `getegid(2)`. (REQ: REQ-07-0023)
+    - [ ] `getpgid()`/`setpgid()`/`getpgrp()` wrappers. (REQ: REQ-07-0024)
+        - [ ] `lib/sys/pgrp.c`: Wrapper functions. (REQ: REQ-07-0025, REQ-07-0028)
+        - [ ] Man pages: `getpgid(2)`, `setpgid(2)`, `getpgrp(2)`. (REQ: REQ-07-0026)
+    - [ ] `getsid()`/`setsid()` wrappers. (REQ: REQ-07-0027)
+        - [ ] `lib/sys/pgrp.c`: Wrapper functions. (REQ: REQ-07-0025, REQ-07-0028)
+        - [ ] Man pages: `getsid(2)`, `setsid(2)`. (REQ: REQ-07-0029)
+    - [ ] `getrusage()` wrapper: Resource usage (user/sys time, memory). (REQ: REQ-07-0030)
+        - [ ] Kernel: Hooked up `sys_getrusage()`. (REQ: REQ-07-0031)
+        - [ ] `lib/sys/getrusage.c`: Wrapper function. (REQ: REQ-07-0032)
+        - [ ] Man page: `getrusage(2)`. (REQ: REQ-07-0033)
+    - [ ] `times()` wrapper: Process times (user, sys, children). (REQ: REQ-07-0034)
+        - [ ] Kernel: Hooked up `sys_times()`. (REQ: REQ-07-0035)
+        - [ ] `lib/sys/times.c`: Wrapper function. (REQ: REQ-07-0036)
+        - [ ] Man page: `times(2)`. (REQ: REQ-07-0037)
+- [ ] **Special-Purpose Syscalls:** (REQ: REQ-07-0038)
+    - [ ] `vm86()` wrapper (SYS_vm86): Enter VM86 mode. (REQ: REQ-07-0039)
+        - [ ] `lib/sys/vm86.c`: Typed wrapper. (REQ: REQ-07-0040)
+        - [ ] Man page: `vm86(2)`. (REQ: REQ-07-0041)
+    - [ ] `ptrace()` wrapper: Process tracing. (REQ: REQ-07-0042)
+        - [ ] `lib/sys/ptrace.c`: Wrapper function. (REQ: REQ-07-0043)
+        - [ ] Man page: `ptrace(2)`. (REQ: REQ-07-0044)
+    - [ ] `reboot()` wrapper: System reboot/power off. (REQ: REQ-07-0045)
+        - [ ] `lib/sys/reboot.c`: Wrapper function. (REQ: REQ-07-0046)
+        - [ ] Man page: `reboot(2)`. (REQ: REQ-07-0047)
+- [ ] **Sysctl Interface:** (REQ: REQ-07-0048)
+    - [ ] `sysctl()` wrapper: Kernel tunable access. (REQ: REQ-07-0049)
+        - [ ] Kernel: Hooked up `sys_sysctl()` MIB tree. (REQ: REQ-07-0050)
+        - [ ] `lib/sys/sysctl.c`: Wrapper function. (REQ: REQ-07-0051)
+        - [ ] Man page: `sysctl(2)`. (REQ: REQ-07-0052)
 
 ### 6a.1 Implementation Reality Audit (March 2026)
-- [ ] **ABI Alignment:**
-    - [ ] Align `lib/sys/syscall.S` calling convention with native personality syscall argument ABI (`substrate` stack-argument path).
-    - [ ] Add ABI conformance tests that validate argument passing for 0-6 argument wrappers under native personality.
-- [ ] **Wrapper Number Hygiene:**
-    - [ ] Remove hardcoded wrapper-only syscall numbers (`SYS_vm86=113`, `SYS_PROC_PERS_NAME=360`) or land matching kernel/header definitions and dispatch wiring.
-    - [ ] Enforce that every `SYS_*` used in `lib/sys` is defined in `sys/arch/i386/syscall.h`.
-- [ ] **Coverage Completion:**
-    - [ ] Add missing `lib/sys` wrappers for wired native syscalls with no typed entry points (`setpriority`, `getpriority`, `clock_gettime`, `waitpid`, `brk`, `munmap`, `futex` as applicable to native ABI policy).
-    - [ ] Add typed wrappers for implemented process introspection and VM info calls as they transition from stubs.
-- [ ] **Stub Burn-Down:**
-    - [ ] Implement kernel handlers for `sys_proc_threads`, `sys_proc_fds`, `sys_proc_maps`, `sys_proc_cwd`, `sys_proc_exe`, `sys_proc_cmdline`, `sys_proc_environ`.
-    - [ ] Replace userspace `ENOSYS` stubs in `lib/sys/sysinfo.c` for `sys_vm_info`, `sys_vm_swap`, `sys_vm_buffers`, and `sys_vm_slabs` with real syscall-backed implementations.
-- [ ] **Error Contract Normalization:**
-    - [ ] Define and enforce one syscall error contract (`-errno` at kernel boundary, libc/libsys normalization policy).
-    - [ ] Add wrapper tests proving consistent return and `errno` behavior across `lib/c` and `lib/sys`.
-- [ ] **Documentation Synchronization:**
-    - [ ] Keep `docs/syscalls/*.md` and `usr.man/man2/sys_proc_*.2`, `usr.man/man2/sys_vm_*.2` synchronized with implementation changes.
+- [ ] **ABI Alignment:** (REQ: REQ-07-0053)
+    - [ ] Align `lib/sys/syscall.S` calling convention with native personality syscall argument ABI (`substrate` stack-argument path). (REQ: REQ-07-0048)
+    - [ ] Add ABI conformance tests that validate argument passing for 0-6 argument wrappers under native personality. (REQ: REQ-07-0048)
+- [ ] **Wrapper Number Hygiene:** (REQ: REQ-07-0054)
+    - [ ] Remove hardcoded wrapper-only syscall numbers (`SYS_vm86=113`, `SYS_PROC_PERS_NAME=360`) or land matching kernel/header definitions and dispatch wiring. (REQ: REQ-07-0048)
+    - [ ] Enforce that every `SYS_*` used in `lib/sys` is defined in `sys/arch/i386/syscall.h`. (REQ: REQ-07-0048)
+- [ ] **Coverage Completion:** (REQ: REQ-07-0055)
+    - [ ] Add missing `lib/sys` wrappers for wired native syscalls with no typed entry points (`setpriority`, `getpriority`, `clock_gettime`, `waitpid`, `brk`, `munmap`, `futex` as applicable to native ABI policy). (REQ: REQ-07-0048)
+    - [ ] Add typed wrappers for implemented process introspection and VM info calls as they transition from stubs. (REQ: REQ-07-0048)
+- [ ] **Stub Burn-Down:** (REQ: REQ-07-0055)
+    - [ ] Implement kernel handlers for `sys_proc_threads`, `sys_proc_fds`, `sys_proc_maps`, `sys_proc_cwd`, `sys_proc_exe`, `sys_proc_cmdline`, `sys_proc_environ`. (REQ: REQ-07-0048)
+    - [ ] Replace userspace `ENOSYS` stubs in `lib/sys/sysinfo.c` for `sys_vm_info`, `sys_vm_swap`, `sys_vm_buffers`, and `sys_vm_slabs` with real syscall-backed implementations. (REQ: REQ-07-0048)
+- [ ] **Error Contract Normalization:** (REQ: REQ-07-0056)
+    - [ ] Define and enforce one syscall error contract (`-errno` at kernel boundary, libc/libsys normalization policy). (REQ: REQ-07-0048)
+    - [ ] Add wrapper tests proving consistent return and `errno` behavior across `lib/c` and `lib/sys`. (REQ: REQ-07-0048)
+- [ ] **Documentation Synchronization:** (REQ: REQ-07-0057)
+    - [ ] Keep `docs/syscalls/*.md` and `usr.man/man2/sys_proc_*.2`, `usr.man/man2/sys_vm_*.2` synchronized with implementation changes. (REQ: REQ-07-0048)
 
 #### Added User Stories (Delta)
 

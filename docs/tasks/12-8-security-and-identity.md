@@ -6,36 +6,36 @@
 ## Reimplemented Checklist (All Open)
 
 ### 8. Security and Identity
-- [ ] **User & Group Management:**
-    - [ ] **Database:**
-        - [ ] Implement `/etc/passwd` parser.
-        - [ ] Implement `/etc/group` parser.
-        - [ ] Implement `/etc/shadow` parser for login.
-    - [ ] **Kernel Credentials:**
-        - [ ] Add `uid, gid, euid, egid, suid, sgid` to Process structure.
-        - [ ] Add supplementary group list to Process structure.
-    - [ ] **System Calls:**
-        - [ ] `getuid`
-        - [ ] `getgid`
-        - [ ] `geteuid`
-        - [ ] `getegid`
-        - [ ] `setuid`
-        - [ ] `setgid`
-        - [ ] `seteuid`
-        - [ ] `setegid`
-        - [ ] `setreuid`
-        - [ ] `setregid`
-        - [ ] `getgroups`
-        - [ ] `setgroups`
-- [ ] **Userland Identity Tools:**
-    - [ ] **`id`:**
-        - [ ] Implement `-u` (UID) flag.
-        - [ ] Implement `-g` (GID) flag.
-        - [ ] Implement `-G` (Groups) flag.
-        - [ ] Implement `-n` (Name) flag.
-        - [ ] Ensure POSIX-compliant output format.
-    - [ ] **`su`:** Enhance with user/group switching.
-    - [ ] **`login`:** Integrate with user database.
+- [ ] **User & Group Management:** (REQ: REQ-12-0001)
+    - [ ] **Database:** (REQ: REQ-12-0002)
+        - [ ] Implement `/etc/passwd` parser. (REQ: REQ-12-0003)
+        - [ ] Implement `/etc/group` parser. (REQ: REQ-12-0004)
+        - [ ] Implement `/etc/shadow` parser for login. (REQ: REQ-12-0005)
+    - [ ] **Kernel Credentials:** (REQ: REQ-12-0006)
+        - [ ] Add `uid, gid, euid, egid, suid, sgid` to Process structure. (REQ: REQ-12-0007)
+        - [ ] Add supplementary group list to Process structure. (REQ: REQ-12-0008)
+    - [ ] **System Calls:** (REQ: REQ-12-0009)
+        - [ ] `getuid` (REQ: REQ-12-0010)
+        - [ ] `getgid` (REQ: REQ-12-0011)
+        - [ ] `geteuid` (REQ: REQ-12-0012)
+        - [ ] `getegid` (REQ: REQ-12-0013)
+        - [ ] `setuid` (REQ: REQ-12-0014)
+        - [ ] `setgid` (REQ: REQ-12-0015)
+        - [ ] `seteuid` (REQ: REQ-12-0016)
+        - [ ] `setegid` (REQ: REQ-12-0017)
+        - [ ] `setreuid` (REQ: REQ-12-0018)
+        - [ ] `setregid` (REQ: REQ-12-0019)
+        - [ ] `getgroups` (REQ: REQ-12-0020)
+        - [ ] `setgroups` (REQ: REQ-12-0021)
+- [ ] **Userland Identity Tools:** (REQ: REQ-12-0022)
+    - [ ] **`id`:** (REQ: REQ-12-0023)
+        - [ ] Implement `-u` (UID) flag. (REQ: REQ-12-0024)
+        - [ ] Implement `-g` (GID) flag. (REQ: REQ-12-0025)
+        - [ ] Implement `-G` (Groups) flag. (REQ: REQ-12-0026)
+        - [ ] Implement `-n` (Name) flag. (REQ: REQ-12-0027)
+        - [ ] Ensure POSIX-compliant output format. (REQ: REQ-12-0028)
+    - [ ] **`su`:** Enhance with user/group switching. (REQ: REQ-12-0029)
+    - [ ] **`login`:** Integrate with user database. (REQ: REQ-12-0030)
 
 
 ## User Stories

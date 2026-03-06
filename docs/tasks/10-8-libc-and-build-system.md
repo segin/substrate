@@ -6,457 +6,457 @@
 ## Reimplemented Checklist (All Open)
 
 ### 8. LibC & Build System (User Requests & Audit)
-- [ ] **LibC Core Compliance (Audit Findings):**
-    - [ ] **Critical Headers (Missing Files):**
-        - [ ] Create `string.h` (functions exist in `string.c` but header is missing).
-        - [ ] Create `limits.h`, `setjmp.h`, `locale.h`.
-        - [ ] Create `err.h` (BSD error reporting helpers).
-        - [ ] Create `stddef.h`, `stdint.h`, `stdarg.h` (wrapping GCC builtins).
-    - [ ] **String Manipulation (`<string.h>`):**
-        - [ ] `strndup()`: Bounded string duplication.
-        - [ ] `stpcpy()` / `stpncpy()`: Copy returning end pointer.
-        - [ ] `strpbrk()`: Search for any of a set of chars.
-        - [ ] `strcoll()` / `strxfrm()`: Locale-aware comparison stubs.
-    - [ ] **Standard Library (`<stdlib.h>`):**
-        - [ ] `strtol()` / `strtoul()` / `strtoll()` / `strtoull()`: Robust string-to-integer conversion.
-        - [ ] `strtod()` / `strtof()`: String to float implementation (currently `atof` is a stub).
-        - [ ] `div()` / `ldiv()` / `lldiv()`: Combined quotient/remainder.
-        - [ ] `atexit()`: Exit handlers (currently `at_quick_exit` is a stub).
-        - [ ] `mbstowcs()` / `wcstombs()`: Multibyte conversion stubs.
-    - [ ] **Standard I/O (`<stdio.h>`):**
-        - [ ] **CRITICAL:** `sscanf()` / `scanf()` / `fscanf()`: Input parsing implementation.
-        - [ ] `snprintf()`: Add wrapper around `vsnprintf`.
-        - [ ] `freopen()`: Reopen stream with new mode.
-        - [ ] `setvbuf()` / `setbuf()`: Buffering mode control.
-        - [ ] `tmpfile()` / `tmpnam()`: Temporary file support.
-        - [ ] `fileno()`: Get fd from `FILE*`.
-    - [ ] **POSIX System Interface (`<unistd.h>`):**
-        - [ ] `dup()`: Duplicate fd (wrapper around `SYS_DUP` or `fcntl`).
-        - [ ] `getppid()`: Get parent PID.
-        - [ ] `setsid()` / `getsid()`: Session ID management.
-        - [ ] `getpgrp()` / `setpgid()`: Process group management.
-        - [ ] `symlink()`: Create symbolic link.
-        - [ ] `ftruncate()` / `truncate()`: Truncate file size.
-        - [ ] `fsync()` / `fdatasync()`: Flush file changes.
-    - [ ] **Time & Date (`<time.h>`):**
-        - [ ] `gmtime()` / `localtime()`: Timestamp to struct tm.
-        - [ ] `mktime()`: Struct tm to timestamp.
-        - [ ] `strftime()` / `strptime()`: Time formatting/parsing.
-        - [ ] `difftime()`: Time difference.
-        - [ ] `ctime()` / `asctime()`: Time to string.
-- [ ] **LibC Features (User Requests):**
-    - [ ] **Implement `getopt_long` (GNU Compatible):**
-        - [ ] Define `struct option` (name, has_arg, flag, val).
-        - [ ] Implement `getopt_long()` function signature.
-        - [ ] Implement `getopt_long_only()` variant.
-        - [ ] Handle argument parsing (`--arg`, `--arg=val`).
-        - [ ] Handle `no_argument`, `required_argument`, `optional_argument`.
-        - [ ] Internal state management (`optind`, `opterr`, `optopt`, `optarg`).
-        - [ ] Error reporting and `?` / `:` return codes.
-        - [ ] Support for non-option argument reordering (swapping argv elements).
-        - [ ] Test against GNU `getopt_long` behavior.
-- [ ] **Low-Level Helpers (LibC Extension):**
-    - [ ] `xmalloc(size)`: Safe memory allocation.
-        - [ ] **Prototype:** `void *xmalloc(size_t size)`
-        - [ ] **Purpose:** Allocate memory, aborting on failure.
-        - [ ] **Standards:** Common extension (Busybox/GNU coreutils style).
-        - [ ] **Syscalls / Kernel interfaces:** `malloc` -> `brk`/`mmap`.
-        - [ ] **Signal-safety / async-signal-safe:** no — calls `malloc`.
-        - [ ] **Reentrancy / thread-safety:** Thread-safe (if `malloc` is).
-        - [ ] **Error semantics:** Returns valid pointer or exits program (never returns NULL).
-        - [ ] **Memory ownership:** Caller must free.
-        - [ ] **Acceptance tests:**
-            - [ ] `xmalloc(1024)` -> returns pointer
-            - [ ] `xmalloc(huge)` -> prints error and exits (mock/limit env)
-        - [ ] **Implementation notes:** Wrapper around `malloc`.
-        - [ ] **Priority:** high
-    - [ ] `xopen(path, flags, mode)`: Safe file open.
-        - [ ] **Prototype:** `int xopen(const char *path, int flags, mode_t mode)`
-        - [ ] **Purpose:** Open file, aborting on failure.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Syscalls / Kernel interfaces:** `open` / `openat`.
-        - [ ] **Signal-safety / async-signal-safe:** yes (if error handler is simple).
-        - [ ] **Reentrancy / thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Returns valid fd or exits program.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xopen("exist", O_RDONLY)` -> returns fd
-            - [ ] `xopen("noexist", O_RDONLY)` -> prints error and exits
-        - [ ] **Priority:** high
-    - [ ] `xrealloc(ptr, size)`: Safe memory reallocation.
-        - [ ] **Prototype:** `void *xrealloc(void *ptr, size_t size)`
-        - [ ] **Purpose:** Reallocate memory, aborting on failure.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `malloc` / `free` -> `brk`/`mmap`.
-        - [ ] **Signal-safety:** no.
-        - [ ] **Thread-safety:** Thread-safe (if Underlying allocator is).
-        - [ ] **Error semantics:** Exits program on failure.
-        - [ ] **Memory ownership:** Caller must free.
-        - [ ] **Acceptance tests:**
-            - [ ] `xrealloc(NULL, 10)` -> equivalent to xmalloc
-            - [ ] `xrealloc(ptr, 20)` -> preserves data, returns new ptr
-        - [ ] **Implementation notes:** `realloc(ptr, 0)` behavior check.
-        - [ ] **Priority:** high
-    - [ ] `xcalloc(nmemb, size)`: Safe zero-initialized allocation.
-        - [ ] **Prototype:** `void *xcalloc(size_t nmemb, size_t size)`
-        - [ ] **Purpose:** Allocate zeroed memory, aborting on failure.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `calloc`.
-        - [ ] **Signal-safety:** no.
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Exits program on failure, check overflow.
-        - [ ] **Memory ownership:** Caller must free.
-        - [ ] **Acceptance tests:**
-            - [ ] `xcalloc(10, 10)` -> returns zeroed buffer
-            - [ ] `xcalloc(MAX, MAX)` -> overflow check and exit
-        - [ ] **Implementation notes:** Check for multiplication overflow.
-        - [ ] **Priority:** high
-    - [ ] `xstrdup(s)`: Safe string duplication.
-        - [ ] **Prototype:** `char *xstrdup(const char *s)`
-        - [ ] **Purpose:** Duplicate string, aborting on failure.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `malloc`.
-        - [ ] **Signal-safety:** no.
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Exits program on failure.
-        - [ ] **Memory ownership:** Caller must free.
-        - [ ] **Acceptance tests:**
-            - [ ] `xstrdup("foo")` -> returns copy
-        - [ ] **Implementation notes:** Wrapper around `strdup`.
-        - [ ] **Priority:** high
-    - [ ] `xread(fd, buf, count)`: Read exact amount or fail.
-        - [ ] **Prototype:** `size_t xread(int fd, void *buf, size_t count)`
-        - [ ] **Purpose:** Read requested bytes, looping on partials/EINTR, exit on error.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `read`.
-        - [ ] **Signal-safety:** yes (if error handler is simple).
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Returns count read (may be < requested if EOF), exits on IO error.
-        - [ ] **Memory ownership:** generic buffer.
-        - [ ] **Acceptance tests:**
-            - [ ] `xread` full buffer -> returns count
-            - [ ] `xread` partial -> loops or returns short on EOF
-        - [ ] **Implementation notes:** Distinguish short read (EOF) vs error.
-        - [ ] **Priority:** high
-    - [ ] `xwrite(fd, buf, count)`: Write exact amount or fail.
-        - [ ] **Prototype:** `void xwrite(int fd, const void *buf, size_t count)`
-        - [ ] **Purpose:** Write all bytes, looping on partials/EINTR, exit on error.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `write`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Exits if write fails or incomplete.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xwrite` full buffer -> succeeds
-            - [ ] `xwrite` to full disk -> exits
-        - [ ] **Implementation notes:** Loop until all written.
-        - [ ] **Priority:** high
-    - [ ] `xstat(path, buf)`: Safe file status.
-        - [ ] **Prototype:** `void xstat(const char *path, struct stat *buf)`
-        - [ ] **Purpose:** Get file status, exit on error.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `stat`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Exits on error.
-        - [ ] **Memory ownership:** caller provides struct.
-        - [ ] **Acceptance tests:**
-            - [ ] `xstat("exist", &sb)` -> success
-            - [ ] `xstat("noexist", &sb)` -> exits
-        - [ ] **Implementation notes:** Used when file is expected to exist.
-        - [ ] **Priority:** medium
-    - [ ] `xaccess(path, mode)`: Safe access check.
-        - [ ] **Prototype:** `void xaccess(const char *path, int mode)`
-        - [ ] **Purpose:** Check file access, exit on error (permission denied is error).
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `access`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Exits if check fails.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xaccess` readable -> success
-        - [ ] **Implementation notes:** Wrapper.
-        - [ ] **Priority:** low
-    - [ ] `xopendir(path)`: Safe directory open.
-        - [ ] **Prototype:** `DIR *xopendir(const char *path)`
-        - [ ] **Purpose:** Open directory, exit on failure.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `open`, `fstat`, `mmap` (via `opendir`).
-        - [ ] **Signal-safety:** no (allocates).
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Returns valid DIR* or exits.
-        - [ ] **Memory ownership:** Caller calls closedir.
-        - [ ] **Acceptance tests:**
-            - [ ] `xopendir(".")` -> success
-        - [ ] **Implementation notes:** Wrapper.
-        - [ ] **Priority:** high
-    - [ ] `xclosedir(dirp)`: Safe directory close.
-        - [ ] **Prototype:** `void xclosedir(DIR *dirp)`
-        - [ ] **Purpose:** Close directory, warn/exit on failure? usually just wrapper.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `close`.
-        - [ ] **Signal-safety:** no.
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Exits on error (unlikely).
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xclosedir` -> success
-        - [ ] **Implementation notes:** Check return code.
-        - [ ] **Priority:** medium
-    - [ ] `xfork()`: Safe process creation.
-        - [ ] **Prototype:** `pid_t xfork(void)`
-        - [ ] **Purpose:** Fork process, exit on failure (EAGAIN usually).
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `fork`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Returns pid or exits.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xfork()` -> parent gets pid, child gets 0
-        - [ ] **Implementation notes:** Wrapper.
-        - [ ] **Priority:** high
-    - [ ] `xwaitpid(pid, status, options)`: Safe wait.
-        - [ ] **Prototype:** `pid_t xwaitpid(pid_t pid, int *status, int options)`
-        - [ ] **Purpose:** Wait for process, loop on EINTR, exit on other error.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `waitpid`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Returns pid.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xwaitpid` -> reaps zombie
-        - [ ] **Implementation notes:** Handle EINTR internally.
-        - [ ] **Priority:** high
-    - [ ] `xexecvp(file, argv)`: Safe execute.
-        - [ ] **Prototype:** `void xexecvp(const char *file, char *const argv[])`
-        - [ ] **Purpose:** Execute program, exit on failure (print error).
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `execvp`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** Thread-safe.
-        - [ ] **Error semantics:** Does not return on success; exits on fail.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xexecvp("true", ...)` -> runs true
-            - [ ] `xexecvp("noexist", ...)` -> prints error, exits
-        - [ ] **Implementation notes:** Should print "cannot execute <file>: <strerror>".
-        - [ ] **Priority:** high
-    - [ ] `xsignal(signum, handler)`: Safe signal handler install.
-        - [ ] **Prototype:** `sighandler_t xsignal(int signum, sighandler_t handler)`
-        - [ ] **Purpose:** Set signal handler using `sigaction` (SA_RESTART), exit on error.
-        - [ ] **Standards:** BSD/Common.
-        - [ ] **Underlying syscalls:** `sigaction`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Returns old handler or exits.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xsignal` -> handler set
-        - [ ] **Implementation notes:** Ensure portable sigaction usage.
-        - [ ] **Priority:** medium
-    - [ ] `humanize_number(buf, len, number, suffix, scale, flags)`: Format number.
-        - [ ] **Prototype:** `int humanize_number(char *buf, size_t len, int64_t number, const char *suffix, int scale, int flags)`
-        - [ ] **Purpose:** Format number with SI prefixes (k, M, G).
-        - [ ] **Standards:** NetBSD / BSD.
-        - [ ] **Underlying syscalls:** none.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Returns length or -1.
-        - [ ] **Memory ownership:** writes to buf.
-        - [ ] **Acceptance tests:**
-            - [ ] 1024 -> "1K"
-        - [ ] **Implementation notes:** Port from NetBSD/OpenBSD.
-        - [ ] **Priority:** medium
-    - [ ] `parse_mode(mode_str, old_mode)`: Parse mode string.
-        - [ ] **Prototype:** `mode_t parse_mode(const char *str, mode_t old)`
-        - [ ] **Purpose:** Parse chmod-style symbolic mode (u+x).
-        - [ ] **Standards:** Custom / BSD-like.
-        - [ ] **Underlying syscalls:** none.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Returns new mode or -1/exits.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] "u+x" -> adds executable bit
-        - [ ] **Implementation notes:** State machine for symbolic parsing.
-        - [ ] **Priority:** medium
-    - [ ] `strlcpy(dst, src, size)`: Safe string copy.
-        - [ ] **Prototype:** `size_t strlcpy(char *dst, const char *src, size_t size)`
-        - [ ] **Purpose:** Copy string with NUL termination guarantee.
-        - [ ] **Standards:** OpenBSD / Common.
-        - [ ] **Underlying syscalls:** none.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Returns total length of src.
-        - [ ] **Memory ownership:** writes dst.
-        - [ ] **Acceptance tests:**
-            - [ ] Truncation check.
-        - [ ] **Implementation notes:** Standard BSD behavior.
-        - [ ] **Priority:** high
-    - [ ] `strlcat(dst, src, size)`: Safe string cat.
-        - [ ] **Prototype:** `size_t strlcat(char *dst, const char *src, size_t size)`
-        - [ ] **Purpose:** Concatenate string with NUL termination guarantee.
-        - [ ] **Standards:** OpenBSD / Common.
-        - [ ] **Underlying syscalls:** none.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Returns total length.
-        - [ ] **Memory ownership:** writes dst.
-        - [ ] **Acceptance tests:**
-            - [ ] Truncation check.
-        - [ ] **Implementation notes:** Standard BSD behavior.
-        - [ ] **Priority:** high
-    - [ ] `warn(fmt, ...)`: Print warning.
-        - [ ] **Prototype:** `void warn(const char *fmt, ...)`
-        - [ ] **Purpose:** Print "progname: fmt: strerror(errno)\n" to stderr.
-        - [ ] **Standards:** BSD.
-        - [ ] **Underlying syscalls:** `write` / `fprintf`.
-        - [ ] **Signal-safety:** no (stdio).
-        - [ ] **Thread-safety:** locked (stdio).
-        - [ ] **Error semantics:** None.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `warn("fail")` -> prints message + errno
-        - [ ] **Implementation notes:** Use `vfprintf`.
-        - [ ] **Priority:** high
-    - [ ] `err(eval, fmt, ...)`: Print error and exit.
-        - [ ] **Prototype:** `void err(int eval, const char *fmt, ...)`
-        - [ ] **Purpose:** Print warning and exit with `eval`.
-        - [ ] **Standards:** BSD.
-        - [ ] **Underlying syscalls:** `write`, `exit`.
-        - [ ] **Signal-safety:** no.
-        - [ ] **Thread-safety:** N/A (exits).
-        - [ ] **Error semantics:** Exits.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `err(1, "fail")` -> exits 1, prints msg
-        - [ ] **Implementation notes:** Calls `warn` then `exit`.
-        - [ ] **Priority:** high
-    - [ ] `setprogname(name)` / `getprogname()`: Program name.
-        - [ ] **Prototype:** `void setprogname(const char *name)`, `const char *getprogname(void)`
-        - [ ] **Purpose:** Store/retrieve program name for diagnostics.
-        - [ ] **Standards:** BSD.
-        - [ ] **Underlying syscalls:** none.
-        - [ ] **Signal-safety:** yes (atomic ptr read/write).
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** N/A.
-        - [ ] **Memory ownership:** static/copy.
-        - [ ] **Acceptance tests:**
-            - [ ] set/get match
-        - [ ] **Implementation notes:** `basename` of argv[0].
-        - [ ] **Priority:** high
-    - [ ] `basename(path)`: Thread-safe path component extraction.
-        - [ ] **Prototype:** `char *basename(char *path)`
-        - [ ] **Purpose:** Return last component of path.
-        - [ ] **Standards:** POSIX.1-2008.
-        - [ ] **Underlying syscalls:** none.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** yes (modifies path or returns static constant).
-        - [ ] **Error semantics:** Returns "." or "/".
-        - [ ] **Memory ownership:** May modify input (POSIX).
-        - [ ] **Acceptance tests:**
-            - [ ] `basename("/usr/bin/ls")` -> "ls"
-            - [ ] `basename("/")` -> "/"
-        - [ ] **Implementation notes:** Handle trailing slashes.
-        - [ ] **Priority:** medium
-    - [ ] `dirname(path)`: Thread-safe directory component extraction.
-        - [ ] **Prototype:** `char *dirname(char *path)`
-        - [ ] **Purpose:** Return parent directory of path.
-        - [ ] **Standards:** POSIX.1-2008.
-        - [ ] **Underlying syscalls:** none.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** yes (modifies path).
-        - [ ] **Error semantics:** Returns "." or "/".
-        - [ ] **Memory ownership:** May modify input.
-        - [ ] **Acceptance tests:**
-            - [ ] `dirname("/usr/bin/ls")` -> "/usr/bin"
-        - [ ] **Implementation notes:** Handle trailing slashes.
-        - [ ] **Priority:** medium
-    - [ ] `xchmod(path, mode)`: Safe chmod.
-        - [ ] **Prototype:** `void xchmod(const char *path, mode_t mode)`
-        - [ ] **Purpose:** Change mode, exit on failure.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `chmod`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Exits on error.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xchmod` -> success
-        - [ ] **Implementation notes:** Wrapper.
-        - [ ] **Priority:** low
-    - [ ] `xchown(path, owner, group)`: Safe chown.
-        - [ ] **Prototype:** `void xchown(const char *path, uid_t owner, gid_t group)`
-        - [ ] **Purpose:** Change ownership, exit on failure.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `chown`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Exits on error.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xchown` -> success
-        - [ ] **Implementation notes:** Wrapper.
-        - [ ] **Priority:** low
-    - [ ] `strtonum(numstr, minval, maxval, errstrp)`: Safe number parsing.
-        - [ ] **Prototype:** `long long strtonum(const char *nptr, long long minval, long long maxval, const char **errstr)`
-        - [ ] **Purpose:** Parse number with bounds checking and strict validation.
-        - [ ] **Standards:** OpenBSD / BSD.
-        - [ ] **Underlying syscalls:** none.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Returns 0 on error and sets errstr.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `strtonum("10", 0, 100, &err)` -> 10, err=NULL
-            - [ ] `strtonum("101", 0, 100, &err)` -> 0, err="too large"
-        - [ ] **Implementation notes:** Strict parsing (no trailing garbage).
-        - [ ] **Priority:** high
-    - [ ] `xgetenv(name)`: Safe environment get.
-        - [ ] **Prototype:** `char *xgetenv(const char *name)`
-        - [ ] **Purpose:** Get environment variable, maybe exit if missing? Or just standard `getenv` wrapper? Usually just `getenv` is fine, but maybe `safe_getenv` for setuid?
-        - [ ] **Standards:** Internal.
-        - [ ] **Underlying syscalls:** none.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe (usually).
-        - [ ] **Error semantics:** Returns value or NULL.
-        - [ ] **Memory ownership:** environment owned.
-        - [ ] **Acceptance tests:**
-            - [ ] Get existing var.
-        - [ ] **Implementation notes:** Maybe strict version `xgetenv_required`?
-        - [ ] **Priority:** low
-    - [ ] `xopenat(dirfd, path, flags, mode)`: Safe relative open.
-        - [ ] **Prototype:** `int xopenat(int dirfd, const char *path, int flags, mode_t mode)`
-        - [ ] **Purpose:** Open file relative to dir, exit on error.
-        - [ ] **Standards:** Common extension.
-        - [ ] **Underlying syscalls:** `openat`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Returns fd or exits.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xopenat` -> success
-        - [ ] **Implementation notes:** Wrapper.
-        - [ ] **Priority:** medium
-    - [ ] `xisatty(fd)`: Safe tty check.
-        - [ ] **Prototype:** `int xisatty(int fd)`
-        - [ ] **Purpose:** Check if fd is a tty, handle errno? Just `isatty` wrapper?
-        - [ ] **Standards:** POSIX.
-        - [ ] **Underlying syscalls:** `ioctl`.
-        - [ ] **Signal-safety:** yes.
-        - [ ] **Thread-safety:** safe.
-        - [ ] **Error semantics:** Returns 1/0.
-        - [ ] **Memory ownership:** N/A.
-        - [ ] **Acceptance tests:**
-            - [ ] `xisatty(0)` -> 1 (if tty)
-        - [ ] **Implementation notes:** Wrapper.
-        - [ ] **Priority:** low
-- [ ] **Build System:**
-    - [ ] Implement `native_dist` target to build usermode tools for the host OS (skipping libc/libm etc).
+- [ ] **LibC Core Compliance (Audit Findings):** (REQ: REQ-10-0001)
+    - [ ] **Critical Headers (Missing Files):** (REQ: REQ-10-0002)
+        - [ ] Create `string.h` (functions exist in `string.c` but header is missing). (REQ: REQ-10-0003)
+        - [ ] Create `limits.h`, `setjmp.h`, `locale.h`. (REQ: REQ-10-0004)
+        - [ ] Create `err.h` (BSD error reporting helpers). (REQ: REQ-10-0005)
+        - [ ] Create `stddef.h`, `stdint.h`, `stdarg.h` (wrapping GCC builtins). (REQ: REQ-10-0006)
+    - [ ] **String Manipulation (`<string.h>`):** (REQ: REQ-10-0007)
+        - [ ] `strndup()`: Bounded string duplication. (REQ: REQ-10-0008)
+        - [ ] `stpcpy()` / `stpncpy()`: Copy returning end pointer. (REQ: REQ-10-0009)
+        - [ ] `strpbrk()`: Search for any of a set of chars. (REQ: REQ-10-0010)
+        - [ ] `strcoll()` / `strxfrm()`: Locale-aware comparison stubs. (REQ: REQ-10-0011)
+    - [ ] **Standard Library (`<stdlib.h>`):** (REQ: REQ-10-0012)
+        - [ ] `strtol()` / `strtoul()` / `strtoll()` / `strtoull()`: Robust string-to-integer conversion. (REQ: REQ-10-0013)
+        - [ ] `strtod()` / `strtof()`: String to float implementation (currently `atof` is a stub). (REQ: REQ-10-0014)
+        - [ ] `div()` / `ldiv()` / `lldiv()`: Combined quotient/remainder. (REQ: REQ-10-0015)
+        - [ ] `atexit()`: Exit handlers (currently `at_quick_exit` is a stub). (REQ: REQ-10-0016)
+        - [ ] `mbstowcs()` / `wcstombs()`: Multibyte conversion stubs. (REQ: REQ-10-0017)
+    - [ ] **Standard I/O (`<stdio.h>`):** (REQ: REQ-10-0018)
+        - [ ] **CRITICAL:** `sscanf()` / `scanf()` / `fscanf()`: Input parsing implementation. (REQ: REQ-10-0019)
+        - [ ] `snprintf()`: Add wrapper around `vsnprintf`. (REQ: REQ-10-0020)
+        - [ ] `freopen()`: Reopen stream with new mode. (REQ: REQ-10-0021)
+        - [ ] `setvbuf()` / `setbuf()`: Buffering mode control. (REQ: REQ-10-0022)
+        - [ ] `tmpfile()` / `tmpnam()`: Temporary file support. (REQ: REQ-10-0023)
+        - [ ] `fileno()`: Get fd from `FILE*`. (REQ: REQ-10-0024)
+    - [ ] **POSIX System Interface (`<unistd.h>`):** (REQ: REQ-10-0025)
+        - [ ] `dup()`: Duplicate fd (wrapper around `SYS_DUP` or `fcntl`). (REQ: REQ-10-0026)
+        - [ ] `getppid()`: Get parent PID. (REQ: REQ-10-0027)
+        - [ ] `setsid()` / `getsid()`: Session ID management. (REQ: REQ-10-0028)
+        - [ ] `getpgrp()` / `setpgid()`: Process group management. (REQ: REQ-10-0029)
+        - [ ] `symlink()`: Create symbolic link. (REQ: REQ-10-0030)
+        - [ ] `ftruncate()` / `truncate()`: Truncate file size. (REQ: REQ-10-0031)
+        - [ ] `fsync()` / `fdatasync()`: Flush file changes. (REQ: REQ-10-0032)
+    - [ ] **Time & Date (`<time.h>`):** (REQ: REQ-10-0033)
+        - [ ] `gmtime()` / `localtime()`: Timestamp to struct tm. (REQ: REQ-10-0034)
+        - [ ] `mktime()`: Struct tm to timestamp. (REQ: REQ-10-0035)
+        - [ ] `strftime()` / `strptime()`: Time formatting/parsing. (REQ: REQ-10-0036)
+        - [ ] `difftime()`: Time difference. (REQ: REQ-10-0037)
+        - [ ] `ctime()` / `asctime()`: Time to string. (REQ: REQ-10-0038)
+- [ ] **LibC Features (User Requests):** (REQ: REQ-10-0039)
+    - [ ] **Implement `getopt_long` (GNU Compatible):** (REQ: REQ-10-0040)
+        - [ ] Define `struct option` (name, has_arg, flag, val). (REQ: REQ-10-0041)
+        - [ ] Implement `getopt_long()` function signature. (REQ: REQ-10-0042)
+        - [ ] Implement `getopt_long_only()` variant. (REQ: REQ-10-0043)
+        - [ ] Handle argument parsing (`--arg`, `--arg=val`). (REQ: REQ-10-0044)
+        - [ ] Handle `no_argument`, `required_argument`, `optional_argument`. (REQ: REQ-10-0045)
+        - [ ] Internal state management (`optind`, `opterr`, `optopt`, `optarg`). (REQ: REQ-10-0046)
+        - [ ] Error reporting and `?` / `:` return codes. (REQ: REQ-10-0047)
+        - [ ] Support for non-option argument reordering (swapping argv elements). (REQ: REQ-10-0048)
+        - [ ] Test against GNU `getopt_long` behavior. (REQ: REQ-10-0049)
+- [ ] **Low-Level Helpers (LibC Extension):** (REQ: REQ-10-0050)
+    - [ ] `xmalloc(size)`: Safe memory allocation. (REQ: REQ-10-0051)
+        - [ ] **Prototype:** `void *xmalloc(size_t size)` (REQ: REQ-10-0052)
+        - [ ] **Purpose:** Allocate memory, aborting on failure. (REQ: REQ-10-0053)
+        - [ ] **Standards:** Common extension (Busybox/GNU coreutils style). (REQ: REQ-10-0054)
+        - [ ] **Syscalls / Kernel interfaces:** `malloc` -> `brk`/`mmap`. (REQ: REQ-10-0055)
+        - [ ] **Signal-safety / async-signal-safe:** no — calls `malloc`. (REQ: REQ-10-0056)
+        - [ ] **Reentrancy / thread-safety:** Thread-safe (if `malloc` is). (REQ: REQ-10-0057)
+        - [ ] **Error semantics:** Returns valid pointer or exits program (never returns NULL). (REQ: REQ-10-0058)
+        - [ ] **Memory ownership:** Caller must free. (REQ: REQ-10-0059, REQ-10-0086, REQ-10-0100, REQ-10-0114)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xmalloc(1024)` -> returns pointer (REQ: REQ-10-0061)
+            - [ ] `xmalloc(huge)` -> prints error and exits (mock/limit env) (REQ: REQ-10-0062)
+        - [ ] **Implementation notes:** Wrapper around `malloc`. (REQ: REQ-10-0063)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xopen(path, flags, mode)`: Safe file open. (REQ: REQ-10-0065)
+        - [ ] **Prototype:** `int xopen(const char *path, int flags, mode_t mode)` (REQ: REQ-10-0066)
+        - [ ] **Purpose:** Open file, aborting on failure. (REQ: REQ-10-0067)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Syscalls / Kernel interfaces:** `open` / `openat`. (REQ: REQ-10-0069)
+        - [ ] **Signal-safety / async-signal-safe:** yes (if error handler is simple). (REQ: REQ-10-0070)
+        - [ ] **Reentrancy / thread-safety:** Thread-safe. (REQ: REQ-10-0071)
+        - [ ] **Error semantics:** Returns valid fd or exits program. (REQ: REQ-10-0072)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xopen("exist", O_RDONLY)` -> returns fd (REQ: REQ-10-0075)
+            - [ ] `xopen("noexist", O_RDONLY)` -> prints error and exits (REQ: REQ-10-0076)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xrealloc(ptr, size)`: Safe memory reallocation. (REQ: REQ-10-0078)
+        - [ ] **Prototype:** `void *xrealloc(void *ptr, size_t size)` (REQ: REQ-10-0079)
+        - [ ] **Purpose:** Reallocate memory, aborting on failure. (REQ: REQ-10-0080)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `malloc` / `free` -> `brk`/`mmap`. (REQ: REQ-10-0082)
+        - [ ] **Signal-safety:** no. (REQ: REQ-10-0083, REQ-10-0097, REQ-10-0111, REQ-10-0192, REQ-10-0323)
+        - [ ] **Thread-safety:** Thread-safe (if Underlying allocator is). (REQ: REQ-10-0084)
+        - [ ] **Error semantics:** Exits program on failure. (REQ: REQ-10-0085, REQ-10-0113)
+        - [ ] **Memory ownership:** Caller must free. (REQ: REQ-10-0059, REQ-10-0086, REQ-10-0100, REQ-10-0114)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xrealloc(NULL, 10)` -> equivalent to xmalloc (REQ: REQ-10-0088)
+            - [ ] `xrealloc(ptr, 20)` -> preserves data, returns new ptr (REQ: REQ-10-0089)
+        - [ ] **Implementation notes:** `realloc(ptr, 0)` behavior check. (REQ: REQ-10-0090)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xcalloc(nmemb, size)`: Safe zero-initialized allocation. (REQ: REQ-10-0092)
+        - [ ] **Prototype:** `void *xcalloc(size_t nmemb, size_t size)` (REQ: REQ-10-0093)
+        - [ ] **Purpose:** Allocate zeroed memory, aborting on failure. (REQ: REQ-10-0094)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `calloc`. (REQ: REQ-10-0096)
+        - [ ] **Signal-safety:** no. (REQ: REQ-10-0083, REQ-10-0097, REQ-10-0111, REQ-10-0192, REQ-10-0323)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Exits program on failure, check overflow. (REQ: REQ-10-0099)
+        - [ ] **Memory ownership:** Caller must free. (REQ: REQ-10-0059, REQ-10-0086, REQ-10-0100, REQ-10-0114)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xcalloc(10, 10)` -> returns zeroed buffer (REQ: REQ-10-0102)
+            - [ ] `xcalloc(MAX, MAX)` -> overflow check and exit (REQ: REQ-10-0103)
+        - [ ] **Implementation notes:** Check for multiplication overflow. (REQ: REQ-10-0104)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xstrdup(s)`: Safe string duplication. (REQ: REQ-10-0106)
+        - [ ] **Prototype:** `char *xstrdup(const char *s)` (REQ: REQ-10-0107)
+        - [ ] **Purpose:** Duplicate string, aborting on failure. (REQ: REQ-10-0108)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `malloc`. (REQ: REQ-10-0110)
+        - [ ] **Signal-safety:** no. (REQ: REQ-10-0083, REQ-10-0097, REQ-10-0111, REQ-10-0192, REQ-10-0323)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Exits program on failure. (REQ: REQ-10-0085, REQ-10-0113)
+        - [ ] **Memory ownership:** Caller must free. (REQ: REQ-10-0059, REQ-10-0086, REQ-10-0100, REQ-10-0114)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xstrdup("foo")` -> returns copy (REQ: REQ-10-0116)
+        - [ ] **Implementation notes:** Wrapper around `strdup`. (REQ: REQ-10-0117)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xread(fd, buf, count)`: Read exact amount or fail. (REQ: REQ-10-0119)
+        - [ ] **Prototype:** `size_t xread(int fd, void *buf, size_t count)` (REQ: REQ-10-0120)
+        - [ ] **Purpose:** Read requested bytes, looping on partials/EINTR, exit on error. (REQ: REQ-10-0121)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `read`. (REQ: REQ-10-0123)
+        - [ ] **Signal-safety:** yes (if error handler is simple). (REQ: REQ-10-0124)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Returns count read (may be < requested if EOF), exits on IO error. (REQ: REQ-10-0126)
+        - [ ] **Memory ownership:** generic buffer. (REQ: REQ-10-0127)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xread` full buffer -> returns count (REQ: REQ-10-0129)
+            - [ ] `xread` partial -> loops or returns short on EOF (REQ: REQ-10-0130)
+        - [ ] **Implementation notes:** Distinguish short read (EOF) vs error. (REQ: REQ-10-0131)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xwrite(fd, buf, count)`: Write exact amount or fail. (REQ: REQ-10-0133)
+        - [ ] **Prototype:** `void xwrite(int fd, const void *buf, size_t count)` (REQ: REQ-10-0134)
+        - [ ] **Purpose:** Write all bytes, looping on partials/EINTR, exit on error. (REQ: REQ-10-0135)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `write`. (REQ: REQ-10-0137)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Exits if write fails or incomplete. (REQ: REQ-10-0140)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xwrite` full buffer -> succeeds (REQ: REQ-10-0143)
+            - [ ] `xwrite` to full disk -> exits (REQ: REQ-10-0144)
+        - [ ] **Implementation notes:** Loop until all written. (REQ: REQ-10-0145)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xstat(path, buf)`: Safe file status. (REQ: REQ-10-0147)
+        - [ ] **Prototype:** `void xstat(const char *path, struct stat *buf)` (REQ: REQ-10-0148)
+        - [ ] **Purpose:** Get file status, exit on error. (REQ: REQ-10-0149)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `stat`. (REQ: REQ-10-0151)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Exits on error. (REQ: REQ-10-0154, REQ-10-0378, REQ-10-0391)
+        - [ ] **Memory ownership:** caller provides struct. (REQ: REQ-10-0155)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xstat("exist", &sb)` -> success (REQ: REQ-10-0157)
+            - [ ] `xstat("noexist", &sb)` -> exits (REQ: REQ-10-0158)
+        - [ ] **Implementation notes:** Used when file is expected to exist. (REQ: REQ-10-0159)
+        - [ ] **Priority:** medium (REQ: REQ-10-0160, REQ-10-0199, REQ-10-0252, REQ-10-0265, REQ-10-0278, REQ-10-0357, REQ-10-0370, REQ-10-0436)
+    - [ ] `xaccess(path, mode)`: Safe access check. (REQ: REQ-10-0161)
+        - [ ] **Prototype:** `void xaccess(const char *path, int mode)` (REQ: REQ-10-0162)
+        - [ ] **Purpose:** Check file access, exit on error (permission denied is error). (REQ: REQ-10-0163)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `access`. (REQ: REQ-10-0165)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Exits if check fails. (REQ: REQ-10-0168)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xaccess` readable -> success (REQ: REQ-10-0171)
+        - [ ] **Implementation notes:** Wrapper. (REQ: REQ-10-0172, REQ-10-0185, REQ-10-0211, REQ-10-0382, REQ-10-0395, REQ-10-0435, REQ-10-0448)
+        - [ ] **Priority:** low (REQ: REQ-10-0173, REQ-10-0383, REQ-10-0396, REQ-10-0423, REQ-10-0449)
+    - [ ] `xopendir(path)`: Safe directory open. (REQ: REQ-10-0174)
+        - [ ] **Prototype:** `DIR *xopendir(const char *path)` (REQ: REQ-10-0175)
+        - [ ] **Purpose:** Open directory, exit on failure. (REQ: REQ-10-0176)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `open`, `fstat`, `mmap` (via `opendir`). (REQ: REQ-10-0178)
+        - [ ] **Signal-safety:** no (allocates). (REQ: REQ-10-0179)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Returns valid DIR* or exits. (REQ: REQ-10-0181)
+        - [ ] **Memory ownership:** Caller calls closedir. (REQ: REQ-10-0182)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xopendir(".")` -> success (REQ: REQ-10-0184)
+        - [ ] **Implementation notes:** Wrapper. (REQ: REQ-10-0172, REQ-10-0185, REQ-10-0211, REQ-10-0382, REQ-10-0395, REQ-10-0435, REQ-10-0448)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xclosedir(dirp)`: Safe directory close. (REQ: REQ-10-0187)
+        - [ ] **Prototype:** `void xclosedir(DIR *dirp)` (REQ: REQ-10-0188)
+        - [ ] **Purpose:** Close directory, warn/exit on failure? usually just wrapper. (REQ: REQ-10-0189)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `close`. (REQ: REQ-10-0191)
+        - [ ] **Signal-safety:** no. (REQ: REQ-10-0083, REQ-10-0097, REQ-10-0111, REQ-10-0192, REQ-10-0323)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Exits on error (unlikely). (REQ: REQ-10-0194)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xclosedir` -> success (REQ: REQ-10-0197)
+        - [ ] **Implementation notes:** Check return code. (REQ: REQ-10-0198)
+        - [ ] **Priority:** medium (REQ: REQ-10-0160, REQ-10-0199, REQ-10-0252, REQ-10-0265, REQ-10-0278, REQ-10-0357, REQ-10-0370, REQ-10-0436)
+    - [ ] `xfork()`: Safe process creation. (REQ: REQ-10-0200)
+        - [ ] **Prototype:** `pid_t xfork(void)` (REQ: REQ-10-0201)
+        - [ ] **Purpose:** Fork process, exit on failure (EAGAIN usually). (REQ: REQ-10-0202)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `fork`. (REQ: REQ-10-0204)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Returns pid or exits. (REQ: REQ-10-0207)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xfork()` -> parent gets pid, child gets 0 (REQ: REQ-10-0210)
+        - [ ] **Implementation notes:** Wrapper. (REQ: REQ-10-0172, REQ-10-0185, REQ-10-0211, REQ-10-0382, REQ-10-0395, REQ-10-0435, REQ-10-0448)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xwaitpid(pid, status, options)`: Safe wait. (REQ: REQ-10-0213)
+        - [ ] **Prototype:** `pid_t xwaitpid(pid_t pid, int *status, int options)` (REQ: REQ-10-0214)
+        - [ ] **Purpose:** Wait for process, loop on EINTR, exit on other error. (REQ: REQ-10-0215)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `waitpid`. (REQ: REQ-10-0217)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Returns pid. (REQ: REQ-10-0220)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xwaitpid` -> reaps zombie (REQ: REQ-10-0223)
+        - [ ] **Implementation notes:** Handle EINTR internally. (REQ: REQ-10-0224)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xexecvp(file, argv)`: Safe execute. (REQ: REQ-10-0226)
+        - [ ] **Prototype:** `void xexecvp(const char *file, char *const argv[])` (REQ: REQ-10-0227)
+        - [ ] **Purpose:** Execute program, exit on failure (print error). (REQ: REQ-10-0228)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `execvp`. (REQ: REQ-10-0230)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** Thread-safe. (REQ: REQ-10-0098, REQ-10-0112, REQ-10-0125, REQ-10-0139, REQ-10-0153, REQ-10-0167, REQ-10-0180, REQ-10-0193, REQ-10-0206, REQ-10-0219, REQ-10-0232)
+        - [ ] **Error semantics:** Does not return on success; exits on fail. (REQ: REQ-10-0233)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xexecvp("true", ...)` -> runs true (REQ: REQ-10-0236)
+            - [ ] `xexecvp("noexist", ...)` -> prints error, exits (REQ: REQ-10-0237)
+        - [ ] **Implementation notes:** Should print "cannot execute <file>: <strerror>". (REQ: REQ-10-0238)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xsignal(signum, handler)`: Safe signal handler install. (REQ: REQ-10-0240)
+        - [ ] **Prototype:** `sighandler_t xsignal(int signum, sighandler_t handler)` (REQ: REQ-10-0241)
+        - [ ] **Purpose:** Set signal handler using `sigaction` (SA_RESTART), exit on error. (REQ: REQ-10-0242)
+        - [ ] **Standards:** BSD/Common. (REQ: REQ-10-0243)
+        - [ ] **Underlying syscalls:** `sigaction`. (REQ: REQ-10-0244)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Returns old handler or exits. (REQ: REQ-10-0247)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xsignal` -> handler set (REQ: REQ-10-0250)
+        - [ ] **Implementation notes:** Ensure portable sigaction usage. (REQ: REQ-10-0251)
+        - [ ] **Priority:** medium (REQ: REQ-10-0160, REQ-10-0199, REQ-10-0252, REQ-10-0265, REQ-10-0278, REQ-10-0357, REQ-10-0370, REQ-10-0436)
+    - [ ] `humanize_number(buf, len, number, suffix, scale, flags)`: Format number. (REQ: REQ-10-0253)
+        - [ ] **Prototype:** `int humanize_number(char *buf, size_t len, int64_t number, const char *suffix, int scale, int flags)` (REQ: REQ-10-0254)
+        - [ ] **Purpose:** Format number with SI prefixes (k, M, G). (REQ: REQ-10-0255)
+        - [ ] **Standards:** NetBSD / BSD. (REQ: REQ-10-0256)
+        - [ ] **Underlying syscalls:** none. (REQ: REQ-10-0257, REQ-10-0270, REQ-10-0283, REQ-10-0296, REQ-10-0335, REQ-10-0348, REQ-10-0362, REQ-10-0401, REQ-10-0415)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Returns length or -1. (REQ: REQ-10-0260)
+        - [ ] **Memory ownership:** writes to buf. (REQ: REQ-10-0261)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] 1024 -> "1K" (REQ: REQ-10-0263)
+        - [ ] **Implementation notes:** Port from NetBSD/OpenBSD. (REQ: REQ-10-0264)
+        - [ ] **Priority:** medium (REQ: REQ-10-0160, REQ-10-0199, REQ-10-0252, REQ-10-0265, REQ-10-0278, REQ-10-0357, REQ-10-0370, REQ-10-0436)
+    - [ ] `parse_mode(mode_str, old_mode)`: Parse mode string. (REQ: REQ-10-0266)
+        - [ ] **Prototype:** `mode_t parse_mode(const char *str, mode_t old)` (REQ: REQ-10-0267)
+        - [ ] **Purpose:** Parse chmod-style symbolic mode (u+x). (REQ: REQ-10-0268)
+        - [ ] **Standards:** Custom / BSD-like. (REQ: REQ-10-0269)
+        - [ ] **Underlying syscalls:** none. (REQ: REQ-10-0257, REQ-10-0270, REQ-10-0283, REQ-10-0296, REQ-10-0335, REQ-10-0348, REQ-10-0362, REQ-10-0401, REQ-10-0415)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Returns new mode or -1/exits. (REQ: REQ-10-0273)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] "u+x" -> adds executable bit (REQ: REQ-10-0276)
+        - [ ] **Implementation notes:** State machine for symbolic parsing. (REQ: REQ-10-0277)
+        - [ ] **Priority:** medium (REQ: REQ-10-0160, REQ-10-0199, REQ-10-0252, REQ-10-0265, REQ-10-0278, REQ-10-0357, REQ-10-0370, REQ-10-0436)
+    - [ ] `strlcpy(dst, src, size)`: Safe string copy. (REQ: REQ-10-0279)
+        - [ ] **Prototype:** `size_t strlcpy(char *dst, const char *src, size_t size)` (REQ: REQ-10-0280)
+        - [ ] **Purpose:** Copy string with NUL termination guarantee. (REQ: REQ-10-0281)
+        - [ ] **Standards:** OpenBSD / Common. (REQ: REQ-10-0282, REQ-10-0295)
+        - [ ] **Underlying syscalls:** none. (REQ: REQ-10-0257, REQ-10-0270, REQ-10-0283, REQ-10-0296, REQ-10-0335, REQ-10-0348, REQ-10-0362, REQ-10-0401, REQ-10-0415)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Returns total length of src. (REQ: REQ-10-0286)
+        - [ ] **Memory ownership:** writes dst. (REQ: REQ-10-0287, REQ-10-0300)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] Truncation check. (REQ: REQ-10-0289, REQ-10-0302)
+        - [ ] **Implementation notes:** Standard BSD behavior. (REQ: REQ-10-0290, REQ-10-0303)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `strlcat(dst, src, size)`: Safe string cat. (REQ: REQ-10-0292)
+        - [ ] **Prototype:** `size_t strlcat(char *dst, const char *src, size_t size)` (REQ: REQ-10-0293)
+        - [ ] **Purpose:** Concatenate string with NUL termination guarantee. (REQ: REQ-10-0294)
+        - [ ] **Standards:** OpenBSD / Common. (REQ: REQ-10-0282, REQ-10-0295)
+        - [ ] **Underlying syscalls:** none. (REQ: REQ-10-0257, REQ-10-0270, REQ-10-0283, REQ-10-0296, REQ-10-0335, REQ-10-0348, REQ-10-0362, REQ-10-0401, REQ-10-0415)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Returns total length. (REQ: REQ-10-0299)
+        - [ ] **Memory ownership:** writes dst. (REQ: REQ-10-0287, REQ-10-0300)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] Truncation check. (REQ: REQ-10-0289, REQ-10-0302)
+        - [ ] **Implementation notes:** Standard BSD behavior. (REQ: REQ-10-0290, REQ-10-0303)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `warn(fmt, ...)`: Print warning. (REQ: REQ-10-0305)
+        - [ ] **Prototype:** `void warn(const char *fmt, ...)` (REQ: REQ-10-0306)
+        - [ ] **Purpose:** Print "progname: fmt: strerror(errno)\n" to stderr. (REQ: REQ-10-0307)
+        - [ ] **Standards:** BSD. (REQ: REQ-10-0308, REQ-10-0321, REQ-10-0334)
+        - [ ] **Underlying syscalls:** `write` / `fprintf`. (REQ: REQ-10-0309)
+        - [ ] **Signal-safety:** no (stdio). (REQ: REQ-10-0310)
+        - [ ] **Thread-safety:** locked (stdio). (REQ: REQ-10-0311)
+        - [ ] **Error semantics:** None. (REQ: REQ-10-0312)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `warn("fail")` -> prints message + errno (REQ: REQ-10-0315)
+        - [ ] **Implementation notes:** Use `vfprintf`. (REQ: REQ-10-0316)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `err(eval, fmt, ...)`: Print error and exit. (REQ: REQ-10-0318)
+        - [ ] **Prototype:** `void err(int eval, const char *fmt, ...)` (REQ: REQ-10-0319)
+        - [ ] **Purpose:** Print warning and exit with `eval`. (REQ: REQ-10-0320)
+        - [ ] **Standards:** BSD. (REQ: REQ-10-0308, REQ-10-0321, REQ-10-0334)
+        - [ ] **Underlying syscalls:** `write`, `exit`. (REQ: REQ-10-0322)
+        - [ ] **Signal-safety:** no. (REQ: REQ-10-0083, REQ-10-0097, REQ-10-0111, REQ-10-0192, REQ-10-0323)
+        - [ ] **Thread-safety:** N/A (exits). (REQ: REQ-10-0324)
+        - [ ] **Error semantics:** Exits. (REQ: REQ-10-0325)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `err(1, "fail")` -> exits 1, prints msg (REQ: REQ-10-0328)
+        - [ ] **Implementation notes:** Calls `warn` then `exit`. (REQ: REQ-10-0329)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `setprogname(name)` / `getprogname()`: Program name. (REQ: REQ-10-0331)
+        - [ ] **Prototype:** `void setprogname(const char *name)`, `const char *getprogname(void)` (REQ: REQ-10-0332)
+        - [ ] **Purpose:** Store/retrieve program name for diagnostics. (REQ: REQ-10-0333)
+        - [ ] **Standards:** BSD. (REQ: REQ-10-0308, REQ-10-0321, REQ-10-0334)
+        - [ ] **Underlying syscalls:** none. (REQ: REQ-10-0257, REQ-10-0270, REQ-10-0283, REQ-10-0296, REQ-10-0335, REQ-10-0348, REQ-10-0362, REQ-10-0401, REQ-10-0415)
+        - [ ] **Signal-safety:** yes (atomic ptr read/write). (REQ: REQ-10-0336)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** N/A. (REQ: REQ-10-0338)
+        - [ ] **Memory ownership:** static/copy. (REQ: REQ-10-0339)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] set/get match (REQ: REQ-10-0341)
+        - [ ] **Implementation notes:** `basename` of argv[0]. (REQ: REQ-10-0342)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `basename(path)`: Thread-safe path component extraction. (REQ: REQ-10-0344)
+        - [ ] **Prototype:** `char *basename(char *path)` (REQ: REQ-10-0345)
+        - [ ] **Purpose:** Return last component of path. (REQ: REQ-10-0346)
+        - [ ] **Standards:** POSIX.1-2008. (REQ: REQ-10-0347, REQ-10-0361)
+        - [ ] **Underlying syscalls:** none. (REQ: REQ-10-0257, REQ-10-0270, REQ-10-0283, REQ-10-0296, REQ-10-0335, REQ-10-0348, REQ-10-0362, REQ-10-0401, REQ-10-0415)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** yes (modifies path or returns static constant). (REQ: REQ-10-0350)
+        - [ ] **Error semantics:** Returns "." or "/". (REQ: REQ-10-0351, REQ-10-0365)
+        - [ ] **Memory ownership:** May modify input (POSIX). (REQ: REQ-10-0352)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `basename("/usr/bin/ls")` -> "ls" (REQ: REQ-10-0354)
+            - [ ] `basename("/")` -> "/" (REQ: REQ-10-0355)
+        - [ ] **Implementation notes:** Handle trailing slashes. (REQ: REQ-10-0356, REQ-10-0369)
+        - [ ] **Priority:** medium (REQ: REQ-10-0160, REQ-10-0199, REQ-10-0252, REQ-10-0265, REQ-10-0278, REQ-10-0357, REQ-10-0370, REQ-10-0436)
+    - [ ] `dirname(path)`: Thread-safe directory component extraction. (REQ: REQ-10-0358)
+        - [ ] **Prototype:** `char *dirname(char *path)` (REQ: REQ-10-0359)
+        - [ ] **Purpose:** Return parent directory of path. (REQ: REQ-10-0360)
+        - [ ] **Standards:** POSIX.1-2008. (REQ: REQ-10-0347, REQ-10-0361)
+        - [ ] **Underlying syscalls:** none. (REQ: REQ-10-0257, REQ-10-0270, REQ-10-0283, REQ-10-0296, REQ-10-0335, REQ-10-0348, REQ-10-0362, REQ-10-0401, REQ-10-0415)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** yes (modifies path). (REQ: REQ-10-0364)
+        - [ ] **Error semantics:** Returns "." or "/". (REQ: REQ-10-0351, REQ-10-0365)
+        - [ ] **Memory ownership:** May modify input. (REQ: REQ-10-0366)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `dirname("/usr/bin/ls")` -> "/usr/bin" (REQ: REQ-10-0368)
+        - [ ] **Implementation notes:** Handle trailing slashes. (REQ: REQ-10-0356, REQ-10-0369)
+        - [ ] **Priority:** medium (REQ: REQ-10-0160, REQ-10-0199, REQ-10-0252, REQ-10-0265, REQ-10-0278, REQ-10-0357, REQ-10-0370, REQ-10-0436)
+    - [ ] `xchmod(path, mode)`: Safe chmod. (REQ: REQ-10-0371)
+        - [ ] **Prototype:** `void xchmod(const char *path, mode_t mode)` (REQ: REQ-10-0372)
+        - [ ] **Purpose:** Change mode, exit on failure. (REQ: REQ-10-0373)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `chmod`. (REQ: REQ-10-0375)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Exits on error. (REQ: REQ-10-0154, REQ-10-0378, REQ-10-0391)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xchmod` -> success (REQ: REQ-10-0381)
+        - [ ] **Implementation notes:** Wrapper. (REQ: REQ-10-0172, REQ-10-0185, REQ-10-0211, REQ-10-0382, REQ-10-0395, REQ-10-0435, REQ-10-0448)
+        - [ ] **Priority:** low (REQ: REQ-10-0173, REQ-10-0383, REQ-10-0396, REQ-10-0423, REQ-10-0449)
+    - [ ] `xchown(path, owner, group)`: Safe chown. (REQ: REQ-10-0384)
+        - [ ] **Prototype:** `void xchown(const char *path, uid_t owner, gid_t group)` (REQ: REQ-10-0385)
+        - [ ] **Purpose:** Change ownership, exit on failure. (REQ: REQ-10-0386)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `chown`. (REQ: REQ-10-0388)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Exits on error. (REQ: REQ-10-0154, REQ-10-0378, REQ-10-0391)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xchown` -> success (REQ: REQ-10-0394)
+        - [ ] **Implementation notes:** Wrapper. (REQ: REQ-10-0172, REQ-10-0185, REQ-10-0211, REQ-10-0382, REQ-10-0395, REQ-10-0435, REQ-10-0448)
+        - [ ] **Priority:** low (REQ: REQ-10-0173, REQ-10-0383, REQ-10-0396, REQ-10-0423, REQ-10-0449)
+    - [ ] `strtonum(numstr, minval, maxval, errstrp)`: Safe number parsing. (REQ: REQ-10-0397)
+        - [ ] **Prototype:** `long long strtonum(const char *nptr, long long minval, long long maxval, const char **errstr)` (REQ: REQ-10-0398)
+        - [ ] **Purpose:** Parse number with bounds checking and strict validation. (REQ: REQ-10-0399)
+        - [ ] **Standards:** OpenBSD / BSD. (REQ: REQ-10-0400)
+        - [ ] **Underlying syscalls:** none. (REQ: REQ-10-0257, REQ-10-0270, REQ-10-0283, REQ-10-0296, REQ-10-0335, REQ-10-0348, REQ-10-0362, REQ-10-0401, REQ-10-0415)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Returns 0 on error and sets errstr. (REQ: REQ-10-0404)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `strtonum("10", 0, 100, &err)` -> 10, err=NULL (REQ: REQ-10-0407)
+            - [ ] `strtonum("101", 0, 100, &err)` -> 0, err="too large" (REQ: REQ-10-0408)
+        - [ ] **Implementation notes:** Strict parsing (no trailing garbage). (REQ: REQ-10-0409)
+        - [ ] **Priority:** high (REQ: REQ-10-0064, REQ-10-0077, REQ-10-0091, REQ-10-0105, REQ-10-0118, REQ-10-0132, REQ-10-0146, REQ-10-0186, REQ-10-0212, REQ-10-0225, REQ-10-0239, REQ-10-0291, REQ-10-0304, REQ-10-0317, REQ-10-0330, REQ-10-0343, REQ-10-0410)
+    - [ ] `xgetenv(name)`: Safe environment get. (REQ: REQ-10-0411)
+        - [ ] **Prototype:** `char *xgetenv(const char *name)` (REQ: REQ-10-0412)
+        - [ ] **Purpose:** Get environment variable, maybe exit if missing? Or just standard `getenv` wrapper? Usually just `getenv` is fine, but maybe `safe_getenv` for setuid? (REQ: REQ-10-0413)
+        - [ ] **Standards:** Internal. (REQ: REQ-10-0414)
+        - [ ] **Underlying syscalls:** none. (REQ: REQ-10-0257, REQ-10-0270, REQ-10-0283, REQ-10-0296, REQ-10-0335, REQ-10-0348, REQ-10-0362, REQ-10-0401, REQ-10-0415)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe (usually). (REQ: REQ-10-0417)
+        - [ ] **Error semantics:** Returns value or NULL. (REQ: REQ-10-0418)
+        - [ ] **Memory ownership:** environment owned. (REQ: REQ-10-0419)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] Get existing var. (REQ: REQ-10-0421)
+        - [ ] **Implementation notes:** Maybe strict version `xgetenv_required`? (REQ: REQ-10-0422)
+        - [ ] **Priority:** low (REQ: REQ-10-0173, REQ-10-0383, REQ-10-0396, REQ-10-0423, REQ-10-0449)
+    - [ ] `xopenat(dirfd, path, flags, mode)`: Safe relative open. (REQ: REQ-10-0424)
+        - [ ] **Prototype:** `int xopenat(int dirfd, const char *path, int flags, mode_t mode)` (REQ: REQ-10-0425)
+        - [ ] **Purpose:** Open file relative to dir, exit on error. (REQ: REQ-10-0426)
+        - [ ] **Standards:** Common extension. (REQ: REQ-10-0068, REQ-10-0081, REQ-10-0095, REQ-10-0109, REQ-10-0122, REQ-10-0136, REQ-10-0150, REQ-10-0164, REQ-10-0177, REQ-10-0190, REQ-10-0203, REQ-10-0216, REQ-10-0229, REQ-10-0374, REQ-10-0387, REQ-10-0427)
+        - [ ] **Underlying syscalls:** `openat`. (REQ: REQ-10-0428)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Returns fd or exits. (REQ: REQ-10-0431)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xopenat` -> success (REQ: REQ-10-0434)
+        - [ ] **Implementation notes:** Wrapper. (REQ: REQ-10-0172, REQ-10-0185, REQ-10-0211, REQ-10-0382, REQ-10-0395, REQ-10-0435, REQ-10-0448)
+        - [ ] **Priority:** medium (REQ: REQ-10-0160, REQ-10-0199, REQ-10-0252, REQ-10-0265, REQ-10-0278, REQ-10-0357, REQ-10-0370, REQ-10-0436)
+    - [ ] `xisatty(fd)`: Safe tty check. (REQ: REQ-10-0437)
+        - [ ] **Prototype:** `int xisatty(int fd)` (REQ: REQ-10-0438)
+        - [ ] **Purpose:** Check if fd is a tty, handle errno? Just `isatty` wrapper? (REQ: REQ-10-0439)
+        - [ ] **Standards:** POSIX. (REQ: REQ-10-0440)
+        - [ ] **Underlying syscalls:** `ioctl`. (REQ: REQ-10-0441)
+        - [ ] **Signal-safety:** yes. (REQ: REQ-10-0138, REQ-10-0152, REQ-10-0166, REQ-10-0205, REQ-10-0218, REQ-10-0231, REQ-10-0245, REQ-10-0258, REQ-10-0271, REQ-10-0284, REQ-10-0297, REQ-10-0349, REQ-10-0363, REQ-10-0376, REQ-10-0389, REQ-10-0402, REQ-10-0416, REQ-10-0429, REQ-10-0442)
+        - [ ] **Thread-safety:** safe. (REQ: REQ-10-0246, REQ-10-0259, REQ-10-0272, REQ-10-0285, REQ-10-0298, REQ-10-0337, REQ-10-0377, REQ-10-0390, REQ-10-0403, REQ-10-0430, REQ-10-0443)
+        - [ ] **Error semantics:** Returns 1/0. (REQ: REQ-10-0444)
+        - [ ] **Memory ownership:** N/A. (REQ: REQ-10-0073, REQ-10-0141, REQ-10-0169, REQ-10-0195, REQ-10-0208, REQ-10-0221, REQ-10-0234, REQ-10-0248, REQ-10-0274, REQ-10-0313, REQ-10-0326, REQ-10-0379, REQ-10-0392, REQ-10-0405, REQ-10-0432, REQ-10-0445)
+        - [ ] **Acceptance tests:** (REQ: REQ-10-0060, REQ-10-0074, REQ-10-0087, REQ-10-0101, REQ-10-0115, REQ-10-0128, REQ-10-0142, REQ-10-0156, REQ-10-0170, REQ-10-0183, REQ-10-0196, REQ-10-0209, REQ-10-0222, REQ-10-0235, REQ-10-0249, REQ-10-0262, REQ-10-0275, REQ-10-0288, REQ-10-0301, REQ-10-0314, REQ-10-0327, REQ-10-0340, REQ-10-0353, REQ-10-0367, REQ-10-0380, REQ-10-0393, REQ-10-0406, REQ-10-0420, REQ-10-0433, REQ-10-0446)
+            - [ ] `xisatty(0)` -> 1 (if tty) (REQ: REQ-10-0447)
+        - [ ] **Implementation notes:** Wrapper. (REQ: REQ-10-0172, REQ-10-0185, REQ-10-0211, REQ-10-0382, REQ-10-0395, REQ-10-0435, REQ-10-0448)
+        - [ ] **Priority:** low (REQ: REQ-10-0173, REQ-10-0383, REQ-10-0396, REQ-10-0423, REQ-10-0449)
+- [ ] **Build System:** (REQ: REQ-10-0450)
+    - [ ] Implement `native_dist` target to build usermode tools for the host OS (skipping libc/libm etc). (REQ: REQ-10-0451)
 
 
 

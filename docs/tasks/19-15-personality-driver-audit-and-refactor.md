@@ -8,110 +8,110 @@
 ### 15. Personality Driver Audit & Refactor
 Reference: User Request (Step 30690)
 
-- [ ] **Audit & Inventory:**
-    - [ ] Scan all personality drivers for syscall wrappers, legacy ABI usage, and hacks.
+- [ ] **Audit & Inventory:** (REQ: REQ-19-0001)
+    - [ ] Scan all personality drivers for syscall wrappers, legacy ABI usage, and hacks. (REQ: REQ-19-0002)
         - Files: `sys/exec/perso/*.c`
         - Tests: N/A
         - Docs: `docs/personality_audit.md` (Inventory Report)
         - Acceptance: Complete list of functions needing refactor.
 
-- [ ] **Linux Personality Refactor:**
-    - [ ] Update Linux syscall shims to translate personality types to Native 64-bit ABI.
+- [ ] **Linux Personality Refactor:** (REQ: REQ-19-0003)
+    - [ ] Update Linux syscall shims to translate personality types to Native 64-bit ABI. (REQ: REQ-19-0004)
         - Files: `sys/exec/perso/perso_linux.c`
         - Tests: integration (stat/lstat/fstat on Linux binaries)
         - Docs: `linux_compat.md`
         - Acceptance: Linux stat64 structs correctly mapped to native 64-bit stat.
-    - [ ] Refactor Linux drivers to remove legacy stat usage.
+    - [ ] Refactor Linux drivers to remove legacy stat usage. (REQ: REQ-19-0005)
         - Files: `sys/exec/perso/perso_linux.c`
         - Tests: unit (driver functions)
         - Acceptance: No dependency on 32-bit native types.
-    - [ ] Add explicit validation tests for file metadata and permission semantics.
+    - [ ] Add explicit validation tests for file metadata and permission semantics. (REQ: REQ-19-0006)
         - Files: `tests/perso/linux_test.c`
         - Tests: integration (chown/chmod/utimes simulation)
         - Acceptance: Semantics match Linux 5.x expectations.
 
-- [ ] **FreeBSD Personality Refactor:**
-    - [ ] Update FreeBSD syscall shims to translate personality types to Native 64-bit ABI.
+- [ ] **FreeBSD Personality Refactor:** (REQ: REQ-19-0007)
+    - [ ] Update FreeBSD syscall shims to translate personality types to Native 64-bit ABI. (REQ: REQ-19-0008)
         - Files: `sys/exec/perso/perso_freebsd.c`
         - Tests: integration (FreeBSD 14.x binary compatibility)
         - Docs: `freebsd_compat.md`
         - Acceptance: FreeBSD stat structure correctly populated.
-    - [ ] Refactor FreeBSD drivers to remove legacy dependencies.
+    - [ ] Refactor FreeBSD drivers to remove legacy dependencies. (REQ: REQ-19-0009)
         - Files: `sys/exec/perso/perso_freebsd.c`
         - Tests: unit
         - Acceptance: Clean separation from legacy native types.
-    - [ ] Add explicit validation tests for FreeBSD semantics.
+    - [ ] Add explicit validation tests for FreeBSD semantics. (REQ: REQ-19-0010)
         - Files: `tests/perso/freebsd_test.c`
         - Tests: integration
         - Acceptance: Pass canonical FreeBSD compliance checks (mini-suite).
 
-- [ ] **SVR4 / SVR3 Personality Refactor:**
-    - [ ] Update SVR4/SVR3 syscall shims for Native 64-bit ABI translation.
+- [ ] **SVR4 / SVR3 Personality Refactor:** (REQ: REQ-19-0011)
+    - [ ] Update SVR4/SVR3 syscall shims for Native 64-bit ABI translation. (REQ: REQ-19-0012)
         - Files: `sys/exec/perso/perso_svr4.c`, `sys/exec/perso/perso_svr3.c`
         - Tests: integration (legacy binary support)
         - Acceptance: Correct metadata reporting for legacy formats.
-    - [ ] Implement SVR3/SVR4 segment register validation for 286/386 protected mode binaries.
+    - [ ] Implement SVR3/SVR4 segment register validation for 286/386 protected mode binaries. (REQ: REQ-19-0013)
         - Files: `sys/exec/perso/perso_svr3.c`, `sys/exec/perso/perso_svr4.c`
         - Tests: unit (segment descriptor validation)
         - Acceptance: Reject invalid segment configurations; log warnings for suspicious setups.
-    - [ ] Add SVR3 x.out (Xenix) binary format recognition and loader hooks.
+    - [ ] Add SVR3 x.out (Xenix) binary format recognition and loader hooks. (REQ: REQ-19-0014)
         - Files: `sys/fs/exec/xout.c`, `sys/exec/perso/perso_svr3.c`
         - Tests: integration (load sample Xenix binary)
         - Docs: `svr3_xout.md`
         - Acceptance: Correctly identify x.out magic and dispatch to SVR3 personality.
-    - [ ] Implement SVR4 /dev/zero and /dev/null personality expectations.
+    - [ ] Implement SVR4 /dev/zero and /dev/null personality expectations. (REQ: REQ-19-0015)
         - Files: `sys/exec/perso/perso_svr4.c`, `sys/drivers/char/mem.c`
         - Tests: integration (mmap /dev/zero)
         - Acceptance: SVR4 binaries can use /dev/zero for anonymous mappings.
-    - [ ] Add SVR3 signal number translation (SVR3 uses different signal numbers).
+    - [ ] Add SVR3 signal number translation (SVR3 uses different signal numbers). (REQ: REQ-19-0016)
         - Files: `sys/exec/perso/perso_svr3.c`
         - Tests: unit (signal mapping table)
         - Acceptance: SIGTERM/SIGKILL/SIGCHLD correctly translated between ABIs.
-    - [ ] Validation tests for SVR compat layers.
+    - [ ] Validation tests for SVR compat layers. (REQ: REQ-19-0017)
         - Files: `tests/perso/svr_test.c`
         - Tests: integration
         - Acceptance: Basic file operations work correctly.
 
-- [ ] **FreeBSD Personality Enhancements:**
-    - [ ] Implement FreeBSD-specific sysctl namespace for personality queries.
+- [ ] **FreeBSD Personality Enhancements:** (REQ: REQ-19-0018)
+    - [ ] Implement FreeBSD-specific sysctl namespace for personality queries. (REQ: REQ-19-0019)
         - Files: `sys/exec/perso/perso_freebsd.c`, `sys/kern/sysctl.c`
         - Tests: integration (sysctl kern.ostype)
         - Acceptance: FreeBSD binaries see "FreeBSD" as ostype.
-    - [ ] Add FreeBSD capsicum(4) syscall stubs (return ENOSYS with log).
+    - [ ] Add FreeBSD capsicum(4) syscall stubs (return ENOSYS with log). (REQ: REQ-19-0020)
         - Files: `sys/exec/perso/perso_freebsd.c`
         - Tests: unit (verify ENOSYS)
         - Docs: Add capsicum notes to `freebsd_compat.md`
         - Acceptance: Capsicum calls fail gracefully without crashing.
-    - [ ] Implement FreeBSD jail(2) detection stub (return ENOSYS).
+    - [ ] Implement FreeBSD jail(2) detection stub (return ENOSYS). (REQ: REQ-19-0021)
         - Files: `sys/exec/perso/perso_freebsd.c`
         - Tests: unit
         - Acceptance: jail(2) returns ENOSYS, does not panic.
 
-- [ ] **Infrastructural Reconciliation:**
-    - [ ] Reconcile personality-specific `/proc` and `/dev` expectations.
+- [ ] **Infrastructural Reconciliation:** (REQ: REQ-19-0022)
+    - [ ] Reconcile personality-specific `/proc` and `/dev` expectations. (REQ: REQ-19-0023)
         - Files: `sys/fs/procfs.c`, `sys/fs/devfs.c`
         - Tests: integration (cat /proc/cpuinfo, ls -l /dev)
         - Docs: `compat_fs_layer.md`
         - Acceptance: Pseudo-filesystems return expected format per-personality OR robust adaptation layer exists.
 
-- [ ] **Quality & Regression:**
-    - [ ] Regression tests for third-party modules / sample drivers.
+- [ ] **Quality & Regression:** (REQ: REQ-19-0024)
+    - [ ] Regression tests for third-party modules / sample drivers. (REQ: REQ-19-0025)
         - Files: `tests/modules/*.c`
         - Tests: regression
         - Acceptance: Personality changes do not break external native modules.
-    - [ ] Refactor "minimal" shims to production quality (error handling, locking).
+    - [ ] Refactor "minimal" shims to production quality (error handling, locking). (REQ: REQ-19-0026)
         - Files: All `perso_*.c` files
         - Tests: stress/edge-case
         - Acceptance: Robust error propagation, no race conditions in translation layers.
-    - [ ] Audit perso_svr3.c for unchecked pointer dereferences and add null guards.
+    - [ ] Audit perso_svr3.c for unchecked pointer dereferences and add null guards. (REQ: REQ-19-0027)
         - Files: `sys/exec/perso/perso_svr3.c`
         - Tests: fuzz (malformed syscall args)
         - Acceptance: No kernel panics on invalid arguments.
-    - [ ] Audit perso_svr4.c for unchecked pointer dereferences and add null guards.
+    - [ ] Audit perso_svr4.c for unchecked pointer dereferences and add null guards. (REQ: REQ-19-0028)
         - Files: `sys/exec/perso/perso_svr4.c`
         - Tests: fuzz (malformed syscall args)
         - Acceptance: No kernel panics on invalid arguments.
-    - [ ] Audit perso_freebsd.c for unchecked pointer dereferences and add null guards.
+    - [ ] Audit perso_freebsd.c for unchecked pointer dereferences and add null guards. (REQ: REQ-19-0029)
         - Files: `sys/exec/perso/perso_freebsd.c`
         - Tests: fuzz (malformed syscall args)
         - Acceptance: No kernel panics on invalid arguments.

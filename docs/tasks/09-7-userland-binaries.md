@@ -6,2629 +6,2629 @@
 ## Reimplemented Checklist (All Open)
 
 ### 7. Userland Binaries (`bin/`)
-- [ ] **Shell (`sh`):**
-    - [ ] **Code Audit & Infrastructure:**
-        - [ ] Audit `lexer.c`, `parser.c`, `expand.c`, `exec.c`, `sh.c` for naive implementations or TODOs.
-        - [ ] Setup coverage-guided fuzzing for the parser and expansion engine.
-    - [ ] **Invocation & Startup:**
-        - [ ] Handle `sh -c` correctly.
-        - [ ] Handle `sh -s` correctly.
-        - [ ] Detect and handle login shell behavior.
-        - [ ] Argument parsing and POSIX option processing.
-        - [ ] Interactive vs non-interactive mode detection.
-        - [ ] Startup files: `ENV` and profile handling.
-        - [ ] Locale and environment initialization.
-        - [ ] Signal disposition at startup.
-    - [ ] **Lexical Analysis:**
-        - [ ] Delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`).
-        - [ ] Quoting (`'` single, `"` double) and escaping (`\`).
-        - [ ] Operators (`&&`, `||`, `>>`, `<<`, `<&`, `>&`).
-        - [ ] Comment handling (`#`).
-        - [ ] Line continuation rules (backslash-newline).
-        - [ ] Here-document lexing (quoted vs unquoted delimiters).
-    - [ ] **Shell Grammar & Parsing:**
-        - [ ] Simple commands.
-        - [ ] Pipelines.
-        - [ ] Lists (`;`, `&`, `&&`, `||`).
-        - [ ] Compound commands (`if`, `while`, `for`, `case`).
-        - [ ] Grouping `{}` and subshells `()`.
-        - [ ] Function definitions.
-        - [ ] Precedence and associativity verification.
-        - [ ] Robust error recovery and diagnostics.
-    - [ ] **Expansions (Exact Order):**
-        - [ ] **1. Tilde Expansion**
-        - [ ] **2. Parameter Expansion:**
-            - [ ] Basic `$VAR`, `${VAR}`.
-            - [ ] `${VAR:-def}`, `${VAR:=def}`, `${VAR:?err}`, `${VAR:+alt}`.
-            - [ ] `${#VAR}` (Length).
-            - [ ] `${VAR%pat}`, `${VAR%%pat}` (Suffix).
-            - [ ] `${VAR#pat}`, `${VAR##pat}` (Prefix).
-            - [ ] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`.
-            - [ ] Nested parameter expansions.
-        - [ ] **3. Command Substitution** (`$(cmd)`).
-        - [ ] **4. Arithmetic Expansion** (`$(( ... ))`).
-        - [ ] **5. Field Splitting:** Use `$IFS` for unquoted expansions.
-        - [ ] **6. Pathname Expansion:** Globbing (`*`, `?`, `[...]`).
-        - [ ] **7. Quote Removal:** Final pass.
-    - [ ] **Redirections:**
-        - [ ] Input/Output (`<`, `>`, `>>`).
-        - [ ] FD duplication (`<&`, `>&`).
-        - [ ] Here-documents (`<<`).
-        - [ ] Proper ordering and evaluation timing.
-        - [ ] Error handling and rollback (save/restore).
-    - [ ] **Execution Engine:**
-        - [ ] Builtin vs external command resolution.
-        - [ ] PATH search rules.
-        - [ ] `exec` behavior (shell replacement).
-        - [ ] Process forking model.
-        - [ ] Job control hooks integration.
-        - [ ] Exit status propagation.
-        - [ ] `set -e` semantics.
-    - [ ] **Builtin Commands:**
-        - [ ] `:` (Null command).
-        - [ ] `.` (Dot/Source).
-        - [ ] `break`.
-        - [ ] `continue`.
-        - [ ] `cd` (including `CDPATH`).
-        - [ ] `command`.
-        - [ ] `eval`.
-        - [ ] `exec`.
-        - [ ] `exit`.
-        - [ ] `export`.
-        - [ ] `getopts`.
-        - [ ] `read`.
-        - [ ] `readonly`.
-        - [ ] `return`.
-        - [ ] `set`.
-        - [ ] `unset`.
-        - [ ] `shift`.
-        - [ ] `times`.
-        - [ ] `trap`.
-        - [ ] `umask`.
-        - [ ] `wait`.
-    - [ ] **Variables & Environment:**
-        - [ ] Shell vs Environment variable distinction.
-        - [ ] Scope rules (Global, Local, Function).
-        - [ ] Export semantics.
-        - [ ] Read-only enforcement.
-    - [ ] **Functions:**
-        - [ ] Definition and Invocation.
-        - [ ] Local variables scoping.
-        - [ ] Return behavior.
-    - [ ] **Job Control:**
-        - [ ] Foreground/Background.
-        - [ ] Process groups.
-        - [ ] Signal forwarding.
-    - [ ] **Signals & Traps:**
-        - [ ] Default signal handling.
-        - [ ] `trap` builtin integration.
-    - [ ] **Testing & Compliance:**
-        - [ ] Unit tests for all modules.
-        - [ ] Script-based conformance tests.
-        - [ ] Coverage-guided fuzzing.
-        - [ ] Man page (`sh(1)`).
-    - [ ] **Interactive Features:**
-        - [ ] **Prompt Handling (PS1):**
-            - [ ] **Invocation Semantics:**
-                - [ ] Determine interactive mode logic (only evaluate PS1 if `is_interactive`).
-                - [ ] Suppress PS1 evaluation in non-interactive/script mode.
-                - [ ] Implement re-evaluation trigger before `readline` or input loop.
-                - [ ] Handle `set -x` (xtrace) interactions (ensure PS1 expansion isn't traced unless necessary/specified).
-                - [ ] Handle `set -e` interactions (errors in PS1 expansion should not exit shell).
-            - [ ] **Expansion Pipeline:**
-                - [ ] Integrate PS1 expansion into core expansion engine.
-                - [ ] Enable **Parameter Expansion** for PS1.
-                - [ ] Enable **Command Substitution** for PS1.
-                - [ ] Enable **Arithmetic Expansion** for PS1.
-                - [ ] Disable **Quote Removal** (PS1 retains quotes, or strictly follows POSIX requirements).
-            - [ ] **Escape Sequence Parsing:**
-                - [ ] Implement parser for backslash escapes in PS1.
-                - [ ] Support `\!` (history number) escape.
-                - [ ] Support `\$` (uid-based suffix `#`/`$`) escape.
-                - [ ] Support `\\` (literal backslash) escape.
-                - [ ] Handle undefined escapes deterministically (e.g., print literal char).
-                - [ ] Support **Common Escapes** (`\u`, `\h`, `\w`) using standard libc functions.
-            - [ ] **State-Dependent Elements:**
-                - [ ] Implement effective UID check for `\$`.
-                - [ ] Expose exit status `?` to prompt expansion without resetting it.
-            - [ ] **Error Handling:**
-                - [ ] Graceful failure on expansion error (fallback to default string).
-                - [ ] Prevent shell crash on malformed PS1 (OOM safety).
-                - [ ] Bound recursion depth for PS1 expansion (verified single-pass).
-            - [ ] **Performance:**
-                - [ ] Prioritize memory leak checks for repeated PS1 expansion.
-                - [ ] Verify no state mutation during prompt rendering.
-            - [ ] **Testing:**
-                - [ ] Unit test: Escape sequence parser (implemented in `tests/test_prompt.c`).
-                - [ ] Unit test: Expansion order validation.
-                - [ ] Edge case: Empty PS1.
-                - [ ] Edge case: Deeply nested command substitution in PS1.
-                - [ ] Fuzz test: `fuzz_ps1_parser.c`.
-            - [ ] **Documentation:**
-                - [ ] Document PS1 expansion behavior in `sh(1)`.
-                - [ ] Document supported escapes.
-        - [ ] **Extended Prompt Formatting (Opt-in):**
-            - [ ] **Mode Selection:**
-                - [ ] Implement configuration option (e.g., `set -o promptvars` or custom shopt) to enable extended parsing.
-                - [ ] Define precedence logic (POSIX PS1 behavior default vs Extended).
-                - [ ] Ensure `sh` in non-interactive mode treats prompt formatting as no-op or pure string.
-                - [ ] Expose current prompt mode via read-only shell variable (e.g., `SHELL_PROMPT_MODE`).
-            - [ ] **Format Grammar:**
-                - [ ] Define formal grammar for `%` escapes (e.g., `%n`, `%m`, `%~`).
-                - [ ] Define Parameterized token syntax (e.g., `%F{red}`, `%K{blue}`).
-                - [ ] Define Conditional token syntax (e.g., `%(condition.true.false)`).
-                - [ ] Explicitly list reserved/unsupported tokens for future compatibility.
-            - [ ] **Token Parsing:**
-                - [ ] Implement dedicated predictive parser for prompt strings (separate from main shell parser).
-                - [ ] Handle escaped `%` characters (`%%`).
-                - [ ] Handle unknown/malformed sequences (emit literal or error without crash).
-                - [ ] Ensure parsing is deterministic and stateless.
-            - [ ] **Expansion Semantics:**
-                - [ ] Define expansion order: Extended Tokens -> Parameter Expansion -> Command Sub -> Arith.
-                - [ ] Isolate prompt expansions to prevent shell state mutation (sandbox execution).
-                - [ ] Implement recursion depth limits for nested prompts.
-                - [ ] Ensure non-printing characters in expansions are correctly marked.
-            - [ ] **Dynamic Elements:**
-                - [ ] `%~` / `%d`: Current Working Directory (Collapse $HOME to ~).
-                - [ ] `%n`: Current Username.
-                - [ ] `%m` / `%M`: Hostname (Short/Long).
-                - [ ] `%#`: UID superuser status (`#` vs `%`).
-                - [ ] `%?`: Last exit code.
-                - [ ] `%L`: Shell nesting level/depth.
-                - [ ] `%j`: Number of background jobs.
-            - [ ] **Styling & Attributes:**
-                - [ ] Support `%F{color}` / `%f`: Foreground color (ANSI).
-                - [ ] Support `%K{color}` / `%k`: Background color (ANSI).
-                - [ ] Support `%B` / `%b`: Bold attribute.
-                - [ ] Support `%U` / `%u`: Underline attribute.
-                - [ ] Implement logic to calculate visible width vs escape sequence width (for line wrapping).
-            - [ ] **Rendering Engine:**
-                - [ ] Implement efficient string builder for prompt assembly.
-                - [ ] Memory Management: Ensure no leaks across repeated prompt evaluations.
-                - [ ] Optimization: Cache static parts of the prompt if possible.
-                - [ ] Clean separation: `parse_prompt()`, `expand_tokens()`, `render_string()`.
-            - [ ] **Error Handling:**
-                - [ ] Define fallback behavior (e.g., print raw string) if parsing fails.
-                - [ ] Signal safety: Ensure expansion is safe during signal handling if used there.
-                - [ ] Guard against exponential expansion attacks.
-            - [ ] **Testing:**
-                - [ ] Unit: Parser validation for standard tokens.
-                - [ ] Unit: Width calculation correctness with ANSI codes.
-                - [ ] Integration: Enable extended mode and verify prompt appearance.
-                - [ ] Fuzzing: `fuzz_extended_prompt.c` targets parser.
-                - [ ] Property: Randomized prompt strings don't crash shell.
-            - [ ] **Documentation:**
-                - [ ] Document new `%` escapes in `sh(1)`.
-                - [ ] Explicitly contrast POSIX PS1 vs Extended Mode handling.
-                - [ ] Document color/attribute codes.
-                - [ ] Document limits (depth, length, etc).
-- [ ] **Core Utilities:**
-    - [ ] **`ls` - List directory contents (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture with separate files for options, output, sorting, traversal.
-            - [ ] Extract option parsing into `ls_opts.c` and `ls_opts.h`.
-            - [ ] Extract output formatting into `ls_print.c` and `ls_print.h`.
-            - [ ] Extract sorting logic into `ls_sort.c` and `ls_sort.h`.
-            - [ ] Extract directory traversal into `ls_traverse.c` and `ls_traverse.h`.
-            - [ ] Write unit tests for each extracted module before proceeding.
-        - [ ] **CLI Options:**
-            - [ ] **Filtering:**
-                - [ ] `-a`, `--all`: List all files including hidden ones.
-                - [ ] `-A`, `--almost-all`: List all except `.` and `..`.
-                - [ ] `-d`, `--directory`: List directories themselves, not their contents.
-                - [ ] `-I PATTERN`, `--ignore=PATTERN`: Do not list implied entries matching PATTERN.
-            - [ ] **Output Format:**
-                - [ ] `-l`: Long listing format (permissions, ownership, size, time).
-                - [ ] `-1`: Force single-column output.
-                - [ ] `-C`: Force multi-column output (default for terminal).
-                - [ ] `-m`: Comma-separated output.
-                - [ ] `-x`: List entries by lines instead of columns.
-                - [ ] `-g`: Like `-l` but omit owner.
-                - [ ] `-o`: Like `-l` but omit group.
-                - [ ] `-n`, `--numeric-uid-gid`: Like `-l` but show numeric UID/GID.
-            - [ ] **Sorting:**
-                - [ ] `-r`, `--reverse`: Reverse order while sorting.
-                - [ ] `-S`: Sort by file size (largest first).
-                - [ ] `-t`: Sort by modification time (newest first).
-                - [ ] `-u`: Sort by access time (with `-lt`), show atime (with `-l`).
-                - [ ] `-c`: Sort by ctime (with `-lt`), show ctime (with `-l`).
-                - [ ] `-U`: Do not sort; list in directory order.
-                - [ ] `-f`: Do not sort, enable `-aU`, disable `-ls --color`.
-                - [ ] `-v`: Natural sort of version numbers within text.
-            - [ ] **Symlink Handling:**
-                - [ ] `-L`, `--dereference`: Follow symlinks and show target's info.
-                - [ ] `-H`: Follow symlinks only on command line arguments.
-            - [ ] **Size & Units:**
-                - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G).
-                - [ ] `-k`, `--kibibytes`: Use 1024-byte blocks.
-                - [ ] `-s`, `--size`: Print allocated size of each file, in blocks.
-                - [ ] `--block-size=SIZE`: Scale sizes by SIZE before printing.
-                - [ ] `--si`: Use powers of 1000 not 1024.
-            - [ ] **File Type Indicators:**
-                - [ ] `-F`, `--classify`: Append indicator (one of */=>@|) to entries.
-                - [ ] `-p`: Append `/` indicator to directories.
-                - [ ] `--file-type`: Likewise, except do not append `*`.
-            - [ ] **Inode & Block:**
-                - [ ] `-i`, `--inode`: Print inode number of each file.
-            - [ ] **Recursion:**
-                - [ ] `-R`, `--recursive`: List subdirectories recursively.
-                - [ ] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`.
-            - [ ] **Color:**
-                - [ ] `--color=auto`: Colorize when stdout is a terminal.
-                - [ ] `--color=always`: Always colorize output.
-                - [ ] `--color=never`: Never colorize output.
-                - [ ] Parse `LS_COLORS` environment variable.
-                - [ ] Default color scheme for file types (dir, link, exec, etc.).
-            - [ ] **Width Control:**
-                - [ ] `--width=N`: Set output width to N columns.
-                - [ ] `-w N`: Same as `--width=N`.
-                - [ ] Read `COLUMNS` environment variable.
-                - [ ] Query terminal width via `ioctl(TIOCGWINSZ)`.
-                - [ ] Fallback to 80 columns for pipes/non-terminals.
-            - [ ] **Timestamps:**
-                - [ ] `--time=WORD`: Use time WORD (atime, access, use, ctime, status, mtime, modification).
-                - [ ] `--time-style=STYLE`: Use STYLE (full-iso, long-iso, iso, locale)., +FORMAT).
-            - [ ] **Miscellaneous:**
-                - [ ] `-q`, `--hide-control-chars`: Print `?` for non-graphic characters.
-                - [ ] `--show-control-chars`: Show non-graphic characters as-is (default).
-                - [ ] `-N`, `--literal`: Print raw entry names (don't quote).
-                - [ ] `-Q`, `--quote-name`: Enclose entry names in double quotes.
-                - [ ] `--quoting-style=WORD`: Quoting style (literal, shell, shell-always, c, escape).
-                - [ ] `--help`: Display help.
-                - [ ] `--version`: Display version.
-        - [ ] **Output Modes:**
-            - [ ] Implement long format (`-l`) with all columns.
-            - [ ] Implement multi-column format (default for terminal).
-            - [ ] Implement single-column format (`-1`).
-            - [ ] Implement comma-separated format (`-m`).
-            - [ ] Implement by-lines format (`-x`).
-            - [ ] Auto-detect terminal vs pipe; select output mode accordingly.
-            - [ ] Handle very narrow terminals (< 20 columns) gracefully.
-        - [ ] **Long Format Details:**
-            - [ ] **File Mode String:**
-                - [ ] File type indicator (d, l, c, b, p, s, -).
-                - [ ] Owner rwx permissions.
-                - [ ] Group rwx permissions.
-                - [ ] Other rwx permissions.
-                - [ ] Setuid bit (`s`/`S` in owner execute).
-                - [ ] Setgid bit (`s`/`S` in group execute).
-                - [ ] Sticky bit (`t`/`T` in other execute).
-                - [ ] ACL indicator (`+`) when extended attributes present.
-                - [ ] Extended attribute indicator (`@`) for xattrs.
-            - [ ] **Link Count:** Print hard link count.
-            - [ ] **Owner:** Print username (or UID if `-n`).
-            - [ ] **Group:** Print group name (or GID if `-n`).
-            - [ ] **Size:** Print file size in bytes (or human-readable if `-h`).
-            - [ ] **Device Major/Minor:** Print major,minor for block/char devices.
-            - [ ] **Timestamps:**
-                - [ ] Default to mtime.
-                - [ ] Support atime with `-u`.
-                - [ ] Support ctime with `-c`.
-                - [ ] Recent files (< 6 months): show month, day, time.
-                - [ ] Old files (>= 6 months): show month, day, year.
-                - [ ] Custom time formats via `--time-style`.
-            - [ ] **Filename:** Print file name.
-            - [ ] **Symlink Target:** Print ` -> target` for symlinks.
-            - [ ] **Total Block Count:** Print `total N` line for each directory.
-        - [ ] **Symlink Behavior:**
-            - [ ] Default: `lstat()` for symlinks, show link info.
-            - [ ] `-L`: `stat()` for symlinks, show target info.
-            - [ ] Show `-> target` in long listing.
-            - [ ] Handle broken symlinks gracefully (show with error indicator).
-            - [ ] Detect symlink loops and report error.
-        - [ ] **Recursive Traversal (`-R`):**
-            - [ ] Implement depth-first traversal.
-            - [ ] Print directory header for each subdirectory.
-            - [ ] Handle permission denied on subdirs (warn and continue).
-            - [ ] Implement cycle detection (detect hardlink loops and symlink loops).
-            - [ ] Option to not cross filesystem boundaries (`--one-file-system`/`-x` GNU ext).
-            - [ ] Respect `-d` to not recurse even with `-R`.
-        - [ ] **Sorting & Collation:**
-            - [ ] Implement name sort (default, case-sensitive).
-            - [ ] Implement case-insensitive name sort (locale-aware).
-            - [ ] Implement size sort (`-S`).
-            - [ ] Implement time sort (`-t`, `-u`, `-c`).
-            - [ ] Implement extension sort (`-X` GNU ext).
-            - [ ] Implement version sort (`-v`).
-            - [ ] Implement reverse sort (`-r`).
-            - [ ] Implement no-sort (`-U`, `-f`).
-            - [ ] Use stable sort with tie-breakers (name as secondary).
-            - [ ] Locale-aware collation via `strcoll()`.
-            - [ ] Directories first option (GNU ext).
-        - [ ] **Column/Width Layout:**
-            - [ ] Calculate printable width of each filename.
-            - [ ] Account for ANSI color escape sequences (non-printing).
-            - [ ] Account for combining characters (zero-width).
-            - [ ] Account for wide characters (CJK, double-width).
-            - [ ] Use `wcwidth()` / `wcswidth()` for Unicode handling.
-            - [ ] Pack columns to fit terminal width.
-            - [ ] Handle filenames wider than terminal width.
-            - [ ] Align columns consistently.
-        - [ ] **Permissions/ACLs/Extended Attributes:**
-            - [ ] Detect ACLs via `acl_get_file()` or `getxattr("system.posix_acl_access")`.
-            - [ ] Show `+` suffix on mode string when ACLs present.
-            - [ ] Detect extended attributes via `listxattr()`.
-            - [ ] Show `@` suffix when xattrs present (macOS style).
-            - [ ] Fallback gracefully when ACL/xattr APIs unavailable.
-            - [ ] Option to list xattr names (`-@` BSD ext).
-        - [ ] **User/Group Name Caching:**
-            - [ ] Implement UID->username cache.
-            - [ ] Implement GID->groupname cache.
-            - [ ] Handle missing users/groups (print numeric ID).
-            - [ ] Limit cache size to prevent memory bloat.
-        - [ ] **Error Handling:**
-            - [ ] Per-file errors: warn and continue.
-            - [ ] Directory open errors: warn and continue to next arg.
-            - [ ] Memory allocation failures: exit with proper code.
-            - [ ] Exit code 0: success.
-            - [ ] Exit code 1: minor problems (cannot access file).
-            - [ ] Exit code 2: serious trouble (cannot access command-line arg).
-            - [ ] Never crash on any input.
-        - [ ] **Performance:**
-            - [ ] Minimize syscalls: batch `stat()` calls where possible.
-            - [ ] Use `lstat()` by default; only `stat()` when `-L`.
-            - [ ] Consider `fts(3)` or custom traversal for `-R`.
-            - [ ] Buffer output for efficiency.
-            - [ ] Avoid repeated `getpwuid()`/`getgrgid()` via caching.
-            - [ ] Profile with large directories (10K+ entries).
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Test mode string formatting for all file types.
-                - [ ] Test mode string with setuid/setgid/sticky.
-                - [ ] Test size formatting (bytes, KB, MB, GB, TB).
-                - [ ] Test human-readable size formatting.
-                - [ ] Test timestamp formatting (recent vs old).
-                - [ ] Test column width calculation.
-                - [ ] Test sorting algorithms (all modes).
-                - [ ] Test collation with locale.
-            - [ ] **Integration Tests:**
-                - [ ] Empty directory.
-                - [ ] Directory with hidden files.
-                - [ ] Directory with symlinks (valid and broken).
-                - [ ] Directory with special files (devices, sockets, FIFOs).
-                - [ ] Deep directory tree (`-R`).
-                - [ ] Large directory (1000+ files).
-                - [ ] Permission denied scenarios.
-                - [ ] Symlink loops.
-                - [ ] Files with spaces, quotes, newlines in names.
-                - [ ] Mixed sorting criteria.
-            - [ ] **Property Tests:**
-                - [ ] Random filenames don't crash (fuzzing).
-                - [ ] Binary characters in filenames handled.
-                - [ ] Control characters handled.
-                - [ ] Unicode filenames (combining chars, CJK).
-                - [ ] Very long filenames (PATH_MAX-1).
-            - [ ] **Acceptance Tests:**
-                - [ ] `ls` empty directory -> empty output.
-                - [ ] `ls -a` -> shows `.` and `..`.
-                - [ ] `ls -l` -> correct 9-column output.
-                - [ ] `ls -lh` -> human sizes (K, M, G).
-                - [ ] `ls -R` -> descends into subdirectories.
-                - [ ] `ls -lS` -> sorted by size descending.
-                - [ ] `ls -lt` -> sorted by mtime descending.
-                - [ ] `ls -F` -> indicators appended.
-                - [ ] `ls --color=always | cat` -> contains ANSI codes.
-                - [ ] `ls -i` -> inode numbers shown.
-        - [ ] **Documentation:**
-            - [ ] Write `ls(1)` man page covering all options.
-            - [ ] Document output formats with examples.
-            - [ ] Document sorting behavior.
-            - [ ] Document color configuration (`LS_COLORS`).
-            - [ ] Document width calculation algorithm (developer notes).
-            - [ ] Document locale/Unicode handling (developer notes).
-            - [ ] Document ACL/xattr detection (developer notes).
-        - [ ] **Accessibility & Machine Parsing:**
-            - [ ] Document `-1` for machine-parseable output.
-            - [ ] Document `--quoting-style` for safe parsing.
-            - [ ] Ensure no extra whitespace or formatting breaks parsing.
-            - [ ] Test with common UNIX text processing tools (`awk`, `cut`).
-        - [ ] **Acceptance Criteria:**
-            - [ ] All CLI options implemented and tested.
-            - [ ] Long format matches expected field layout.
-            - [ ] Sorting produces correct order for all modes.
-            - [ ] No crashes on any valid or malformed filenames.
-            - [ ] Handles directories with 100K+ entries without OOM.
-            - [ ] Color output respects terminal capabilities.
-            - [ ] Exit codes match documented behavior.
-            - [ ] Man page complete and accurate.
-            - [ ] All tests pass in CI.
-    - [ ] **`cp` - Copy files and directories (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/cp/cp.c` for TODO comments, fragile code, and incomplete features.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture with separate files.
-            - [ ] Extract option parsing into `cp_opts.c` and `cp_opts.h`.
-            - [ ] Extract copy engine into `cp_copy.c` and `cp_copy.h`.
-            - [ ] Extract metadata preservation into `cp_preserve.c` and `cp_preserve.h`.
-            - [ ] Extract atomic replace logic into `cp_atomic.c` and `cp_atomic.h`.
-            - [ ] Write unit tests for each extracted module.
-        - [ ] **Basic CLI Options:**
-            - [ ] `-r`, `-R`, `--recursive`: Copy directories recursively.
-            - [ ] `-f`, `--force`: Force overwrite, remove destination if needed.
-            - [ ] `-i`, `--interactive`: Prompt before overwrite.
-            - [ ] `-n`, `--no-clobber`: Do not overwrite existing files.
-            - [ ] `-v`, `--verbose`: Explain what is being done.
-            - [ ] `-d`: Same as `--no-dereference --preserve=links`.
-            - [ ] `--help`: Display help and exit.
-            - [ ] `--version`: Display version and exit.
-        - [ ] **Preservation Options:**
-            - [ ] `-p`: Preserve mode, ownership, timestamps.
-            - [ ] `-a`, `--archive`: Same as `-dR --preserve=all`.
-            - [ ] `--preserve=LIST`: Preserve specified attributes.
-                - [ ] `--preserve=mode`: Preserve file mode bits.
-                - [ ] `--preserve=ownership`: Preserve owner and group.
-                - [ ] `--preserve=timestamps`: Preserve atime and mtime.
-                - [ ] `--preserve=links`: Preserve hard links in source tree.
-                - [ ] `--preserve=xattr`: Preserve extended attributes.
-                - [ ] `--preserve=all`: All of the above.
-            - [ ] `--no-preserve=LIST`: Do not preserve specified attributes.
-        - [ ] **Link Options:**
-            - [ ] `-l`, `--link`: Create hard links instead of copying.
-            - [ ] `-s`, `--symbolic-link`: Create symbolic links instead of copying.
-            - [ ] `-L`, `--dereference`: Always follow symlinks in source.
-            - [ ] `-P`, `--no-dereference`: Never follow symlinks (default).
-            - [ ] `-H`: Follow symlinks on command line only.
-        - [ ] **Sparse File Options:**
-            - [ ] `--sparse=auto`: Detect and create sparse files automatically (default).
-            - [ ] `--sparse=always`: Always create sparse files (even for regular data).
-            - [ ] `--sparse=never`: Never create sparse files.
-            - [ ] Implement `SEEK_DATA`/`SEEK_HOLE` for hole detection.
-            - [ ] Fallback to zero-block detection when `SEEK_HOLE` unavailable.
-        - [ ] **Buffer & Performance Options:**
-            - [ ] `-b SIZE`, `--buffer-size=SIZE`: Set IO buffer size.
-            - [ ] Default buffer size (64KB or configurable).
-            - [ ] Use `copy_file_range()` when available and beneficial.
-            - [ ] Use `sendfile()` as optimization on Linux.
-            - [ ] Fallback to portable `read()`/`write()` loop.
-            - [ ] Profile and tune buffer sizes for various file sizes.
-        - [ ] **Backup Options:**
-            - [ ] `-b`, `--backup`: Make backup of each existing destination file.
-            - [ ] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never).
-            - [ ] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`).
-        - [ ] **Target Directory Options:**
-            - [ ] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Copy all sources into target dir.
-            - [ ] `-T`, `--no-target-directory`: Treat destination as normal file.
-        - [ ] **Miscellaneous Options:**
-            - [ ] `--reflink=WHEN`: Control clone/CoW (auto, always, never).
-            - [ ] `--remove-destination`: Remove existing dest files before copy.
-            - [ ] `-u`, `--update`: Copy only when source is newer or dest missing.
-        - [ ] **Basic Copy Operations:**
-            - [ ] **Single File to File:**
-                - [ ] Create destination file with correct mode.
-                - [ ] Copy data from source to destination.
-                - [ ] Preserve metadata as requested.
-                - [ ] Handle existing destination per flags.
-            - [ ] **Multiple Files to Directory:**
-                - [ ] Verify destination is a directory.
-                - [ ] Construct destination paths correctly.
-                - [ ] Process each source file.
-                - [ ] Handle errors per-file (warn and continue).
-            - [ ] **Directory Recursion (`-R`/`-a`):**
-                - [ ] Create destination directory structure.
-                - [ ] Traverse source directory depth-first.
-                - [ ] Copy regular files, symlinks, devices, FIFOs.
-                - [ ] Preserve directory permissions after contents copied.
-                - [ ] Handle permission denied (warn and continue).
-        - [ ] **Atomic Replace:**
-            - [ ] Create temporary file in destination directory.
-            - [ ] Use unique naming (`.cp.XXXXXX` pattern).
-            - [ ] Copy all data to temporary file.
-            - [ ] Set correct permissions on temporary file.
-            - [ ] Call `fsync()` on file descriptor.
-            - [ ] `rename()` temporary file to destination.
-            - [ ] Handle rename failure (cross-device, permissions).
-            - [ ] Clean up temporary file on any failure.
-            - [ ] Atomic replace for regular files only.
-        - [ ] **Hardlink Graph Preservation:**
-            - [ ] Detect when multiple source files are hard links to same inode.
-            - [ ] Maintain map of (source_dev, source_ino) -> destination_path.
-            - [ ] On second encounter, create hard link to first copy.
-            - [ ] Efficient hash map implementation for large trees.
-            - [ ] Handle cross-device scenarios (cannot preserve links).
-        - [ ] **Extended Attributes & ACLs:**
-            - [ ] Detect platform support for xattrs (`getxattr()`, `setxattr()`).
-            - [ ] List source file xattrs with `listxattr()`.
-            - [ ] Copy each xattr to destination.
-            - [ ] Handle xattr size limits.
-            - [ ] Detect platform support for ACLs.
-            - [ ] Copy ACLs when `--preserve=all` or `--preserve=xattr`.
-            - [ ] Graceful degradation when APIs unavailable.
-            - [ ] Warn when preservation fails (non-fatal).
-        - [ ] **Special Files:**
-            - [ ] **Symlinks:** Copy link target or create symlink based on flags.
-            - [ ] **Block Devices:** Use `mknod()` with `-R`.
-            - [ ] **Character Devices:** Use `mknod()` with `-R`.
-            - [ ] **FIFOs:** Use `mkfifo()` with `-R`.
-            - [ ] **Sockets:** Skip or warn (cannot copy).
-        - [ ] **Cross-Device Handling:**
-            - [ ] Detect cross-device copy (stat source and dest dirs).
-            - [ ] `-l` (hardlink) fails across devices with clear error.
-            - [ ] `-s` (symlink) works across devices.
-            - [ ] Regular copy works across devices.
-            - [ ] Hardlink preservation fails across devices (warn).
-        - [ ] **Error Handling & Robustness:**
-            - [ ] Handle `EINTR` during read/write (retry).
-            - [ ] Handle partial writes (continue from where left off).
-            - [ ] Handle `ENOSPC` (disk full) gracefully.
-            - [ ] Handle `EDQUOT` (quota exceeded) gracefully.
-            - [ ] Clean up partial destination on failure.
-            - [ ] Signal handling: catch SIGINT/SIGTERM, cleanup, exit.
-            - [ ] Write robust signal-safe cleanup routines.
-            - [ ] Exit code 0: success.
-            - [ ] Exit code 1: some files could not be copied.
-            - [ ] Never crash on any input.
-        - [ ] **Path Handling:**
-            - [ ] No fixed-size path buffers (use dynamic allocation).
-            - [ ] Hygienic path joining (handle trailing slashes).
-            - [ ] Detect and reject self-copy attempts.
-            - [ ] Handle paths with special characters.
-            - [ ] Handle paths at `PATH_MAX` limit.
-        - [ ] **Permission & Ownership Handling:**
-            - [ ] Create destination with source mode (masked by umask initially).
-            - [ ] After copy complete, chmod to exact source mode.
-            - [ ] If root, chown to source owner:group.
-            - [ ] If not root, preserve group if possible.
-            - [ ] Warn if ownership cannot be preserved.
-            - [ ] Handle setuid/setgid bits correctly.
-        - [ ] **Timestamp Preservation:**
-            - [ ] Read source atime and mtime.
-            - [ ] Use `utimensat()` for nanosecond precision.
-            - [ ] Fallback to `utimes()` if needed.
-            - [ ] Preserve timestamps after all data written.
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Test atomic replace helper.
-                - [ ] Test sparse file detection.
-                - [ ] Test hardlink map operations.
-                - [ ] Test path joining logic.
-                - [ ] Test metadata preservation helpers.
-                - [ ] Test buffer allocation.
-            - [ ] **Integration Tests:**
-                - [ ] Copy single file to new file.
-                - [ ] Copy single file to existing file.
-                - [ ] Copy multiple files to directory.
-                - [ ] Copy directory recursively.
-                - [ ] Copy with `-p` (permissions preserved).
-                - [ ] Copy with `-a` (archive mode).
-                - [ ] Copy hardlinked files (links preserved).
-                - [ ] Copy sparse files (holes preserved).
-                - [ ] Copy symlinks with `-d` and `-L`.
-                - [ ] Copy special files (devices, FIFOs).
-                - [ ] Copy files with xattrs.
-                - [ ] Copy across filesystems.
-                - [ ] Handle permission denied.
-                - [ ] Handle disk full.
-                - [ ] Handle self-copy attempt.
-            - [ ] **Property Tests:**
-                - [ ] Random file content survives copy.
-                - [ ] Random metadata preserved correctly.
-                - [ ] Random directory structures copy correctly.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz path handling with binary filenames.
-                - [ ] Fuzz metadata parsing.
-                - [ ] Fuzz option parsing.
-            - [ ] **Acceptance Tests:**
-                - [ ] `cp file1 file2` -> file2 identical to file1.
-                - [ ] `cp -r dir1 dir2` -> dir2 contains copy of dir1.
-                - [ ] `cp -a` -> timestamps, permissions, links preserved.
-                - [ ] `cp -i existing` -> prompts user.
-                - [ ] `cp -n existing` -> skips overwrite.
-                - [ ] `cp -l` -> creates hard links.
-                - [ ] `cp -s` -> creates symlinks.
-                - [ ] Atomic replace verified (no partial files on interrupt).
-        - [ ] **Documentation:**
-            - [ ] Write `cp(1)` man page covering all options.
-            - [ ] Document preservation behavior in detail.
-            - [ ] Document sparse file handling.
-            - [ ] Document atomic replace mechanism.
-            - [ ] Write developer design doc for data flow.
-            - [ ] Document hardlink preservation algorithm.
-            - [ ] Document cross-device handling.
-        - [ ] **Acceptance Criteria:**
-            - [ ] All CLI options implemented and tested.
-            - [ ] Atomic replace demonstrated (no partial files).
-            - [ ] Hardlink preservation works for multi-file inputs.
-            - [ ] Sparse files copied efficiently.
-            - [ ] No memory leaks (valgrind clean).
-            - [ ] Correct behavior across all flag combinations.
-            - [ ] Exit codes match documented behavior.
-            - [ ] Man page complete and accurate.
-            - [ ] All tests pass in CI.
-    - [ ] **`mv` - Move (rename) files (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/mv/mv.c` for TODO comments, fragile code, incomplete features.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture.
-            - [ ] Extract option parsing into `mv_opts.c` and `mv_opts.h`.
-            - [ ] Extract rename/copy logic into `mv_core.c` and `mv_core.h`.
-            - [ ] Integrate with `cp` atomic replace logic (shared library or code reuse).
-            - [ ] Write unit tests for each extracted module.
-        - [ ] **CLI Options:**
-            - [ ] `-f`, `--force`: Do not prompt before overwriting.
-            - [ ] `-i`, `--interactive`: Prompt before overwrite.
-            - [ ] `-n`, `--no-clobber`: Do not overwrite existing file.
-            - [ ] `-v`, `--verbose`: Explain what is being done.
-            - [ ] `-u`, `--update`: Move only when source is newer or dest missing.
-            - [ ] `--strip-trailing-slashes`: Remove trailing slashes from source args.
-            - [ ] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Move all sources into target dir.
-            - [ ] `-T`, `--no-target-directory`: Treat destination as normal file.
-            - [ ] `--help`: Display help and exit.
-            - [ ] `--version`: Display version and exit.
-        - [ ] **Backup Options:**
-            - [ ] `-b`, `--backup`: Make backup of each existing destination file.
-            - [ ] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never).
-            - [ ] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`).
-        - [ ] **Rename Semantics (Same Filesystem):**
-            - [ ] Use `rename(2)` syscall for atomic move.
-            - [ ] Handle `rename()` success: done, no further action.
-            - [ ] Handle `rename()` failure with `EXDEV`: trigger copy+unlink fallback.
-            - [ ] Handle `rename()` failure with `ENOENT`: source doesn't exist, error.
-            - [ ] Handle `rename()` failure with `EACCES`/`EPERM`: permission error.
-            - [ ] Handle `rename()` failure with `ENOTDIR`: path component not directory.
-            - [ ] Handle `rename()` failure with `EISDIR`: dest is dir, source is not.
-            - [ ] Handle `rename()` failure with `ENOTEMPTY`: dest dir not empty (dir move).
-        - [ ] **Cross-Filesystem Fallback:**
-            - [ ] Detect `EXDEV` from `rename()`.
-            - [ ] Invoke copy operation (reuse `cp` logic).
-            - [ ] Preserve all metadata during copy (timestamps, ownership, mode).
-            - [ ] Preserve extended attributes during copy.
-            - [ ] Preserve ACLs during copy if supported.
-            - [ ] Preserve hardlink graph during recursive move.
-            - [ ] After successful copy, unlink source.
-            - [ ] For directories: recursively copy, then recursively remove source.
-            - [ ] Handle partial failure: source partially moved.
-            - [ ] Clean up destination on copy failure before unlinking source.
-        - [ ] **Overwrite Policies:**
-            - [ ] Default: prompt if destination exists and stdout is TTY.
-            - [ ] `-f`: Never prompt, silently overwrite.
-            - [ ] `-i`: Always prompt before overwrite.
-            - [ ] `-n`: Never overwrite, silently skip.
-            - [ ] Precedence: last option wins among `-f`, `-i`, `-n`.
-            - [ ] Non-TTY behavior: `-i` still prompts (use /dev/tty or skip).
-            - [ ] Prompt format: "overwrite 'file'? " with y/n response.
-        - [ ] **Directory Moves:**
-            - [ ] Move directory to new name (rename within fs).
-            - [ ] Move directory into existing directory.
-            - [ ] Detect move-into-self error (moving dir into its own subtree).
-            - [ ] Error message for move-into-self: clear explanation.
-            - [ ] Handle non-empty destination directory (error).
-            - [ ] Recursive directory move for cross-fs.
-        - [ ] **Special File Handling:**
-            - [ ] **Symlinks:** Move symlink itself (not target) by default.
-            - [ ] `-L`: Follow symlinks (move target, not link).
-            - [ ] `-P`: Never follow symlinks (default).
-            - [ ] **Block/Character Devices:** Rename or recreate on cross-fs.
-            - [ ] **FIFOs:** Rename or recreate on cross-fs.
-            - [ ] **Sockets:** Rename only (cannot copy).
-        - [ ] **Hardlinks & Metadata:**
-            - [ ] Preserve hardlink relationships during cross-fs copy.
-            - [ ] Reuse hardlink map from `cp` implementation.
-            - [ ] Preserve file mode (chmod after copy).
-            - [ ] Preserve owner/group (chown after copy, if root).
-            - [ ] Preserve timestamps (utimensat after copy).
-        - [ ] **Race Condition Avoidance:**
-            - [ ] Minimize TOCTOU window between check and operation.
-            - [ ] Use `renameat2()` with `RENAME_NOREPLACE` where available.
-            - [ ] Fallback to traditional rename with accept-the-race semantics.
-            - [ ] For `-n`: open with O_EXCL to avoid overwrite races.
-            - [ ] Document known race conditions that cannot be avoided.
-        - [ ] **Error Handling:**
-            - [ ] Per-file errors: warn and continue with next source.
-            - [ ] Exit code 0: all moves successful.
-            - [ ] Exit code 1: at least one move failed.
-            - [ ] Never crash on any input.
-            - [ ] Handle EINTR during operations.
-            - [ ] Signal handling: catch SIGINT, cleanup partial operations.
-        - [ ] **Path Handling:**
-            - [ ] No fixed-size path buffers (use dynamic allocation).
-            - [ ] `--strip-trailing-slashes` implementation.
-            - [ ] Handle paths with special characters.
-            - [ ] Handle paths at `PATH_MAX` limit.
-            - [ ] Detect and reject source == destination.
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Test rename semantics helper.
-                - [ ] Test cross-fs detection.
-                - [ ] Test overwrite policy logic.
-                - [ ] Test path manipulation (strip slashes).
-                - [ ] Test move-into-self detection.
-            - [ ] **Integration Tests:**
-                - [ ] Move single file to new name.
-                - [ ] Move single file to existing file (overwrite).
-                - [ ] Move file to directory.
-                - [ ] Move multiple files to directory.
-                - [ ] Move directory to new name.
-                - [ ] Move directory into existing directory.
-                - [ ] Move across filesystems.
-                - [ ] Move with `-i` (interactive prompt).
-                - [ ] Move with `-n` (no clobber).
-                - [ ] Move with `-u` (update).
-                - [ ] Move special files (symlinks, devices).
-                - [ ] Move-into-self detection.
-                - [ ] Hardlink preservation on cross-fs.
-            - [ ] **Property Tests:**
-                - [ ] File content preserved after move.
-                - [ ] Metadata preserved after cross-fs move.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz path handling with binary/special characters.
-                - [ ] Fuzz option parsing.
-            - [ ] **Non-TTY Interactive Tests:**
-                - [ ] `-i` behavior when stdin is not TTY.
-                - [ ] Input redirection for prompts.
-            - [ ] **Acceptance Tests:**
-                - [ ] `mv file1 file2` -> file1 gone, file2 exists.
-                - [ ] `mv file dir/` -> dir/file exists.
-                - [ ] `mv` across filesystems -> content identical.
-                - [ ] `mv -i existing` -> prompts user.
-                - [ ] `mv -n existing` -> skips, source untouched.
-                - [ ] `mv dir1 dir2` -> dir1 renamed if same fs.
-        - [ ] **Documentation:**
-            - [ ] Write `mv(1)` man page covering all options.
-            - [ ] Document rename(2) atomicity guarantees.
-            - [ ] Document cross-filesystem behavior.
-            - [ ] Document backup options.
-            - [ ] Write developer notes on atomicity.
-            - [ ] Document race condition considerations.
-        - [ ] **Acceptance Criteria:**
-            - [ ] `rename(2)` used when possible.
-            - [ ] Correct fallback to copy+unlink for cross-fs.
-            - [ ] Hardlink preservation on fallback.
-            - [ ] Metadata preservation on fallback.
-            - [ ] Robust error handling.
-            - [ ] No memory leaks.
-            - [ ] Exit codes match documented behavior.
-            - [ ] Man page complete and accurate.
-            - [ ] All tests pass in CI.
-    - [ ] **`rm` - Remove files or directories (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/rm/rm.c` for TODO comments, fragile code, incomplete features.
-            - [ ] Document all functionality gaps and security concerns.
-            - [ ] Create refactoring plan: modular architecture.
-            - [ ] Extract option parsing into `rm_opts.c` and `rm_opts.h`.
-            - [ ] Extract recursive walker into `rm_walk.c` and `rm_walk.h`.
-            - [ ] Extract safety checks into `rm_safety.c` and `rm_safety.h`.
-            - [ ] Write unit tests for each extracted module.
-        - [ ] **CLI Options:**
-            - [ ] `-f`, `--force`: Ignore nonexistent files, never prompt.
-            - [ ] `-i`: Prompt before every removal.
-            - [ ] `-I`: Prompt once before removing more than 3 files or recursing.
-            - [ ] `-r`, `-R`, `--recursive`: Remove directories and their contents recursively.
-            - [ ] `-d`, `--dir`: Remove empty directories.
-            - [ ] `-v`, `--verbose`: Explain what is being done.
-            - [ ] `--one-file-system`: Do not cross filesystem boundaries.
-            - [ ] `--preserve-root`: Do not remove `/` (default).
-            - [ ] `--no-preserve-root`: Allow removing `/` (dangerous).
-            - [ ] `--interactive=WHEN`: Prompt according to WHEN (never, once, always).
-            - [ ] `--help`: Display help and exit.
-            - [ ] `--version`: Display version and exit.
-        - [ ] **Root Protection (`--preserve-root`):**
-            - [ ] Default: refuse to remove `/` with `-r`.
-            - [ ] Detect `/` as argument (canonicalize paths first).
-            - [ ] Detect attempts to remove filesystem root.
-            - [ ] Error message: "it is dangerous to operate recursively on '/'".
-            - [ ] `--no-preserve-root`: explicit opt-in to dangerous behavior.
-            - [ ] Acceptance: never accidentally remove `/` in any test.
-        - [ ] **Dangerous Pattern Detection:**
-            - [ ] Refuse `rm -rf /` unless `--no-preserve-root`.
-            - [ ] Warn on `rm -rf /*` (but allow if forced).
-            - [ ] Warn on `rm -rf ~` or `rm -rf $HOME`.
-            - [ ] Document dangerous patterns in man page.
-        - [ ] **Symlink Handling (Recursive Mode):**
-            - [ ] Do NOT follow symlinks during directory traversal.
-            - [ ] Remove the symlink itself, not the target.
-            - [ ] Never descend into symlinked directories.
-            - [ ] Handle broken symlinks (remove them).
-            - [ ] Tests: symlink removal tests, symlink-to-directory tests.
-        - [ ] **TOCTOU Hardening (FD-Based Traversal):**
-            - [ ] Use `openat()` to open directories relative to parent fd.
-            - [ ] Use `unlinkat()` to remove files relative to directory fd.
-            - [ ] Use `fstatat()` to stat files relative to directory fd.
-            - [ ] Never use path-based operations during traversal.
-            - [ ] Keep directory fd open during traversal of its contents.
-            - [ ] Handle directory fd invalidation gracefully.
-            - [ ] Files: `rm_walk.c` uses fd-based traversal throughout.
-            - [ ] Tests: TOCTOU tests with mock concurrent modifications.
-        - [ ] **Recursive Removal Algorithm:**
-            - [ ] Depth-first traversal: remove contents before directory.
-            - [ ] Open directory via `openat(parent_fd, name, O_DIRECTORY)`.
-            - [ ] Iterate directory with `getdents()` or `fdopendir()`.
-            - [ ] Skip `.` and `..` entries.
-            - [ ] Recursively remove subdirectories.
-            - [ ] Use `unlinkat(dir_fd, name, 0)` for files.
-            - [ ] Use `unlinkat(dir_fd, name, AT_REMOVEDIR)` for directories.
-            - [ ] Close directory fd after contents removed.
-        - [ ] **One-File-System Option:**
-            - [ ] Detect filesystem boundary during traversal.
-            - [ ] Compare `st_dev` of child to parent.
-            - [ ] Skip (do not descend) if `st_dev` differs.
-            - [ ] Warn when skipping due to filesystem boundary.
-            - [ ] Tests: cross-filesystem skip tests (with mock or loopback).
-        - [ ] **Interactive Prompting:**
-            - [ ] `-i`: Prompt before every removal.
-            - [ ] `-I`: Prompt once if more than 3 files or if `-r`.
-            - [ ] Prompt format: "rm: remove <type> '<path>'?".
-            - [ ] Accept y/Y for yes, n/N or other for no.
-            - [ ] Non-TTY behavior: `-i` reads from /dev/tty or skips.
-            - [ ] `-f` overrides `-i` (last option wins).
-        - [ ] **Permission & Ownership Handling:**
-            - [ ] Check write permission on parent directory (for unlink).
-            - [ ] Handle unwritable files with prompt (unless `-f`).
-            - [ ] Prompt: "rm: remove write-protected <type> '<path>'?".
-            - [ ] Sticky bit handling: only owner can delete in sticky dir.
-            - [ ] POSIX semantics: check effective UID vs file owner.
-        - [ ] **Special File Handling:**
-            - [ ] Regular files: `unlinkat(dir_fd, name, 0)`.
-            - [ ] Directories: `unlinkat(dir_fd, name, AT_REMOVEDIR)`.
-            - [ ] Symlinks: unlink the link, not target.
-            - [ ] Devices/FIFOs: unlink normally.
-            - [ ] Sockets: unlink normally.
-        - [ ] **Immutable Files & Extended Attributes:**
-            - [ ] Handle `EPERM` from unlink on immutable files.
-            - [ ] Document immutable flag behavior in man page.
-            - [ ] Privileged mode: can remove if root and chattr -i first (not auto).
-            - [ ] Report clear error for immutable files.
-        - [ ] **Error Handling:**
-            - [ ] Continue on per-file errors (unless fatal).
-            - [ ] Accumulate errors and return nonzero on any failure.
-            - [ ] `-f` suppresses error messages but still sets exit code.
-            - [ ] Exit code 0: all files removed successfully.
-            - [ ] Exit code 1: at least one file could not be removed.
-            - [ ] Handle `ENOENT` gracefully with `-f`.
-            - [ ] Handle `EACCES`, `EPERM`, `EBUSY`, `EROFS` appropriately.
-            - [ ] Handle `ENOTEMPTY` (race: dir filled during removal).
-        - [ ] **Path Handling:**
-            - [ ] No fixed-size path buffers (dynamic allocation).
-            - [ ] Handle paths with special characters.
-            - [ ] Handle paths at `PATH_MAX` limit.
-            - [ ] Canonicalize paths for root protection check.
-            - [ ] Reject paths ending in `/` for non-directories.
-        - [ ] **Signal Handling:**
-            - [ ] Catch SIGINT/SIGTERM for cleanup.
-            - [ ] Exit cleanly on signal (don't leave partial state).
-            - [ ] Document interruptibility in man page.
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Test recursive walker with mock filesystem.
-                - [ ] Test symlink detection logic.
-                - [ ] Test preserve-root detection.
-                - [ ] Test option parsing.
-                - [ ] Test fd-based traversal helpers.
-            - [ ] **Integration Tests:**
-                - [ ] Remove single file.
-                - [ ] Remove multiple files.
-                - [ ] Remove empty directory with `-d`.
-                - [ ] Remove non-empty directory with `-r`.
-                - [ ] Remove deep directory tree.
-                - [ ] Remove with `-f` (nonexistent file).
-                - [ ] Remove with `-i` (interactive prompt).
-                - [ ] Remove with `-I` (prompt once).
-                - [ ] Remove with `-v` (verbose output).
-                - [ ] Preserve-root protection test.
-                - [ ] Symlink removal (file and directory links).
-                - [ ] One-file-system boundary test.
-                - [ ] Write-protected file prompt test.
-                - [ ] Sticky bit handling test.
-            - [ ] **TOCTOU Tests:**
-                - [ ] Concurrent file creation during removal.
-                - [ ] Concurrent symlink replacement during removal.
-                - [ ] Concurrent directory creation during removal.
-                - [ ] Mock harness for race condition injection.
-            - [ ] **Property Tests:**
-                - [ ] Random directory trees removed completely.
-                - [ ] Symlinks never followed during recursion.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz path handling with binary filenames.
-                - [ ] Fuzz option parsing.
-                - [ ] Fuzz directory tree structures.
-            - [ ] **Acceptance Tests:**
-                - [ ] `rm file` -> file removed.
-                - [ ] `rm -r dir` -> dir and contents removed.
-                - [ ] `rm -f nonexist` -> no error.
-                - [ ] `rm -rf /` -> refused (preserve-root).
-                - [ ] `rm -rf --no-preserve-root /tmp/test` -> allowed.
-                - [ ] No accidental deletion in any test.
-        - [ ] **Documentation:**
-            - [ ] Write `rm(1)` man page covering all options.
-            - [ ] Document `--preserve-root` behavior prominently.
-            - [ ] Document risks of `rm -rf`.
-            - [ ] Document symlink behavior during recursion.
-            - [ ] Document sticky bit and permission handling.
-            - [ ] Write developer notes on fd-based traversal.
-            - [ ] Document TOCTOU mitigations.
-        - [ ] **Acceptance Criteria:**
-            - [ ] All CLI options implemented and tested.
-            - [ ] `--preserve-root` default prevents accidental root removal.
-            - [ ] FD-based traversal prevents TOCTOU races.
-            - [ ] Symlinks never followed during recursive removal.
-            - [ ] No memory leaks (valgrind clean).
-            - [ ] Correct exit codes for all scenarios.
-            - [ ] Man page complete and accurate.
-            - [ ] All tests pass in CI.
-    - [ ] **`mkdir` - Make directories (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/mkdir/mkdir.c` for TODO comments, fragile code.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture.
-            - [ ] Extract option parsing into `mkdir_opts.c` and `mkdir_opts.h`.
-            - [ ] Extract mode parsing into shared `lib/modeparse.c` (reusable by chmod).
-            - [ ] Extract parent creation logic into `mkdir_parents.c`.
-            - [ ] Write unit tests for each extracted module.
-        - [ ] **CLI Options:**
-            - [ ] `-p`, `--parents`: No error if existing, make parent directories as needed.
-            - [ ] `-m MODE`, `--mode=MODE`: Set file mode (as in chmod).
-            - [ ] `-v`, `--verbose`: Print a message for each created directory.
-            - [ ] `-Z`, `--context=CTX`: Set SELinux context (stub or implement if needed).
-            - [ ] `--help`: Display help and exit.
-            - [ ] `--version`: Display version and exit.
-        - [ ] **Mode Parsing:**
-            - [ ] **Octal Modes:**
-                - [ ] Parse octal strings (e.g., `0755`, `755`).
-                - [ ] Validate octal range (0-7 per digit).
-                - [ ] Support leading zero or no leading zero.
-            - [ ] **Symbolic Modes:**
-                - [ ] Parse symbolic modes (e.g., `u+rwx`, `a+rx`, `go-w`).
-                - [ ] Support WHO: `u` (user), `g` (group), `o` (other), `a` (all).
-                - [ ] Support PERM: `r` (read), `w` (write), `x` (execute).
-                - [ ] Support OP: `+` (add), `-` (remove), `=` (set exactly).
-                - [ ] Support multiple clauses (e.g., `u+rw,go+r`).
-                - [ ] Apply symbolic mode relative to initial mode (0777 for dirs).
-            - [ ] **Umask Interaction:**
-                - [ ] Without `-m`: apply umask to default mode (0777).
-                - [ ] With `-m`: use specified mode exactly (ignore umask for final).
-                - [ ] For `-p` intermediate dirs: use default mode with umask.
-                - [ ] Document umask interaction in man page.
-            - [ ] **Mode Library:**
-                - [ ] Create reusable `parse_mode()` function.
-                - [ ] Return parsed mode or error indicator.
-                - [ ] Unit tests for all mode formats.
-        - [ ] **Basic Directory Creation:**
-            - [ ] Create single directory with `mkdir()` syscall.
-            - [ ] Apply specified mode with `chmod()` after creation.
-            - [ ] Handle `EEXIST` error (fail unless `-p`).
-            - [ ] Report error on `EACCES`, `ENOENT`, `ENOTDIR`.
-            - [ ] Verbose output: "mkdir: created directory '<path>'".
-        - [ ] **Parent Directory Creation (`-p`):**
-            - [ ] Parse path into components.
-            - [ ] Create each missing intermediate directory.
-            - [ ] Intermediate directories get default mode (0777 & ~umask).
-            - [ ] Final directory gets specified mode (or default).
-            - [ ] Do not error if directory already exists.
-            - [ ] Error if path component exists but is not a directory.
-            - [ ] Handle paths starting with `/` (absolute).
-            - [ ] Handle paths starting with `./` or `../` (relative).
-            - [ ] Handle trailing slashes correctly.
-        - [ ] **Race-Safe Creation:**
-            - [ ] Use `mkdirat()` for relative creation within parent fd.
-            - [ ] Handle `EEXIST` gracefully during `-p` (concurrent mkdir).
-            - [ ] After `EEXIST`, verify it's a directory (not a file).
-            - [ ] Use `fstatat()` to check type after race.
-            - [ ] Idempotent behavior: concurrent `mkdir -p` on same path succeeds.
-            - [ ] Files: use fd-based operations where possible.
-        - [ ] **Permissions & Ownership:**
-            - [ ] Created directories owned by effective UID/GID.
-            - [ ] When running as root: document that ownership is root.
-            - [ ] Setgid inheritance: if parent has setgid, child inherits.
-            - [ ] Document ownership behavior in man page.
-        - [ ] **Path Handling:**
-            - [ ] No fixed-size path buffers (dynamic allocation).
-            - [ ] Handle paths with special characters.
-            - [ ] Handle paths at `PATH_MAX` limit.
-            - [ ] Handle empty path component (double slash).
-            - [ ] Handle `.` and `..` components correctly.
-        - [ ] **Error Handling:**
-            - [ ] Continue to next operand on per-directory error.
-            - [ ] Accumulate errors and return nonzero on any failure.
-            - [ ] Exit code 0: all directories created successfully.
-            - [ ] Exit code 1: at least one directory could not be created.
-            - [ ] Clear error messages with path and errno description.
-            - [ ] Handle `ENOSPC`, `EDQUOT`, `EROFS`.
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Test octal mode parsing.
-                - [ ] Test symbolic mode parsing.
-                - [ ] Test mode with umask application.
-                - [ ] Test path component splitting.
-                - [ ] Test option parsing.
-            - [ ] **Integration Tests:**
-                - [ ] Create single directory.
-                - [ ] Create directory with `-m` octal mode.
-                - [ ] Create directory with `-m` symbolic mode.
-                - [ ] Create directory with `-v` verbose.
-                - [ ] Create parent directories with `-p`.
-                - [ ] Create already existing directory (error without `-p`).
-                - [ ] Create already existing directory (success with `-p`).
-                - [ ] Path component is file (error).
-                - [ ] Deep path creation.
-                - [ ] Trailing slash handling.
-            - [ ] **Race/Concurrency Tests:**
-                - [ ] Concurrent `mkdir -p` on same path.
-                - [ ] Verify idempotent behavior.
-                - [ ] Concurrent mkdir where one creates file (error case).
-            - [ ] **Property Tests:**
-                - [ ] Random paths created correctly with `-p`.
-                - [ ] Mode applied correctly after creation.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz path handling with binary filenames.
-                - [ ] Fuzz mode parsing with random strings.
-                - [ ] Fuzz option parsing.
-            - [ ] **Acceptance Tests:**
-                - [ ] `mkdir dir` -> dir exists.
-                - [ ] `mkdir -p a/b/c` -> creates deep path.
-                - [ ] `mkdir exists` -> fails (unless -p).
-                - [ ] `mkdir -m 700 dir` -> dir has mode 700.
-                - [ ] `mkdir -pv a/b` -> prints created directories.
-        - [ ] **Documentation:**
-            - [ ] Write `mkdir(1)` man page covering all options.
-            - [ ] Document `-m` mode format (octal and symbolic).
-            - [ ] Document umask interaction.
-            - [ ] Document `-p` idempotent behavior.
-            - [ ] Document race conditions and safety.
-            - [ ] Write developer notes on atomic creation.
-            - [ ] Document ownership and setgid behavior.
-        - [ ] **Acceptance Criteria:**
-            - [ ] All CLI options implemented and tested.
-            - [ ] `-p` is idempotent (concurrent safe).
-            - [ ] Mode parsing supports octal and symbolic.
-            - [ ] Umask correctly applied.
-            - [ ] No memory leaks (valgrind clean).
-            - [ ] Correct exit codes for all scenarios.
-            - [ ] Man page complete and accurate.
-            - [ ] All tests pass in CI.
-    - [ ] **`rmdir` - Remove empty directories (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/rmdir/rmdir.c` for TODO comments, fragile code.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture.
-            - [ ] Extract option parsing into `rmdir_opts.c` and `rmdir_opts.h`.
-            - [ ] Extract ancestor removal logic into `rmdir_parents.c`.
-            - [ ] Write unit tests for each extracted module.
-        - [ ] **CLI Options:**
-            - [ ] `-p`, `--parents`: Remove ancestors if they become empty after removal.
-            - [ ] `-v`, `--verbose`: Output a diagnostic for every directory processed.
-            - [ ] `--ignore-fail-on-non-empty`: Ignore failures due to non-empty.
-            - [ ] `--help`: Display help and exit.
-            - [ ] `--version`: Display version and exit.
-        - [ ] **Basic Directory Removal:**
-            - [ ] Remove single directory with `rmdir()` syscall.
-            - [ ] Fail if directory is not empty (`ENOTEMPTY`).
-            - [ ] Fail if path is not a directory (`ENOTDIR`).
-            - [ ] Fail if path does not exist (`ENOENT`).
-            - [ ] Verbose output: "rmdir: removing directory, '<path>'".
-        - [ ] **Ancestor Removal (`-p`):**
-            - [ ] Parse path into ancestor components.
-            - [ ] After removing target, attempt to remove parent.
-            - [ ] Continue up the tree while directories are empty.
-            - [ ] Stop at first failure (non-empty, permission, etc.).
-            - [ ] Handle relative paths (./a/b/c).
-            - [ ] Handle absolute paths (/a/b/c).
-            - [ ] Do not attempt to remove root `/` or `.`.
-            - [ ] Verbose output for each ancestor removed.
-        - [ ] **Safety & Validation:**
-            - [ ] Do NOT follow symlinks.
-            - [ ] Refuse removal if path is a symlink to a directory.
-            - [ ] Verify path is a directory before removal.
-            - [ ] Refuse removal of `.` and `..`.
-            - [ ] Refuse removal of `/` (always).
-        - [ ] **Race-Safe Removal:**
-            - [ ] Use `openat()` to open parent directory.
-            - [ ] Use `fstatat()` to verify target is empty directory.
-            - [ ] Use `unlinkat(parent_fd, name, AT_REMOVEDIR)` for removal.
-            - [ ] Handle race where directory becomes non-empty.
-            - [ ] Handle race where directory is removed by another process.
-            - [ ] Files: fd-based validation before removal.
-        - [ ] **Error Handling:**
-            - [ ] Continue to next operand on per-directory error.
-            - [ ] Accumulate errors and return nonzero on any failure.
-            - [ ] Exit code 0: all directories removed successfully.
-            - [ ] Exit code 1: at least one directory could not be removed.
-            - [ ] Clear error messages with path and errno description.
-            - [ ] `--ignore-fail-on-non-empty`: suppress `ENOTEMPTY` errors.
-            - [ ] Handle `EACCES`, `EPERM`, `EBUSY`, `EROFS`.
-        - [ ] **Path Handling:**
-            - [ ] No fixed-size path buffers (dynamic allocation).
-            - [ ] Handle paths with special characters.
-            - [ ] Handle paths at `PATH_MAX` limit.
-            - [ ] Handle trailing slashes correctly.
-            - [ ] Handle empty path component (error).
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Test ancestor path parsing.
-                - [ ] Test option parsing.
-                - [ ] Test symlink detection.
-                - [ ] Test empty directory detection.
-            - [ ] **Integration Tests:**
-                - [ ] Remove single empty directory.
-                - [ ] Remove single non-empty directory (error).
-                - [ ] Remove with `-v` (verbose output).
-                - [ ] Remove with `-p` (ancestors).
-                - [ ] Ancestor stops at non-empty.
-                - [ ] Symlink to directory (error).
-                - [ ] Path is file not directory (error).
-                - [ ] Deep ancestor chain removal.
-                - [ ] `--ignore-fail-on-non-empty` behavior.
-            - [ ] **Race/Concurrency Tests:**
-                - [ ] Concurrent file creation during removal.
-                - [ ] Concurrent directory creation in target.
-                - [ ] Concurrent removal by another process.
-            - [ ] **Property Tests:**
-                - [ ] Random empty directory trees removed correctly.
-                - [ ] `-p` removes as many ancestors as possible.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz path handling with binary filenames.
-                - [ ] Fuzz option parsing.
-            - [ ] **Acceptance Tests:**
-                - [ ] `rmdir empty_dir` -> succeeds.
-                - [ ] `rmdir non_empty_dir` -> fails.
-                - [ ] `rmdir -p a/b/c` -> removes c, then b, then a.
-                - [ ] `rmdir -pv a/b` -> verbose output for each.
-                - [ ] Symlink to dir -> error, not followed.
-        - [ ] **Documentation:**
-            - [ ] Write `rmdir(1)` man page covering all options.
-            - [ ] Document `-p` ancestor removal behavior.
-            - [ ] Document symlink handling (not followed).
-            - [ ] Document race condition handling.
-            - [ ] Write developer notes on fd-based validation.
-        - [ ] **Acceptance Criteria:**
-            - [ ] All CLI options implemented and tested.
-            - [ ] `-p` removes ancestors correctly.
-            - [ ] Symlinks never followed.
-            - [ ] Race-safe with fd-based operations.
-            - [ ] No memory leaks (valgrind clean).
-            - [ ] Correct exit codes for all scenarios.
-            - [ ] Man page complete and accurate.
-            - [ ] All tests pass in CI.
-    - [ ] **`cal` - Display a calendar (Production Quality Implementation):**
-        - [ ] **Audit & Design:**
-            - [ ] Review BSD and GNU cal implementations for feature parity.
-            - [ ] Document supported year range (e.g., 1-9999 or wider).
-            - [ ] Document Gregorian/Julian transition handling strategy.
-            - [ ] Create design doc: `docs/cal-design.md`.
-        - [ ] **CLI Options:**
-            - [ ] `[month] [year]`: Display specific month/year.
-            - [ ] `[year]`: Display entire year calendar.
-            - [ ] `-1`: Display single month (default).
-            - [ ] `-3`: Display previous, current, and next month.
-            - [ ] `-y`: Display entire year calendar.
-            - [ ] `-m`: Start week on Monday (ISO 8601).
-            - [ ] `-s`: Start week on Sunday (default, traditional).
-            - [ ] `-j`, `--julian`: Display Julian day-of-year (1-366).
-            - [ ] `-w`: Display week numbers.
-            - [ ] `-n NUM`: Display NUM months starting from current.
-            - [ ] `-A NUM`: Display NUM months after current.
-            - [ ] `-B NUM`: Display NUM months before current.
-            - [ ] `-h`, `--no-highlight`: Do not highlight today.
-            - [ ] `--color=WHEN`: Colorize output (always, auto, never).
-            - [ ] `--help`: Display help and exit.
-            - [ ] `--version`: Display version and exit.
-        - [ ] **Calendar System Options:**
-            - [ ] `--gregorian`: Use Gregorian calendar exclusively.
-            - [ ] `--julian`: Use Julian calendar exclusively.
-            - [ ] `-p`, `--reform=DATE`: Set Gregorian reform date (default: 1752-09-14).
-            - [ ] Support common reform dates (1582, 1752, etc.).
-            - [ ] Document historical transitions in man page.
-        - [ ] **Date Calculations:**
-            - [ ] **Leap Year Rules:**
-                - [ ] Gregorian: divisible by 4, except centuries unless by 400.
-                - [ ] Julian: divisible by 4.
-                - [ ] Implement `is_leap_year(year, calendar_type)`.
-                - [ ] Unit tests for leap year edge cases.
-            - [ ] **Day of Week Calculation:**
-                - [ ] Implement Zeller's congruence or similar algorithm.
-                - [ ] Handle Gregorian/Julian calendar differences.
-                - [ ] Calculate first day of any month in range.
-                - [ ] Unit tests against known reference dates.
-            - [ ] **Days in Month:**
-                - [ ] Standard days per month.
-                - [ ] February adjustment for leap years.
-                - [ ] Handle Gregorian transition gaps.
-            - [ ] **Julian Day Number:**
-                - [ ] Calculate day-of-year (1-365/366).
-                - [ ] Display with `-j` flag.
-        - [ ] **Gregorian/Julian Transition:**
-            - [ ] Default transition: September 1752 (British/US).
-            - [ ] September 1752: skip Sep 3-13 (11 days).
-            - [ ] Configurable transition date with `--reform`.
-            - [ ] Correctly display months that span transition.
-            - [ ] Handle years before transition with Julian calendar.
-            - [ ] Handle years after transition with Gregorian calendar.
-            - [ ] Document behavior in man page.
-        - [ ] **Output Formatting:**
-            - [ ] **Single Month:**
-                - [ ] Header: month name and year, centered.
-                - [ ] Day names row (Su Mo Tu We Th Fr Sa or Mo Tu...).
-                - [ ] Weeks in rows, right-aligned day numbers.
-                - [ ] Spaces for days before/after month.
-                - [ ] 20 or 21 character width per month.
-            - [ ] **Year Calendar:**
-                - [ ] 3 months per row (or configurable).
-                - [ ] Centered year header.
-                - [ ] Proper spacing between month columns.
-            - [ ] **Three-Month Display (`-3`):**
-                - [ ] Previous, current, next month side by side.
-            - [ ] **Today Highlighting:**
-                - [ ] Default: highlight today with reverse video.
-                - [ ] `-h` to disable.
-                - [ ] ANSI escape codes for terminal.
-                - [ ] Detect if output is TTY.
-            - [ ] **Julian Day Format (`-j`):**
-                - [ ] 3-digit day-of-year instead of 2-digit date.
-                - [ ] Wider column layout (27 chars per month).
-            - [ ] **Week Numbers (`-w`):**
-                - [ ] ISO week numbers in left column.
-        - [ ] **Locale Support:**
-            - [ ] **Month Names:**
-                - [ ] Use locale-specific month names.
-                - [ ] Fallback to English if locale unavailable.
-            - [ ] **Day Names:**
-                - [ ] Use locale-specific abbreviated day names.
-                - [ ] Handle wide characters in names.
-            - [ ] **First Day of Week:**
-                - [ ] Respect LC_TIME first_weekday if available.
-                - [ ] Override with `-m` or `-s`.
-            - [ ] **Character Width:**
-                - [ ] Handle wide characters (CJK) in names.
-                - [ ] Calculate display width correctly.
-        - [ ] **Error Handling:**
-            - [ ] Invalid month (< 1 or > 12): error.
-            - [ ] Invalid year (out of range): error.
-            - [ ] Invalid option combinations: error.
-            - [ ] Exit code 0: success.
-            - [ ] Exit code 1: error.
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Leap year calculation (multiple edge cases).
-                - [ ] Day of week calculation (known dates).
-                - [ ] Days in month (all months, leap/non-leap).
-                - [ ] Julian day-of-year calculation.
-                - [ ] Option parsing.
-            - [ ] **Reference Data Tests:**
-                - [ ] Compare output against ncal/cal reference.
-                - [ ] Test years: 1, 100, 1582, 1752, 2000, 2024, 9999.
-                - [ ] Test leap years: 1600, 1700, 1800, 1900, 2000, 2100.
-                - [ ] Test February in leap/non-leap years.
-            - [ ] **Gregorian/Julian Transition Tests:**
-                - [ ] September 1752 calendar (11-day gap).
-                - [ ] October 1582 calendar (10-day gap).
-                - [ ] Custom reform dates.
-            - [ ] **Locale Tests:**
-                - [ ] Different LC_TIME settings.
-                - [ ] First day of week variations.
-                - [ ] Non-ASCII month/day names.
-            - [ ] **Property Tests:**
-                - [ ] Any valid month/year produces valid output.
-                - [ ] February days correct for any year.
-                - [ ] Day count per month always correct.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz year values (extreme ranges).
-                - [ ] Fuzz option combinations.
-            - [ ] **Acceptance Tests:**
-                - [ ] `cal` -> displays current month.
-                - [ ] `cal 2024` -> displays 2024 year calendar.
-                - [ ] `cal 9 1752` -> shows September 1752 with gap.
-                - [ ] `cal -j` -> Julian day-of-year format.
-                - [ ] `cal -m` -> weeks start Monday.
-                - [ ] `cal -3` -> three months displayed.
-        - [ ] **Documentation:**
-            - [ ] Write `cal(1)` man page covering all options.
-            - [ ] Document supported year range.
-            - [ ] Document Gregorian/Julian transition behavior.
-            - [ ] Document `-j` Julian day format.
-            - [ ] Document locale support.
-            - [ ] Historical notes on calendar reforms.
-        - [ ] **Acceptance Criteria:**
-            - [ ] All CLI options implemented and tested.
-            - [ ] Output matches authoritative references.
-            - [ ] Leap years calculated correctly.
-            - [ ] Gregorian/Julian transition handled.
-            - [ ] Locale-aware formatting works.
-            - [ ] No memory leaks (valgrind clean).
-            - [ ] Man page complete and accurate.
-            - [ ] All tests pass in CI.
-    - [ ] **`cat` - Concatenate files and print on standard output (Production Quality Rewrite):**
-        - [ ] **Audit & Refactor Existing Code:**
-            - [ ] Audit existing `bin/cat/cat.c` for TODO comments, fragile code.
-            - [ ] Document all functionality gaps and bugs.
-            - [ ] Create refactoring plan: modular architecture.
-            - [ ] Extract option parsing into separate function.
-            - [ ] Extract I/O loop into reusable function.
-            - [ ] Write unit tests for each module.
-        - [ ] **CLI Options (POSIX + Extensions):**
-            - [ ] `-u`: Write bytes unbuffered (POSIX).
-            - [ ] `-` (dash): Read from stdin (POSIX).
-            - [ ] `-n`, `--number`: Number all output lines.
-            - [ ] `-b`, `--number-nonblank`: Number non-blank lines only.
-            - [ ] `-s`, `--squeeze-blank`: Suppress repeated empty lines.
-            - [ ] `-E`, `--show-ends`: Display `$` at end of each line.
-            - [ ] `-T`, `--show-tabs`: Display TAB as `^I`.
-            - [ ] `-v`, `--show-nonprinting`: Display control chars as `^X`, M-X.
-            - [ ] `-A`, `--show-all`: Equivalent to `-vET`.
-            - [ ] `-e`: Equivalent to `-vE`.
-            - [ ] `-t`: Equivalent to `-vT`.
-            - [ ] `--help`: Display help and exit.
-            - [ ] `--version`: Display version and exit.
-        - [ ] **Input Handling:**
-            - [ ] Read from files specified as arguments.
-            - [ ] Read from stdin if no files or `-` argument.
-            - [ ] Handle multiple `-` arguments (read stdin multiple times).
-            - [ ] Handle binary files (pass through unchanged).
-            - [ ] Handle empty files (output nothing).
-            - [ ] Handle very large files (streaming, no full buffering).
-            - [ ] Handle files with no trailing newline.
-        - [ ] **Output Handling:**
-            - [ ] Write to stdout.
-            - [ ] `-u` flag: unbuffered writes (one syscall per read).
-            - [ ] Default: buffered I/O for performance.
-            - [ ] Handle `EINTR` on write (retry).
-            - [ ] Handle `EPIPE` gracefully (broken pipe).
-            - [ ] Handle partial writes.
-        - [ ] **Line Numbering (`-n`, `-b`):**
-            - [ ] Right-justify line numbers in 6-character field.
-            - [ ] Follow number with TAB separator.
-            - [ ] `-n`: Number all lines including blank.
-            - [ ] `-b`: Number only non-blank lines.
-            - [ ] Line counter persists across files.
-            - [ ] Handle lines without trailing newline.
-        - [ ] **Blank Line Squeezing (`-s`):**
-            - [ ] Replace multiple consecutive blank lines with one.
-            - [ ] Track state across read boundaries.
-            - [ ] Works correctly with `-n` (numbers squeezed output).
-        - [ ] **End-of-Line Marker (`-E`):**
-            - [ ] Display `$` before each newline.
-            - [ ] Handle lines without trailing newline.
-        - [ ] **Tab Display (`-T`):**
-            - [ ] Display TAB characters as `^I`.
-        - [ ] **Non-Printing Characters (`-v`):**
-            - [ ] Display control chars (0x00-0x1F) as `^@` through `^_`.
-            - [ ] Display DEL (0x7F) as `^?`.
-            - [ ] Display high-bit chars (0x80-0x9F) as `M-^@` through `M-^_`.
-            - [ ] Display high-bit chars (0xA0-0xFE) as `M- ` through `M-~`.
-            - [ ] Display 0xFF as `M-^?`.
-            - [ ] Exception: TAB, NL, FF handled separately.
-        - [ ] **Error Handling:**
-            - [ ] Continue to next file on per-file error.
-            - [ ] Print error message to stderr for each failure.
-            - [ ] Return nonzero exit code if any file failed.
-            - [ ] Exit code 0: all files processed successfully.
-            - [ ] Exit code 1: at least one file could not be read.
-            - [ ] Handle `ENOENT`, `EACCES`, `EISDIR`.
-        - [ ] **Special Cases:**
-            - [ ] Handle directories (error: is a directory).
-            - [ ] Handle device files (read normally).
-            - [ ] Handle FIFOs/pipes.
-            - [ ] Handle socket files (error or read).
-            - [ ] Symlinks: follow to target.
-        - [ ] **Performance:**
-            - [ ] Use efficient buffer size (e.g., 64KB).
-            - [ ] Minimize syscalls in default mode.
-            - [ ] Streaming: never buffer entire file.
-            - [ ] Consider `sendfile()` for file-to-stdout (optional).
-        - [ ] **Build & Installation:**
-            - [ ] Update `bin/cat/Makefile`.
-            - [ ] Install to `/bin/cat`.
-            - [ ] Add to root filesystem `dist/`.
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Option parsing.
-                - [ ] Line numbering logic.
-                - [ ] Blank squeezing state machine.
-                - [ ] Non-printing character encoding.
-            - [ ] **Integration Tests:**
-                - [ ] Basic: `cat file` -> prints contents.
-                - [ ] Multiple files: `cat file1 file2` -> concatenated.
-                - [ ] Stdin: `echo test | cat` -> "test".
-                - [ ] Dash: `cat - file` -> stdin then file.
-                - [ ] Line numbers: `cat -n file` -> numbered lines.
-                - [ ] Non-blank numbers: `cat -b file`.
-                - [ ] Squeeze blank: `cat -s file`.
-                - [ ] Show ends: `cat -E file` -> `$` at EOL.
-                - [ ] Show tabs: `cat -T file` -> `^I`.
-                - [ ] Show non-printing: `cat -v file`.
-                - [ ] Show all: `cat -A file`.
-                - [ ] Unbuffered: `cat -u file`.
-                - [ ] Binary file passthrough.
-                - [ ] Empty file.
-                - [ ] Very large file.
-                - [ ] File without trailing newline.
-                - [ ] Directory argument (error).
-            - [ ] **Error Handling Tests:**
-                - [ ] Nonexistent file.
-                - [ ] Permission denied.
-                - [ ] Continue after error.
-            - [ ] **Property Tests:**
-                - [ ] Output byte count equals input byte count (without options).
-                - [ ] Line count matches with `-n`.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz binary files.
-                - [ ] Fuzz option combinations.
-            - [ ] **Acceptance Tests:**
-                - [ ] `cat file` -> prints contents.
-                - [ ] `cat file1 file2` -> prints concatenated.
-                - [ ] `cat -n file` -> lines numbered.
-                - [ ] `cat -` -> reads stdin.
-        - [ ] **Documentation:**
-            - [ ] Write `cat(1)` man page covering all options.
-            - [ ] Document POSIX `-u` behavior.
-            - [ ] Document `-v` encoding scheme.
-            - [ ] Document error continuation behavior.
-        - [ ] **Acceptance Criteria:**
-            - [ ] All POSIX options implemented (`-u`).
-            - [ ] All common extensions implemented (`-n`, `-b`, `-s`, `-E`, `-T`, `-v`).
-            - [ ] Binary files handled correctly.
-            - [ ] No memory leaks (valgrind clean).
-            - [ ] Correct exit codes.
-            - [ ] Man page complete.
-            - [ ] All tests pass in CI.
-    - [ ] **`echo` - Display a line of text (Standalone `/bin/echo`):**
-        - [ ] **Design & Rationale:**
-            - [ ] Create standalone `/bin/echo` executable separate from shell builtin.
-            - [ ] Document differences from shell builtin echo.
-            - [ ] Shell builtin takes precedence; `/bin/echo` invoked via explicit path.
-            - [ ] Design doc: behavior parity with BSD/GNU echo.
-        - [ ] **CLI Options:**
-            - [ ] `-n`: Do not output the trailing newline.
-            - [ ] `-e`: Enable interpretation of backslash escapes.
-            - [ ] `-E`: Disable interpretation of backslash escapes (default).
-            - [ ] `--help`: Display help and exit (GNU extension).
-            - [ ] `--version`: Display version and exit (GNU extension).
-            - [ ] POSIX mode: only `-n` supported when POSIXLY_CORRECT set.
-        - [ ] **Backslash Escape Sequences (`-e`):**
-            - [ ] `\\`: Backslash.
-            - [ ] `\a`: Alert (bell).
-            - [ ] `\b`: Backspace.
-            - [ ] `\c`: Suppress further output (stop processing).
-            - [ ] `\e`, `\E`: Escape character (0x1B).
-            - [ ] `\f`: Form feed.
-            - [ ] `\n`: Newline.
-            - [ ] `\r`: Carriage return.
-            - [ ] `\t`: Horizontal tab.
-            - [ ] `\v`: Vertical tab.
-            - [ ] `\0nnn`: Octal byte value (0-3 digits).
-            - [ ] `\xHH`: Hexadecimal byte value (1-2 digits).
-            - [ ] `\uHHHH`: Unicode code point (4 hex digits).
-            - [ ] `\UHHHHHHHH`: Unicode code point (8 hex digits).
-        - [ ] **Argument Handling:**
-            - [ ] Print all arguments separated by single space.
-            - [ ] Handle empty arguments correctly.
-            - [ ] Handle arguments with embedded whitespace.
-            - [ ] Handle arguments with special characters.
-            - [ ] Append newline unless `-n` specified.
-        - [ ] **Option Parsing:**
-            - [ ] Stop option parsing at first non-option argument.
-            - [ ] Treat `-` as literal argument.
-            - [ ] Treat `--` as end of options.
-            - [ ] Handle combined options (e.g., `-ne`).
-            - [ ] Invalid options treated as arguments (POSIX behavior).
-        - [ ] **Output:**
-            - [ ] Write to stdout using `write()` syscall.
-            - [ ] Handle `EINTR` (retry on interrupt).
-            - [ ] Handle partial writes.
-            - [ ] Exit code 0 on success.
-            - [ ] Exit code 1 on write error.
-        - [ ] **Build & Installation:**
-            - [ ] Create `bin/echo/` directory structure.
-            - [ ] Create `bin/echo/Makefile`.
-            - [ ] Install to `/bin/echo`.
-            - [ ] Add to root filesystem `dist/`.
-        - [ ] **Tests:**
-            - [ ] **Unit Tests:**
-                - [ ] Escape sequence parsing.
-                - [ ] Option parsing.
-                - [ ] Octal/hex/unicode parsing.
-            - [ ] **Integration Tests:**
-                - [ ] Basic: `echo hello` -> "hello\n".
-                - [ ] No newline: `echo -n hello` -> "hello".
-                - [ ] Tab: `echo -e 'a\tb'` -> "a\tb".
-                - [ ] Newline: `echo -e 'a\nb'` -> "a\nb".
-                - [ ] Backslash: `echo -e '\\'` -> "\\".
-                - [ ] Octal: `echo -e '\101'` -> "A".
-                - [ ] Hex: `echo -e '\x41'` -> "A".
-                - [ ] Stop output: `echo -e 'a\cb'` -> "a".
-                - [ ] Multiple args: `echo a b c` -> "a b c\n".
-                - [ ] Empty args: `echo "" x` -> " x\n".
-                - [ ] Dash literal: `echo -` -> "-\n".
-                - [ ] Combined options: `echo -ne 'a\n'` -> "a\n".
-                - [ ] No escape: `echo -E 'a\tb'` -> "a\\tb\n".
-            - [ ] **Edge Case Tests:**
-                - [ ] Very long arguments.
-                - [ ] Binary data in arguments.
-                - [ ] Unicode characters.
-                - [ ] Null bytes in escape sequences.
-            - [ ] **Property Tests:**
-                - [ ] Output length matches expected.
-                - [ ] Escape sequences produce valid output.
-            - [ ] **Fuzz Tests:**
-                - [ ] Fuzz argument parsing.
-                - [ ] Fuzz escape sequence parsing.
-            - [ ] **Acceptance Tests:**
-                - [ ] Explicit `/bin/echo` works.
-                - [ ] Compatible with common scripts.
-        - [ ] **Documentation:**
-            - [ ] Write `echo(1)` man page.
-            - [ ] Document all escape sequences.
-            - [ ] Document `-e`/`-E` behavior.
-            - [ ] Document differences from shell builtin.
-            - [ ] Document POSIX vs GNU extensions.
-        - [ ] **Acceptance Criteria:**
-            - [ ] All CLI options implemented.
-            - [ ] All escape sequences work correctly.
-            - [ ] Standalone binary at `/bin/echo`.
-            - [ ] No memory leaks (valgrind clean).
-            - [ ] Exit codes correct.
-            - [ ] Man page complete.
-            - [ ] All tests pass in CI.
-    - [ ] **`touch` - Change file timestamps:**
-        - [ ] **Purpose:** Update the access and modification times of each FILE to the current time.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-a`: Change only the access time.
-            - [ ] `-m`: Change only the modification time.
-            - [ ] `-c`, `--no-create`: Do not create any files.
-            - [ ] `-d`, `--date=STRING`: Parse STRING and use it instead of current time.
-            - [ ] `-r`, `--reference=FILE`: Use this file's times instead of current time.
-        - [ ] **Runtime:**
-            - [ ] Create empty file if not exists (unless `-c`).
-            - [ ] Update times using `utimensat`.
-        - [ ] **Library dependencies:**
-            - [ ] `open` (O_CREAT), `utimensat`, `parse_time`
-        - [ ] **Acceptance tests:**
-            - [ ] `touch newfile` -> file created
-            - [ ] `touch existing` -> mtime updated
-            - [ ] `touch -c nonexist` -> file not created
+- [ ] **Shell (`sh`):** (REQ: REQ-09-0001)
+    - [ ] **Code Audit & Infrastructure:** (REQ: REQ-09-0002)
+        - [ ] Audit `lexer.c`, `parser.c`, `expand.c`, `exec.c`, `sh.c` for naive implementations or TODOs. (REQ: REQ-09-0003)
+        - [ ] Setup coverage-guided fuzzing for the parser and expansion engine. (REQ: REQ-09-0004)
+    - [ ] **Invocation & Startup:** (REQ: REQ-09-0005)
+        - [ ] Handle `sh -c` correctly. (REQ: REQ-09-0006)
+        - [ ] Handle `sh -s` correctly. (REQ: REQ-09-0007)
+        - [ ] Detect and handle login shell behavior. (REQ: REQ-09-0008)
+        - [ ] Argument parsing and POSIX option processing. (REQ: REQ-09-0009)
+        - [ ] Interactive vs non-interactive mode detection. (REQ: REQ-09-0010)
+        - [ ] Startup files: `ENV` and profile handling. (REQ: REQ-09-0011)
+        - [ ] Locale and environment initialization. (REQ: REQ-09-0012)
+        - [ ] Signal disposition at startup. (REQ: REQ-09-0013)
+    - [ ] **Lexical Analysis:** (REQ: REQ-09-0014)
+        - [ ] Delimiters (space, tab, newline, `;`, `&`, `|`, `(`, `)`). (REQ: REQ-09-0015)
+        - [ ] Quoting (`'` single, `"` double) and escaping (`\`). (REQ: REQ-09-0016)
+        - [ ] Operators (`&&`, `||`, `>>`, `<<`, `<&`, `>&`). (REQ: REQ-09-0017)
+        - [ ] Comment handling (`#`). (REQ: REQ-09-0018)
+        - [ ] Line continuation rules (backslash-newline). (REQ: REQ-09-0019)
+        - [ ] Here-document lexing (quoted vs unquoted delimiters). (REQ: REQ-09-0020)
+    - [ ] **Shell Grammar & Parsing:** (REQ: REQ-09-0021)
+        - [ ] Simple commands. (REQ: REQ-09-0022)
+        - [ ] Pipelines. (REQ: REQ-09-0023)
+        - [ ] Lists (`;`, `&`, `&&`, `||`). (REQ: REQ-09-0024)
+        - [ ] Compound commands (`if`, `while`, `for`, `case`). (REQ: REQ-09-0025)
+        - [ ] Grouping `{}` and subshells `()`. (REQ: REQ-09-0026)
+        - [ ] Function definitions. (REQ: REQ-09-0027)
+        - [ ] Precedence and associativity verification. (REQ: REQ-09-0028)
+        - [ ] Robust error recovery and diagnostics. (REQ: REQ-09-0029)
+    - [ ] **Expansions (Exact Order):** (REQ: REQ-09-0030)
+        - [ ] **1. Tilde Expansion** (REQ: REQ-09-0031)
+        - [ ] **2. Parameter Expansion:** (REQ: REQ-09-0032)
+            - [ ] Basic `$VAR`, `${VAR}`. (REQ: REQ-09-0033)
+            - [ ] `${VAR:-def}`, `${VAR:=def}`, `${VAR:?err}`, `${VAR:+alt}`. (REQ: REQ-09-0034)
+            - [ ] `${#VAR}` (Length). (REQ: REQ-09-0035)
+            - [ ] `${VAR%pat}`, `${VAR%%pat}` (Suffix). (REQ: REQ-09-0036)
+            - [ ] `${VAR#pat}`, `${VAR##pat}` (Prefix). (REQ: REQ-09-0037)
+            - [ ] Special parameters: `$@`, `$*`, `$#`, `$?`, `$$`, `$!`, `$-`. (REQ: REQ-09-0038)
+            - [ ] Nested parameter expansions. (REQ: REQ-09-0039)
+        - [ ] **3. Command Substitution** (`$(cmd)`). (REQ: REQ-09-0040)
+        - [ ] **4. Arithmetic Expansion** (`$(( ... ))`). (REQ: REQ-09-0041)
+        - [ ] **5. Field Splitting:** Use `$IFS` for unquoted expansions. (REQ: REQ-09-0042)
+        - [ ] **6. Pathname Expansion:** Globbing (`*`, `?`, `[...]`). (REQ: REQ-09-0043)
+        - [ ] **7. Quote Removal:** Final pass. (REQ: REQ-09-0044)
+    - [ ] **Redirections:** (REQ: REQ-09-0045)
+        - [ ] Input/Output (`<`, `>`, `>>`). (REQ: REQ-09-0046)
+        - [ ] FD duplication (`<&`, `>&`). (REQ: REQ-09-0047)
+        - [ ] Here-documents (`<<`). (REQ: REQ-09-0048)
+        - [ ] Proper ordering and evaluation timing. (REQ: REQ-09-0049)
+        - [ ] Error handling and rollback (save/restore). (REQ: REQ-09-0050)
+    - [ ] **Execution Engine:** (REQ: REQ-09-0051)
+        - [ ] Builtin vs external command resolution. (REQ: REQ-09-0052)
+        - [ ] PATH search rules. (REQ: REQ-09-0053)
+        - [ ] `exec` behavior (shell replacement). (REQ: REQ-09-0054)
+        - [ ] Process forking model. (REQ: REQ-09-0055)
+        - [ ] Job control hooks integration. (REQ: REQ-09-0056)
+        - [ ] Exit status propagation. (REQ: REQ-09-0057)
+        - [ ] `set -e` semantics. (REQ: REQ-09-0058)
+    - [ ] **Builtin Commands:** (REQ: REQ-09-0059)
+        - [ ] `:` (Null command). (REQ: REQ-09-0060)
+        - [ ] `.` (Dot/Source). (REQ: REQ-09-0061)
+        - [ ] `break`. (REQ: REQ-09-0062)
+        - [ ] `continue`. (REQ: REQ-09-0063)
+        - [ ] `cd` (including `CDPATH`). (REQ: REQ-09-0064)
+        - [ ] `command`. (REQ: REQ-09-0065)
+        - [ ] `eval`. (REQ: REQ-09-0066)
+        - [ ] `exec`. (REQ: REQ-09-0067)
+        - [ ] `exit`. (REQ: REQ-09-0068)
+        - [ ] `export`. (REQ: REQ-09-0069)
+        - [ ] `getopts`. (REQ: REQ-09-0070)
+        - [ ] `read`. (REQ: REQ-09-0071)
+        - [ ] `readonly`. (REQ: REQ-09-0072)
+        - [ ] `return`. (REQ: REQ-09-0073)
+        - [ ] `set`. (REQ: REQ-09-0074)
+        - [ ] `unset`. (REQ: REQ-09-0075)
+        - [ ] `shift`. (REQ: REQ-09-0076)
+        - [ ] `times`. (REQ: REQ-09-0077)
+        - [ ] `trap`. (REQ: REQ-09-0078)
+        - [ ] `umask`. (REQ: REQ-09-0079)
+        - [ ] `wait`. (REQ: REQ-09-0080)
+    - [ ] **Variables & Environment:** (REQ: REQ-09-0081)
+        - [ ] Shell vs Environment variable distinction. (REQ: REQ-09-0082)
+        - [ ] Scope rules (Global, Local, Function). (REQ: REQ-09-0083)
+        - [ ] Export semantics. (REQ: REQ-09-0084)
+        - [ ] Read-only enforcement. (REQ: REQ-09-0085)
+    - [ ] **Functions:** (REQ: REQ-09-0086)
+        - [ ] Definition and Invocation. (REQ: REQ-09-0087)
+        - [ ] Local variables scoping. (REQ: REQ-09-0088)
+        - [ ] Return behavior. (REQ: REQ-09-0089)
+    - [ ] **Job Control:** (REQ: REQ-09-0090)
+        - [ ] Foreground/Background. (REQ: REQ-09-0091)
+        - [ ] Process groups. (REQ: REQ-09-0092)
+        - [ ] Signal forwarding. (REQ: REQ-09-0093)
+    - [ ] **Signals & Traps:** (REQ: REQ-09-0094)
+        - [ ] Default signal handling. (REQ: REQ-09-0095)
+        - [ ] `trap` builtin integration. (REQ: REQ-09-0096)
+    - [ ] **Testing & Compliance:** (REQ: REQ-09-0097)
+        - [ ] Unit tests for all modules. (REQ: REQ-09-0098)
+        - [ ] Script-based conformance tests. (REQ: REQ-09-0099)
+        - [ ] Coverage-guided fuzzing. (REQ: REQ-09-0100)
+        - [ ] Man page (`sh(1)`). (REQ: REQ-09-0101)
+    - [ ] **Interactive Features:** (REQ: REQ-09-0102)
+        - [ ] **Prompt Handling (PS1):** (REQ: REQ-09-0103)
+            - [ ] **Invocation Semantics:** (REQ: REQ-09-0104)
+                - [ ] Determine interactive mode logic (only evaluate PS1 if `is_interactive`). (REQ: REQ-09-0105)
+                - [ ] Suppress PS1 evaluation in non-interactive/script mode. (REQ: REQ-09-0106)
+                - [ ] Implement re-evaluation trigger before `readline` or input loop. (REQ: REQ-09-0107)
+                - [ ] Handle `set -x` (xtrace) interactions (ensure PS1 expansion isn't traced unless necessary/specified). (REQ: REQ-09-0108)
+                - [ ] Handle `set -e` interactions (errors in PS1 expansion should not exit shell). (REQ: REQ-09-0109)
+            - [ ] **Expansion Pipeline:** (REQ: REQ-09-0110)
+                - [ ] Integrate PS1 expansion into core expansion engine. (REQ: REQ-09-0111)
+                - [ ] Enable **Parameter Expansion** for PS1. (REQ: REQ-09-0112)
+                - [ ] Enable **Command Substitution** for PS1. (REQ: REQ-09-0113)
+                - [ ] Enable **Arithmetic Expansion** for PS1. (REQ: REQ-09-0114)
+                - [ ] Disable **Quote Removal** (PS1 retains quotes, or strictly follows POSIX requirements). (REQ: REQ-09-0115)
+            - [ ] **Escape Sequence Parsing:** (REQ: REQ-09-0116, REQ-09-1508)
+                - [ ] Implement parser for backslash escapes in PS1. (REQ: REQ-09-0117)
+                - [ ] Support `\!` (history number) escape. (REQ: REQ-09-0118)
+                - [ ] Support `\$` (uid-based suffix `#`/`$`) escape. (REQ: REQ-09-0119)
+                - [ ] Support `\\` (literal backslash) escape. (REQ: REQ-09-0120)
+                - [ ] Handle undefined escapes deterministically (e.g., print literal char). (REQ: REQ-09-0121)
+                - [ ] Support **Common Escapes** (`\u`, `\h`, `\w`) using standard libc functions. (REQ: REQ-09-0122)
+            - [ ] **State-Dependent Elements:** (REQ: REQ-09-0123)
+                - [ ] Implement effective UID check for `\$`. (REQ: REQ-09-0124)
+                - [ ] Expose exit status `?` to prompt expansion without resetting it. (REQ: REQ-09-0125)
+            - [ ] **Error Handling:** (REQ: REQ-09-0126, REQ-09-0182, REQ-09-0353, REQ-09-0709, REQ-09-0864, REQ-09-1012, REQ-09-1113, REQ-09-1265, REQ-09-1381)
+                - [ ] Graceful failure on expansion error (fallback to default string). (REQ: REQ-09-0127)
+                - [ ] Prevent shell crash on malformed PS1 (OOM safety). (REQ: REQ-09-0128)
+                - [ ] Bound recursion depth for PS1 expansion (verified single-pass). (REQ: REQ-09-0129)
+            - [ ] **Performance:** (REQ: REQ-09-0130, REQ-09-0361, REQ-09-1394)
+                - [ ] Prioritize memory leak checks for repeated PS1 expansion. (REQ: REQ-09-0131)
+                - [ ] Verify no state mutation during prompt rendering. (REQ: REQ-09-0132)
+            - [ ] **Testing:** (REQ: REQ-09-0133, REQ-09-0186)
+                - [ ] Unit test: Escape sequence parser (implemented in `tests/test_prompt.c`). (REQ: REQ-09-0134)
+                - [ ] Unit test: Expansion order validation. (REQ: REQ-09-0135)
+                - [ ] Edge case: Empty PS1. (REQ: REQ-09-0136)
+                - [ ] Edge case: Deeply nested command substitution in PS1. (REQ: REQ-09-0137)
+                - [ ] Fuzz test: `fuzz_ps1_parser.c`. (REQ: REQ-09-0138)
+            - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+                - [ ] Document PS1 expansion behavior in `sh(1)`. (REQ: REQ-09-0140)
+                - [ ] Document supported escapes. (REQ: REQ-09-0141)
+        - [ ] **Extended Prompt Formatting (Opt-in):** (REQ: REQ-09-0142)
+            - [ ] **Mode Selection:** (REQ: REQ-09-0143)
+                - [ ] Implement configuration option (e.g., `set -o promptvars` or custom shopt) to enable extended parsing. (REQ: REQ-09-0144)
+                - [ ] Define precedence logic (POSIX PS1 behavior default vs Extended). (REQ: REQ-09-0145)
+                - [ ] Ensure `sh` in non-interactive mode treats prompt formatting as no-op or pure string. (REQ: REQ-09-0146)
+                - [ ] Expose current prompt mode via read-only shell variable (e.g., `SHELL_PROMPT_MODE`). (REQ: REQ-09-0147)
+            - [ ] **Format Grammar:** (REQ: REQ-09-0148)
+                - [ ] Define formal grammar for `%` escapes (e.g., `%n`, `%m`, `%~`). (REQ: REQ-09-0149)
+                - [ ] Define Parameterized token syntax (e.g., `%F{red}`, `%K{blue}`). (REQ: REQ-09-0150)
+                - [ ] Define Conditional token syntax (e.g., `%(condition.true.false)`). (REQ: REQ-09-0151)
+                - [ ] Explicitly list reserved/unsupported tokens for future compatibility. (REQ: REQ-09-0152)
+            - [ ] **Token Parsing:** (REQ: REQ-09-0153)
+                - [ ] Implement dedicated predictive parser for prompt strings (separate from main shell parser). (REQ: REQ-09-0154)
+                - [ ] Handle escaped `%` characters (`%%`). (REQ: REQ-09-0155)
+                - [ ] Handle unknown/malformed sequences (emit literal or error without crash). (REQ: REQ-09-0156)
+                - [ ] Ensure parsing is deterministic and stateless. (REQ: REQ-09-0157)
+            - [ ] **Expansion Semantics:** (REQ: REQ-09-0158)
+                - [ ] Define expansion order: Extended Tokens -> Parameter Expansion -> Command Sub -> Arith. (REQ: REQ-09-0159)
+                - [ ] Isolate prompt expansions to prevent shell state mutation (sandbox execution). (REQ: REQ-09-0160)
+                - [ ] Implement recursion depth limits for nested prompts. (REQ: REQ-09-0161)
+                - [ ] Ensure non-printing characters in expansions are correctly marked. (REQ: REQ-09-0162)
+            - [ ] **Dynamic Elements:** (REQ: REQ-09-0163)
+                - [ ] `%~` / `%d`: Current Working Directory (Collapse $HOME to ~). (REQ: REQ-09-0164)
+                - [ ] `%n`: Current Username. (REQ: REQ-09-0165)
+                - [ ] `%m` / `%M`: Hostname (Short/Long). (REQ: REQ-09-0166)
+                - [ ] `%#`: UID superuser status (`#` vs `%`). (REQ: REQ-09-0167)
+                - [ ] `%?`: Last exit code. (REQ: REQ-09-0168)
+                - [ ] `%L`: Shell nesting level/depth. (REQ: REQ-09-0169)
+                - [ ] `%j`: Number of background jobs. (REQ: REQ-09-0170)
+            - [ ] **Styling & Attributes:** (REQ: REQ-09-0171)
+                - [ ] Support `%F{color}` / `%f`: Foreground color (ANSI). (REQ: REQ-09-0172)
+                - [ ] Support `%K{color}` / `%k`: Background color (ANSI). (REQ: REQ-09-0173)
+                - [ ] Support `%B` / `%b`: Bold attribute. (REQ: REQ-09-0174)
+                - [ ] Support `%U` / `%u`: Underline attribute. (REQ: REQ-09-0175)
+                - [ ] Implement logic to calculate visible width vs escape sequence width (for line wrapping). (REQ: REQ-09-0176)
+            - [ ] **Rendering Engine:** (REQ: REQ-09-0177)
+                - [ ] Implement efficient string builder for prompt assembly. (REQ: REQ-09-0178)
+                - [ ] Memory Management: Ensure no leaks across repeated prompt evaluations. (REQ: REQ-09-0179)
+                - [ ] Optimization: Cache static parts of the prompt if possible. (REQ: REQ-09-0180)
+                - [ ] Clean separation: `parse_prompt()`, `expand_tokens()`, `render_string()`. (REQ: REQ-09-0181)
+            - [ ] **Error Handling:** (REQ: REQ-09-0126, REQ-09-0182, REQ-09-0353, REQ-09-0709, REQ-09-0864, REQ-09-1012, REQ-09-1113, REQ-09-1265, REQ-09-1381)
+                - [ ] Define fallback behavior (e.g., print raw string) if parsing fails. (REQ: REQ-09-0183)
+                - [ ] Signal safety: Ensure expansion is safe during signal handling if used there. (REQ: REQ-09-0184)
+                - [ ] Guard against exponential expansion attacks. (REQ: REQ-09-0185)
+            - [ ] **Testing:** (REQ: REQ-09-0133, REQ-09-0186)
+                - [ ] Unit: Parser validation for standard tokens. (REQ: REQ-09-0187)
+                - [ ] Unit: Width calculation correctness with ANSI codes. (REQ: REQ-09-0188)
+                - [ ] Integration: Enable extended mode and verify prompt appearance. (REQ: REQ-09-0189)
+                - [ ] Fuzzing: `fuzz_extended_prompt.c` targets parser. (REQ: REQ-09-0190)
+                - [ ] Property: Randomized prompt strings don't crash shell. (REQ: REQ-09-0191)
+            - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+                - [ ] Document new `%` escapes in `sh(1)`. (REQ: REQ-09-0193)
+                - [ ] Explicitly contrast POSIX PS1 vs Extended Mode handling. (REQ: REQ-09-0194)
+                - [ ] Document color/attribute codes. (REQ: REQ-09-0195)
+                - [ ] Document limits (depth, length, etc). (REQ: REQ-09-0196)
+- [ ] **Core Utilities:** (REQ: REQ-09-0197)
+    - [ ] **`ls` - List directory contents (Production Quality Rewrite):** (REQ: REQ-09-0198)
+        - [ ] **Audit & Refactor Existing Code:** (REQ: REQ-09-0199, REQ-09-0430, REQ-09-0632, REQ-09-0777, REQ-09-0942, REQ-09-1072, REQ-09-1322)
+            - [ ] Audit existing `bin/ls/ls.c` for TODO comments, fragile code, and incomplete features. (REQ: REQ-09-0200)
+            - [ ] Document all functionality gaps and bugs. (REQ: REQ-09-0201, REQ-09-0432, REQ-09-0634, REQ-09-0944, REQ-09-1074, REQ-09-1324)
+            - [ ] Create refactoring plan: modular architecture with separate files for options, output, sorting, traversal. (REQ: REQ-09-0202)
+            - [ ] Extract option parsing into `ls_opts.c` and `ls_opts.h`. (REQ: REQ-09-0203)
+            - [ ] Extract output formatting into `ls_print.c` and `ls_print.h`. (REQ: REQ-09-0204)
+            - [ ] Extract sorting logic into `ls_sort.c` and `ls_sort.h`. (REQ: REQ-09-0205)
+            - [ ] Extract directory traversal into `ls_traverse.c` and `ls_traverse.h`. (REQ: REQ-09-0206)
+            - [ ] Write unit tests for each extracted module before proceeding. (REQ: REQ-09-0207)
+        - [ ] **CLI Options:** (REQ: REQ-09-0208, REQ-09-0640, REQ-09-0785, REQ-09-0950, REQ-09-1079, REQ-09-1180, REQ-09-1461)
+            - [ ] **Filtering:** (REQ: REQ-09-0209)
+                - [ ] `-a`, `--all`: List all files including hidden ones. (REQ: REQ-09-0210)
+                - [ ] `-A`, `--almost-all`: List all except `.` and `..`. (REQ: REQ-09-0211)
+                - [ ] `-d`, `--directory`: List directories themselves, not their contents. (REQ: REQ-09-0212)
+                - [ ] `-I PATTERN`, `--ignore=PATTERN`: Do not list implied entries matching PATTERN. (REQ: REQ-09-0213)
+            - [ ] **Output Format:** (REQ: REQ-09-0214)
+                - [ ] `-l`: Long listing format (permissions, ownership, size, time). (REQ: REQ-09-0215)
+                - [ ] `-1`: Force single-column output. (REQ: REQ-09-0216)
+                - [ ] `-C`: Force multi-column output (default for terminal). (REQ: REQ-09-0217)
+                - [ ] `-m`: Comma-separated output. (REQ: REQ-09-0218)
+                - [ ] `-x`: List entries by lines instead of columns. (REQ: REQ-09-0219)
+                - [ ] `-g`: Like `-l` but omit owner. (REQ: REQ-09-0220)
+                - [ ] `-o`: Like `-l` but omit group. (REQ: REQ-09-0221)
+                - [ ] `-n`, `--numeric-uid-gid`: Like `-l` but show numeric UID/GID. (REQ: REQ-09-0222)
+            - [ ] **Sorting:** (REQ: REQ-09-0223)
+                - [ ] `-r`, `--reverse`: Reverse order while sorting. (REQ: REQ-09-0224)
+                - [ ] `-S`: Sort by file size (largest first). (REQ: REQ-09-0225)
+                - [ ] `-t`: Sort by modification time (newest first). (REQ: REQ-09-0226)
+                - [ ] `-u`: Sort by access time (with `-lt`), show atime (with `-l`). (REQ: REQ-09-0227)
+                - [ ] `-c`: Sort by ctime (with `-lt`), show ctime (with `-l`). (REQ: REQ-09-0228)
+                - [ ] `-U`: Do not sort; list in directory order. (REQ: REQ-09-0229)
+                - [ ] `-f`: Do not sort, enable `-aU`, disable `-ls --color`. (REQ: REQ-09-0230)
+                - [ ] `-v`: Natural sort of version numbers within text. (REQ: REQ-09-0231)
+            - [ ] **Symlink Handling:** (REQ: REQ-09-0232)
+                - [ ] `-L`, `--dereference`: Follow symlinks and show target's info. (REQ: REQ-09-0233)
+                - [ ] `-H`: Follow symlinks only on command line arguments. (REQ: REQ-09-0234)
+            - [ ] **Size & Units:** (REQ: REQ-09-0235)
+                - [ ] `-h`, `--human-readable`: Print sizes in human readable format (K, M, G). (REQ: REQ-09-0236)
+                - [ ] `-k`, `--kibibytes`: Use 1024-byte blocks. (REQ: REQ-09-0237)
+                - [ ] `-s`, `--size`: Print allocated size of each file, in blocks. (REQ: REQ-09-0238)
+                - [ ] `--block-size=SIZE`: Scale sizes by SIZE before printing. (REQ: REQ-09-0239)
+                - [ ] `--si`: Use powers of 1000 not 1024. (REQ: REQ-09-0240)
+            - [ ] **File Type Indicators:** (REQ: REQ-09-0241)
+                - [ ] `-F`, `--classify`: Append indicator (one of */=>@|) to entries. (REQ: REQ-09-0242)
+                - [ ] `-p`: Append `/` indicator to directories. (REQ: REQ-09-0243)
+                - [ ] `--file-type`: Likewise, except do not append `*`. (REQ: REQ-09-0244)
+            - [ ] **Inode & Block:** (REQ: REQ-09-0245)
+                - [ ] `-i`, `--inode`: Print inode number of each file. (REQ: REQ-09-0246)
+            - [ ] **Recursion:** (REQ: REQ-09-0247)
+                - [ ] `-R`, `--recursive`: List subdirectories recursively. (REQ: REQ-09-0248)
+                - [ ] `--hide=PATTERN`: Do not list implied entries matching PATTERN during `-R`. (REQ: REQ-09-0249)
+            - [ ] **Color:** (REQ: REQ-09-0250)
+                - [ ] `--color=auto`: Colorize when stdout is a terminal. (REQ: REQ-09-0251)
+                - [ ] `--color=always`: Always colorize output. (REQ: REQ-09-0252)
+                - [ ] `--color=never`: Never colorize output. (REQ: REQ-09-0253)
+                - [ ] Parse `LS_COLORS` environment variable. (REQ: REQ-09-0254)
+                - [ ] Default color scheme for file types (dir, link, exec, etc.). (REQ: REQ-09-0255)
+            - [ ] **Width Control:** (REQ: REQ-09-0256)
+                - [ ] `--width=N`: Set output width to N columns. (REQ: REQ-09-0257)
+                - [ ] `-w N`: Same as `--width=N`. (REQ: REQ-09-0258)
+                - [ ] Read `COLUMNS` environment variable. (REQ: REQ-09-0259)
+                - [ ] Query terminal width via `ioctl(TIOCGWINSZ)`. (REQ: REQ-09-0260)
+                - [ ] Fallback to 80 columns for pipes/non-terminals. (REQ: REQ-09-0261)
+            - [ ] **Timestamps:** (REQ: REQ-09-0262, REQ-09-0297)
+                - [ ] `--time=WORD`: Use time WORD (atime, access, use, ctime, status, mtime, modification). (REQ: REQ-09-0263)
+                - [ ] `--time-style=STYLE`: Use STYLE (full-iso, long-iso, iso, locale)., +FORMAT). (REQ: REQ-09-0264)
+            - [ ] **Miscellaneous:** (REQ: REQ-09-0265)
+                - [ ] `-q`, `--hide-control-chars`: Print `?` for non-graphic characters. (REQ: REQ-09-0266)
+                - [ ] `--show-control-chars`: Show non-graphic characters as-is (default). (REQ: REQ-09-0267)
+                - [ ] `-N`, `--literal`: Print raw entry names (don't quote). (REQ: REQ-09-0268)
+                - [ ] `-Q`, `--quote-name`: Enclose entry names in double quotes. (REQ: REQ-09-0269)
+                - [ ] `--quoting-style=WORD`: Quoting style (literal, shell, shell-always, c, escape). (REQ: REQ-09-0270)
+                - [ ] `--help`: Display help. (REQ: REQ-09-0271)
+                - [ ] `--version`: Display version. (REQ: REQ-09-0272)
+        - [ ] **Output Modes:** (REQ: REQ-09-0273)
+            - [ ] Implement long format (`-l`) with all columns. (REQ: REQ-09-0274)
+            - [ ] Implement multi-column format (default for terminal). (REQ: REQ-09-0275)
+            - [ ] Implement single-column format (`-1`). (REQ: REQ-09-0276)
+            - [ ] Implement comma-separated format (`-m`). (REQ: REQ-09-0277)
+            - [ ] Implement by-lines format (`-x`). (REQ: REQ-09-0278)
+            - [ ] Auto-detect terminal vs pipe; select output mode accordingly. (REQ: REQ-09-0279)
+            - [ ] Handle very narrow terminals (< 20 columns) gracefully. (REQ: REQ-09-0280)
+        - [ ] **Long Format Details:** (REQ: REQ-09-0281)
+            - [ ] **File Mode String:** (REQ: REQ-09-0282)
+                - [ ] File type indicator (d, l, c, b, p, s, -). (REQ: REQ-09-0283)
+                - [ ] Owner rwx permissions. (REQ: REQ-09-0284)
+                - [ ] Group rwx permissions. (REQ: REQ-09-0285)
+                - [ ] Other rwx permissions. (REQ: REQ-09-0286)
+                - [ ] Setuid bit (`s`/`S` in owner execute). (REQ: REQ-09-0287)
+                - [ ] Setgid bit (`s`/`S` in group execute). (REQ: REQ-09-0288)
+                - [ ] Sticky bit (`t`/`T` in other execute). (REQ: REQ-09-0289)
+                - [ ] ACL indicator (`+`) when extended attributes present. (REQ: REQ-09-0290)
+                - [ ] Extended attribute indicator (`@`) for xattrs. (REQ: REQ-09-0291)
+            - [ ] **Link Count:** Print hard link count. (REQ: REQ-09-0292)
+            - [ ] **Owner:** Print username (or UID if `-n`). (REQ: REQ-09-0293)
+            - [ ] **Group:** Print group name (or GID if `-n`). (REQ: REQ-09-0294)
+            - [ ] **Size:** Print file size in bytes (or human-readable if `-h`). (REQ: REQ-09-0295)
+            - [ ] **Device Major/Minor:** Print major,minor for block/char devices. (REQ: REQ-09-0296)
+            - [ ] **Timestamps:** (REQ: REQ-09-0262, REQ-09-0297)
+                - [ ] Default to mtime. (REQ: REQ-09-0298)
+                - [ ] Support atime with `-u`. (REQ: REQ-09-0299)
+                - [ ] Support ctime with `-c`. (REQ: REQ-09-0300)
+                - [ ] Recent files (< 6 months): show month, day, time. (REQ: REQ-09-0301)
+                - [ ] Old files (>= 6 months): show month, day, year. (REQ: REQ-09-0302)
+                - [ ] Custom time formats via `--time-style`. (REQ: REQ-09-0303)
+            - [ ] **Filename:** Print file name. (REQ: REQ-09-0304)
+            - [ ] **Symlink Target:** Print ` -> target` for symlinks. (REQ: REQ-09-0305)
+            - [ ] **Total Block Count:** Print `total N` line for each directory. (REQ: REQ-09-0306)
+        - [ ] **Symlink Behavior:** (REQ: REQ-09-0307)
+            - [ ] Default: `lstat()` for symlinks, show link info. (REQ: REQ-09-0308)
+            - [ ] `-L`: `stat()` for symlinks, show target info. (REQ: REQ-09-0309)
+            - [ ] Show `-> target` in long listing. (REQ: REQ-09-0310)
+            - [ ] Handle broken symlinks gracefully (show with error indicator). (REQ: REQ-09-0311)
+            - [ ] Detect symlink loops and report error. (REQ: REQ-09-0312)
+        - [ ] **Recursive Traversal (`-R`):** (REQ: REQ-09-0313)
+            - [ ] Implement depth-first traversal. (REQ: REQ-09-0314)
+            - [ ] Print directory header for each subdirectory. (REQ: REQ-09-0315)
+            - [ ] Handle permission denied on subdirs (warn and continue). (REQ: REQ-09-0316)
+            - [ ] Implement cycle detection (detect hardlink loops and symlink loops). (REQ: REQ-09-0317)
+            - [ ] Option to not cross filesystem boundaries (`--one-file-system`/`-x` GNU ext). (REQ: REQ-09-0318)
+            - [ ] Respect `-d` to not recurse even with `-R`. (REQ: REQ-09-0319)
+        - [ ] **Sorting & Collation:** (REQ: REQ-09-0320)
+            - [ ] Implement name sort (default, case-sensitive). (REQ: REQ-09-0321)
+            - [ ] Implement case-insensitive name sort (locale-aware). (REQ: REQ-09-0322)
+            - [ ] Implement size sort (`-S`). (REQ: REQ-09-0323)
+            - [ ] Implement time sort (`-t`, `-u`, `-c`). (REQ: REQ-09-0324)
+            - [ ] Implement extension sort (`-X` GNU ext). (REQ: REQ-09-0325)
+            - [ ] Implement version sort (`-v`). (REQ: REQ-09-0326)
+            - [ ] Implement reverse sort (`-r`). (REQ: REQ-09-0327)
+            - [ ] Implement no-sort (`-U`, `-f`). (REQ: REQ-09-0328)
+            - [ ] Use stable sort with tie-breakers (name as secondary). (REQ: REQ-09-0329)
+            - [ ] Locale-aware collation via `strcoll()`. (REQ: REQ-09-0330)
+            - [ ] Directories first option (GNU ext). (REQ: REQ-09-0331)
+        - [ ] **Column/Width Layout:** (REQ: REQ-09-0332)
+            - [ ] Calculate printable width of each filename. (REQ: REQ-09-0333)
+            - [ ] Account for ANSI color escape sequences (non-printing). (REQ: REQ-09-0334)
+            - [ ] Account for combining characters (zero-width). (REQ: REQ-09-0335)
+            - [ ] Account for wide characters (CJK, double-width). (REQ: REQ-09-0336)
+            - [ ] Use `wcwidth()` / `wcswidth()` for Unicode handling. (REQ: REQ-09-0337)
+            - [ ] Pack columns to fit terminal width. (REQ: REQ-09-0338)
+            - [ ] Handle filenames wider than terminal width. (REQ: REQ-09-0339)
+            - [ ] Align columns consistently. (REQ: REQ-09-0340)
+        - [ ] **Permissions/ACLs/Extended Attributes:** (REQ: REQ-09-0341)
+            - [ ] Detect ACLs via `acl_get_file()` or `getxattr("system.posix_acl_access")`. (REQ: REQ-09-0342)
+            - [ ] Show `+` suffix on mode string when ACLs present. (REQ: REQ-09-0343)
+            - [ ] Detect extended attributes via `listxattr()`. (REQ: REQ-09-0344)
+            - [ ] Show `@` suffix when xattrs present (macOS style). (REQ: REQ-09-0345)
+            - [ ] Fallback gracefully when ACL/xattr APIs unavailable. (REQ: REQ-09-0346)
+            - [ ] Option to list xattr names (`-@` BSD ext). (REQ: REQ-09-0347)
+        - [ ] **User/Group Name Caching:** (REQ: REQ-09-0348)
+            - [ ] Implement UID->username cache. (REQ: REQ-09-0349)
+            - [ ] Implement GID->groupname cache. (REQ: REQ-09-0350)
+            - [ ] Handle missing users/groups (print numeric ID). (REQ: REQ-09-0351)
+            - [ ] Limit cache size to prevent memory bloat. (REQ: REQ-09-0352)
+        - [ ] **Error Handling:** (REQ: REQ-09-0126, REQ-09-0182, REQ-09-0353, REQ-09-0709, REQ-09-0864, REQ-09-1012, REQ-09-1113, REQ-09-1265, REQ-09-1381)
+            - [ ] Per-file errors: warn and continue. (REQ: REQ-09-0354)
+            - [ ] Directory open errors: warn and continue to next arg. (REQ: REQ-09-0355)
+            - [ ] Memory allocation failures: exit with proper code. (REQ: REQ-09-0356)
+            - [ ] Exit code 0: success. (REQ: REQ-09-0357, REQ-09-0551, REQ-09-1269)
+            - [ ] Exit code 1: minor problems (cannot access file). (REQ: REQ-09-0358)
+            - [ ] Exit code 2: serious trouble (cannot access command-line arg). (REQ: REQ-09-0359)
+            - [ ] Never crash on any input. (REQ: REQ-09-0360, REQ-09-0553, REQ-09-0713)
+        - [ ] **Performance:** (REQ: REQ-09-0130, REQ-09-0361, REQ-09-1394)
+            - [ ] Minimize syscalls: batch `stat()` calls where possible. (REQ: REQ-09-0362)
+            - [ ] Use `lstat()` by default; only `stat()` when `-L`. (REQ: REQ-09-0363)
+            - [ ] Consider `fts(3)` or custom traversal for `-R`. (REQ: REQ-09-0364)
+            - [ ] Buffer output for efficiency. (REQ: REQ-09-0365)
+            - [ ] Avoid repeated `getpwuid()`/`getgrgid()` via caching. (REQ: REQ-09-0366)
+            - [ ] Profile with large directories (10K+ entries). (REQ: REQ-09-0367)
+        - [ ] **Tests:** (REQ: REQ-09-0368, REQ-09-0572, REQ-09-0722, REQ-09-0883, REQ-09-1019, REQ-09-1127, REQ-09-1271, REQ-09-1403, REQ-09-1506)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Test mode string formatting for all file types. (REQ: REQ-09-0370)
+                - [ ] Test mode string with setuid/setgid/sticky. (REQ: REQ-09-0371)
+                - [ ] Test size formatting (bytes, KB, MB, GB, TB). (REQ: REQ-09-0372)
+                - [ ] Test human-readable size formatting. (REQ: REQ-09-0373)
+                - [ ] Test timestamp formatting (recent vs old). (REQ: REQ-09-0374)
+                - [ ] Test column width calculation. (REQ: REQ-09-0375)
+                - [ ] Test sorting algorithms (all modes). (REQ: REQ-09-0376)
+                - [ ] Test collation with locale. (REQ: REQ-09-0377)
+            - [ ] **Integration Tests:** (REQ: REQ-09-0378, REQ-09-0580, REQ-09-0729, REQ-09-0890, REQ-09-1026, REQ-09-1133, REQ-09-1409, REQ-09-1511, REQ-09-2282)
+                - [ ] Empty directory. (REQ: REQ-09-0379)
+                - [ ] Directory with hidden files. (REQ: REQ-09-0380)
+                - [ ] Directory with symlinks (valid and broken). (REQ: REQ-09-0381)
+                - [ ] Directory with special files (devices, sockets, FIFOs). (REQ: REQ-09-0382)
+                - [ ] Deep directory tree (`-R`). (REQ: REQ-09-0383)
+                - [ ] Large directory (1000+ files). (REQ: REQ-09-0384)
+                - [ ] Permission denied scenarios. (REQ: REQ-09-0385)
+                - [ ] Symlink loops. (REQ: REQ-09-0386)
+                - [ ] Files with spaces, quotes, newlines in names. (REQ: REQ-09-0387)
+                - [ ] Mixed sorting criteria. (REQ: REQ-09-0388)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] Random filenames don't crash (fuzzing). (REQ: REQ-09-0390)
+                - [ ] Binary characters in filenames handled. (REQ: REQ-09-0391)
+                - [ ] Control characters handled. (REQ: REQ-09-0392)
+                - [ ] Unicode filenames (combining chars, CJK). (REQ: REQ-09-0393)
+                - [ ] Very long filenames (PATH_MAX-1). (REQ: REQ-09-0394)
+            - [ ] **Acceptance Tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+                - [ ] `ls` empty directory -> empty output. (REQ: REQ-09-0396)
+                - [ ] `ls -a` -> shows `.` and `..`. (REQ: REQ-09-0397)
+                - [ ] `ls -l` -> correct 9-column output. (REQ: REQ-09-0398)
+                - [ ] `ls -lh` -> human sizes (K, M, G). (REQ: REQ-09-0399)
+                - [ ] `ls -R` -> descends into subdirectories. (REQ: REQ-09-0400)
+                - [ ] `ls -lS` -> sorted by size descending. (REQ: REQ-09-0401)
+                - [ ] `ls -lt` -> sorted by mtime descending. (REQ: REQ-09-0402)
+                - [ ] `ls -F` -> indicators appended. (REQ: REQ-09-0403)
+                - [ ] `ls --color=always | cat` -> contains ANSI codes. (REQ: REQ-09-0404)
+                - [ ] `ls -i` -> inode numbers shown. (REQ: REQ-09-0405)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `ls(1)` man page covering all options. (REQ: REQ-09-0407)
+            - [ ] Document output formats with examples. (REQ: REQ-09-0408)
+            - [ ] Document sorting behavior. (REQ: REQ-09-0409)
+            - [ ] Document color configuration (`LS_COLORS`). (REQ: REQ-09-0410)
+            - [ ] Document width calculation algorithm (developer notes). (REQ: REQ-09-0411)
+            - [ ] Document locale/Unicode handling (developer notes). (REQ: REQ-09-0412)
+            - [ ] Document ACL/xattr detection (developer notes). (REQ: REQ-09-0413)
+        - [ ] **Accessibility & Machine Parsing:** (REQ: REQ-09-0414)
+            - [ ] Document `-1` for machine-parseable output. (REQ: REQ-09-0415)
+            - [ ] Document `--quoting-style` for safe parsing. (REQ: REQ-09-0416)
+            - [ ] Ensure no extra whitespace or formatting breaks parsing. (REQ: REQ-09-0417)
+            - [ ] Test with common UNIX text processing tools (`awk`, `cut`). (REQ: REQ-09-0418)
+        - [ ] **Acceptance Criteria:** (REQ: REQ-09-0419, REQ-09-0621, REQ-09-0766, REQ-09-0932, REQ-09-1062, REQ-09-1165, REQ-09-1312, REQ-09-1447, REQ-09-1545)
+            - [ ] All CLI options implemented and tested. (REQ: REQ-09-0420, REQ-09-0622, REQ-09-0933, REQ-09-1063, REQ-09-1166, REQ-09-1313)
+            - [ ] Long format matches expected field layout. (REQ: REQ-09-0421)
+            - [ ] Sorting produces correct order for all modes. (REQ: REQ-09-0422)
+            - [ ] No crashes on any valid or malformed filenames. (REQ: REQ-09-0423)
+            - [ ] Handles directories with 100K+ entries without OOM. (REQ: REQ-09-0424)
+            - [ ] Color output respects terminal capabilities. (REQ: REQ-09-0425)
+            - [ ] Exit codes match documented behavior. (REQ: REQ-09-0426, REQ-09-0628, REQ-09-0773)
+            - [ ] Man page complete and accurate. (REQ: REQ-09-0427, REQ-09-0629, REQ-09-0774, REQ-09-0939, REQ-09-1069, REQ-09-1172, REQ-09-1319)
+            - [ ] All tests pass in CI. (REQ: REQ-09-0428, REQ-09-0630, REQ-09-0775, REQ-09-0940, REQ-09-1070, REQ-09-1173, REQ-09-1320, REQ-09-1454, REQ-09-1552)
+    - [ ] **`cp` - Copy files and directories (Production Quality Rewrite):** (REQ: REQ-09-0429)
+        - [ ] **Audit & Refactor Existing Code:** (REQ: REQ-09-0199, REQ-09-0430, REQ-09-0632, REQ-09-0777, REQ-09-0942, REQ-09-1072, REQ-09-1322)
+            - [ ] Audit existing `bin/cp/cp.c` for TODO comments, fragile code, and incomplete features. (REQ: REQ-09-0431)
+            - [ ] Document all functionality gaps and bugs. (REQ: REQ-09-0201, REQ-09-0432, REQ-09-0634, REQ-09-0944, REQ-09-1074, REQ-09-1324)
+            - [ ] Create refactoring plan: modular architecture with separate files. (REQ: REQ-09-0433)
+            - [ ] Extract option parsing into `cp_opts.c` and `cp_opts.h`. (REQ: REQ-09-0434)
+            - [ ] Extract copy engine into `cp_copy.c` and `cp_copy.h`. (REQ: REQ-09-0435)
+            - [ ] Extract metadata preservation into `cp_preserve.c` and `cp_preserve.h`. (REQ: REQ-09-0436)
+            - [ ] Extract atomic replace logic into `cp_atomic.c` and `cp_atomic.h`. (REQ: REQ-09-0437)
+            - [ ] Write unit tests for each extracted module. (REQ: REQ-09-0438, REQ-09-0639, REQ-09-0784, REQ-09-0949, REQ-09-1078)
+        - [ ] **Basic CLI Options:** (REQ: REQ-09-0439)
+            - [ ] `-r`, `-R`, `--recursive`: Copy directories recursively. (REQ: REQ-09-0440)
+            - [ ] `-f`, `--force`: Force overwrite, remove destination if needed. (REQ: REQ-09-0441)
+            - [ ] `-i`, `--interactive`: Prompt before overwrite. (REQ: REQ-09-0442, REQ-09-0642)
+            - [ ] `-n`, `--no-clobber`: Do not overwrite existing files. (REQ: REQ-09-0443)
+            - [ ] `-v`, `--verbose`: Explain what is being done. (REQ: REQ-09-0444, REQ-09-0644, REQ-09-0791)
+            - [ ] `-d`: Same as `--no-dereference --preserve=links`. (REQ: REQ-09-0445)
+            - [ ] `--help`: Display help and exit. (REQ: REQ-09-0446, REQ-09-0649, REQ-09-0796, REQ-09-0955, REQ-09-1083, REQ-09-1195, REQ-09-1341)
+            - [ ] `--version`: Display version and exit. (REQ: REQ-09-0447, REQ-09-0650, REQ-09-0797, REQ-09-0956, REQ-09-1084, REQ-09-1196, REQ-09-1342)
+        - [ ] **Preservation Options:** (REQ: REQ-09-0448)
+            - [ ] `-p`: Preserve mode, ownership, timestamps. (REQ: REQ-09-0449)
+            - [ ] `-a`, `--archive`: Same as `-dR --preserve=all`. (REQ: REQ-09-0450)
+            - [ ] `--preserve=LIST`: Preserve specified attributes. (REQ: REQ-09-0451)
+                - [ ] `--preserve=mode`: Preserve file mode bits. (REQ: REQ-09-0452)
+                - [ ] `--preserve=ownership`: Preserve owner and group. (REQ: REQ-09-0453)
+                - [ ] `--preserve=timestamps`: Preserve atime and mtime. (REQ: REQ-09-0454)
+                - [ ] `--preserve=links`: Preserve hard links in source tree. (REQ: REQ-09-0455)
+                - [ ] `--preserve=xattr`: Preserve extended attributes. (REQ: REQ-09-0456)
+                - [ ] `--preserve=all`: All of the above. (REQ: REQ-09-0457)
+            - [ ] `--no-preserve=LIST`: Do not preserve specified attributes. (REQ: REQ-09-0458)
+        - [ ] **Link Options:** (REQ: REQ-09-0459)
+            - [ ] `-l`, `--link`: Create hard links instead of copying. (REQ: REQ-09-0460)
+            - [ ] `-s`, `--symbolic-link`: Create symbolic links instead of copying. (REQ: REQ-09-0461)
+            - [ ] `-L`, `--dereference`: Always follow symlinks in source. (REQ: REQ-09-0462)
+            - [ ] `-P`, `--no-dereference`: Never follow symlinks (default). (REQ: REQ-09-0463)
+            - [ ] `-H`: Follow symlinks on command line only. (REQ: REQ-09-0464)
+        - [ ] **Sparse File Options:** (REQ: REQ-09-0465)
+            - [ ] `--sparse=auto`: Detect and create sparse files automatically (default). (REQ: REQ-09-0466)
+            - [ ] `--sparse=always`: Always create sparse files (even for regular data). (REQ: REQ-09-0467)
+            - [ ] `--sparse=never`: Never create sparse files. (REQ: REQ-09-0468)
+            - [ ] Implement `SEEK_DATA`/`SEEK_HOLE` for hole detection. (REQ: REQ-09-0469)
+            - [ ] Fallback to zero-block detection when `SEEK_HOLE` unavailable. (REQ: REQ-09-0470)
+        - [ ] **Buffer & Performance Options:** (REQ: REQ-09-0471)
+            - [ ] `-b SIZE`, `--buffer-size=SIZE`: Set IO buffer size. (REQ: REQ-09-0472)
+            - [ ] Default buffer size (64KB or configurable). (REQ: REQ-09-0473)
+            - [ ] Use `copy_file_range()` when available and beneficial. (REQ: REQ-09-0474)
+            - [ ] Use `sendfile()` as optimization on Linux. (REQ: REQ-09-0475)
+            - [ ] Fallback to portable `read()`/`write()` loop. (REQ: REQ-09-0476)
+            - [ ] Profile and tune buffer sizes for various file sizes. (REQ: REQ-09-0477)
+        - [ ] **Backup Options:** (REQ: REQ-09-0478, REQ-09-0651)
+            - [ ] `-b`, `--backup`: Make backup of each existing destination file. (REQ: REQ-09-0479, REQ-09-0652)
+            - [ ] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never). (REQ: REQ-09-0480, REQ-09-0653)
+            - [ ] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`). (REQ: REQ-09-0481, REQ-09-0654)
+        - [ ] **Target Directory Options:** (REQ: REQ-09-0482)
+            - [ ] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Copy all sources into target dir. (REQ: REQ-09-0483)
+            - [ ] `-T`, `--no-target-directory`: Treat destination as normal file. (REQ: REQ-09-0484, REQ-09-0648)
+        - [ ] **Miscellaneous Options:** (REQ: REQ-09-0485)
+            - [ ] `--reflink=WHEN`: Control clone/CoW (auto, always, never). (REQ: REQ-09-0486)
+            - [ ] `--remove-destination`: Remove existing dest files before copy. (REQ: REQ-09-0487)
+            - [ ] `-u`, `--update`: Copy only when source is newer or dest missing. (REQ: REQ-09-0488)
+        - [ ] **Basic Copy Operations:** (REQ: REQ-09-0489)
+            - [ ] **Single File to File:** (REQ: REQ-09-0490)
+                - [ ] Create destination file with correct mode. (REQ: REQ-09-0491)
+                - [ ] Copy data from source to destination. (REQ: REQ-09-0492)
+                - [ ] Preserve metadata as requested. (REQ: REQ-09-0493)
+                - [ ] Handle existing destination per flags. (REQ: REQ-09-0494)
+            - [ ] **Multiple Files to Directory:** (REQ: REQ-09-0495)
+                - [ ] Verify destination is a directory. (REQ: REQ-09-0496)
+                - [ ] Construct destination paths correctly. (REQ: REQ-09-0497)
+                - [ ] Process each source file. (REQ: REQ-09-0498)
+                - [ ] Handle errors per-file (warn and continue). (REQ: REQ-09-0499)
+            - [ ] **Directory Recursion (`-R`/`-a`):** (REQ: REQ-09-0500)
+                - [ ] Create destination directory structure. (REQ: REQ-09-0501)
+                - [ ] Traverse source directory depth-first. (REQ: REQ-09-0502)
+                - [ ] Copy regular files, symlinks, devices, FIFOs. (REQ: REQ-09-0503)
+                - [ ] Preserve directory permissions after contents copied. (REQ: REQ-09-0504)
+                - [ ] Handle permission denied (warn and continue). (REQ: REQ-09-0505)
+        - [ ] **Atomic Replace:** (REQ: REQ-09-0506)
+            - [ ] Create temporary file in destination directory. (REQ: REQ-09-0507)
+            - [ ] Use unique naming (`.cp.XXXXXX` pattern). (REQ: REQ-09-0508)
+            - [ ] Copy all data to temporary file. (REQ: REQ-09-0509)
+            - [ ] Set correct permissions on temporary file. (REQ: REQ-09-0510)
+            - [ ] Call `fsync()` on file descriptor. (REQ: REQ-09-0511)
+            - [ ] `rename()` temporary file to destination. (REQ: REQ-09-0512)
+            - [ ] Handle rename failure (cross-device, permissions). (REQ: REQ-09-0513)
+            - [ ] Clean up temporary file on any failure. (REQ: REQ-09-0514)
+            - [ ] Atomic replace for regular files only. (REQ: REQ-09-0515)
+        - [ ] **Hardlink Graph Preservation:** (REQ: REQ-09-0516)
+            - [ ] Detect when multiple source files are hard links to same inode. (REQ: REQ-09-0517)
+            - [ ] Maintain map of (source_dev, source_ino) -> destination_path. (REQ: REQ-09-0518)
+            - [ ] On second encounter, create hard link to first copy. (REQ: REQ-09-0516)
+            - [ ] Efficient hash map implementation for large trees. (REQ: REQ-09-0520)
+            - [ ] Handle cross-device scenarios (cannot preserve links). (REQ: REQ-09-0521)
+        - [ ] **Extended Attributes & ACLs:** (REQ: REQ-09-0522)
+            - [ ] Detect platform support for xattrs (`getxattr()`, `setxattr()`). (REQ: REQ-09-0523)
+            - [ ] List source file xattrs with `listxattr()`. (REQ: REQ-09-0524)
+            - [ ] Copy each xattr to destination. (REQ: REQ-09-0525)
+            - [ ] Handle xattr size limits. (REQ: REQ-09-0526)
+            - [ ] Detect platform support for ACLs. (REQ: REQ-09-0527)
+            - [ ] Copy ACLs when `--preserve=all` or `--preserve=xattr`. (REQ: REQ-09-0528)
+            - [ ] Graceful degradation when APIs unavailable. (REQ: REQ-09-0529)
+            - [ ] Warn when preservation fails (non-fatal). (REQ: REQ-09-0530)
+        - [ ] **Special Files:** (REQ: REQ-09-0531)
+            - [ ] **Symlinks:** Copy link target or create symlink based on flags. (REQ: REQ-09-0532)
+            - [ ] **Block Devices:** Use `mknod()` with `-R`. (REQ: REQ-09-0533)
+            - [ ] **Character Devices:** Use `mknod()` with `-R`. (REQ: REQ-09-0534)
+            - [ ] **FIFOs:** Use `mkfifo()` with `-R`. (REQ: REQ-09-0535)
+            - [ ] **Sockets:** Skip or warn (cannot copy). (REQ: REQ-09-0536)
+        - [ ] **Cross-Device Handling:** (REQ: REQ-09-0537)
+            - [ ] Detect cross-device copy (stat source and dest dirs). (REQ: REQ-09-0538)
+            - [ ] `-l` (hardlink) fails across devices with clear error. (REQ: REQ-09-0539)
+            - [ ] `-s` (symlink) works across devices. (REQ: REQ-09-0540)
+            - [ ] Regular copy works across devices. (REQ: REQ-09-0541)
+            - [ ] Hardlink preservation fails across devices (warn). (REQ: REQ-09-0542)
+        - [ ] **Error Handling & Robustness:** (REQ: REQ-09-0543)
+            - [ ] Handle `EINTR` during read/write (retry). (REQ: REQ-09-0544)
+            - [ ] Handle partial writes (continue from where left off). (REQ: REQ-09-0545)
+            - [ ] Handle `ENOSPC` (disk full) gracefully. (REQ: REQ-09-0546)
+            - [ ] Handle `EDQUOT` (quota exceeded) gracefully. (REQ: REQ-09-0547)
+            - [ ] Clean up partial destination on failure. (REQ: REQ-09-0548)
+            - [ ] Signal handling: catch SIGINT/SIGTERM, cleanup, exit. (REQ: REQ-09-0549)
+            - [ ] Write robust signal-safe cleanup routines. (REQ: REQ-09-0550)
+            - [ ] Exit code 0: success. (REQ: REQ-09-0357, REQ-09-0551, REQ-09-1269)
+            - [ ] Exit code 1: some files could not be copied. (REQ: REQ-09-0552)
+            - [ ] Never crash on any input. (REQ: REQ-09-0360, REQ-09-0553, REQ-09-0713)
+        - [ ] **Path Handling:** (REQ: REQ-09-0554, REQ-09-0716, REQ-09-0873, REQ-09-1006, REQ-09-1121)
+            - [ ] No fixed-size path buffers (use dynamic allocation). (REQ: REQ-09-0555, REQ-09-0717)
+            - [ ] Hygienic path joining (handle trailing slashes). (REQ: REQ-09-0556)
+            - [ ] Detect and reject self-copy attempts. (REQ: REQ-09-0557)
+            - [ ] Handle paths with special characters. (REQ: REQ-09-0558, REQ-09-0719, REQ-09-0875, REQ-09-1008, REQ-09-1123)
+            - [ ] Handle paths at `PATH_MAX` limit. (REQ: REQ-09-0559, REQ-09-0720, REQ-09-0876, REQ-09-1009, REQ-09-1124)
+        - [ ] **Permission & Ownership Handling:** (REQ: REQ-09-0560, REQ-09-0847)
+            - [ ] Create destination with source mode (masked by umask initially). (REQ: REQ-09-0561)
+            - [ ] After copy complete, chmod to exact source mode. (REQ: REQ-09-0562)
+            - [ ] If root, chown to source owner:group. (REQ: REQ-09-0560, REQ-09-0847)
+            - [ ] If not root, preserve group if possible. (REQ: REQ-09-0560, REQ-09-0847)
+            - [ ] Warn if ownership cannot be preserved. (REQ: REQ-09-0565)
+            - [ ] Handle setuid/setgid bits correctly. (REQ: REQ-09-0566)
+        - [ ] **Timestamp Preservation:** (REQ: REQ-09-0567)
+            - [ ] Read source atime and mtime. (REQ: REQ-09-0568)
+            - [ ] Use `utimensat()` for nanosecond precision. (REQ: REQ-09-0569)
+            - [ ] Fallback to `utimes()` if needed. (REQ: REQ-09-0570)
+            - [ ] Preserve timestamps after all data written. (REQ: REQ-09-0571)
+        - [ ] **Tests:** (REQ: REQ-09-0368, REQ-09-0572, REQ-09-0722, REQ-09-0883, REQ-09-1019, REQ-09-1127, REQ-09-1271, REQ-09-1403, REQ-09-1506)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Test atomic replace helper. (REQ: REQ-09-0574)
+                - [ ] Test sparse file detection. (REQ: REQ-09-0575)
+                - [ ] Test hardlink map operations. (REQ: REQ-09-0576)
+                - [ ] Test path joining logic. (REQ: REQ-09-0577)
+                - [ ] Test metadata preservation helpers. (REQ: REQ-09-0578)
+                - [ ] Test buffer allocation. (REQ: REQ-09-0579)
+            - [ ] **Integration Tests:** (REQ: REQ-09-0378, REQ-09-0580, REQ-09-0729, REQ-09-0890, REQ-09-1026, REQ-09-1133, REQ-09-1409, REQ-09-1511, REQ-09-2282)
+                - [ ] Copy single file to new file. (REQ: REQ-09-0581)
+                - [ ] Copy single file to existing file. (REQ: REQ-09-0582)
+                - [ ] Copy multiple files to directory. (REQ: REQ-09-0583)
+                - [ ] Copy directory recursively. (REQ: REQ-09-0584)
+                - [ ] Copy with `-p` (permissions preserved). (REQ: REQ-09-0585)
+                - [ ] Copy with `-a` (archive mode). (REQ: REQ-09-0586)
+                - [ ] Copy hardlinked files (links preserved). (REQ: REQ-09-0587)
+                - [ ] Copy sparse files (holes preserved). (REQ: REQ-09-0588)
+                - [ ] Copy symlinks with `-d` and `-L`. (REQ: REQ-09-0589)
+                - [ ] Copy special files (devices, FIFOs). (REQ: REQ-09-0590)
+                - [ ] Copy files with xattrs. (REQ: REQ-09-0591)
+                - [ ] Copy across filesystems. (REQ: REQ-09-0592)
+                - [ ] Handle permission denied. (REQ: REQ-09-0593)
+                - [ ] Handle disk full. (REQ: REQ-09-0594)
+                - [ ] Handle self-copy attempt. (REQ: REQ-09-0595)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] Random file content survives copy. (REQ: REQ-09-0597)
+                - [ ] Random metadata preserved correctly. (REQ: REQ-09-0598)
+                - [ ] Random directory structures copy correctly. (REQ: REQ-09-0599)
+            - [ ] **Fuzz Tests:** (REQ: REQ-09-0600, REQ-09-0746, REQ-09-0913, REQ-09-1044, REQ-09-1150, REQ-09-1295, REQ-09-1434, REQ-09-1533)
+                - [ ] Fuzz path handling with binary filenames. (REQ: REQ-09-0601, REQ-09-0914, REQ-09-1045, REQ-09-1151)
+                - [ ] Fuzz metadata parsing. (REQ: REQ-09-0602)
+                - [ ] Fuzz option parsing. (REQ: REQ-09-0603, REQ-09-0748, REQ-09-0915, REQ-09-1047, REQ-09-1152)
+            - [ ] **Acceptance Tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+                - [ ] `cp file1 file2` -> file2 identical to file1. (REQ: REQ-09-0605)
+                - [ ] `cp -r dir1 dir2` -> dir2 contains copy of dir1. (REQ: REQ-09-0606)
+                - [ ] `cp -a` -> timestamps, permissions, links preserved. (REQ: REQ-09-0607)
+                - [ ] `cp -i existing` -> prompts user. (REQ: REQ-09-0608)
+                - [ ] `cp -n existing` -> skips overwrite. (REQ: REQ-09-0609)
+                - [ ] `cp -l` -> creates hard links. (REQ: REQ-09-0610)
+                - [ ] `cp -s` -> creates symlinks. (REQ: REQ-09-0611)
+                - [ ] Atomic replace verified (no partial files on interrupt). (REQ: REQ-09-0612)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `cp(1)` man page covering all options. (REQ: REQ-09-0614)
+            - [ ] Document preservation behavior in detail. (REQ: REQ-09-0615)
+            - [ ] Document sparse file handling. (REQ: REQ-09-0616)
+            - [ ] Document atomic replace mechanism. (REQ: REQ-09-0617)
+            - [ ] Write developer design doc for data flow. (REQ: REQ-09-0618)
+            - [ ] Document hardlink preservation algorithm. (REQ: REQ-09-0619)
+            - [ ] Document cross-device handling. (REQ: REQ-09-0620)
+        - [ ] **Acceptance Criteria:** (REQ: REQ-09-0419, REQ-09-0621, REQ-09-0766, REQ-09-0932, REQ-09-1062, REQ-09-1165, REQ-09-1312, REQ-09-1447, REQ-09-1545)
+            - [ ] All CLI options implemented and tested. (REQ: REQ-09-0420, REQ-09-0622, REQ-09-0933, REQ-09-1063, REQ-09-1166, REQ-09-1313)
+            - [ ] Atomic replace demonstrated (no partial files). (REQ: REQ-09-0623)
+            - [ ] Hardlink preservation works for multi-file inputs. (REQ: REQ-09-0624)
+            - [ ] Sparse files copied efficiently. (REQ: REQ-09-0625)
+            - [ ] No memory leaks (valgrind clean). (REQ: REQ-09-0626, REQ-09-0937, REQ-09-1067, REQ-09-1170, REQ-09-1318, REQ-09-1451, REQ-09-1549)
+            - [ ] Correct behavior across all flag combinations. (REQ: REQ-09-0627)
+            - [ ] Exit codes match documented behavior. (REQ: REQ-09-0426, REQ-09-0628, REQ-09-0773)
+            - [ ] Man page complete and accurate. (REQ: REQ-09-0427, REQ-09-0629, REQ-09-0774, REQ-09-0939, REQ-09-1069, REQ-09-1172, REQ-09-1319)
+            - [ ] All tests pass in CI. (REQ: REQ-09-0428, REQ-09-0630, REQ-09-0775, REQ-09-0940, REQ-09-1070, REQ-09-1173, REQ-09-1320, REQ-09-1454, REQ-09-1552)
+    - [ ] **`mv` - Move (rename) files (Production Quality Rewrite):** (REQ: REQ-09-0631)
+        - [ ] **Audit & Refactor Existing Code:** (REQ: REQ-09-0199, REQ-09-0430, REQ-09-0632, REQ-09-0777, REQ-09-0942, REQ-09-1072, REQ-09-1322)
+            - [ ] Audit existing `bin/mv/mv.c` for TODO comments, fragile code, incomplete features. (REQ: REQ-09-0633)
+            - [ ] Document all functionality gaps and bugs. (REQ: REQ-09-0201, REQ-09-0432, REQ-09-0634, REQ-09-0944, REQ-09-1074, REQ-09-1324)
+            - [ ] Create refactoring plan: modular architecture. (REQ: REQ-09-0635, REQ-09-0780, REQ-09-0945, REQ-09-1075, REQ-09-1325)
+            - [ ] Extract option parsing into `mv_opts.c` and `mv_opts.h`. (REQ: REQ-09-0636)
+            - [ ] Extract rename/copy logic into `mv_core.c` and `mv_core.h`. (REQ: REQ-09-0637)
+            - [ ] Integrate with `cp` atomic replace logic (shared library or code reuse). (REQ: REQ-09-0638)
+            - [ ] Write unit tests for each extracted module. (REQ: REQ-09-0438, REQ-09-0639, REQ-09-0784, REQ-09-0949, REQ-09-1078)
+        - [ ] **CLI Options:** (REQ: REQ-09-0208, REQ-09-0640, REQ-09-0785, REQ-09-0950, REQ-09-1079, REQ-09-1180, REQ-09-1461)
+            - [ ] `-f`, `--force`: Do not prompt before overwriting. (REQ: REQ-09-0641)
+            - [ ] `-i`, `--interactive`: Prompt before overwrite. (REQ: REQ-09-0442, REQ-09-0642)
+            - [ ] `-n`, `--no-clobber`: Do not overwrite existing file. (REQ: REQ-09-0643)
+            - [ ] `-v`, `--verbose`: Explain what is being done. (REQ: REQ-09-0444, REQ-09-0644, REQ-09-0791)
+            - [ ] `-u`, `--update`: Move only when source is newer or dest missing. (REQ: REQ-09-0645)
+            - [ ] `--strip-trailing-slashes`: Remove trailing slashes from source args. (REQ: REQ-09-0646)
+            - [ ] `-t DIRECTORY`, `--target-directory=DIRECTORY`: Move all sources into target dir. (REQ: REQ-09-0647)
+            - [ ] `-T`, `--no-target-directory`: Treat destination as normal file. (REQ: REQ-09-0484, REQ-09-0648)
+            - [ ] `--help`: Display help and exit. (REQ: REQ-09-0446, REQ-09-0649, REQ-09-0796, REQ-09-0955, REQ-09-1083, REQ-09-1195, REQ-09-1341)
+            - [ ] `--version`: Display version and exit. (REQ: REQ-09-0447, REQ-09-0650, REQ-09-0797, REQ-09-0956, REQ-09-1084, REQ-09-1196, REQ-09-1342)
+        - [ ] **Backup Options:** (REQ: REQ-09-0478, REQ-09-0651)
+            - [ ] `-b`, `--backup`: Make backup of each existing destination file. (REQ: REQ-09-0479, REQ-09-0652)
+            - [ ] `--backup=CONTROL`: Backup control (none, off, numbered, t, existing, nil, simple, never). (REQ: REQ-09-0480, REQ-09-0653)
+            - [ ] `-S SUFFIX`, `--suffix=SUFFIX`: Override backup suffix (default `~`). (REQ: REQ-09-0481, REQ-09-0654)
+        - [ ] **Rename Semantics (Same Filesystem):** (REQ: REQ-09-0655)
+            - [ ] Use `rename(2)` syscall for atomic move. (REQ: REQ-09-0656)
+            - [ ] Handle `rename()` success: done, no further action. (REQ: REQ-09-0657)
+            - [ ] Handle `rename()` failure with `EXDEV`: trigger copy+unlink fallback. (REQ: REQ-09-0658)
+            - [ ] Handle `rename()` failure with `ENOENT`: source doesn't exist, error. (REQ: REQ-09-0659)
+            - [ ] Handle `rename()` failure with `EACCES`/`EPERM`: permission error. (REQ: REQ-09-0660)
+            - [ ] Handle `rename()` failure with `ENOTDIR`: path component not directory. (REQ: REQ-09-0661)
+            - [ ] Handle `rename()` failure with `EISDIR`: dest is dir, source is not. (REQ: REQ-09-0662)
+            - [ ] Handle `rename()` failure with `ENOTEMPTY`: dest dir not empty (dir move). (REQ: REQ-09-0663)
+        - [ ] **Cross-Filesystem Fallback:** (REQ: REQ-09-0664)
+            - [ ] Detect `EXDEV` from `rename()`. (REQ: REQ-09-0665)
+            - [ ] Invoke copy operation (reuse `cp` logic). (REQ: REQ-09-0666)
+            - [ ] Preserve all metadata during copy (timestamps, ownership, mode). (REQ: REQ-09-0667)
+            - [ ] Preserve extended attributes during copy. (REQ: REQ-09-0668)
+            - [ ] Preserve ACLs during copy if supported. (REQ: REQ-09-0669)
+            - [ ] Preserve hardlink graph during recursive move. (REQ: REQ-09-0670)
+            - [ ] After successful copy, unlink source. (REQ: REQ-09-0671)
+            - [ ] For directories: recursively copy, then recursively remove source. (REQ: REQ-09-0672)
+            - [ ] Handle partial failure: source partially moved. (REQ: REQ-09-0673)
+            - [ ] Clean up destination on copy failure before unlinking source. (REQ: REQ-09-0674)
+        - [ ] **Overwrite Policies:** (REQ: REQ-09-0675)
+            - [ ] Default: prompt if destination exists and stdout is TTY. (REQ: REQ-09-0676)
+            - [ ] `-f`: Never prompt, silently overwrite. (REQ: REQ-09-0677)
+            - [ ] `-i`: Always prompt before overwrite. (REQ: REQ-09-0678)
+            - [ ] `-n`: Never overwrite, silently skip. (REQ: REQ-09-0679)
+            - [ ] Precedence: last option wins among `-f`, `-i`, `-n`. (REQ: REQ-09-0680)
+            - [ ] Non-TTY behavior: `-i` still prompts (use /dev/tty or skip). (REQ: REQ-09-0681)
+            - [ ] Prompt format: "overwrite 'file'? " with y/n response. (REQ: REQ-09-0682)
+        - [ ] **Directory Moves:** (REQ: REQ-09-0683)
+            - [ ] Move directory to new name (rename within fs). (REQ: REQ-09-0684)
+            - [ ] Move directory into existing directory. (REQ: REQ-09-0685, REQ-09-0735)
+            - [ ] Detect move-into-self error (moving dir into its own subtree). (REQ: REQ-09-0686)
+            - [ ] Error message for move-into-self: clear explanation. (REQ: REQ-09-0687)
+            - [ ] Handle non-empty destination directory (error). (REQ: REQ-09-0688)
+            - [ ] Recursive directory move for cross-fs. (REQ: REQ-09-0689)
+        - [ ] **Special File Handling:** (REQ: REQ-09-0690, REQ-09-0853)
+            - [ ] **Symlinks:** Move symlink itself (not target) by default. (REQ: REQ-09-0691)
+            - [ ] `-L`: Follow symlinks (move target, not link). (REQ: REQ-09-0692)
+            - [ ] `-P`: Never follow symlinks (default). (REQ: REQ-09-0693)
+            - [ ] **Block/Character Devices:** Rename or recreate on cross-fs. (REQ: REQ-09-0694)
+            - [ ] **FIFOs:** Rename or recreate on cross-fs. (REQ: REQ-09-0695)
+            - [ ] **Sockets:** Rename only (cannot copy). (REQ: REQ-09-0696)
+        - [ ] **Hardlinks & Metadata:** (REQ: REQ-09-0697)
+            - [ ] Preserve hardlink relationships during cross-fs copy. (REQ: REQ-09-0698)
+            - [ ] Reuse hardlink map from `cp` implementation. (REQ: REQ-09-0699)
+            - [ ] Preserve file mode (chmod after copy). (REQ: REQ-09-0700)
+            - [ ] Preserve owner/group (chown after copy, if root). (REQ: REQ-09-0701)
+            - [ ] Preserve timestamps (utimensat after copy). (REQ: REQ-09-0702)
+        - [ ] **Race Condition Avoidance:** (REQ: REQ-09-0703)
+            - [ ] Minimize TOCTOU window between check and operation. (REQ: REQ-09-0704)
+            - [ ] Use `renameat2()` with `RENAME_NOREPLACE` where available. (REQ: REQ-09-0705)
+            - [ ] Fallback to traditional rename with accept-the-race semantics. (REQ: REQ-09-0706)
+            - [ ] For `-n`: open with O_EXCL to avoid overwrite races. (REQ: REQ-09-0707)
+            - [ ] Document known race conditions that cannot be avoided. (REQ: REQ-09-0708)
+        - [ ] **Error Handling:** (REQ: REQ-09-0126, REQ-09-0182, REQ-09-0353, REQ-09-0709, REQ-09-0864, REQ-09-1012, REQ-09-1113, REQ-09-1265, REQ-09-1381)
+            - [ ] Per-file errors: warn and continue with next source. (REQ: REQ-09-0710)
+            - [ ] Exit code 0: all moves successful. (REQ: REQ-09-0711)
+            - [ ] Exit code 1: at least one move failed. (REQ: REQ-09-0712)
+            - [ ] Never crash on any input. (REQ: REQ-09-0360, REQ-09-0553, REQ-09-0713)
+            - [ ] Handle EINTR during operations. (REQ: REQ-09-0714)
+            - [ ] Signal handling: catch SIGINT, cleanup partial operations. (REQ: REQ-09-0715)
+        - [ ] **Path Handling:** (REQ: REQ-09-0554, REQ-09-0716, REQ-09-0873, REQ-09-1006, REQ-09-1121)
+            - [ ] No fixed-size path buffers (use dynamic allocation). (REQ: REQ-09-0555, REQ-09-0717)
+            - [ ] `--strip-trailing-slashes` implementation. (REQ: REQ-09-0718)
+            - [ ] Handle paths with special characters. (REQ: REQ-09-0558, REQ-09-0719, REQ-09-0875, REQ-09-1008, REQ-09-1123)
+            - [ ] Handle paths at `PATH_MAX` limit. (REQ: REQ-09-0559, REQ-09-0720, REQ-09-0876, REQ-09-1009, REQ-09-1124)
+            - [ ] Detect and reject source == destination. (REQ: REQ-09-0721)
+        - [ ] **Tests:** (REQ: REQ-09-0368, REQ-09-0572, REQ-09-0722, REQ-09-0883, REQ-09-1019, REQ-09-1127, REQ-09-1271, REQ-09-1403, REQ-09-1506)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Test rename semantics helper. (REQ: REQ-09-0724)
+                - [ ] Test cross-fs detection. (REQ: REQ-09-0725)
+                - [ ] Test overwrite policy logic. (REQ: REQ-09-0726)
+                - [ ] Test path manipulation (strip slashes). (REQ: REQ-09-0727)
+                - [ ] Test move-into-self detection. (REQ: REQ-09-0728)
+            - [ ] **Integration Tests:** (REQ: REQ-09-0378, REQ-09-0580, REQ-09-0729, REQ-09-0890, REQ-09-1026, REQ-09-1133, REQ-09-1409, REQ-09-1511, REQ-09-2282)
+                - [ ] Move single file to new name. (REQ: REQ-09-0730)
+                - [ ] Move single file to existing file (overwrite). (REQ: REQ-09-0731)
+                - [ ] Move file to directory. (REQ: REQ-09-0732)
+                - [ ] Move multiple files to directory. (REQ: REQ-09-0733)
+                - [ ] Move directory to new name. (REQ: REQ-09-0734)
+                - [ ] Move directory into existing directory. (REQ: REQ-09-0685, REQ-09-0735)
+                - [ ] Move across filesystems. (REQ: REQ-09-0736)
+                - [ ] Move with `-i` (interactive prompt). (REQ: REQ-09-0737)
+                - [ ] Move with `-n` (no clobber). (REQ: REQ-09-0738)
+                - [ ] Move with `-u` (update). (REQ: REQ-09-0739)
+                - [ ] Move special files (symlinks, devices). (REQ: REQ-09-0740)
+                - [ ] Move-into-self detection. (REQ: REQ-09-0741)
+                - [ ] Hardlink preservation on cross-fs. (REQ: REQ-09-0742)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] File content preserved after move. (REQ: REQ-09-0744)
+                - [ ] Metadata preserved after cross-fs move. (REQ: REQ-09-0745)
+            - [ ] **Fuzz Tests:** (REQ: REQ-09-0600, REQ-09-0746, REQ-09-0913, REQ-09-1044, REQ-09-1150, REQ-09-1295, REQ-09-1434, REQ-09-1533)
+                - [ ] Fuzz path handling with binary/special characters. (REQ: REQ-09-0747)
+                - [ ] Fuzz option parsing. (REQ: REQ-09-0603, REQ-09-0748, REQ-09-0915, REQ-09-1047, REQ-09-1152)
+            - [ ] **Non-TTY Interactive Tests:** (REQ: REQ-09-0749)
+                - [ ] `-i` behavior when stdin is not TTY. (REQ: REQ-09-0750)
+                - [ ] Input redirection for prompts. (REQ: REQ-09-0751)
+            - [ ] **Acceptance Tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+                - [ ] `mv file1 file2` -> file1 gone, file2 exists. (REQ: REQ-09-0753)
+                - [ ] `mv file dir/` -> dir/file exists. (REQ: REQ-09-0754)
+                - [ ] `mv` across filesystems -> content identical. (REQ: REQ-09-0755)
+                - [ ] `mv -i existing` -> prompts user. (REQ: REQ-09-0756)
+                - [ ] `mv -n existing` -> skips, source untouched. (REQ: REQ-09-0757)
+                - [ ] `mv dir1 dir2` -> dir1 renamed if same fs. (REQ: REQ-09-0758)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `mv(1)` man page covering all options. (REQ: REQ-09-0760)
+            - [ ] Document rename(2) atomicity guarantees. (REQ: REQ-09-0761)
+            - [ ] Document cross-filesystem behavior. (REQ: REQ-09-0762)
+            - [ ] Document backup options. (REQ: REQ-09-0763)
+            - [ ] Write developer notes on atomicity. (REQ: REQ-09-0764)
+            - [ ] Document race condition considerations. (REQ: REQ-09-0765)
+        - [ ] **Acceptance Criteria:** (REQ: REQ-09-0419, REQ-09-0621, REQ-09-0766, REQ-09-0932, REQ-09-1062, REQ-09-1165, REQ-09-1312, REQ-09-1447, REQ-09-1545)
+            - [ ] `rename(2)` used when possible. (REQ: REQ-09-0767)
+            - [ ] Correct fallback to copy+unlink for cross-fs. (REQ: REQ-09-0768)
+            - [ ] Hardlink preservation on fallback. (REQ: REQ-09-0769)
+            - [ ] Metadata preservation on fallback. (REQ: REQ-09-0770)
+            - [ ] Robust error handling. (REQ: REQ-09-0771)
+            - [ ] No memory leaks. (REQ: REQ-09-0772)
+            - [ ] Exit codes match documented behavior. (REQ: REQ-09-0426, REQ-09-0628, REQ-09-0773)
+            - [ ] Man page complete and accurate. (REQ: REQ-09-0427, REQ-09-0629, REQ-09-0774, REQ-09-0939, REQ-09-1069, REQ-09-1172, REQ-09-1319)
+            - [ ] All tests pass in CI. (REQ: REQ-09-0428, REQ-09-0630, REQ-09-0775, REQ-09-0940, REQ-09-1070, REQ-09-1173, REQ-09-1320, REQ-09-1454, REQ-09-1552)
+    - [ ] **`rm` - Remove files or directories (Production Quality Rewrite):** (REQ: REQ-09-0776)
+        - [ ] **Audit & Refactor Existing Code:** (REQ: REQ-09-0199, REQ-09-0430, REQ-09-0632, REQ-09-0777, REQ-09-0942, REQ-09-1072, REQ-09-1322)
+            - [ ] Audit existing `bin/rm/rm.c` for TODO comments, fragile code, incomplete features. (REQ: REQ-09-0778)
+            - [ ] Document all functionality gaps and security concerns. (REQ: REQ-09-0779)
+            - [ ] Create refactoring plan: modular architecture. (REQ: REQ-09-0635, REQ-09-0780, REQ-09-0945, REQ-09-1075, REQ-09-1325)
+            - [ ] Extract option parsing into `rm_opts.c` and `rm_opts.h`. (REQ: REQ-09-0781)
+            - [ ] Extract recursive walker into `rm_walk.c` and `rm_walk.h`. (REQ: REQ-09-0782)
+            - [ ] Extract safety checks into `rm_safety.c` and `rm_safety.h`. (REQ: REQ-09-0783)
+            - [ ] Write unit tests for each extracted module. (REQ: REQ-09-0438, REQ-09-0639, REQ-09-0784, REQ-09-0949, REQ-09-1078)
+        - [ ] **CLI Options:** (REQ: REQ-09-0208, REQ-09-0640, REQ-09-0785, REQ-09-0950, REQ-09-1079, REQ-09-1180, REQ-09-1461)
+            - [ ] `-f`, `--force`: Ignore nonexistent files, never prompt. (REQ: REQ-09-0786)
+            - [ ] `-i`: Prompt before every removal. (REQ: REQ-09-0787, REQ-09-0841)
+            - [ ] `-I`: Prompt once before removing more than 3 files or recursing. (REQ: REQ-09-0788)
+            - [ ] `-r`, `-R`, `--recursive`: Remove directories and their contents recursively. (REQ: REQ-09-0789)
+            - [ ] `-d`, `--dir`: Remove empty directories. (REQ: REQ-09-0790)
+            - [ ] `-v`, `--verbose`: Explain what is being done. (REQ: REQ-09-0444, REQ-09-0644, REQ-09-0791)
+            - [ ] `--one-file-system`: Do not cross filesystem boundaries. (REQ: REQ-09-0792)
+            - [ ] `--preserve-root`: Do not remove `/` (default). (REQ: REQ-09-0793)
+            - [ ] `--no-preserve-root`: Allow removing `/` (dangerous). (REQ: REQ-09-0794)
+            - [ ] `--interactive=WHEN`: Prompt according to WHEN (never, once, always). (REQ: REQ-09-0795)
+            - [ ] `--help`: Display help and exit. (REQ: REQ-09-0446, REQ-09-0649, REQ-09-0796, REQ-09-0955, REQ-09-1083, REQ-09-1195, REQ-09-1341)
+            - [ ] `--version`: Display version and exit. (REQ: REQ-09-0447, REQ-09-0650, REQ-09-0797, REQ-09-0956, REQ-09-1084, REQ-09-1196, REQ-09-1342)
+        - [ ] **Root Protection (`--preserve-root`):** (REQ: REQ-09-0798)
+            - [ ] Default: refuse to remove `/` with `-r`. (REQ: REQ-09-0799)
+            - [ ] Detect `/` as argument (canonicalize paths first). (REQ: REQ-09-0800)
+            - [ ] Detect attempts to remove filesystem root. (REQ: REQ-09-0801)
+            - [ ] Error message: "it is dangerous to operate recursively on '/'". (REQ: REQ-09-0802)
+            - [ ] `--no-preserve-root`: explicit opt-in to dangerous behavior. (REQ: REQ-09-0803)
+            - [ ] Acceptance: never accidentally remove `/` in any test. (REQ: REQ-09-0804)
+        - [ ] **Dangerous Pattern Detection:** (REQ: REQ-09-0805)
+            - [ ] Refuse `rm -rf /` unless `--no-preserve-root`. (REQ: REQ-09-0806)
+            - [ ] Warn on `rm -rf /*` (but allow if forced). (REQ: REQ-09-0807)
+            - [ ] Warn on `rm -rf ~` or `rm -rf $HOME`. (REQ: REQ-09-0808)
+            - [ ] Document dangerous patterns in man page. (REQ: REQ-09-0809)
+        - [ ] **Symlink Handling (Recursive Mode):** (REQ: REQ-09-0810)
+            - [ ] Do NOT follow symlinks during directory traversal. (REQ: REQ-09-0811)
+            - [ ] Remove the symlink itself, not the target. (REQ: REQ-09-0812)
+            - [ ] Never descend into symlinked directories. (REQ: REQ-09-0813)
+            - [ ] Handle broken symlinks (remove them). (REQ: REQ-09-0814)
+            - [ ] Tests: symlink removal tests, symlink-to-directory tests. (REQ: REQ-09-0815)
+        - [ ] **TOCTOU Hardening (FD-Based Traversal):** (REQ: REQ-09-0816)
+            - [ ] Use `openat()` to open directories relative to parent fd. (REQ: REQ-09-0817)
+            - [ ] Use `unlinkat()` to remove files relative to directory fd. (REQ: REQ-09-0818)
+            - [ ] Use `fstatat()` to stat files relative to directory fd. (REQ: REQ-09-0819)
+            - [ ] Never use path-based operations during traversal. (REQ: REQ-09-0820)
+            - [ ] Keep directory fd open during traversal of its contents. (REQ: REQ-09-0821)
+            - [ ] Handle directory fd invalidation gracefully. (REQ: REQ-09-0822)
+            - [ ] Files: `rm_walk.c` uses fd-based traversal throughout. (REQ: REQ-09-0823)
+            - [ ] Tests: TOCTOU tests with mock concurrent modifications. (REQ: REQ-09-0824)
+        - [ ] **Recursive Removal Algorithm:** (REQ: REQ-09-0825)
+            - [ ] Depth-first traversal: remove contents before directory. (REQ: REQ-09-0826)
+            - [ ] Open directory via `openat(parent_fd, name, O_DIRECTORY)`. (REQ: REQ-09-0827)
+            - [ ] Iterate directory with `getdents()` or `fdopendir()`. (REQ: REQ-09-0828)
+            - [ ] Skip `.` and `..` entries. (REQ: REQ-09-0829)
+            - [ ] Recursively remove subdirectories. (REQ: REQ-09-0830)
+            - [ ] Use `unlinkat(dir_fd, name, 0)` for files. (REQ: REQ-09-0831)
+            - [ ] Use `unlinkat(dir_fd, name, AT_REMOVEDIR)` for directories. (REQ: REQ-09-0832)
+            - [ ] Close directory fd after contents removed. (REQ: REQ-09-0833)
+        - [ ] **One-File-System Option:** (REQ: REQ-09-0834)
+            - [ ] Detect filesystem boundary during traversal. (REQ: REQ-09-0835)
+            - [ ] Compare `st_dev` of child to parent. (REQ: REQ-09-0836)
+            - [ ] Skip (do not descend) if `st_dev` differs. (REQ: REQ-09-0837)
+            - [ ] Warn when skipping due to filesystem boundary. (REQ: REQ-09-0838)
+            - [ ] Tests: cross-filesystem skip tests (with mock or loopback). (REQ: REQ-09-0839)
+        - [ ] **Interactive Prompting:** (REQ: REQ-09-0840)
+            - [ ] `-i`: Prompt before every removal. (REQ: REQ-09-0787, REQ-09-0841)
+            - [ ] `-I`: Prompt once if more than 3 files or if `-r`. (REQ: REQ-09-0842)
+            - [ ] Prompt format: "rm: remove <type> '<path>'?". (REQ: REQ-09-0843)
+            - [ ] Accept y/Y for yes, n/N or other for no. (REQ: REQ-09-0844)
+            - [ ] Non-TTY behavior: `-i` reads from /dev/tty or skips. (REQ: REQ-09-0845)
+            - [ ] `-f` overrides `-i` (last option wins). (REQ: REQ-09-0846)
+        - [ ] **Permission & Ownership Handling:** (REQ: REQ-09-0560, REQ-09-0847)
+            - [ ] Check write permission on parent directory (for unlink). (REQ: REQ-09-0848)
+            - [ ] Handle unwritable files with prompt (unless `-f`). (REQ: REQ-09-0849)
+            - [ ] Prompt: "rm: remove write-protected <type> '<path>'?". (REQ: REQ-09-0850)
+            - [ ] Sticky bit handling: only owner can delete in sticky dir. (REQ: REQ-09-0851)
+            - [ ] POSIX semantics: check effective UID vs file owner. (REQ: REQ-09-0852)
+        - [ ] **Special File Handling:** (REQ: REQ-09-0690, REQ-09-0853)
+            - [ ] Regular files: `unlinkat(dir_fd, name, 0)`. (REQ: REQ-09-0854)
+            - [ ] Directories: `unlinkat(dir_fd, name, AT_REMOVEDIR)`. (REQ: REQ-09-0855)
+            - [ ] Symlinks: unlink the link, not target. (REQ: REQ-09-0856)
+            - [ ] Devices/FIFOs: unlink normally. (REQ: REQ-09-0857)
+            - [ ] Sockets: unlink normally. (REQ: REQ-09-0858)
+        - [ ] **Immutable Files & Extended Attributes:** (REQ: REQ-09-0859)
+            - [ ] Handle `EPERM` from unlink on immutable files. (REQ: REQ-09-0860)
+            - [ ] Document immutable flag behavior in man page. (REQ: REQ-09-0861)
+            - [ ] Privileged mode: can remove if root and chattr -i first (not auto). (REQ: REQ-09-0862)
+            - [ ] Report clear error for immutable files. (REQ: REQ-09-0863)
+        - [ ] **Error Handling:** (REQ: REQ-09-0126, REQ-09-0182, REQ-09-0353, REQ-09-0709, REQ-09-0864, REQ-09-1012, REQ-09-1113, REQ-09-1265, REQ-09-1381)
+            - [ ] Continue on per-file errors (unless fatal). (REQ: REQ-09-0865)
+            - [ ] Accumulate errors and return nonzero on any failure. (REQ: REQ-09-0866, REQ-09-1014, REQ-09-1115)
+            - [ ] `-f` suppresses error messages but still sets exit code. (REQ: REQ-09-0867)
+            - [ ] Exit code 0: all files removed successfully. (REQ: REQ-09-0868)
+            - [ ] Exit code 1: at least one file could not be removed. (REQ: REQ-09-0869)
+            - [ ] Handle `ENOENT` gracefully with `-f`. (REQ: REQ-09-0870)
+            - [ ] Handle `EACCES`, `EPERM`, `EBUSY`, `EROFS` appropriately. (REQ: REQ-09-0871)
+            - [ ] Handle `ENOTEMPTY` (race: dir filled during removal). (REQ: REQ-09-0872)
+        - [ ] **Path Handling:** (REQ: REQ-09-0554, REQ-09-0716, REQ-09-0873, REQ-09-1006, REQ-09-1121)
+            - [ ] No fixed-size path buffers (dynamic allocation). (REQ: REQ-09-0874, REQ-09-1007, REQ-09-1122)
+            - [ ] Handle paths with special characters. (REQ: REQ-09-0558, REQ-09-0719, REQ-09-0875, REQ-09-1008, REQ-09-1123)
+            - [ ] Handle paths at `PATH_MAX` limit. (REQ: REQ-09-0559, REQ-09-0720, REQ-09-0876, REQ-09-1009, REQ-09-1124)
+            - [ ] Canonicalize paths for root protection check. (REQ: REQ-09-0877)
+            - [ ] Reject paths ending in `/` for non-directories. (REQ: REQ-09-0878)
+        - [ ] **Signal Handling:** (REQ: REQ-09-0879)
+            - [ ] Catch SIGINT/SIGTERM for cleanup. (REQ: REQ-09-0880)
+            - [ ] Exit cleanly on signal (don't leave partial state). (REQ: REQ-09-0881)
+            - [ ] Document interruptibility in man page. (REQ: REQ-09-0882)
+        - [ ] **Tests:** (REQ: REQ-09-0368, REQ-09-0572, REQ-09-0722, REQ-09-0883, REQ-09-1019, REQ-09-1127, REQ-09-1271, REQ-09-1403, REQ-09-1506)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Test recursive walker with mock filesystem. (REQ: REQ-09-0885)
+                - [ ] Test symlink detection logic. (REQ: REQ-09-0886)
+                - [ ] Test preserve-root detection. (REQ: REQ-09-0887)
+                - [ ] Test option parsing. (REQ: REQ-09-0888, REQ-09-1025, REQ-09-1130)
+                - [ ] Test fd-based traversal helpers. (REQ: REQ-09-0889)
+            - [ ] **Integration Tests:** (REQ: REQ-09-0378, REQ-09-0580, REQ-09-0729, REQ-09-0890, REQ-09-1026, REQ-09-1133, REQ-09-1409, REQ-09-1511, REQ-09-2282)
+                - [ ] Remove single file. (REQ: REQ-09-0891)
+                - [ ] Remove multiple files. (REQ: REQ-09-0892)
+                - [ ] Remove empty directory with `-d`. (REQ: REQ-09-0893)
+                - [ ] Remove non-empty directory with `-r`. (REQ: REQ-09-0894)
+                - [ ] Remove deep directory tree. (REQ: REQ-09-0895)
+                - [ ] Remove with `-f` (nonexistent file). (REQ: REQ-09-0896)
+                - [ ] Remove with `-i` (interactive prompt). (REQ: REQ-09-0897)
+                - [ ] Remove with `-I` (prompt once). (REQ: REQ-09-0898)
+                - [ ] Remove with `-v` (verbose output). (REQ: REQ-09-0899, REQ-09-1136)
+                - [ ] Preserve-root protection test. (REQ: REQ-09-0900)
+                - [ ] Symlink removal (file and directory links). (REQ: REQ-09-0901)
+                - [ ] One-file-system boundary test. (REQ: REQ-09-0902)
+                - [ ] Write-protected file prompt test. (REQ: REQ-09-0903)
+                - [ ] Sticky bit handling test. (REQ: REQ-09-0904)
+            - [ ] **TOCTOU Tests:** (REQ: REQ-09-0905)
+                - [ ] Concurrent file creation during removal. (REQ: REQ-09-0906, REQ-09-1144)
+                - [ ] Concurrent symlink replacement during removal. (REQ: REQ-09-0907)
+                - [ ] Concurrent directory creation during removal. (REQ: REQ-09-0908)
+                - [ ] Mock harness for race condition injection. (REQ: REQ-09-0909)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] Random directory trees removed completely. (REQ: REQ-09-0911)
+                - [ ] Symlinks never followed during recursion. (REQ: REQ-09-0912)
+            - [ ] **Fuzz Tests:** (REQ: REQ-09-0600, REQ-09-0746, REQ-09-0913, REQ-09-1044, REQ-09-1150, REQ-09-1295, REQ-09-1434, REQ-09-1533)
+                - [ ] Fuzz path handling with binary filenames. (REQ: REQ-09-0601, REQ-09-0914, REQ-09-1045, REQ-09-1151)
+                - [ ] Fuzz option parsing. (REQ: REQ-09-0603, REQ-09-0748, REQ-09-0915, REQ-09-1047, REQ-09-1152)
+                - [ ] Fuzz directory tree structures. (REQ: REQ-09-0916)
+            - [ ] **Acceptance Tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+                - [ ] `rm file` -> file removed. (REQ: REQ-09-0918)
+                - [ ] `rm -r dir` -> dir and contents removed. (REQ: REQ-09-0919)
+                - [ ] `rm -f nonexist` -> no error. (REQ: REQ-09-0920)
+                - [ ] `rm -rf /` -> refused (preserve-root). (REQ: REQ-09-0921)
+                - [ ] `rm -rf --no-preserve-root /tmp/test` -> allowed. (REQ: REQ-09-0922)
+                - [ ] No accidental deletion in any test. (REQ: REQ-09-0923)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `rm(1)` man page covering all options. (REQ: REQ-09-0925)
+            - [ ] Document `--preserve-root` behavior prominently. (REQ: REQ-09-0926)
+            - [ ] Document risks of `rm -rf`. (REQ: REQ-09-0927)
+            - [ ] Document symlink behavior during recursion. (REQ: REQ-09-0928)
+            - [ ] Document sticky bit and permission handling. (REQ: REQ-09-0929)
+            - [ ] Write developer notes on fd-based traversal. (REQ: REQ-09-0930)
+            - [ ] Document TOCTOU mitigations. (REQ: REQ-09-0931)
+        - [ ] **Acceptance Criteria:** (REQ: REQ-09-0419, REQ-09-0621, REQ-09-0766, REQ-09-0932, REQ-09-1062, REQ-09-1165, REQ-09-1312, REQ-09-1447, REQ-09-1545)
+            - [ ] All CLI options implemented and tested. (REQ: REQ-09-0420, REQ-09-0622, REQ-09-0933, REQ-09-1063, REQ-09-1166, REQ-09-1313)
+            - [ ] `--preserve-root` default prevents accidental root removal. (REQ: REQ-09-0934)
+            - [ ] FD-based traversal prevents TOCTOU races. (REQ: REQ-09-0935)
+            - [ ] Symlinks never followed during recursive removal. (REQ: REQ-09-0936)
+            - [ ] No memory leaks (valgrind clean). (REQ: REQ-09-0626, REQ-09-0937, REQ-09-1067, REQ-09-1170, REQ-09-1318, REQ-09-1451, REQ-09-1549)
+            - [ ] Correct exit codes for all scenarios. (REQ: REQ-09-0938, REQ-09-1068, REQ-09-1171)
+            - [ ] Man page complete and accurate. (REQ: REQ-09-0427, REQ-09-0629, REQ-09-0774, REQ-09-0939, REQ-09-1069, REQ-09-1172, REQ-09-1319)
+            - [ ] All tests pass in CI. (REQ: REQ-09-0428, REQ-09-0630, REQ-09-0775, REQ-09-0940, REQ-09-1070, REQ-09-1173, REQ-09-1320, REQ-09-1454, REQ-09-1552)
+    - [ ] **`mkdir` - Make directories (Production Quality Rewrite):** (REQ: REQ-09-0941)
+        - [ ] **Audit & Refactor Existing Code:** (REQ: REQ-09-0199, REQ-09-0430, REQ-09-0632, REQ-09-0777, REQ-09-0942, REQ-09-1072, REQ-09-1322)
+            - [ ] Audit existing `bin/mkdir/mkdir.c` for TODO comments, fragile code. (REQ: REQ-09-0943)
+            - [ ] Document all functionality gaps and bugs. (REQ: REQ-09-0201, REQ-09-0432, REQ-09-0634, REQ-09-0944, REQ-09-1074, REQ-09-1324)
+            - [ ] Create refactoring plan: modular architecture. (REQ: REQ-09-0635, REQ-09-0780, REQ-09-0945, REQ-09-1075, REQ-09-1325)
+            - [ ] Extract option parsing into `mkdir_opts.c` and `mkdir_opts.h`. (REQ: REQ-09-0946)
+            - [ ] Extract mode parsing into shared `lib/modeparse.c` (reusable by chmod). (REQ: REQ-09-0947)
+            - [ ] Extract parent creation logic into `mkdir_parents.c`. (REQ: REQ-09-0948)
+            - [ ] Write unit tests for each extracted module. (REQ: REQ-09-0438, REQ-09-0639, REQ-09-0784, REQ-09-0949, REQ-09-1078)
+        - [ ] **CLI Options:** (REQ: REQ-09-0208, REQ-09-0640, REQ-09-0785, REQ-09-0950, REQ-09-1079, REQ-09-1180, REQ-09-1461)
+            - [ ] `-p`, `--parents`: No error if existing, make parent directories as needed. (REQ: REQ-09-0951)
+            - [ ] `-m MODE`, `--mode=MODE`: Set file mode (as in chmod). (REQ: REQ-09-0952)
+            - [ ] `-v`, `--verbose`: Print a message for each created directory. (REQ: REQ-09-0953)
+            - [ ] `-Z`, `--context=CTX`: Set SELinux context (stub or implement if needed). (REQ: REQ-09-0954)
+            - [ ] `--help`: Display help and exit. (REQ: REQ-09-0446, REQ-09-0649, REQ-09-0796, REQ-09-0955, REQ-09-1083, REQ-09-1195, REQ-09-1341)
+            - [ ] `--version`: Display version and exit. (REQ: REQ-09-0447, REQ-09-0650, REQ-09-0797, REQ-09-0956, REQ-09-1084, REQ-09-1196, REQ-09-1342)
+        - [ ] **Mode Parsing:** (REQ: REQ-09-0957)
+            - [ ] **Octal Modes:** (REQ: REQ-09-0958)
+                - [ ] Parse octal strings (e.g., `0755`, `755`). (REQ: REQ-09-0959)
+                - [ ] Validate octal range (0-7 per digit). (REQ: REQ-09-0960)
+                - [ ] Support leading zero or no leading zero. (REQ: REQ-09-0961)
+            - [ ] **Symbolic Modes:** (REQ: REQ-09-0962)
+                - [ ] Parse symbolic modes (e.g., `u+rwx`, `a+rx`, `go-w`). (REQ: REQ-09-0963)
+                - [ ] Support WHO: `u` (user), `g` (group), `o` (other), `a` (all). (REQ: REQ-09-0964)
+                - [ ] Support PERM: `r` (read), `w` (write), `x` (execute). (REQ: REQ-09-0965)
+                - [ ] Support OP: `+` (add), `-` (remove), `=` (set exactly). (REQ: REQ-09-0966)
+                - [ ] Support multiple clauses (e.g., `u+rw,go+r`). (REQ: REQ-09-0967)
+                - [ ] Apply symbolic mode relative to initial mode (0777 for dirs). (REQ: REQ-09-0968)
+            - [ ] **Umask Interaction:** (REQ: REQ-09-0969)
+                - [ ] Without `-m`: apply umask to default mode (0777). (REQ: REQ-09-0970)
+                - [ ] With `-m`: use specified mode exactly (ignore umask for final). (REQ: REQ-09-0971)
+                - [ ] For `-p` intermediate dirs: use default mode with umask. (REQ: REQ-09-0972)
+                - [ ] Document umask interaction in man page. (REQ: REQ-09-0973)
+            - [ ] **Mode Library:** (REQ: REQ-09-0974)
+                - [ ] Create reusable `parse_mode()` function. (REQ: REQ-09-0975)
+                - [ ] Return parsed mode or error indicator. (REQ: REQ-09-0976)
+                - [ ] Unit tests for all mode formats. (REQ: REQ-09-0977)
+        - [ ] **Basic Directory Creation:** (REQ: REQ-09-0978)
+            - [ ] Create single directory with `mkdir()` syscall. (REQ: REQ-09-0979)
+            - [ ] Apply specified mode with `chmod()` after creation. (REQ: REQ-09-0980)
+            - [ ] Handle `EEXIST` error (fail unless `-p`). (REQ: REQ-09-0981)
+            - [ ] Report error on `EACCES`, `ENOENT`, `ENOTDIR`. (REQ: REQ-09-0982)
+            - [ ] Verbose output: "mkdir: created directory '<path>'". (REQ: REQ-09-0983)
+        - [ ] **Parent Directory Creation (`-p`):** (REQ: REQ-09-0984)
+            - [ ] Parse path into components. (REQ: REQ-09-0985)
+            - [ ] Create each missing intermediate directory. (REQ: REQ-09-0986)
+            - [ ] Intermediate directories get default mode (0777 & ~umask). (REQ: REQ-09-0987)
+            - [ ] Final directory gets specified mode (or default). (REQ: REQ-09-0988)
+            - [ ] Do not error if directory already exists. (REQ: REQ-09-0989)
+            - [ ] Error if path component exists but is not a directory. (REQ: REQ-09-0990)
+            - [ ] Handle paths starting with `/` (absolute). (REQ: REQ-09-0991)
+            - [ ] Handle paths starting with `./` or `../` (relative). (REQ: REQ-09-0992)
+            - [ ] Handle trailing slashes correctly. (REQ: REQ-09-0993, REQ-09-1125)
+        - [ ] **Race-Safe Creation:** (REQ: REQ-09-0994)
+            - [ ] Use `mkdirat()` for relative creation within parent fd. (REQ: REQ-09-0995)
+            - [ ] Handle `EEXIST` gracefully during `-p` (concurrent mkdir). (REQ: REQ-09-0996)
+            - [ ] After `EEXIST`, verify it's a directory (not a file). (REQ: REQ-09-0997)
+            - [ ] Use `fstatat()` to check type after race. (REQ: REQ-09-0998)
+            - [ ] Idempotent behavior: concurrent `mkdir -p` on same path succeeds. (REQ: REQ-09-0999)
+            - [ ] Files: use fd-based operations where possible. (REQ: REQ-09-1000)
+        - [ ] **Permissions & Ownership:** (REQ: REQ-09-1001)
+            - [ ] Created directories owned by effective UID/GID. (REQ: REQ-09-1002)
+            - [ ] When running as root: document that ownership is root. (REQ: REQ-09-1001)
+            - [ ] Setgid inheritance: if parent has setgid, child inherits. (REQ: REQ-09-1004)
+            - [ ] Document ownership behavior in man page. (REQ: REQ-09-1005)
+        - [ ] **Path Handling:** (REQ: REQ-09-0554, REQ-09-0716, REQ-09-0873, REQ-09-1006, REQ-09-1121)
+            - [ ] No fixed-size path buffers (dynamic allocation). (REQ: REQ-09-0874, REQ-09-1007, REQ-09-1122)
+            - [ ] Handle paths with special characters. (REQ: REQ-09-0558, REQ-09-0719, REQ-09-0875, REQ-09-1008, REQ-09-1123)
+            - [ ] Handle paths at `PATH_MAX` limit. (REQ: REQ-09-0559, REQ-09-0720, REQ-09-0876, REQ-09-1009, REQ-09-1124)
+            - [ ] Handle empty path component (double slash). (REQ: REQ-09-1010)
+            - [ ] Handle `.` and `..` components correctly. (REQ: REQ-09-1011)
+        - [ ] **Error Handling:** (REQ: REQ-09-0126, REQ-09-0182, REQ-09-0353, REQ-09-0709, REQ-09-0864, REQ-09-1012, REQ-09-1113, REQ-09-1265, REQ-09-1381)
+            - [ ] Continue to next operand on per-directory error. (REQ: REQ-09-1013, REQ-09-1114)
+            - [ ] Accumulate errors and return nonzero on any failure. (REQ: REQ-09-0866, REQ-09-1014, REQ-09-1115)
+            - [ ] Exit code 0: all directories created successfully. (REQ: REQ-09-1015)
+            - [ ] Exit code 1: at least one directory could not be created. (REQ: REQ-09-1016)
+            - [ ] Clear error messages with path and errno description. (REQ: REQ-09-1017, REQ-09-1118)
+            - [ ] Handle `ENOSPC`, `EDQUOT`, `EROFS`. (REQ: REQ-09-1018)
+        - [ ] **Tests:** (REQ: REQ-09-0368, REQ-09-0572, REQ-09-0722, REQ-09-0883, REQ-09-1019, REQ-09-1127, REQ-09-1271, REQ-09-1403, REQ-09-1506)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Test octal mode parsing. (REQ: REQ-09-1021)
+                - [ ] Test symbolic mode parsing. (REQ: REQ-09-1022)
+                - [ ] Test mode with umask application. (REQ: REQ-09-1023)
+                - [ ] Test path component splitting. (REQ: REQ-09-1024)
+                - [ ] Test option parsing. (REQ: REQ-09-0888, REQ-09-1025, REQ-09-1130)
+            - [ ] **Integration Tests:** (REQ: REQ-09-0378, REQ-09-0580, REQ-09-0729, REQ-09-0890, REQ-09-1026, REQ-09-1133, REQ-09-1409, REQ-09-1511, REQ-09-2282)
+                - [ ] Create single directory. (REQ: REQ-09-1027)
+                - [ ] Create directory with `-m` octal mode. (REQ: REQ-09-1028)
+                - [ ] Create directory with `-m` symbolic mode. (REQ: REQ-09-1029)
+                - [ ] Create directory with `-v` verbose. (REQ: REQ-09-1030)
+                - [ ] Create parent directories with `-p`. (REQ: REQ-09-1031)
+                - [ ] Create already existing directory (error without `-p`). (REQ: REQ-09-1032)
+                - [ ] Create already existing directory (success with `-p`). (REQ: REQ-09-1033)
+                - [ ] Path component is file (error). (REQ: REQ-09-1034)
+                - [ ] Deep path creation. (REQ: REQ-09-1035)
+                - [ ] Trailing slash handling. (REQ: REQ-09-1036)
+            - [ ] **Race/Concurrency Tests:** (REQ: REQ-09-1037, REQ-09-1143)
+                - [ ] Concurrent `mkdir -p` on same path. (REQ: REQ-09-1038)
+                - [ ] Verify idempotent behavior. (REQ: REQ-09-1039)
+                - [ ] Concurrent mkdir where one creates file (error case). (REQ: REQ-09-1040)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] Random paths created correctly with `-p`. (REQ: REQ-09-1042)
+                - [ ] Mode applied correctly after creation. (REQ: REQ-09-1043)
+            - [ ] **Fuzz Tests:** (REQ: REQ-09-0600, REQ-09-0746, REQ-09-0913, REQ-09-1044, REQ-09-1150, REQ-09-1295, REQ-09-1434, REQ-09-1533)
+                - [ ] Fuzz path handling with binary filenames. (REQ: REQ-09-0601, REQ-09-0914, REQ-09-1045, REQ-09-1151)
+                - [ ] Fuzz mode parsing with random strings. (REQ: REQ-09-1046)
+                - [ ] Fuzz option parsing. (REQ: REQ-09-0603, REQ-09-0748, REQ-09-0915, REQ-09-1047, REQ-09-1152)
+            - [ ] **Acceptance Tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+                - [ ] `mkdir dir` -> dir exists. (REQ: REQ-09-1049)
+                - [ ] `mkdir -p a/b/c` -> creates deep path. (REQ: REQ-09-1050)
+                - [ ] `mkdir exists` -> fails (unless -p). (REQ: REQ-09-1051)
+                - [ ] `mkdir -m 700 dir` -> dir has mode 700. (REQ: REQ-09-1052)
+                - [ ] `mkdir -pv a/b` -> prints created directories. (REQ: REQ-09-1053)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `mkdir(1)` man page covering all options. (REQ: REQ-09-1055)
+            - [ ] Document `-m` mode format (octal and symbolic). (REQ: REQ-09-1056)
+            - [ ] Document umask interaction. (REQ: REQ-09-1057)
+            - [ ] Document `-p` idempotent behavior. (REQ: REQ-09-1058)
+            - [ ] Document race conditions and safety. (REQ: REQ-09-1059)
+            - [ ] Write developer notes on atomic creation. (REQ: REQ-09-1060)
+            - [ ] Document ownership and setgid behavior. (REQ: REQ-09-1061)
+        - [ ] **Acceptance Criteria:** (REQ: REQ-09-0419, REQ-09-0621, REQ-09-0766, REQ-09-0932, REQ-09-1062, REQ-09-1165, REQ-09-1312, REQ-09-1447, REQ-09-1545)
+            - [ ] All CLI options implemented and tested. (REQ: REQ-09-0420, REQ-09-0622, REQ-09-0933, REQ-09-1063, REQ-09-1166, REQ-09-1313)
+            - [ ] `-p` is idempotent (concurrent safe). (REQ: REQ-09-1064)
+            - [ ] Mode parsing supports octal and symbolic. (REQ: REQ-09-1065)
+            - [ ] Umask correctly applied. (REQ: REQ-09-1066)
+            - [ ] No memory leaks (valgrind clean). (REQ: REQ-09-0626, REQ-09-0937, REQ-09-1067, REQ-09-1170, REQ-09-1318, REQ-09-1451, REQ-09-1549)
+            - [ ] Correct exit codes for all scenarios. (REQ: REQ-09-0938, REQ-09-1068, REQ-09-1171)
+            - [ ] Man page complete and accurate. (REQ: REQ-09-0427, REQ-09-0629, REQ-09-0774, REQ-09-0939, REQ-09-1069, REQ-09-1172, REQ-09-1319)
+            - [ ] All tests pass in CI. (REQ: REQ-09-0428, REQ-09-0630, REQ-09-0775, REQ-09-0940, REQ-09-1070, REQ-09-1173, REQ-09-1320, REQ-09-1454, REQ-09-1552)
+    - [ ] **`rmdir` - Remove empty directories (Production Quality Rewrite):** (REQ: REQ-09-1071)
+        - [ ] **Audit & Refactor Existing Code:** (REQ: REQ-09-0199, REQ-09-0430, REQ-09-0632, REQ-09-0777, REQ-09-0942, REQ-09-1072, REQ-09-1322)
+            - [ ] Audit existing `bin/rmdir/rmdir.c` for TODO comments, fragile code. (REQ: REQ-09-1073)
+            - [ ] Document all functionality gaps and bugs. (REQ: REQ-09-0201, REQ-09-0432, REQ-09-0634, REQ-09-0944, REQ-09-1074, REQ-09-1324)
+            - [ ] Create refactoring plan: modular architecture. (REQ: REQ-09-0635, REQ-09-0780, REQ-09-0945, REQ-09-1075, REQ-09-1325)
+            - [ ] Extract option parsing into `rmdir_opts.c` and `rmdir_opts.h`. (REQ: REQ-09-1076)
+            - [ ] Extract ancestor removal logic into `rmdir_parents.c`. (REQ: REQ-09-1077)
+            - [ ] Write unit tests for each extracted module. (REQ: REQ-09-0438, REQ-09-0639, REQ-09-0784, REQ-09-0949, REQ-09-1078)
+        - [ ] **CLI Options:** (REQ: REQ-09-0208, REQ-09-0640, REQ-09-0785, REQ-09-0950, REQ-09-1079, REQ-09-1180, REQ-09-1461)
+            - [ ] `-p`, `--parents`: Remove ancestors if they become empty after removal. (REQ: REQ-09-1080)
+            - [ ] `-v`, `--verbose`: Output a diagnostic for every directory processed. (REQ: REQ-09-1081)
+            - [ ] `--ignore-fail-on-non-empty`: Ignore failures due to non-empty. (REQ: REQ-09-1082)
+            - [ ] `--help`: Display help and exit. (REQ: REQ-09-0446, REQ-09-0649, REQ-09-0796, REQ-09-0955, REQ-09-1083, REQ-09-1195, REQ-09-1341)
+            - [ ] `--version`: Display version and exit. (REQ: REQ-09-0447, REQ-09-0650, REQ-09-0797, REQ-09-0956, REQ-09-1084, REQ-09-1196, REQ-09-1342)
+        - [ ] **Basic Directory Removal:** (REQ: REQ-09-1085)
+            - [ ] Remove single directory with `rmdir()` syscall. (REQ: REQ-09-1086)
+            - [ ] Fail if directory is not empty (`ENOTEMPTY`). (REQ: REQ-09-1087)
+            - [ ] Fail if path is not a directory (`ENOTDIR`). (REQ: REQ-09-1088)
+            - [ ] Fail if path does not exist (`ENOENT`). (REQ: REQ-09-1089)
+            - [ ] Verbose output: "rmdir: removing directory, '<path>'". (REQ: REQ-09-1090)
+        - [ ] **Ancestor Removal (`-p`):** (REQ: REQ-09-1091)
+            - [ ] Parse path into ancestor components. (REQ: REQ-09-1092)
+            - [ ] After removing target, attempt to remove parent. (REQ: REQ-09-1093)
+            - [ ] Continue up the tree while directories are empty. (REQ: REQ-09-1094)
+            - [ ] Stop at first failure (non-empty, permission, etc.). (REQ: REQ-09-1095)
+            - [ ] Handle relative paths (./a/b/c). (REQ: REQ-09-1096)
+            - [ ] Handle absolute paths (/a/b/c). (REQ: REQ-09-1097)
+            - [ ] Do not attempt to remove root `/` or `.`. (REQ: REQ-09-1098)
+            - [ ] Verbose output for each ancestor removed. (REQ: REQ-09-1099)
+        - [ ] **Safety & Validation:** (REQ: REQ-09-1100)
+            - [ ] Do NOT follow symlinks. (REQ: REQ-09-1101)
+            - [ ] Refuse removal if path is a symlink to a directory. (REQ: REQ-09-1102)
+            - [ ] Verify path is a directory before removal. (REQ: REQ-09-1103)
+            - [ ] Refuse removal of `.` and `..`. (REQ: REQ-09-1104)
+            - [ ] Refuse removal of `/` (always). (REQ: REQ-09-1105)
+        - [ ] **Race-Safe Removal:** (REQ: REQ-09-1106)
+            - [ ] Use `openat()` to open parent directory. (REQ: REQ-09-1107)
+            - [ ] Use `fstatat()` to verify target is empty directory. (REQ: REQ-09-1108)
+            - [ ] Use `unlinkat(parent_fd, name, AT_REMOVEDIR)` for removal. (REQ: REQ-09-1109)
+            - [ ] Handle race where directory becomes non-empty. (REQ: REQ-09-1110)
+            - [ ] Handle race where directory is removed by another process. (REQ: REQ-09-1111)
+            - [ ] Files: fd-based validation before removal. (REQ: REQ-09-1112)
+        - [ ] **Error Handling:** (REQ: REQ-09-0126, REQ-09-0182, REQ-09-0353, REQ-09-0709, REQ-09-0864, REQ-09-1012, REQ-09-1113, REQ-09-1265, REQ-09-1381)
+            - [ ] Continue to next operand on per-directory error. (REQ: REQ-09-1013, REQ-09-1114)
+            - [ ] Accumulate errors and return nonzero on any failure. (REQ: REQ-09-0866, REQ-09-1014, REQ-09-1115)
+            - [ ] Exit code 0: all directories removed successfully. (REQ: REQ-09-1116)
+            - [ ] Exit code 1: at least one directory could not be removed. (REQ: REQ-09-1117)
+            - [ ] Clear error messages with path and errno description. (REQ: REQ-09-1017, REQ-09-1118)
+            - [ ] `--ignore-fail-on-non-empty`: suppress `ENOTEMPTY` errors. (REQ: REQ-09-1119)
+            - [ ] Handle `EACCES`, `EPERM`, `EBUSY`, `EROFS`. (REQ: REQ-09-1120)
+        - [ ] **Path Handling:** (REQ: REQ-09-0554, REQ-09-0716, REQ-09-0873, REQ-09-1006, REQ-09-1121)
+            - [ ] No fixed-size path buffers (dynamic allocation). (REQ: REQ-09-0874, REQ-09-1007, REQ-09-1122)
+            - [ ] Handle paths with special characters. (REQ: REQ-09-0558, REQ-09-0719, REQ-09-0875, REQ-09-1008, REQ-09-1123)
+            - [ ] Handle paths at `PATH_MAX` limit. (REQ: REQ-09-0559, REQ-09-0720, REQ-09-0876, REQ-09-1009, REQ-09-1124)
+            - [ ] Handle trailing slashes correctly. (REQ: REQ-09-0993, REQ-09-1125)
+            - [ ] Handle empty path component (error). (REQ: REQ-09-1126)
+        - [ ] **Tests:** (REQ: REQ-09-0368, REQ-09-0572, REQ-09-0722, REQ-09-0883, REQ-09-1019, REQ-09-1127, REQ-09-1271, REQ-09-1403, REQ-09-1506)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Test ancestor path parsing. (REQ: REQ-09-1129)
+                - [ ] Test option parsing. (REQ: REQ-09-0888, REQ-09-1025, REQ-09-1130)
+                - [ ] Test symlink detection. (REQ: REQ-09-1131)
+                - [ ] Test empty directory detection. (REQ: REQ-09-1132)
+            - [ ] **Integration Tests:** (REQ: REQ-09-0378, REQ-09-0580, REQ-09-0729, REQ-09-0890, REQ-09-1026, REQ-09-1133, REQ-09-1409, REQ-09-1511, REQ-09-2282)
+                - [ ] Remove single empty directory. (REQ: REQ-09-1134)
+                - [ ] Remove single non-empty directory (error). (REQ: REQ-09-1135)
+                - [ ] Remove with `-v` (verbose output). (REQ: REQ-09-0899, REQ-09-1136)
+                - [ ] Remove with `-p` (ancestors). (REQ: REQ-09-1137)
+                - [ ] Ancestor stops at non-empty. (REQ: REQ-09-1138)
+                - [ ] Symlink to directory (error). (REQ: REQ-09-1139)
+                - [ ] Path is file not directory (error). (REQ: REQ-09-1140)
+                - [ ] Deep ancestor chain removal. (REQ: REQ-09-1141)
+                - [ ] `--ignore-fail-on-non-empty` behavior. (REQ: REQ-09-1142)
+            - [ ] **Race/Concurrency Tests:** (REQ: REQ-09-1037, REQ-09-1143)
+                - [ ] Concurrent file creation during removal. (REQ: REQ-09-0906, REQ-09-1144)
+                - [ ] Concurrent directory creation in target. (REQ: REQ-09-1145)
+                - [ ] Concurrent removal by another process. (REQ: REQ-09-1146)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] Random empty directory trees removed correctly. (REQ: REQ-09-1148)
+                - [ ] `-p` removes as many ancestors as possible. (REQ: REQ-09-1149)
+            - [ ] **Fuzz Tests:** (REQ: REQ-09-0600, REQ-09-0746, REQ-09-0913, REQ-09-1044, REQ-09-1150, REQ-09-1295, REQ-09-1434, REQ-09-1533)
+                - [ ] Fuzz path handling with binary filenames. (REQ: REQ-09-0601, REQ-09-0914, REQ-09-1045, REQ-09-1151)
+                - [ ] Fuzz option parsing. (REQ: REQ-09-0603, REQ-09-0748, REQ-09-0915, REQ-09-1047, REQ-09-1152)
+            - [ ] **Acceptance Tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+                - [ ] `rmdir empty_dir` -> succeeds. (REQ: REQ-09-1154)
+                - [ ] `rmdir non_empty_dir` -> fails. (REQ: REQ-09-1155)
+                - [ ] `rmdir -p a/b/c` -> removes c, then b, then a. (REQ: REQ-09-1156)
+                - [ ] `rmdir -pv a/b` -> verbose output for each. (REQ: REQ-09-1157)
+                - [ ] Symlink to dir -> error, not followed. (REQ: REQ-09-1158)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `rmdir(1)` man page covering all options. (REQ: REQ-09-1160)
+            - [ ] Document `-p` ancestor removal behavior. (REQ: REQ-09-1161)
+            - [ ] Document symlink handling (not followed). (REQ: REQ-09-1162)
+            - [ ] Document race condition handling. (REQ: REQ-09-1163)
+            - [ ] Write developer notes on fd-based validation. (REQ: REQ-09-1164)
+        - [ ] **Acceptance Criteria:** (REQ: REQ-09-0419, REQ-09-0621, REQ-09-0766, REQ-09-0932, REQ-09-1062, REQ-09-1165, REQ-09-1312, REQ-09-1447, REQ-09-1545)
+            - [ ] All CLI options implemented and tested. (REQ: REQ-09-0420, REQ-09-0622, REQ-09-0933, REQ-09-1063, REQ-09-1166, REQ-09-1313)
+            - [ ] `-p` removes ancestors correctly. (REQ: REQ-09-1167)
+            - [ ] Symlinks never followed. (REQ: REQ-09-1168)
+            - [ ] Race-safe with fd-based operations. (REQ: REQ-09-1169)
+            - [ ] No memory leaks (valgrind clean). (REQ: REQ-09-0626, REQ-09-0937, REQ-09-1067, REQ-09-1170, REQ-09-1318, REQ-09-1451, REQ-09-1549)
+            - [ ] Correct exit codes for all scenarios. (REQ: REQ-09-0938, REQ-09-1068, REQ-09-1171)
+            - [ ] Man page complete and accurate. (REQ: REQ-09-0427, REQ-09-0629, REQ-09-0774, REQ-09-0939, REQ-09-1069, REQ-09-1172, REQ-09-1319)
+            - [ ] All tests pass in CI. (REQ: REQ-09-0428, REQ-09-0630, REQ-09-0775, REQ-09-0940, REQ-09-1070, REQ-09-1173, REQ-09-1320, REQ-09-1454, REQ-09-1552)
+    - [ ] **`cal` - Display a calendar (Production Quality Implementation):** (REQ: REQ-09-1174)
+        - [ ] **Audit & Design:** (REQ: REQ-09-1175)
+            - [ ] Review BSD and GNU cal implementations for feature parity. (REQ: REQ-09-1176)
+            - [ ] Document supported year range (e.g., 1-9999 or wider). (REQ: REQ-09-1177)
+            - [ ] Document Gregorian/Julian transition handling strategy. (REQ: REQ-09-1178)
+            - [ ] Create design doc: `docs/cal-design.md`. (REQ: REQ-09-1179)
+        - [ ] **CLI Options:** (REQ: REQ-09-0208, REQ-09-0640, REQ-09-0785, REQ-09-0950, REQ-09-1079, REQ-09-1180, REQ-09-1461)
+            - [ ] `[month] [year]`: Display specific month/year. (REQ: REQ-09-1181)
+            - [ ] `[year]`: Display entire year calendar. (REQ: REQ-09-1182)
+            - [ ] `-1`: Display single month (default). (REQ: REQ-09-1183)
+            - [ ] `-3`: Display previous, current, and next month. (REQ: REQ-09-1184)
+            - [ ] `-y`: Display entire year calendar. (REQ: REQ-09-1185)
+            - [ ] `-m`: Start week on Monday (ISO 8601). (REQ: REQ-09-1186)
+            - [ ] `-s`: Start week on Sunday (default, traditional). (REQ: REQ-09-1187)
+            - [ ] `-j`, `--julian`: Display Julian day-of-year (1-366). (REQ: REQ-09-1188)
+            - [ ] `-w`: Display week numbers. (REQ: REQ-09-1189)
+            - [ ] `-n NUM`: Display NUM months starting from current. (REQ: REQ-09-1190)
+            - [ ] `-A NUM`: Display NUM months after current. (REQ: REQ-09-1191)
+            - [ ] `-B NUM`: Display NUM months before current. (REQ: REQ-09-1192)
+            - [ ] `-h`, `--no-highlight`: Do not highlight today. (REQ: REQ-09-1193)
+            - [ ] `--color=WHEN`: Colorize output (always, auto, never). (REQ: REQ-09-1194)
+            - [ ] `--help`: Display help and exit. (REQ: REQ-09-0446, REQ-09-0649, REQ-09-0796, REQ-09-0955, REQ-09-1083, REQ-09-1195, REQ-09-1341)
+            - [ ] `--version`: Display version and exit. (REQ: REQ-09-0447, REQ-09-0650, REQ-09-0797, REQ-09-0956, REQ-09-1084, REQ-09-1196, REQ-09-1342)
+        - [ ] **Calendar System Options:** (REQ: REQ-09-1197)
+            - [ ] `--gregorian`: Use Gregorian calendar exclusively. (REQ: REQ-09-1198)
+            - [ ] `--julian`: Use Julian calendar exclusively. (REQ: REQ-09-1199)
+            - [ ] `-p`, `--reform=DATE`: Set Gregorian reform date (default: 1752-09-14). (REQ: REQ-09-1200)
+            - [ ] Support common reform dates (1582, 1752, etc.). (REQ: REQ-09-1201)
+            - [ ] Document historical transitions in man page. (REQ: REQ-09-1202)
+        - [ ] **Date Calculations:** (REQ: REQ-09-1203)
+            - [ ] **Leap Year Rules:** (REQ: REQ-09-1204)
+                - [ ] Gregorian: divisible by 4, except centuries unless by 400. (REQ: REQ-09-1205)
+                - [ ] Julian: divisible by 4. (REQ: REQ-09-1206)
+                - [ ] Implement `is_leap_year(year, calendar_type)`. (REQ: REQ-09-1207)
+                - [ ] Unit tests for leap year edge cases. (REQ: REQ-09-1208)
+            - [ ] **Day of Week Calculation:** (REQ: REQ-09-1209)
+                - [ ] Implement Zeller's congruence or similar algorithm. (REQ: REQ-09-1210)
+                - [ ] Handle Gregorian/Julian calendar differences. (REQ: REQ-09-1211)
+                - [ ] Calculate first day of any month in range. (REQ: REQ-09-1212)
+                - [ ] Unit tests against known reference dates. (REQ: REQ-09-1213)
+            - [ ] **Days in Month:** (REQ: REQ-09-1214)
+                - [ ] Standard days per month. (REQ: REQ-09-1215)
+                - [ ] February adjustment for leap years. (REQ: REQ-09-1216)
+                - [ ] Handle Gregorian transition gaps. (REQ: REQ-09-1217)
+            - [ ] **Julian Day Number:** (REQ: REQ-09-1218)
+                - [ ] Calculate day-of-year (1-365/366). (REQ: REQ-09-1219)
+                - [ ] Display with `-j` flag. (REQ: REQ-09-1220)
+        - [ ] **Gregorian/Julian Transition:** (REQ: REQ-09-1221)
+            - [ ] Default transition: September 1752 (British/US). (REQ: REQ-09-1222)
+            - [ ] September 1752: skip Sep 3-13 (11 days). (REQ: REQ-09-1223)
+            - [ ] Configurable transition date with `--reform`. (REQ: REQ-09-1224)
+            - [ ] Correctly display months that span transition. (REQ: REQ-09-1225)
+            - [ ] Handle years before transition with Julian calendar. (REQ: REQ-09-1226)
+            - [ ] Handle years after transition with Gregorian calendar. (REQ: REQ-09-1227)
+            - [ ] Document behavior in man page. (REQ: REQ-09-1228)
+        - [ ] **Output Formatting:** (REQ: REQ-09-1229)
+            - [ ] **Single Month:** (REQ: REQ-09-1230)
+                - [ ] Header: month name and year, centered. (REQ: REQ-09-1231)
+                - [ ] Day names row (Su Mo Tu We Th Fr Sa or Mo Tu...). (REQ: REQ-09-1232)
+                - [ ] Weeks in rows, right-aligned day numbers. (REQ: REQ-09-1233)
+                - [ ] Spaces for days before/after month. (REQ: REQ-09-1234)
+                - [ ] 20 or 21 character width per month. (REQ: REQ-09-1235)
+            - [ ] **Year Calendar:** (REQ: REQ-09-1236)
+                - [ ] 3 months per row (or configurable). (REQ: REQ-09-1237)
+                - [ ] Centered year header. (REQ: REQ-09-1238)
+                - [ ] Proper spacing between month columns. (REQ: REQ-09-1239)
+            - [ ] **Three-Month Display (`-3`):** (REQ: REQ-09-1240)
+                - [ ] Previous, current, next month side by side. (REQ: REQ-09-1241)
+            - [ ] **Today Highlighting:** (REQ: REQ-09-1242)
+                - [ ] Default: highlight today with reverse video. (REQ: REQ-09-1243)
+                - [ ] `-h` to disable. (REQ: REQ-09-1244)
+                - [ ] ANSI escape codes for terminal. (REQ: REQ-09-1245)
+                - [ ] Detect if output is TTY. (REQ: REQ-09-1246)
+            - [ ] **Julian Day Format (`-j`):** (REQ: REQ-09-1247)
+                - [ ] 3-digit day-of-year instead of 2-digit date. (REQ: REQ-09-1248)
+                - [ ] Wider column layout (27 chars per month). (REQ: REQ-09-1249)
+            - [ ] **Week Numbers (`-w`):** (REQ: REQ-09-1250)
+                - [ ] ISO week numbers in left column. (REQ: REQ-09-1251)
+        - [ ] **Locale Support:** (REQ: REQ-09-1252)
+            - [ ] **Month Names:** (REQ: REQ-09-1253)
+                - [ ] Use locale-specific month names. (REQ: REQ-09-1254)
+                - [ ] Fallback to English if locale unavailable. (REQ: REQ-09-1255)
+            - [ ] **Day Names:** (REQ: REQ-09-1256)
+                - [ ] Use locale-specific abbreviated day names. (REQ: REQ-09-1257)
+                - [ ] Handle wide characters in names. (REQ: REQ-09-1258)
+            - [ ] **First Day of Week:** (REQ: REQ-09-1259)
+                - [ ] Respect LC_TIME first_weekday if available. (REQ: REQ-09-1260)
+                - [ ] Override with `-m` or `-s`. (REQ: REQ-09-1261)
+            - [ ] **Character Width:** (REQ: REQ-09-1262)
+                - [ ] Handle wide characters (CJK) in names. (REQ: REQ-09-1263)
+                - [ ] Calculate display width correctly. (REQ: REQ-09-1264)
+        - [ ] **Error Handling:** (REQ: REQ-09-0126, REQ-09-0182, REQ-09-0353, REQ-09-0709, REQ-09-0864, REQ-09-1012, REQ-09-1113, REQ-09-1265, REQ-09-1381)
+            - [ ] Invalid month (< 1 or > 12): error. (REQ: REQ-09-1266)
+            - [ ] Invalid year (out of range): error. (REQ: REQ-09-1267)
+            - [ ] Invalid option combinations: error. (REQ: REQ-09-1268)
+            - [ ] Exit code 0: success. (REQ: REQ-09-0357, REQ-09-0551, REQ-09-1269)
+            - [ ] Exit code 1: error. (REQ: REQ-09-1270)
+        - [ ] **Tests:** (REQ: REQ-09-0368, REQ-09-0572, REQ-09-0722, REQ-09-0883, REQ-09-1019, REQ-09-1127, REQ-09-1271, REQ-09-1403, REQ-09-1506)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Leap year calculation (multiple edge cases). (REQ: REQ-09-1273)
+                - [ ] Day of week calculation (known dates). (REQ: REQ-09-1274)
+                - [ ] Days in month (all months, leap/non-leap). (REQ: REQ-09-1275)
+                - [ ] Julian day-of-year calculation. (REQ: REQ-09-1276)
+                - [ ] Option parsing. (REQ: REQ-09-1277, REQ-09-1405, REQ-09-1489, REQ-09-1509)
+            - [ ] **Reference Data Tests:** (REQ: REQ-09-1278)
+                - [ ] Compare output against ncal/cal reference. (REQ: REQ-09-1279)
+                - [ ] Test years: 1, 100, 1582, 1752, 2000, 2024, 9999. (REQ: REQ-09-1280)
+                - [ ] Test leap years: 1600, 1700, 1800, 1900, 2000, 2100. (REQ: REQ-09-1281)
+                - [ ] Test February in leap/non-leap years. (REQ: REQ-09-1282)
+            - [ ] **Gregorian/Julian Transition Tests:** (REQ: REQ-09-1283)
+                - [ ] September 1752 calendar (11-day gap). (REQ: REQ-09-1284)
+                - [ ] October 1582 calendar (10-day gap). (REQ: REQ-09-1285)
+                - [ ] Custom reform dates. (REQ: REQ-09-1286)
+            - [ ] **Locale Tests:** (REQ: REQ-09-1287)
+                - [ ] Different LC_TIME settings. (REQ: REQ-09-1288)
+                - [ ] First day of week variations. (REQ: REQ-09-1289)
+                - [ ] Non-ASCII month/day names. (REQ: REQ-09-1290)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] Any valid month/year produces valid output. (REQ: REQ-09-1292)
+                - [ ] February days correct for any year. (REQ: REQ-09-1293)
+                - [ ] Day count per month always correct. (REQ: REQ-09-1294)
+            - [ ] **Fuzz Tests:** (REQ: REQ-09-0600, REQ-09-0746, REQ-09-0913, REQ-09-1044, REQ-09-1150, REQ-09-1295, REQ-09-1434, REQ-09-1533)
+                - [ ] Fuzz year values (extreme ranges). (REQ: REQ-09-1296)
+                - [ ] Fuzz option combinations. (REQ: REQ-09-1297, REQ-09-1436)
+            - [ ] **Acceptance Tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+                - [ ] `cal` -> displays current month. (REQ: REQ-09-1299)
+                - [ ] `cal 2024` -> displays 2024 year calendar. (REQ: REQ-09-1300)
+                - [ ] `cal 9 1752` -> shows September 1752 with gap. (REQ: REQ-09-1301)
+                - [ ] `cal -j` -> Julian day-of-year format. (REQ: REQ-09-1302)
+                - [ ] `cal -m` -> weeks start Monday. (REQ: REQ-09-1303)
+                - [ ] `cal -3` -> three months displayed. (REQ: REQ-09-1304)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `cal(1)` man page covering all options. (REQ: REQ-09-1306)
+            - [ ] Document supported year range. (REQ: REQ-09-1307)
+            - [ ] Document Gregorian/Julian transition behavior. (REQ: REQ-09-1308)
+            - [ ] Document `-j` Julian day format. (REQ: REQ-09-1309)
+            - [ ] Document locale support. (REQ: REQ-09-1310)
+            - [ ] Historical notes on calendar reforms. (REQ: REQ-09-1311)
+        - [ ] **Acceptance Criteria:** (REQ: REQ-09-0419, REQ-09-0621, REQ-09-0766, REQ-09-0932, REQ-09-1062, REQ-09-1165, REQ-09-1312, REQ-09-1447, REQ-09-1545)
+            - [ ] All CLI options implemented and tested. (REQ: REQ-09-0420, REQ-09-0622, REQ-09-0933, REQ-09-1063, REQ-09-1166, REQ-09-1313)
+            - [ ] Output matches authoritative references. (REQ: REQ-09-1314)
+            - [ ] Leap years calculated correctly. (REQ: REQ-09-1315)
+            - [ ] Gregorian/Julian transition handled. (REQ: REQ-09-1316)
+            - [ ] Locale-aware formatting works. (REQ: REQ-09-1317)
+            - [ ] No memory leaks (valgrind clean). (REQ: REQ-09-0626, REQ-09-0937, REQ-09-1067, REQ-09-1170, REQ-09-1318, REQ-09-1451, REQ-09-1549)
+            - [ ] Man page complete and accurate. (REQ: REQ-09-0427, REQ-09-0629, REQ-09-0774, REQ-09-0939, REQ-09-1069, REQ-09-1172, REQ-09-1319)
+            - [ ] All tests pass in CI. (REQ: REQ-09-0428, REQ-09-0630, REQ-09-0775, REQ-09-0940, REQ-09-1070, REQ-09-1173, REQ-09-1320, REQ-09-1454, REQ-09-1552)
+    - [ ] **`cat` - Concatenate files and print on standard output (Production Quality Rewrite):** (REQ: REQ-09-1321)
+        - [ ] **Audit & Refactor Existing Code:** (REQ: REQ-09-0199, REQ-09-0430, REQ-09-0632, REQ-09-0777, REQ-09-0942, REQ-09-1072, REQ-09-1322)
+            - [ ] Audit existing `bin/cat/cat.c` for TODO comments, fragile code. (REQ: REQ-09-1323)
+            - [ ] Document all functionality gaps and bugs. (REQ: REQ-09-0201, REQ-09-0432, REQ-09-0634, REQ-09-0944, REQ-09-1074, REQ-09-1324)
+            - [ ] Create refactoring plan: modular architecture. (REQ: REQ-09-0635, REQ-09-0780, REQ-09-0945, REQ-09-1075, REQ-09-1325)
+            - [ ] Extract option parsing into separate function. (REQ: REQ-09-1326)
+            - [ ] Extract I/O loop into reusable function. (REQ: REQ-09-1327)
+            - [ ] Write unit tests for each module. (REQ: REQ-09-1328)
+        - [ ] **CLI Options (POSIX + Extensions):** (REQ: REQ-09-1329)
+            - [ ] `-u`: Write bytes unbuffered (POSIX). (REQ: REQ-09-1330)
+            - [ ] `-` (dash): Read from stdin (POSIX). (REQ: REQ-09-1331)
+            - [ ] `-n`, `--number`: Number all output lines. (REQ: REQ-09-1332)
+            - [ ] `-b`, `--number-nonblank`: Number non-blank lines only. (REQ: REQ-09-1333)
+            - [ ] `-s`, `--squeeze-blank`: Suppress repeated empty lines. (REQ: REQ-09-1334)
+            - [ ] `-E`, `--show-ends`: Display `$` at end of each line. (REQ: REQ-09-1335)
+            - [ ] `-T`, `--show-tabs`: Display TAB as `^I`. (REQ: REQ-09-1336)
+            - [ ] `-v`, `--show-nonprinting`: Display control chars as `^X`, M-X. (REQ: REQ-09-1337)
+            - [ ] `-A`, `--show-all`: Equivalent to `-vET`. (REQ: REQ-09-1338)
+            - [ ] `-e`: Equivalent to `-vE`. (REQ: REQ-09-1339)
+            - [ ] `-t`: Equivalent to `-vT`. (REQ: REQ-09-1340)
+            - [ ] `--help`: Display help and exit. (REQ: REQ-09-0446, REQ-09-0649, REQ-09-0796, REQ-09-0955, REQ-09-1083, REQ-09-1195, REQ-09-1341)
+            - [ ] `--version`: Display version and exit. (REQ: REQ-09-0447, REQ-09-0650, REQ-09-0797, REQ-09-0956, REQ-09-1084, REQ-09-1196, REQ-09-1342)
+        - [ ] **Input Handling:** (REQ: REQ-09-1343, REQ-09-2119)
+            - [ ] Read from files specified as arguments. (REQ: REQ-09-1344)
+            - [ ] Read from stdin if no files or `-` argument. (REQ: REQ-09-1345)
+            - [ ] Handle multiple `-` arguments (read stdin multiple times). (REQ: REQ-09-1346)
+            - [ ] Handle binary files (pass through unchanged). (REQ: REQ-09-1347)
+            - [ ] Handle empty files (output nothing). (REQ: REQ-09-1348)
+            - [ ] Handle very large files (streaming, no full buffering). (REQ: REQ-09-1349)
+            - [ ] Handle files with no trailing newline. (REQ: REQ-09-1350)
+        - [ ] **Output Handling:** (REQ: REQ-09-1351)
+            - [ ] Write to stdout. (REQ: REQ-09-1352)
+            - [ ] `-u` flag: unbuffered writes (one syscall per read). (REQ: REQ-09-1353)
+            - [ ] Default: buffered I/O for performance. (REQ: REQ-09-1354)
+            - [ ] Handle `EINTR` on write (retry). (REQ: REQ-09-1355)
+            - [ ] Handle `EPIPE` gracefully (broken pipe). (REQ: REQ-09-1356)
+            - [ ] Handle partial writes. (REQ: REQ-09-1357, REQ-09-1498)
+        - [ ] **Line Numbering (`-n`, `-b`):** (REQ: REQ-09-1358)
+            - [ ] Right-justify line numbers in 6-character field. (REQ: REQ-09-1359)
+            - [ ] Follow number with TAB separator. (REQ: REQ-09-1360)
+            - [ ] `-n`: Number all lines including blank. (REQ: REQ-09-1361)
+            - [ ] `-b`: Number only non-blank lines. (REQ: REQ-09-1362)
+            - [ ] Line counter persists across files. (REQ: REQ-09-1363)
+            - [ ] Handle lines without trailing newline. (REQ: REQ-09-1364, REQ-09-1371)
+        - [ ] **Blank Line Squeezing (`-s`):** (REQ: REQ-09-1365)
+            - [ ] Replace multiple consecutive blank lines with one. (REQ: REQ-09-1366)
+            - [ ] Track state across read boundaries. (REQ: REQ-09-1367)
+            - [ ] Works correctly with `-n` (numbers squeezed output). (REQ: REQ-09-1368)
+        - [ ] **End-of-Line Marker (`-E`):** (REQ: REQ-09-1369)
+            - [ ] Display `$` before each newline. (REQ: REQ-09-1370)
+            - [ ] Handle lines without trailing newline. (REQ: REQ-09-1364, REQ-09-1371)
+        - [ ] **Tab Display (`-T`):** (REQ: REQ-09-1372)
+            - [ ] Display TAB characters as `^I`. (REQ: REQ-09-1373)
+        - [ ] **Non-Printing Characters (`-v`):** (REQ: REQ-09-1374)
+            - [ ] Display control chars (0x00-0x1F) as `^@` through `^_`. (REQ: REQ-09-1375)
+            - [ ] Display DEL (0x7F) as `^?`. (REQ: REQ-09-1376)
+            - [ ] Display high-bit chars (0x80-0x9F) as `M-^@` through `M-^_`. (REQ: REQ-09-1377)
+            - [ ] Display high-bit chars (0xA0-0xFE) as `M- ` through `M-~`. (REQ: REQ-09-1378)
+            - [ ] Display 0xFF as `M-^?`. (REQ: REQ-09-1379)
+            - [ ] Exception: TAB, NL, FF handled separately. (REQ: REQ-09-1380)
+        - [ ] **Error Handling:** (REQ: REQ-09-0126, REQ-09-0182, REQ-09-0353, REQ-09-0709, REQ-09-0864, REQ-09-1012, REQ-09-1113, REQ-09-1265, REQ-09-1381)
+            - [ ] Continue to next file on per-file error. (REQ: REQ-09-1382)
+            - [ ] Print error message to stderr for each failure. (REQ: REQ-09-1383)
+            - [ ] Return nonzero exit code if any file failed. (REQ: REQ-09-1384)
+            - [ ] Exit code 0: all files processed successfully. (REQ: REQ-09-1385)
+            - [ ] Exit code 1: at least one file could not be read. (REQ: REQ-09-1386)
+            - [ ] Handle `ENOENT`, `EACCES`, `EISDIR`. (REQ: REQ-09-1387)
+        - [ ] **Special Cases:** (REQ: REQ-09-1388)
+            - [ ] Handle directories (error: is a directory). (REQ: REQ-09-1389)
+            - [ ] Handle device files (read normally). (REQ: REQ-09-1390)
+            - [ ] Handle FIFOs/pipes. (REQ: REQ-09-1391)
+            - [ ] Handle socket files (error or read). (REQ: REQ-09-1392)
+            - [ ] Symlinks: follow to target. (REQ: REQ-09-1393)
+        - [ ] **Performance:** (REQ: REQ-09-0130, REQ-09-0361, REQ-09-1394)
+            - [ ] Use efficient buffer size (e.g., 64KB). (REQ: REQ-09-1395)
+            - [ ] Minimize syscalls in default mode. (REQ: REQ-09-1396)
+            - [ ] Streaming: never buffer entire file. (REQ: REQ-09-1397)
+            - [ ] Consider `sendfile()` for file-to-stdout (optional). (REQ: REQ-09-1398)
+        - [ ] **Build & Installation:** (REQ: REQ-09-1399, REQ-09-1501)
+            - [ ] Update `bin/cat/Makefile`. (REQ: REQ-09-1400)
+            - [ ] Install to `/bin/cat`. (REQ: REQ-09-1401)
+            - [ ] Add to root filesystem `dist/`. (REQ: REQ-09-1402, REQ-09-1505)
+        - [ ] **Tests:** (REQ: REQ-09-0368, REQ-09-0572, REQ-09-0722, REQ-09-0883, REQ-09-1019, REQ-09-1127, REQ-09-1271, REQ-09-1403, REQ-09-1506)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Option parsing. (REQ: REQ-09-1277, REQ-09-1405, REQ-09-1489, REQ-09-1509)
+                - [ ] Line numbering logic. (REQ: REQ-09-1406)
+                - [ ] Blank squeezing state machine. (REQ: REQ-09-1407)
+                - [ ] Non-printing character encoding. (REQ: REQ-09-1408)
+            - [ ] **Integration Tests:** (REQ: REQ-09-0378, REQ-09-0580, REQ-09-0729, REQ-09-0890, REQ-09-1026, REQ-09-1133, REQ-09-1409, REQ-09-1511, REQ-09-2282)
+                - [ ] Basic: `cat file` -> prints contents. (REQ: REQ-09-1410)
+                - [ ] Multiple files: `cat file1 file2` -> concatenated. (REQ: REQ-09-1411)
+                - [ ] Stdin: `echo test | cat` -> "test". (REQ: REQ-09-1412)
+                - [ ] Dash: `cat - file` -> stdin then file. (REQ: REQ-09-1413)
+                - [ ] Line numbers: `cat -n file` -> numbered lines. (REQ: REQ-09-1414)
+                - [ ] Non-blank numbers: `cat -b file`. (REQ: REQ-09-1415)
+                - [ ] Squeeze blank: `cat -s file`. (REQ: REQ-09-1416)
+                - [ ] Show ends: `cat -E file` -> `$` at EOL. (REQ: REQ-09-1417)
+                - [ ] Show tabs: `cat -T file` -> `^I`. (REQ: REQ-09-1418)
+                - [ ] Show non-printing: `cat -v file`. (REQ: REQ-09-1419)
+                - [ ] Show all: `cat -A file`. (REQ: REQ-09-1420)
+                - [ ] Unbuffered: `cat -u file`. (REQ: REQ-09-1421)
+                - [ ] Binary file passthrough. (REQ: REQ-09-1422)
+                - [ ] Empty file. (REQ: REQ-09-1423)
+                - [ ] Very large file. (REQ: REQ-09-1424)
+                - [ ] File without trailing newline. (REQ: REQ-09-1425)
+                - [ ] Directory argument (error). (REQ: REQ-09-1426)
+            - [ ] **Error Handling Tests:** (REQ: REQ-09-1427)
+                - [ ] Nonexistent file. (REQ: REQ-09-1428)
+                - [ ] Permission denied. (REQ: REQ-09-1429)
+                - [ ] Continue after error. (REQ: REQ-09-1430)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] Output byte count equals input byte count (without options). (REQ: REQ-09-1432)
+                - [ ] Line count matches with `-n`. (REQ: REQ-09-1433)
+            - [ ] **Fuzz Tests:** (REQ: REQ-09-0600, REQ-09-0746, REQ-09-0913, REQ-09-1044, REQ-09-1150, REQ-09-1295, REQ-09-1434, REQ-09-1533)
+                - [ ] Fuzz binary files. (REQ: REQ-09-1435)
+                - [ ] Fuzz option combinations. (REQ: REQ-09-1297, REQ-09-1436)
+            - [ ] **Acceptance Tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+                - [ ] `cat file` -> prints contents. (REQ: REQ-09-1438)
+                - [ ] `cat file1 file2` -> prints concatenated. (REQ: REQ-09-1439)
+                - [ ] `cat -n file` -> lines numbered. (REQ: REQ-09-1440)
+                - [ ] `cat -` -> reads stdin. (REQ: REQ-09-1441)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `cat(1)` man page covering all options. (REQ: REQ-09-1443)
+            - [ ] Document POSIX `-u` behavior. (REQ: REQ-09-1444)
+            - [ ] Document `-v` encoding scheme. (REQ: REQ-09-1445)
+            - [ ] Document error continuation behavior. (REQ: REQ-09-1446)
+        - [ ] **Acceptance Criteria:** (REQ: REQ-09-0419, REQ-09-0621, REQ-09-0766, REQ-09-0932, REQ-09-1062, REQ-09-1165, REQ-09-1312, REQ-09-1447, REQ-09-1545)
+            - [ ] All POSIX options implemented (`-u`). (REQ: REQ-09-1448)
+            - [ ] All common extensions implemented (`-n`, `-b`, `-s`, `-E`, `-T`, `-v`). (REQ: REQ-09-1449)
+            - [ ] Binary files handled correctly. (REQ: REQ-09-1450)
+            - [ ] No memory leaks (valgrind clean). (REQ: REQ-09-0626, REQ-09-0937, REQ-09-1067, REQ-09-1170, REQ-09-1318, REQ-09-1451, REQ-09-1549)
+            - [ ] Correct exit codes. (REQ: REQ-09-1452)
+            - [ ] Man page complete. (REQ: REQ-09-1453, REQ-09-1551)
+            - [ ] All tests pass in CI. (REQ: REQ-09-0428, REQ-09-0630, REQ-09-0775, REQ-09-0940, REQ-09-1070, REQ-09-1173, REQ-09-1320, REQ-09-1454, REQ-09-1552)
+    - [ ] **`echo` - Display a line of text (Standalone `/bin/echo`):** (REQ: REQ-09-1455)
+        - [ ] **Design & Rationale:** (REQ: REQ-09-1456)
+            - [ ] Create standalone `/bin/echo` executable separate from shell builtin. (REQ: REQ-09-1457)
+            - [ ] Document differences from shell builtin echo. (REQ: REQ-09-1458)
+            - [ ] Shell builtin takes precedence; `/bin/echo` invoked via explicit path. (REQ: REQ-09-1459)
+            - [ ] Design doc: behavior parity with BSD/GNU echo. (REQ: REQ-09-1460)
+        - [ ] **CLI Options:** (REQ: REQ-09-0208, REQ-09-0640, REQ-09-0785, REQ-09-0950, REQ-09-1079, REQ-09-1180, REQ-09-1461)
+            - [ ] `-n`: Do not output the trailing newline. (REQ: REQ-09-1462)
+            - [ ] `-e`: Enable interpretation of backslash escapes. (REQ: REQ-09-1463)
+            - [ ] `-E`: Disable interpretation of backslash escapes (default). (REQ: REQ-09-1464)
+            - [ ] `--help`: Display help and exit (GNU extension). (REQ: REQ-09-1465)
+            - [ ] `--version`: Display version and exit (GNU extension). (REQ: REQ-09-1466)
+            - [ ] POSIX mode: only `-n` supported when POSIXLY_CORRECT set. (REQ: REQ-09-1467)
+        - [ ] **Backslash Escape Sequences (`-e`):** (REQ: REQ-09-1468)
+            - [ ] `\\`: Backslash. (REQ: REQ-09-1469, REQ-09-1994)
+            - [ ] `\a`: Alert (bell). (REQ: REQ-09-1470, REQ-09-1995)
+            - [ ] `\b`: Backspace. (REQ: REQ-09-1471, REQ-09-1996)
+            - [ ] `\c`: Suppress further output (stop processing). (REQ: REQ-09-1472)
+            - [ ] `\e`, `\E`: Escape character (0x1B). (REQ: REQ-09-1473)
+            - [ ] `\f`: Form feed. (REQ: REQ-09-1474, REQ-09-1997)
+            - [ ] `\n`: Newline. (REQ: REQ-09-1475, REQ-09-1998)
+            - [ ] `\r`: Carriage return. (REQ: REQ-09-1476, REQ-09-1999)
+            - [ ] `\t`: Horizontal tab. (REQ: REQ-09-1477)
+            - [ ] `\v`: Vertical tab. (REQ: REQ-09-1478, REQ-09-2001)
+            - [ ] `\0nnn`: Octal byte value (0-3 digits). (REQ: REQ-09-1479)
+            - [ ] `\xHH`: Hexadecimal byte value (1-2 digits). (REQ: REQ-09-1480)
+            - [ ] `\uHHHH`: Unicode code point (4 hex digits). (REQ: REQ-09-1481)
+            - [ ] `\UHHHHHHHH`: Unicode code point (8 hex digits). (REQ: REQ-09-1482)
+        - [ ] **Argument Handling:** (REQ: REQ-09-1483)
+            - [ ] Print all arguments separated by single space. (REQ: REQ-09-1484)
+            - [ ] Handle empty arguments correctly. (REQ: REQ-09-1485)
+            - [ ] Handle arguments with embedded whitespace. (REQ: REQ-09-1486)
+            - [ ] Handle arguments with special characters. (REQ: REQ-09-1487)
+            - [ ] Append newline unless `-n` specified. (REQ: REQ-09-1488)
+        - [ ] **Option Parsing:** (REQ: REQ-09-1277, REQ-09-1405, REQ-09-1489, REQ-09-1509)
+            - [ ] Stop option parsing at first non-option argument. (REQ: REQ-09-1490)
+            - [ ] Treat `-` as literal argument. (REQ: REQ-09-1491)
+            - [ ] Treat `--` as end of options. (REQ: REQ-09-1492)
+            - [ ] Handle combined options (e.g., `-ne`). (REQ: REQ-09-1493)
+            - [ ] Invalid options treated as arguments (POSIX behavior). (REQ: REQ-09-1494)
+        - [ ] **Output:** (REQ: REQ-09-1495)
+            - [ ] Write to stdout using `write()` syscall. (REQ: REQ-09-1496)
+            - [ ] Handle `EINTR` (retry on interrupt). (REQ: REQ-09-1497)
+            - [ ] Handle partial writes. (REQ: REQ-09-1357, REQ-09-1498)
+            - [ ] Exit code 0 on success. (REQ: REQ-09-1499)
+            - [ ] Exit code 1 on write error. (REQ: REQ-09-1500)
+        - [ ] **Build & Installation:** (REQ: REQ-09-1399, REQ-09-1501)
+            - [ ] Create `bin/echo/` directory structure. (REQ: REQ-09-1502)
+            - [ ] Create `bin/echo/Makefile`. (REQ: REQ-09-1503)
+            - [ ] Install to `/bin/echo`. (REQ: REQ-09-1504)
+            - [ ] Add to root filesystem `dist/`. (REQ: REQ-09-1402, REQ-09-1505)
+        - [ ] **Tests:** (REQ: REQ-09-0368, REQ-09-0572, REQ-09-0722, REQ-09-0883, REQ-09-1019, REQ-09-1127, REQ-09-1271, REQ-09-1403, REQ-09-1506)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Escape sequence parsing. (REQ: REQ-09-0116, REQ-09-1508)
+                - [ ] Option parsing. (REQ: REQ-09-1277, REQ-09-1405, REQ-09-1489, REQ-09-1509)
+                - [ ] Octal/hex/unicode parsing. (REQ: REQ-09-1510)
+            - [ ] **Integration Tests:** (REQ: REQ-09-0378, REQ-09-0580, REQ-09-0729, REQ-09-0890, REQ-09-1026, REQ-09-1133, REQ-09-1409, REQ-09-1511, REQ-09-2282)
+                - [ ] Basic: `echo hello` -> "hello\n". (REQ: REQ-09-1512)
+                - [ ] No newline: `echo -n hello` -> "hello". (REQ: REQ-09-1513)
+                - [ ] Tab: `echo -e 'a\tb'` -> "a\tb". (REQ: REQ-09-1514)
+                - [ ] Newline: `echo -e 'a\nb'` -> "a\nb". (REQ: REQ-09-1515)
+                - [ ] Backslash: `echo -e '\\'` -> "\\". (REQ: REQ-09-1516)
+                - [ ] Octal: `echo -e '\101'` -> "A". (REQ: REQ-09-1517)
+                - [ ] Hex: `echo -e '\x41'` -> "A". (REQ: REQ-09-1518)
+                - [ ] Stop output: `echo -e 'a\cb'` -> "a". (REQ: REQ-09-1519)
+                - [ ] Multiple args: `echo a b c` -> "a b c\n". (REQ: REQ-09-1520)
+                - [ ] Empty args: `echo "" x` -> " x\n". (REQ: REQ-09-1521)
+                - [ ] Dash literal: `echo -` -> "-\n". (REQ: REQ-09-1522)
+                - [ ] Combined options: `echo -ne 'a\n'` -> "a\n". (REQ: REQ-09-1523)
+                - [ ] No escape: `echo -E 'a\tb'` -> "a\\tb\n". (REQ: REQ-09-1524)
+            - [ ] **Edge Case Tests:** (REQ: REQ-09-1525)
+                - [ ] Very long arguments. (REQ: REQ-09-1526)
+                - [ ] Binary data in arguments. (REQ: REQ-09-1527)
+                - [ ] Unicode characters. (REQ: REQ-09-1528)
+                - [ ] Null bytes in escape sequences. (REQ: REQ-09-1529)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] Output length matches expected. (REQ: REQ-09-1531)
+                - [ ] Escape sequences produce valid output. (REQ: REQ-09-1532)
+            - [ ] **Fuzz Tests:** (REQ: REQ-09-0600, REQ-09-0746, REQ-09-0913, REQ-09-1044, REQ-09-1150, REQ-09-1295, REQ-09-1434, REQ-09-1533)
+                - [ ] Fuzz argument parsing. (REQ: REQ-09-1534)
+                - [ ] Fuzz escape sequence parsing. (REQ: REQ-09-1535)
+            - [ ] **Acceptance Tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+                - [ ] Explicit `/bin/echo` works. (REQ: REQ-09-1537)
+                - [ ] Compatible with common scripts. (REQ: REQ-09-1538)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `echo(1)` man page. (REQ: REQ-09-1540)
+            - [ ] Document all escape sequences. (REQ: REQ-09-1541)
+            - [ ] Document `-e`/`-E` behavior. (REQ: REQ-09-1542)
+            - [ ] Document differences from shell builtin. (REQ: REQ-09-1543)
+            - [ ] Document POSIX vs GNU extensions. (REQ: REQ-09-1544)
+        - [ ] **Acceptance Criteria:** (REQ: REQ-09-0419, REQ-09-0621, REQ-09-0766, REQ-09-0932, REQ-09-1062, REQ-09-1165, REQ-09-1312, REQ-09-1447, REQ-09-1545)
+            - [ ] All CLI options implemented. (REQ: REQ-09-1546)
+            - [ ] All escape sequences work correctly. (REQ: REQ-09-1547)
+            - [ ] Standalone binary at `/bin/echo`. (REQ: REQ-09-1548)
+            - [ ] No memory leaks (valgrind clean). (REQ: REQ-09-0626, REQ-09-0937, REQ-09-1067, REQ-09-1170, REQ-09-1318, REQ-09-1451, REQ-09-1549)
+            - [ ] Exit codes correct. (REQ: REQ-09-1550)
+            - [ ] Man page complete. (REQ: REQ-09-1453, REQ-09-1551)
+            - [ ] All tests pass in CI. (REQ: REQ-09-0428, REQ-09-0630, REQ-09-0775, REQ-09-0940, REQ-09-1070, REQ-09-1173, REQ-09-1320, REQ-09-1454, REQ-09-1552)
+    - [ ] **`touch` - Change file timestamps:** (REQ: REQ-09-1553)
+        - [ ] **Purpose:** Update the access and modification times of each FILE to the current time. (REQ: REQ-09-1554)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-a`: Change only the access time. (REQ: REQ-09-1557)
+            - [ ] `-m`: Change only the modification time. (REQ: REQ-09-1558)
+            - [ ] `-c`, `--no-create`: Do not create any files. (REQ: REQ-09-1559)
+            - [ ] `-d`, `--date=STRING`: Parse STRING and use it instead of current time. (REQ: REQ-09-1560)
+            - [ ] `-r`, `--reference=FILE`: Use this file's times instead of current time. (REQ: REQ-09-1561)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Create empty file if not exists (unless `-c`). (REQ: REQ-09-1563)
+            - [ ] Update times using `utimensat`. (REQ: REQ-09-1564)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `open` (O_CREAT), `utimensat`, `parse_time` (REQ: REQ-09-1566)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `touch newfile` -> file created (REQ: REQ-09-1568)
+            - [ ] `touch existing` -> mtime updated (REQ: REQ-09-1569)
+            - [ ] `touch -c nonexist` -> file not created (REQ: REQ-09-1570)
     - [/] **`chmod` - Change file mode bits:**
-        - [ ] **Purpose:** Change the mode of each FILE to MODE.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-R`, `--recursive`: Change files and directories recursively.
-            - [ ] `-v`, `--verbose`: Diagnostic for every file processed.
-            - [ ] Symbolic mode support (e.g., `u+x,g-w`).
-            - [ ] Octal mode support (e.g., `755`).
-        - [ ] **Runtime:**
-            - [ ] Recursive traversal logic for `-R`.
-            - [ ] Parsing complex symbolic mode strings.
-        - [ ] **Library dependencies:**
-            - [ ] `chmod`, `fchmodat`, `parse_mode_string`
-        - [ ] **Acceptance tests:**
-            - [ ] `chmod 755 file` -> mode is 755
-            - [ ] `chmod +x file` -> executable bit set
-            - [ ] `chmod -R a-w dir` -> dir and contents read-only
-    - [ ] **`chown` - Change file owner and group:**
-        - [ ] **Purpose:** Change the owner and/or group of each FILE to OWNER and/or GROUP.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-R`, `--recursive`: Operate on files and directories recursively.
-            - [ ] `-h`, `--no-dereference`: Affect symbolic links instead of referenced file.
-            - [ ] `[OWNER][:[GROUP]]`: Owner/Group specifier.
-        - [ ] **Runtime:**
-            - [ ] Name-to-ID resolution (`getpwnam`, `getgrnam`).
-            - [ ] Handling numeric IDs.
-        - [ ] **Library dependencies:**
-            - [ ] `chown`, `lchown`, `fchownat`, `id_resolve`
-        - [ ] **Acceptance tests:**
-            - [ ] `chown user file` -> owner changed
-            - [ ] `chown :group file` -> group changed
-            - [ ] `chown -R user:group dir` -> recurse change
-    - [ ] **`ln` - Make links between files:**
-        - [ ] **Purpose:** Make links between files.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-s`, `--symbolic`: Make symbolic links instead of hard links.
-            - [ ] `-f`, `--force`: Remove existing destination files.
-            - [ ] `-n`, `--no-dereference`: Treat LINK_NAME as a normal file if it is a directory link.
-        - [ ] **Runtime:**
-            - [ ] Hard link creation (`link`).
-            - [ ] Symlink creation (`symlink`).
-            - [ ] Overwrite logic for `-f`.
-        - [ ] **Library dependencies:**
-            - [ ] `link`, `symlink`, `unlink`
-        - [ ] **Acceptance tests:**
-            - [ ] `ln target link` -> hard link created
-            - [ ] `ln -s target link` -> symlink created
-            - [ ] `ln -sf new old` -> overwrites old with new symlink
-    - [ ] **`wc` - Print newline, word, and byte counts:**
-        - [ ] **Purpose:** Print newline, word, and byte counts for each FILE.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-c`, `--bytes`: Print the byte counts.
-            - [ ] `-l`, `--lines`: Print the newline counts.
-            - [ ] `-w`, `--words`: Print the word counts.
-            - [ ] `-m`, `--chars`: Print the character counts.
-        - [ ] **Runtime:**
-            - [ ] Buffered read loop.
-            - [ ] State machine for word counting (whitespace transition).
-        - [ ] **Library dependencies:**
-            - [ ] `safe_read`, `isspace`
-        - [ ] **Acceptance tests:**
-            - [ ] `wc file` -> prints lines, words, bytes
-            - [ ] `echo "a b" | wc -w` -> prints 2
-            - [ ] `wc -c` -> prints byte count
-    - [ ] **`head` - Output the first part of files:**
-        - [ ] **Purpose:** Print the first 10 lines of each FILE to standard output.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-n`, `--lines=[-]K`: Print the first K lines; or all but the last K lines.
-            - [ ] `-c`, `--bytes=[-]K`: Print the first K bytes; or all but the last K bytes.
-            - [ ] `-q`, `--quiet`: Never print headers giving file names.
-            - [ ] `-v`, `--verbose`: Always print headers.
-        - [ ] **Runtime:**
-            - [ ] Line counting loop.
-            - [ ] Byte counting loop.
-        - [ ] **Library dependencies:**
-            - [ ] `safe_read`, `parse_num_suffix`
-        - [ ] **Acceptance tests:**
-            - [ ] `head -n 5 file` -> prints first 5 lines
-            - [ ] `head -c 10 file` -> prints first 10 bytes
-            - [ ] `head file1 file2` -> prints headers and content
-    - [ ] **`tail` - Output the last part of files:**
-        - [ ] **Purpose:** Print the last 10 lines of each FILE to standard output.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-n`, `--lines=[+]K`: Output the last K lines; or start from line K.
-            - [ ] `-c`, `--bytes=[+]K`: Output the last K bytes; or start from byte K.
-            - [ ] `-f`, `--follow`: Output appended data as the file grows.
-        - [ ] **Runtime:**
-            - [ ] Circular buffer or seek-to-end logic for last K lines/bytes.
-            - [ ] `inotify` or polling loop for `-f`.
-        - [ ] **Library dependencies:**
-            - [ ] `lseek`, `safe_read`, `poll`/`inotify`
-        - [ ] **Acceptance tests:**
-            - [ ] `tail -n 5 file` -> last 5 lines
-            - [ ] `tail -f log` -> prints new data appended
-            - [ ] `tail -c 10 file` -> last 10 bytes
-    - [ ] **`dd` - Convert and copy a file:**
-        - [ ] **Purpose:** Low-level file copying and conversion.
-        - [ ] **Standards:** POSIX.1-2017, BSD Extensions.
-        - [ ] **Operands:**
-            - [ ] `if=file`: Input file (default stdin).
-            - [ ] `of=file`: Output file (default stdout).
-            - [ ] `ibs=n`: Input block size (default 512).
-            - [ ] `obs=n`: Output block size (default 512).
-            - [ ] `bs=n`: Set both ibs and obs.
-            - [ ] `cbs=n`: Conversion buffer size.
-            - [ ] `skip=n`: Skip n blocks from input start.
-            - [ ] `seek=n`: Skip n blocks from output start.
-            - [ ] `count=n`: Copy only n input blocks.
-            - [ ] `status=level`: `noxfer`, `none`, `progress`.
-            - [ ] `conv=value[,value...]`:
-                - [ ] `ascii`, `ebcdic`: Encoding conversion.
-                - [ ] `block`, `unblock`: Fixed-length record conversion.
-                - [ ] `lcase`, `ucase`: Case folding.
-                - [ ] `swab`: Swap byte pairs.
-                - [ ] `noerror`: Continue after read error.
-                - [ ] `notrunc`: Do not truncate output file.
-                - [ ] `sync`: Pad blocks with NULs (or spaces if `block`/`unblock`).
-                - [ ] `fdatasync`, `fsync`: Sync before exit (extension).
-        - [ ] **Runtime:**
-            - [ ] `SIGINFO`/`SIGUSR1` handler for progress stats.
-            - [ ] Summary output (records in/out, bytes, speed) to stderr.
-    - [ ] **`df` - Report file system disk space usage:**
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Options:**
-            - [ ] `-a`: Include all file systems (including size 0, pseudo-FS).
-            - [ ] `-h`: Human-readable output (base 2: K, M, G).
-            - [ ] `-H`: Human-readable output (base 10: KB, MB, GB).
-            - [ ] `-k`: 1024-byte blocks (default is often 512 in legacy).
-            - [ ] `-P`: Portable output format (strict single line).
-            - [ ] `-i`: Include inode usage info (Used, Free, %IUsed).
-            - [ ] `-l`: Local file systems only (no network mounts).
-            - [ ] `-t type`: Filter by file system type (e.g., `ext2`, `procfs`).
-        - [ ] **Implementation:**
-            - [ ] `getmntinfo()` or `setfsent()` loop.
-            - [ ] `statvfs()`/`getfsstat()` calls for block/inode data.
-            - [ ] Dynamic width calculation for aligned columns (Filesystem, Blocks, Used, Avail, Capacity, Mounted on).
-            - [ ] Handle Access Denied gracefully.
-    - [ ] **`pwd` - Return working directory name:**
-        - [ ] **Purpose:** Print the value of the current working directory.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-L`: Logical path (from environment PWD).
-            - [ ] `-P`: Physical path (resolve symlinks).
-        - [ ] **Runtime:**
-            - [ ] `getcwd()` usage.
-            - [ ] Fallback to `..` traversal if `getcwd` fails/absent.
-        - [ ] **Library dependencies:**
-            - [ ] `getcwd`, `getenv`
-        - [ ] **Acceptance tests:**
-            - [ ] `pwd` -> prints valid path
-            - [ ] `cd /tmp; pwd` -> prints /tmp
-            - [ ] `pwd -P` vs `pwd -L` inside symlinked dir
-    - [ ] **`sync` - Synchronize cached writes:**
-        - [ ] **Purpose:** Write any data buffered in memory out to disk.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:** None.
-        - [ ] **Runtime:**
-            - [ ] Invoke `sync()` syscall.
-        - [ ] **Library dependencies:**
-            - [ ] `sync`
-        - [ ] **Acceptance tests:**
-            - [ ] `sync` -> returns 0
-            - [ ] `sync --help` -> usage (optional)
-    - [ ] **`mknod` - Make block or character special files:**
-        - [ ] **Purpose:** Create a device special file.
-        - [ ] **Standards:** XSI (Legacy/Extension).
-        - [ ] **Operands:**
-            - [ ] `name`: File to create.
-            - [ ] `type`: `b` (block), `c` or `u` (char), `p` (fifo).
-            - [ ] `major`: Device major number (for b/c).
-            - [ ] `minor`: Device minor number (for b/c).
-        - [ ] **Runtime:**
-            - [ ] Use `mknod()` syscall (or `mkfifo()`).
-            - [ ] Validate permissions/ownership creation.
-        - [ ] **Library dependencies:**
-            - [ ] `mknod`, `mkfifo`, `strtol`
-        - [ ] **Acceptance tests:**
-            - [ ] `mknod pipe p` -> FIFO created
-            - [ ] `mknod dev c 1 3` -> char device created (requires root)
-    - [ ] **`mktemp` - Make temporary file or directory:**
-        - [ ] **Purpose:** Create a temporary file or directory.
-        - [ ] **Standards:** BSD/GNU Extension.
-        - [ ] **Operands:**
-            - [ ] `-d`, `--directory`: Create directory.
-            - [ ] `-u`, `--dry-run`: Do not create, just print name (unsafe).
-            - [ ] `-q`, `--quiet`: Fail silently.
-            - [ ] `-t prefix`: Use template in `TMPDIR`.
-            - [ ] `[TEMPLATE]`: Template string (ending in XXXXXX).
-        - [ ] **Runtime:**
-            - [ ] `mkstemp()` / `mkdtemp()` usage.
-        - [ ] **Library dependencies:**
-            - [ ] `mkstemp`, `mkdtemp`
-        - [ ] **Acceptance tests:**
-            - [ ] `mktemp` -> creates file in tmp
-            - [ ] `mktemp -d` -> creates dir
-            - [ ] `mktemp t.XXXXXX` -> replaces Xs
-    - [ ] **`readlink` - Print value of a symbolic link:**
-        - [ ] **Purpose:** Display information about a symbolic link.
-        - [ ] **Standards:** BSD/GNU Extension.
-        - [ ] **Operands:**
-            - [ ] `-f`: Canonicalize by following every symlink in every component.
-            - [ ] `-n`: Do not output trailing newline.
-        - [ ] **Runtime:**
-            - [ ] call `readlink()` syscall.
-            - [ ] logic for `-f` (realpath iteration).
-        - [ ] **Library dependencies:**
-            - [ ] `readlink`, `realpath` (for -f)
-        - [ ] **Acceptance tests:**
-            - [ ] `readlink symlink` -> prints target
-            - [ ] `readlink -f symlink` -> prints absolute path
-            - [ ] `readlink regularfile` -> fails (unless -f)
-    - [ ] **`realpath` - Print resolved path:**
-        - [ ] **Purpose:** Print the resolved path.
-        - [ ] **Standards:** POSIX.1-2024 (New), GNU/BSD compatible.
-        - [ ] **Operands:**
-            - [ ] `-e`: Require all components to exist.
-            - [ ] `-m`: No components required to exist.
-            - [ ] `-L`: Resolve logical (PWD).
-            - [ ] `-P`: Resolve physical (Symlinks).
-        - [ ] **Runtime:**
-            - [ ] `realpath()` function.
-        - [ ] **Library dependencies:**
-            - [ ] `realpath`
-        - [ ] **Acceptance tests:**
-            - [ ] `realpath .` -> absolute path
-            - [ ] `realpath symlink` -> resolved path
-            - [ ] `realpath -m missing/path` -> prints resolved path
-    - [ ] **`tee` - Duplicate standard input:**
-        - [ ] **Purpose:** Read from standard input and write to standard output and files.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-a`, `--append`: Append to files instead of overwriting.
-            - [ ] `-i`, `--ignore-interrupts`: Ignore SIGINT.
-        - [ ] **Runtime:**
-            - [ ] Open all files (O_CREAT | O_WRONLY | [O_TRUNC|O_APPEND]).
-            - [ ] Read stdin -> Write to stdout + all files.
-            - [ ] Handle write errors gracefully (continue other files).
-        - [ ] **Library dependencies:**
-            - [ ] `xopen`, `safe_read`, `safe_write`, `signal`
-        - [ ] **Acceptance tests:**
-            - [ ] `echo hi | tee file` -> file has "hi", stdout has "hi"
-            - [ ] `tee -a file` -> appends
-            - [ ] `tee -i` -> ignores interrupt
-    - [ ] **`date` - Write the date and time:**
-        - [ ] **Purpose:** Print or set the system date and time.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-u`: Display/Set UTC time.
-            - [ ] `-r file`: Display modification time of file.
-            - [ ] `-d date` / `--date=str`: Display string description of time (GNU Extension).
-            - [ ] `+format`: Format string (strftime compatible).
-        - [ ] **Runtime:**
-            - [ ] `clock_gettime()` / `gettimeofday()`.
-            - [ ] `settimeofday()` for setting time (superuser).
-            - [ ] `strftime()` for formatting.
-        - [ ] **Library dependencies:**
-            - [ ] `clock_gettime`, `localtime`, `gmtime`, `strftime`, `parse_date`
-        - [ ] **Acceptance tests:**
-            - [ ] `date` -> prints date
-            - [ ] `date +%Y` -> prints year
-            - [ ] `date -u` -> prints UTC
-    - [ ] **`hostname` - Show or set the system's host name:**
-        - [ ] **Purpose:** Show or set the system's host name.
-        - [ ] **Standards:** Legacy / LSB.
-        - [ ] **Operands:**
-            - [ ] `-f`: Long host name (FQDN).
-            - [ ] `-s`: Short host name.
-            - [ ] `-i`: IP address.
-            - [ ] `-y`: YP/NIS domain name.
-            - [ ] `[name]`: Set hostname (superuser).
-        - [ ] **Runtime:**
-            - [ ] `gethostname()` / `sethostname()`.
-            - [ ] `getaddrinfo()` for FQDN resolution.
-        - [ ] **Library dependencies:**
-            - [ ] `gethostname`, `sethostname`, `getaddrinfo`
-        - [ ] **Acceptance tests:**
-            - [ ] `hostname` -> prints name
-            - [ ] `hostname newname` -> sets name (if root)
-            - [ ] `hostname -f` -> prints FQDN
-    - [ ] **`uname` - Print system information:**
-        - [ ] **Purpose:** Print system info.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-a`: Print all info.
-            - [ ] `-s`: Kernel name.
-            - [ ] `-n`: Node name.
-            - [ ] `-r`: Kernel release.
-            - [ ] `-v`: Kernel version.
-            - [ ] `-m`: Machine hardware name.
-            - [ ] `-p`: Processor type (GNU extension).
-            - [ ] `-i`: Hardware platform (GNU extension).
-            - [ ] `-o`: Operating system (GNU extension).
-        - [ ] **Runtime:**
-            - [ ] `uname()` syscall.
-        - [ ] **Library dependencies:**
-            - [ ] `uname`
-        - [ ] **Acceptance tests:**
-            - [ ] `uname` -> prints kernel name
-            - [ ] `uname -a` -> prints all fields
-            - [ ] `uname -m` -> prints arch
-    - [ ] **`kill` - Terminate or signal processes:**
-        - [ ] **Purpose:** Send a signal to a process.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `-s signal`, `-signal`: Specify signal name/number.
-            - [ ] `-l [status]`: List signals or translate exit status.
-            - [ ] `pid...`: Target processes.
-        - [ ] **Runtime:**
-            - [ ] `kill()` syscall.
-            - [ ] `strtol()` for PID parsing.
-            - [ ] Signal name resolution (`SIGTERM`, etc).
-        - [ ] **Library dependencies:**
-            - [ ] `kill`, `strtol`, `strsignal`
-        - [ ] **Acceptance tests:**
-            - [ ] `kill pid` -> sends SIGTERM
-            - [ ] `kill -9 pid` -> sends SIGKILL
-            - [ ] `kill -l` -> lists signals
-    - [ ] **`sleep` - Suspend execution for an interval:**
-        - [ ] **Purpose:** Pause execution.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:**
-            - [ ] `time`: Non-negative integer.
-            - [ ] Extension: Floating point support.
-            - [ ] Extension: Suffixes (s, m, h, d).
-        - [ ] **Runtime:**
-            - [ ] `nanosleep()` usage.
-        - [ ] **Library dependencies:**
-            - [ ] `nanosleep`, `strtod`
-        - [ ] **Acceptance tests:**
-            - [ ] `sleep 1` -> pauses 1s
-            - [ ] `sleep 0.1` -> pauses 100ms
-            - [ ] `sleep invalid` -> reports error
-    - [ ] **`true` - Return true value:**
-        - [ ] **Purpose:** Do nothing, successfully.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:** Ignored.
-        - [ ] **Runtime:** Exit code 0.
-        - [ ] **Library dependencies:** None.
-        - [ ] **Acceptance tests:**
-            - [ ] `true` -> exit status 0
-            - [ ] `true args` -> exit status 0
-    - [ ] **`false` - Return false value:**
-        - [ ] **Purpose:** Do nothing, unsuccessfully.
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Operands:** Ignored.
-        - [ ] **Runtime:** Exit code 1.
-        - [ ] **Library dependencies:** None.
-        - [ ] **Acceptance tests:**
-            - [ ] `false` -> exit status 1
-            - [ ] `false args` -> exit status 1
-    - [ ] **`test` / `[` - Evaluate expression:**
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **File Type Operators:**
-            - [ ] `-b file`: True if block special file.
-            - [ ] `-c file`: True if character special file.
-            - [ ] `-d file`: True if directory.
-            - [ ] `-e file`: True if file exists.
-            - [ ] `-f file`: True if regular file.
-            - [ ] `-g file`: True if set-group-ID flag is set.
-            - [ ] `-h` / `-L file`: True if symbolic link.
-            - [ ] `-k file`: True if sticky bit is set.
-            - [ ] `-p file`: True if FIFO (named pipe).
-            - [ ] `-r file`: True if readable.
-            - [ ] `-S file`: True if socket.
-            - [ ] `-s file`: True if size is greater than 0.
-            - [ ] `-u file`: True if set-user-ID flag is set.
-            - [ ] `-w file`: True if writable.
-            - [ ] `-x file`: True if executable.
-        - [ ] **String Operators:**
-            - [ ] `-z string`: True if string length is 0.
-            - [ ] `-n string`: True if string length is not 0.
-            - [ ] `s1 = s2`: True if strings are identical.
-            - [ ] `s1 != s2`: True if strings are not identical.
-        - [ ] **Integer Operators:**
-            - [ ] `n1 -eq n2`: Equal.
-            - [ ] `n1 -ne n2`: Not equal.
-            - [ ] `n1 -gt n2`: Greater than.
-            - [ ] `n1 -ge n2`: Greater than or equal.
-            - [ ] `n1 -lt n2`: Less than.
-            - [ ] `n1 -le n2`: Less than or equal.
-        - [ ] **Logic & Control:**
-            - [ ] `! expr`: Negate expression.
-            - [ ] `( expr )`: Grouping precedence.
-            - [ ] `expr1 -a expr2`: Logical AND (Binary).
-            - [ ] `expr1 -o expr2`: Logical OR (Binary).
-        - [ ] **Parsing & Runtime:**
-            - [ ] Recursive descent parser implementation.
-            - [ ] Handle 3-argument vs 4-argument ambiguity (POSIX rules).
-            - [ ] Detect `[` invocation name and require matching `]`.
-            - [ ] Use `lstat` for `-L`/`-h`, `stat` for others.
-            - [ ] Handle numeric parsing errors gracefully.
-    - [ ] **`expr` - Evaluate arguments as an expression:**
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Arithmetic Operators:**
-            - [ ] `+`: Addition (Integer).
-            - [ ] `-`: Subtraction (Integer).
-            - [ ] `*`: Multiplication (Integer).
-            - [ ] `/`: Integer division.
-            - [ ] `%`: Integer modulus.
-        - [ ] **Relational Operators (String & Integer support):**
-            - [ ] `=`: Equal.
-            - [ ] `!=`: Not equal.
-            - [ ] `>`: Greater than.
-            - [ ] `>=`: Greater than or equal.
-            - [ ] `<`: Less than.
-            - [ ] `<=`: Less than or equal.
-        - [ ] **Boolean Operators:**
-            - [ ] `|`: Logical OR (returns first non-null/non-zero arg, else 0).
-            - [ ] `&`: Logical AND (returns first arg if both non-null/non-zero, else 0).
-        - [ ] **String Matching:**
-            - [ ] `:`: Pattern matching (Anchored Regex).
-        - [ ] **Parsing:**
-            - [ ] Argument shifting logic.
-            - [ ] `regex.h` integration for `:` operator.
-            - [ ] Precedence handling: `( ... )` (if supported extension) or standard operator precedence.
-            - [ ] Robust detection of operators vs operands (e.g., `expr 1 + 1` vs `expr + 1`).
-    - [ ] **`printf` - Write formatted output:**
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Escape Sequences (Format String):**
-            - [ ] `\\`: Backslash.
-            - [ ] `\a`: Alert (bell).
-            - [ ] `\b`: Backspace.
-            - [ ] `\f`: Form feed.
-            - [ ] `\n`: Newline.
-            - [ ] `\r`: Carriage return.
-            - [ ] `\t`: Tab.
-            - [ ] `\v`: Vertical tab.
-            - [ ] `\0ooo`: Octal value (1-3 digits).
-        - [ ] **Format Specifiers:**
-            - [ ] `d`, `i`: Signed decimal.
-            - [ ] `o`: Unsigned octal.
-            - [ ] `u`: Unsigned decimal.
-            - [ ] `x`, `X`: Unsigned hexadecimal (lower/upper).
-            - [ ] `f`, `F`: Decimal floating point.
-            - [ ] `e`, `E`: Exponential floating point.
-            - [ ] `g`, `G`: General floating point (shortest).
-            - [ ] `a`, `A`: Hexadecimal floating point.
-            - [ ] `c`: Character.
-            - [ ] `s`: String.
-            - [ ] `p`: Pointer address (impl defined).
-            - [ ] `%`: Literal percent.
-        - [ ] **Special Specifiers:**
-            - [ ] `%b`: Expand escape sequences in the corresponding argument string.
-        - [ ] **Flags & Precision:**
-            - [ ] Width (e.g., `%5d`).
-            - [ ] Precision (e.g., `%.2f`, `%.5s`).
-            - [ ] `-`: Left-justify.
-            - [ ] `+`: Force sign.
-            - [ ] ` ` (space): Space if no sign.
-            - [ ] `#`: Alternate form (0x prefix, etc).
-            - [ ] `0`: Zero padding.
-        - [ ] **Behavior:**
-            - [ ] Argument recycling: Reuse format string if arguments remain.
-            - [ ] Default values: treat missing args as 0 (int) or "" (string).
-    - [ ] **`stty` - Set options for a terminal:**
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Options:**
-            - [ ] `-a`: All settings.
-            - [ ] `-g`: Saveable string.
-        - [ ] **Settings:**
-            - [ ] **Control Modes (`c_cflag`):**
-                - [ ] `parenb`, `parodd`, `-parenb`: Parity generation.
-                - [ ] `cs5`, `cs6`, `cs7`, `cs8`: Character size bits.
-                - [ ] `hupcl`: Hangup on last close.
-                - [ ] `cstopb`: Two stop bits.
-                - [ ] `cread`: Enable receiver.
-                - [ ] `clocal`: Ignore modem control lines.
-            - [ ] **Input Modes (`c_iflag`):**
-                - [ ] `ignbrk`, `brkint`: Break condition handling.
-                - [ ] `ignpar`, `parmrk`, `inpck`: Parity checking.
-                - [ ] `istrip`: Strip 8th bit.
-                - [ ] `inlcr`, `igncr`, `icrnl`: CR/NL mapping.
-                - [ ] `ixon`, `ixoff`: XON/XOFF flow control.
-            - [ ] **Output Modes (`c_oflag`):**
-                - [ ] `opost`: Post-process output.
-                - [ ] `onlcr`: Map NL to CR-NL.
-                - [ ] `ocrnl`: Map CR to NL.
-            - [ ] **Local Modes (`c_lflag`):**
-                - [ ] `isig`: Enable signals (INTR, QUIT, SUSP).
-                - [ ] `icanon`: Canonical mode (line buffering).
-                - [ ] `echo`, `echoe` (erase), `echok` (kill), `echonl`.
-                - [ ] `noflsh`: Disable flushing on signal.
-                - [ ] `tostop`: Stop background jobs on write.
-            - [ ] **Special Characters (`c_cc`):**
-                - [ ] `erase` (DEL/BS).
-                - [ ] `kill` (^U).
-                - [ ] `intr` (^C).
-                - [ ] `quit` (^\).
-                - [ ] `eof` (^D).
-                - [ ] `susp` (^Z).
-                - [ ] `start`/`stop` (^Q/^S).
-                - [ ] `min`/`time` (Non-canonical read control).
-            - [ ] **Combination Settings:**
-                - [ ] `sane`: Reset all to reasonable defaults.
-                - [ ] `raw`: Disable all processing (pass-through).
-                - [ ] `cooked`: Re-enable processing.
-                - [ ] `size`: Print terminal rows and columns.
-                - [ ] `rows N`, `cols N`: Set window size manually.
-    - [ ] **`tty` - Return user's terminal name:**
-        - [ ] **Standards:** POSIX.1-2017.
-        - [ ] **Options:**
-            - [ ] `-s`: Silent mode.
-        - [ ] **Implementation:**
-            - [ ] `ttyname(STDIN_FILENO)`.
-- [ ] Fix `pmap_dump` memory access logic (use `sys/proc.h` correctly) <!-- id: 4 -->
-- [ ] Fix `init=` command line parsing <!-- id: 5 -->
-- [ ] Fix `run_kernel_tests` linker error in EFI build <!-- id: 6 -->
-- [ ] Add `syscall_log` kernel parameter for debugging <!-- id: 7 -->
-- [ ] Investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 -->
-- [ ] Investigate Page Fault at `0x08065d2b` (accessing `0x08124000`) <!-- id: 9 -->
-    - [ ] **Editors:**
-        - [ ] **`vi` Clone (Tiny/Busybox-like):**
-            - [ ] **Buffer Management:**
-                - [ ] Gap buffer or Line-based linked list structure.
-                - [ ] File loading/saving (`:w`, `:e`).
-            - [ ] **Modes:**
-                - [ ] Normal Mode (Command processing).
-                - [ ] Insert Mode (Text input).
-                - [ ] Command-Line Mode (`:` prompts).
-            - [ ] **Navigation (Normal Mode):**
-                - [ ] `h`, `j`, `k`, `l`: Character cursor movement.
-                - [ ] `w`, `b`, `e`: Word movement.
-                - [ ] `0`, `^`, `$`: Line start/end.
-                - [ ] `G`, `gg`: Go to line.
-                - [ ] `Ctrl+F`, `Ctrl+B`: Page scrolling.
-            - [ ] **Editing Operations:**
-                - [ ] `i`, `a`, `o`, `O`: Enter insert mode.
-                - [ ] `x`, `X`: Delete character.
-                - [ ] `dd`, `dw`: Delete line/word.
-                - [ ] `yy`, `yw`: Yank (copy) line/word.
-                - [ ] `p`, `P`: Paste.
-                - [ ] `u`: Undo (Simplex implementation).
-            - [ ] **Search:**
-                - [ ] `/pattern`: Forward search.
-                - [ ] `n`, `N`: Next/Previous match.
-            - [ ] **Ex Commands:**
-                - [ ] `:q`, `:q!`: Quit.
-                - [ ] `:w`, `:wq`: Write/Save.
-                - [ ] `:set nu` / `:set nonu`: Line numbering.
-        - [ ] **TUI Editor (Nano-like):**
-            - [ ] **UI Rendering:**
-                - [ ] Top status bar (Version, File status).
-                - [ ] Bottom help bar (Key shortcuts ^G, ^X, etc).
-                - [ ] Main text area with scrolling.
-            - [ ] **Input Handling:**
-                - [ ] Modeless text entry (always insert).
-                - [ ] Control key handling (`^X` Exit, `^O` Save).
-                - [ ] Home/End/PageUp/PageDown navigation.
-            - [ ] **Features:**
-                - [ ] Search (`^W`) and Replace (`^\`).
-                - [ ] Cut (`^K`) and Uncut (`^U`) lines.
-                - [ ] Goto Line (`^_`).
-        - [ ] **GUI Editor (Notepad-like):**
-            - [ ] **Core Components:**
-                - [ ] `GWindow`: Main application window.
-                - [ ] `GTextArea`: Multi-line text widget with scrollbar.
-                - [ ] `GMenuBar`: Top menu (File, Edit, Format).
-            - [ ] **File Operations:**
-                - [ ] New: Clear buffer.
-                - [ ] Open: Launch `GFileChooser` dialog.
-                - [ ] Save / Save As: Launch `GFileChooser` (Save mode).
-            - [ ] **Edit Operations:**
-                - [ ] Cut/Copy/Paste via Clipboard API.
-                - [ ] Select All.
-                - [ ] Undo/Redo stack.
-            - [ ] **Preferences:**
-                - [ ] Font selection dialog.
-                - [ ] Word wrap toggle.
-- [ ] **System Utils:**
-    - [ ] **`init` (PID 1):**
-        - [ ] **Stage 1 (Boot):**
-            - [ ] Mask all signals except `SIGCHLD`.
-            - [ ] Mount `/proc`, `/sys`, `/dev` if not mounted by kernel.
-            - [ ] Parse `/etc/rc` shell script.
-            - [ ] Check `/etc/system.conf` for `GRAPHICAL_LOGIN=yes`.
-        - [ ] **Stage 2 (Run Loop):**
-            - [ ] Spawn `getty` on TTYs (`tty1`...`tty6`) or start `login.gui`.
-            - [ ] Handle `SIGCHLD`: `waitpid(-1, ...)` to reap orphans.
-            - [ ] Respawn died critical services (like `getty`).
-            - [ ] Handle `SIGINT`/`SIGPWR` for shutdown/reboot.
-    - [ ] **Graphical Login (`login.gui`):**
-        - [ ] **UI:**
-            - [ ] Simple window with User/Pass fields.
-            - [ ] Shutdown/Restart buttons.
-        - [ ] **Auth:**
-            - [ ] Reads username/password.
-            - [ ] Authenticates using `libauth` (no direct file access).
-        - [ ] **Session:**
-            - [ ] Starts the default Desktop Environment shell on success.
-            - [ ] Hand off control using `execve` inside a `fork`ed child.
-    - [ ] **`login` (CLI Auth):**
-        - [ ] **Phase 1: Classic Unix Auth (`libauth`):**
-            - [ ] Display generic "login:" prompt.
-            - [ ] Disable TTY echo for password input.
-            - [ ] Use `libauth` to validate credentials (validates against `/etc/passwd`).
-            - [ ] Handle generic authentication failures (delay 3s).
-        - [ ] **Phase 2: Session Setup:**
-            - [ ] Initialize Environment (`HOME`, `SHELL`, `USER`, `LOGNAME`, `PATH`, `TERM`).
-            - [ ] Set Process Group / Session ID (`setsid`).
-            - [ ] Apply Group IDs (`setgid`, `initgroups` for supplementary).
-            - [ ] Apply User ID (`setuid`).
-            - [ ] Change to user's home directory (`chdir`).
-            - [ ] Display `/etc/motd` (Message of the Day).
-            - [ ] Execute Shell (`execve` of `pw_shell`).
-        - [ ] **Phase 3: Security & Logging:**
-            - [ ] Implement account expiration checking.
-            - [ ] Record login in `/var/run/utmp` and `/var/log/wtmp`.
-            - [ ] Handle login failures (syslog LOG_AUTH).
-    - [ ] **`ps` (Process Status):**
-        - [ ] **Data Gathering (via `libsys`):**
-            - [ ] Call `sys_proc_count()` to get process count.
-            - [ ] Call `sys_proc_list()` to enumerate all PIDs.
-            - [ ] Call `sys_proc_info()` for each PID to get state, ppid, pgid, sid, tty, perso_id.
-            - [ ] Call `sys_proc_cmdline()` for full command line arguments.
-            - [ ] Call `sys_proc_pers_name()` to resolve personality ID to display string.
-        - [ ] **Formatting & Output:**
-            - [ ] Resolve TTY device number to name (from `sys_procinfo_t.tty`).
-            - [ ] Calculate %CPU (user_time+sys_time / uptime delta).
-            - [ ] Calculate %MEM (rss * pagesize / total_ram from `sys_vm_stats()`).
-            - [ ] Format columns: PID, TTY, STAT, TIME, COMMAND, PERS (personality).
-            - [ ] Support BSD syntax (`aux`) vs SysV syntax (`-ef`).
-    - [ ] **`top` (Real-time Monitor):**
-        - [ ] **Backend (via `libsys`):**
-            - [ ] Efficiently call `sys_proc_list()` and `sys_proc_info()` (snapshotting).
-            - [ ] Calculate CPU delta usage via `sys_cpu_times()` between samples.
-            - [ ] Read global stats via `sys_vm_stats()` and `sys_cpu_loadavg()`.
-        - [ ] **UI / Display:**
-            - [ ] Initialize terminal (raw mode, no echo).
-            - [ ] Handle VT100 control sequences (clear screen, cursor positioning).
-            - [ ] Display Header: Uptime (`sys_uptime()`), Load (`sys_cpu_loadavg()`), Mem/Swap.
-            - [ ] Display Process List (sortable by CPU/Mem, show personality, clamp to screen).
-            - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update).
-    - [ ] **Documentation Utils:**
-        - [ ] **`roff` / `nroff` (Typesetting Engine):**
-            - [ ] **Core Engine & Parsing:**
-                - [ ] Implement input stream buffering (pushback support).
-                - [ ] Implement tokenizer (requests vs text vs escapes).
-                - [ ] Implement escape sequence parser (`\e`, `\(xx`, `\*`, `\n`).
-                - [ ] Implement numeric register parser with scaling units (`n`, `v`, `p`, `m`).
-                - [ ] Implement string register expansion (`\*[string]`).
-                - [ ] Implement conditional parsing (`.if`, `.ie`, `.el`).
-                - [ ] Implement loop/while parsing (`.while`).
-                - [ ] Implement macro definition parser (`.de`, `.am`, `..`).
-                - [ ] Implement diversion support (`.di`, `.da`, boxes).
-                - [ ] Implement environment switching (`.ev`).
-                - [ ] Implement `.so` (source file) handling.
-                - [ ] Implement error handling and line number tracking.
-            - [ ] **Formatting & Layout:**
-                - [ ] Implement current state tracking (font, size, fill mode).
-                - [ ] Implement line filling and adjustment logic.
-                - [ ] Implement hyphenation hooks (knuth-plass or simple pattern).
-                - [ ] Implement page control (`.pl`, `.po`, `.tl`).
-                - [ ] Implement traps (page location, input line).
-                - [ ] Implement tab stop calculations.
-            - [ ] **Macro Packages:**
-                - [ ] **`-man` (Manpages):**
-                    - [ ] Implement `.TH`, `.SH`, `.SS` structure.
-                    - [ ] Implement `.TP`, `.IP`, `.HP` indentation/lists.
-                    - [ ] Implement font macros (`.B`, `.I`, `.BI`, etc.).
-                - [ ] **`-mdoc` (Semantic Manpages):**
-                    - [ ] Implement structural macros (`.Dd`, `.Dt`, `.Os`).
-                    - [ ] Implement block macros (`.Bl`, `.It`, `.El`).
-                    - [ ] Implement in-line semantic macros (`.Op`, `.Fl`, `.Ar`).
-                - [ ] **`-ms` (Manuscripts - Minimal):**
-                    - [ ] Implement paragraph macros (`.PP`, `.LP`).
-                    - [ ] Implement heading macros (`.NH`, `.SH`).
-            - [ ] **Output Backends:**
-                - [ ] **ASCII / TTY:**
-                    - [ ] Implement basic character output.
-                    - [ ] Implement overstriking for bold/underline (backspace hacking).
-                    - [ ] Handle TTY control codes (if opts enabled).
-                - [ ] **Future/Stub:**
-                    - [ ] Define device-independent output interface (GROFF-like troff).
-            - [ ] **Compatibility:**
-                - [ ] Align behavior with Heirloom Troff / Mandoc where possible.
-                - [ ] Document deviations from GNU Groff.
-                - [ ] Test against traditional V7 manual sources.
-        - [ ] **`man` (Manual Pager):**
-            - [ ] **Page Discovery:**
-                - [ ] Implement `MANPATH` environment parsing.
-                - [ ] Implement default system path (`/usr/man`).
-                - [ ] Implement section search order (1, n, p, 8, 2, 3...).
-                - [ ] Implement locale-specific subdirectories handling.
-                - [ ] Support compressed sources (`.gz`, `.bz2`, `.xz`) via decompressors.
-            - [ ] **Preprocessing Pipeline:**
-                - [ ] Detect macro format (`-man` vs `-mdoc`) via first-line scan.
-                - [ ] Construct `roff` pipeline command.
-                - [ ] Handle preprocessors if flagged (`tbl`, `eqn`, `pic` - stubs).
-            - [ ] **User Interface:**
-                - [ ] Implement CLI flags (`-a`, `-f`, `-k`, `-w`, `-s`).
-                - [ ] Implement pager integration (`$PAGER` or `less`).
-                - [ ] Handle exit codes (0 found, 1 missing, >1 error).
-            - [ ] **Caching & Performance:**
-                - [ ] Implement `catman` style preformatted cache directory support.
-                - [ ] Implement cache invalidation (timestamp check vs source).
-                - [ ] Implement security checks (don't write to cache as user).
-            - [ ] **Diagnostics:**
-                - [ ] Report "No manual entry for..." clearly.
-                - [ ] Report ambiguous matches properly.
-        - [ ] **Testing & Quality (Roff/Man):**
-            - [ ] **Unit Tests:**
-                - [ ] Test register arithmetic logic.
-                - [ ] Test macro argument expansion (`$1`, `$*`).
-                - [ ] Test conditional nesting.
-            - [ ] **Property Tests:**
-                - [ ] Fuzz macro parser with random line noise.
-                - [ ] Randomize nested environment creation.
-            - [ ] **Integration Tests:**
-                - [ ] Render all system manpages and check for crashes.
-                - [ ] Compare output against reference implementation (groff/mandoc) for diffs.
-        - [ ] **Documentation:**
-            - [ ] Write `roff(7)` language reference.
-            - [ ] Write `man(1)` user manual.
-            - [ ] Write `mandoc_impl.md` developer design doc.
-        - [ ] **`roff` / `nroff` / `man` (Production-Quality Task Expansion):**
-            - [ ] **Compatibility Baseline & Scope Control:**
-                - [ ] Define normative baseline: POSIX where defined, BSD `mandoc` semantics preferred where unspecified.
-                - [ ] Produce behavior matrix for V7/BSD roff, BSD mandoc, and GNU groff.
-                - [ ] Record compatibility priorities for `man` output correctness over full troff feature coverage.
-                - [ ] Enumerate explicitly supported macro packages and minimum versions.
-                - [ ] Enumerate explicitly unsupported GNU groff-only extensions as non-goals.
-                - [ ] Add task gate requiring incompatibility entries for every intentional divergence.
-                - [ ] Define per-feature status tags: implemented, compatible-subset, stubbed, deferred.
-            - [ ] **`roff` / `nroff` CLI Frontend:**
-                - [ ] Add `bin/roff/` program skeleton with argument parser and usage output.
-                - [ ] Add `bin/nroff/` frontend aliasing roff engine with terminal defaults.
-                - [ ] Implement `-man`, `-mdoc`, and `-ms` package selection flags.
-                - [ ] Implement `-Tascii` device selection and default device logic for `nroff`.
-                - [ ] Implement `-m` package loading path semantics compatible with BSD tooling.
-                - [ ] Implement register preset flags (`-rX=N`) and string preset flags (`-dX=VALUE`).
-                - [ ] Implement warning/diagnostic control flags and quiet mode.
-                - [ ] Implement stdin and file-list processing order exactly as specified by CLI.
-                - [ ] Implement deterministic exit codes for parse, include, and runtime formatting failures.
-                - [ ] Add `roff(1)` and `nroff(1)` option tables synchronized with implementation.
-            - [ ] **Core Engine: Input Stream, Tokenization, and Lexical Rules:**
-                - [ ] Implement unified input source stack for files, `.so` includes, and diversions.
-                - [ ] Track source coordinates (file, line, column, include depth) for diagnostics.
-                - [ ] Implement line reader with newline preservation and escaped-newline handling.
-                - [ ] Implement request line detection for both `.` and `'` control prefixes.
-                - [ ] Implement comment line and empty control line semantics.
-                - [ ] Implement argument lexer preserving escaped spaces and quoted segments.
-                - [ ] Implement token categories: text, request, macro call, escape, and transparent-through tokens.
-                - [ ] Implement pushback/unread token support for lookahead-sensitive parsing.
-                - [ ] Implement tokenizer behavior for copy mode vs interpretation mode.
-                - [ ] Add hard limits for token length, argument count, and input recursion depth.
-            - [ ] **Core Engine: Escape Sequence Parsing and Expansion:**
-                - [ ] Implement escape dispatcher for one-char, two-char, bracketed, and long-name forms.
-                - [ ] Implement literal escape handling (`\\`, `\e`) and escaped control chars.
-                - [ ] Implement special character escapes (`\(xx`, `\[name]`) with lookup table.
-                - [ ] Implement string register interpolation (`\*x`, `\*(xx`, `\*[name]`).
-                - [ ] Implement numeric register interpolation (`\nx`, `\n(xx`, `\n[name]`) with formatting options.
-                - [ ] Implement number-format escape modifiers (`\n+`, `\n-`) semantics.
-                - [ ] Implement font/style escapes used by terminal backend.
-                - [ ] Implement width-measurement escapes with backend callback hooks.
-                - [ ] Implement conditional-inline escapes used by macro packages.
-                - [ ] Implement copy-mode suppression rules for escapes inside macro definitions.
-                - [ ] Implement unknown escape fallback policy with warning classing.
-                - [ ] Implement truncation-safe UTF-8/byte handling for escape parser in nroff mode.
-            - [ ] **Core Engine: Requests, Macros, and Macro Invocation:**
-                - [ ] Implement request dispatch table with fast lookup by canonical request name.
-                - [ ] Implement user macro definition (`.de`) with proper terminator handling.
-                - [ ] Implement append-to-macro (`.am`) preserving previous body.
-                - [ ] Implement remove/rename behavior for user-defined macros.
-                - [ ] Implement macro invocation with positional arguments (`$1`..`$9`, `$*`, `$@` behavior decision task).
-                - [ ] Implement argument quoting/spacing rules for macro expansion.
-                - [ ] Implement nested macro expansion depth limits and overflow diagnostics.
-                - [ ] Implement recursion detection and deterministic failure behavior.
-                - [ ] Implement request-vs-macro name precedence and conflict resolution.
-                - [ ] Implement copy-mode capture for macro bodies with delayed expansion.
-            - [ ] **Core Engine: Registers and String Storage:**
-                - [ ] Implement numeric register table with signed integer storage.
-                - [ ] Implement auto-increment/decrement register operations.
-                - [ ] Implement numeric register default-value semantics for undefined names.
-                - [ ] Implement string register table with mutable replacement and append operations.
-                - [ ] Implement register namespaces and name normalization rules.
-                - [ ] Implement register deletion APIs and lifecycle handling.
-                - [ ] Implement per-environment register visibility policy decision and documentation.
-                - [ ] Implement register serialization helpers for diagnostics/testing.
-            - [ ] **Core Engine: Conditionals and Control Flow:**
-                - [ ] Implement `.if` expression parser for numeric, string, and definedness tests.
-                - [ ] Implement `.ie` and `.el` chain handling with proper else binding.
-                - [ ] Implement block conditionals (`\{` / `\}`) and nested block depth tracking.
-                - [ ] Implement `.while` loop execution with loop guard limits.
-                - [ ] Implement `.break`-style loop interruption request (if supported) and fallback behavior.
-                - [ ] Implement short-circuit parsing for false branches without side effects.
-                - [ ] Emit diagnostics for unterminated conditional blocks and malformed predicates.
-            - [ ] **Core Engine: Diversions, Traps, and Deferred Material:**
-                - [ ] Implement diversion start/stop (`.di`) and append diversion (`.da`).
-                - [ ] Implement named diversion storage and retrieval lifecycle.
-                - [ ] Implement diversion nesting semantics and stack management.
-                - [ ] Implement diversion line numbering and diagnostics preservation.
-                - [ ] Implement top-of-page and page-location trap registration.
-                - [ ] Implement trap invocation ordering and re-entrancy safety.
-                - [ ] Implement diversion replay into normal input stream with source attribution.
-            - [ ] **Core Engine: Environments and State Stacking:**
-                - [ ] Implement environment switch request (`.ev`) with stack-aware push/pop behavior.
-                - [ ] Track fill mode, adjust mode, indentation, temporary indent, and line length per environment.
-                - [ ] Track font/style state and spacing parameters per environment.
-                - [ ] Track tab stops and leaders per environment.
-                - [ ] Track numbering/format state per environment when compatibility requires it.
-                - [ ] Implement environment copy/clone behavior for macro package needs.
-                - [ ] Implement hard limits and diagnostics for environment depth exhaustion.
-            - [ ] **Core Engine: Line Breaking, Filling, and Adjustment:**
-                - [ ] Implement no-fill and fill modes (`.nf`/`.fi`) with state transitions.
-                - [ ] Implement adjustable line assembly with word buffering.
-                - [ ] Implement left/right adjustment and centering behaviors required by man macros.
-                - [ ] Implement sentence-space handling policy and compatibility toggle.
-                - [ ] Implement indentation requests (`.in`, `.ti`) and restoration semantics.
-                - [ ] Implement line length changes (`.ll`) and pending line flush behavior.
-                - [ ] Implement vertical spacing (`.sp`, `.br`) interactions with filled output.
-                - [ ] Implement keep-together behavior required by tagged paragraphs.
-                - [ ] Implement blank-line propagation rules for literal displays.
-                - [ ] Add deterministic wrapping rules for overlong tokens and unbreakable strings.
-            - [ ] **Core Engine: Hyphenation Hooks (Initial Stub + Interfaces):**
-                - [ ] Define hyphenation interface between formatter and language-specific engine.
-                - [ ] Add default disabled behavior matching conservative nroff expectations.
-                - [ ] Add request-level toggles for enabling/disabling hyphenation.
-                - [ ] Implement soft-hyphen insertion points plumbing without enabling algorithms yet.
-                - [ ] Add metrics hooks so future hyphenation can influence line breaker decisions.
-            - [ ] **Core Engine: Number Formatting and Scaling Units:**
-                - [ ] Implement parser for roff numeric expressions with optional sign and defaults.
-                - [ ] Implement scaling units (`u`, `i`, `c`, `P`, `p`, `m`, `n`, `v`) with nroff-specific conversions.
-                - [ ] Implement absolute vs relative assignments for numeric requests.
-                - [ ] Implement format request for registers (decimal, roman, alphabetic formats).
-                - [ ] Implement unit conversion overflow checks and saturation diagnostics.
-                - [ ] Implement deterministic rounding policy for fractional internal units.
-            - [ ] **Core Engine: Input Sourcing and `.so` Semantics:**
-                - [ ] Implement `.so` path resolution using current file directory first.
-                - [ ] Implement include search path list for macro directories and man tree includes.
-                - [ ] Implement include recursion detection and cycle diagnostics.
-                - [ ] Implement include depth limits with actionable error messages.
-                - [ ] Implement include failure behavior compatibility option (fatal vs warning) and default choice.
-                - [ ] Preserve source locations across include boundaries for error reporting.
-            - [ ] **Core Engine: Error Handling and Diagnostics:**
-                - [ ] Define diagnostic classes: parse error, compatibility warning, runtime warning, internal bug.
-                - [ ] Emit source-rich diagnostics with file:line and macro/include backtrace.
-                - [ ] Add warning categories for unsupported requests and ignored escapes.
-                - [ ] Add strict mode that upgrades selected warnings to errors for test gating.
-                - [ ] Add recoverable parse paths so malformed lines do not crash formatter.
-                - [ ] Add deterministic memory/OOM error propagation from engine to CLI exit codes.
-            - [ ] **Macro Packages: `-man` Required Coverage:**
-                - [ ] Implement document prologue macros: `.TH`, `.DT`, `.UC` with BSD-compatible defaults.
-                - [ ] Implement sectioning macros: `.SH`, `.SS`.
-                - [ ] Implement paragraph macros: `.PP`, `.P`, `.LP`.
-                - [ ] Implement tagged/indented paragraph macros: `.TP`, `.IP`, `.HP`, `.TQ`.
-                - [ ] Implement font-switching macros: `.B`, `.I`, `.BR`, `.RB`, `.BI`, `.IB`, `.IR`, `.RI`.
-                - [ ] Implement spacing control macros: `.sp`, `.br`, `.nf`, `.fi` wrappers as expected by pages.
-                - [ ] Implement display-like helpers used in common man sources.
-                - [ ] Implement `.RS`/`.RE` relative indent stack behavior.
-                - [ ] Implement synopsis helpers preserving argument spacing.
-                - [ ] Implement literal block behavior used by code examples.
-                - [ ] Implement macro argument defaulting and empty-argument behavior matching BSD man.
-                - [ ] Implement macro redefinition safety policy for local overrides in pages.
-            - [ ] **Macro Packages: `-mdoc` Required Coverage:**
-                - [ ] Implement prologue validation for `.Dd`, `.Dt`, `.Os`.
-                - [ ] Implement section/block macros: `.Sh`, `.Ss`, `.Pp`.
-                - [ ] Implement list macros: `.Bl`, `.It`, `.El` with key list types (`-bullet`, `-enum`, `-tag`, `-diag`, `-hang`, `-ohang`, `-inset`).
-                - [ ] Implement display macros: `.Bd`, `.Ed`.
-                - [ ] Implement enclosure macros: `.Oo`/`.Oc`, `.Op`, `.Aq`, `.Bq`, `.Dq`, `.Pq`, `.Brq`.
-                - [ ] Implement argument/flag/name macros: `.Nm`, `.Fl`, `.Ar`, `.Cm`, `.Ic`.
-                - [ ] Implement cross-reference macros: `.Xr`, `.Sx`.
-                - [ ] Implement library/function macros: `.Lb`, `.In`, `.Fn`, `.Fa`, `.Ft`, `.Fo`, `.Fc`.
-                - [ ] Implement standards/history metadata macros: `.St`, `.At`, `.Bx`, `.Fx`, `.Nx`, `.Ox`, `.Dx`.
-                - [ ] Implement punctuation handling and spacing suppression rules required by mdoc grammar.
-                - [ ] Implement callable semantic node model so macros can influence formatting context.
-                - [ ] Add compatibility tasks for commonly used but non-standard mdoc idioms.
-            - [ ] **Macro Packages: Minimal `-ms` Compatibility:**
-                - [ ] Implement paragraph macros `.PP`, `.LP`, `.IP`.
-                - [ ] Implement heading macros `.NH`, `.SH`.
-                - [ ] Implement quote/display basics needed for legacy docs in tree.
-                - [ ] Implement title/date author subset required for simple manuscripts.
-                - [ ] Document unsupported advanced `-ms` requests as explicit non-goals.
-            - [ ] **Macro Expansion Semantics, Scoping, and Redefinition:**
-                - [ ] Define argument interpolation rules for quoted vs unquoted macro arguments.
-                - [ ] Define late-expansion vs early-expansion behavior for nested macros.
-                - [ ] Implement local temporary strings/registers for package internals when required.
-                - [ ] Implement macro shadowing and unshadowing rules across include boundaries.
-                - [ ] Implement safe redefinition guards for core package macros in strict mode.
-                - [ ] Implement `.als`-style aliasing decision (support or explicit incompatibility task).
-                - [ ] Add diagnostics when pages rely on unsupported macro-argument edge behaviors.
-            - [ ] **Output Backend: ASCII Terminal (`nroff`-Style):**
-                - [ ] Implement backend abstraction separating layout tree from device rendering.
-                - [ ] Implement plain terminal text renderer with deterministic whitespace policy.
-                - [ ] Implement indentation output logic with tab/space balancing.
-                - [ ] Implement page header/footer emission for macros that require it.
-                - [ ] Implement literal-mode rendering without fill/adjust transformations.
-                - [ ] Implement fallback glyph mapping for unsupported special characters.
-                - [ ] Implement configurable line width default (80) with CLI/environment overrides.
-                - [ ] Implement optional margin clipping diagnostics for overflowed lines.
-            - [ ] **Output Backend: Overstrike, Bold, and Underline:**
-                - [ ] Implement backspace overstrike sequences for bold rendering.
-                - [ ] Implement underline rendering using underscore-backspace conventions.
-                - [ ] Implement conflict resolution when nested font changes overlap.
-                - [ ] Implement backend switch to disable overstrike for plain-output consumers.
-                - [ ] Add tests verifying historical terminal output byte-for-byte for styled tokens.
-            - [ ] **Output Backend: Width, Tabs, and Indentation Calculations:**
-                - [ ] Implement tab stop table with default and custom stops.
-                - [ ] Implement tab expansion in both fill and no-fill contexts.
-                - [ ] Implement escape-aware display width calculation for style and zero-width escapes.
-                - [ ] Implement wide-character policy decision and ASCII fallback in `nroff`.
-                - [ ] Implement tagged paragraph width balancing for `.TP` and `.It -tag`.
-                - [ ] Implement hanging-indent behavior for continuation lines.
-                - [ ] Implement indentation stack overflow checks with diagnostics.
-            - [ ] **Output Backend: Future Device Hooks (Tasks Only):**
-                - [ ] Define stable intermediate representation for block/inline/layout nodes.
-                - [ ] Define backend vtable for HTML/PDF/PostScript future renderers.
-                - [ ] Add no-op HTML backend stub behind compile-time flag.
-                - [ ] Add no-op PDF backend stub behind compile-time flag.
-                - [ ] Document backend API contracts and invariants in developer design doc.
-            - [ ] **Compatibility Targets and Explicit Non-Goals:**
-                - [ ] Create per-request compatibility notes vs BSD mandoc and groff.
-                - [ ] Add decision task for each known BSD/GNU behavioral conflict.
-                - [ ] Prefer BSD output when conflicts are user-visible in manpages.
-                - [ ] Mark GNU-only extensions (`.als`, `.do`, `.nop`, `.while` edge cases, GNU long names, device controls) as unsupported unless explicitly accepted.
-                - [ ] Add diagnostics for ignored GNU-specific requests when encountered.
-                - [ ] Add compatibility mode switch task only if real-world pages require it.
-                - [ ] Add regression corpus of historical manpages from BSD and Unix variants.
-            - [ ] **`man` Command: CLI, Modes, and Exit Behavior:**
-                - [ ] Implement `man` argument parser supporting section-prefix and name forms.
-                - [ ] Implement `man <section> <name>` and `man <name> <section>` disambiguation.
-                - [ ] Implement options `-a`, `-f`, `-k`, `-w`, `-M`, `-m`, `-s`, `-S`, `-l`, `-P`, `-C`.
-                - [ ] Implement `-f` whatis mode behavior and output formatting.
-                - [ ] Implement `-k` apropos mode behavior and keyword matching.
-                - [ ] Implement `-w` path-only mode without invoking formatter.
-                - [ ] Implement `-a` all-matches traversal with pager/session behavior.
-                - [ ] Implement consistent exit codes: success, no entry, usage, runtime failure.
-                - [ ] Implement option conflict resolution and precedence rules.
-                - [ ] Document BSD-vs-GNU option behavior decisions explicitly.
-            - [ ] **`man` Command: Page Discovery and Search Path Resolution:**
-                - [ ] Implement section canonicalization and alias mapping (for `3`, `3p`, `n`, local sections).
-                - [ ] Implement default search order with configurable section list.
-                - [ ] Implement `MANPATH` parser including empty-field inheritance semantics.
-                - [ ] Implement system path defaults and user path overlay semantics.
-                - [ ] Implement `-M` temporary MANPATH override semantics.
-                - [ ] Implement architecture/OS-specific suffix directory search when configured.
-                - [ ] Implement locale-aware subdirectory fallback chain.
-                - [ ] Implement exact-name match before partial/alias match policy.
-                - [ ] Implement support for source suffixes (`.1`, `.1.gz`, `.1.bz2`, `.1.xz`, etc.).
-                - [ ] Implement deterministic tie-breaking for duplicate page names across paths.
-                - [ ] Emit ambiguity diagnostics listing candidate pages and sections.
-            - [ ] **`man` Command: Preprocessing Pipeline and Roff Invocation:**
-                - [ ] Implement page format detection (`man` vs `mdoc`) by content heuristics and safe fallbacks.
-                - [ ] Implement explicit macro package override via CLI.
-                - [ ] Build internal roff invocation pipeline without unsafe shell string concatenation.
-                - [ ] Implement decompression pipeline for `.gz`, `.bz2`, and `.xz` sources.
-                - [ ] Implement optional preprocessor stage hooks (`tbl`, `eqn`, `pic`) as stubs with diagnostics.
-                - [ ] Implement charset detection and conversion path for legacy encodings.
-                - [ ] Implement pass-through of selected formatter warnings in verbose mode.
-                - [ ] Ensure temporary file/pipe lifecycle is leak-free and signal-safe.
-            - [ ] **`man` Command: Pager and Terminal Integration:**
-                - [ ] Implement pager resolution precedence: `-P`, `MANPAGER`, `PAGER`, fallback pager.
-                - [ ] Implement fallback pager when `less` is unavailable.
-                - [ ] Implement `LESS` environment integration and sane defaults.
-                - [ ] Implement non-interactive output mode when stdout is not a tty.
-                - [ ] Implement SIGPIPE-safe behavior when pager exits early.
-                - [ ] Preserve formatter backspace sequences expected by pager (`less -R`/plain mode decision task).
-                - [ ] Implement terminal width detection and pass width to formatter.
-            - [ ] **`man` Command: Caching, Catpages, and Performance:**
-                - [ ] Implement catpage directory layout keyed by path, section, and locale.
-                - [ ] Implement cache key metadata including source mtime, size, and formatter version.
-                - [ ] Implement cache reuse on valid metadata match.
-                - [ ] Implement cache invalidation on source/formatter/config change.
-                - [ ] Implement atomic cache writes using temp file + rename.
-                - [ ] Implement file permission and ownership policy for shared cache directories.
-                - [ ] Implement per-user cache fallback when system cache is not writable.
-                - [ ] Add lock strategy preventing cache corruption under concurrent `man` processes.
-                - [ ] Add performance benchmarks for cold-cache and warm-cache runs.
-            - [ ] **`man` Command: Diagnostics and UX:**
-                - [ ] Implement missing page error with searched paths and sections.
-                - [ ] Implement ambiguous match message with ranked candidates.
-                - [ ] Implement section-conflict guidance when same name exists in multiple sections.
-                - [ ] Implement concise hints (`Try 'man 2 foo'`) for common ambiguity cases.
-                - [ ] Implement user-friendly `-k`/`-f` no-result messages.
-                - [ ] Implement localized error output boundaries and UTF-8 safety.
-                - [ ] Ensure all diagnostics are testable and stable for golden tests.
-            - [ ] **Security and Robustness (`roff` + `man`):**
-                - [ ] Forbid path traversal outside allowed roots for `.so` and `man -l` unless explicitly requested.
-                - [ ] Ensure decompressor invocation uses execve argv arrays, never shell expansion.
-                - [ ] Add input size limits for decompressed streams to mitigate zip-bomb style abuse.
-                - [ ] Add recursion and macro expansion limits to prevent CPU/memory exhaustion.
-                - [ ] Harden temporary file creation (`mkstemp`) and directory permissions.
-                - [ ] Validate environment variables (`MANPATH`, `PAGER`, `LESS`) before use.
-                - [ ] Add privilege boundary policy for setuid/setgid contexts (disable unsafe features).
-            - [ ] **Testing: Unit Coverage (Roff/Man):**
-                - [ ] Add lexer unit tests for request/text/escape tokenization boundaries.
-                - [ ] Add parser unit tests for request argument splitting and quoting.
-                - [ ] Add unit tests for register arithmetic, formatting, and default values.
-                - [ ] Add unit tests for string register interpolation across nested macro calls.
-                - [ ] Add unit tests for `.if`/`.ie`/`.el` precedence and nesting.
-                - [ ] Add unit tests for `.while` loop termination and guard limits.
-                - [ ] Add unit tests for diversion capture and replay ordering.
-                - [ ] Add unit tests for environment push/pop state isolation.
-                - [ ] Add unit tests for fill/no-fill transitions and line-break decisions.
-                - [ ] Add unit tests for scaling unit conversions and rounding behavior.
-                - [ ] Add unit tests for `.so` include path resolution and failure modes.
-                - [ ] Add unit tests for `man` section parsing, option precedence, and path selection.
-                - [ ] Add unit tests for compressed source detection and decompressor dispatch.
-                - [ ] Add unit tests for cache key generation and invalidation decisions.
-                - [ ] Add unit tests for user-facing diagnostic message selection.
-            - [ ] **Testing: Property-Based Coverage:**
-                - [ ] Add property tests for random nested macro definitions and expansions.
-                - [ ] Add property tests for random conditional trees with deterministic evaluation.
-                - [ ] Add property tests for random environment stack operations preserving invariants.
-                - [ ] Add property tests for random indentation/tab configurations with width invariants.
-                - [ ] Add property tests for include graph generation with cycle detection invariants.
-                - [ ] Add property tests for `man` search path permutations yielding stable ranking.
-                - [ ] Add property tests for cache metadata monotonicity across file timestamp changes.
-            - [ ] **Testing: Fuzzer Targets:**
-                - [ ] Add fuzz target for escape sequence parser.
-                - [ ] Add fuzz target for request/macro argument parser.
-                - [ ] Add fuzz target for macro expansion engine with recursion guards.
-                - [ ] Add fuzz target for conditional expression parser.
-                - [ ] Add fuzz target for diversion/environment stack state machine.
-                - [ ] Add fuzz target for scaling-unit numeric parser.
-                - [ ] Add fuzz target for malformed `.so` include directives and path normalization.
-                - [ ] Add fuzz target for mdoc inline punctuation and delimiter parsing.
-                - [ ] Add fuzz target for `man` CLI option parser and mixed positional arguments.
-                - [ ] Add fuzz target for `MANPATH` parser and separator edge cases.
-                - [ ] Add fuzz target for compressed input decoding wrappers with truncated/corrupt streams.
-                - [ ] Integrate all fuzzers into CI with corpus minimization and crash triage workflow.
-            - [ ] **Testing: Integration, Golden Output, and Performance:**
-                - [ ] Build golden corpus from project manpages across `man` and `mdoc` styles.
-                - [ ] Add integration test rendering corpus with internal `nroff` and comparing stable fixtures.
-                - [ ] Add differential tests against BSD mandoc for selected canonical pages.
-                - [ ] Add differential tests against groff for overlapping supported feature subset.
-                - [ ] Add end-to-end tests for `man` discovery (`section`, `MANPATH`, compressed pages, pager bypass).
-                - [ ] Add end-to-end tests for `man -k` and `man -f` with prepared whatis database fixtures.
-                - [ ] Add stress test for large manpage sets and repeated invocations.
-                - [ ] Add performance budget checks for startup latency and throughput.
-            - [ ] **Documentation Deliverables:**
-                - [ ] Write `man/man7/roff.7` language and request reference for supported subset.
-                - [ ] Write `man/man1/roff.1` command manual.
-                - [ ] Write `man/man1/nroff.1` command manual with terminal-specific behavior.
-                - [ ] Write `man/man1/man.1` command manual including all implemented options.
-                - [ ] Write `man/man7/man.7` macro package reference for supported macros.
-                - [ ] Write `man/man7/mdoc.7` supported semantic macro reference and limitations.
-                - [ ] Write `man/man7/ms.7` minimal compatibility reference and explicit non-goals.
-                - [ ] Document implementation-defined behavior for escapes, spacing, and diagnostics.
-                - [ ] Document BSD-vs-GNU compatibility choices and rationale.
-                - [ ] Document security model for includes, decompression, and pager invocation.
-                - [ ] Write developer design document for roff engine architecture, data flow, and extension points.
-                - [ ] Add maintainer guide for adding new requests/macros/backends safely.
-            - [ ] **Release Gating and Completion Criteria:**
-                - [ ] Define required pass criteria for unit/property/fuzz/integration suites.
-                - [ ] Define compatibility acceptance thresholds against BSD mandoc corpus.
-                - [ ] Define performance acceptance thresholds for `man` warm and cold paths.
-                - [ ] Define documentation completeness checklist before marking feature complete.
-                - [ ] Add final audit task verifying no unchecked intentional incompatibilities remain undocumented.
+        - [ ] **Purpose:** Change the mode of each FILE to MODE. (REQ: REQ-09-1571)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-R`, `--recursive`: Change files and directories recursively. (REQ: REQ-09-1574)
+            - [ ] `-v`, `--verbose`: Diagnostic for every file processed. (REQ: REQ-09-1575)
+            - [ ] Symbolic mode support (e.g., `u+x,g-w`). (REQ: REQ-09-1576)
+            - [ ] Octal mode support (e.g., `755`). (REQ: REQ-09-1577)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Recursive traversal logic for `-R`. (REQ: REQ-09-1579)
+            - [ ] Parsing complex symbolic mode strings. (REQ: REQ-09-1580)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `chmod`, `fchmodat`, `parse_mode_string` (REQ: REQ-09-1582)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `chmod 755 file` -> mode is 755 (REQ: REQ-09-1584)
+            - [ ] `chmod +x file` -> executable bit set (REQ: REQ-09-1585)
+            - [ ] `chmod -R a-w dir` -> dir and contents read-only (REQ: REQ-09-1586)
+    - [ ] **`chown` - Change file owner and group:** (REQ: REQ-09-1587)
+        - [ ] **Purpose:** Change the owner and/or group of each FILE to OWNER and/or GROUP. (REQ: REQ-09-1588)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-R`, `--recursive`: Operate on files and directories recursively. (REQ: REQ-09-1591)
+            - [ ] `-h`, `--no-dereference`: Affect symbolic links instead of referenced file. (REQ: REQ-09-1592)
+            - [ ] `[OWNER][:[GROUP]]`: Owner/Group specifier. (REQ: REQ-09-1593)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Name-to-ID resolution (`getpwnam`, `getgrnam`). (REQ: REQ-09-1595)
+            - [ ] Handling numeric IDs. (REQ: REQ-09-1596)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `chown`, `lchown`, `fchownat`, `id_resolve` (REQ: REQ-09-1598)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `chown user file` -> owner changed (REQ: REQ-09-1600)
+            - [ ] `chown :group file` -> group changed (REQ: REQ-09-1601)
+            - [ ] `chown -R user:group dir` -> recurse change (REQ: REQ-09-1602)
+    - [ ] **`ln` - Make links between files:** (REQ: REQ-09-1603)
+        - [ ] **Purpose:** Make links between files. (REQ: REQ-09-1604)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-s`, `--symbolic`: Make symbolic links instead of hard links. (REQ: REQ-09-1607)
+            - [ ] `-f`, `--force`: Remove existing destination files. (REQ: REQ-09-1608)
+            - [ ] `-n`, `--no-dereference`: Treat LINK_NAME as a normal file if it is a directory link. (REQ: REQ-09-1609)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Hard link creation (`link`). (REQ: REQ-09-1611)
+            - [ ] Symlink creation (`symlink`). (REQ: REQ-09-1612)
+            - [ ] Overwrite logic for `-f`. (REQ: REQ-09-1613)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `link`, `symlink`, `unlink` (REQ: REQ-09-1615)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `ln target link` -> hard link created (REQ: REQ-09-1617)
+            - [ ] `ln -s target link` -> symlink created (REQ: REQ-09-1618)
+            - [ ] `ln -sf new old` -> overwrites old with new symlink (REQ: REQ-09-1619)
+    - [ ] **`wc` - Print newline, word, and byte counts:** (REQ: REQ-09-1620)
+        - [ ] **Purpose:** Print newline, word, and byte counts for each FILE. (REQ: REQ-09-1621)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-c`, `--bytes`: Print the byte counts. (REQ: REQ-09-1624)
+            - [ ] `-l`, `--lines`: Print the newline counts. (REQ: REQ-09-1625)
+            - [ ] `-w`, `--words`: Print the word counts. (REQ: REQ-09-1626)
+            - [ ] `-m`, `--chars`: Print the character counts. (REQ: REQ-09-1627)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Buffered read loop. (REQ: REQ-09-1629)
+            - [ ] State machine for word counting (whitespace transition). (REQ: REQ-09-1630)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `safe_read`, `isspace` (REQ: REQ-09-1632)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `wc file` -> prints lines, words, bytes (REQ: REQ-09-1634)
+            - [ ] `echo "a b" | wc -w` -> prints 2 (REQ: REQ-09-1635)
+            - [ ] `wc -c` -> prints byte count (REQ: REQ-09-1636)
+    - [ ] **`head` - Output the first part of files:** (REQ: REQ-09-1637)
+        - [ ] **Purpose:** Print the first 10 lines of each FILE to standard output. (REQ: REQ-09-1638)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-n`, `--lines=[-]K`: Print the first K lines; or all but the last K lines. (REQ: REQ-09-1641)
+            - [ ] `-c`, `--bytes=[-]K`: Print the first K bytes; or all but the last K bytes. (REQ: REQ-09-1642)
+            - [ ] `-q`, `--quiet`: Never print headers giving file names. (REQ: REQ-09-1643)
+            - [ ] `-v`, `--verbose`: Always print headers. (REQ: REQ-09-1644)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Line counting loop. (REQ: REQ-09-1646)
+            - [ ] Byte counting loop. (REQ: REQ-09-1647)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `safe_read`, `parse_num_suffix` (REQ: REQ-09-1649)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `head -n 5 file` -> prints first 5 lines (REQ: REQ-09-1651)
+            - [ ] `head -c 10 file` -> prints first 10 bytes (REQ: REQ-09-1652)
+            - [ ] `head file1 file2` -> prints headers and content (REQ: REQ-09-1653)
+    - [ ] **`tail` - Output the last part of files:** (REQ: REQ-09-1654)
+        - [ ] **Purpose:** Print the last 10 lines of each FILE to standard output. (REQ: REQ-09-1655)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-n`, `--lines=[+]K`: Output the last K lines; or start from line K. (REQ: REQ-09-1658)
+            - [ ] `-c`, `--bytes=[+]K`: Output the last K bytes; or start from byte K. (REQ: REQ-09-1659)
+            - [ ] `-f`, `--follow`: Output appended data as the file grows. (REQ: REQ-09-1660)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Circular buffer or seek-to-end logic for last K lines/bytes. (REQ: REQ-09-1662)
+            - [ ] `inotify` or polling loop for `-f`. (REQ: REQ-09-1663)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `lseek`, `safe_read`, `poll`/`inotify` (REQ: REQ-09-1665)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `tail -n 5 file` -> last 5 lines (REQ: REQ-09-1667)
+            - [ ] `tail -f log` -> prints new data appended (REQ: REQ-09-1668)
+            - [ ] `tail -c 10 file` -> last 10 bytes (REQ: REQ-09-1669)
+    - [ ] **`dd` - Convert and copy a file:** (REQ: REQ-09-1670)
+        - [ ] **Purpose:** Low-level file copying and conversion. (REQ: REQ-09-1671)
+        - [ ] **Standards:** POSIX.1-2017, BSD Extensions. (REQ: REQ-09-1672)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `if=file`: Input file (default stdin). (REQ: REQ-09-1674)
+            - [ ] `of=file`: Output file (default stdout). (REQ: REQ-09-1675)
+            - [ ] `ibs=n`: Input block size (default 512). (REQ: REQ-09-1676)
+            - [ ] `obs=n`: Output block size (default 512). (REQ: REQ-09-1677)
+            - [ ] `bs=n`: Set both ibs and obs. (REQ: REQ-09-1678)
+            - [ ] `cbs=n`: Conversion buffer size. (REQ: REQ-09-1679)
+            - [ ] `skip=n`: Skip n blocks from input start. (REQ: REQ-09-1680)
+            - [ ] `seek=n`: Skip n blocks from output start. (REQ: REQ-09-1681)
+            - [ ] `count=n`: Copy only n input blocks. (REQ: REQ-09-1682)
+            - [ ] `status=level`: `noxfer`, `none`, `progress`. (REQ: REQ-09-1683)
+            - [ ] `conv=value[,value...]`: (REQ: REQ-09-1684)
+                - [ ] `ascii`, `ebcdic`: Encoding conversion. (REQ: REQ-09-1685)
+                - [ ] `block`, `unblock`: Fixed-length record conversion. (REQ: REQ-09-1686)
+                - [ ] `lcase`, `ucase`: Case folding. (REQ: REQ-09-1687)
+                - [ ] `swab`: Swap byte pairs. (REQ: REQ-09-1688)
+                - [ ] `noerror`: Continue after read error. (REQ: REQ-09-1689)
+                - [ ] `notrunc`: Do not truncate output file. (REQ: REQ-09-1690)
+                - [ ] `sync`: Pad blocks with NULs (or spaces if `block`/`unblock`). (REQ: REQ-09-1691)
+                - [ ] `fdatasync`, `fsync`: Sync before exit (extension). (REQ: REQ-09-1692)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] `SIGINFO`/`SIGUSR1` handler for progress stats. (REQ: REQ-09-1694)
+            - [ ] Summary output (records in/out, bytes, speed) to stderr. (REQ: REQ-09-1695)
+    - [ ] **`df` - Report file system disk space usage:** (REQ: REQ-09-1696)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Options:** (REQ: REQ-09-1698, REQ-09-2031, REQ-09-2075)
+            - [ ] `-a`: Include all file systems (including size 0, pseudo-FS). (REQ: REQ-09-1699)
+            - [ ] `-h`: Human-readable output (base 2: K, M, G). (REQ: REQ-09-1700)
+            - [ ] `-H`: Human-readable output (base 10: KB, MB, GB). (REQ: REQ-09-1701)
+            - [ ] `-k`: 1024-byte blocks (default is often 512 in legacy). (REQ: REQ-09-1702)
+            - [ ] `-P`: Portable output format (strict single line). (REQ: REQ-09-1703)
+            - [ ] `-i`: Include inode usage info (Used, Free, %IUsed). (REQ: REQ-09-1704)
+            - [ ] `-l`: Local file systems only (no network mounts). (REQ: REQ-09-1705)
+            - [ ] `-t type`: Filter by file system type (e.g., `ext2`, `procfs`). (REQ: REQ-09-1706)
+        - [ ] **Implementation:** (REQ: REQ-09-1707, REQ-09-2077)
+            - [ ] `getmntinfo()` or `setfsent()` loop. (REQ: REQ-09-1708)
+            - [ ] `statvfs()`/`getfsstat()` calls for block/inode data. (REQ: REQ-09-1709)
+            - [ ] Dynamic width calculation for aligned columns (Filesystem, Blocks, Used, Avail, Capacity, Mounted on). (REQ: REQ-09-1710)
+            - [ ] Handle Access Denied gracefully. (REQ: REQ-09-1711)
+    - [ ] **`pwd` - Return working directory name:** (REQ: REQ-09-1712)
+        - [ ] **Purpose:** Print the value of the current working directory. (REQ: REQ-09-1713)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-L`: Logical path (from environment PWD). (REQ: REQ-09-1716)
+            - [ ] `-P`: Physical path (resolve symlinks). (REQ: REQ-09-1717)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] `getcwd()` usage. (REQ: REQ-09-1719)
+            - [ ] Fallback to `..` traversal if `getcwd` fails/absent. (REQ: REQ-09-1720)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `getcwd`, `getenv` (REQ: REQ-09-1722)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `pwd` -> prints valid path (REQ: REQ-09-1724)
+            - [ ] `cd /tmp; pwd` -> prints /tmp (REQ: REQ-09-1725)
+            - [ ] `pwd -P` vs `pwd -L` inside symlinked dir (REQ: REQ-09-1726)
+    - [ ] **`sync` - Synchronize cached writes:** (REQ: REQ-09-1727)
+        - [ ] **Purpose:** Write any data buffered in memory out to disk. (REQ: REQ-09-1728)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** None. (REQ: REQ-09-1730)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Invoke `sync()` syscall. (REQ: REQ-09-1732)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `sync` (REQ: REQ-09-1734)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `sync` -> returns 0 (REQ: REQ-09-1736)
+            - [ ] `sync --help` -> usage (optional) (REQ: REQ-09-1737)
+    - [ ] **`mknod` - Make block or character special files:** (REQ: REQ-09-1738)
+        - [ ] **Purpose:** Create a device special file. (REQ: REQ-09-1739)
+        - [ ] **Standards:** XSI (Legacy/Extension). (REQ: REQ-09-1740)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `name`: File to create. (REQ: REQ-09-1742)
+            - [ ] `type`: `b` (block), `c` or `u` (char), `p` (fifo). (REQ: REQ-09-1743)
+            - [ ] `major`: Device major number (for b/c). (REQ: REQ-09-1744)
+            - [ ] `minor`: Device minor number (for b/c). (REQ: REQ-09-1745)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Use `mknod()` syscall (or `mkfifo()`). (REQ: REQ-09-1747)
+            - [ ] Validate permissions/ownership creation. (REQ: REQ-09-1748)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `mknod`, `mkfifo`, `strtol` (REQ: REQ-09-1750)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `mknod pipe p` -> FIFO created (REQ: REQ-09-1752)
+            - [ ] `mknod dev c 1 3` -> char device created (requires root) (REQ: REQ-09-1753)
+    - [ ] **`mktemp` - Make temporary file or directory:** (REQ: REQ-09-1754)
+        - [ ] **Purpose:** Create a temporary file or directory. (REQ: REQ-09-1755)
+        - [ ] **Standards:** BSD/GNU Extension. (REQ: REQ-09-1756, REQ-09-1773)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-d`, `--directory`: Create directory. (REQ: REQ-09-1758)
+            - [ ] `-u`, `--dry-run`: Do not create, just print name (unsafe). (REQ: REQ-09-1759)
+            - [ ] `-q`, `--quiet`: Fail silently. (REQ: REQ-09-1760)
+            - [ ] `-t prefix`: Use template in `TMPDIR`. (REQ: REQ-09-1761)
+            - [ ] `[TEMPLATE]`: Template string (ending in XXXXXX). (REQ: REQ-09-1762)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] `mkstemp()` / `mkdtemp()` usage. (REQ: REQ-09-1764)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `mkstemp`, `mkdtemp` (REQ: REQ-09-1766)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `mktemp` -> creates file in tmp (REQ: REQ-09-1768)
+            - [ ] `mktemp -d` -> creates dir (REQ: REQ-09-1769)
+            - [ ] `mktemp t.XXXXXX` -> replaces Xs (REQ: REQ-09-1770)
+    - [ ] **`readlink` - Print value of a symbolic link:** (REQ: REQ-09-1771)
+        - [ ] **Purpose:** Display information about a symbolic link. (REQ: REQ-09-1772)
+        - [ ] **Standards:** BSD/GNU Extension. (REQ: REQ-09-1756, REQ-09-1773)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-f`: Canonicalize by following every symlink in every component. (REQ: REQ-09-1775)
+            - [ ] `-n`: Do not output trailing newline. (REQ: REQ-09-1776)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] call `readlink()` syscall. (REQ: REQ-09-1778)
+            - [ ] logic for `-f` (realpath iteration). (REQ: REQ-09-1779)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `readlink`, `realpath` (for -f) (REQ: REQ-09-1781)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `readlink symlink` -> prints target (REQ: REQ-09-1783)
+            - [ ] `readlink -f symlink` -> prints absolute path (REQ: REQ-09-1784)
+            - [ ] `readlink regularfile` -> fails (unless -f) (REQ: REQ-09-1785)
+    - [ ] **`realpath` - Print resolved path:** (REQ: REQ-09-1786)
+        - [ ] **Purpose:** Print the resolved path. (REQ: REQ-09-1787)
+        - [ ] **Standards:** POSIX.1-2024 (New), GNU/BSD compatible. (REQ: REQ-09-1788)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-e`: Require all components to exist. (REQ: REQ-09-1790)
+            - [ ] `-m`: No components required to exist. (REQ: REQ-09-1791)
+            - [ ] `-L`: Resolve logical (PWD). (REQ: REQ-09-1792)
+            - [ ] `-P`: Resolve physical (Symlinks). (REQ: REQ-09-1793)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] `realpath()` function. (REQ: REQ-09-1795)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `realpath` (REQ: REQ-09-1797)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `realpath .` -> absolute path (REQ: REQ-09-1799)
+            - [ ] `realpath symlink` -> resolved path (REQ: REQ-09-1800)
+            - [ ] `realpath -m missing/path` -> prints resolved path (REQ: REQ-09-1801)
+    - [ ] **`tee` - Duplicate standard input:** (REQ: REQ-09-1802)
+        - [ ] **Purpose:** Read from standard input and write to standard output and files. (REQ: REQ-09-1803)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-a`, `--append`: Append to files instead of overwriting. (REQ: REQ-09-1806)
+            - [ ] `-i`, `--ignore-interrupts`: Ignore SIGINT. (REQ: REQ-09-1807)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] Open all files (O_CREAT | O_WRONLY | [O_TRUNC|O_APPEND]). (REQ: REQ-09-1809)
+            - [ ] Read stdin -> Write to stdout + all files. (REQ: REQ-09-1810)
+            - [ ] Handle write errors gracefully (continue other files). (REQ: REQ-09-1811)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `xopen`, `safe_read`, `safe_write`, `signal` (REQ: REQ-09-1813)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `echo hi | tee file` -> file has "hi", stdout has "hi" (REQ: REQ-09-1815)
+            - [ ] `tee -a file` -> appends (REQ: REQ-09-1816)
+            - [ ] `tee -i` -> ignores interrupt (REQ: REQ-09-1817)
+    - [ ] **`date` - Write the date and time:** (REQ: REQ-09-1818)
+        - [ ] **Purpose:** Print or set the system date and time. (REQ: REQ-09-1819)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-u`: Display/Set UTC time. (REQ: REQ-09-1822)
+            - [ ] `-r file`: Display modification time of file. (REQ: REQ-09-1823)
+            - [ ] `-d date` / `--date=str`: Display string description of time (GNU Extension). (REQ: REQ-09-1824)
+            - [ ] `+format`: Format string (strftime compatible). (REQ: REQ-09-1825)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] `clock_gettime()` / `gettimeofday()`. (REQ: REQ-09-1827)
+            - [ ] `settimeofday()` for setting time (superuser). (REQ: REQ-09-1828)
+            - [ ] `strftime()` for formatting. (REQ: REQ-09-1829)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `clock_gettime`, `localtime`, `gmtime`, `strftime`, `parse_date` (REQ: REQ-09-1831)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `date` -> prints date (REQ: REQ-09-1833)
+            - [ ] `date +%Y` -> prints year (REQ: REQ-09-1834)
+            - [ ] `date -u` -> prints UTC (REQ: REQ-09-1835)
+    - [ ] **`hostname` - Show or set the system's host name:** (REQ: REQ-09-1836)
+        - [ ] **Purpose:** Show or set the system's host name. (REQ: REQ-09-1837)
+        - [ ] **Standards:** Legacy / LSB. (REQ: REQ-09-1838)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-f`: Long host name (FQDN). (REQ: REQ-09-1840)
+            - [ ] `-s`: Short host name. (REQ: REQ-09-1841)
+            - [ ] `-i`: IP address. (REQ: REQ-09-1842)
+            - [ ] `-y`: YP/NIS domain name. (REQ: REQ-09-1843)
+            - [ ] `[name]`: Set hostname (superuser). (REQ: REQ-09-1844)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] `gethostname()` / `sethostname()`. (REQ: REQ-09-1846)
+            - [ ] `getaddrinfo()` for FQDN resolution. (REQ: REQ-09-1847)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `gethostname`, `sethostname`, `getaddrinfo` (REQ: REQ-09-1849)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `hostname` -> prints name (REQ: REQ-09-1851)
+            - [ ] `hostname newname` -> sets name (if root) (REQ: REQ-09-1852)
+            - [ ] `hostname -f` -> prints FQDN (REQ: REQ-09-1853)
+    - [ ] **`uname` - Print system information:** (REQ: REQ-09-1854)
+        - [ ] **Purpose:** Print system info. (REQ: REQ-09-1855)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-a`: Print all info. (REQ: REQ-09-1858)
+            - [ ] `-s`: Kernel name. (REQ: REQ-09-1859)
+            - [ ] `-n`: Node name. (REQ: REQ-09-1860)
+            - [ ] `-r`: Kernel release. (REQ: REQ-09-1861)
+            - [ ] `-v`: Kernel version. (REQ: REQ-09-1862)
+            - [ ] `-m`: Machine hardware name. (REQ: REQ-09-1863)
+            - [ ] `-p`: Processor type (GNU extension). (REQ: REQ-09-1864)
+            - [ ] `-i`: Hardware platform (GNU extension). (REQ: REQ-09-1865)
+            - [ ] `-o`: Operating system (GNU extension). (REQ: REQ-09-1866)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] `uname()` syscall. (REQ: REQ-09-1868)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `uname` (REQ: REQ-09-1870)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `uname` -> prints kernel name (REQ: REQ-09-1872)
+            - [ ] `uname -a` -> prints all fields (REQ: REQ-09-1873)
+            - [ ] `uname -m` -> prints arch (REQ: REQ-09-1874)
+    - [ ] **`kill` - Terminate or signal processes:** (REQ: REQ-09-1875)
+        - [ ] **Purpose:** Send a signal to a process. (REQ: REQ-09-1876)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `-s signal`, `-signal`: Specify signal name/number. (REQ: REQ-09-1879)
+            - [ ] `-l [status]`: List signals or translate exit status. (REQ: REQ-09-1880)
+            - [ ] `pid...`: Target processes. (REQ: REQ-09-1881)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] `kill()` syscall. (REQ: REQ-09-1883)
+            - [ ] `strtol()` for PID parsing. (REQ: REQ-09-1884)
+            - [ ] Signal name resolution (`SIGTERM`, etc). (REQ: REQ-09-1885)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `kill`, `strtol`, `strsignal` (REQ: REQ-09-1887)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `kill pid` -> sends SIGTERM (REQ: REQ-09-1889)
+            - [ ] `kill -9 pid` -> sends SIGKILL (REQ: REQ-09-1890)
+            - [ ] `kill -l` -> lists signals (REQ: REQ-09-1891)
+    - [ ] **`sleep` - Suspend execution for an interval:** (REQ: REQ-09-1892)
+        - [ ] **Purpose:** Pause execution. (REQ: REQ-09-1893)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** (REQ: REQ-09-1556, REQ-09-1573, REQ-09-1590, REQ-09-1606, REQ-09-1623, REQ-09-1640, REQ-09-1657, REQ-09-1673, REQ-09-1715, REQ-09-1741, REQ-09-1757, REQ-09-1774, REQ-09-1789, REQ-09-1805, REQ-09-1821, REQ-09-1839, REQ-09-1857, REQ-09-1878, REQ-09-1895)
+            - [ ] `time`: Non-negative integer. (REQ: REQ-09-1896)
+            - [ ] Extension: Floating point support. (REQ: REQ-09-1897)
+            - [ ] Extension: Suffixes (s, m, h, d). (REQ: REQ-09-1898)
+        - [ ] **Runtime:** (REQ: REQ-09-1562, REQ-09-1578, REQ-09-1594, REQ-09-1610, REQ-09-1628, REQ-09-1645, REQ-09-1661, REQ-09-1693, REQ-09-1718, REQ-09-1731, REQ-09-1746, REQ-09-1763, REQ-09-1777, REQ-09-1794, REQ-09-1808, REQ-09-1826, REQ-09-1845, REQ-09-1867, REQ-09-1882, REQ-09-1899)
+            - [ ] `nanosleep()` usage. (REQ: REQ-09-1900)
+        - [ ] **Library dependencies:** (REQ: REQ-09-1565, REQ-09-1581, REQ-09-1597, REQ-09-1614, REQ-09-1631, REQ-09-1648, REQ-09-1664, REQ-09-1721, REQ-09-1733, REQ-09-1749, REQ-09-1765, REQ-09-1780, REQ-09-1796, REQ-09-1812, REQ-09-1830, REQ-09-1848, REQ-09-1869, REQ-09-1886, REQ-09-1901)
+            - [ ] `nanosleep`, `strtod` (REQ: REQ-09-1902)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `sleep 1` -> pauses 1s (REQ: REQ-09-1904)
+            - [ ] `sleep 0.1` -> pauses 100ms (REQ: REQ-09-1905)
+            - [ ] `sleep invalid` -> reports error (REQ: REQ-09-1906)
+    - [ ] **`true` - Return true value:** (REQ: REQ-09-1907)
+        - [ ] **Purpose:** Do nothing, successfully. (REQ: REQ-09-1908)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** Ignored. (REQ: REQ-09-1910, REQ-09-1919)
+        - [ ] **Runtime:** Exit code 0. (REQ: REQ-09-1911)
+        - [ ] **Library dependencies:** None. (REQ: REQ-09-1912, REQ-09-1921)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `true` -> exit status 0 (REQ: REQ-09-1914)
+            - [ ] `true args` -> exit status 0 (REQ: REQ-09-1915)
+    - [ ] **`false` - Return false value:** (REQ: REQ-09-1916)
+        - [ ] **Purpose:** Do nothing, unsuccessfully. (REQ: REQ-09-1917)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Operands:** Ignored. (REQ: REQ-09-1910, REQ-09-1919)
+        - [ ] **Runtime:** Exit code 1. (REQ: REQ-09-1920)
+        - [ ] **Library dependencies:** None. (REQ: REQ-09-1912, REQ-09-1921)
+        - [ ] **Acceptance tests:** (REQ: REQ-09-0395, REQ-09-0604, REQ-09-0752, REQ-09-0917, REQ-09-1048, REQ-09-1153, REQ-09-1298, REQ-09-1437, REQ-09-1536, REQ-09-1567, REQ-09-1583, REQ-09-1599, REQ-09-1616, REQ-09-1633, REQ-09-1650, REQ-09-1666, REQ-09-1723, REQ-09-1735, REQ-09-1751, REQ-09-1767, REQ-09-1782, REQ-09-1798, REQ-09-1814, REQ-09-1832, REQ-09-1850, REQ-09-1871, REQ-09-1888, REQ-09-1903, REQ-09-1913, REQ-09-1922)
+            - [ ] `false` -> exit status 1 (REQ: REQ-09-1923)
+            - [ ] `false args` -> exit status 1 (REQ: REQ-09-1924)
+    - [ ] **`test` / `[` - Evaluate expression:** (REQ: REQ-09-1925)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **File Type Operators:** (REQ: REQ-09-1927)
+            - [ ] `-b file`: True if block special file. (REQ: REQ-09-1928)
+            - [ ] `-c file`: True if character special file. (REQ: REQ-09-1929)
+            - [ ] `-d file`: True if directory. (REQ: REQ-09-1930)
+            - [ ] `-e file`: True if file exists. (REQ: REQ-09-1931)
+            - [ ] `-f file`: True if regular file. (REQ: REQ-09-1932)
+            - [ ] `-g file`: True if set-group-ID flag is set. (REQ: REQ-09-1933)
+            - [ ] `-h` / `-L file`: True if symbolic link. (REQ: REQ-09-1934)
+            - [ ] `-k file`: True if sticky bit is set. (REQ: REQ-09-1935)
+            - [ ] `-p file`: True if FIFO (named pipe). (REQ: REQ-09-1936)
+            - [ ] `-r file`: True if readable. (REQ: REQ-09-1937)
+            - [ ] `-S file`: True if socket. (REQ: REQ-09-1938)
+            - [ ] `-s file`: True if size is greater than 0. (REQ: REQ-09-1939)
+            - [ ] `-u file`: True if set-user-ID flag is set. (REQ: REQ-09-1940)
+            - [ ] `-w file`: True if writable. (REQ: REQ-09-1941)
+            - [ ] `-x file`: True if executable. (REQ: REQ-09-1942)
+        - [ ] **String Operators:** (REQ: REQ-09-1943)
+            - [ ] `-z string`: True if string length is 0. (REQ: REQ-09-1944)
+            - [ ] `-n string`: True if string length is not 0. (REQ: REQ-09-1945)
+            - [ ] `s1 = s2`: True if strings are identical. (REQ: REQ-09-1946)
+            - [ ] `s1 != s2`: True if strings are not identical. (REQ: REQ-09-1947)
+        - [ ] **Integer Operators:** (REQ: REQ-09-1948)
+            - [ ] `n1 -eq n2`: Equal. (REQ: REQ-09-1949)
+            - [ ] `n1 -ne n2`: Not equal. (REQ: REQ-09-1950)
+            - [ ] `n1 -gt n2`: Greater than. (REQ: REQ-09-1951)
+            - [ ] `n1 -ge n2`: Greater than or equal. (REQ: REQ-09-1952)
+            - [ ] `n1 -lt n2`: Less than. (REQ: REQ-09-1953)
+            - [ ] `n1 -le n2`: Less than or equal. (REQ: REQ-09-1954)
+        - [ ] **Logic & Control:** (REQ: REQ-09-1955)
+            - [ ] `! expr`: Negate expression. (REQ: REQ-09-1956)
+            - [ ] `( expr )`: Grouping precedence. (REQ: REQ-09-1957)
+            - [ ] `expr1 -a expr2`: Logical AND (Binary). (REQ: REQ-09-1958)
+            - [ ] `expr1 -o expr2`: Logical OR (Binary). (REQ: REQ-09-1959)
+        - [ ] **Parsing & Runtime:** (REQ: REQ-09-1960)
+            - [ ] Recursive descent parser implementation. (REQ: REQ-09-1961)
+            - [ ] Handle 3-argument vs 4-argument ambiguity (POSIX rules). (REQ: REQ-09-1962)
+            - [ ] Detect `[` invocation name and require matching `]`. (REQ: REQ-09-1963)
+            - [ ] Use `lstat` for `-L`/`-h`, `stat` for others. (REQ: REQ-09-1964)
+            - [ ] Handle numeric parsing errors gracefully. (REQ: REQ-09-1965)
+    - [ ] **`expr` - Evaluate arguments as an expression:** (REQ: REQ-09-1966)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Arithmetic Operators:** (REQ: REQ-09-1968)
+            - [ ] `+`: Addition (Integer). (REQ: REQ-09-1969)
+            - [ ] `-`: Subtraction (Integer). (REQ: REQ-09-1970)
+            - [ ] `*`: Multiplication (Integer). (REQ: REQ-09-1971)
+            - [ ] `/`: Integer division. (REQ: REQ-09-1972)
+            - [ ] `%`: Integer modulus. (REQ: REQ-09-1973)
+        - [ ] **Relational Operators (String & Integer support):** (REQ: REQ-09-1974)
+            - [ ] `=`: Equal. (REQ: REQ-09-1975)
+            - [ ] `!=`: Not equal. (REQ: REQ-09-1976)
+            - [ ] `>`: Greater than. (REQ: REQ-09-1977)
+            - [ ] `>=`: Greater than or equal. (REQ: REQ-09-1978)
+            - [ ] `<`: Less than. (REQ: REQ-09-1979)
+            - [ ] `<=`: Less than or equal. (REQ: REQ-09-1980)
+        - [ ] **Boolean Operators:** (REQ: REQ-09-1981)
+            - [ ] `|`: Logical OR (returns first non-null/non-zero arg, else 0). (REQ: REQ-09-1982)
+            - [ ] `&`: Logical AND (returns first arg if both non-null/non-zero, else 0). (REQ: REQ-09-1983)
+        - [ ] **String Matching:** (REQ: REQ-09-1984)
+            - [ ] `:`: Pattern matching (Anchored Regex). (REQ: REQ-09-1985)
+        - [ ] **Parsing:** (REQ: REQ-09-1986)
+            - [ ] Argument shifting logic. (REQ: REQ-09-1987)
+            - [ ] `regex.h` integration for `:` operator. (REQ: REQ-09-1988)
+            - [ ] Precedence handling: `( ... )` (if supported extension) or standard operator precedence. (REQ: REQ-09-1989)
+            - [ ] Robust detection of operators vs operands (e.g., `expr 1 + 1` vs `expr + 1`). (REQ: REQ-09-1990)
+    - [ ] **`printf` - Write formatted output:** (REQ: REQ-09-1991)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Escape Sequences (Format String):** (REQ: REQ-09-1993)
+            - [ ] `\\`: Backslash. (REQ: REQ-09-1469, REQ-09-1994)
+            - [ ] `\a`: Alert (bell). (REQ: REQ-09-1470, REQ-09-1995)
+            - [ ] `\b`: Backspace. (REQ: REQ-09-1471, REQ-09-1996)
+            - [ ] `\f`: Form feed. (REQ: REQ-09-1474, REQ-09-1997)
+            - [ ] `\n`: Newline. (REQ: REQ-09-1475, REQ-09-1998)
+            - [ ] `\r`: Carriage return. (REQ: REQ-09-1476, REQ-09-1999)
+            - [ ] `\t`: Tab. (REQ: REQ-09-2000)
+            - [ ] `\v`: Vertical tab. (REQ: REQ-09-1478, REQ-09-2001)
+            - [ ] `\0ooo`: Octal value (1-3 digits). (REQ: REQ-09-2002)
+        - [ ] **Format Specifiers:** (REQ: REQ-09-2003)
+            - [ ] `d`, `i`: Signed decimal. (REQ: REQ-09-2004)
+            - [ ] `o`: Unsigned octal. (REQ: REQ-09-2005)
+            - [ ] `u`: Unsigned decimal. (REQ: REQ-09-2006)
+            - [ ] `x`, `X`: Unsigned hexadecimal (lower/upper). (REQ: REQ-09-2007)
+            - [ ] `f`, `F`: Decimal floating point. (REQ: REQ-09-2008)
+            - [ ] `e`, `E`: Exponential floating point. (REQ: REQ-09-2009)
+            - [ ] `g`, `G`: General floating point (shortest). (REQ: REQ-09-2010)
+            - [ ] `a`, `A`: Hexadecimal floating point. (REQ: REQ-09-2011)
+            - [ ] `c`: Character. (REQ: REQ-09-2012)
+            - [ ] `s`: String. (REQ: REQ-09-2013)
+            - [ ] `p`: Pointer address (impl defined). (REQ: REQ-09-2014)
+            - [ ] `%`: Literal percent. (REQ: REQ-09-2015)
+        - [ ] **Special Specifiers:** (REQ: REQ-09-2016)
+            - [ ] `%b`: Expand escape sequences in the corresponding argument string. (REQ: REQ-09-2017)
+        - [ ] **Flags & Precision:** (REQ: REQ-09-2018)
+            - [ ] Width (e.g., `%5d`). (REQ: REQ-09-2019)
+            - [ ] Precision (e.g., `%.2f`, `%.5s`). (REQ: REQ-09-2020)
+            - [ ] `-`: Left-justify. (REQ: REQ-09-2021)
+            - [ ] `+`: Force sign. (REQ: REQ-09-2022)
+            - [ ] ` ` (space): Space if no sign. (REQ: REQ-09-2023)
+            - [ ] `#`: Alternate form (0x prefix, etc). (REQ: REQ-09-2024)
+            - [ ] `0`: Zero padding. (REQ: REQ-09-2025)
+        - [ ] **Behavior:** (REQ: REQ-09-2026)
+            - [ ] Argument recycling: Reuse format string if arguments remain. (REQ: REQ-09-2027)
+            - [ ] Default values: treat missing args as 0 (int) or "" (string). (REQ: REQ-09-2028)
+    - [ ] **`stty` - Set options for a terminal:** (REQ: REQ-09-2029)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Options:** (REQ: REQ-09-1698, REQ-09-2031, REQ-09-2075)
+            - [ ] `-a`: All settings. (REQ: REQ-09-2032)
+            - [ ] `-g`: Saveable string. (REQ: REQ-09-2033)
+        - [ ] **Settings:** (REQ: REQ-09-2034)
+            - [ ] **Control Modes (`c_cflag`):** (REQ: REQ-09-2035)
+                - [ ] `parenb`, `parodd`, `-parenb`: Parity generation. (REQ: REQ-09-2036)
+                - [ ] `cs5`, `cs6`, `cs7`, `cs8`: Character size bits. (REQ: REQ-09-2037)
+                - [ ] `hupcl`: Hangup on last close. (REQ: REQ-09-2038)
+                - [ ] `cstopb`: Two stop bits. (REQ: REQ-09-2039)
+                - [ ] `cread`: Enable receiver. (REQ: REQ-09-2040)
+                - [ ] `clocal`: Ignore modem control lines. (REQ: REQ-09-2041)
+            - [ ] **Input Modes (`c_iflag`):** (REQ: REQ-09-2042)
+                - [ ] `ignbrk`, `brkint`: Break condition handling. (REQ: REQ-09-2043)
+                - [ ] `ignpar`, `parmrk`, `inpck`: Parity checking. (REQ: REQ-09-2044)
+                - [ ] `istrip`: Strip 8th bit. (REQ: REQ-09-2045)
+                - [ ] `inlcr`, `igncr`, `icrnl`: CR/NL mapping. (REQ: REQ-09-2046)
+                - [ ] `ixon`, `ixoff`: XON/XOFF flow control. (REQ: REQ-09-2047)
+            - [ ] **Output Modes (`c_oflag`):** (REQ: REQ-09-2048)
+                - [ ] `opost`: Post-process output. (REQ: REQ-09-2049)
+                - [ ] `onlcr`: Map NL to CR-NL. (REQ: REQ-09-2050)
+                - [ ] `ocrnl`: Map CR to NL. (REQ: REQ-09-2051)
+            - [ ] **Local Modes (`c_lflag`):** (REQ: REQ-09-2052)
+                - [ ] `isig`: Enable signals (INTR, QUIT, SUSP). (REQ: REQ-09-2053)
+                - [ ] `icanon`: Canonical mode (line buffering). (REQ: REQ-09-2054)
+                - [ ] `echo`, `echoe` (erase), `echok` (kill), `echonl`. (REQ: REQ-09-2055)
+                - [ ] `noflsh`: Disable flushing on signal. (REQ: REQ-09-2056)
+                - [ ] `tostop`: Stop background jobs on write. (REQ: REQ-09-2057)
+            - [ ] **Special Characters (`c_cc`):** (REQ: REQ-09-2058)
+                - [ ] `erase` (DEL/BS). (REQ: REQ-09-2059)
+                - [ ] `kill` (^U). (REQ: REQ-09-2060)
+                - [ ] `intr` (^C). (REQ: REQ-09-2061)
+                - [ ] `quit` (^\). (REQ: REQ-09-2062)
+                - [ ] `eof` (^D). (REQ: REQ-09-2063)
+                - [ ] `susp` (^Z). (REQ: REQ-09-2064)
+                - [ ] `start`/`stop` (^Q/^S). (REQ: REQ-09-2065)
+                - [ ] `min`/`time` (Non-canonical read control). (REQ: REQ-09-2066)
+            - [ ] **Combination Settings:** (REQ: REQ-09-2067)
+                - [ ] `sane`: Reset all to reasonable defaults. (REQ: REQ-09-2068)
+                - [ ] `raw`: Disable all processing (pass-through). (REQ: REQ-09-2069)
+                - [ ] `cooked`: Re-enable processing. (REQ: REQ-09-2070)
+                - [ ] `size`: Print terminal rows and columns. (REQ: REQ-09-2071)
+                - [ ] `rows N`, `cols N`: Set window size manually. (REQ: REQ-09-2072)
+    - [ ] **`tty` - Return user's terminal name:** (REQ: REQ-09-2073)
+        - [ ] **Standards:** POSIX.1-2017. (REQ: REQ-09-1555, REQ-09-1572, REQ-09-1589, REQ-09-1605, REQ-09-1622, REQ-09-1639, REQ-09-1656, REQ-09-1697, REQ-09-1714, REQ-09-1729, REQ-09-1804, REQ-09-1820, REQ-09-1856, REQ-09-1877, REQ-09-1894, REQ-09-1909, REQ-09-1918, REQ-09-1926, REQ-09-1967, REQ-09-1992, REQ-09-2030, REQ-09-2074)
+        - [ ] **Options:** (REQ: REQ-09-1698, REQ-09-2031, REQ-09-2075)
+            - [ ] `-s`: Silent mode. (REQ: REQ-09-2076)
+        - [ ] **Implementation:** (REQ: REQ-09-1707, REQ-09-2077)
+            - [ ] `ttyname(STDIN_FILENO)`. (REQ: REQ-09-2078)
+- [ ] Fix `pmap_dump` memory access logic (use `sys/proc.h` correctly) <!-- id: 4 --> (REQ: REQ-09-2079)
+- [ ] Fix `init=` command line parsing <!-- id: 5 --> (REQ: REQ-09-2080)
+- [ ] Fix `run_kernel_tests` linker error in EFI build <!-- id: 6 --> (REQ: REQ-09-2081)
+- [ ] Add `syscall_log` kernel parameter for debugging <!-- id: 7 --> (REQ: REQ-09-2082)
+- [ ] Investigate duplicate thread creation (PID 1 has TID 1 & 2) <!-- id: 8 --> (REQ: REQ-09-2083)
+- [ ] Investigate Page Fault at `0x08065d2b` (accessing `0x08124000`) <!-- id: 9 --> (REQ: REQ-09-2084)
+    - [ ] **Editors:** (REQ: REQ-09-2085)
+        - [ ] **`vi` Clone (Tiny/Busybox-like):** (REQ: REQ-09-2086)
+            - [ ] **Buffer Management:** (REQ: REQ-09-2087)
+                - [ ] Gap buffer or Line-based linked list structure. (REQ: REQ-09-2088)
+                - [ ] File loading/saving (`:w`, `:e`). (REQ: REQ-09-2089)
+            - [ ] **Modes:** (REQ: REQ-09-2090)
+                - [ ] Normal Mode (Command processing). (REQ: REQ-09-2091)
+                - [ ] Insert Mode (Text input). (REQ: REQ-09-2092)
+                - [ ] Command-Line Mode (`:` prompts). (REQ: REQ-09-2093)
+            - [ ] **Navigation (Normal Mode):** (REQ: REQ-09-2094)
+                - [ ] `h`, `j`, `k`, `l`: Character cursor movement. (REQ: REQ-09-2095)
+                - [ ] `w`, `b`, `e`: Word movement. (REQ: REQ-09-2096)
+                - [ ] `0`, `^`, `$`: Line start/end. (REQ: REQ-09-2097)
+                - [ ] `G`, `gg`: Go to line. (REQ: REQ-09-2098)
+                - [ ] `Ctrl+F`, `Ctrl+B`: Page scrolling. (REQ: REQ-09-2099)
+            - [ ] **Editing Operations:** (REQ: REQ-09-2100)
+                - [ ] `i`, `a`, `o`, `O`: Enter insert mode. (REQ: REQ-09-2101)
+                - [ ] `x`, `X`: Delete character. (REQ: REQ-09-2102)
+                - [ ] `dd`, `dw`: Delete line/word. (REQ: REQ-09-2103)
+                - [ ] `yy`, `yw`: Yank (copy) line/word. (REQ: REQ-09-2104)
+                - [ ] `p`, `P`: Paste. (REQ: REQ-09-2105)
+                - [ ] `u`: Undo (Simplex implementation). (REQ: REQ-09-2106)
+            - [ ] **Search:** (REQ: REQ-09-2107)
+                - [ ] `/pattern`: Forward search. (REQ: REQ-09-2108)
+                - [ ] `n`, `N`: Next/Previous match. (REQ: REQ-09-2109)
+            - [ ] **Ex Commands:** (REQ: REQ-09-2110)
+                - [ ] `:q`, `:q!`: Quit. (REQ: REQ-09-2111)
+                - [ ] `:w`, `:wq`: Write/Save. (REQ: REQ-09-2112)
+                - [ ] `:set nu` / `:set nonu`: Line numbering. (REQ: REQ-09-2113)
+        - [ ] **TUI Editor (Nano-like):** (REQ: REQ-09-2114)
+            - [ ] **UI Rendering:** (REQ: REQ-09-2115)
+                - [ ] Top status bar (Version, File status). (REQ: REQ-09-2116)
+                - [ ] Bottom help bar (Key shortcuts ^G, ^X, etc). (REQ: REQ-09-2117)
+                - [ ] Main text area with scrolling. (REQ: REQ-09-2118)
+            - [ ] **Input Handling:** (REQ: REQ-09-1343, REQ-09-2119)
+                - [ ] Modeless text entry (always insert). (REQ: REQ-09-2120)
+                - [ ] Control key handling (`^X` Exit, `^O` Save). (REQ: REQ-09-2121)
+                - [ ] Home/End/PageUp/PageDown navigation. (REQ: REQ-09-2122)
+            - [ ] **Features:** (REQ: REQ-09-2123)
+                - [ ] Search (`^W`) and Replace (`^\`). (REQ: REQ-09-2124)
+                - [ ] Cut (`^K`) and Uncut (`^U`) lines. (REQ: REQ-09-2125)
+                - [ ] Goto Line (`^_`). (REQ: REQ-09-2126)
+        - [ ] **GUI Editor (Notepad-like):** (REQ: REQ-09-2127)
+            - [ ] **Core Components:** (REQ: REQ-09-2128)
+                - [ ] `GWindow`: Main application window. (REQ: REQ-09-2129)
+                - [ ] `GTextArea`: Multi-line text widget with scrollbar. (REQ: REQ-09-2130)
+                - [ ] `GMenuBar`: Top menu (File, Edit, Format). (REQ: REQ-09-2131)
+            - [ ] **File Operations:** (REQ: REQ-09-2132)
+                - [ ] New: Clear buffer. (REQ: REQ-09-2133)
+                - [ ] Open: Launch `GFileChooser` dialog. (REQ: REQ-09-2134)
+                - [ ] Save / Save As: Launch `GFileChooser` (Save mode). (REQ: REQ-09-2135)
+            - [ ] **Edit Operations:** (REQ: REQ-09-2136)
+                - [ ] Cut/Copy/Paste via Clipboard API. (REQ: REQ-09-2137)
+                - [ ] Select All. (REQ: REQ-09-2138)
+                - [ ] Undo/Redo stack. (REQ: REQ-09-2139)
+            - [ ] **Preferences:** (REQ: REQ-09-2140)
+                - [ ] Font selection dialog. (REQ: REQ-09-2141)
+                - [ ] Word wrap toggle. (REQ: REQ-09-2142)
+- [ ] **System Utils:** (REQ: REQ-09-2143)
+    - [ ] **`init` (PID 1):** (REQ: REQ-09-2144)
+        - [ ] **Stage 1 (Boot):** (REQ: REQ-09-2145)
+            - [ ] Mask all signals except `SIGCHLD`. (REQ: REQ-09-2146)
+            - [ ] Mount `/proc`, `/sys`, `/dev` if not mounted by kernel. (REQ: REQ-09-2147)
+            - [ ] Parse `/etc/rc` shell script. (REQ: REQ-09-2148)
+            - [ ] Check `/etc/system.conf` for `GRAPHICAL_LOGIN=yes`. (REQ: REQ-09-2149)
+        - [ ] **Stage 2 (Run Loop):** (REQ: REQ-09-2150)
+            - [ ] Spawn `getty` on TTYs (`tty1`...`tty6`) or start `login.gui`. (REQ: REQ-09-2151)
+            - [ ] Handle `SIGCHLD`: `waitpid(-1, ...)` to reap orphans. (REQ: REQ-09-2152)
+            - [ ] Respawn died critical services (like `getty`). (REQ: REQ-09-2153)
+            - [ ] Handle `SIGINT`/`SIGPWR` for shutdown/reboot. (REQ: REQ-09-2154)
+    - [ ] **Graphical Login (`login.gui`):** (REQ: REQ-09-2155)
+        - [ ] **UI:** (REQ: REQ-09-2156)
+            - [ ] Simple window with User/Pass fields. (REQ: REQ-09-2157)
+            - [ ] Shutdown/Restart buttons. (REQ: REQ-09-2158)
+        - [ ] **Auth:** (REQ: REQ-09-2159)
+            - [ ] Reads username/password. (REQ: REQ-09-2160)
+            - [ ] Authenticates using `libauth` (no direct file access). (REQ: REQ-09-2161)
+        - [ ] **Session:** (REQ: REQ-09-2162)
+            - [ ] Starts the default Desktop Environment shell on success. (REQ: REQ-09-2163)
+            - [ ] Hand off control using `execve` inside a `fork`ed child. (REQ: REQ-09-2164)
+    - [ ] **`login` (CLI Auth):** (REQ: REQ-09-2165)
+        - [ ] **Phase 1: Classic Unix Auth (`libauth`):** (REQ: REQ-09-2166)
+            - [ ] Display generic "login:" prompt. (REQ: REQ-09-2167)
+            - [ ] Disable TTY echo for password input. (REQ: REQ-09-2168)
+            - [ ] Use `libauth` to validate credentials (validates against `/etc/passwd`). (REQ: REQ-09-2169)
+            - [ ] Handle generic authentication failures (delay 3s). (REQ: REQ-09-2170)
+        - [ ] **Phase 2: Session Setup:** (REQ: REQ-09-2171)
+            - [ ] Initialize Environment (`HOME`, `SHELL`, `USER`, `LOGNAME`, `PATH`, `TERM`). (REQ: REQ-09-2172)
+            - [ ] Set Process Group / Session ID (`setsid`). (REQ: REQ-09-2173)
+            - [ ] Apply Group IDs (`setgid`, `initgroups` for supplementary). (REQ: REQ-09-2174)
+            - [ ] Apply User ID (`setuid`). (REQ: REQ-09-2175)
+            - [ ] Change to user's home directory (`chdir`). (REQ: REQ-09-2176)
+            - [ ] Display `/etc/motd` (Message of the Day). (REQ: REQ-09-2177)
+            - [ ] Execute Shell (`execve` of `pw_shell`). (REQ: REQ-09-2178)
+        - [ ] **Phase 3: Security & Logging:** (REQ: REQ-09-2179)
+            - [ ] Implement account expiration checking. (REQ: REQ-09-2180)
+            - [ ] Record login in `/var/run/utmp` and `/var/log/wtmp`. (REQ: REQ-09-2181)
+            - [ ] Handle login failures (syslog LOG_AUTH). (REQ: REQ-09-2182)
+    - [ ] **`ps` (Process Status):** (REQ: REQ-09-2183)
+        - [ ] **Data Gathering (via `libsys`):** (REQ: REQ-09-2184)
+            - [ ] Call `sys_proc_count()` to get process count. (REQ: REQ-09-2185)
+            - [ ] Call `sys_proc_list()` to enumerate all PIDs. (REQ: REQ-09-2186)
+            - [ ] Call `sys_proc_info()` for each PID to get state, ppid, pgid, sid, tty, perso_id. (REQ: REQ-09-2187)
+            - [ ] Call `sys_proc_cmdline()` for full command line arguments. (REQ: REQ-09-2188)
+            - [ ] Call `sys_proc_pers_name()` to resolve personality ID to display string. (REQ: REQ-09-2189)
+        - [ ] **Formatting & Output:** (REQ: REQ-09-2190)
+            - [ ] Resolve TTY device number to name (from `sys_procinfo_t.tty`). (REQ: REQ-09-2191)
+            - [ ] Calculate %CPU (user_time+sys_time / uptime delta). (REQ: REQ-09-2192)
+            - [ ] Calculate %MEM (rss * pagesize / total_ram from `sys_vm_stats()`). (REQ: REQ-09-2193)
+            - [ ] Format columns: PID, TTY, STAT, TIME, COMMAND, PERS (personality). (REQ: REQ-09-2194)
+            - [ ] Support BSD syntax (`aux`) vs SysV syntax (`-ef`). (REQ: REQ-09-2195)
+    - [ ] **`top` (Real-time Monitor):** (REQ: REQ-09-2196)
+        - [ ] **Backend (via `libsys`):** (REQ: REQ-09-2197)
+            - [ ] Efficiently call `sys_proc_list()` and `sys_proc_info()` (snapshotting). (REQ: REQ-09-2198)
+            - [ ] Calculate CPU delta usage via `sys_cpu_times()` between samples. (REQ: REQ-09-2199)
+            - [ ] Read global stats via `sys_vm_stats()` and `sys_cpu_loadavg()`. (REQ: REQ-09-2200)
+        - [ ] **UI / Display:** (REQ: REQ-09-2201)
+            - [ ] Initialize terminal (raw mode, no echo). (REQ: REQ-09-2202)
+            - [ ] Handle VT100 control sequences (clear screen, cursor positioning). (REQ: REQ-09-2203)
+            - [ ] Display Header: Uptime (`sys_uptime()`), Load (`sys_cpu_loadavg()`), Mem/Swap. (REQ: REQ-09-2204)
+            - [ ] Display Process List (sortable by CPU/Mem, show personality, clamp to screen). (REQ: REQ-09-2205)
+            - [ ] Handle Input (`q` quit, `k` kill, `r` renice, space update). (REQ: REQ-09-2206)
+    - [ ] **Documentation Utils:** (REQ: REQ-09-2207)
+        - [ ] **`roff` / `nroff` (Typesetting Engine):** (REQ: REQ-09-2208)
+            - [ ] **Core Engine & Parsing:** (REQ: REQ-09-2209)
+                - [ ] Implement input stream buffering (pushback support). (REQ: REQ-09-2210)
+                - [ ] Implement tokenizer (requests vs text vs escapes). (REQ: REQ-09-2211)
+                - [ ] Implement escape sequence parser (`\e`, `\(xx`, `\*`, `\n`). (REQ: REQ-09-2212)
+                - [ ] Implement numeric register parser with scaling units (`n`, `v`, `p`, `m`). (REQ: REQ-09-2213)
+                - [ ] Implement string register expansion (`\*[string]`). (REQ: REQ-09-2214)
+                - [ ] Implement conditional parsing (`.if`, `.ie`, `.el`). (REQ: REQ-09-2215)
+                - [ ] Implement loop/while parsing (`.while`). (REQ: REQ-09-2216)
+                - [ ] Implement macro definition parser (`.de`, `.am`, `..`). (REQ: REQ-09-2217)
+                - [ ] Implement diversion support (`.di`, `.da`, boxes). (REQ: REQ-09-2218)
+                - [ ] Implement environment switching (`.ev`). (REQ: REQ-09-2219)
+                - [ ] Implement `.so` (source file) handling. (REQ: REQ-09-2220)
+                - [ ] Implement error handling and line number tracking. (REQ: REQ-09-2221)
+            - [ ] **Formatting & Layout:** (REQ: REQ-09-2222)
+                - [ ] Implement current state tracking (font, size, fill mode). (REQ: REQ-09-2223)
+                - [ ] Implement line filling and adjustment logic. (REQ: REQ-09-2224)
+                - [ ] Implement hyphenation hooks (knuth-plass or simple pattern). (REQ: REQ-09-2225)
+                - [ ] Implement page control (`.pl`, `.po`, `.tl`). (REQ: REQ-09-2226)
+                - [ ] Implement traps (page location, input line). (REQ: REQ-09-2227)
+                - [ ] Implement tab stop calculations. (REQ: REQ-09-2228)
+            - [ ] **Macro Packages:** (REQ: REQ-09-2229)
+                - [ ] **`-man` (Manpages):** (REQ: REQ-09-2230)
+                    - [ ] Implement `.TH`, `.SH`, `.SS` structure. (REQ: REQ-09-2231)
+                    - [ ] Implement `.TP`, `.IP`, `.HP` indentation/lists. (REQ: REQ-09-2232)
+                    - [ ] Implement font macros (`.B`, `.I`, `.BI`, etc.). (REQ: REQ-09-2233)
+                - [ ] **`-mdoc` (Semantic Manpages):** (REQ: REQ-09-2234)
+                    - [ ] Implement structural macros (`.Dd`, `.Dt`, `.Os`). (REQ: REQ-09-2235)
+                    - [ ] Implement block macros (`.Bl`, `.It`, `.El`). (REQ: REQ-09-2236)
+                    - [ ] Implement in-line semantic macros (`.Op`, `.Fl`, `.Ar`). (REQ: REQ-09-2237)
+                - [ ] **`-ms` (Manuscripts - Minimal):** (REQ: REQ-09-2238)
+                    - [ ] Implement paragraph macros (`.PP`, `.LP`). (REQ: REQ-09-2239)
+                    - [ ] Implement heading macros (`.NH`, `.SH`). (REQ: REQ-09-2240, REQ-09-2443)
+            - [ ] **Output Backends:** (REQ: REQ-09-2241)
+                - [ ] **ASCII / TTY:** (REQ: REQ-09-2242)
+                    - [ ] Implement basic character output. (REQ: REQ-09-2243)
+                    - [ ] Implement overstriking for bold/underline (backspace hacking). (REQ: REQ-09-2244)
+                    - [ ] Handle TTY control codes (if opts enabled). (REQ: REQ-09-2245)
+                - [ ] **Future/Stub:** (REQ: REQ-09-2246)
+                    - [ ] Define device-independent output interface (GROFF-like troff). (REQ: REQ-09-2247)
+            - [ ] **Compatibility:** (REQ: REQ-09-2248)
+                - [ ] Align behavior with Heirloom Troff / Mandoc where possible. (REQ: REQ-09-2249)
+                - [ ] Document deviations from GNU Groff. (REQ: REQ-09-2250)
+                - [ ] Test against traditional V7 manual sources. (REQ: REQ-09-2251)
+        - [ ] **`man` (Manual Pager):** (REQ: REQ-09-2252)
+            - [ ] **Page Discovery:** (REQ: REQ-09-2253)
+                - [ ] Implement `MANPATH` environment parsing. (REQ: REQ-09-2254)
+                - [ ] Implement default system path (`/usr/man`). (REQ: REQ-09-2255)
+                - [ ] Implement section search order (1, n, p, 8, 2, 3...). (REQ: REQ-09-2256)
+                - [ ] Implement locale-specific subdirectories handling. (REQ: REQ-09-2257)
+                - [ ] Support compressed sources (`.gz`, `.bz2`, `.xz`) via decompressors. (REQ: REQ-09-2258)
+            - [ ] **Preprocessing Pipeline:** (REQ: REQ-09-2259)
+                - [ ] Detect macro format (`-man` vs `-mdoc`) via first-line scan. (REQ: REQ-09-2260)
+                - [ ] Construct `roff` pipeline command. (REQ: REQ-09-2261)
+                - [ ] Handle preprocessors if flagged (`tbl`, `eqn`, `pic` - stubs). (REQ: REQ-09-2262)
+            - [ ] **User Interface:** (REQ: REQ-09-2263)
+                - [ ] Implement CLI flags (`-a`, `-f`, `-k`, `-w`, `-s`). (REQ: REQ-09-2264)
+                - [ ] Implement pager integration (`$PAGER` or `less`). (REQ: REQ-09-2265)
+                - [ ] Handle exit codes (0 found, 1 missing, >1 error). (REQ: REQ-09-2266)
+            - [ ] **Caching & Performance:** (REQ: REQ-09-2267)
+                - [ ] Implement `catman` style preformatted cache directory support. (REQ: REQ-09-2268)
+                - [ ] Implement cache invalidation (timestamp check vs source). (REQ: REQ-09-2269)
+                - [ ] Implement security checks (don't write to cache as user). (REQ: REQ-09-2270)
+            - [ ] **Diagnostics:** (REQ: REQ-09-2271)
+                - [ ] Report "No manual entry for..." clearly. (REQ: REQ-09-2272)
+                - [ ] Report ambiguous matches properly. (REQ: REQ-09-2273)
+        - [ ] **Testing & Quality (Roff/Man):** (REQ: REQ-09-2274)
+            - [ ] **Unit Tests:** (REQ: REQ-09-0369, REQ-09-0573, REQ-09-0723, REQ-09-0884, REQ-09-1020, REQ-09-1128, REQ-09-1272, REQ-09-1404, REQ-09-1507, REQ-09-2275)
+                - [ ] Test register arithmetic logic. (REQ: REQ-09-2276)
+                - [ ] Test macro argument expansion (`$1`, `$*`). (REQ: REQ-09-2277)
+                - [ ] Test conditional nesting. (REQ: REQ-09-2278)
+            - [ ] **Property Tests:** (REQ: REQ-09-0389, REQ-09-0596, REQ-09-0743, REQ-09-0910, REQ-09-1041, REQ-09-1147, REQ-09-1291, REQ-09-1431, REQ-09-1530, REQ-09-2279)
+                - [ ] Fuzz macro parser with random line noise. (REQ: REQ-09-2280)
+                - [ ] Randomize nested environment creation. (REQ: REQ-09-2281)
+            - [ ] **Integration Tests:** (REQ: REQ-09-0378, REQ-09-0580, REQ-09-0729, REQ-09-0890, REQ-09-1026, REQ-09-1133, REQ-09-1409, REQ-09-1511, REQ-09-2282)
+                - [ ] Render all system manpages and check for crashes. (REQ: REQ-09-2283)
+                - [ ] Compare output against reference implementation (groff/mandoc) for diffs. (REQ: REQ-09-2284)
+        - [ ] **Documentation:** (REQ: REQ-09-0139, REQ-09-0192, REQ-09-0406, REQ-09-0613, REQ-09-0759, REQ-09-0924, REQ-09-1054, REQ-09-1159, REQ-09-1305, REQ-09-1442, REQ-09-1539, REQ-09-2285)
+            - [ ] Write `roff(7)` language reference. (REQ: REQ-09-2286)
+            - [ ] Write `man(1)` user manual. (REQ: REQ-09-2287)
+            - [ ] Write `mandoc_impl.md` developer design doc. (REQ: REQ-09-2288)
+        - [ ] **`roff` / `nroff` / `man` (Production-Quality Task Expansion):** (REQ: REQ-09-2289)
+            - [ ] **Compatibility Baseline & Scope Control:** (REQ: REQ-09-2290)
+                - [ ] Define normative baseline: POSIX where defined, BSD `mandoc` semantics preferred where unspecified. (REQ: REQ-09-2291)
+                - [ ] Produce behavior matrix for V7/BSD roff, BSD mandoc, and GNU groff. (REQ: REQ-09-2292)
+                - [ ] Record compatibility priorities for `man` output correctness over full troff feature coverage. (REQ: REQ-09-2293)
+                - [ ] Enumerate explicitly supported macro packages and minimum versions. (REQ: REQ-09-2294)
+                - [ ] Enumerate explicitly unsupported GNU groff-only extensions as non-goals. (REQ: REQ-09-2295)
+                - [ ] Add task gate requiring incompatibility entries for every intentional divergence. (REQ: REQ-09-2296)
+                - [ ] Define per-feature status tags: implemented, compatible-subset, stubbed, deferred. (REQ: REQ-09-2297)
+            - [ ] **`roff` / `nroff` CLI Frontend:** (REQ: REQ-09-2298)
+                - [ ] Add `bin/roff/` program skeleton with argument parser and usage output. (REQ: REQ-09-2299)
+                - [ ] Add `bin/nroff/` frontend aliasing roff engine with terminal defaults. (REQ: REQ-09-2300)
+                - [ ] Implement `-man`, `-mdoc`, and `-ms` package selection flags. (REQ: REQ-09-2301)
+                - [ ] Implement `-Tascii` device selection and default device logic for `nroff`. (REQ: REQ-09-2302)
+                - [ ] Implement `-m` package loading path semantics compatible with BSD tooling. (REQ: REQ-09-2303)
+                - [ ] Implement register preset flags (`-rX=N`) and string preset flags (`-dX=VALUE`). (REQ: REQ-09-2304)
+                - [ ] Implement warning/diagnostic control flags and quiet mode. (REQ: REQ-09-2305)
+                - [ ] Implement stdin and file-list processing order exactly as specified by CLI. (REQ: REQ-09-2306)
+                - [ ] Implement deterministic exit codes for parse, include, and runtime formatting failures. (REQ: REQ-09-2307)
+                - [ ] Add `roff(1)` and `nroff(1)` option tables synchronized with implementation. (REQ: REQ-09-2308)
+            - [ ] **Core Engine: Input Stream, Tokenization, and Lexical Rules:** (REQ: REQ-09-2309)
+                - [ ] Implement unified input source stack for files, `.so` includes, and diversions. (REQ: REQ-09-2310)
+                - [ ] Track source coordinates (file, line, column, include depth) for diagnostics. (REQ: REQ-09-2311)
+                - [ ] Implement line reader with newline preservation and escaped-newline handling. (REQ: REQ-09-2312)
+                - [ ] Implement request line detection for both `.` and `'` control prefixes. (REQ: REQ-09-2313)
+                - [ ] Implement comment line and empty control line semantics. (REQ: REQ-09-2314)
+                - [ ] Implement argument lexer preserving escaped spaces and quoted segments. (REQ: REQ-09-2315)
+                - [ ] Implement token categories: text, request, macro call, escape, and transparent-through tokens. (REQ: REQ-09-2316)
+                - [ ] Implement pushback/unread token support for lookahead-sensitive parsing. (REQ: REQ-09-2317)
+                - [ ] Implement tokenizer behavior for copy mode vs interpretation mode. (REQ: REQ-09-2318)
+                - [ ] Add hard limits for token length, argument count, and input recursion depth. (REQ: REQ-09-2319)
+            - [ ] **Core Engine: Escape Sequence Parsing and Expansion:** (REQ: REQ-09-2320)
+                - [ ] Implement escape dispatcher for one-char, two-char, bracketed, and long-name forms. (REQ: REQ-09-2321)
+                - [ ] Implement literal escape handling (`\\`, `\e`) and escaped control chars. (REQ: REQ-09-2322)
+                - [ ] Implement special character escapes (`\(xx`, `\[name]`) with lookup table. (REQ: REQ-09-2323)
+                - [ ] Implement string register interpolation (`\*x`, `\*(xx`, `\*[name]`). (REQ: REQ-09-2324)
+                - [ ] Implement numeric register interpolation (`\nx`, `\n(xx`, `\n[name]`) with formatting options. (REQ: REQ-09-2325)
+                - [ ] Implement number-format escape modifiers (`\n+`, `\n-`) semantics. (REQ: REQ-09-2326)
+                - [ ] Implement font/style escapes used by terminal backend. (REQ: REQ-09-2327)
+                - [ ] Implement width-measurement escapes with backend callback hooks. (REQ: REQ-09-2328)
+                - [ ] Implement conditional-inline escapes used by macro packages. (REQ: REQ-09-2329)
+                - [ ] Implement copy-mode suppression rules for escapes inside macro definitions. (REQ: REQ-09-2330)
+                - [ ] Implement unknown escape fallback policy with warning classing. (REQ: REQ-09-2331)
+                - [ ] Implement truncation-safe UTF-8/byte handling for escape parser in nroff mode. (REQ: REQ-09-2332)
+            - [ ] **Core Engine: Requests, Macros, and Macro Invocation:** (REQ: REQ-09-2333)
+                - [ ] Implement request dispatch table with fast lookup by canonical request name. (REQ: REQ-09-2334)
+                - [ ] Implement user macro definition (`.de`) with proper terminator handling. (REQ: REQ-09-2335)
+                - [ ] Implement append-to-macro (`.am`) preserving previous body. (REQ: REQ-09-2336)
+                - [ ] Implement remove/rename behavior for user-defined macros. (REQ: REQ-09-2337)
+                - [ ] Implement macro invocation with positional arguments (`$1`..`$9`, `$*`, `$@` behavior decision task). (REQ: REQ-09-2338)
+                - [ ] Implement argument quoting/spacing rules for macro expansion. (REQ: REQ-09-2339)
+                - [ ] Implement nested macro expansion depth limits and overflow diagnostics. (REQ: REQ-09-2340)
+                - [ ] Implement recursion detection and deterministic failure behavior. (REQ: REQ-09-2341)
+                - [ ] Implement request-vs-macro name precedence and conflict resolution. (REQ: REQ-09-2342)
+                - [ ] Implement copy-mode capture for macro bodies with delayed expansion. (REQ: REQ-09-2343)
+            - [ ] **Core Engine: Registers and String Storage:** (REQ: REQ-09-2344)
+                - [ ] Implement numeric register table with signed integer storage. (REQ: REQ-09-2345)
+                - [ ] Implement auto-increment/decrement register operations. (REQ: REQ-09-2346)
+                - [ ] Implement numeric register default-value semantics for undefined names. (REQ: REQ-09-2347)
+                - [ ] Implement string register table with mutable replacement and append operations. (REQ: REQ-09-2348)
+                - [ ] Implement register namespaces and name normalization rules. (REQ: REQ-09-2349)
+                - [ ] Implement register deletion APIs and lifecycle handling. (REQ: REQ-09-2350)
+                - [ ] Implement per-environment register visibility policy decision and documentation. (REQ: REQ-09-2351)
+                - [ ] Implement register serialization helpers for diagnostics/testing. (REQ: REQ-09-2352)
+            - [ ] **Core Engine: Conditionals and Control Flow:** (REQ: REQ-09-2353)
+                - [ ] Implement `.if` expression parser for numeric, string, and definedness tests. (REQ: REQ-09-2354)
+                - [ ] Implement `.ie` and `.el` chain handling with proper else binding. (REQ: REQ-09-2355)
+                - [ ] Implement block conditionals (`\{` / `\}`) and nested block depth tracking. (REQ: REQ-09-2356)
+                - [ ] Implement `.while` loop execution with loop guard limits. (REQ: REQ-09-2357)
+                - [ ] Implement `.break`-style loop interruption request (if supported) and fallback behavior. (REQ: REQ-09-2358)
+                - [ ] Implement short-circuit parsing for false branches without side effects. (REQ: REQ-09-2359)
+                - [ ] Emit diagnostics for unterminated conditional blocks and malformed predicates. (REQ: REQ-09-2360)
+            - [ ] **Core Engine: Diversions, Traps, and Deferred Material:** (REQ: REQ-09-2361)
+                - [ ] Implement diversion start/stop (`.di`) and append diversion (`.da`). (REQ: REQ-09-2362)
+                - [ ] Implement named diversion storage and retrieval lifecycle. (REQ: REQ-09-2363)
+                - [ ] Implement diversion nesting semantics and stack management. (REQ: REQ-09-2364)
+                - [ ] Implement diversion line numbering and diagnostics preservation. (REQ: REQ-09-2365)
+                - [ ] Implement top-of-page and page-location trap registration. (REQ: REQ-09-2366)
+                - [ ] Implement trap invocation ordering and re-entrancy safety. (REQ: REQ-09-2367)
+                - [ ] Implement diversion replay into normal input stream with source attribution. (REQ: REQ-09-2368)
+            - [ ] **Core Engine: Environments and State Stacking:** (REQ: REQ-09-2369)
+                - [ ] Implement environment switch request (`.ev`) with stack-aware push/pop behavior. (REQ: REQ-09-2370)
+                - [ ] Track fill mode, adjust mode, indentation, temporary indent, and line length per environment. (REQ: REQ-09-2371)
+                - [ ] Track font/style state and spacing parameters per environment. (REQ: REQ-09-2372)
+                - [ ] Track tab stops and leaders per environment. (REQ: REQ-09-2373)
+                - [ ] Track numbering/format state per environment when compatibility requires it. (REQ: REQ-09-2374)
+                - [ ] Implement environment copy/clone behavior for macro package needs. (REQ: REQ-09-2375)
+                - [ ] Implement hard limits and diagnostics for environment depth exhaustion. (REQ: REQ-09-2376)
+            - [ ] **Core Engine: Line Breaking, Filling, and Adjustment:** (REQ: REQ-09-2377)
+                - [ ] Implement no-fill and fill modes (`.nf`/`.fi`) with state transitions. (REQ: REQ-09-2378)
+                - [ ] Implement adjustable line assembly with word buffering. (REQ: REQ-09-2379)
+                - [ ] Implement left/right adjustment and centering behaviors required by man macros. (REQ: REQ-09-2380)
+                - [ ] Implement sentence-space handling policy and compatibility toggle. (REQ: REQ-09-2381)
+                - [ ] Implement indentation requests (`.in`, `.ti`) and restoration semantics. (REQ: REQ-09-2382)
+                - [ ] Implement line length changes (`.ll`) and pending line flush behavior. (REQ: REQ-09-2383)
+                - [ ] Implement vertical spacing (`.sp`, `.br`) interactions with filled output. (REQ: REQ-09-2384)
+                - [ ] Implement keep-together behavior required by tagged paragraphs. (REQ: REQ-09-2385)
+                - [ ] Implement blank-line propagation rules for literal displays. (REQ: REQ-09-2386)
+                - [ ] Add deterministic wrapping rules for overlong tokens and unbreakable strings. (REQ: REQ-09-2387)
+            - [ ] **Core Engine: Hyphenation Hooks (Initial Stub + Interfaces):** (REQ: REQ-09-2388)
+                - [ ] Define hyphenation interface between formatter and language-specific engine. (REQ: REQ-09-2389)
+                - [ ] Add default disabled behavior matching conservative nroff expectations. (REQ: REQ-09-2390)
+                - [ ] Add request-level toggles for enabling/disabling hyphenation. (REQ: REQ-09-2391)
+                - [ ] Implement soft-hyphen insertion points plumbing without enabling algorithms yet. (REQ: REQ-09-2392)
+                - [ ] Add metrics hooks so future hyphenation can influence line breaker decisions. (REQ: REQ-09-2393)
+            - [ ] **Core Engine: Number Formatting and Scaling Units:** (REQ: REQ-09-2394)
+                - [ ] Implement parser for roff numeric expressions with optional sign and defaults. (REQ: REQ-09-2395)
+                - [ ] Implement scaling units (`u`, `i`, `c`, `P`, `p`, `m`, `n`, `v`) with nroff-specific conversions. (REQ: REQ-09-2396)
+                - [ ] Implement absolute vs relative assignments for numeric requests. (REQ: REQ-09-2397)
+                - [ ] Implement format request for registers (decimal, roman, alphabetic formats). (REQ: REQ-09-2398)
+                - [ ] Implement unit conversion overflow checks and saturation diagnostics. (REQ: REQ-09-2399)
+                - [ ] Implement deterministic rounding policy for fractional internal units. (REQ: REQ-09-2400)
+            - [ ] **Core Engine: Input Sourcing and `.so` Semantics:** (REQ: REQ-09-2401)
+                - [ ] Implement `.so` path resolution using current file directory first. (REQ: REQ-09-2402)
+                - [ ] Implement include search path list for macro directories and man tree includes. (REQ: REQ-09-2403)
+                - [ ] Implement include recursion detection and cycle diagnostics. (REQ: REQ-09-2404)
+                - [ ] Implement include depth limits with actionable error messages. (REQ: REQ-09-2405)
+                - [ ] Implement include failure behavior compatibility option (fatal vs warning) and default choice. (REQ: REQ-09-2406)
+                - [ ] Preserve source locations across include boundaries for error reporting. (REQ: REQ-09-2407)
+            - [ ] **Core Engine: Error Handling and Diagnostics:** (REQ: REQ-09-2408)
+                - [ ] Define diagnostic classes: parse error, compatibility warning, runtime warning, internal bug. (REQ: REQ-09-2409)
+                - [ ] Emit source-rich diagnostics with file:line and macro/include backtrace. (REQ: REQ-09-2410)
+                - [ ] Add warning categories for unsupported requests and ignored escapes. (REQ: REQ-09-2411)
+                - [ ] Add strict mode that upgrades selected warnings to errors for test gating. (REQ: REQ-09-2412)
+                - [ ] Add recoverable parse paths so malformed lines do not crash formatter. (REQ: REQ-09-2413)
+                - [ ] Add deterministic memory/OOM error propagation from engine to CLI exit codes. (REQ: REQ-09-2414)
+            - [ ] **Macro Packages: `-man` Required Coverage:** (REQ: REQ-09-2415)
+                - [ ] Implement document prologue macros: `.TH`, `.DT`, `.UC` with BSD-compatible defaults. (REQ: REQ-09-2416)
+                - [ ] Implement sectioning macros: `.SH`, `.SS`. (REQ: REQ-09-2417)
+                - [ ] Implement paragraph macros: `.PP`, `.P`, `.LP`. (REQ: REQ-09-2418)
+                - [ ] Implement tagged/indented paragraph macros: `.TP`, `.IP`, `.HP`, `.TQ`. (REQ: REQ-09-2419)
+                - [ ] Implement font-switching macros: `.B`, `.I`, `.BR`, `.RB`, `.BI`, `.IB`, `.IR`, `.RI`. (REQ: REQ-09-2420)
+                - [ ] Implement spacing control macros: `.sp`, `.br`, `.nf`, `.fi` wrappers as expected by pages. (REQ: REQ-09-2421)
+                - [ ] Implement display-like helpers used in common man sources. (REQ: REQ-09-2422)
+                - [ ] Implement `.RS`/`.RE` relative indent stack behavior. (REQ: REQ-09-2423)
+                - [ ] Implement synopsis helpers preserving argument spacing. (REQ: REQ-09-2424)
+                - [ ] Implement literal block behavior used by code examples. (REQ: REQ-09-2425)
+                - [ ] Implement macro argument defaulting and empty-argument behavior matching BSD man. (REQ: REQ-09-2426)
+                - [ ] Implement macro redefinition safety policy for local overrides in pages. (REQ: REQ-09-2427)
+            - [ ] **Macro Packages: `-mdoc` Required Coverage:** (REQ: REQ-09-2428)
+                - [ ] Implement prologue validation for `.Dd`, `.Dt`, `.Os`. (REQ: REQ-09-2429)
+                - [ ] Implement section/block macros: `.Sh`, `.Ss`, `.Pp`. (REQ: REQ-09-2430)
+                - [ ] Implement list macros: `.Bl`, `.It`, `.El` with key list types (`-bullet`, `-enum`, `-tag`, `-diag`, `-hang`, `-ohang`, `-inset`). (REQ: REQ-09-2431)
+                - [ ] Implement display macros: `.Bd`, `.Ed`. (REQ: REQ-09-2432)
+                - [ ] Implement enclosure macros: `.Oo`/`.Oc`, `.Op`, `.Aq`, `.Bq`, `.Dq`, `.Pq`, `.Brq`. (REQ: REQ-09-2433)
+                - [ ] Implement argument/flag/name macros: `.Nm`, `.Fl`, `.Ar`, `.Cm`, `.Ic`. (REQ: REQ-09-2434)
+                - [ ] Implement cross-reference macros: `.Xr`, `.Sx`. (REQ: REQ-09-2435)
+                - [ ] Implement library/function macros: `.Lb`, `.In`, `.Fn`, `.Fa`, `.Ft`, `.Fo`, `.Fc`. (REQ: REQ-09-2436)
+                - [ ] Implement standards/history metadata macros: `.St`, `.At`, `.Bx`, `.Fx`, `.Nx`, `.Ox`, `.Dx`. (REQ: REQ-09-2437)
+                - [ ] Implement punctuation handling and spacing suppression rules required by mdoc grammar. (REQ: REQ-09-2438)
+                - [ ] Implement callable semantic node model so macros can influence formatting context. (REQ: REQ-09-2439)
+                - [ ] Add compatibility tasks for commonly used but non-standard mdoc idioms. (REQ: REQ-09-2440)
+            - [ ] **Macro Packages: Minimal `-ms` Compatibility:** (REQ: REQ-09-2441)
+                - [ ] Implement paragraph macros `.PP`, `.LP`, `.IP`. (REQ: REQ-09-2442)
+                - [ ] Implement heading macros `.NH`, `.SH`. (REQ: REQ-09-2240, REQ-09-2443)
+                - [ ] Implement quote/display basics needed for legacy docs in tree. (REQ: REQ-09-2444)
+                - [ ] Implement title/date author subset required for simple manuscripts. (REQ: REQ-09-2445)
+                - [ ] Document unsupported advanced `-ms` requests as explicit non-goals. (REQ: REQ-09-2446)
+            - [ ] **Macro Expansion Semantics, Scoping, and Redefinition:** (REQ: REQ-09-2447)
+                - [ ] Define argument interpolation rules for quoted vs unquoted macro arguments. (REQ: REQ-09-2448)
+                - [ ] Define late-expansion vs early-expansion behavior for nested macros. (REQ: REQ-09-2449)
+                - [ ] Implement local temporary strings/registers for package internals when required. (REQ: REQ-09-2450)
+                - [ ] Implement macro shadowing and unshadowing rules across include boundaries. (REQ: REQ-09-2451)
+                - [ ] Implement safe redefinition guards for core package macros in strict mode. (REQ: REQ-09-2452)
+                - [ ] Implement `.als`-style aliasing decision (support or explicit incompatibility task). (REQ: REQ-09-2453)
+                - [ ] Add diagnostics when pages rely on unsupported macro-argument edge behaviors. (REQ: REQ-09-2454)
+            - [ ] **Output Backend: ASCII Terminal (`nroff`-Style):** (REQ: REQ-09-2455)
+                - [ ] Implement backend abstraction separating layout tree from device rendering. (REQ: REQ-09-2456)
+                - [ ] Implement plain terminal text renderer with deterministic whitespace policy. (REQ: REQ-09-2457)
+                - [ ] Implement indentation output logic with tab/space balancing. (REQ: REQ-09-2458)
+                - [ ] Implement page header/footer emission for macros that require it. (REQ: REQ-09-2459)
+                - [ ] Implement literal-mode rendering without fill/adjust transformations. (REQ: REQ-09-2460)
+                - [ ] Implement fallback glyph mapping for unsupported special characters. (REQ: REQ-09-2461)
+                - [ ] Implement configurable line width default (80) with CLI/environment overrides. (REQ: REQ-09-2462)
+                - [ ] Implement optional margin clipping diagnostics for overflowed lines. (REQ: REQ-09-2463)
+            - [ ] **Output Backend: Overstrike, Bold, and Underline:** (REQ: REQ-09-2464)
+                - [ ] Implement backspace overstrike sequences for bold rendering. (REQ: REQ-09-2465)
+                - [ ] Implement underline rendering using underscore-backspace conventions. (REQ: REQ-09-2466)
+                - [ ] Implement conflict resolution when nested font changes overlap. (REQ: REQ-09-2467)
+                - [ ] Implement backend switch to disable overstrike for plain-output consumers. (REQ: REQ-09-2468)
+                - [ ] Add tests verifying historical terminal output byte-for-byte for styled tokens. (REQ: REQ-09-2469)
+            - [ ] **Output Backend: Width, Tabs, and Indentation Calculations:** (REQ: REQ-09-2470)
+                - [ ] Implement tab stop table with default and custom stops. (REQ: REQ-09-2471)
+                - [ ] Implement tab expansion in both fill and no-fill contexts. (REQ: REQ-09-2472)
+                - [ ] Implement escape-aware display width calculation for style and zero-width escapes. (REQ: REQ-09-2473)
+                - [ ] Implement wide-character policy decision and ASCII fallback in `nroff`. (REQ: REQ-09-2474)
+                - [ ] Implement tagged paragraph width balancing for `.TP` and `.It -tag`. (REQ: REQ-09-2475)
+                - [ ] Implement hanging-indent behavior for continuation lines. (REQ: REQ-09-2476)
+                - [ ] Implement indentation stack overflow checks with diagnostics. (REQ: REQ-09-2477)
+            - [ ] **Output Backend: Future Device Hooks (Tasks Only):** (REQ: REQ-09-2478)
+                - [ ] Define stable intermediate representation for block/inline/layout nodes. (REQ: REQ-09-2479)
+                - [ ] Define backend vtable for HTML/PDF/PostScript future renderers. (REQ: REQ-09-2480)
+                - [ ] Add no-op HTML backend stub behind compile-time flag. (REQ: REQ-09-2481)
+                - [ ] Add no-op PDF backend stub behind compile-time flag. (REQ: REQ-09-2482)
+                - [ ] Document backend API contracts and invariants in developer design doc. (REQ: REQ-09-2483)
+            - [ ] **Compatibility Targets and Explicit Non-Goals:** (REQ: REQ-09-2484)
+                - [ ] Create per-request compatibility notes vs BSD mandoc and groff. (REQ: REQ-09-2485)
+                - [ ] Add decision task for each known BSD/GNU behavioral conflict. (REQ: REQ-09-2486)
+                - [ ] Prefer BSD output when conflicts are user-visible in manpages. (REQ: REQ-09-2487)
+                - [ ] Mark GNU-only extensions (`.als`, `.do`, `.nop`, `.while` edge cases, GNU long names, device controls) as unsupported unless explicitly accepted. (REQ: REQ-09-2488)
+                - [ ] Add diagnostics for ignored GNU-specific requests when encountered. (REQ: REQ-09-2489)
+                - [ ] Add compatibility mode switch task only if real-world pages require it. (REQ: REQ-09-2490)
+                - [ ] Add regression corpus of historical manpages from BSD and Unix variants. (REQ: REQ-09-2491)
+            - [ ] **`man` Command: CLI, Modes, and Exit Behavior:** (REQ: REQ-09-2492)
+                - [ ] Implement `man` argument parser supporting section-prefix and name forms. (REQ: REQ-09-2493)
+                - [ ] Implement `man <section> <name>` and `man <name> <section>` disambiguation. (REQ: REQ-09-2494)
+                - [ ] Implement options `-a`, `-f`, `-k`, `-w`, `-M`, `-m`, `-s`, `-S`, `-l`, `-P`, `-C`. (REQ: REQ-09-2495)
+                - [ ] Implement `-f` whatis mode behavior and output formatting. (REQ: REQ-09-2496)
+                - [ ] Implement `-k` apropos mode behavior and keyword matching. (REQ: REQ-09-2497)
+                - [ ] Implement `-w` path-only mode without invoking formatter. (REQ: REQ-09-2498)
+                - [ ] Implement `-a` all-matches traversal with pager/session behavior. (REQ: REQ-09-2499)
+                - [ ] Implement consistent exit codes: success, no entry, usage, runtime failure. (REQ: REQ-09-2500)
+                - [ ] Implement option conflict resolution and precedence rules. (REQ: REQ-09-2501)
+                - [ ] Document BSD-vs-GNU option behavior decisions explicitly. (REQ: REQ-09-2502)
+            - [ ] **`man` Command: Page Discovery and Search Path Resolution:** (REQ: REQ-09-2503)
+                - [ ] Implement section canonicalization and alias mapping (for `3`, `3p`, `n`, local sections). (REQ: REQ-09-2504)
+                - [ ] Implement default search order with configurable section list. (REQ: REQ-09-2505)
+                - [ ] Implement `MANPATH` parser including empty-field inheritance semantics. (REQ: REQ-09-2506)
+                - [ ] Implement system path defaults and user path overlay semantics. (REQ: REQ-09-2507)
+                - [ ] Implement `-M` temporary MANPATH override semantics. (REQ: REQ-09-2508)
+                - [ ] Implement architecture/OS-specific suffix directory search when configured. (REQ: REQ-09-2509)
+                - [ ] Implement locale-aware subdirectory fallback chain. (REQ: REQ-09-2510)
+                - [ ] Implement exact-name match before partial/alias match policy. (REQ: REQ-09-2511)
+                - [ ] Implement support for source suffixes (`.1`, `.1.gz`, `.1.bz2`, `.1.xz`, etc.). (REQ: REQ-09-2512)
+                - [ ] Implement deterministic tie-breaking for duplicate page names across paths. (REQ: REQ-09-2513)
+                - [ ] Emit ambiguity diagnostics listing candidate pages and sections. (REQ: REQ-09-2514)
+            - [ ] **`man` Command: Preprocessing Pipeline and Roff Invocation:** (REQ: REQ-09-2515)
+                - [ ] Implement page format detection (`man` vs `mdoc`) by content heuristics and safe fallbacks. (REQ: REQ-09-2516)
+                - [ ] Implement explicit macro package override via CLI. (REQ: REQ-09-2517)
+                - [ ] Build internal roff invocation pipeline without unsafe shell string concatenation. (REQ: REQ-09-2518)
+                - [ ] Implement decompression pipeline for `.gz`, `.bz2`, and `.xz` sources. (REQ: REQ-09-2519)
+                - [ ] Implement optional preprocessor stage hooks (`tbl`, `eqn`, `pic`) as stubs with diagnostics. (REQ: REQ-09-2520)
+                - [ ] Implement charset detection and conversion path for legacy encodings. (REQ: REQ-09-2521)
+                - [ ] Implement pass-through of selected formatter warnings in verbose mode. (REQ: REQ-09-2522)
+                - [ ] Ensure temporary file/pipe lifecycle is leak-free and signal-safe. (REQ: REQ-09-2523)
+            - [ ] **`man` Command: Pager and Terminal Integration:** (REQ: REQ-09-2524)
+                - [ ] Implement pager resolution precedence: `-P`, `MANPAGER`, `PAGER`, fallback pager. (REQ: REQ-09-2525)
+                - [ ] Implement fallback pager when `less` is unavailable. (REQ: REQ-09-2526)
+                - [ ] Implement `LESS` environment integration and sane defaults. (REQ: REQ-09-2527)
+                - [ ] Implement non-interactive output mode when stdout is not a tty. (REQ: REQ-09-2528)
+                - [ ] Implement SIGPIPE-safe behavior when pager exits early. (REQ: REQ-09-2529)
+                - [ ] Preserve formatter backspace sequences expected by pager (`less -R`/plain mode decision task). (REQ: REQ-09-2530)
+                - [ ] Implement terminal width detection and pass width to formatter. (REQ: REQ-09-2531)
+            - [ ] **`man` Command: Caching, Catpages, and Performance:** (REQ: REQ-09-2532)
+                - [ ] Implement catpage directory layout keyed by path, section, and locale. (REQ: REQ-09-2533)
+                - [ ] Implement cache key metadata including source mtime, size, and formatter version. (REQ: REQ-09-2534)
+                - [ ] Implement cache reuse on valid metadata match. (REQ: REQ-09-2535)
+                - [ ] Implement cache invalidation on source/formatter/config change. (REQ: REQ-09-2536)
+                - [ ] Implement atomic cache writes using temp file + rename. (REQ: REQ-09-2537)
+                - [ ] Implement file permission and ownership policy for shared cache directories. (REQ: REQ-09-2538)
+                - [ ] Implement per-user cache fallback when system cache is not writable. (REQ: REQ-09-2539)
+                - [ ] Add lock strategy preventing cache corruption under concurrent `man` processes. (REQ: REQ-09-2540)
+                - [ ] Add performance benchmarks for cold-cache and warm-cache runs. (REQ: REQ-09-2541)
+            - [ ] **`man` Command: Diagnostics and UX:** (REQ: REQ-09-2542)
+                - [ ] Implement missing page error with searched paths and sections. (REQ: REQ-09-2543)
+                - [ ] Implement ambiguous match message with ranked candidates. (REQ: REQ-09-2544)
+                - [ ] Implement section-conflict guidance when same name exists in multiple sections. (REQ: REQ-09-2545)
+                - [ ] Implement concise hints (`Try 'man 2 foo'`) for common ambiguity cases. (REQ: REQ-09-2546)
+                - [ ] Implement user-friendly `-k`/`-f` no-result messages. (REQ: REQ-09-2547)
+                - [ ] Implement localized error output boundaries and UTF-8 safety. (REQ: REQ-09-2548)
+                - [ ] Ensure all diagnostics are testable and stable for golden tests. (REQ: REQ-09-2549)
+            - [ ] **Security and Robustness (`roff` + `man`):** (REQ: REQ-09-2550)
+                - [ ] Forbid path traversal outside allowed roots for `.so` and `man -l` unless explicitly requested. (REQ: REQ-09-2551)
+                - [ ] Ensure decompressor invocation uses execve argv arrays, never shell expansion. (REQ: REQ-09-2552)
+                - [ ] Add input size limits for decompressed streams to mitigate zip-bomb style abuse. (REQ: REQ-09-2553)
+                - [ ] Add recursion and macro expansion limits to prevent CPU/memory exhaustion. (REQ: REQ-09-2554)
+                - [ ] Harden temporary file creation (`mkstemp`) and directory permissions. (REQ: REQ-09-2555)
+                - [ ] Validate environment variables (`MANPATH`, `PAGER`, `LESS`) before use. (REQ: REQ-09-2556)
+                - [ ] Add privilege boundary policy for setuid/setgid contexts (disable unsafe features). (REQ: REQ-09-2557)
+            - [ ] **Testing: Unit Coverage (Roff/Man):** (REQ: REQ-09-2558)
+                - [ ] Add lexer unit tests for request/text/escape tokenization boundaries. (REQ: REQ-09-2559)
+                - [ ] Add parser unit tests for request argument splitting and quoting. (REQ: REQ-09-2560)
+                - [ ] Add unit tests for register arithmetic, formatting, and default values. (REQ: REQ-09-2561)
+                - [ ] Add unit tests for string register interpolation across nested macro calls. (REQ: REQ-09-2562)
+                - [ ] Add unit tests for `.if`/`.ie`/`.el` precedence and nesting. (REQ: REQ-09-2563)
+                - [ ] Add unit tests for `.while` loop termination and guard limits. (REQ: REQ-09-2564)
+                - [ ] Add unit tests for diversion capture and replay ordering. (REQ: REQ-09-2565)
+                - [ ] Add unit tests for environment push/pop state isolation. (REQ: REQ-09-2566)
+                - [ ] Add unit tests for fill/no-fill transitions and line-break decisions. (REQ: REQ-09-2567)
+                - [ ] Add unit tests for scaling unit conversions and rounding behavior. (REQ: REQ-09-2568)
+                - [ ] Add unit tests for `.so` include path resolution and failure modes. (REQ: REQ-09-2569)
+                - [ ] Add unit tests for `man` section parsing, option precedence, and path selection. (REQ: REQ-09-2570)
+                - [ ] Add unit tests for compressed source detection and decompressor dispatch. (REQ: REQ-09-2571)
+                - [ ] Add unit tests for cache key generation and invalidation decisions. (REQ: REQ-09-2572)
+                - [ ] Add unit tests for user-facing diagnostic message selection. (REQ: REQ-09-2573)
+            - [ ] **Testing: Property-Based Coverage:** (REQ: REQ-09-2574)
+                - [ ] Add property tests for random nested macro definitions and expansions. (REQ: REQ-09-2575)
+                - [ ] Add property tests for random conditional trees with deterministic evaluation. (REQ: REQ-09-2576)
+                - [ ] Add property tests for random environment stack operations preserving invariants. (REQ: REQ-09-2577)
+                - [ ] Add property tests for random indentation/tab configurations with width invariants. (REQ: REQ-09-2578)
+                - [ ] Add property tests for include graph generation with cycle detection invariants. (REQ: REQ-09-2579)
+                - [ ] Add property tests for `man` search path permutations yielding stable ranking. (REQ: REQ-09-2580)
+                - [ ] Add property tests for cache metadata monotonicity across file timestamp changes. (REQ: REQ-09-2581)
+            - [ ] **Testing: Fuzzer Targets:** (REQ: REQ-09-2582)
+                - [ ] Add fuzz target for escape sequence parser. (REQ: REQ-09-2583)
+                - [ ] Add fuzz target for request/macro argument parser. (REQ: REQ-09-2584)
+                - [ ] Add fuzz target for macro expansion engine with recursion guards. (REQ: REQ-09-2585)
+                - [ ] Add fuzz target for conditional expression parser. (REQ: REQ-09-2586)
+                - [ ] Add fuzz target for diversion/environment stack state machine. (REQ: REQ-09-2587)
+                - [ ] Add fuzz target for scaling-unit numeric parser. (REQ: REQ-09-2588)
+                - [ ] Add fuzz target for malformed `.so` include directives and path normalization. (REQ: REQ-09-2589)
+                - [ ] Add fuzz target for mdoc inline punctuation and delimiter parsing. (REQ: REQ-09-2590)
+                - [ ] Add fuzz target for `man` CLI option parser and mixed positional arguments. (REQ: REQ-09-2591)
+                - [ ] Add fuzz target for `MANPATH` parser and separator edge cases. (REQ: REQ-09-2592)
+                - [ ] Add fuzz target for compressed input decoding wrappers with truncated/corrupt streams. (REQ: REQ-09-2593)
+                - [ ] Integrate all fuzzers into CI with corpus minimization and crash triage workflow. (REQ: REQ-09-2594)
+            - [ ] **Testing: Integration, Golden Output, and Performance:** (REQ: REQ-09-2595)
+                - [ ] Build golden corpus from project manpages across `man` and `mdoc` styles. (REQ: REQ-09-2596)
+                - [ ] Add integration test rendering corpus with internal `nroff` and comparing stable fixtures. (REQ: REQ-09-2597)
+                - [ ] Add differential tests against BSD mandoc for selected canonical pages. (REQ: REQ-09-2598)
+                - [ ] Add differential tests against groff for overlapping supported feature subset. (REQ: REQ-09-2599)
+                - [ ] Add end-to-end tests for `man` discovery (`section`, `MANPATH`, compressed pages, pager bypass). (REQ: REQ-09-2600)
+                - [ ] Add end-to-end tests for `man -k` and `man -f` with prepared whatis database fixtures. (REQ: REQ-09-2601)
+                - [ ] Add stress test for large manpage sets and repeated invocations. (REQ: REQ-09-2602)
+                - [ ] Add performance budget checks for startup latency and throughput. (REQ: REQ-09-2603)
+            - [ ] **Documentation Deliverables:** (REQ: REQ-09-2604)
+                - [ ] Write `man/man7/roff.7` language and request reference for supported subset. (REQ: REQ-09-2605)
+                - [ ] Write `man/man1/roff.1` command manual. (REQ: REQ-09-2606)
+                - [ ] Write `man/man1/nroff.1` command manual with terminal-specific behavior. (REQ: REQ-09-2607)
+                - [ ] Write `man/man1/man.1` command manual including all implemented options. (REQ: REQ-09-2608)
+                - [ ] Write `man/man7/man.7` macro package reference for supported macros. (REQ: REQ-09-2609)
+                - [ ] Write `man/man7/mdoc.7` supported semantic macro reference and limitations. (REQ: REQ-09-2610)
+                - [ ] Write `man/man7/ms.7` minimal compatibility reference and explicit non-goals. (REQ: REQ-09-2611)
+                - [ ] Document implementation-defined behavior for escapes, spacing, and diagnostics. (REQ: REQ-09-2612)
+                - [ ] Document BSD-vs-GNU compatibility choices and rationale. (REQ: REQ-09-2613)
+                - [ ] Document security model for includes, decompression, and pager invocation. (REQ: REQ-09-2614)
+                - [ ] Write developer design document for roff engine architecture, data flow, and extension points. (REQ: REQ-09-2615)
+                - [ ] Add maintainer guide for adding new requests/macros/backends safely. (REQ: REQ-09-2616)
+            - [ ] **Release Gating and Completion Criteria:** (REQ: REQ-09-2617)
+                - [ ] Define required pass criteria for unit/property/fuzz/integration suites. (REQ: REQ-09-2618)
+                - [ ] Define compatibility acceptance thresholds against BSD mandoc corpus. (REQ: REQ-09-2619)
+                - [ ] Define performance acceptance thresholds for `man` warm and cold paths. (REQ: REQ-09-2620)
+                - [ ] Define documentation completeness checklist before marking feature complete. (REQ: REQ-09-2621)
+                - [ ] Add final audit task verifying no unchecked intentional incompatibilities remain undocumented. (REQ: REQ-09-2622)
 
 
 ## User Stories

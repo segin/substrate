@@ -17,425 +17,425 @@
 > History supports `H_ENTER`/`H_FIRST`/`H_LAST`/`H_PREV`/`H_NEXT`/
 > `H_SETSIZE`. Terminal supports raw/orig mode switching.
 
-- [ ] **Core Foundation (`editline.c`, `el.h`, `histedit.h`):**
-    - [ ] Create `lib/edit/` directory structure.
-    - [ ] Implement `el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr)`: allocate `EditLine`, initialize line buffer (1024‑byte default), store streams.
-    - [ ] Implement `el_end(EditLine *el)`: restore terminal, free line buffer and state.
-    - [ ] Implement `el_reset(EditLine *el)`: zero `len`/`cursor`, NUL‑terminate buffer.
-    - [ ] Implement `el_line(EditLine *el)`: return `LineInfo` with `buffer`/`cursor`/`lastchar` pointers.
-    - [ ] Define `struct editline` (streams, terminal, line, history, prompt).
-    - [ ] Define `struct line` (buffer, cap, len, cursor, `LineInfo`).
-    - [ ] Define `struct terminal` (orig/raw `termios`, `is_raw` flag).
-    - [ ] Add `prog` name storage for error messages.
-    - [ ] Add `editor_mode` field to `struct editline` (enum: `ED_EMACS`, `ED_VI`).
-    - [ ] Add `signal_state` field to `struct editline` (saved dispositions + mask).
-    - [ ] Add `completion` callback pointer and client data to `struct editline`.
-    - [ ] Add `rprompt` (right‑prompt) pointer to `struct editline`.
-    - [ ] Dynamic line‑buffer growth: `realloc` when `len + 1 >= cap` (double strategy, capped at 1 MiB).
-    - [ ] Implement `el_resize(EditLine *el)`: force terminal size re‑query and redraw.
-    - [ ] Thread‑safety: document that `EditLine` is not thread‑safe (single‑thread contract).
+- [ ] **Core Foundation (`editline.c`, `el.h`, `histedit.h`):** (REQ: REQ-08-0001)
+    - [ ] Create `lib/edit/` directory structure. (REQ: REQ-08-0002)
+    - [ ] Implement `el_init(const char *prog, FILE *fin, FILE *fout, FILE *ferr)`: allocate `EditLine`, initialize line buffer (1024‑byte default), store streams. (REQ: REQ-08-0003)
+    - [ ] Implement `el_end(EditLine *el)`: restore terminal, free line buffer and state. (REQ: REQ-08-0004)
+    - [ ] Implement `el_reset(EditLine *el)`: zero `len`/`cursor`, NUL‑terminate buffer. (REQ: REQ-08-0005)
+    - [ ] Implement `el_line(EditLine *el)`: return `LineInfo` with `buffer`/`cursor`/`lastchar` pointers. (REQ: REQ-08-0006)
+    - [ ] Define `struct editline` (streams, terminal, line, history, prompt). (REQ: REQ-08-0007)
+    - [ ] Define `struct line` (buffer, cap, len, cursor, `LineInfo`). (REQ: REQ-08-0008)
+    - [ ] Define `struct terminal` (orig/raw `termios`, `is_raw` flag). (REQ: REQ-08-0009)
+    - [ ] Add `prog` name storage for error messages. (REQ: REQ-08-0010)
+    - [ ] Add `editor_mode` field to `struct editline` (enum: `ED_EMACS`, `ED_VI`). (REQ: REQ-08-0011)
+    - [ ] Add `signal_state` field to `struct editline` (saved dispositions + mask). (REQ: REQ-08-0012)
+    - [ ] Add `completion` callback pointer and client data to `struct editline`. (REQ: REQ-08-0013)
+    - [ ] Add `rprompt` (right‑prompt) pointer to `struct editline`. (REQ: REQ-08-0014)
+    - [ ] Dynamic line‑buffer growth: `realloc` when `len + 1 >= cap` (double strategy, capped at 1 MiB). (REQ: REQ-08-0015)
+    - [ ] Implement `el_resize(EditLine *el)`: force terminal size re‑query and redraw. (REQ: REQ-08-0016)
+    - [ ] Thread‑safety: document that `EditLine` is not thread‑safe (single‑thread contract). (REQ: REQ-08-0017)
 
-- [ ] **Line Editing Engine (`readline.c`):**
-    - [ ] **Character Insertion:**
-        - [ ] Insert printable ASCII at cursor with `memmove` rightward shift.
-        - [ ] Reject insertion when buffer is at capacity (grow or beep).
-        - [ ] Support overwrite/replace mode toggle (Insert key).
-    - [ ] **Deletion:**
-        - [ ] Backspace (`^H` / 0x7F): delete char before cursor.
-        - [ ] Delete (`^D`): delete char at cursor (or EOF on empty line).
-        - [ ] `kill-line` (`^K`): delete from cursor to end of line, save to kill ring.
-        - [ ] `backward-kill-line` (`^U`): delete from start to cursor, save to kill ring.
-        - [ ] `kill-word` (`M-d`): delete from cursor to end of word, save to kill ring.
-        - [ ] `backward-kill-word` (`M-^H` / `M-DEL`): delete word before cursor, save to kill ring.
-        - [ ] `delete-char-or-list` (configurable `^D` variant): list completions if at end, else delete.
-    - [ ] **Cursor Navigation:**
-        - [ ] Left/Right arrow keys (ESC `[D` / ESC `[C`).
-        - [ ] `beginning-of-line` (`^A`): move to column 0.
-        - [ ] `end-of-line` (`^E`): move to `lastchar`.
-        - [ ] `forward-word` (`M-f`): skip to next word boundary.
-        - [ ] `backward-word` (`M-b`): skip to previous word boundary.
-        - [ ] Home / End keys (ESC `[H`, ESC `[F`, and alternate sequences ESC `[1~` / ESC `[4~`).
-    - [ ] **Screen Refresh (`refresh_line`):**
-        - [ ] `\\r` + `CSI K` + prompt + buffer + cursor reposition via `CSI %dD`.
-        - [ ] Handle multi‑line buffers: track physical rows, scroll window.
-        - [ ] Calculate visible width accounting for prompt length and terminal columns.
-        - [ ] Handle lines wider than terminal width (horizontal scrolling or wrapping).
-        - [ ] Optimize refresh: track dirty region and only redraw changed portion.
-    - [ ] **History Navigation:**
-        - [ ] Up arrow (`ESC [A`): `H_PREV` — load previous history entry.
-        - [ ] Down arrow (`ESC [B`): `H_NEXT` — load next or reset to empty.
-        - [ ] Save current input before first history navigation; restore on down‑past‑end.
-        - [ ] `history-search-backward` (`^R`): incremental reverse search.
-        - [ ] `history-search-forward` (`^S`): incremental forward search.
-        - [ ] `beginning-of-history` (`M-<`): jump to oldest entry.
-        - [ ] `end-of-history` (`M->`): jump to newest / current input.
-    - [ ] **Special Keys:**
-        - [ ] `^C`: print `^C`, reset line, reprint prompt.
-        - [ ] `^L`: clear screen (`CSI H` + `CSI 2J`), refresh line.
-        - [ ] Enter (`\\n` / `\\r`): accept line, restore terminal, return buffer.
-        - [ ] `^T` (`transpose-chars`): swap char at cursor with previous.
-        - [ ] `^W` (`unix-word-rubout`): kill word backward (whitespace‑delimited).
-        - [ ] `^Y` (`yank`): paste most recent kill‑ring entry.
-        - [ ] `M-y` (`yank-pop`): cycle through kill ring after yank.
-        - [ ] `^_` (`undo`): undo last editing operation.
-    - [ ] **Escape Sequence Decoding:**
-        - [ ] Two‑byte CSI: `ESC [` + final byte.
-        - [ ] Three‑byte CSI with numeric parameter: `ESC [ <digit> ~` (Delete, Insert, PgUp, PgDn).
-        - [ ] SS3 sequences: `ESC O A`/`B`/`C`/`D` (alternate arrow encoding).
-        - [ ] Extended CSI: `ESC [ 1 ; <mod> <final>` (Shift/Ctrl/Alt + arrow/Home/End).
-        - [ ] Timeout on incomplete escape (avoid blocking on bare ESC).
-    - [ ] **Kill Ring:**
-        - [ ] Circular buffer (8 entries default).
-        - [ ] `kill-line`, `kill-word`, `backward-kill-word`, `backward-kill-line` all push to ring.
-        - [ ] Consecutive kills append to the same ring entry.
-        - [ ] `yank` inserts most recent; `yank-pop` rotates.
-    - [ ] **Undo System:**
-        - [ ] Record each editing operation (insert, delete, cursor move) as an undo entry.
-        - [ ] `^_` pops the undo stack and reverts the operation.
-        - [ ] Limit undo stack depth (256 entries default).
+- [ ] **Line Editing Engine (`readline.c`):** (REQ: REQ-08-0018)
+    - [ ] **Character Insertion:** (REQ: REQ-08-0019)
+        - [ ] Insert printable ASCII at cursor with `memmove` rightward shift. (REQ: REQ-08-0020)
+        - [ ] Reject insertion when buffer is at capacity (grow or beep). (REQ: REQ-08-0021)
+        - [ ] Support overwrite/replace mode toggle (Insert key). (REQ: REQ-08-0022)
+    - [ ] **Deletion:** (REQ: REQ-08-0023)
+        - [ ] Backspace (`^H` / 0x7F): delete char before cursor. (REQ: REQ-08-0024)
+        - [ ] Delete (`^D`): delete char at cursor (or EOF on empty line). (REQ: REQ-08-0025)
+        - [ ] `kill-line` (`^K`): delete from cursor to end of line, save to kill ring. (REQ: REQ-08-0026)
+        - [ ] `backward-kill-line` (`^U`): delete from start to cursor, save to kill ring. (REQ: REQ-08-0027)
+        - [ ] `kill-word` (`M-d`): delete from cursor to end of word, save to kill ring. (REQ: REQ-08-0028)
+        - [ ] `backward-kill-word` (`M-^H` / `M-DEL`): delete word before cursor, save to kill ring. (REQ: REQ-08-0029)
+        - [ ] `delete-char-or-list` (configurable `^D` variant): list completions if at end, else delete. (REQ: REQ-08-0030)
+    - [ ] **Cursor Navigation:** (REQ: REQ-08-0031, REQ-08-0327)
+        - [ ] Left/Right arrow keys (ESC `[D` / ESC `[C`). (REQ: REQ-08-0032)
+        - [ ] `beginning-of-line` (`^A`): move to column 0. (REQ: REQ-08-0033)
+        - [ ] `end-of-line` (`^E`): move to `lastchar`. (REQ: REQ-08-0034)
+        - [ ] `forward-word` (`M-f`): skip to next word boundary. (REQ: REQ-08-0035)
+        - [ ] `backward-word` (`M-b`): skip to previous word boundary. (REQ: REQ-08-0036)
+        - [ ] Home / End keys (ESC `[H`, ESC `[F`, and alternate sequences ESC `[1~` / ESC `[4~`). (REQ: REQ-08-0037)
+    - [ ] **Screen Refresh (`refresh_line`):** (REQ: REQ-08-0038)
+        - [ ] `\\r` + `CSI K` + prompt + buffer + cursor reposition via `CSI %dD`. (REQ: REQ-08-0039)
+        - [ ] Handle multi‑line buffers: track physical rows, scroll window. (REQ: REQ-08-0040)
+        - [ ] Calculate visible width accounting for prompt length and terminal columns. (REQ: REQ-08-0041)
+        - [ ] Handle lines wider than terminal width (horizontal scrolling or wrapping). (REQ: REQ-08-0042)
+        - [ ] Optimize refresh: track dirty region and only redraw changed portion. (REQ: REQ-08-0043)
+    - [ ] **History Navigation:** (REQ: REQ-08-0044)
+        - [ ] Up arrow (`ESC [A`): `H_PREV` — load previous history entry. (REQ: REQ-08-0045)
+        - [ ] Down arrow (`ESC [B`): `H_NEXT` — load next or reset to empty. (REQ: REQ-08-0046)
+        - [ ] Save current input before first history navigation; restore on down‑past‑end. (REQ: REQ-08-0047)
+        - [ ] `history-search-backward` (`^R`): incremental reverse search. (REQ: REQ-08-0048)
+        - [ ] `history-search-forward` (`^S`): incremental forward search. (REQ: REQ-08-0049)
+        - [ ] `beginning-of-history` (`M-<`): jump to oldest entry. (REQ: REQ-08-0050)
+        - [ ] `end-of-history` (`M->`): jump to newest / current input. (REQ: REQ-08-0051)
+    - [ ] **Special Keys:** (REQ: REQ-08-0052)
+        - [ ] `^C`: print `^C`, reset line, reprint prompt. (REQ: REQ-08-0053)
+        - [ ] `^L`: clear screen (`CSI H` + `CSI 2J`), refresh line. (REQ: REQ-08-0054)
+        - [ ] Enter (`\\n` / `\\r`): accept line, restore terminal, return buffer. (REQ: REQ-08-0055)
+        - [ ] `^T` (`transpose-chars`): swap char at cursor with previous. (REQ: REQ-08-0056)
+        - [ ] `^W` (`unix-word-rubout`): kill word backward (whitespace‑delimited). (REQ: REQ-08-0057)
+        - [ ] `^Y` (`yank`): paste most recent kill‑ring entry. (REQ: REQ-08-0058)
+        - [ ] `M-y` (`yank-pop`): cycle through kill ring after yank. (REQ: REQ-08-0059)
+        - [ ] `^_` (`undo`): undo last editing operation. (REQ: REQ-08-0060)
+    - [ ] **Escape Sequence Decoding:** (REQ: REQ-08-0061)
+        - [ ] Two‑byte CSI: `ESC [` + final byte. (REQ: REQ-08-0062)
+        - [ ] Three‑byte CSI with numeric parameter: `ESC [ <digit> ~` (Delete, Insert, PgUp, PgDn). (REQ: REQ-08-0063)
+        - [ ] SS3 sequences: `ESC O A`/`B`/`C`/`D` (alternate arrow encoding). (REQ: REQ-08-0064)
+        - [ ] Extended CSI: `ESC [ 1 ; <mod> <final>` (Shift/Ctrl/Alt + arrow/Home/End). (REQ: REQ-08-0065)
+        - [ ] Timeout on incomplete escape (avoid blocking on bare ESC). (REQ: REQ-08-0066)
+    - [ ] **Kill Ring:** (REQ: REQ-08-0067)
+        - [ ] Circular buffer (8 entries default). (REQ: REQ-08-0068)
+        - [ ] `kill-line`, `kill-word`, `backward-kill-word`, `backward-kill-line` all push to ring. (REQ: REQ-08-0069)
+        - [ ] Consecutive kills append to the same ring entry. (REQ: REQ-08-0070)
+        - [ ] `yank` inserts most recent; `yank-pop` rotates. (REQ: REQ-08-0071)
+    - [ ] **Undo System:** (REQ: REQ-08-0072)
+        - [ ] Record each editing operation (insert, delete, cursor move) as an undo entry. (REQ: REQ-08-0073)
+        - [ ] `^_` pops the undo stack and reverts the operation. (REQ: REQ-08-0074)
+        - [ ] Limit undo stack depth (256 entries default). (REQ: REQ-08-0075)
 
-- [ ] **Emacs Key‑Binding Map:**
-    - [ ] **Implemented:**
-        - [ ] Printable self‑insert (0x20–0x7E).
-        - [ ] Backspace / Delete.
-        - [ ] `^C` (interrupt), `^D` (delete/EOF), `^L` (clear screen).
-        - [ ] Arrow keys (cursor movement + history).
-    - [ ] **Required Additions:**
-        - [ ] `^A` — `beginning-of-line`.
-        - [ ] `^B` — `backward-char`.
-        - [ ] `^E` — `end-of-line`.
-        - [ ] `^F` — `forward-char`.
-        - [ ] `^K` — `kill-line`.
-        - [ ] `^N` — `next-history` (alias for down‑arrow).
-        - [ ] `^P` — `previous-history` (alias for up‑arrow).
-        - [ ] `^R` — `reverse-search-history`.
-        - [ ] `^S` — `forward-search-history`.
-        - [ ] `^T` — `transpose-chars`.
-        - [ ] `^U` — `unix-line-discard`.
-        - [ ] `^W` — `unix-word-rubout`.
-        - [ ] `^Y` — `yank`.
-        - [ ] `^_` — `undo`.
-        - [ ] `M-b` — `backward-word`.
-        - [ ] `M-c` — `capitalize-word`.
-        - [ ] `M-d` — `kill-word`.
-        - [ ] `M-f` — `forward-word`.
-        - [ ] `M-l` — `downcase-word`.
-        - [ ] `M-u` — `upcase-word`.
-        - [ ] `M-y` — `yank-pop`.
-        - [ ] `M-<` — `beginning-of-history`.
-        - [ ] `M->` — `end-of-history`.
-        - [ ] `M-.` — `yank-last-arg` (insert last arg of previous command).
-        - [ ] `Tab` (`^I`) — `complete` (filename completion).
+- [ ] **Emacs Key‑Binding Map:** (REQ: REQ-08-0076)
+    - [ ] **Implemented:** (REQ: REQ-08-0077, REQ-08-0301)
+        - [ ] Printable self‑insert (0x20–0x7E). (REQ: REQ-08-0078)
+        - [ ] Backspace / Delete. (REQ: REQ-08-0079)
+        - [ ] `^C` (interrupt), `^D` (delete/EOF), `^L` (clear screen). (REQ: REQ-08-0080)
+        - [ ] Arrow keys (cursor movement + history). (REQ: REQ-08-0081)
+    - [ ] **Required Additions:** (REQ: REQ-08-0082)
+        - [ ] `^A` — `beginning-of-line`. (REQ: REQ-08-0083)
+        - [ ] `^B` — `backward-char`. (REQ: REQ-08-0084)
+        - [ ] `^E` — `end-of-line`. (REQ: REQ-08-0085)
+        - [ ] `^F` — `forward-char`. (REQ: REQ-08-0086)
+        - [ ] `^K` — `kill-line`. (REQ: REQ-08-0087)
+        - [ ] `^N` — `next-history` (alias for down‑arrow). (REQ: REQ-08-0088)
+        - [ ] `^P` — `previous-history` (alias for up‑arrow). (REQ: REQ-08-0089)
+        - [ ] `^R` — `reverse-search-history`. (REQ: REQ-08-0090)
+        - [ ] `^S` — `forward-search-history`. (REQ: REQ-08-0091)
+        - [ ] `^T` — `transpose-chars`. (REQ: REQ-08-0092)
+        - [ ] `^U` — `unix-line-discard`. (REQ: REQ-08-0093)
+        - [ ] `^W` — `unix-word-rubout`. (REQ: REQ-08-0094)
+        - [ ] `^Y` — `yank`. (REQ: REQ-08-0095)
+        - [ ] `^_` — `undo`. (REQ: REQ-08-0096)
+        - [ ] `M-b` — `backward-word`. (REQ: REQ-08-0097)
+        - [ ] `M-c` — `capitalize-word`. (REQ: REQ-08-0098)
+        - [ ] `M-d` — `kill-word`. (REQ: REQ-08-0099)
+        - [ ] `M-f` — `forward-word`. (REQ: REQ-08-0100)
+        - [ ] `M-l` — `downcase-word`. (REQ: REQ-08-0101)
+        - [ ] `M-u` — `upcase-word`. (REQ: REQ-08-0102)
+        - [ ] `M-y` — `yank-pop`. (REQ: REQ-08-0103)
+        - [ ] `M-<` — `beginning-of-history`. (REQ: REQ-08-0104)
+        - [ ] `M->` — `end-of-history`. (REQ: REQ-08-0105)
+        - [ ] `M-.` — `yank-last-arg` (insert last arg of previous command). (REQ: REQ-08-0106)
+        - [ ] `Tab` (`^I`) — `complete` (filename completion). (REQ: REQ-08-0107)
 
-- [ ] **Vi Mode (`EL_EDITOR "vi"`):**
-    - [ ] **Mode State Machine:**
-        - [ ] Insert mode (default on entry): self‑insert, ESC → command mode.
-        - [ ] Command mode: motion, edit, and search commands.
-        - [ ] Replace mode (`R`): overwrite characters, ESC → command mode.
-        - [ ] Track mode in `struct editline` (`vi_mode` enum: `VI_INSERT`, `VI_COMMAND`, `VI_REPLACE`).
-    - [ ] **Insert‑Mode Keys:**
-        - [ ] `ESC` — switch to command mode.
-        - [ ] `^H` / Backspace — delete backward.
-        - [ ] `^W` — delete word backward.
-        - [ ] `^U` — delete to start of line.
-        - [ ] `^D` — EOF / delete char.
-    - [ ] **Command‑Mode Motion:**
-        - [ ] `h` / `l` — left / right one char.
-        - [ ] `w` / `W` — forward word / WORD.
-        - [ ] `b` / `B` — backward word / WORD.
-        - [ ] `e` / `E` — end of word / WORD.
-        - [ ] `0` — beginning of line.
-        - [ ] `$` — end of line.
-        - [ ] `^` — first non‑blank character.
-        - [ ] `f<c>` / `F<c>` — find char forward / backward.
-        - [ ] `t<c>` / `T<c>` — find char till forward / backward.
-        - [ ] `;` / `,` — repeat / reverse last find.
-    - [ ] **Command‑Mode Editing:**
-        - [ ] `i` — enter insert mode at cursor.
-        - [ ] `a` — enter insert mode after cursor.
-        - [ ] `I` — insert at beginning of line.
-        - [ ] `A` — insert at end of line.
-        - [ ] `x` — delete char at cursor.
-        - [ ] `X` — delete char before cursor.
-        - [ ] `r<c>` — replace char at cursor with `<c>`.
-        - [ ] `R` — enter replace mode.
-        - [ ] `d<motion>` — delete over motion (e.g., `dw`, `d$`, `dd`).
-        - [ ] `c<motion>` — change over motion (delete + insert mode).
-        - [ ] `D` — delete to end of line (`d$`).
-        - [ ] `C` — change to end of line (`c$`).
-        - [ ] `s` — substitute char (delete + insert).
-        - [ ] `S` — substitute entire line.
-        - [ ] `y<motion>` — yank over motion.
-        - [ ] `p` / `P` — paste after / before cursor.
-        - [ ] `u` — undo last change.
-        - [ ] `.` — repeat last edit command.
-        - [ ] `~` — toggle case of char at cursor.
-    - [ ] **Command‑Mode History:**
-        - [ ] `j` / `k` — next / previous history.
-        - [ ] `/pattern` — search history backward.
-        - [ ] `?pattern` — search history forward.
-        - [ ] `n` / `N` — repeat search / reverse.
-    - [ ] **Command‑Mode Misc:**
-        - [ ] `v` — invoke `$VISUAL` or `$EDITOR` on current line.
-        - [ ] `#` — comment out line (prepend `#`, accept).
-        - [ ] Count prefixes: `3dw` = delete 3 words.
+- [ ] **Vi Mode (`EL_EDITOR "vi"`):** (REQ: REQ-08-0108)
+    - [ ] **Mode State Machine:** (REQ: REQ-08-0109)
+        - [ ] Insert mode (default on entry): self‑insert, ESC → command mode. (REQ: REQ-08-0110)
+        - [ ] Command mode: motion, edit, and search commands. (REQ: REQ-08-0111)
+        - [ ] Replace mode (`R`): overwrite characters, ESC → command mode. (REQ: REQ-08-0112)
+        - [ ] Track mode in `struct editline` (`vi_mode` enum: `VI_INSERT`, `VI_COMMAND`, `VI_REPLACE`). (REQ: REQ-08-0113)
+    - [ ] **Insert‑Mode Keys:** (REQ: REQ-08-0114)
+        - [ ] `ESC` — switch to command mode. (REQ: REQ-08-0115)
+        - [ ] `^H` / Backspace — delete backward. (REQ: REQ-08-0116)
+        - [ ] `^W` — delete word backward. (REQ: REQ-08-0117)
+        - [ ] `^U` — delete to start of line. (REQ: REQ-08-0118)
+        - [ ] `^D` — EOF / delete char. (REQ: REQ-08-0119)
+    - [ ] **Command‑Mode Motion:** (REQ: REQ-08-0120)
+        - [ ] `h` / `l` — left / right one char. (REQ: REQ-08-0121)
+        - [ ] `w` / `W` — forward word / WORD. (REQ: REQ-08-0122)
+        - [ ] `b` / `B` — backward word / WORD. (REQ: REQ-08-0123)
+        - [ ] `e` / `E` — end of word / WORD. (REQ: REQ-08-0124)
+        - [ ] `0` — beginning of line. (REQ: REQ-08-0125)
+        - [ ] `$` — end of line. (REQ: REQ-08-0126)
+        - [ ] `^` — first non‑blank character. (REQ: REQ-08-0127)
+        - [ ] `f<c>` / `F<c>` — find char forward / backward. (REQ: REQ-08-0128)
+        - [ ] `t<c>` / `T<c>` — find char till forward / backward. (REQ: REQ-08-0129)
+        - [ ] `;` / `,` — repeat / reverse last find. (REQ: REQ-08-0130)
+    - [ ] **Command‑Mode Editing:** (REQ: REQ-08-0131)
+        - [ ] `i` — enter insert mode at cursor. (REQ: REQ-08-0132)
+        - [ ] `a` — enter insert mode after cursor. (REQ: REQ-08-0133)
+        - [ ] `I` — insert at beginning of line. (REQ: REQ-08-0134)
+        - [ ] `A` — insert at end of line. (REQ: REQ-08-0135)
+        - [ ] `x` — delete char at cursor. (REQ: REQ-08-0136)
+        - [ ] `X` — delete char before cursor. (REQ: REQ-08-0137)
+        - [ ] `r<c>` — replace char at cursor with `<c>`. (REQ: REQ-08-0138)
+        - [ ] `R` — enter replace mode. (REQ: REQ-08-0139)
+        - [ ] `d<motion>` — delete over motion (e.g., `dw`, `d$`, `dd`). (REQ: REQ-08-0140)
+        - [ ] `c<motion>` — change over motion (delete + insert mode). (REQ: REQ-08-0141)
+        - [ ] `D` — delete to end of line (`d$`). (REQ: REQ-08-0142)
+        - [ ] `C` — change to end of line (`c$`). (REQ: REQ-08-0143)
+        - [ ] `s` — substitute char (delete + insert). (REQ: REQ-08-0144)
+        - [ ] `S` — substitute entire line. (REQ: REQ-08-0145)
+        - [ ] `y<motion>` — yank over motion. (REQ: REQ-08-0146)
+        - [ ] `p` / `P` — paste after / before cursor. (REQ: REQ-08-0147)
+        - [ ] `u` — undo last change. (REQ: REQ-08-0148)
+        - [ ] `.` — repeat last edit command. (REQ: REQ-08-0149)
+        - [ ] `~` — toggle case of char at cursor. (REQ: REQ-08-0150)
+    - [ ] **Command‑Mode History:** (REQ: REQ-08-0151)
+        - [ ] `j` / `k` — next / previous history. (REQ: REQ-08-0152)
+        - [ ] `/pattern` — search history backward. (REQ: REQ-08-0153)
+        - [ ] `?pattern` — search history forward. (REQ: REQ-08-0154)
+        - [ ] `n` / `N` — repeat search / reverse. (REQ: REQ-08-0155)
+    - [ ] **Command‑Mode Misc:** (REQ: REQ-08-0156)
+        - [ ] `v` — invoke `$VISUAL` or `$EDITOR` on current line. (REQ: REQ-08-0157)
+        - [ ] `#` — comment out line (prepend `#`, accept). (REQ: REQ-08-0158)
+        - [ ] Count prefixes: `3dw` = delete 3 words. (REQ: REQ-08-0159)
 
-- [ ] **Terminal Abstraction (`terminal.c`):**
-    - [ ] **Raw Mode:**
-        - [ ] `terminal_set_raw(EditLine *el)`: save orig termios, set raw (no echo, no canon, no signals, CS8, VMIN=1, VTIME=0).
-        - [ ] `terminal_set_orig(EditLine *el)`: restore saved termios.
-    - [ ] **Capability Queries:**
-        - [ ] Query terminal dimensions via `ioctl(TIOCGWINSZ)`.
-        - [ ] Fallback to `$COLUMNS` / `$LINES` environment variables.
-        - [ ] Fallback to 80×24 default.
-        - [ ] Cache dimensions; invalidate on `SIGWINCH`.
-    - [ ] **Termcap/Terminfo Support:**
-        - [ ] Query `$TERM` and look up capabilities.
-        - [ ] Support cursor motion: `cm` (absolute), `le`/`nd`/`up`/`do` (relative).
-        - [ ] Support clear: `cl` (screen), `ce` (to end of line), `cd` (to end of screen).
-        - [ ] Support insert/delete: `ic`/`dc` (char), `al`/`dl` (line).
-        - [ ] Support attributes: `md` (bold), `me` (reset), `so`/`se` (standout).
-        - [ ] Support scrolling: `sr` (reverse), `sf` (forward).
-        - [ ] Hardcoded ANSI/VT100 fallback when termcap unavailable.
-    - [ ] **Output Buffering:**
-        - [ ] Buffer terminal writes and flush in batches (reduce syscall overhead).
-        - [ ] Ensure flush on prompt display and before blocking reads.
+- [ ] **Terminal Abstraction (`terminal.c`):** (REQ: REQ-08-0160)
+    - [ ] **Raw Mode:** (REQ: REQ-08-0161)
+        - [ ] `terminal_set_raw(EditLine *el)`: save orig termios, set raw (no echo, no canon, no signals, CS8, VMIN=1, VTIME=0). (REQ: REQ-08-0162)
+        - [ ] `terminal_set_orig(EditLine *el)`: restore saved termios. (REQ: REQ-08-0163)
+    - [ ] **Capability Queries:** (REQ: REQ-08-0164)
+        - [ ] Query terminal dimensions via `ioctl(TIOCGWINSZ)`. (REQ: REQ-08-0165)
+        - [ ] Fallback to `$COLUMNS` / `$LINES` environment variables. (REQ: REQ-08-0166)
+        - [ ] Fallback to 80×24 default. (REQ: REQ-08-0167)
+        - [ ] Cache dimensions; invalidate on `SIGWINCH`. (REQ: REQ-08-0168)
+    - [ ] **Termcap/Terminfo Support:** (REQ: REQ-08-0169)
+        - [ ] Query `$TERM` and look up capabilities. (REQ: REQ-08-0170)
+        - [ ] Support cursor motion: `cm` (absolute), `le`/`nd`/`up`/`do` (relative). (REQ: REQ-08-0171)
+        - [ ] Support clear: `cl` (screen), `ce` (to end of line), `cd` (to end of screen). (REQ: REQ-08-0172)
+        - [ ] Support insert/delete: `ic`/`dc` (char), `al`/`dl` (line). (REQ: REQ-08-0173)
+        - [ ] Support attributes: `md` (bold), `me` (reset), `so`/`se` (standout). (REQ: REQ-08-0174)
+        - [ ] Support scrolling: `sr` (reverse), `sf` (forward). (REQ: REQ-08-0175)
+        - [ ] Hardcoded ANSI/VT100 fallback when termcap unavailable. (REQ: REQ-08-0176)
+    - [ ] **Output Buffering:** (REQ: REQ-08-0177)
+        - [ ] Buffer terminal writes and flush in batches (reduce syscall overhead). (REQ: REQ-08-0178)
+        - [ ] Ensure flush on prompt display and before blocking reads. (REQ: REQ-08-0179)
 
-- [ ] **Signal Handling:**
-    - [ ] **`SIGWINCH` Handler:**
-        - [ ] Install handler in `el_gets`; remove on return.
-        - [ ] On receipt: re‑query `TIOCGWINSZ`, update stored dimensions, force full redraw.
-    - [ ] **`SIGINT` Handler:**
-        - [ ] If `EL_SIGNAL` is set: install handler in `el_gets`.
-        - [ ] On receipt: discard current line, print `^C\\n`, reset buffer, reprint prompt (do not exit).
-    - [ ] **`SIGQUIT` Handler:**
-        - [ ] If `EL_SIGNAL` is set: install handler, ignore `SIGQUIT` during editing.
-    - [ ] **`SIGTSTP` / `SIGCONT` Handler:**
-        - [ ] `SIGTSTP`: restore terminal, send `SIGTSTP` to self.
-        - [ ] `SIGCONT`: re‑enter raw mode, redraw prompt + buffer.
-    - [ ] **`SIGTERM` / `SIGHUP` Handler:**
-        - [ ] Restore terminal, propagate signal (allow clean shell exit).
-    - [ ] **Signal Mask Discipline:**
-        - [ ] Save old signal dispositions in `el_gets` entry, restore on exit.
-        - [ ] Use `sigaction` (not `signal`) for reliable semantics.
-        - [ ] Set `SA_RESTART` where appropriate.
+- [ ] **Signal Handling:** (REQ: REQ-08-0180)
+    - [ ] **`SIGWINCH` Handler:** (REQ: REQ-08-0181)
+        - [ ] Install handler in `el_gets`; remove on return. (REQ: REQ-08-0182)
+        - [ ] On receipt: re‑query `TIOCGWINSZ`, update stored dimensions, force full redraw. (REQ: REQ-08-0181)
+    - [ ] **`SIGINT` Handler:** (REQ: REQ-08-0184)
+        - [ ] If `EL_SIGNAL` is set: install handler in `el_gets`. (REQ: REQ-08-0184)
+        - [ ] On receipt: discard current line, print `^C\\n`, reset buffer, reprint prompt (do not exit). (REQ: REQ-08-0184)
+    - [ ] **`SIGQUIT` Handler:** (REQ: REQ-08-0187)
+        - [ ] If `EL_SIGNAL` is set: install handler, ignore `SIGQUIT` during editing. (REQ: REQ-08-0187)
+    - [ ] **`SIGTSTP` / `SIGCONT` Handler:** (REQ: REQ-08-0189)
+        - [ ] `SIGTSTP`: restore terminal, send `SIGTSTP` to self. (REQ: REQ-08-0190)
+        - [ ] `SIGCONT`: re‑enter raw mode, redraw prompt + buffer. (REQ: REQ-08-0191)
+    - [ ] **`SIGTERM` / `SIGHUP` Handler:** (REQ: REQ-08-0192)
+        - [ ] Restore terminal, propagate signal (allow clean shell exit). (REQ: REQ-08-0193)
+    - [ ] **Signal Mask Discipline:** (REQ: REQ-08-0194)
+        - [ ] Save old signal dispositions in `el_gets` entry, restore on exit. (REQ: REQ-08-0195)
+        - [ ] Use `sigaction` (not `signal`) for reliable semantics. (REQ: REQ-08-0196)
+        - [ ] Set `SA_RESTART` where appropriate. (REQ: REQ-08-0197)
 
-- [ ] **Key Map Subsystem:**
-    - [ ] **Key Map Structure:**
-        - [ ] Define `el_keymap_t` as a 256‑entry table mapping byte → action (function pointer or nested map pointer).
-        - [ ] Support multi‑byte key sequences via chained keymaps (e.g., ESC → sub‑map).
-        - [ ] Default keymaps: `emacs_keymap`, `vi_insert_keymap`, `vi_command_keymap`.
-    - [ ] **Key Binding API:**
-        - [ ] `el_set(el, EL_BIND, key_sequence, command_name)`: bind key to named command.
-        - [ ] `el_set(el, EL_BIND, key_sequence, NULL)`: unbind key.
-        - [ ] Parse key sequence notation: `^A`, `\\e`, `\\M-`, `\\C-`, `\\e[A`, literal chars.
-    - [ ] **Action Registry:**
-        - [ ] Register all built‑in editing commands with string names.
-        - [ ] Support user‑defined custom action callbacks via `el_set(el, EL_ADDFN, name, help, func)`.
-        - [ ] `el_set(el, EL_BIND, "-a", ...)`: bind in vi alternate (command) keymap.
+- [ ] **Key Map Subsystem:** (REQ: REQ-08-0198)
+    - [ ] **Key Map Structure:** (REQ: REQ-08-0199)
+        - [ ] Define `el_keymap_t` as a 256‑entry table mapping byte → action (function pointer or nested map pointer). (REQ: REQ-08-0200)
+        - [ ] Support multi‑byte key sequences via chained keymaps (e.g., ESC → sub‑map). (REQ: REQ-08-0201)
+        - [ ] Default keymaps: `emacs_keymap`, `vi_insert_keymap`, `vi_command_keymap`. (REQ: REQ-08-0202)
+    - [ ] **Key Binding API:** (REQ: REQ-08-0203)
+        - [ ] `el_set(el, EL_BIND, key_sequence, command_name)`: bind key to named command. (REQ: REQ-08-0204)
+        - [ ] `el_set(el, EL_BIND, key_sequence, NULL)`: unbind key. (REQ: REQ-08-0205)
+        - [ ] Parse key sequence notation: `^A`, `\\e`, `\\M-`, `\\C-`, `\\e[A`, literal chars. (REQ: REQ-08-0206)
+    - [ ] **Action Registry:** (REQ: REQ-08-0207)
+        - [ ] Register all built‑in editing commands with string names. (REQ: REQ-08-0208)
+        - [ ] Support user‑defined custom action callbacks via `el_set(el, EL_ADDFN, name, help, func)`. (REQ: REQ-08-0209)
+        - [ ] `el_set(el, EL_BIND, "-a", ...)`: bind in vi alternate (command) keymap. (REQ: REQ-08-0210)
 
-- [ ] **Programmable Completion:**
-    - [ ] **Completion Callback:**
-        - [ ] `el_set(el, EL_ADDFN, "complete", "Complete", completion_fn)`: register custom completion function.
-        - [ ] Callback signature: `unsigned char fn(EditLine *el, int ch)`.
-        - [ ] Default: filename completion (glob + opendir scan).
-    - [ ] **Filename Completion Engine:**
-        - [ ] Extract word under cursor (back to whitespace or special char).
-        - [ ] Expand `~` prefix before lookup.
-        - [ ] `opendir` + `readdir` scan for matching prefixes.
-        - [ ] If single match: insert remainder + trailing space (or `/` for directory).
-        - [ ] If multiple matches: insert common prefix, then list alternatives on second tab.
-        - [ ] Display alternatives in columns (use terminal width).
-    - [ ] **Integration with Shell:**
-        - [ ] Shell provides custom completion callback that understands builtins, paths, variables, hostnames.
-        - [ ] Document callback interface in `editline(3)`.
+- [ ] **Programmable Completion:** (REQ: REQ-08-0211)
+    - [ ] **Completion Callback:** (REQ: REQ-08-0212)
+        - [ ] `el_set(el, EL_ADDFN, "complete", "Complete", completion_fn)`: register custom completion function. (REQ: REQ-08-0213)
+        - [ ] Callback signature: `unsigned char fn(EditLine *el, int ch)`. (REQ: REQ-08-0214)
+        - [ ] Default: filename completion (glob + opendir scan). (REQ: REQ-08-0215)
+    - [ ] **Filename Completion Engine:** (REQ: REQ-08-0216)
+        - [ ] Extract word under cursor (back to whitespace or special char). (REQ: REQ-08-0217)
+        - [ ] Expand `~` prefix before lookup. (REQ: REQ-08-0218)
+        - [ ] `opendir` + `readdir` scan for matching prefixes. (REQ: REQ-08-0219)
+        - [ ] If single match: insert remainder + trailing space (or `/` for directory). (REQ: REQ-08-0216)
+        - [ ] If multiple matches: insert common prefix, then list alternatives on second tab. (REQ: REQ-08-0216)
+        - [ ] Display alternatives in columns (use terminal width). (REQ: REQ-08-0222)
+    - [ ] **Integration with Shell:** (REQ: REQ-08-0223)
+        - [ ] Shell provides custom completion callback that understands builtins, paths, variables, hostnames. (REQ: REQ-08-0224)
+        - [ ] Document callback interface in `editline(3)`. (REQ: REQ-08-0225)
 
-- [ ] **Tokenizer (`tok_init` / `tok_str` / `tok_end`):**
-    - [ ] `tok_init(const char *ifs)`: create tokenizer context with IFS string.
-    - [ ] `tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv)`: tokenize line content into argv.
-    - [ ] `tok_reset(Tokenizer *tok)`: reset tokenizer state.
-    - [ ] `tok_end(Tokenizer *tok)`: free tokenizer resources.
-    - [ ] Handle single‑quoting, double‑quoting, and backslash‑escaping.
-    - [ ] Handle continuation (incomplete quotes → return continuation status).
-    - [ ] Add `Tokenizer` typedef and API to `histedit.h`.
+- [ ] **Tokenizer (`tok_init` / `tok_str` / `tok_end`):** (REQ: REQ-08-0226)
+    - [ ] `tok_init(const char *ifs)`: create tokenizer context with IFS string. (REQ: REQ-08-0227)
+    - [ ] `tok_str(Tokenizer *tok, const LineInfo *li, int *argc, const char ***argv)`: tokenize line content into argv. (REQ: REQ-08-0228)
+    - [ ] `tok_reset(Tokenizer *tok)`: reset tokenizer state. (REQ: REQ-08-0229)
+    - [ ] `tok_end(Tokenizer *tok)`: free tokenizer resources. (REQ: REQ-08-0230)
+    - [ ] Handle single‑quoting, double‑quoting, and backslash‑escaping. (REQ: REQ-08-0231)
+    - [ ] Handle continuation (incomplete quotes → return continuation status). (REQ: REQ-08-0232)
+    - [ ] Add `Tokenizer` typedef and API to `histedit.h`. (REQ: REQ-08-0233)
 
-- [ ] **`el_set()` / `el_get()` Operations:**
-    - [ ] `EL_PROMPT` (0): set/get prompt string pointer. **(Implemented)**
-    - [ ] `EL_PROMPT_ESC`: set prompt function with escape‑char marking (for non‑printing sequences).
-    - [ ] `EL_TERMINAL` (1): set terminal type string. **(Stub, unused)**
-    - [ ] `EL_EDITOR` (2): set editor mode (`"emacs"` or `"vi"`). **(Stub — sets field but no vi mode)**
-    - [ ] `EL_SIGNAL` (3): enable/disable signal handling during `el_gets`. **(Stub)**
-    - [ ] `EL_BIND` (4): bind key sequence → editor command.
-    - [ ] `EL_ECHOTC` (5): echo a termcap string.
-    - [ ] `EL_SETTC` (6): set a termcap value.
-    - [ ] `EL_REFRESH` (7): force screen refresh. **(Stub)**
-    - [ ] `EL_HIST` (8): set history function + context. **(Implemented — stores `History *`)**
-    - [ ] `EL_ADDFN`: register user‑defined editing function.
-    - [ ] `EL_SETFN`: replace an existing named function.
-    - [ ] `EL_RPROMPT`: set right‑side prompt string/function.
-    - [ ] `EL_CLIENTDATA`: set/get opaque user pointer.
-    - [ ] `EL_SETTY`: set tty mode and character assignments.
-    - [ ] `EL_GETFP`: get FILE * (in/out/err).
-    - [ ] `EL_SETFP`: set FILE * (in/out/err).
-    - [ ] `EL_EDITMODE`: enable/disable editing (passthrough mode).
+- [ ] **`el_set()` / `el_get()` Operations:** (REQ: REQ-08-0234)
+    - [ ] `EL_PROMPT` (0): set/get prompt string pointer. **(Implemented)** (REQ: REQ-08-0235)
+    - [ ] `EL_PROMPT_ESC`: set prompt function with escape‑char marking (for non‑printing sequences). (REQ: REQ-08-0236)
+    - [ ] `EL_TERMINAL` (1): set terminal type string. **(Stub, unused)** (REQ: REQ-08-0237)
+    - [ ] `EL_EDITOR` (2): set editor mode (`"emacs"` or `"vi"`). **(Stub — sets field but no vi mode)** (REQ: REQ-08-0238)
+    - [ ] `EL_SIGNAL` (3): enable/disable signal handling during `el_gets`. **(Stub)** (REQ: REQ-08-0239)
+    - [ ] `EL_BIND` (4): bind key sequence → editor command. (REQ: REQ-08-0240)
+    - [ ] `EL_ECHOTC` (5): echo a termcap string. (REQ: REQ-08-0241)
+    - [ ] `EL_SETTC` (6): set a termcap value. (REQ: REQ-08-0242)
+    - [ ] `EL_REFRESH` (7): force screen refresh. **(Stub)** (REQ: REQ-08-0243)
+    - [ ] `EL_HIST` (8): set history function + context. **(Implemented — stores `History *`)** (REQ: REQ-08-0244)
+    - [ ] `EL_ADDFN`: register user‑defined editing function. (REQ: REQ-08-0245)
+    - [ ] `EL_SETFN`: replace an existing named function. (REQ: REQ-08-0246)
+    - [ ] `EL_RPROMPT`: set right‑side prompt string/function. (REQ: REQ-08-0247)
+    - [ ] `EL_CLIENTDATA`: set/get opaque user pointer. (REQ: REQ-08-0248)
+    - [ ] `EL_SETTY`: set tty mode and character assignments. (REQ: REQ-08-0249)
+    - [ ] `EL_GETFP`: get FILE * (in/out/err). (REQ: REQ-08-0250)
+    - [ ] `EL_SETFP`: set FILE * (in/out/err). (REQ: REQ-08-0251)
+    - [ ] `EL_EDITMODE`: enable/disable editing (passthrough mode). (REQ: REQ-08-0252)
 
-- [ ] **`el_source()` and `.editrc` Parsing:**
-    - [ ] `el_source(EditLine *el, const char *file)`: read and execute editrc commands.
-    - [ ] Default path: `~/.editrc` if `file` is `NULL`.
-    - [ ] **Supported `.editrc` Commands:**
-        - [ ] `bind [-a] [-e] [-v] [-s] [key [command]]`: bind key to command.
-        - [ ] `echotc cap [arg ...]`: execute termcap string.
-        - [ ] `edit [on|off]`: enable/disable editing.
-        - [ ] `settc cap value`: set termcap variable.
-        - [ ] `setty [-a] [-d] [-q] [-x] mode ...`: set tty modes.
-    - [ ] Comment lines (`#`) and blank lines.
-    - [ ] Per‑program sections: `prog:command args` (match `prog` against `el->prog`).
-    - [ ] Error reporting: print line number and diagnostic on parse errors, continue.
+- [ ] **`el_source()` and `.editrc` Parsing:** (REQ: REQ-08-0253)
+    - [ ] `el_source(EditLine *el, const char *file)`: read and execute editrc commands. (REQ: REQ-08-0254)
+    - [ ] Default path: `~/.editrc` if `file` is `NULL`. (REQ: REQ-08-0255)
+    - [ ] **Supported `.editrc` Commands:** (REQ: REQ-08-0256)
+        - [ ] `bind [-a] [-e] [-v] [-s] [key [command]]`: bind key to command. (REQ: REQ-08-0257)
+        - [ ] `echotc cap [arg ...]`: execute termcap string. (REQ: REQ-08-0258)
+        - [ ] `edit [on|off]`: enable/disable editing. (REQ: REQ-08-0259)
+        - [ ] `settc cap value`: set termcap variable. (REQ: REQ-08-0260)
+        - [ ] `setty [-a] [-d] [-q] [-x] mode ...`: set tty modes. (REQ: REQ-08-0261)
+    - [ ] Comment lines (`#`) and blank lines. (REQ: REQ-08-0262)
+    - [ ] Per‑program sections: `prog:command args` (match `prog` against `el->prog`). (REQ: REQ-08-0263)
+    - [ ] Error reporting: print line number and diagnostic on parse errors, continue. (REQ: REQ-08-0264)
 
-- [ ] **History Management (`history.c`):**
-    - [ ] **Core (Implemented):**
-        - [ ] `history_init()`: allocate `History` with linked list, default max 100.
-        - [ ] `history_end(History *h)`: free all nodes and list.
-        - [ ] `H_SETSIZE` (1): set maximum entries; evict oldest on overflow.
-        - [ ] `H_ENTER` (10): add entry (skip duplicates of tail).
-        - [ ] `H_FIRST` (3): set cursor to head.
-        - [ ] `H_LAST` (4): set cursor to tail.
-        - [ ] `H_PREV` (5): move cursor backward (toward oldest).
-        - [ ] `H_NEXT` (6): move cursor forward (toward newest).
-    - [ ] **Missing Operations:**
-        - [ ] `H_GETSIZE` (2): return current entry count via `HistEvent.num`.
-        - [ ] `H_CURR` (7): return current entry without moving cursor.
-        - [ ] `H_SET` (8): set cursor to entry by number.
-        - [ ] `H_ADD` (9): append text to current entry (multi‑line continuation).
-        - [ ] `H_APPEND` (11): append string to last entry.
-        - [ ] `H_END` (12): move cursor past end (sentinel, `ev.str = NULL`).
-        - [ ] `H_NEXT_STR` (13): search forward for entry containing string.
-        - [ ] `H_PREV_STR` (14): search backward for entry containing string.
-        - [ ] `H_NEXT_EVENT` (15): move to next entry matching event number.
-        - [ ] `H_PREV_EVENT` (16): move to previous entry matching event number.
-        - [ ] `H_LOAD` (17): load history from file (one entry per line).
-        - [ ] `H_SAVE` (18): save history to file.
-        - [ ] `H_CLEAR` (19): clear all entries.
-    - [ ] **History Numbering:**
-        - [ ] Assign monotonically increasing event numbers to entries.
-        - [ ] Set `HistEvent.num` on all operations that return an entry.
-    - [ ] **Unique History (Dedup):**
-        - [ ] Option to suppress consecutive duplicate entries (already done for tail).
-        - [ ] Option to remove all duplicates on insert (keep most recent).
-    - [ ] **Timestamp Support:**
-        - [ ] Store entry timestamp (for save/load fidelity with extended format).
-    - [ ] **File Format:**
-        - [ ] Simple format: one entry per line, newlines escaped as `\\n`.
-        - [ ] Write atomically (tmp + rename) to prevent corruption.
+- [ ] **History Management (`history.c`):** (REQ: REQ-08-0265)
+    - [ ] **Core (Implemented):** (REQ: REQ-08-0266)
+        - [ ] `history_init()`: allocate `History` with linked list, default max 100. (REQ: REQ-08-0267)
+        - [ ] `history_end(History *h)`: free all nodes and list. (REQ: REQ-08-0268)
+        - [ ] `H_SETSIZE` (1): set maximum entries; evict oldest on overflow. (REQ: REQ-08-0269)
+        - [ ] `H_ENTER` (10): add entry (skip duplicates of tail). (REQ: REQ-08-0270)
+        - [ ] `H_FIRST` (3): set cursor to head. (REQ: REQ-08-0271)
+        - [ ] `H_LAST` (4): set cursor to tail. (REQ: REQ-08-0272)
+        - [ ] `H_PREV` (5): move cursor backward (toward oldest). (REQ: REQ-08-0273)
+        - [ ] `H_NEXT` (6): move cursor forward (toward newest). (REQ: REQ-08-0274)
+    - [ ] **Missing Operations:** (REQ: REQ-08-0275)
+        - [ ] `H_GETSIZE` (2): return current entry count via `HistEvent.num`. (REQ: REQ-08-0276)
+        - [ ] `H_CURR` (7): return current entry without moving cursor. (REQ: REQ-08-0277)
+        - [ ] `H_SET` (8): set cursor to entry by number. (REQ: REQ-08-0278)
+        - [ ] `H_ADD` (9): append text to current entry (multi‑line continuation). (REQ: REQ-08-0279)
+        - [ ] `H_APPEND` (11): append string to last entry. (REQ: REQ-08-0280)
+        - [ ] `H_END` (12): move cursor past end (sentinel, `ev.str = NULL`). (REQ: REQ-08-0281)
+        - [ ] `H_NEXT_STR` (13): search forward for entry containing string. (REQ: REQ-08-0282)
+        - [ ] `H_PREV_STR` (14): search backward for entry containing string. (REQ: REQ-08-0283)
+        - [ ] `H_NEXT_EVENT` (15): move to next entry matching event number. (REQ: REQ-08-0284)
+        - [ ] `H_PREV_EVENT` (16): move to previous entry matching event number. (REQ: REQ-08-0285)
+        - [ ] `H_LOAD` (17): load history from file (one entry per line). (REQ: REQ-08-0286)
+        - [ ] `H_SAVE` (18): save history to file. (REQ: REQ-08-0287)
+        - [ ] `H_CLEAR` (19): clear all entries. (REQ: REQ-08-0288)
+    - [ ] **History Numbering:** (REQ: REQ-08-0289)
+        - [ ] Assign monotonically increasing event numbers to entries. (REQ: REQ-08-0290)
+        - [ ] Set `HistEvent.num` on all operations that return an entry. (REQ: REQ-08-0291)
+    - [ ] **Unique History (Dedup):** (REQ: REQ-08-0292)
+        - [ ] Option to suppress consecutive duplicate entries (already done for tail). (REQ: REQ-08-0293)
+        - [ ] Option to remove all duplicates on insert (keep most recent). (REQ: REQ-08-0294)
+    - [ ] **Timestamp Support:** (REQ: REQ-08-0295)
+        - [ ] Store entry timestamp (for save/load fidelity with extended format). (REQ: REQ-08-0296)
+    - [ ] **File Format:** (REQ: REQ-08-0297)
+        - [ ] Simple format: one entry per line, newlines escaped as `\\n`. (REQ: REQ-08-0298)
+        - [ ] Write atomically (tmp + rename) to prevent corruption. (REQ: REQ-08-0299)
 
-- [ ] **Readline Compatibility Layer (`readline.c` — extended):**
-    - [ ] **Implemented:**
-        - [ ] `el_gets(EditLine *el, int *count)`: main read loop with raw mode, insert, backspace, arrows, history, `^C`, `^D`, `^L`.
-    - [ ] **API Shim Functions (for applications using readline(3)):**
-        - [ ] `readline(const char *prompt)`: wrapper that creates/reuses `EditLine`, calls `el_gets`, returns `strdup`'d result.
-        - [ ] `add_history(const char *line)`: wrapper around `history(h, &ev, H_ENTER, line)`.
-        - [ ] `rl_bind_key(int key, rl_command_func_t *function)`: map to `el_set(EL_BIND, ...)`.
-        - [ ] `rl_set_prompt(const char *prompt)`: map to `el_set(EL_PROMPT, ...)`.
-        - [ ] `rl_on_new_line()`: map to refresh.
-        - [ ] `rl_forced_update_display()`: map to `el_set(EL_REFRESH)`.
-    - [ ] **Readline Variables (Global Shims):**
-        - [ ] `rl_line_buffer`: pointer to current line buffer.
-        - [ ] `rl_point`: cursor position.
-        - [ ] `rl_end`: end of buffer position.
-        - [ ] `rl_readline_name`: application name.
-        - [ ] `rl_attempted_completion_function`: completion callback.
-    - [ ] **Header:** provide `readline/readline.h` and `readline/history.h` compatibility headers.
+- [ ] **Readline Compatibility Layer (`readline.c` — extended):** (REQ: REQ-08-0300)
+    - [ ] **Implemented:** (REQ: REQ-08-0077, REQ-08-0301)
+        - [ ] `el_gets(EditLine *el, int *count)`: main read loop with raw mode, insert, backspace, arrows, history, `^C`, `^D`, `^L`. (REQ: REQ-08-0302)
+    - [ ] **API Shim Functions (for applications using readline(3)):** (REQ: REQ-08-0303)
+        - [ ] `readline(const char *prompt)`: wrapper that creates/reuses `EditLine`, calls `el_gets`, returns `strdup`'d result. (REQ: REQ-08-0304)
+        - [ ] `add_history(const char *line)`: wrapper around `history(h, &ev, H_ENTER, line)`. (REQ: REQ-08-0305)
+        - [ ] `rl_bind_key(int key, rl_command_func_t *function)`: map to `el_set(EL_BIND, ...)`. (REQ: REQ-08-0306)
+        - [ ] `rl_set_prompt(const char *prompt)`: map to `el_set(EL_PROMPT, ...)`. (REQ: REQ-08-0307)
+        - [ ] `rl_on_new_line()`: map to refresh. (REQ: REQ-08-0308)
+        - [ ] `rl_forced_update_display()`: map to `el_set(EL_REFRESH)`. (REQ: REQ-08-0309)
+    - [ ] **Readline Variables (Global Shims):** (REQ: REQ-08-0310)
+        - [ ] `rl_line_buffer`: pointer to current line buffer. (REQ: REQ-08-0311)
+        - [ ] `rl_point`: cursor position. (REQ: REQ-08-0312)
+        - [ ] `rl_end`: end of buffer position. (REQ: REQ-08-0313)
+        - [ ] `rl_readline_name`: application name. (REQ: REQ-08-0314)
+        - [ ] `rl_attempted_completion_function`: completion callback. (REQ: REQ-08-0315)
+    - [ ] **Header:** provide `readline/readline.h` and `readline/history.h` compatibility headers. (REQ: REQ-08-0316)
 
-- [ ] **UTF‑8 / Wide‑Character Support:**
-    - [ ] **Input Decoding:**
-        - [ ] Decode multi‑byte UTF‑8 sequences on input into `wchar_t` codepoints.
-        - [ ] Validate sequences: reject overlong encodings, surrogates, values > U+10FFFF.
-        - [ ] Handle incomplete sequences at read boundary (buffer and re‑read).
-    - [ ] **Display Width:**
-        - [ ] Use `wcwidth()` / project‑local equivalent to determine display width of each codepoint.
-        - [ ] Handle zero‑width combining characters (display width 0).
-        - [ ] Handle CJK double‑width characters (display width 2).
-        - [ ] Handle non‑printable characters (display as `^X` or `\uXXXX`).
-    - [ ] **Cursor Navigation:**
-        - [ ] `forward-char` / `backward-char` move by codepoint, not byte.
-        - [ ] `forward-word` / `backward-word` recognize Unicode word boundaries (letter/digit vs punctuation).
-        - [ ] Delete/backspace remove entire multi‑byte codepoint.
-    - [ ] **Line Buffer:**
-        - [ ] Store as UTF‑8 bytes internally (no wchar_t buffer).
-        - [ ] Cursor and length track byte positions; convert to character positions for display.
-    - [ ] **Locale Integration:**
-        - [ ] Detect locale encoding via `nl_langinfo(CODESET)` or `$LC_CTYPE`.
-        - [ ] Fall back to ASCII‑only mode if locale is not UTF‑8.
+- [ ] **UTF‑8 / Wide‑Character Support:** (REQ: REQ-08-0317)
+    - [ ] **Input Decoding:** (REQ: REQ-08-0318)
+        - [ ] Decode multi‑byte UTF‑8 sequences on input into `wchar_t` codepoints. (REQ: REQ-08-0319)
+        - [ ] Validate sequences: reject overlong encodings, surrogates, values > U+10FFFF. (REQ: REQ-08-0320)
+        - [ ] Handle incomplete sequences at read boundary (buffer and re‑read). (REQ: REQ-08-0321)
+    - [ ] **Display Width:** (REQ: REQ-08-0322)
+        - [ ] Use `wcwidth()` / project‑local equivalent to determine display width of each codepoint. (REQ: REQ-08-0323)
+        - [ ] Handle zero‑width combining characters (display width 0). (REQ: REQ-08-0324)
+        - [ ] Handle CJK double‑width characters (display width 2). (REQ: REQ-08-0325)
+        - [ ] Handle non‑printable characters (display as `^X` or `\uXXXX`). (REQ: REQ-08-0326)
+    - [ ] **Cursor Navigation:** (REQ: REQ-08-0031, REQ-08-0327)
+        - [ ] `forward-char` / `backward-char` move by codepoint, not byte. (REQ: REQ-08-0328)
+        - [ ] `forward-word` / `backward-word` recognize Unicode word boundaries (letter/digit vs punctuation). (REQ: REQ-08-0329)
+        - [ ] Delete/backspace remove entire multi‑byte codepoint. (REQ: REQ-08-0330)
+    - [ ] **Line Buffer:** (REQ: REQ-08-0331)
+        - [ ] Store as UTF‑8 bytes internally (no wchar_t buffer). (REQ: REQ-08-0332)
+        - [ ] Cursor and length track byte positions; convert to character positions for display. (REQ: REQ-08-0333)
+    - [ ] **Locale Integration:** (REQ: REQ-08-0334)
+        - [ ] Detect locale encoding via `nl_langinfo(CODESET)` or `$LC_CTYPE`. (REQ: REQ-08-0335)
+        - [ ] Fall back to ASCII‑only mode if locale is not UTF‑8. (REQ: REQ-08-0336)
 
-- [ ] **Multi‑Line Editing:**
-    - [ ] Detect `\\n` within line buffer (e.g., from continuation or `el_insertstr`).
-    - [ ] Track logical lines vs physical screen rows.
-    - [ ] Up/Down arrow within multi‑line buffer: move between logical lines (not history).
-    - [ ] Correct cursor positioning across wrapped physical lines.
-    - [ ] `el_gets` continuation support: return continuation indicator for incomplete input (unmatched quotes, trailing `\\`).
+- [ ] **Multi‑Line Editing:** (REQ: REQ-08-0337)
+    - [ ] Detect `\\n` within line buffer (e.g., from continuation or `el_insertstr`). (REQ: REQ-08-0338)
+    - [ ] Track logical lines vs physical screen rows. (REQ: REQ-08-0339)
+    - [ ] Up/Down arrow within multi‑line buffer: move between logical lines (not history). (REQ: REQ-08-0340)
+    - [ ] Correct cursor positioning across wrapped physical lines. (REQ: REQ-08-0341)
+    - [ ] `el_gets` continuation support: return continuation indicator for incomplete input (unmatched quotes, trailing `\\`). (REQ: REQ-08-0342)
 
-- [ ] **Testing:**
-    - [ ] **Unit Tests (`tests/lib/edit/`):**
-        - [ ] **Line Buffer Tests:**
-            - [ ] Insert at beginning, middle, end.
-            - [ ] Delete at beginning, middle, end.
-            - [ ] Cursor movement: forward/backward char, word, begin/end of line.
-            - [ ] Buffer growth: insert beyond initial capacity.
-            - [ ] Kill and yank: `^K`, `^U`, `^Y`.
-            - [ ] Undo: verify each operation reverts.
-        - [ ] **History Tests:**
-            - [ ] `H_ENTER` respects max size eviction.
-            - [ ] `H_PREV` / `H_NEXT` traverse entire list correctly.
-            - [ ] `H_NEXT_STR` / `H_PREV_STR` find correct entries.
-            - [ ] `H_LOAD` / `H_SAVE` round‑trip (write then read back, compare).
-            - [ ] `H_CLEAR` empties all entries.
-            - [ ] Duplicate suppression: consecutive and all‑duplicates modes.
-        - [ ] **Key Map Tests:**
-            - [ ] Bind, unbind, rebind a key; verify action dispatches correctly.
-            - [ ] Multi‑byte sequence binding (ESC `[A` → `previous-history`).
-            - [ ] Per‑program `.editrc` binding.
-        - [ ] **Tokenizer Tests:**
-            - [ ] Simple whitespace splitting.
-            - [ ] Quoted strings (single, double).
-            - [ ] Backslash escaping within quotes.
-            - [ ] Continuation detection (incomplete quotes).
-        - [ ] **`.editrc` Parser Tests:**
-            - [ ] Valid `bind` commands.
-            - [ ] Comment and blank line handling.
-            - [ ] Program‑specific sections.
-            - [ ] Malformed line: error message + continue.
-        - [ ] **Emacs Binding Tests:**
-            - [ ] Verify all `^A`–`^Z` and `M-*` bindings dispatch to correct actions.
-        - [ ] **Vi Mode Tests:**
-            - [ ] Insert → command → insert transitions.
-            - [ ] Motion commands (`w`, `b`, `e`, `$`, `0`).
-            - [ ] Edit commands (`d`, `c`, `x`, `r`, `p`).
-            - [ ] Count prefixes (`3dw`).
-            - [ ] Search (`/`, `?`, `n`, `N`).
-    - [ ] **Property Tests:**
-        - [ ] Line buffer invariants: `0 <= cursor <= len < cap`, buffer NUL‑terminated.
-        - [ ] History invariants: `size <= max_size`, doubly‑linked list consistency.
-        - [ ] Randomized editing sequences (insert, delete, move, undo) never crash or corrupt.
-        - [ ] Kill ring: yank always produces previously killed text.
-    - [ ] **Fuzz Tests:**
-        - [ ] Fuzz `el_gets` input stream with random bytes (harness: in‑memory `FILE *`).
-        - [ ] Fuzz `.editrc` parser with random config files.
-        - [ ] Fuzz tokenizer with random line buffers.
-    - [ ] **Integration Tests:**
-        - [ ] Drive `el_gets` via PTY: send escape sequences, verify output bytes.
-        - [ ] History file round‑trip: save, load, compare.
-        - [ ] Readline-compat: build a minimal readline app against `libedit`, verify prompt + completion.
+- [ ] **Testing:** (REQ: REQ-08-0343)
+    - [ ] **Unit Tests (`tests/lib/edit/`):** (REQ: REQ-08-0344)
+        - [ ] **Line Buffer Tests:** (REQ: REQ-08-0345)
+            - [ ] Insert at beginning, middle, end. (REQ: REQ-08-0346)
+            - [ ] Delete at beginning, middle, end. (REQ: REQ-08-0347)
+            - [ ] Cursor movement: forward/backward char, word, begin/end of line. (REQ: REQ-08-0348)
+            - [ ] Buffer growth: insert beyond initial capacity. (REQ: REQ-08-0349)
+            - [ ] Kill and yank: `^K`, `^U`, `^Y`. (REQ: REQ-08-0350)
+            - [ ] Undo: verify each operation reverts. (REQ: REQ-08-0351)
+        - [ ] **History Tests:** (REQ: REQ-08-0352)
+            - [ ] `H_ENTER` respects max size eviction. (REQ: REQ-08-0353)
+            - [ ] `H_PREV` / `H_NEXT` traverse entire list correctly. (REQ: REQ-08-0354)
+            - [ ] `H_NEXT_STR` / `H_PREV_STR` find correct entries. (REQ: REQ-08-0355)
+            - [ ] `H_LOAD` / `H_SAVE` round‑trip (write then read back, compare). (REQ: REQ-08-0356)
+            - [ ] `H_CLEAR` empties all entries. (REQ: REQ-08-0357)
+            - [ ] Duplicate suppression: consecutive and all‑duplicates modes. (REQ: REQ-08-0358)
+        - [ ] **Key Map Tests:** (REQ: REQ-08-0359)
+            - [ ] Bind, unbind, rebind a key; verify action dispatches correctly. (REQ: REQ-08-0360)
+            - [ ] Multi‑byte sequence binding (ESC `[A` → `previous-history`). (REQ: REQ-08-0361)
+            - [ ] Per‑program `.editrc` binding. (REQ: REQ-08-0362)
+        - [ ] **Tokenizer Tests:** (REQ: REQ-08-0363)
+            - [ ] Simple whitespace splitting. (REQ: REQ-08-0364)
+            - [ ] Quoted strings (single, double). (REQ: REQ-08-0365)
+            - [ ] Backslash escaping within quotes. (REQ: REQ-08-0366)
+            - [ ] Continuation detection (incomplete quotes). (REQ: REQ-08-0367)
+        - [ ] **`.editrc` Parser Tests:** (REQ: REQ-08-0368)
+            - [ ] Valid `bind` commands. (REQ: REQ-08-0369)
+            - [ ] Comment and blank line handling. (REQ: REQ-08-0370)
+            - [ ] Program‑specific sections. (REQ: REQ-08-0371)
+            - [ ] Malformed line: error message + continue. (REQ: REQ-08-0372)
+        - [ ] **Emacs Binding Tests:** (REQ: REQ-08-0373)
+            - [ ] Verify all `^A`–`^Z` and `M-*` bindings dispatch to correct actions. (REQ: REQ-08-0374)
+        - [ ] **Vi Mode Tests:** (REQ: REQ-08-0375)
+            - [ ] Insert → command → insert transitions. (REQ: REQ-08-0376)
+            - [ ] Motion commands (`w`, `b`, `e`, `$`, `0`). (REQ: REQ-08-0377)
+            - [ ] Edit commands (`d`, `c`, `x`, `r`, `p`). (REQ: REQ-08-0378)
+            - [ ] Count prefixes (`3dw`). (REQ: REQ-08-0379)
+            - [ ] Search (`/`, `?`, `n`, `N`). (REQ: REQ-08-0380)
+    - [ ] **Property Tests:** (REQ: REQ-08-0381)
+        - [ ] Line buffer invariants: `0 <= cursor <= len < cap`, buffer NUL‑terminated. (REQ: REQ-08-0382)
+        - [ ] History invariants: `size <= max_size`, doubly‑linked list consistency. (REQ: REQ-08-0383)
+        - [ ] Randomized editing sequences (insert, delete, move, undo) never crash or corrupt. (REQ: REQ-08-0384)
+        - [ ] Kill ring: yank always produces previously killed text. (REQ: REQ-08-0385)
+    - [ ] **Fuzz Tests:** (REQ: REQ-08-0386)
+        - [ ] Fuzz `el_gets` input stream with random bytes (harness: in‑memory `FILE *`). (REQ: REQ-08-0387)
+        - [ ] Fuzz `.editrc` parser with random config files. (REQ: REQ-08-0388)
+        - [ ] Fuzz tokenizer with random line buffers. (REQ: REQ-08-0389)
+    - [ ] **Integration Tests:** (REQ: REQ-08-0390)
+        - [ ] Drive `el_gets` via PTY: send escape sequences, verify output bytes. (REQ: REQ-08-0391)
+        - [ ] History file round‑trip: save, load, compare. (REQ: REQ-08-0392)
+        - [ ] Readline-compat: build a minimal readline app against `libedit`, verify prompt + completion. (REQ: REQ-08-0393)
 
-- [ ] **Documentation:**
-    - [ ] Man page: `editline(3)` — overview of the library. **(Exists)**
-    - [ ] Man page: `el_init(3)`, `el_gets(3)`, `el_set(3)`, `el_get(3)`, `el_line(3)`, `el_end(3)`, `el_reset(3)`, `el_source(3)`, `el_resize(3)` — API reference. **(Exists)**
-    - [ ] Man page: `editrc(5)` — `.editrc` file format and commands. **(Exists)**
-    - [ ] Man page: `history(3)` — history API (`history_init`, `history_end`, `H_*` ops). **(Exists)**
-    - [ ] Man page: `tok_init(3)` — tokenizer API.
-    - [ ] Update `editline(3)` with vi mode documentation.
-    - [ ] Update `editline(3)` with completion callback documentation.
-    - [ ] Update `history(3)` with `H_LOAD` / `H_SAVE` / timestamps documentation.
-    - [ ] Document readline compatibility layer and header shim.
+- [ ] **Documentation:** (REQ: REQ-08-0394)
+    - [ ] Man page: `editline(3)` — overview of the library. **(Exists)** (REQ: REQ-08-0395)
+    - [ ] Man page: `el_init(3)`, `el_gets(3)`, `el_set(3)`, `el_get(3)`, `el_line(3)`, `el_end(3)`, `el_reset(3)`, `el_source(3)`, `el_resize(3)` — API reference. **(Exists)** (REQ: REQ-08-0396)
+    - [ ] Man page: `editrc(5)` — `.editrc` file format and commands. **(Exists)** (REQ: REQ-08-0397)
+    - [ ] Man page: `history(3)` — history API (`history_init`, `history_end`, `H_*` ops). **(Exists)** (REQ: REQ-08-0398)
+    - [ ] Man page: `tok_init(3)` — tokenizer API. (REQ: REQ-08-0399)
+    - [ ] Update `editline(3)` with vi mode documentation. (REQ: REQ-08-0400)
+    - [ ] Update `editline(3)` with completion callback documentation. (REQ: REQ-08-0401)
+    - [ ] Update `history(3)` with `H_LOAD` / `H_SAVE` / timestamps documentation. (REQ: REQ-08-0402)
+    - [ ] Document readline compatibility layer and header shim. (REQ: REQ-08-0403)
 
 
 ## User Stories

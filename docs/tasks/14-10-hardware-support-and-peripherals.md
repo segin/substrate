@@ -6,584 +6,584 @@
 ## Reimplemented Checklist (All Open)
 
 ### 10. Hardware Support & Peripherals
-- [ ] **USB Subsystem:**
-    - [ ] **Host Controllers:**
-        - [ ] **UHCI (Universal Host Controller Interface):**
-            - [ ] Implement UHCI register access.
+- [ ] **USB Subsystem:** (REQ: REQ-14-0001)
+    - [ ] **Host Controllers:** (REQ: REQ-14-0002)
+        - [ ] **UHCI (Universal Host Controller Interface):** (REQ: REQ-14-0003)
+            - [ ] Implement UHCI register access. (REQ: REQ-14-0004)
                 - Files: `sys/drivers/usb/uhci.c` (new), `sys/drivers/usb/uhci.h` (new)
                 - Registers: USBCMD, USBSTS, USBINTR, FRNUM, FLBASEADD, SOFMOD, PORTSC
                 - Tests: integration (register read/write from QEMU UHCI)
                 - Docs: `uhci.4`
                 - Acceptance: Controller detected and accessible
-            - [ ] Implement Frame List allocation and setup.
+            - [ ] Implement Frame List allocation and setup. (REQ: REQ-14-0005)
                 - Files: `sys/drivers/usb/uhci.c`
                 - Logic: 1024-entry frame list (4KB aligned), each entry points to QH/TD
                 - Tests: unit (frame list allocation, alignment)
                 - Docs: `uhci.4`
                 - Acceptance: Frame list in FLBASEADD, HC processing
-            - [ ] Implement Queue Head (QH) management.
+            - [ ] Implement Queue Head (QH) management. (REQ: REQ-14-0006, REQ-14-0018)
                 - Files: `sys/drivers/usb/uhci.c`
                 - Structure: `uhci_qh_t` with horizontal/vertical pointers
                 - Logic: Skeleton QHs for interrupt, control, bulk
                 - Tests: unit (QH linking, traversal)
                 - Docs: `uhci.4`
                 - Acceptance: QH hierarchy operational
-            - [ ] Implement Transfer Descriptor (TD) management.
+            - [ ] Implement Transfer Descriptor (TD) management. (REQ: REQ-14-0007, REQ-14-0013)
                 - Files: `sys/drivers/usb/uhci.c`
                 - Structure: `uhci_td_t` with link, status, token, buffer
                 - Tests: unit (TD allocation, status parsing)
                 - Docs: `uhci.4`
                 - Acceptance: TDs processed by HC
-            - [ ] Implement interrupt handling.
+            - [ ] Implement interrupt handling. (REQ: REQ-14-0008, REQ-14-0021)
                 - Files: `sys/drivers/usb/uhci.c`
                 - Events: USBINT (completion), USBERRINT (error), Resume, Host System Error
                 - Tests: integration (IRQ fires on transfer completion)
                 - Docs: `uhci.4`
                 - Acceptance: Interrupts handled, URBs completed
-        - [ ] **OHCI (Open Host Controller Interface):**
-            - [ ] Implement OHCI register access.
+        - [ ] **OHCI (Open Host Controller Interface):** (REQ: REQ-14-0009)
+            - [ ] Implement OHCI register access. (REQ: REQ-14-0010)
                 - Files: `sys/drivers/usb/ohci.c` (new), `sys/drivers/usb/ohci.h` (new)
                 - Registers: HcRevision, HcControl, HcCommandStatus, HcInterruptStatus, HcHCCA
                 - Tests: integration (MMIO register access)
                 - Docs: `ohci.4`
                 - Acceptance: Controller detected
-            - [ ] Implement HCCA (Host Controller Communications Area).
+            - [ ] Implement HCCA (Host Controller Communications Area). (REQ: REQ-14-0011)
                 - Files: `sys/drivers/usb/ohci.c`
                 - Structure: 256-byte aligned, interrupt table, frame number, done head
                 - Tests: unit (HCCA allocation, alignment, done head updates)
                 - Docs: `ohci.4`
                 - Acceptance: HCCA operational
-            - [ ] Implement Endpoint Descriptor (ED) management.
+            - [ ] Implement Endpoint Descriptor (ED) management. (REQ: REQ-14-0012)
                 - Files: `sys/drivers/usb/ohci.c`
                 - Structure: `ohci_ed_t` with FA, EN, D, S, K, F, MPS, TailP, HeadP, NextED
                 - Logic: Control, bulk, interrupt, isochronous ED lists
                 - Tests: unit (ED creation, list insertion)
                 - Docs: `ohci.4`
                 - Acceptance: EDs processed by HC
-            - [ ] Implement Transfer Descriptor (TD) management.
+            - [ ] Implement Transfer Descriptor (TD) management. (REQ: REQ-14-0007, REQ-14-0013)
                 - Files: `sys/drivers/usb/ohci.c`
                 - Structure: `ohci_td_t` with flags, CBP, NextTD, BE
                 - Tests: unit (TD allocation, completion status)
                 - Docs: `ohci.4`
                 - Acceptance: TDs processed correctly
-            - [ ] Implement interrupt and done queue handling.
+            - [ ] Implement interrupt and done queue handling. (REQ: REQ-14-0014)
                 - Files: `sys/drivers/usb/ohci.c`
                 - Logic: Process HccaDoneHead, complete URBs
                 - Tests: integration (URB completion via done queue)
                 - Docs: `ohci.4`
                 - Acceptance: Transfer completion signaled
-        - [ ] **EHCI (Enhanced Host Controller Interface):**
-            - [ ] Implement EHCI capability and operational register access.
+        - [ ] **EHCI (Enhanced Host Controller Interface):** (REQ: REQ-14-0015)
+            - [ ] Implement EHCI capability and operational register access. (REQ: REQ-14-0016)
                 - Files: `sys/drivers/usb/ehci.c` (new), `sys/drivers/usb/ehci.h` (new)
                 - Capability: CAPLENGTH, HCSPARAMS, HCCPARAMS
                 - Operational: USBCMD, USBSTS, USBINTR, FRINDEX, PERIODICLISTBASE, ASYNCLISTADDR
                 - Tests: integration (capability parsing, operational access)
                 - Docs: `ehci.4`
                 - Acceptance: Controller initialized
-            - [ ] Implement Asynchronous Schedule (Control/Bulk).
+            - [ ] Implement Asynchronous Schedule (Control/Bulk). (REQ: REQ-14-0017)
                 - Files: `sys/drivers/usb/ehci.c`
                 - Structure: Queue Head (QH) linked list, ASYNCLISTADDR
                 - Logic: Async schedule enable, reclamation
                 - Tests: integration (async schedule active, control transfers work)
                 - Docs: `ehci.4`
                 - Acceptance: Async schedule operational
-            - [ ] Implement Queue Head (QH) management.
+            - [ ] Implement Queue Head (QH) management. (REQ: REQ-14-0006, REQ-14-0018)
                 - Files: `sys/drivers/usb/ehci.c`
                 - Structure: `ehci_qh_t` with horizontal link, endpoint chars, overlay
                 - Tests: unit (QH allocation, overlay handling)
                 - Docs: `ehci.4`
                 - Acceptance: QHs processed by HC
-            - [ ] Implement Queue Transfer Descriptor (qTD) management.
+            - [ ] Implement Queue Transfer Descriptor (qTD) management. (REQ: REQ-14-0019)
                 - Files: `sys/drivers/usb/ehci.c`
                 - Structure: `ehci_qtd_t` with next, alt_next, token, buffer pointers
                 - Tests: unit (qTD linking, token status parsing)
                 - Docs: `ehci.4`
                 - Acceptance: qTDs executed correctly
-            - [ ] Implement Periodic Schedule (Interrupt/Isochronous).
+            - [ ] Implement Periodic Schedule (Interrupt/Isochronous). (REQ: REQ-14-0020)
                 - Files: `sys/drivers/usb/ehci.c`
                 - Structure: 1024-entry frame list, interrupt QHs, iTDs/siTDs
                 - Tests: integration (periodic schedule, interrupt transfers)
                 - Docs: `ehci.4`
                 - Acceptance: Periodic transfers work
-            - [ ] Implement interrupt handling.
+            - [ ] Implement interrupt handling. (REQ: REQ-14-0008, REQ-14-0021)
                 - Files: `sys/drivers/usb/ehci.c`
                 - Events: USB Interrupt, USB Error, Port Change, Frame List Rollover, Host System Error
                 - Tests: integration (transfer completion IRQ)
                 - Docs: `ehci.4`
                 - Acceptance: Interrupts handled correctly
-        - [ ] **xHCI (eXtensible Host Controller Interface):**
-            - [ ] Implement xHCI capability structure parsing.
+        - [ ] **xHCI (eXtensible Host Controller Interface):** (REQ: REQ-14-0022)
+            - [ ] Implement xHCI capability structure parsing. (REQ: REQ-14-0023)
                 - Files: `sys/drivers/usb/xhci.c` (new), `sys/drivers/usb/xhci.h` (new)
                 - Capability: CAPLENGTH, HCSPARAMS1/2/3, HCCPARAMS1/2, DBOFF, RTSOFF
                 - Extended: Supported Protocol, Legacy Support, Capability IDs
                 - Tests: integration (parse all capabilities from QEMU xHCI)
                 - Docs: `xhci.4`
                 - Acceptance: Capabilities detected correctly
-            - [ ] Implement Command Ring setup and processing.
+            - [ ] Implement Command Ring setup and processing. (REQ: REQ-14-0024)
                 - Files: `sys/drivers/usb/xhci.c`
                 - Structure: TRB ring with Link TRBs, CRCR register
                 - Commands: Enable Slot, Address Device, Configure Endpoint, Evaluate Context
                 - Tests: unit (ring wrap, command completion)
                 - Docs: `xhci.4`
                 - Acceptance: Commands processed by xHC
-            - [ ] Implement Event Ring setup and handling.
+            - [ ] Implement Event Ring setup and handling. (REQ: REQ-14-0025)
                 - Files: `sys/drivers/usb/xhci.c`
                 - Structure: Event Ring Segment Table, ERDP, interrupter registers
                 - Events: Transfer, Command Completion, Port Status Change
                 - Tests: integration (events received on completion)
                 - Docs: `xhci.4`
                 - Acceptance: Events processed correctly
-            - [ ] Implement Transfer Ring management.
+            - [ ] Implement Transfer Ring management. (REQ: REQ-14-0026)
                 - Files: `sys/drivers/usb/xhci.c`
                 - Structure: Per-endpoint transfer rings with TRBs
                 - TRB types: Normal, Setup, Data, Status, Isoch, Link
                 - Tests: unit (TRB enqueue, ring wrap)
                 - Docs: `xhci.4`
                 - Acceptance: Transfer TRBs executed
-            - [ ] Implement Doorbell mechanism.
+            - [ ] Implement Doorbell mechanism. (REQ: REQ-14-0027)
                 - Files: `sys/drivers/usb/xhci.c`
                 - Logic: Ring doorbell to notify xHC of new work
                 - Tests: unit (doorbell write triggers processing)
                 - Docs: `xhci.4`
                 - Acceptance: xHC processes TRBs after doorbell
-            - [ ] Implement Device Context management.
+            - [ ] Implement Device Context management. (REQ: REQ-14-0028)
                 - Files: `sys/drivers/usb/xhci.c`
                 - Structure: DCBAA, Device Context, Slot Context, Endpoint Contexts
                 - Logic: Allocate on Enable Slot, configure on Set Address
                 - Tests: integration (device addressed, endpoints configured)
                 - Docs: `xhci.4`
                 - Acceptance: Device contexts properly managed
-            - [ ] Implement Scratchpad Buffer allocation.
+            - [ ] Implement Scratchpad Buffer allocation. (REQ: REQ-14-0029)
                 - Files: `sys/drivers/usb/xhci.c`
                 - Logic: Parse HCSPARAMS2 for scratchpad count, allocate buffers
                 - Tests: unit (scratchpad pages allocated)
                 - Docs: `xhci.4`
                 - Acceptance: xHC has required scratchpad
-    - [ ] **Core Stack:**
-        - [ ] **USB Device Abstraction:**
-            - [ ] Define `struct usb_device`.
+    - [ ] **Core Stack:** (REQ: REQ-14-0030)
+        - [ ] **USB Device Abstraction:** (REQ: REQ-14-0031)
+            - [ ] Define `struct usb_device`. (REQ: REQ-14-0032)
                 - Files: `sys/kern/usb/usb.h` (new)
                 - Fields: address, speed, state, config, parent, driver, ep0_pipe, descriptors
                 - Tests: unit (struct layout)
                 - Docs: `usb_device.9`
                 - Acceptance: Device structure defined
-            - [ ] Define `struct usb_endpoint`.
+            - [ ] Define `struct usb_endpoint`. (REQ: REQ-14-0033)
                 - Files: `sys/kern/usb/usb.h`
                 - Fields: address, type, direction, maxpacket, interval, toggle
                 - Tests: unit (endpoint descriptor parsing)
                 - Docs: `usb_endpoint.9`
                 - Acceptance: Endpoint structure defined
-            - [ ] Define `struct usb_interface`.
+            - [ ] Define `struct usb_interface`. (REQ: REQ-14-0034)
                 - Files: `sys/kern/usb/usb.h`
                 - Fields: number, altsetting, class, subclass, protocol, endpoints, driver
                 - Tests: unit (interface descriptor parsing)
                 - Docs: `usb_interface.9`
                 - Acceptance: Interface structure defined
-        - [ ] **Device Enumeration:**
-            - [ ] Implement USB device state machine.
+        - [ ] **Device Enumeration:** (REQ: REQ-14-0035)
+            - [ ] Implement USB device state machine. (REQ: REQ-14-0036)
                 - Files: `sys/kern/usb/usb_core.c` (new)
                 - States: DEFAULT, ADDRESS, CONFIGURED, SUSPENDED
                 - Logic: State transitions on SET_ADDRESS, SET_CONFIGURATION
                 - Tests: integration (device reaches CONFIGURED)
                 - Docs: `usb_state_machine.9`
                 - Acceptance: Proper state transitions
-            - [ ] Implement SET_ADDRESS control transfer.
+            - [ ] Implement SET_ADDRESS control transfer. (REQ: REQ-14-0037)
                 - Files: `sys/kern/usb/usb_core.c`
                 - Logic: Assign address, update HCD data structures
                 - Tests: integration (device responds at new address)
                 - Docs: `usb_set_address.9`
                 - Acceptance: Address assigned successfully
-            - [ ] Implement GET_DESCRIPTOR (Device).
+            - [ ] Implement GET_DESCRIPTOR (Device). (REQ: REQ-14-0038)
                 - Files: `sys/kern/usb/usb_core.c`
                 - Fields: bcdUSB, bDeviceClass, idVendor, idProduct, bNumConfigurations
                 - Tests: unit (descriptor parsing)
                 - Docs: `usb_get_descriptor.9`
                 - Acceptance: Device descriptor parsed
-            - [ ] Implement GET_DESCRIPTOR (Configuration).
+            - [ ] Implement GET_DESCRIPTOR (Configuration). (REQ: REQ-14-0039)
                 - Files: `sys/kern/usb/usb_core.c`
                 - Logic: Read wTotalLength, then full config+interface+endpoint tree
                 - Tests: unit (nested descriptor parsing)
                 - Docs: `usb_get_descriptor.9`
                 - Acceptance: Full configuration tree available
-            - [ ] Implement GET_DESCRIPTOR (String).
+            - [ ] Implement GET_DESCRIPTOR (String). (REQ: REQ-14-0040)
                 - Files: `sys/kern/usb/usb_core.c`
                 - Logic: Language ID query, string index query, UTF-16 to UTF-8
                 - Tests: unit (string descriptor decoding)
                 - Docs: `usb_get_descriptor.9`
                 - Acceptance: Manufacturer/product strings available
-            - [ ] Implement SET_CONFIGURATION.
+            - [ ] Implement SET_CONFIGURATION. (REQ: REQ-14-0041)
                 - Files: `sys/kern/usb/usb_core.c`
                 - Logic: Select configuration, enable endpoints
                 - Tests: integration (device ready for class-specific commands)
                 - Docs: `usb_set_configuration.9`
                 - Acceptance: Device configured
-        - [ ] **Hub Driver:**
-            - [ ] Implement hub descriptor parsing.
+        - [ ] **Hub Driver:** (REQ: REQ-14-0042)
+            - [ ] Implement hub descriptor parsing. (REQ: REQ-14-0043)
                 - Files: `sys/drivers/usb/hub.c` (new)
                 - Fields: bNbrPorts, wHubCharacteristics, bPwrOn2PwrGood
                 - Tests: unit (hub descriptor fields)
                 - Docs: `usb_hub.4`
                 - Acceptance: Hub ports detected
-            - [ ] Implement port status change interrupt handling.
+            - [ ] Implement port status change interrupt handling. (REQ: REQ-14-0044)
                 - Files: `sys/drivers/usb/hub.c`
                 - Logic: Interrupt endpoint polling, status change bitmap parsing
                 - Tests: integration (device connect detected via interrupt)
                 - Docs: `usb_hub.4`
                 - Acceptance: Port changes signaled
-            - [ ] Implement GET_PORT_STATUS.
+            - [ ] Implement GET_PORT_STATUS. (REQ: REQ-14-0045)
                 - Files: `sys/drivers/usb/hub.c`
                 - Fields: wPortStatus, wPortChange (connection, enable, suspend, reset)
                 - Tests: unit (status bits parsed)
                 - Docs: `usb_hub.4`
                 - Acceptance: Port status queried
-            - [ ] Implement SET_PORT_FEATURE (power, reset, enable).
+            - [ ] Implement SET_PORT_FEATURE (power, reset, enable). (REQ: REQ-14-0046)
                 - Files: `sys/drivers/usb/hub.c`
                 - Features: PORT_POWER, PORT_RESET, PORT_ENABLE, PORT_SUSPEND
                 - Tests: integration (port reset triggers enumeration)
                 - Docs: `usb_hub.4`
                 - Acceptance: Port features controlled
-            - [ ] Implement CLEAR_PORT_FEATURE (change acknowledgment).
+            - [ ] Implement CLEAR_PORT_FEATURE (change acknowledgment). (REQ: REQ-14-0047)
                 - Files: `sys/drivers/usb/hub.c`
                 - Features: C_PORT_CONNECTION, C_PORT_ENABLE, C_PORT_RESET
                 - Tests: unit (change bits cleared)
                 - Docs: `usb_hub.4`
                 - Acceptance: Change conditions cleared
-            - [ ] Implement root hub emulation for HCDs.
+            - [ ] Implement root hub emulation for HCDs. (REQ: REQ-14-0048)
                 - Files: `sys/kern/usb/usb_roothub.c` (new)
                 - Logic: Translate hub requests to HCD port operations
                 - Tests: integration (root hub appears as normal hub)
                 - Docs: `usb_roothub.9`
                 - Acceptance: Root hub enumerable
-        - [ ] **URB (USB Request Block) Lifecycle:**
-            - [ ] Define `struct urb`.
+        - [ ] **URB (USB Request Block) Lifecycle:** (REQ: REQ-14-0049)
+            - [ ] Define `struct urb`. (REQ: REQ-14-0050)
                 - Files: `sys/kern/usb/urb.h` (new)
                 - Fields: dev, pipe, transfer_buffer, transfer_buffer_length, actual_length, status, complete, context, interval, setup_packet
                 - Tests: unit (struct layout)
                 - Docs: `urb.9`
                 - Acceptance: URB structure defined
-            - [ ] Implement `usb_alloc_urb()`.
+            - [ ] Implement `usb_alloc_urb()`. (REQ: REQ-14-0051)
                 - Files: `sys/kern/usb/urb.c` (new)
                 - API: Allocate URB from pool/kmalloc
                 - Tests: unit (allocation, free)
                 - Docs: `usb_alloc_urb.9`
                 - Acceptance: URB allocated
-            - [ ] Implement `usb_submit_urb()`.
+            - [ ] Implement `usb_submit_urb()`. (REQ: REQ-14-0052)
                 - Files: `sys/kern/usb/urb.c`
                 - API: Submit URB to HCD for processing
                 - Logic: Build pipe info, call HCD urb_enqueue
                 - Tests: integration (URB submitted and completed)
                 - Docs: `usb_submit_urb.9`
                 - Acceptance: URB reaches device
-            - [ ] Implement `usb_unlink_urb()`.
+            - [ ] Implement `usb_unlink_urb()`. (REQ: REQ-14-0053)
                 - Files: `sys/kern/usb/urb.c`
                 - API: Cancel pending URB
                 - Logic: Call HCD urb_dequeue, complete with -ECONNRESET
                 - Tests: unit (unlink pending URB)
                 - Docs: `usb_unlink_urb.9`
                 - Acceptance: URB cancelled
-            - [ ] Implement URB completion callback mechanism.
+            - [ ] Implement URB completion callback mechanism. (REQ: REQ-14-0054)
                 - Files: `sys/kern/usb/urb.c`
                 - Logic: Call urb->complete from HCD interrupt context or thread
                 - Tests: integration (completion callback invoked)
                 - Docs: `urb_completion.9`
                 - Acceptance: Callback called with correct status
-    - [ ] **Class Drivers:**
-        - [ ] **HID (Human Interface Device):**
-            - [ ] Implement HID report descriptor parsing.
+    - [ ] **Class Drivers:** (REQ: REQ-14-0055)
+        - [ ] **HID (Human Interface Device):** (REQ: REQ-14-0056)
+            - [ ] Implement HID report descriptor parsing. (REQ: REQ-14-0057)
                 - Files: `sys/drivers/usb/hid.c` (new), `sys/drivers/usb/hid.h` (new)
                 - Logic: Parse Usage Page, Usage, Collection, Input/Output/Feature items
                 - Tests: unit (keyboard descriptor, mouse descriptor), fuzzer (malformed descriptors)
                 - Docs: `usb_hid.4`
                 - Acceptance: Report fields extracted
-            - [ ] Implement keyboard scancode translation.
+            - [ ] Implement keyboard scancode translation. (REQ: REQ-14-0058)
                 - Files: `sys/drivers/usb/hid_keyboard.c` (new)
                 - Logic: USB HID Usage to PS/2 scancode mapping
                 - Modifier handling: Shift, Ctrl, Alt, GUI keys
                 - Tests: unit (key press/release events)
                 - Docs: `hid_keyboard.4`
                 - Acceptance: Keyboard input works
-            - [ ] Implement mouse relative motion reporting.
+            - [ ] Implement mouse relative motion reporting. (REQ: REQ-14-0059)
                 - Files: `sys/drivers/usb/hid_mouse.c` (new)
                 - Logic: Parse X/Y relative, button state, wheel
                 - Tests: unit (motion events, button events)
                 - Docs: `hid_mouse.4`
                 - Acceptance: Mouse input works
-            - [ ] Implement HID interrupt IN polling.
+            - [ ] Implement HID interrupt IN polling. (REQ: REQ-14-0060)
                 - Files: `sys/drivers/usb/hid.c`
                 - Logic: Submit interrupt URB, re-submit on completion
                 - Tests: integration (continuous input polling)
                 - Docs: `usb_hid.4`
                 - Acceptance: Events received continuously
-        - [ ] **Mass Storage (MSC):**
-            - [ ] Implement Bulk-Only Transport (BOT) state machine.
+        - [ ] **Mass Storage (MSC):** (REQ: REQ-14-0061)
+            - [ ] Implement Bulk-Only Transport (BOT) state machine. (REQ: REQ-14-0062)
                 - Files: `sys/drivers/usb/usb_storage.c` (new), `sys/drivers/usb/usb_storage.h` (new)
                 - States: COMMAND, DATA, STATUS, RESET
                 - Tests: integration (full command sequence)
                 - Docs: `usb_storage.4`
                 - Acceptance: BOT protocol works
-            - [ ] Implement Command Block Wrapper (CBW) construction.
+            - [ ] Implement Command Block Wrapper (CBW) construction. (REQ: REQ-14-0063)
                 - Files: `sys/drivers/usb/usb_storage.c`
                 - Fields: dCBWSignature, dCBWTag, dCBWDataTransferLength, bmCBWFlags, bCBWLUN, bCBWCBLength, CBWCB
                 - Tests: unit (CBW format correct)
                 - Docs: `usb_storage.4`
                 - Acceptance: CBW accepted by device
-            - [ ] Implement Command Status Wrapper (CSW) parsing.
+            - [ ] Implement Command Status Wrapper (CSW) parsing. (REQ: REQ-14-0064)
                 - Files: `sys/drivers/usb/usb_storage.c`
                 - Fields: dCSWSignature, dCSWTag, dCSWDataResidue, bCSWStatus
                 - Status: PASSED, FAILED, PHASE_ERROR
                 - Tests: unit (CSW parsing, error handling)
                 - Docs: `usb_storage.4`
                 - Acceptance: CSW correctly interpreted
-            - [ ] Implement bulk data transfer (IN/OUT).
+            - [ ] Implement bulk data transfer (IN/OUT). (REQ: REQ-14-0065)
                 - Files: `sys/drivers/usb/usb_storage.c`
                 - Logic: Submit bulk URBs for data phase
                 - Tests: integration (read/write data)
                 - Docs: `usb_storage.4`
                 - Acceptance: Data transferred correctly
-            - [ ] Implement BOT reset recovery.
+            - [ ] Implement BOT reset recovery. (REQ: REQ-14-0066)
                 - Files: `sys/drivers/usb/usb_storage.c`
                 - Logic: Bulk-Only Mass Storage Reset, Clear Feature HALT
                 - Tests: integration (recovery from stall)
                 - Docs: `usb_storage.4`
                 - Acceptance: Device recovers after error
-            - [ ] Integrate with SCSI mid-layer.
+            - [ ] Integrate with SCSI mid-layer. (REQ: REQ-14-0067)
                 - Files: `sys/drivers/usb/usb_storage.c`
                 - API: Implement scsi_link_t execute callback
                 - Logic: Wrap SCSI CDBs in CBW, parse CSW status
                 - Tests: integration (SCSI INQUIRY via USB)
                 - Docs: `usb_storage.4`
                 - Acceptance: USB storage appears as SCSI device
-        - [ ] **CDC-ACM (Communications Device Class - Abstract Control Model):**
-            - [ ] Implement CDC functional descriptor parsing.
+        - [ ] **CDC-ACM (Communications Device Class - Abstract Control Model):** (REQ: REQ-14-0068)
+            - [ ] Implement CDC functional descriptor parsing. (REQ: REQ-14-0069)
                 - Files: `sys/drivers/usb/cdc_acm.c` (new)
                 - Descriptors: Header, Call Management, ACM, Union
                 - Tests: unit (descriptor parsing)
                 - Docs: `cdc_acm.4`
                 - Acceptance: Functional descriptors understood
-            - [ ] Implement SET_LINE_CODING.
+            - [ ] Implement SET_LINE_CODING. (REQ: REQ-14-0070)
                 - Files: `sys/drivers/usb/cdc_acm.c`
                 - Fields: dwDTERate, bCharFormat, bParityType, bDataBits
                 - Tests: unit (baud rate setting)
                 - Docs: `cdc_acm.4`
                 - Acceptance: Line coding sent
-            - [ ] Implement GET_LINE_CODING.
+            - [ ] Implement GET_LINE_CODING. (REQ: REQ-14-0071)
                 - Files: `sys/drivers/usb/cdc_acm.c`
                 - Tests: unit (retrieve current settings)
                 - Docs: `cdc_acm.4`
                 - Acceptance: Settings retrieved
-            - [ ] Implement SET_CONTROL_LINE_STATE.
+            - [ ] Implement SET_CONTROL_LINE_STATE. (REQ: REQ-14-0072)
                 - Files: `sys/drivers/usb/cdc_acm.c`
                 - Signals: DTR, RTS
                 - Tests: unit (control signals set)
                 - Docs: `cdc_acm.4`
                 - Acceptance: DTR/RTS toggled
-            - [ ] Implement serial notification handling.
+            - [ ] Implement serial notification handling. (REQ: REQ-14-0073)
                 - Files: `sys/drivers/usb/cdc_acm.c`
                 - Notifications: SERIAL_STATE (DCD, DSR, RI, break, framing error)
                 - Tests: integration (notifications received)
                 - Docs: `cdc_acm.4`
                 - Acceptance: Modem signals reported
-            - [ ] Integrate with TTY subsystem.
+            - [ ] Integrate with TTY subsystem. (REQ: REQ-14-0074)
                 - Files: `sys/drivers/usb/cdc_acm.c`
                 - Logic: Register as /dev/ttyUSBN, implement tty_ldisc operations
                 - Tests: integration (cat /dev/ttyUSB0 works)
                 - Docs: `cdc_acm.4`
                 - Acceptance: Serial device usable
-- [ ] **Audio Subsystem:**
-    - [ ] **Native API (Sun/NetBSD AudioIO):**
-        - [ ] **Device Nodes:**
-            - [ ] Create `/dev/audio` character device.
+- [ ] **Audio Subsystem:** (REQ: REQ-14-0075)
+    - [ ] **Native API (Sun/NetBSD AudioIO):** (REQ: REQ-14-0076)
+        - [ ] **Device Nodes:** (REQ: REQ-14-0077)
+            - [ ] Create `/dev/audio` character device. (REQ: REQ-14-0078)
                 - Files: `sys/drivers/audio/audio.c` (new), `sys/drivers/audio/audio.h` (new)
                 - Mode: Read/write, supports playback and recording
                 - Tests: integration (open /dev/audio for playback)
                 - Docs: `audio.4`
                 - Acceptance: Device node accessible
-            - [ ] Create `/dev/audioctl` control-only device.
+            - [ ] Create `/dev/audioctl` control-only device. (REQ: REQ-14-0079)
                 - Files: `sys/drivers/audio/audio.c`
                 - Mode: ioctl only, no read/write data
                 - Tests: unit (ioctl works, read/write fails)
                 - Docs: `audio.4`
                 - Acceptance: Control-only access
-            - [ ] Create `/dev/mixer` mixer device.
+            - [ ] Create `/dev/mixer` mixer device. (REQ: REQ-14-0080)
                 - Files: `sys/drivers/audio/mixer.c` (new)
                 - Mode: ioctl for volume/source control
                 - Tests: integration (mixer ioctls work)
                 - Docs: `mixer.4`
                 - Acceptance: Mixer accessible
-        - [ ] **`audio_info_t` Structure:**
-            - [ ] Define `audio_info_t` encapsulating audio parameters.
+        - [ ] **`audio_info_t` Structure:** (REQ: REQ-14-0081)
+            - [ ] Define `audio_info_t` encapsulating audio parameters. (REQ: REQ-14-0082)
                 - Files: `sys/drivers/audio/audio.h`
                 - Fields: `play` (audio_prinfo_t), `record` (audio_prinfo_t), `monitor_gain`, `blocksize`
                 - Subfields: sample_rate, channels, precision, encoding, gain, port, buffer_size
                 - Tests: unit (struct layout, initialization)
                 - Docs: `audio_info.9`
                 - Acceptance: Structure defined per NetBSD/Sun spec
-            - [ ] Define `AUDIO_ENCODING_*` constants.
+            - [ ] Define `AUDIO_ENCODING_*` constants. (REQ: REQ-14-0083)
                 - Files: `sys/drivers/audio/audio.h`
                 - Values: ULAW, ALAW, PCM8, PCM16, PCM24, PCM32
                 - Tests: unit (encoding constants defined)
                 - Docs: `audio_encoding.9`
                 - Acceptance: Encoding types enumerated
-        - [ ] **Audio Ioctls:**
-            - [ ] Implement `AUDIO_GETINFO` ioctl.
+        - [ ] **Audio Ioctls:** (REQ: REQ-14-0084)
+            - [ ] Implement `AUDIO_GETINFO` ioctl. (REQ: REQ-14-0085)
                 - Files: `sys/drivers/audio/audio.c`
                 - API: Return current audio_info_t settings
                 - Tests: unit (getinfo returns valid data)
                 - Docs: `audio.4`
                 - Acceptance: Current settings retrieved
-            - [ ] Implement `AUDIO_SETINFO` ioctl.
+            - [ ] Implement `AUDIO_SETINFO` ioctl. (REQ: REQ-14-0086)
                 - Files: `sys/drivers/audio/audio.c`
                 - API: Set audio parameters (sample rate, channels, encoding)
                 - Logic: Validate parameters, reconfigure hardware
                 - Tests: unit (setinfo success, invalid params rejected)
                 - Docs: `audio.4`
                 - Acceptance: Parameters applied to hardware
-            - [ ] Implement `AUDIO_DRAIN` ioctl.
+            - [ ] Implement `AUDIO_DRAIN` ioctl. (REQ: REQ-14-0087)
                 - Files: `sys/drivers/audio/audio.c`
                 - API: Block until playback buffer empty
                 - Tests: integration (drain waits for playback)
                 - Docs: `audio.4`
                 - Acceptance: Returns after buffers drained
-            - [ ] Implement `AUDIO_FLUSH` ioctl.
+            - [ ] Implement `AUDIO_FLUSH` ioctl. (REQ: REQ-14-0088)
                 - Files: `sys/drivers/audio/audio.c`
                 - API: Discard buffered data, reset pointers
                 - Tests: unit (flush clears buffers)
                 - Docs: `audio.4`
                 - Acceptance: Buffers emptied immediately
-            - [ ] Implement `AUDIO_GETDEV` ioctl.
+            - [ ] Implement `AUDIO_GETDEV` ioctl. (REQ: REQ-14-0089)
                 - Files: `sys/drivers/audio/audio.c`
                 - API: Return audio device name/version
                 - Tests: unit (device info returned)
                 - Docs: `audio.4`
                 - Acceptance: Correct device info
-    - [ ] **Driver Implementation:**
-        - [ ] **Circular DMA Buffers:**
-            - [ ] Implement ring buffer management.
+    - [ ] **Driver Implementation:** (REQ: REQ-14-0090)
+        - [ ] **Circular DMA Buffers:** (REQ: REQ-14-0091)
+            - [ ] Implement ring buffer management. (REQ: REQ-14-0092)
                 - Files: `sys/drivers/audio/audio_ring.c` (new)
                 - Structure: Read/write pointers, buffer size, highwater/lowwater marks
                 - Tests: unit (wrap-around, overflow detection, underrun detection)
                 - Docs: `audio_ring.9`
                 - Acceptance: Ring buffer operational
-            - [ ] Implement DMA descriptor chain setup.
+            - [ ] Implement DMA descriptor chain setup. (REQ: REQ-14-0093)
                 - Files: `sys/drivers/audio/audio_dma.c` (new)
                 - Logic: Scatter-gather DMA for continuous playback
                 - Tests: integration (continuous audio without gaps)
                 - Docs: `audio_dma.9`
                 - Acceptance: Gapless playback
-            - [ ] Implement buffer interrupt handling.
+            - [ ] Implement buffer interrupt handling. (REQ: REQ-14-0094)
                 - Files: `sys/drivers/audio/audio_dma.c`
                 - Logic: Refill/drain buffers on DMA completion interrupt
                 - Tests: integration (interrupts keep stream running)
                 - Docs: `audio_dma.9`
                 - Acceptance: Stable interrupt-driven I/O
-        - [ ] **Mixer:**
-            - [ ] Implement `MIXER_READ` ioctl.
+        - [ ] **Mixer:** (REQ: REQ-14-0095)
+            - [ ] Implement `MIXER_READ` ioctl. (REQ: REQ-14-0096)
                 - Files: `sys/drivers/audio/mixer.c`
                 - Channels: VOLUME, BASS, TREBLE, SYNTH, PCM, SPEAKER, LINE, MIC, CD
                 - Tests: unit (read each channel)
                 - Docs: `mixer.4`
                 - Acceptance: Channel levels retrieved
-            - [ ] Implement `MIXER_WRITE` ioctl.
+            - [ ] Implement `MIXER_WRITE` ioctl. (REQ: REQ-14-0097)
                 - Files: `sys/drivers/audio/mixer.c`
                 - Logic: Set left/right channel levels (0-100 scale)
                 - Tests: unit (write each channel)
                 - Docs: `mixer.4`
                 - Acceptance: Channel levels set
-            - [ ] Implement mute control.
+            - [ ] Implement mute control. (REQ: REQ-14-0098)
                 - Files: `sys/drivers/audio/mixer.c`
                 - Logic: Toggle mute per channel
                 - Tests: unit (mute on/off)
                 - Docs: `mixer.4`
                 - Acceptance: Mute works
-            - [ ] Implement source selection.
+            - [ ] Implement source selection. (REQ: REQ-14-0099)
                 - Files: `sys/drivers/audio/mixer.c`
                 - Sources: Mic, Line In, CD, Aux
                 - Tests: unit (source switch)
                 - Docs: `mixer.4`
                 - Acceptance: Recording source selectable
-        - [ ] **AC97 Codec:**
-            - [ ] Implement AC97 register read/write.
+        - [ ] **AC97 Codec:** (REQ: REQ-14-0100)
+            - [ ] Implement AC97 register read/write. (REQ: REQ-14-0101)
                 - Files: `sys/drivers/audio/ac97.c` (new), `sys/drivers/audio/ac97.h` (new)
                 - Registers: Master Volume, PCM Out Volume, Record Select, Reset, etc.
                 - Tests: unit (register access)
                 - Docs: `ac97.4`
                 - Acceptance: Codec registers accessible
-            - [ ] Implement AC97 codec detection.
+            - [ ] Implement AC97 codec detection. (REQ: REQ-14-0102)
                 - Files: `sys/drivers/audio/ac97.c`
                 - Logic: Read Vendor ID registers, detect codec type
                 - Tests: integration (codec detected in QEMU)
                 - Docs: `ac97.4`
                 - Acceptance: Codec identified
-            - [ ] Implement AC97 mixer integration.
+            - [ ] Implement AC97 mixer integration. (REQ: REQ-14-0103)
                 - Files: `sys/drivers/audio/ac97.c`
                 - Logic: Map mixer ioctls to AC97 registers
                 - Tests: integration (mixer controls AC97 volumes)
                 - Docs: `ac97.4`
                 - Acceptance: Mixer controls codec
-            - [ ] Implement AC97 link controller interface.
+            - [ ] Implement AC97 link controller interface. (REQ: REQ-14-0104)
                 - Files: `sys/drivers/audio/ac97.c`
                 - Logic: Timing for codec register access via link
                 - Tests: unit (link timing correct)
                 - Docs: `ac97.4`
                 - Acceptance: Stable codec communication
-        - [ ] **Intel High Definition Audio (HDA):**
-            - [ ] Implement HDA controller register access.
+        - [ ] **Intel High Definition Audio (HDA):** (REQ: REQ-14-0105)
+            - [ ] Implement HDA controller register access. (REQ: REQ-14-0106)
                 - Files: `sys/drivers/audio/hda.c` (new), `sys/drivers/audio/hda.h` (new)
                 - Registers: GCAP, VMIN, VMAJ, GCTL, WAKEEN, STATESTS, CORB*, RIRB*, Stream Descriptors
                 - Tests: integration (controller detected)
                 - Docs: `hda.4`
                 - Acceptance: HDA controller accessible
-            - [ ] Implement CORB (Command Output Ring Buffer) setup.
+            - [ ] Implement CORB (Command Output Ring Buffer) setup. (REQ: REQ-14-0107)
                 - Files: `sys/drivers/audio/hda.c`
                 - Logic: Allocate CORB memory, set CORBLBASE/CORBUBASE, enable
                 - Tests: unit (CORB operational)
                 - Docs: `hda.4`
                 - Acceptance: Commands can be sent
-            - [ ] Implement RIRB (Response Input Ring Buffer) setup.
+            - [ ] Implement RIRB (Response Input Ring Buffer) setup. (REQ: REQ-14-0108)
                 - Files: `sys/drivers/audio/hda.c`
                 - Logic: Allocate RIRB memory, set RIRBLBASE/RIRBUBASE, enable
                 - Tests: unit (RIRB receives responses)
                 - Docs: `hda.4`
                 - Acceptance: Responses received
-            - [ ] Implement codec enumeration.
+            - [ ] Implement codec enumeration. (REQ: REQ-14-0109)
                 - Files: `sys/drivers/audio/hda.c`
                 - Logic: Read STATESTS, probe codec addresses 0-14
                 - Tests: integration (codec detected)
                 - Docs: `hda.4`
                 - Acceptance: Codec found
-            - [ ] Implement widget parsing.
+            - [ ] Implement widget parsing. (REQ: REQ-14-0110)
                 - Files: `sys/drivers/audio/hda_codec.c` (new)
                 - Logic: Get Parameter verb to read widget types, connections
                 - Widgets: Audio Output, Audio Input, Audio Mixer, Audio Selector, Pin Complex
                 - Tests: unit (widget graph parsed)
                 - Docs: `hda.4`
                 - Acceptance: Audio path discovered
-            - [ ] Implement Stream Descriptor setup.
+            - [ ] Implement Stream Descriptor setup. (REQ: REQ-14-0111)
                 - Files: `sys/drivers/audio/hda.c`
                 - Registers: SDnCTL, SDnSTS, SDnLPIB, SDnCBL, SDnLVI, SDnFMT, SDnBDPL/U
                 - Logic: Configure stream format, buffer descriptor list
                 - Tests: integration (stream configured)
                 - Docs: `hda.4`
                 - Acceptance: Stream ready for data
-            - [ ] Implement Buffer Descriptor List (BDL) management.
+            - [ ] Implement Buffer Descriptor List (BDL) management. (REQ: REQ-14-0112)
                 - Files: `sys/drivers/audio/hda.c`
                 - Structure: Array of (address, length, IOC) entries
                 - Logic: Scatter-gather DMA for audio data
                 - Tests: unit (BDL wrap, IOC interrupts)
                 - Docs: `hda.4`
                 - Acceptance: Audio data transferred
-            - [ ] Implement stream interrupt handling.
+            - [ ] Implement stream interrupt handling. (REQ: REQ-14-0113)
                 - Files: `sys/drivers/audio/hda.c`
                 - Logic: Buffer completion, underrun/overrun detection
                 - Tests: integration (continuous playback via interrupts)
                 - Docs: `hda.4`
                 - Acceptance: Stable audio playback
     
-- [ ] **Power Management (ACPI):**
-    - [ ] **ACPICA:** Port Intel ACPICA or write custom AML parser.
-    - [ ] **States:**
-        - [ ] System Shutdown (`S5`)
-        - [ ] Reboot
+- [ ] **Power Management (ACPI):** (REQ: REQ-14-0114)
+    - [ ] **ACPICA:** Port Intel ACPICA or write custom AML parser. (REQ: REQ-14-0115)
+    - [ ] **States:** (REQ: REQ-14-0116)
+        - [ ] System Shutdown (`S5`) (REQ: REQ-14-0117)
+        - [ ] Reboot (REQ: REQ-14-0118)
 
 
 ## User Stories

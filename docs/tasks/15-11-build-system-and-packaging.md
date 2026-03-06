@@ -6,12 +6,12 @@
 ## Reimplemented Checklist (All Open)
 
 ### 11. Build System & Packaging
-- [ ] **Kernel Image Formats:**
-    - [ ] **zImage Support:**
-        - [ ] Standard Linux-compatible zImage header (magic, entry point, size).
-        - [ ] Flat binary generation (`objcopy -O binary`).
-        - [ ] Bootloader compatibility (QEMU `-kernel` or U-Boot `bootz`).
-        - [ ] Piggybacked initrd support (if applicable).
+- [ ] **Kernel Image Formats:** (REQ: REQ-15-0001)
+    - [ ] **zImage Support:** (REQ: REQ-15-0002)
+        - [ ] Standard Linux-compatible zImage header (magic, entry point, size). (REQ: REQ-15-0003)
+        - [ ] Flat binary generation (`objcopy -O binary`). (REQ: REQ-15-0004)
+        - [ ] Bootloader compatibility (QEMU `-kernel` or U-Boot `bootz`). (REQ: REQ-15-0005)
+        - [ ] Piggybacked initrd support (if applicable). (REQ: REQ-15-0006)
 
 
 ## User Stories

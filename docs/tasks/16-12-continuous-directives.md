@@ -9,13 +9,13 @@
 > [!IMPORTANT]
 > These are not one-off tasks but ongoing directives to be performed regularly.
 
-- [ ] **Documentation Maintenance:**
-    - [ ] **`ARCHITECTURE.md`:** Update whenever major structural changes or design decisions are made.
-    - [ ] **`AGENTS.md` / `GEMINI.md`:** Update to reflect current project status, context, and new capabilities.
-    - [ ] **Temporary component tasklists policy:** For active deep work, keep temporary `TASKLIST_*.md` files inside the owning component directory (for example `usr.bin/as/`, `usr.bin/ld/`, `usr.lib/elf/`). Do not track these in `ARCHITECTURE.md`; remove each tasklist when completed.
-- [ ] **Testing & Quality:**
-    - [ ] **Regression Tests:** Ensure `make test` (or equivalent) passes before committing.
-    - [ ] **Code Style:** adhere to kernel coding standards (KNF/Linux-style).
+- [ ] **Documentation Maintenance:** (REQ: REQ-16-0001)
+    - [ ] **`ARCHITECTURE.md`:** Update whenever major structural changes or design decisions are made. (REQ: REQ-16-0002)
+    - [ ] **`AGENTS.md` / `GEMINI.md`:** Update to reflect current project status, context, and new capabilities. (REQ: REQ-16-0003)
+    - [ ] **Temporary component tasklists policy:** For active deep work, keep temporary `TASKLIST_*.md` files inside the owning component directory (for example `usr.bin/as/`, `usr.bin/ld/`, `usr.lib/elf/`). Do not track these in `ARCHITECTURE.md`; remove each tasklist when completed. (REQ: REQ-16-0004)
+- [ ] **Testing & Quality:** (REQ: REQ-16-0005)
+    - [ ] **Regression Tests:** Ensure `make test` (or equivalent) passes before committing. (REQ: REQ-16-0006)
+    - [ ] **Code Style:** adhere to kernel coding standards (KNF/Linux-style). (REQ: REQ-16-0007)
 
 
 

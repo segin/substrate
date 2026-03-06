@@ -8,94 +8,94 @@
 ### 14. Native 64-bit Stat ABI Enforcement
 Reference: User Request (Step 30668)
 
-- [ ] **ABI Definition & Documentation:**
-    - [ ] Define and document the canonical 64-bit `struct stat` and kernel syscall ABI.
+- [ ] **ABI Definition & Documentation:** (REQ: REQ-18-0001)
+    - [ ] Define and document the canonical 64-bit `struct stat` and kernel syscall ABI. (REQ: REQ-18-0002)
         - Files: `sys/include/sys/stat.h`, `sys/doc/abi.md`
         - Tests: property (offsets/sizes verification)
         - Docs: Developer guide, `stat.2`
         - Acceptance: Single 64-bit definition in public header, ABI fully documented
-    - [ ] Create manpages for `stat(2)` explaining single-ABI policy.
+    - [ ] Create manpages for `stat(2)` explaining single-ABI policy. (REQ: REQ-18-0003)
         - Files: `usr/man/man2/stat.2`
         - Tests: doc validation
         - Docs: `stat.2`
         - Acceptance: Manpage documents 64-bit nature and usage
 
-- [ ] **LibC Updates:**
-    - [ ] Update LibC `stat` wrappers to use canonical 64-bit ABI (all architectures).
+- [ ] **LibC Updates:** (REQ: REQ-18-0004)
+    - [ ] Update LibC `stat` wrappers to use canonical 64-bit ABI (all architectures). (REQ: REQ-18-0005)
         - Files: `lib/c/src/sys.c`, `lib/c/include/sys/stat.h`
         - Tests: unit (struct size validation on i386 and amd64)
         - Docs: LibC internal docs
         - Acceptance: Userspace calls map directly to 64-bit kernel structure
-    - [ ] Update `fstat`, `lstat`, `fstatat` to use 64-bit ABI.
+    - [ ] Update `fstat`, `lstat`, `fstatat` to use 64-bit ABI. (REQ: REQ-18-0006)
         - Files: `lib/c/src/sys.c`
         - Tests: property (fd/path consistency)
         - Docs: `fstat.2`, `lstat.2`
         - Acceptance: All stat-family functions use new ABI
 
-- [ ] **Kernel Implementation:**
-    - [ ] Expose ONLY canonical 64-bit stat syscalls for native personality.
+- [ ] **Kernel Implementation:** (REQ: REQ-18-0007)
+    - [ ] Expose ONLY canonical 64-bit stat syscalls for native personality. (REQ: REQ-18-0008)
         - Files: `sys/exec/perso/perso_native.c`, `sys/arch/i386/syscall.c`
         - Tests: integration (strace confirms correct syscall usage)
         - Docs: `native_abi.md`
         - Acceptance: Native table has no legacy 32-bit stat entries
-    - [ ] Audit and remove "stub-like" stat implementations.
+    - [ ] Audit and remove "stub-like" stat implementations. (REQ: REQ-18-0009)
         - Files: `sys/kern/vfs_syscalls.c` (or equivalent)
         - Tests: unit (error handling, edge cases)
         - Docs: Source comments
         - Acceptance: Full implementation with robust error paths
-    - [ ] Add compatibility shims for non-native personalities (Linux/FreeBSD) only where needed.
+    - [ ] Add compatibility shims for non-native personalities (Linux/FreeBSD) only where needed. (REQ: REQ-18-0010)
         - Files: `sys/exec/perso/perso_linux.c`, `sys/exec/perso/perso_freebsd.c`
         - Tests: integration (compat shim translates correctly)
         - Docs: Personality internal docs
         - Acceptance: Foreign binaries work, native binaries use clean 64-bit path
 
-- [ ] **Testing & Verification:**
-    - [ ] Create ABI regression tools to assert field offsets and sizes.
+- [ ] **Testing & Verification:** (REQ: REQ-18-0011)
+    - [ ] Create ABI regression tools to assert field offsets and sizes. (REQ: REQ-18-0012)
         - Files: `tests/abi/stat_test.c`
         - Tests: property (offset assert)
         - Docs: Test README
         - Acceptance: Tool compiled and running on CI
-    - [ ] Property tests for large files, sparse files, and odd timestamps.
+    - [ ] Property tests for large files, sparse files, and odd timestamps. (REQ: REQ-18-0013)
         - Files: `tests/fs/stat_properties.c`
         - Tests: property (fuzz inputs)
         - Docs: Test plan
         - Acceptance: Tests pass consistently
-    - [ ] Audit and listing of userland tools using `stat`.
+    - [ ] Audit and listing of userland tools using `stat`. (REQ: REQ-18-0014)
         - Files: `bin/*`
         - Tests: N/A
         - Docs: `audit_stat_users.md`
         - Acceptance: all call sites identified
-    - [ ] Update userland tools to 64-bit stat.
+    - [ ] Update userland tools to 64-bit stat. (REQ: REQ-18-0015)
         - Files: `bin/ls.c`, `bin/tar.c`, etc.
         - Tests: integration (ls -l correct output)
         - Docs: N/A
         - Acceptance: Tools built against new LibC
 
-- [ ] **CI & Tooling:**
-    - [ ] Update CI to build and test both 32-bit and 64-bit targets.
+- [ ] **CI & Tooling:** (REQ: REQ-18-0016)
+    - [ ] Update CI to build and test both 32-bit and 64-bit targets. (REQ: REQ-18-0017)
         - Files: `Makefile`, `.github/workflows/ci.yml`
         - Tests: CI pipeline
         - Docs: CI Reference
         - Acceptance: Both targets green, confirming 64-bit ABI works on 32-bit arch
 
-- [ ] **Extended 64-bit Sycall ABI (Beyond Stat):**
-    - [ ] Standardize `lseek` / `lseek64` to single 64-bit offset ABI.
+- [ ] **Extended 64-bit Sycall ABI (Beyond Stat):** (REQ: REQ-18-0018)
+    - [ ] Standardize `lseek` / `lseek64` to single 64-bit offset ABI. (REQ: REQ-18-0019)
         - Files: `sys/arch/i386/syscall.c`
         - Tests: property (seek beyond 2GB)
         - Acceptance: `lseek` handles 64-bit offsets natively.
-    - [ ] Standardize `truncate` / `ftruncate` to 64-bit ABI.
+    - [ ] Standardize `truncate` / `ftruncate` to 64-bit ABI. (REQ: REQ-18-0020)
         - Files: `sys/kern/vfs_syscalls.c`
         - Tests: property (truncate large file)
         - Acceptance: `truncate` / `ftruncate` are natively 64-bit; no `truncate64` syscall needed.
-    - [ ] Standardize `mmap` to handle 64-bit offsets (pgoff).
+    - [ ] Standardize `mmap` to handle 64-bit offsets (pgoff). (REQ: REQ-18-0021)
         - Files: `sys/arch/i386/syscall.c`
         - Tests: integration (map large offset)
         - Acceptance: `mmap` accepts 64-bit offset (or sufficient page count).
-    - [ ] Review `getdents` / `getdents64` dirent structures.
+    - [ ] Review `getdents` / `getdents64` dirent structures. (REQ: REQ-18-0022)
         - Files: `sys/fs/fs.c`
         - Tests: integration (read directory with many/large inodes)
         - Acceptance: Single 64-bit friendly dirent format (`getdents` implies 64-bit inodes/offsets).
-    - [ ] Standardize `statfs` / `statvfs` to 64-bit block counts.
+    - [ ] Standardize `statfs` / `statvfs` to 64-bit block counts. (REQ: REQ-18-0023)
         - Files: `sys/vfs/vfs.c`
         - Tests: integration (df on large volume)
         - Acceptance: Report correct size for >2TB volumes.

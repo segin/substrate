@@ -6,7 +6,7 @@
 ## Reimplemented Checklist (All Open)
 
 ### 3. Drivers (`sys/drivers`)
-- [ ] **Storage Subsystem (Unified SCSI Stack):**
+- [ ] **Storage Subsystem (Unified SCSI Stack):** (REQ: REQ-03-0001)
 
     > **Files:** `sys/drivers/storage/scsi/scsi.h`, `scsi.c`, `scsi_dev.c`,
     > `scsi_ctl.c`, `atapi_scsi.c`/`.h`, `virtio_scsi.c`.
@@ -15,265 +15,265 @@
     > command execution. No artificial sd/sr split — everything is a
     > `scsi_device` with type-specific behavior.
 
-    - [ ] **Core Architecture (CAM/Mid-layer):**
+    - [ ] **Core Architecture (CAM/Mid-layer):** (REQ: REQ-03-0002)
 
-        - [ ] **Data Structures (`scsi.h`):**
-            - [ ] `scsi_request_t`: command execution context.
-                - [ ] CDB storage (up to `SCSI_MAX_CDB_LEN` = 16 bytes).
-                - [ ] `cdb_len`: actual CDB length (6, 10, 12, or 16).
-                - [ ] `data`/`data_len`: DMA buffer pointer and transfer length.
-                - [ ] `flags`: direction (`SCSI_REQ_READ`, `SCSI_REQ_WRITE`), and options.
-                - [ ] `status`: SCSI status byte (GOOD, CHECK CONDITION, BUSY, etc.).
-                - [ ] `sense_data[SCSI_SENSE_LEN]`: auto-sense buffer (32 bytes).
-                - [ ] `sense_len`: actual sense data returned.
-                - [ ] `timeout_ms`: per-command timeout.
-                - [ ] `retries` / `max_retries`: retry counters (default 3, media error = 0).
-                - [ ] `callback`: async completion function pointer.
-                - [ ] `submit_time` / `start_time` / `elapsed_ms`: timing instrumentation.
-                - [ ] Queue linkage (`next` pointer).
-            - [ ] `scsi_device_t`: target representation.
-                - [ ] Addressing: `bus`, `target` (0–15), `lun` (0–255).
-                - [ ] Identity from INQUIRY: `vendor[9]`, `product[17]`, `revision[5]`, `serial[21]`.
-                - [ ] `type`: peripheral device type (disk=0x00, tape=0x01, cdrom=0x05, etc.).
-                - [ ] `removable`: RMB bit from INQUIRY.
-                - [ ] `scsi_version`: SPC version from INQUIRY.
-                - [ ] `capacity`: total sectors (from READ CAPACITY).
-                - [ ] `sector_size`: bytes/sector (512 for disk, 2048 for CD-ROM).
-                - [ ] `flags`: online/offline, write-protected, supports TCQ.
-                - [ ] Command queue: `queue_head`/`queue_tail`, `queue_depth`, `max_queue_depth`.
-                - [ ] `link`: back-pointer to transport interface.
-                - [ ] Registry linkage (`next` pointer).
-            - [ ] `scsi_link_t`: transport adapter interface.
-                - [ ] `name[32]`: adapter name (e.g., `"atapi0"`, `"virtio-scsi0"`).
-                - [ ] `execute(link, request)`: function pointer — transport-specific command dispatch.
-                - [ ] `max_targets` / `max_luns`: bus topology limits.
-                - [ ] `adapter_queue_depth`: HBA-level parallelism.
-                - [ ] `flags`: DMA-capable, supports tagged queueing, ordered tags.
-                - [ ] Statistics: `cmds_completed`, `cmds_failed`, `bytes_read`, `bytes_written`.
-            - [ ] `scsi_sense_fixed`: SPC-3 fixed-format sense data (36 bytes).
-                - [ ] `response_code` (0x70 current, 0x71 deferred).
-                - [ ] `sense_key` (bits 0–3), `ILI` (bit 5), `EOM` (bit 6), `FileMark` (bit 7).
-                - [ ] `info[4]`: command-specific information.
-                - [ ] `asc` / `ascq`: Additional Sense Code / Qualifier.
-            - [ ] `scsi_inquiry_data`: standard INQUIRY response (36+ bytes).
-                - [ ] `device_type` (bits 0–4), `qualifier` (bits 5–7).
-                - [ ] `rmb` (bit 7), `version`, `response_format`.
-                - [ ] `additional_length`, `flags` (CmdQue, etc.).
-                - [ ] Vendor/Product/Revision strings (space-padded).
-            - [ ] `scsi_report_luns_data`: REPORT LUNS response (up to 64 LUNs).
+        - [ ] **Data Structures (`scsi.h`):** (REQ: REQ-03-0003)
+            - [ ] `scsi_request_t`: command execution context. (REQ: REQ-03-0004)
+                - [ ] CDB storage (up to `SCSI_MAX_CDB_LEN` = 16 bytes). (REQ: REQ-03-0005)
+                - [ ] `cdb_len`: actual CDB length (6, 10, 12, or 16). (REQ: REQ-03-0006)
+                - [ ] `data`/`data_len`: DMA buffer pointer and transfer length. (REQ: REQ-03-0007)
+                - [ ] `flags`: direction (`SCSI_REQ_READ`, `SCSI_REQ_WRITE`), and options. (REQ: REQ-03-0008)
+                - [ ] `status`: SCSI status byte (GOOD, CHECK CONDITION, BUSY, etc.). (REQ: REQ-03-0009)
+                - [ ] `sense_data[SCSI_SENSE_LEN]`: auto-sense buffer (32 bytes). (REQ: REQ-03-0010)
+                - [ ] `sense_len`: actual sense data returned. (REQ: REQ-03-0011)
+                - [ ] `timeout_ms`: per-command timeout. (REQ: REQ-03-0012)
+                - [ ] `retries` / `max_retries`: retry counters (default 3, media error = 0). (REQ: REQ-03-0013)
+                - [ ] `callback`: async completion function pointer. (REQ: REQ-03-0014)
+                - [ ] `submit_time` / `start_time` / `elapsed_ms`: timing instrumentation. (REQ: REQ-03-0015)
+                - [ ] Queue linkage (`next` pointer). (REQ: REQ-03-0016)
+            - [ ] `scsi_device_t`: target representation. (REQ: REQ-03-0017)
+                - [ ] Addressing: `bus`, `target` (0–15), `lun` (0–255). (REQ: REQ-03-0018)
+                - [ ] Identity from INQUIRY: `vendor[9]`, `product[17]`, `revision[5]`, `serial[21]`. (REQ: REQ-03-0019)
+                - [ ] `type`: peripheral device type (disk=0x00, tape=0x01, cdrom=0x05, etc.). (REQ: REQ-03-0020)
+                - [ ] `removable`: RMB bit from INQUIRY. (REQ: REQ-03-0021)
+                - [ ] `scsi_version`: SPC version from INQUIRY. (REQ: REQ-03-0022)
+                - [ ] `capacity`: total sectors (from READ CAPACITY). (REQ: REQ-03-0023)
+                - [ ] `sector_size`: bytes/sector (512 for disk, 2048 for CD-ROM). (REQ: REQ-03-0024)
+                - [ ] `flags`: online/offline, write-protected, supports TCQ. (REQ: REQ-03-0025)
+                - [ ] Command queue: `queue_head`/`queue_tail`, `queue_depth`, `max_queue_depth`. (REQ: REQ-03-0026)
+                - [ ] `link`: back-pointer to transport interface. (REQ: REQ-03-0027)
+                - [ ] Registry linkage (`next` pointer). (REQ: REQ-03-0028)
+            - [ ] `scsi_link_t`: transport adapter interface. (REQ: REQ-03-0029)
+                - [ ] `name[32]`: adapter name (e.g., `"atapi0"`, `"virtio-scsi0"`). (REQ: REQ-03-0030)
+                - [ ] `execute(link, request)`: function pointer — transport-specific command dispatch. (REQ: REQ-03-0031)
+                - [ ] `max_targets` / `max_luns`: bus topology limits. (REQ: REQ-03-0032)
+                - [ ] `adapter_queue_depth`: HBA-level parallelism. (REQ: REQ-03-0033)
+                - [ ] `flags`: DMA-capable, supports tagged queueing, ordered tags. (REQ: REQ-03-0034)
+                - [ ] Statistics: `cmds_completed`, `cmds_failed`, `bytes_read`, `bytes_written`. (REQ: REQ-03-0035)
+            - [ ] `scsi_sense_fixed`: SPC-3 fixed-format sense data (36 bytes). (REQ: REQ-03-0036)
+                - [ ] `response_code` (0x70 current, 0x71 deferred). (REQ: REQ-03-0037)
+                - [ ] `sense_key` (bits 0–3), `ILI` (bit 5), `EOM` (bit 6), `FileMark` (bit 7). (REQ: REQ-03-0038)
+                - [ ] `info[4]`: command-specific information. (REQ: REQ-03-0039)
+                - [ ] `asc` / `ascq`: Additional Sense Code / Qualifier. (REQ: REQ-03-0040)
+            - [ ] `scsi_inquiry_data`: standard INQUIRY response (36+ bytes). (REQ: REQ-03-0041)
+                - [ ] `device_type` (bits 0–4), `qualifier` (bits 5–7). (REQ: REQ-03-0042)
+                - [ ] `rmb` (bit 7), `version`, `response_format`. (REQ: REQ-03-0043)
+                - [ ] `additional_length`, `flags` (CmdQue, etc.). (REQ: REQ-03-0044)
+                - [ ] Vendor/Product/Revision strings (space-padded). (REQ: REQ-03-0045)
+            - [ ] `scsi_report_luns_data`: REPORT LUNS response (up to 64 LUNs). (REQ: REQ-03-0046)
 
-        - [ ] **Initialization (`scsi_init`):**
-            - [ ] Initialize device registry (pre-allocate pool of `scsi_device_t`, 64 max).
-            - [ ] Initialize request pool (pre-allocate `scsi_request_t`, 128 max).
-            - [ ] Initialize free lists for both pools.
-            - [ ] Call `scsi_dev_init()` and `scsi_ctl_init()`.
+        - [ ] **Initialization (`scsi_init`):** (REQ: REQ-03-0047)
+            - [ ] Initialize device registry (pre-allocate pool of `scsi_device_t`, 64 max). (REQ: REQ-03-0048)
+            - [ ] Initialize request pool (pre-allocate `scsi_request_t`, 128 max). (REQ: REQ-03-0049)
+            - [ ] Initialize free lists for both pools. (REQ: REQ-03-0050)
+            - [ ] Call `scsi_dev_init()` and `scsi_ctl_init()`. (REQ: REQ-03-0051)
 
-        - [ ] **Transport Registration:**
-            - [ ] `scsi_register_link(link)`: register HBA/transport adapter.
-                - [ ] Validate `execute` callback is non-NULL.
-                - [ ] Add to global link list (max 8 links).
-                - [ ] Trigger bus scan on the new link.
-            - [ ] `scsi_unregister_link(link)`: unregister adapter.
-                - [ ] Detach all devices on this link.
-                - [ ] Free associated resources.
+        - [ ] **Transport Registration:** (REQ: REQ-03-0052)
+            - [ ] `scsi_register_link(link)`: register HBA/transport adapter. (REQ: REQ-03-0053)
+                - [ ] Validate `execute` callback is non-NULL. (REQ: REQ-03-0054)
+                - [ ] Add to global link list (max 8 links). (REQ: REQ-03-0055)
+                - [ ] Trigger bus scan on the new link. (REQ: REQ-03-0056)
+            - [ ] `scsi_unregister_link(link)`: unregister adapter. (REQ: REQ-03-0057)
+                - [ ] Detach all devices on this link. (REQ: REQ-03-0058)
+                - [ ] Free associated resources. (REQ: REQ-03-0059)
 
-        - [ ] **Device Discovery:**
-            - [ ] `scsi_scan_bus(link, bus)`: enumerate all targets on a bus.
-                - [ ] Iterate target IDs 0..`link->max_targets - 1`.
-                - [ ] For each target: INQUIRY at LUN 0, then REPORT LUNS for multi-LUN.
-                - [ ] Fallback: sequential LUN probing if REPORT LUNS fails (old devices).
-            - [ ] `scsi_probe_lun(link, bus, target, lun)`: probe a single LUN.
-                - [ ] Send TEST UNIT READY.
-                - [ ] Send INQUIRY; parse device type, vendor, product, revision.
-                - [ ] If device type is valid: `scsi_device_register()`.
-                - [ ] Send READ CAPACITY (10 or 16) for block devices.
-                - [ ] Trigger `scsi_auto_attach()` on success.
-            - [ ] `scsi_device_register(dev)`: add to global device list.
-                - [ ] Check for duplicate (same bus:target:lun).
-                - [ ] Assign monotonically increasing device number.
-                - [ ] Log discovery: `"scsi: B:T:L vendor product [type]"`.
-            - [ ] `scsi_device_unregister(dev)`: remove from list.
-            - [ ] `scsi_device_lookup(bus, target, lun)`: find registered device.
+        - [ ] **Device Discovery:** (REQ: REQ-03-0060)
+            - [ ] `scsi_scan_bus(link, bus)`: enumerate all targets on a bus. (REQ: REQ-03-0061)
+                - [ ] Iterate target IDs 0..`link->max_targets - 1`. (REQ: REQ-03-0062)
+                - [ ] For each target: INQUIRY at LUN 0, then REPORT LUNS for multi-LUN. (REQ: REQ-03-0063)
+                - [ ] Fallback: sequential LUN probing if REPORT LUNS fails (old devices). (REQ: REQ-03-0064)
+            - [ ] `scsi_probe_lun(link, bus, target, lun)`: probe a single LUN. (REQ: REQ-03-0065)
+                - [ ] Send TEST UNIT READY. (REQ: REQ-03-0066)
+                - [ ] Send INQUIRY; parse device type, vendor, product, revision. (REQ: REQ-03-0067)
+                - [ ] If device type is valid: `scsi_device_register()`. (REQ: REQ-03-0065)
+                - [ ] Send READ CAPACITY (10 or 16) for block devices. (REQ: REQ-03-0069)
+                - [ ] Trigger `scsi_auto_attach()` on success. (REQ: REQ-03-0070)
+            - [ ] `scsi_device_register(dev)`: add to global device list. (REQ: REQ-03-0071)
+                - [ ] Check for duplicate (same bus:target:lun). (REQ: REQ-03-0072)
+                - [ ] Assign monotonically increasing device number. (REQ: REQ-03-0073)
+                - [ ] Log discovery: `"scsi: B:T:L vendor product [type]"`. (REQ: REQ-03-0074)
+            - [ ] `scsi_device_unregister(dev)`: remove from list. (REQ: REQ-03-0075)
+            - [ ] `scsi_device_lookup(bus, target, lun)`: find registered device. (REQ: REQ-03-0076)
 
-        - [ ] **Command Execution:**
-            - [ ] **Request Lifecycle:**
-                - [ ] `scsi_request_alloc()`: allocate from pool (or return NULL if exhausted).
-                - [ ] `scsi_request_init(req, dev)`: zero fields, link to device, set default timeout (30s) and retries (3).
-                - [ ] `scsi_request_free(req)`: return to free pool.
-            - [ ] **Synchronous Execution:**
-                - [ ] `scsi_execute_sync(dev, cdb, cdb_len, data, data_len, flags, timeout_ms)`:
-                    - [ ] Allocate request, fill CDB/buffer, call `scsi_execute()`, block until complete, return status.
-            - [ ] **Core Execution (`scsi_execute`):**
-                - [ ] Record `submit_time` timestamp.
-                - [ ] Retry loop: attempt up to `max_retries + 1` times.
-                - [ ] Call `link->execute(link, req)` to dispatch to transport.
-                - [ ] Record `start_time`, measure `elapsed_ms`.
-                - [ ] On CHECK CONDITION: auto-request sense, parse sense key.
-                    - [ ] UNIT ATTENTION (sense key 6): retry automatically (medium changed).
-                    - [ ] NOT READY (sense key 2): retry with delay (device spinning up).
-                    - [ ] MEDIUM ERROR (sense key 3): no retry (data loss).
-                    - [ ] ABORTED COMMAND (sense key 0xB): retry.
-                - [ ] On BUSY / TASK SET FULL: backoff and retry.
-                - [ ] Update link statistics on completion.
-            - [ ] **Async Queue Management:**
-                - [ ] `scsi_queue_request(req)`: enqueue to device's command queue.
-                    - [ ] Respect `max_queue_depth` (drop or backpressure).
-                - [ ] `scsi_process_queue(dev)`: dequeue and execute pending requests.
-                - [ ] `scsi_abort_request(req)`: cancel pending request (remove from queue, invoke callback with error).
-                - [ ] `scsi_complete_request(req, status)`: mark done, invoke callback, trigger queue processing.
+        - [ ] **Command Execution:** (REQ: REQ-03-0077)
+            - [ ] **Request Lifecycle:** (REQ: REQ-03-0078)
+                - [ ] `scsi_request_alloc()`: allocate from pool (or return NULL if exhausted). (REQ: REQ-03-0079)
+                - [ ] `scsi_request_init(req, dev)`: zero fields, link to device, set default timeout (30s) and retries (3). (REQ: REQ-03-0080)
+                - [ ] `scsi_request_free(req)`: return to free pool. (REQ: REQ-03-0081)
+            - [ ] **Synchronous Execution:** (REQ: REQ-03-0082)
+                - [ ] `scsi_execute_sync(dev, cdb, cdb_len, data, data_len, flags, timeout_ms)`: (REQ: REQ-03-0083)
+                    - [ ] Allocate request, fill CDB/buffer, call `scsi_execute()`, block until complete, return status. (REQ: REQ-03-0084)
+            - [ ] **Core Execution (`scsi_execute`):** (REQ: REQ-03-0085)
+                - [ ] Record `submit_time` timestamp. (REQ: REQ-03-0086)
+                - [ ] Retry loop: attempt up to `max_retries + 1` times. (REQ: REQ-03-0087)
+                - [ ] Call `link->execute(link, req)` to dispatch to transport. (REQ: REQ-03-0088)
+                - [ ] Record `start_time`, measure `elapsed_ms`. (REQ: REQ-03-0089)
+                - [ ] On CHECK CONDITION: auto-request sense, parse sense key. (REQ: REQ-03-0085)
+                    - [ ] UNIT ATTENTION (sense key 6): retry automatically (medium changed). (REQ: REQ-03-0091)
+                    - [ ] NOT READY (sense key 2): retry with delay (device spinning up). (REQ: REQ-03-0092)
+                    - [ ] MEDIUM ERROR (sense key 3): no retry (data loss). (REQ: REQ-03-0093)
+                    - [ ] ABORTED COMMAND (sense key 0xB): retry. (REQ: REQ-03-0094)
+                - [ ] On BUSY / TASK SET FULL: backoff and retry. (REQ: REQ-03-0085)
+                - [ ] Update link statistics on completion. (REQ: REQ-03-0096)
+            - [ ] **Async Queue Management:** (REQ: REQ-03-0097)
+                - [ ] `scsi_queue_request(req)`: enqueue to device's command queue. (REQ: REQ-03-0098)
+                    - [ ] Respect `max_queue_depth` (drop or backpressure). (REQ: REQ-03-0099)
+                - [ ] `scsi_process_queue(dev)`: dequeue and execute pending requests. (REQ: REQ-03-0100)
+                - [ ] `scsi_abort_request(req)`: cancel pending request (remove from queue, invoke callback with error). (REQ: REQ-03-0101)
+                - [ ] `scsi_complete_request(req, status)`: mark done, invoke callback, trigger queue processing. (REQ: REQ-03-0102)
 
-        - [ ] **Sense Data Parsing:**
-            - [ ] `scsi_sense_key(sense, len)`: extract sense key from fixed or descriptor format.
-            - [ ] `scsi_sense_asc(sense, len)`: extract ASC (Additional Sense Code).
-            - [ ] `scsi_sense_ascq(sense, len)`: extract ASCQ (Additional Sense Code Qualifier).
-            - [ ] `scsi_sense_string(sense, len, buf, buflen)`: human-readable sense string.
-            - [ ] Sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED.
-            - [ ] Common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present).
+        - [ ] **Sense Data Parsing:** (REQ: REQ-03-0103)
+            - [ ] `scsi_sense_key(sense, len)`: extract sense key from fixed or descriptor format. (REQ: REQ-03-0104)
+            - [ ] `scsi_sense_asc(sense, len)`: extract ASC (Additional Sense Code). (REQ: REQ-03-0105)
+            - [ ] `scsi_sense_ascq(sense, len)`: extract ASCQ (Additional Sense Code Qualifier). (REQ: REQ-03-0106)
+            - [ ] `scsi_sense_string(sense, len, buf, buflen)`: human-readable sense string. (REQ: REQ-03-0107)
+            - [ ] Sense key names: NO SENSE, RECOVERED, NOT READY, MEDIUM ERROR, HARDWARE ERROR, ILLEGAL REQUEST, UNIT ATTENTION, DATA PROTECT, BLANK CHECK, VENDOR, COPY ABORTED, ABORTED COMMAND, VOLUME OVERFLOW, MISCOMPARE, COMPLETED. (REQ: REQ-03-0108)
+            - [ ] Common ASC/ASCQ: 0x04/01 (becoming ready), 0x28/00 (medium changed), 0x29/00 (power on reset), 0x3A/00 (medium not present). (REQ: REQ-03-0109)
 
-        - [ ] **CDB Builders:**
-            - [ ] `scsi_cdb_test_unit_ready(cdb)`: 6-byte TUR.
-            - [ ] `scsi_cdb_inquiry(cdb, len)`: 6-byte INQUIRY with allocation length.
-            - [ ] `scsi_cdb_request_sense(cdb, len)`: 6-byte REQUEST SENSE.
-            - [ ] `scsi_cdb_read_capacity_10(cdb)`: 10-byte READ CAPACITY.
-            - [ ] `scsi_cdb_read_10(cdb, lba, count)`: 10-byte READ.
-            - [ ] `scsi_cdb_write_10(cdb, lba, count)`: 10-byte WRITE.
-            - [ ] `scsi_cdb_read_16(cdb, lba, count)`: 16-byte READ (LBA > 2TB).
-            - [ ] `scsi_cdb_write_16(cdb, lba, count)`: 16-byte WRITE (LBA > 2TB).
-            - [ ] `scsi_cdb_mode_sense_6(cdb, page, len)` / `scsi_cdb_mode_sense_10(cdb, page, len)`.
-            - [ ] `scsi_cdb_start_stop(cdb, start, load_eject)`: START STOP UNIT.
-            - [ ] `scsi_cdb_sync_cache(cdb, lba, count)`: SYNCHRONIZE CACHE (10).
-            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`.
+        - [ ] **CDB Builders:** (REQ: REQ-03-0110)
+            - [ ] `scsi_cdb_test_unit_ready(cdb)`: 6-byte TUR. (REQ: REQ-03-0111)
+            - [ ] `scsi_cdb_inquiry(cdb, len)`: 6-byte INQUIRY with allocation length. (REQ: REQ-03-0112)
+            - [ ] `scsi_cdb_request_sense(cdb, len)`: 6-byte REQUEST SENSE. (REQ: REQ-03-0113)
+            - [ ] `scsi_cdb_read_capacity_10(cdb)`: 10-byte READ CAPACITY. (REQ: REQ-03-0114)
+            - [ ] `scsi_cdb_read_10(cdb, lba, count)`: 10-byte READ. (REQ: REQ-03-0115)
+            - [ ] `scsi_cdb_write_10(cdb, lba, count)`: 10-byte WRITE. (REQ: REQ-03-0116)
+            - [ ] `scsi_cdb_read_16(cdb, lba, count)`: 16-byte READ (LBA > 2TB). (REQ: REQ-03-0117)
+            - [ ] `scsi_cdb_write_16(cdb, lba, count)`: 16-byte WRITE (LBA > 2TB). (REQ: REQ-03-0118)
+            - [ ] `scsi_cdb_mode_sense_6(cdb, page, len)` / `scsi_cdb_mode_sense_10(cdb, page, len)`. (REQ: REQ-03-0119)
+            - [ ] `scsi_cdb_start_stop(cdb, start, load_eject)`: START STOP UNIT. (REQ: REQ-03-0120)
+            - [ ] `scsi_cdb_sync_cache(cdb, lba, count)`: SYNCHRONIZE CACHE (10). (REQ: REQ-03-0121)
+            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`. (REQ: REQ-03-0122, REQ-03-0225)
 
-        - [ ] **Standard Command Wrappers:**
-            - [ ] `scsi_test_unit_ready(dev)`: send TUR, return 0 on GOOD.
-            - [ ] `scsi_inquiry(dev, inq)`: send INQUIRY, fill `scsi_inquiry_data`.
-            - [ ] `scsi_read_capacity(dev, sectors, sector_size)`: READ CAPACITY (10 or 16), fill output.
-            - [ ] `scsi_request_sense(dev, sense, len)`: explicit REQUEST SENSE.
-            - [ ] `scsi_start_stop(dev, start, load_eject)`: START STOP UNIT.
-            - [ ] `scsi_report_luns(dev, luns)`: REPORT LUNS, parse big-endian LUN list.
-            - [ ] `scsi_synchronize_cache(dev)`: SYNCHRONIZE CACHE (write-back).
-            - [ ] `scsi_mode_sense(dev, page, buffer, len)`: MODE SENSE (for caching, geometry pages).
+        - [ ] **Standard Command Wrappers:** (REQ: REQ-03-0123)
+            - [ ] `scsi_test_unit_ready(dev)`: send TUR, return 0 on GOOD. (REQ: REQ-03-0124)
+            - [ ] `scsi_inquiry(dev, inq)`: send INQUIRY, fill `scsi_inquiry_data`. (REQ: REQ-03-0125)
+            - [ ] `scsi_read_capacity(dev, sectors, sector_size)`: READ CAPACITY (10 or 16), fill output. (REQ: REQ-03-0126)
+            - [ ] `scsi_request_sense(dev, sense, len)`: explicit REQUEST SENSE. (REQ: REQ-03-0127)
+            - [ ] `scsi_start_stop(dev, start, load_eject)`: START STOP UNIT. (REQ: REQ-03-0128)
+            - [ ] `scsi_report_luns(dev, luns)`: REPORT LUNS, parse big-endian LUN list. (REQ: REQ-03-0129)
+            - [ ] `scsi_synchronize_cache(dev)`: SYNCHRONIZE CACHE (write-back). (REQ: REQ-03-0130)
+            - [ ] `scsi_mode_sense(dev, page, buffer, len)`: MODE SENSE (for caching, geometry pages). (REQ: REQ-03-0131)
 
-    - [ ] **High-Level Device Driver (`scsi_dev.c`):**
+    - [ ] **High-Level Device Driver (`scsi_dev.c`):** (REQ: REQ-03-0132)
 
-        - [ ] **Block Device Callbacks:**
-            - [ ] `scsi_blk_read(blkdev, sector, count, buffer)`: build READ(10) CDB, execute sync, return sector count or -1.
-            - [ ] `scsi_blk_write(blkdev, sector, count, buffer)`: build WRITE(10) CDB, execute sync; reject writes to CD-ROM.
-            - [ ] Handle sector size translation (512 vs 2048 for CD-ROM).
-            - [ ] Support READ(16)/WRITE(16) for devices with capacity > 2TB.
-        - [ ] **Device Type Handling:**
-            - [ ] **Direct Access (Type 0x00 — Disk):**
-                - [ ] READ CAPACITY for sector count and size.
-                - [ ] Cache flush via SYNCHRONIZE CACHE on unmount/shutdown.
-                - [ ] Device name: `scsiN` (sequential numbering).
-            - [ ] **CD-ROM / DVD (Type 0x05 — ROM):**
-                - [ ] `scsi_read_toc(dev, buffer, buflen)`: READ TOC/PMA/ATIP (CDB 0x43).
-                - [ ] `scsi_lock_door(dev, lock)`: PREVENT/ALLOW MEDIUM REMOVAL (CDB 0x1E).
-                - [ ] Sector size: 2048 bytes (data CD standard).
-                - [ ] Handle UNIT ATTENTION on media change: re-read capacity.
-            - [ ] **WORM / Optical (Types 0x04, 0x07):**
-                - [ ] Same as disk but write-once semantics; reject overwrites.
-            - [ ] **Sequential Access (Type 0x01 — Tape) — deferred.**
-        - [ ] **Attach / Detach:**
-            - [ ] `scsi_dev_attach(scsi_dev)`: create `scsi_blk_dev_t`, register block device.
-                - [ ] Only attach block-capable types (disk, cdrom, optical, worm).
-                - [ ] Set sector size based on device type.
-                - [ ] Log: `"scsi: attached scsiN (type) [vendor product]"`.
-            - [ ] `scsi_dev_detach(scsi_dev)`: unregister block device, remove from list.
-            - [ ] `scsi_dev_lookup(name)`: find block device by name (e.g., `"scsi0"`).
-            - [ ] `scsi_dev_init()`: initialize unified device subsystem.
-            - [ ] `scsi_auto_attach(dev)`: called on discovery — create generic node + block device.
+        - [ ] **Block Device Callbacks:** (REQ: REQ-03-0133)
+            - [ ] `scsi_blk_read(blkdev, sector, count, buffer)`: build READ(10) CDB, execute sync, return sector count or -1. (REQ: REQ-03-0134)
+            - [ ] `scsi_blk_write(blkdev, sector, count, buffer)`: build WRITE(10) CDB, execute sync; reject writes to CD-ROM. (REQ: REQ-03-0135)
+            - [ ] Handle sector size translation (512 vs 2048 for CD-ROM). (REQ: REQ-03-0136)
+            - [ ] Support READ(16)/WRITE(16) for devices with capacity > 2TB. (REQ: REQ-03-0137)
+        - [ ] **Device Type Handling:** (REQ: REQ-03-0138)
+            - [ ] **Direct Access (Type 0x00 — Disk):** (REQ: REQ-03-0139)
+                - [ ] READ CAPACITY for sector count and size. (REQ: REQ-03-0140)
+                - [ ] Cache flush via SYNCHRONIZE CACHE on unmount/shutdown. (REQ: REQ-03-0141)
+                - [ ] Device name: `scsiN` (sequential numbering). (REQ: REQ-03-0142)
+            - [ ] **CD-ROM / DVD (Type 0x05 — ROM):** (REQ: REQ-03-0143)
+                - [ ] `scsi_read_toc(dev, buffer, buflen)`: READ TOC/PMA/ATIP (CDB 0x43). (REQ: REQ-03-0144)
+                - [ ] `scsi_lock_door(dev, lock)`: PREVENT/ALLOW MEDIUM REMOVAL (CDB 0x1E). (REQ: REQ-03-0145)
+                - [ ] Sector size: 2048 bytes (data CD standard). (REQ: REQ-03-0146)
+                - [ ] Handle UNIT ATTENTION on media change: re-read capacity. (REQ: REQ-03-0147)
+            - [ ] **WORM / Optical (Types 0x04, 0x07):** (REQ: REQ-03-0148)
+                - [ ] Same as disk but write-once semantics; reject overwrites. (REQ: REQ-03-0149)
+            - [ ] **Sequential Access (Type 0x01 — Tape) — deferred.** (REQ: REQ-03-0150)
+        - [ ] **Attach / Detach:** (REQ: REQ-03-0151)
+            - [ ] `scsi_dev_attach(scsi_dev)`: create `scsi_blk_dev_t`, register block device. (REQ: REQ-03-0152)
+                - [ ] Only attach block-capable types (disk, cdrom, optical, worm). (REQ: REQ-03-0153)
+                - [ ] Set sector size based on device type. (REQ: REQ-03-0154)
+                - [ ] Log: `"scsi: attached scsiN (type) [vendor product]"`. (REQ: REQ-03-0155)
+            - [ ] `scsi_dev_detach(scsi_dev)`: unregister block device, remove from list. (REQ: REQ-03-0156)
+            - [ ] `scsi_dev_lookup(name)`: find block device by name (e.g., `"scsi0"`). (REQ: REQ-03-0157)
+            - [ ] `scsi_dev_init()`: initialize unified device subsystem. (REQ: REQ-03-0158)
+            - [ ] `scsi_auto_attach(dev)`: called on discovery — create generic node + block device. (REQ: REQ-03-0159)
 
-    - [ ] **Controller Interface (`scsi_ctl.c`):**
+    - [ ] **Controller Interface (`scsi_ctl.c`):** (REQ: REQ-03-0160)
 
-        - [ ] **Device Node Hierarchy:**
-            - [ ] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`): generic SCSI pass-through node.
-                - [ ] `scsi_create_generic_node(dev)`: create DevFS entry.
-                - [ ] `sg_ioctl(node, request, arg)`: ioctl handler for generic nodes.
-            - [ ] `/dev/storage/scsi/B` (e.g., `0`): bus controller endpoint.
-                - [ ] `scsi_create_bus_node(link, bus_id)`: create DevFS entry.
-                - [ ] `bus_ioctl(node, request, arg)`: ioctl handler for bus operations.
-            - [ ] `/dev/storage/scsiN` (e.g., `scsi0`): high-level block device alias.
-        - [ ] **ioctl Operations:**
-            - [ ] `SCSI_IOCTL_SCAN` (0x5301): trigger bus rescan.
-            - [ ] `SCSI_IOCTL_GET_INFO` (0x5302): return `scsi_ioctl_info_t` (bus, target, lun, type, vendor, product, capacity).
-            - [ ] `SCSI_IOCTL_GET_IDLUN` (0x5303): return packed bus:target:lun.
-            - [ ] `SCSI_IOCTL_GET_COUNT` (0x5304): return device count on bus.
-            - [ ] `SCSI_IOCTL_SEND_CMD` (0x5305): pass-through raw SCSI CDB with data buffer.
-                - [ ] Copy CDB from userspace, validate length.
-                - [ ] Execute via `scsi_execute_sync()`, copy results back.
-                - [ ] Require appropriate privilege (root or CAP_SYS_RAWIO).
+        - [ ] **Device Node Hierarchy:** (REQ: REQ-03-0161)
+            - [ ] `/dev/storage/scsi/B:T:L` (e.g., `0:0:0`): generic SCSI pass-through node. (REQ: REQ-03-0162)
+                - [ ] `scsi_create_generic_node(dev)`: create DevFS entry. (REQ: REQ-03-0163)
+                - [ ] `sg_ioctl(node, request, arg)`: ioctl handler for generic nodes. (REQ: REQ-03-0164)
+            - [ ] `/dev/storage/scsi/B` (e.g., `0`): bus controller endpoint. (REQ: REQ-03-0165)
+                - [ ] `scsi_create_bus_node(link, bus_id)`: create DevFS entry. (REQ: REQ-03-0166)
+                - [ ] `bus_ioctl(node, request, arg)`: ioctl handler for bus operations. (REQ: REQ-03-0167)
+            - [ ] `/dev/storage/scsiN` (e.g., `scsi0`): high-level block device alias. (REQ: REQ-03-0168)
+        - [ ] **ioctl Operations:** (REQ: REQ-03-0169)
+            - [ ] `SCSI_IOCTL_SCAN` (0x5301): trigger bus rescan. (REQ: REQ-03-0170)
+            - [ ] `SCSI_IOCTL_GET_INFO` (0x5302): return `scsi_ioctl_info_t` (bus, target, lun, type, vendor, product, capacity). (REQ: REQ-03-0171)
+            - [ ] `SCSI_IOCTL_GET_IDLUN` (0x5303): return packed bus:target:lun. (REQ: REQ-03-0172)
+            - [ ] `SCSI_IOCTL_GET_COUNT` (0x5304): return device count on bus. (REQ: REQ-03-0173)
+            - [ ] `SCSI_IOCTL_SEND_CMD` (0x5305): pass-through raw SCSI CDB with data buffer. (REQ: REQ-03-0174)
+                - [ ] Copy CDB from userspace, validate length. (REQ: REQ-03-0175)
+                - [ ] Execute via `scsi_execute_sync()`, copy results back. (REQ: REQ-03-0176)
+                - [ ] Require appropriate privilege (root or CAP_SYS_RAWIO). (REQ: REQ-03-0177)
 
-    - [ ] **Transport/HBA Drivers (Low-Level):**
+    - [ ] **Transport/HBA Drivers (Low-Level):** (REQ: REQ-03-0178)
 
-        - [ ] **ATAPI Transport (`atapi_scsi.c`, `atapi_scsi.h`):**
-            - [ ] `atapi_link`: `scsi_link_t` instance for ATA secondary (ATAPI) devices.
-            - [ ] `atapi_execute(link, req)`: translate `scsi_request_t` to ATA PACKET command.
-                - [ ] Select drive (master/slave) via device register.
-                - [ ] Write PACKET command (0xA0) to command register.
-                - [ ] Wait for DRQ, then PIO-out the CDB (12 or 16 bytes, padded to 12).
-                - [ ] Wait for DRQ for data phase; PIO-in/out data buffer.
-                - [ ] Read status register for errors; auto-request sense on CHECK CONDITION.
-            - [ ] `atapi_init()`: register link, set max_targets=2 (master/slave per channel).
-            - [ ] Support: primary + secondary IDE channels (4 possible ATAPI devices).
-            - [ ] Support: tertiary + quaternary channels (if IDE driver supports them).
+        - [ ] **ATAPI Transport (`atapi_scsi.c`, `atapi_scsi.h`):** (REQ: REQ-03-0179)
+            - [ ] `atapi_link`: `scsi_link_t` instance for ATA secondary (ATAPI) devices. (REQ: REQ-03-0180)
+            - [ ] `atapi_execute(link, req)`: translate `scsi_request_t` to ATA PACKET command. (REQ: REQ-03-0181)
+                - [ ] Select drive (master/slave) via device register. (REQ: REQ-03-0182)
+                - [ ] Write PACKET command (0xA0) to command register. (REQ: REQ-03-0183)
+                - [ ] Wait for DRQ, then PIO-out the CDB (12 or 16 bytes, padded to 12). (REQ: REQ-03-0184)
+                - [ ] Wait for DRQ for data phase; PIO-in/out data buffer. (REQ: REQ-03-0185)
+                - [ ] Read status register for errors; auto-request sense on CHECK CONDITION. (REQ: REQ-03-0186)
+            - [ ] `atapi_init()`: register link, set max_targets=2 (master/slave per channel). (REQ: REQ-03-0187)
+            - [ ] Support: primary + secondary IDE channels (4 possible ATAPI devices). (REQ: REQ-03-0188)
+            - [ ] Support: tertiary + quaternary channels (if IDE driver supports them). (REQ: REQ-03-0189)
 
-        - [ ] **USB Mass Storage (deferred):**
-            - [ ] **Bulk-Only Transport (BOT):**
-                - [ ] Build Command Block Wrapper (CBW): 31-byte header with signature (0x43425355), tag, transfer length, flags, LUN, CDB.
-                - [ ] Send CBW via Bulk-OUT endpoint.
-                - [ ] Transfer data via Bulk-IN (read) or Bulk-OUT (write) endpoint.
-                - [ ] Receive Command Status Wrapper (CSW): 13-byte response with signature (0x53425355), tag, residue, status.
-                - [ ] CSW status: 0=passed, 1=failed (issue REQUEST SENSE), 2=phase error (reset recovery).
-            - [ ] **Reset Recovery:**
-                - [ ] Bulk-Only Mass Storage Reset (class-specific request 0xFF).
-                - [ ] Clear HALT on Bulk-IN and Bulk-OUT endpoints.
-            - [ ] **Integration:**
-                - [ ] Register `scsi_link_t` per USB device (bridge to SCSI mid-layer).
-                - [ ] Set max_targets=1, max_luns from GET MAX LUN request.
-                - [ ] Handle device disconnect: unregister link, detach all devices.
+        - [ ] **USB Mass Storage (deferred):** (REQ: REQ-03-0190)
+            - [ ] **Bulk-Only Transport (BOT):** (REQ: REQ-03-0191)
+                - [ ] Build Command Block Wrapper (CBW): 31-byte header with signature (0x43425355), tag, transfer length, flags, LUN, CDB. (REQ: REQ-03-0192)
+                - [ ] Send CBW via Bulk-OUT endpoint. (REQ: REQ-03-0193)
+                - [ ] Transfer data via Bulk-IN (read) or Bulk-OUT (write) endpoint. (REQ: REQ-03-0194)
+                - [ ] Receive Command Status Wrapper (CSW): 13-byte response with signature (0x53425355), tag, residue, status. (REQ: REQ-03-0195)
+                - [ ] CSW status: 0=passed, 1=failed (issue REQUEST SENSE), 2=phase error (reset recovery). (REQ: REQ-03-0196)
+            - [ ] **Reset Recovery:** (REQ: REQ-03-0197)
+                - [ ] Bulk-Only Mass Storage Reset (class-specific request 0xFF). (REQ: REQ-03-0198)
+                - [ ] Clear HALT on Bulk-IN and Bulk-OUT endpoints. (REQ: REQ-03-0199)
+            - [ ] **Integration:** (REQ: REQ-03-0200, REQ-03-0980)
+                - [ ] Register `scsi_link_t` per USB device (bridge to SCSI mid-layer). (REQ: REQ-03-0201)
+                - [ ] Set max_targets=1, max_luns from GET MAX LUN request. (REQ: REQ-03-0202)
+                - [ ] Handle device disconnect: unregister link, detach all devices. (REQ: REQ-03-0203)
 
-        - [ ] **VirtIO-SCSI (`virtio_scsi.c`):**
-            - [ ] `vscsi_execute(link, req)`: map `scsi_request_t` to virtio request descriptor.
-                - [ ] Build request header: LUN (8-byte SAM encoding), tag, task attributes, CDB.
-                - [ ] Attach data buffers as scatter-gather (device-readable for writes, device-writable for reads).
-                - [ ] Attach response buffer (sense data, residual, status).
-                - [ ] Submit to request virtqueue; wait for used buffer notification.
-            - [ ] `vscsi_setup_event_buffers()`: pre-populate event virtqueue.
-            - [ ] `vscsi_process_events()`: handle hotplug add/remove, transport reset, parameter change events.
-            - [ ] Control virtqueue: INQUIRY, REPORT LUNS, task management via control queue.
-            - [ ] Multi-queue support: one request virtqueue per vCPU (if negotiated).
+        - [ ] **VirtIO-SCSI (`virtio_scsi.c`):** (REQ: REQ-03-0204)
+            - [ ] `vscsi_execute(link, req)`: map `scsi_request_t` to virtio request descriptor. (REQ: REQ-03-0205)
+                - [ ] Build request header: LUN (8-byte SAM encoding), tag, task attributes, CDB. (REQ: REQ-03-0206)
+                - [ ] Attach data buffers as scatter-gather (device-readable for writes, device-writable for reads). (REQ: REQ-03-0207)
+                - [ ] Attach response buffer (sense data, residual, status). (REQ: REQ-03-0208)
+                - [ ] Submit to request virtqueue; wait for used buffer notification. (REQ: REQ-03-0209)
+            - [ ] `vscsi_setup_event_buffers()`: pre-populate event virtqueue. (REQ: REQ-03-0210)
+            - [ ] `vscsi_process_events()`: handle hotplug add/remove, transport reset, parameter change events. (REQ: REQ-03-0211)
+            - [ ] Control virtqueue: INQUIRY, REPORT LUNS, task management via control queue. (REQ: REQ-03-0212)
+            - [ ] Multi-queue support: one request virtqueue per vCPU (if negotiated). (REQ: REQ-03-0213)
 
-        - [ ] **iSCSI (deferred):**
-            - [ ] TCP-based SCSI transport.
-            - [ ] Login, discovery, full-feature phase.
-            - [ ] PDU framing, session management.
+        - [ ] **iSCSI (deferred):** (REQ: REQ-03-0214)
+            - [ ] TCP-based SCSI transport. (REQ: REQ-03-0215)
+            - [ ] Login, discovery, full-feature phase. (REQ: REQ-03-0216)
+            - [ ] PDU framing, session management. (REQ: REQ-03-0217)
 
-    - [ ] **Testing:**
-        - [ ] **Unit Tests:**
-            - [ ] CDB builder correctness: verify byte layout for READ(10), WRITE(10), INQUIRY, READ CAPACITY.
-            - [ ] Sense data parsing: fixed format with all 16 sense keys.
-            - [ ] Sense data parsing: common ASC/ASCQ pairs.
-            - [ ] Device registry: register, lookup, unregister, duplicate detection.
-            - [ ] Request allocation: pool exhaustion, free and reuse.
-            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`.
-        - [ ] **Property Tests:**
-            - [ ] All CDB builders produce valid length CDBs (6/10/12/16).
-            - [ ] Request pool invariant: allocated + free = total pool size.
-            - [ ] Device list: no duplicates (unique bus:target:lun).
-        - [ ] **Integration Tests:**
-            - [ ] VirtIO-SCSI disk: boot QEMU with `-device virtio-scsi-pci -device scsi-hd`, verify discovery + read/write.
-            - [ ] ATAPI CD-ROM: boot QEMU with `-cdrom`, verify READ CAPACITY + READ TOC + sector read.
-            - [ ] Bus rescan: add device to VirtIO-SCSI via hotplug, verify auto-attach.
-            - [ ] Generic passthrough: send INQUIRY via `SCSI_IOCTL_SEND_CMD` from userspace, verify response.
-            - [ ] Error path: simulate CHECK CONDITION, verify retry and sense reporting.
+    - [ ] **Testing:** (REQ: REQ-03-0218, REQ-03-0317, REQ-03-0396, REQ-03-0594, REQ-03-0926, REQ-03-1120)
+        - [ ] **Unit Tests:** (REQ: REQ-03-0219, REQ-03-0595, REQ-03-1121)
+            - [ ] CDB builder correctness: verify byte layout for READ(10), WRITE(10), INQUIRY, READ CAPACITY. (REQ: REQ-03-0220)
+            - [ ] Sense data parsing: fixed format with all 16 sense keys. (REQ: REQ-03-0221)
+            - [ ] Sense data parsing: common ASC/ASCQ pairs. (REQ: REQ-03-0222)
+            - [ ] Device registry: register, lookup, unregister, duplicate detection. (REQ: REQ-03-0223)
+            - [ ] Request allocation: pool exhaustion, free and reuse. (REQ: REQ-03-0224)
+            - [ ] Byte-order helpers: `scsi_be16()`, `scsi_be32()`, `scsi_put_be16()`, `scsi_put_be32()`. (REQ: REQ-03-0122, REQ-03-0225)
+        - [ ] **Property Tests:** (REQ: REQ-03-0226, REQ-03-0604)
+            - [ ] All CDB builders produce valid length CDBs (6/10/12/16). (REQ: REQ-03-0227)
+            - [ ] Request pool invariant: allocated + free = total pool size. (REQ: REQ-03-0228)
+            - [ ] Device list: no duplicates (unique bus:target:lun). (REQ: REQ-03-0229)
+        - [ ] **Integration Tests:** (REQ: REQ-03-0230, REQ-03-0608, REQ-03-1133)
+            - [ ] VirtIO-SCSI disk: boot QEMU with `-device virtio-scsi-pci -device scsi-hd`, verify discovery + read/write. (REQ: REQ-03-0231)
+            - [ ] ATAPI CD-ROM: boot QEMU with `-cdrom`, verify READ CAPACITY + READ TOC + sector read. (REQ: REQ-03-0232)
+            - [ ] Bus rescan: add device to VirtIO-SCSI via hotplug, verify auto-attach. (REQ: REQ-03-0233)
+            - [ ] Generic passthrough: send INQUIRY via `SCSI_IOCTL_SEND_CMD` from userspace, verify response. (REQ: REQ-03-0234)
+            - [ ] Error path: simulate CHECK CONDITION, verify retry and sense reporting. (REQ: REQ-03-0235)
 
-    - [ ] **Documentation:**
-        - [ ] Internal doc: SCSI mid-layer architecture (link/device/request lifecycle).
-        - [ ] Internal doc: transport driver interface (`scsi_link_t.execute` contract).
-        - [ ] Internal doc: CDB reference and sense key/ASC/ASCQ table.
-        - [ ] Internal doc: device node hierarchy and ioctl interface.
-- [ ] **ATA/IDE (Legacy):** <!-- ide.c, ide.h -->
+    - [ ] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)
+        - [ ] Internal doc: SCSI mid-layer architecture (link/device/request lifecycle). (REQ: REQ-03-0237)
+        - [ ] Internal doc: transport driver interface (`scsi_link_t.execute` contract). (REQ: REQ-03-0238)
+        - [ ] Internal doc: CDB reference and sense key/ASC/ASCQ table. (REQ: REQ-03-0239)
+        - [ ] Internal doc: device node hierarchy and ioctl interface. (REQ: REQ-03-0240)
+- [ ] **ATA/IDE (Legacy):** <!-- ide.c, ide.h --> (REQ: REQ-03-0241)
 
     > **Files:** `sys/drivers/storage/ide/ide.c`, `ide.h`.
     >
@@ -281,951 +281,951 @@
     > DMA (bus master), ATAPI packet commands, master/slave device selection.
     > Channel struct hardcoded for 2 channels.
 
-    - [ ] **Channel Architecture:**
-        - [ ] **Primary Channel:** I/O 0x1F0, Control 0x3F6, IRQ 14.
-        - [ ] **Secondary Channel:** I/O 0x170, Control 0x376, IRQ 15.
-        - [ ] **Tertiary Channel:** I/O 0x1E8, Control 0x3EE, IRQ 11.
+    - [ ] **Channel Architecture:** (REQ: REQ-03-0242)
+        - [ ] **Primary Channel:** I/O 0x1F0, Control 0x3F6, IRQ 14. (REQ: REQ-03-0243)
+        - [ ] **Secondary Channel:** I/O 0x170, Control 0x376, IRQ 15. (REQ: REQ-03-0244)
+        - [ ] **Tertiary Channel:** I/O 0x1E8, Control 0x3EE, IRQ 11. (REQ: REQ-03-0245)
             - ISA add‑in IDE controllers (e.g., Sound Blaster AWE32/64, Promise DC4030).
             - Linux equivalents: `/dev/hde` (master), `/dev/hdf` (slave).
-        - [ ] **Quaternary Channel:** I/O 0x168, Control 0x36E, IRQ 10 (or 9).
+        - [ ] **Quaternary Channel:** I/O 0x168, Control 0x36E, IRQ 10 (or 9). (REQ: REQ-03-0246)
             - ISA add‑in IDE controllers, secondary port.
             - Linux equivalents: `/dev/hdg` (master), `/dev/hdh` (slave).
-        - [ ] Expand `ide_channel_t` array from 2 to 4 entries.
-        - [ ] Expand `ide_device_t` array from 4 to 8 entries (2 per channel × 4 channels).
-        - [ ] Add `ATA_TERTIARY_IO` (0x1E8), `ATA_TERTIARY_CTRL` (0x3EE), `ATA_QUATERNARY_IO` (0x168), `ATA_QUATERNARY_CTRL` (0x36E) defines to `ide.h`.
-        - [ ] Probe all four channels during `ide_init()` — detect presence by reading status register (0xFF = empty bus).
-        - [ ] Support configurable channel I/O bases (for PCI IDE controllers with non‑standard BARs).
-    - [ ] **PCI IDE Controller Discovery:**
-        - [ ] Scan PCI class 0x01 subclass 0x01 (IDE Controller) for native/compatibility mode.
-        - [ ] Read PCI Programming Interface byte to determine:
+        - [ ] Expand `ide_channel_t` array from 2 to 4 entries. (REQ: REQ-03-0247)
+        - [ ] Expand `ide_device_t` array from 4 to 8 entries (2 per channel × 4 channels). (REQ: REQ-03-0248)
+        - [ ] Add `ATA_TERTIARY_IO` (0x1E8), `ATA_TERTIARY_CTRL` (0x3EE), `ATA_QUATERNARY_IO` (0x168), `ATA_QUATERNARY_CTRL` (0x36E) defines to `ide.h`. (REQ: REQ-03-0249)
+        - [ ] Probe all four channels during `ide_init()` — detect presence by reading status register (0xFF = empty bus). (REQ: REQ-03-0250)
+        - [ ] Support configurable channel I/O bases (for PCI IDE controllers with non‑standard BARs). (REQ: REQ-03-0251)
+    - [ ] **PCI IDE Controller Discovery:** (REQ: REQ-03-0252)
+        - [ ] Scan PCI class 0x01 subclass 0x01 (IDE Controller) for native/compatibility mode. (REQ: REQ-03-0253)
+        - [ ] Read PCI Programming Interface byte to determine: (REQ: REQ-03-0254)
             - Bit 0: Primary channel in native mode (use BAR0/BAR1) vs compatibility mode (0x1F0/0x3F6).
             - Bit 2: Secondary channel in native mode (use BAR2/BAR3) vs compatibility mode (0x170/0x376).
             - Bit 7: Bus Master capable (use BAR4 for DMA registers).
-        - [ ] For native‑mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line.
-        - [ ] Detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 — typically expose as separate PCI functions).
-        - [ ] ISA tertiary/quaternary probing: if PCI does not enumerate additional channels, probe legacy I/O ports at 0x1E8 and 0x168 for device presence.
-    - [ ] **Device Identification (`ide_identify` / `ide_identify_atapi`):**
-        - [ ] Issue IDENTIFY DEVICE (0xEC) or IDENTIFY PACKET DEVICE (0xA1).
-        - [ ] Parse model, serial, firmware revision strings (byte‑swap from ATA word format).
-        - [ ] Extract LBA28 sector count (words 60–61) and LBA48 sector count (words 100–103).
-        - [ ] Extract supported command sets: DMA, LBA48, SMART, NCQ, TRIM.
-        - [ ] Extract supported DMA modes: MWDMA (words 63), UDMA (word 88).
-        - [ ] Detect 48‑bit addressing support (command set word 83 bit 10).
-    - [ ] **PIO Mode Transfers:**
-        - [ ] **LBA28 Read/Write:** `ide_read_sectors()` / `ide_write_sectors()` — 28‑bit LBA, max 256 sectors.
-        - [ ] **LBA48 Read/Write:** `ide_read_sectors_ext()` / `ide_write_sectors_ext()` — 48‑bit LBA, max 65536 sectors.
-        - [ ] Wait‑for‑BSY / wait‑for‑DRQ polling loops with bounded timeout.
-        - [ ] Error detection: check ERR bit after command completion, decode error register.
-        - [ ] 400 ns delay after writing command register (read alternate status 4 times).
-    - [ ] **DMA Transfers:**
-        - [ ] **Bus Master Register Access:**
-            - [ ] `ide_bm_start(channel, write)`: set direction, start DMA.
-            - [ ] `ide_bm_stop(channel)`: clear start bit.
-            - [ ] `ide_bm_status(channel)`: read status (active, error, interrupt).
-            - [ ] `ide_bm_clear_interrupt(channel)`: write 1 to clear interrupt bit.
-        - [ ] **PRDT (Physical Region Descriptor Table) Setup:**
-            - [ ] `ide_prdt_setup(channel, buffer, byte_count)`: build scatter‑gather list.
-            - [ ] Each PRD entry: 4‑byte aligned phys address + byte count + EOT flag.
-            - [ ] PRDT must not cross 64 KB boundary.
-            - [ ] Max 32 PRD entries (128 KB transfer).
-        - [ ] **DMA Read/Write:** `ide_dma_read()` / `ide_dma_write()` — issue DMA command, start bus master, wait for IRQ.
-        - [ ] **UDMA Mode Negotiation:**
-            - [ ] Read supported UDMA modes from IDENTIFY word 88.
-            - [ ] Issue SET FEATURES (0xEF) subcommand 0x03 with transfer mode.
-            - [ ] Track active DMA mode per device (`ide_device_t.dma_mode`).
-    - [ ] **ATAPI (SCSI Transport):**
-        - [ ] `ide_atapi_packet(channel, drive, cdb, cdb_len, buffer, buf_len, write)`: send CDB via PACKET command (0xA0).
-        - [ ] Handle DRQ‑based data transfer (PIO) or DMA‑based transfer.
-        - [ ] `ide_atapi_read_capacity()`: SCSI READ CAPACITY (0x25).
-        - [ ] `ide_atapi_read_sectors()`: SCSI READ (10) (0x28).
-        - [ ] `ide_atapi_read_toc()`: SCSI READ TOC (0x43) for CD‑ROM.
-        - [ ] Medium change detection (unit attention sense key).
-    - [ ] **IRQ Handling:**
-        - [ ] `ide_irq_handler(irq)`: acknowledge interrupt, signal DMA completion.
-        - [ ] IRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary).
-        - [ ] Support shared IRQs for PCI native‑mode controllers.
-    - [ ] **Software Reset:**
-        - [ ] Issue SRST via device control register (bit 2).
-        - [ ] Wait for BSY clear on both master and slave.
-        - [ ] Re‑identify devices after reset.
-    - [ ] **Power Management (deferred):**
-        - [ ] STANDBY IMMEDIATE (0xE0), IDLE IMMEDIATE (0xE1).
-        - [ ] CHECK POWER MODE (0xE5).
-        - [ ] Spin‑down timer configuration.
-    - [ ] **Naming Convention:**
-        - [ ] Primary master: `ide0`, primary slave: `ide1`.
-        - [ ] Secondary master: `ide2`, secondary slave: `ide3`.
-        - [ ] Tertiary master: `ide4`, tertiary slave: `ide5`.
-        - [ ] Quaternary master: `ide6`, quaternary slave: `ide7`.
-        - [ ] Register with `/dev/storage/ideN` DevFS nodes.
-    - [ ] **Error Handling:**
-        - [ ] Decode ATA error register bits (BBK, UNC, IDNF, ABRT, TK0NF, AMNF).
-        - [ ] Retry failed reads up to 3 times before reporting error.
-        - [ ] Log device faults and media errors to kernel console.
-        - [ ] Handle timeout (device not responding) gracefully — mark device offline.
-    - [ ] **Testing:**
-        - [ ] Unit: IDENTIFY parsing (model string byte‑swap, LBA48 detection, DMA mode extraction).
-        - [ ] Unit: PRDT construction (alignment, boundary, EOT flag).
-        - [ ] Integration: PIO read/write round‑trip on QEMU `-hda` disk.
-        - [ ] Integration: DMA read/write round‑trip on QEMU with bus master.
-        - [ ] Integration: ATAPI CD‑ROM read capacity + read sectors on QEMU `-cdrom`.
-        - [ ] Integration: tertiary/quaternary channel detection on QEMU with `-device ide-hd,bus=ide.2,...` (or equivalent).
-    - [ ] **Documentation:**
-        - [ ] Internal doc: ATA/IDE register map and command reference.
-        - [ ] Internal doc: channel probing strategy (PCI native vs ISA compatibility vs legacy tertiary/quaternary).
+        - [ ] For native‑mode channels: read I/O base from PCI BARs, allocate IRQ from PCI interrupt line. (REQ: REQ-03-0255)
+        - [ ] Detect PCI IDE controllers with additional channels (e.g., CMD640, Promise, HighPoint, SiI680 — typically expose as separate PCI functions). (REQ: REQ-03-0256)
+        - [ ] ISA tertiary/quaternary probing: if PCI does not enumerate additional channels, probe legacy I/O ports at 0x1E8 and 0x168 for device presence. (REQ: REQ-03-0257)
+    - [ ] **Device Identification (`ide_identify` / `ide_identify_atapi`):** (REQ: REQ-03-0258)
+        - [ ] Issue IDENTIFY DEVICE (0xEC) or IDENTIFY PACKET DEVICE (0xA1). (REQ: REQ-03-0259)
+        - [ ] Parse model, serial, firmware revision strings (byte‑swap from ATA word format). (REQ: REQ-03-0260)
+        - [ ] Extract LBA28 sector count (words 60–61) and LBA48 sector count (words 100–103). (REQ: REQ-03-0261)
+        - [ ] Extract supported command sets: DMA, LBA48, SMART, NCQ, TRIM. (REQ: REQ-03-0262)
+        - [ ] Extract supported DMA modes: MWDMA (words 63), UDMA (word 88). (REQ: REQ-03-0263)
+        - [ ] Detect 48‑bit addressing support (command set word 83 bit 10). (REQ: REQ-03-0264)
+    - [ ] **PIO Mode Transfers:** (REQ: REQ-03-0265)
+        - [ ] **LBA28 Read/Write:** `ide_read_sectors()` / `ide_write_sectors()` — 28‑bit LBA, max 256 sectors. (REQ: REQ-03-0266)
+        - [ ] **LBA48 Read/Write:** `ide_read_sectors_ext()` / `ide_write_sectors_ext()` — 48‑bit LBA, max 65536 sectors. (REQ: REQ-03-0267)
+        - [ ] Wait‑for‑BSY / wait‑for‑DRQ polling loops with bounded timeout. (REQ: REQ-03-0268)
+        - [ ] Error detection: check ERR bit after command completion, decode error register. (REQ: REQ-03-0269)
+        - [ ] 400 ns delay after writing command register (read alternate status 4 times). (REQ: REQ-03-0270)
+    - [ ] **DMA Transfers:** (REQ: REQ-03-0271)
+        - [ ] **Bus Master Register Access:** (REQ: REQ-03-0272)
+            - [ ] `ide_bm_start(channel, write)`: set direction, start DMA. (REQ: REQ-03-0273)
+            - [ ] `ide_bm_stop(channel)`: clear start bit. (REQ: REQ-03-0274)
+            - [ ] `ide_bm_status(channel)`: read status (active, error, interrupt). (REQ: REQ-03-0275)
+            - [ ] `ide_bm_clear_interrupt(channel)`: write 1 to clear interrupt bit. (REQ: REQ-03-0276)
+        - [ ] **PRDT (Physical Region Descriptor Table) Setup:** (REQ: REQ-03-0277)
+            - [ ] `ide_prdt_setup(channel, buffer, byte_count)`: build scatter‑gather list. (REQ: REQ-03-0278)
+            - [ ] Each PRD entry: 4‑byte aligned phys address + byte count + EOT flag. (REQ: REQ-03-0279)
+            - [ ] PRDT must not cross 64 KB boundary. (REQ: REQ-03-0280)
+            - [ ] Max 32 PRD entries (128 KB transfer). (REQ: REQ-03-0281)
+        - [ ] **DMA Read/Write:** `ide_dma_read()` / `ide_dma_write()` — issue DMA command, start bus master, wait for IRQ. (REQ: REQ-03-0282)
+        - [ ] **UDMA Mode Negotiation:** (REQ: REQ-03-0283)
+            - [ ] Read supported UDMA modes from IDENTIFY word 88. (REQ: REQ-03-0284)
+            - [ ] Issue SET FEATURES (0xEF) subcommand 0x03 with transfer mode. (REQ: REQ-03-0285)
+            - [ ] Track active DMA mode per device (`ide_device_t.dma_mode`). (REQ: REQ-03-0286)
+    - [ ] **ATAPI (SCSI Transport):** (REQ: REQ-03-0287)
+        - [ ] `ide_atapi_packet(channel, drive, cdb, cdb_len, buffer, buf_len, write)`: send CDB via PACKET command (0xA0). (REQ: REQ-03-0288)
+        - [ ] Handle DRQ‑based data transfer (PIO) or DMA‑based transfer. (REQ: REQ-03-0289)
+        - [ ] `ide_atapi_read_capacity()`: SCSI READ CAPACITY (0x25). (REQ: REQ-03-0290)
+        - [ ] `ide_atapi_read_sectors()`: SCSI READ (10) (0x28). (REQ: REQ-03-0291)
+        - [ ] `ide_atapi_read_toc()`: SCSI READ TOC (0x43) for CD‑ROM. (REQ: REQ-03-0292)
+        - [ ] Medium change detection (unit attention sense key). (REQ: REQ-03-0293)
+    - [ ] **IRQ Handling:** (REQ: REQ-03-0294, REQ-03-0382)
+        - [ ] `ide_irq_handler(irq)`: acknowledge interrupt, signal DMA completion. (REQ: REQ-03-0295)
+        - [ ] IRQ 14 (primary), IRQ 15 (secondary), IRQ 11 (tertiary), IRQ 10 (quaternary). (REQ: REQ-03-0296)
+        - [ ] Support shared IRQs for PCI native‑mode controllers. (REQ: REQ-03-0297)
+    - [ ] **Software Reset:** (REQ: REQ-03-0298)
+        - [ ] Issue SRST via device control register (bit 2). (REQ: REQ-03-0299)
+        - [ ] Wait for BSY clear on both master and slave. (REQ: REQ-03-0300)
+        - [ ] Re‑identify devices after reset. (REQ: REQ-03-0301)
+    - [ ] **Power Management (deferred):** (REQ: REQ-03-0302)
+        - [ ] STANDBY IMMEDIATE (0xE0), IDLE IMMEDIATE (0xE1). (REQ: REQ-03-0303)
+        - [ ] CHECK POWER MODE (0xE5). (REQ: REQ-03-0304)
+        - [ ] Spin‑down timer configuration. (REQ: REQ-03-0305)
+    - [ ] **Naming Convention:** (REQ: REQ-03-0306)
+        - [ ] Primary master: `ide0`, primary slave: `ide1`. (REQ: REQ-03-0307)
+        - [ ] Secondary master: `ide2`, secondary slave: `ide3`. (REQ: REQ-03-0308)
+        - [ ] Tertiary master: `ide4`, tertiary slave: `ide5`. (REQ: REQ-03-0309)
+        - [ ] Quaternary master: `ide6`, quaternary slave: `ide7`. (REQ: REQ-03-0310)
+        - [ ] Register with `/dev/storage/ideN` DevFS nodes. (REQ: REQ-03-0311)
+    - [ ] **Error Handling:** (REQ: REQ-03-0312, REQ-03-0385)
+        - [ ] Decode ATA error register bits (BBK, UNC, IDNF, ABRT, TK0NF, AMNF). (REQ: REQ-03-0313)
+        - [ ] Retry failed reads up to 3 times before reporting error. (REQ: REQ-03-0314)
+        - [ ] Log device faults and media errors to kernel console. (REQ: REQ-03-0315)
+        - [ ] Handle timeout (device not responding) gracefully — mark device offline. (REQ: REQ-03-0316)
+    - [ ] **Testing:** (REQ: REQ-03-0218, REQ-03-0317, REQ-03-0396, REQ-03-0594, REQ-03-0926, REQ-03-1120)
+        - [ ] Unit: IDENTIFY parsing (model string byte‑swap, LBA48 detection, DMA mode extraction). (REQ: REQ-03-0318)
+        - [ ] Unit: PRDT construction (alignment, boundary, EOT flag). (REQ: REQ-03-0319)
+        - [ ] Integration: PIO read/write round‑trip on QEMU `-hda` disk. (REQ: REQ-03-0320)
+        - [ ] Integration: DMA read/write round‑trip on QEMU with bus master. (REQ: REQ-03-0321)
+        - [ ] Integration: ATAPI CD‑ROM read capacity + read sectors on QEMU `-cdrom`. (REQ: REQ-03-0322)
+        - [ ] Integration: tertiary/quaternary channel detection on QEMU with `-device ide-hd,bus=ide.2,...` (or equivalent). (REQ: REQ-03-0323)
+    - [ ] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)
+        - [ ] Internal doc: ATA/IDE register map and command reference. (REQ: REQ-03-0325)
+        - [ ] Internal doc: channel probing strategy (PCI native vs ISA compatibility vs legacy tertiary/quaternary). (REQ: REQ-03-0326)
 
-- [ ] **Floppy Disk Controller (`sys/drivers/storage/floppy/`):**
+- [ ] **Floppy Disk Controller (`sys/drivers/storage/floppy/`):** (REQ: REQ-03-0327)
 
     > Supports standard PC floppy disk controller (Intel 82077AA / NEC µPD765
     > compatible). Up to 4 drives (2 per controller, though most PCs have 1 controller).
     > Naming: `fd0`–`fd3` at `/dev/storage/fdN`.
 
-    - [ ] **Controller Initialization (`fdc_init`):**
-        - [ ] Detect FDC presence: read MSR (Main Status Register) at 0x3F4.
-        - [ ] Issue RESET command: assert bit 2 of DOR (Digital Output Register, 0x3F2), then deassert.
-        - [ ] Wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4).
-        - [ ] Configure controller: CONFIGURE command (implied seek, FIFO threshold).
-        - [ ] Set data rate via CCR (Configuration Control Register, 0x3F7): 500kbps for HD, 300kbps for DD, 250kbps for SD.
-        - [ ] Enable DMA channel 2 for data transfers (ISA DMA).
-    - [ ] **I/O Registers (base 0x3F0):**
-        - [ ] 0x3F2: DOR (Digital Output Register) — drive select, motor control, DMA/IRQ enable, reset.
-        - [ ] 0x3F4: MSR (Main Status Register) — RQM, DIO, NDMA, busy flags.
-        - [ ] 0x3F5: Data Register (FIFO) — command/result/data bytes.
-        - [ ] 0x3F7: DIR (Digital Input Register, read) — disk change detect (bit 7).
-        - [ ] 0x3F7: CCR (Configuration Control Register, write) — data rate select.
-    - [ ] **DMA Configuration:**
-        - [ ] ISA DMA channel 2 (8‑bit transfers).
-        - [ ] Program DMA controller (ports 0x04, 0x05, 0x81, 0x0A, 0x0B, 0x0C) for read/write.
-        - [ ] DMA buffer must be below 16 MB (ISA 24‑bit addressing).
-        - [ ] Allocate bounce buffer in low memory if kernel buffer is above 16 MB.
-    - [ ] **Drive Detection:**
-        - [ ] Query CMOS (RTC port 0x70/0x71, register 0x10) for drive types:
+    - [ ] **Controller Initialization (`fdc_init`):** (REQ: REQ-03-0328)
+        - [ ] Detect FDC presence: read MSR (Main Status Register) at 0x3F4. (REQ: REQ-03-0329)
+        - [ ] Issue RESET command: assert bit 2 of DOR (Digital Output Register, 0x3F2), then deassert. (REQ: REQ-03-0330)
+        - [ ] Wait for IRQ6 after reset; issue SENSE INTERRUPT for each drive (up to 4). (REQ: REQ-03-0331)
+        - [ ] Configure controller: CONFIGURE command (implied seek, FIFO threshold). (REQ: REQ-03-0332)
+        - [ ] Set data rate via CCR (Configuration Control Register, 0x3F7): 500kbps for HD, 300kbps for DD, 250kbps for SD. (REQ: REQ-03-0333)
+        - [ ] Enable DMA channel 2 for data transfers (ISA DMA). (REQ: REQ-03-0334)
+    - [ ] **I/O Registers (base 0x3F0):** (REQ: REQ-03-0335)
+        - [ ] 0x3F2: DOR (Digital Output Register) — drive select, motor control, DMA/IRQ enable, reset. (REQ: REQ-03-0336)
+        - [ ] 0x3F4: MSR (Main Status Register) — RQM, DIO, NDMA, busy flags. (REQ: REQ-03-0337)
+        - [ ] 0x3F5: Data Register (FIFO) — command/result/data bytes. (REQ: REQ-03-0338)
+        - [ ] 0x3F7: DIR (Digital Input Register, read) — disk change detect (bit 7). (REQ: REQ-03-0339)
+        - [ ] 0x3F7: CCR (Configuration Control Register, write) — data rate select. (REQ: REQ-03-0340)
+    - [ ] **DMA Configuration:** (REQ: REQ-03-0341)
+        - [ ] ISA DMA channel 2 (8‑bit transfers). (REQ: REQ-03-0342)
+        - [ ] Program DMA controller (ports 0x04, 0x05, 0x81, 0x0A, 0x0B, 0x0C) for read/write. (REQ: REQ-03-0343)
+        - [ ] DMA buffer must be below 16 MB (ISA 24‑bit addressing). (REQ: REQ-03-0344)
+        - [ ] Allocate bounce buffer in low memory if kernel buffer is above 16 MB. (REQ: REQ-03-0345)
+    - [ ] **Drive Detection:** (REQ: REQ-03-0346)
+        - [ ] Query CMOS (RTC port 0x70/0x71, register 0x10) for drive types: (REQ: REQ-03-0347)
             - Bits 7–4: drive 0 type, bits 3–0: drive 1 type.
             - 0=none, 1=360K, 2=1.2M, 3=720K, 4=1.44M, 5=2.88M.
-        - [ ] Support up to 4 drives: drives 0–1 on primary FDC (0x3F0), drives 2–3 on secondary FDC (0x370, rare).
-        - [ ] Register detected drives with DevFS as `/dev/storage/fd0`..`/dev/storage/fd3`.
-    - [ ] **Motor Control:**
-        - [ ] Motor on: set DOR motor bits (bits 4–7) for target drive.
-        - [ ] Spin‑up delay: wait 300–500 ms after motor on before I/O.
-        - [ ] Motor off timer: auto‑stop motor after 2–3 seconds of inactivity.
-        - [ ] Track motor state per drive to avoid redundant spin‑up.
-    - [ ] **Media Types:**
-        - [ ] 3.5" HD: 1.44 MB — 80 cylinders, 2 heads, 18 sectors/track, 512 bytes/sector.
-        - [ ] 3.5" DD: 720 KB — 80 cylinders, 2 heads, 9 sectors/track.
-        - [ ] 3.5" ED: 2.88 MB — 80 cylinders, 2 heads, 36 sectors/track (rare).
-        - [ ] 5.25" HD: 1.2 MB — 80 cylinders, 2 heads, 15 sectors/track.
-        - [ ] 5.25" DD: 360 KB — 40 cylinders, 2 heads, 9 sectors/track.
-        - [ ] Store geometry per drive in `fdc_drive_t` struct.
-    - [ ] **Seek and Recalibrate:**
-        - [ ] RECALIBRATE command: move head to cylinder 0 (issued on init and after errors).
-        - [ ] SEEK command: move to target cylinder.
-        - [ ] Wait for IRQ6 after seek; issue SENSE INTERRUPT to confirm.
-        - [ ] Track current cylinder per drive to avoid redundant seeks.
-    - [ ] **Read/Write Operations:**
-        - [ ] READ DATA command (MT=1, MFM=1): multi‑track read with DMA.
-        - [ ] WRITE DATA command (MT=1, MFM=1): multi‑track write with DMA.
-        - [ ] CHS‑to‑LBA and LBA‑to‑CHS conversion for block device interface.
-        - [ ] Convert sector addresses: `cylinder = LBA / (heads * spt)`, `head = (LBA / spt) % heads`, `sector = (LBA % spt) + 1`.
-        - [ ] Read result bytes (ST0, ST1, ST2, C, H, R, N) after each command to check success.
-        - [ ] Retry on error: recalibrate and retry up to 3 times, then fail.
-    - [ ] **Format Track:**
-        - [ ] FORMAT TRACK command: write sector headers for an entire track.
-        - [ ] Build format buffer with (C, H, R, N) tuples for each sector.
-        - [ ] Used by disk formatting utilities.
-    - [ ] **Disk Change Detection:**
-        - [ ] Read DIR bit 7 (DSKCHG) to detect media removal/insertion.
-        - [ ] On change: invalidate cached geometry, re‑detect media type.
-        - [ ] Seek to cylinder 1 and back to cylinder 0 to clear DSKCHG bit.
-    - [ ] **IRQ Handling:**
-        - [ ] IRQ 6 handler: set completion flag, wake waiting thread.
-        - [ ] SENSE INTERRUPT STATUS command after IRQ to read ST0 and current cylinder.
-    - [ ] **Error Handling:**
-        - [ ] Decode ST0/ST1/ST2 result bytes for error classification.
-        - [ ] ST0 bits 7–6: interrupt code (00=normal, 01=abnormal, 10=invalid, 11=drive not ready).
-        - [ ] ST1: missing address mark, write protect, no data, overrun, CRC error.
-        - [ ] ST2: wrong cylinder, bad cylinder, missing data address mark.
-        - [ ] Automatic retry with recalibrate on recoverable errors.
-    - [ ] **Block Device Interface:**
-        - [ ] Register with storage subsystem as block device.
-        - [ ] `fdc_read(drive, lba, count, buffer)` / `fdc_write(drive, lba, count, buffer)`.
-        - [ ] Sector size: 512 bytes (standard).
-        - [ ] Report device capacity based on detected media geometry.
-    - [ ] **Testing:**
-        - [ ] Unit: CHS↔LBA conversion for all supported media geometries.
-        - [ ] Unit: DMA buffer address validation (below 16 MB, page‑aligned).
-        - [ ] Unit: CMOS drive type parsing.
-        - [ ] Integration: read/write/verify cycle on QEMU with `-fda` / `-fdb` images.
-        - [ ] Integration: disk change detection on QEMU.
-        - [ ] Integration: format + read‑back on blank floppy image.
-    - [ ] **Documentation:**
-        - [ ] Internal doc: FDC register map and command reference.
-        - [ ] Internal doc: DMA programming for ISA channel 2.
-        - [ ] Internal doc: media type detection and geometry tables.
+        - [ ] Support up to 4 drives: drives 0–1 on primary FDC (0x3F0), drives 2–3 on secondary FDC (0x370, rare). (REQ: REQ-03-0348)
+        - [ ] Register detected drives with DevFS as `/dev/storage/fd0`..`/dev/storage/fd3`. (REQ: REQ-03-0349)
+    - [ ] **Motor Control:** (REQ: REQ-03-0350)
+        - [ ] Motor on: set DOR motor bits (bits 4–7) for target drive. (REQ: REQ-03-0351)
+        - [ ] Spin‑up delay: wait 300–500 ms after motor on before I/O. (REQ: REQ-03-0352)
+        - [ ] Motor off timer: auto‑stop motor after 2–3 seconds of inactivity. (REQ: REQ-03-0353)
+        - [ ] Track motor state per drive to avoid redundant spin‑up. (REQ: REQ-03-0354)
+    - [ ] **Media Types:** (REQ: REQ-03-0355)
+        - [ ] 3.5" HD: 1.44 MB — 80 cylinders, 2 heads, 18 sectors/track, 512 bytes/sector. (REQ: REQ-03-0356)
+        - [ ] 3.5" DD: 720 KB — 80 cylinders, 2 heads, 9 sectors/track. (REQ: REQ-03-0357)
+        - [ ] 3.5" ED: 2.88 MB — 80 cylinders, 2 heads, 36 sectors/track (rare). (REQ: REQ-03-0358)
+        - [ ] 5.25" HD: 1.2 MB — 80 cylinders, 2 heads, 15 sectors/track. (REQ: REQ-03-0359)
+        - [ ] 5.25" DD: 360 KB — 40 cylinders, 2 heads, 9 sectors/track. (REQ: REQ-03-0360)
+        - [ ] Store geometry per drive in `fdc_drive_t` struct. (REQ: REQ-03-0361)
+    - [ ] **Seek and Recalibrate:** (REQ: REQ-03-0362)
+        - [ ] RECALIBRATE command: move head to cylinder 0 (issued on init and after errors). (REQ: REQ-03-0363)
+        - [ ] SEEK command: move to target cylinder. (REQ: REQ-03-0364)
+        - [ ] Wait for IRQ6 after seek; issue SENSE INTERRUPT to confirm. (REQ: REQ-03-0365)
+        - [ ] Track current cylinder per drive to avoid redundant seeks. (REQ: REQ-03-0366)
+    - [ ] **Read/Write Operations:** (REQ: REQ-03-0367)
+        - [ ] READ DATA command (MT=1, MFM=1): multi‑track read with DMA. (REQ: REQ-03-0368)
+        - [ ] WRITE DATA command (MT=1, MFM=1): multi‑track write with DMA. (REQ: REQ-03-0369)
+        - [ ] CHS‑to‑LBA and LBA‑to‑CHS conversion for block device interface. (REQ: REQ-03-0370)
+        - [ ] Convert sector addresses: `cylinder = LBA / (heads * spt)`, `head = (LBA / spt) % heads`, `sector = (LBA % spt) + 1`. (REQ: REQ-03-0371)
+        - [ ] Read result bytes (ST0, ST1, ST2, C, H, R, N) after each command to check success. (REQ: REQ-03-0372)
+        - [ ] Retry on error: recalibrate and retry up to 3 times, then fail. (REQ: REQ-03-0373)
+    - [ ] **Format Track:** (REQ: REQ-03-0374)
+        - [ ] FORMAT TRACK command: write sector headers for an entire track. (REQ: REQ-03-0375)
+        - [ ] Build format buffer with (C, H, R, N) tuples for each sector. (REQ: REQ-03-0376)
+        - [ ] Used by disk formatting utilities. (REQ: REQ-03-0377)
+    - [ ] **Disk Change Detection:** (REQ: REQ-03-0378)
+        - [ ] Read DIR bit 7 (DSKCHG) to detect media removal/insertion. (REQ: REQ-03-0379)
+        - [ ] On change: invalidate cached geometry, re‑detect media type. (REQ: REQ-03-0378)
+        - [ ] Seek to cylinder 1 and back to cylinder 0 to clear DSKCHG bit. (REQ: REQ-03-0381)
+    - [ ] **IRQ Handling:** (REQ: REQ-03-0294, REQ-03-0382)
+        - [ ] IRQ 6 handler: set completion flag, wake waiting thread. (REQ: REQ-03-0383)
+        - [ ] SENSE INTERRUPT STATUS command after IRQ to read ST0 and current cylinder. (REQ: REQ-03-0384)
+    - [ ] **Error Handling:** (REQ: REQ-03-0312, REQ-03-0385)
+        - [ ] Decode ST0/ST1/ST2 result bytes for error classification. (REQ: REQ-03-0386)
+        - [ ] ST0 bits 7–6: interrupt code (00=normal, 01=abnormal, 10=invalid, 11=drive not ready). (REQ: REQ-03-0387)
+        - [ ] ST1: missing address mark, write protect, no data, overrun, CRC error. (REQ: REQ-03-0388)
+        - [ ] ST2: wrong cylinder, bad cylinder, missing data address mark. (REQ: REQ-03-0389)
+        - [ ] Automatic retry with recalibrate on recoverable errors. (REQ: REQ-03-0390)
+    - [ ] **Block Device Interface:** (REQ: REQ-03-0391)
+        - [ ] Register with storage subsystem as block device. (REQ: REQ-03-0392)
+        - [ ] `fdc_read(drive, lba, count, buffer)` / `fdc_write(drive, lba, count, buffer)`. (REQ: REQ-03-0393)
+        - [ ] Sector size: 512 bytes (standard). (REQ: REQ-03-0394)
+        - [ ] Report device capacity based on detected media geometry. (REQ: REQ-03-0395)
+    - [ ] **Testing:** (REQ: REQ-03-0218, REQ-03-0317, REQ-03-0396, REQ-03-0594, REQ-03-0926, REQ-03-1120)
+        - [ ] Unit: CHS↔LBA conversion for all supported media geometries. (REQ: REQ-03-0397)
+        - [ ] Unit: DMA buffer address validation (below 16 MB, page‑aligned). (REQ: REQ-03-0398)
+        - [ ] Unit: CMOS drive type parsing. (REQ: REQ-03-0399)
+        - [ ] Integration: read/write/verify cycle on QEMU with `-fda` / `-fdb` images. (REQ: REQ-03-0400)
+        - [ ] Integration: disk change detection on QEMU. (REQ: REQ-03-0401)
+        - [ ] Integration: format + read‑back on blank floppy image. (REQ: REQ-03-0402)
+    - [ ] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)
+        - [ ] Internal doc: FDC register map and command reference. (REQ: REQ-03-0404)
+        - [ ] Internal doc: DMA programming for ISA channel 2. (REQ: REQ-03-0405)
+        - [ ] Internal doc: media type detection and geometry tables. (REQ: REQ-03-0406)
 
 
-- [ ] **AHCI:**
-    - [ ] **HBA Initialization:**
-        - [ ] Enable AHCI Mode (GHC.AE).
-        - [ ] Perform HBA Reset processes (GHC.HR).
-        - [ ] Capability detection (CAP, CAP2).
-        - [ ] MSI-X / Interrupt setup.
-    - [ ] **Port Enumeration:**
-        - [ ] Check Implemented Ports (PI).
-        - [ ] Determine Port Type (SSTS.DET).
-        - [ ] Allocate Command Lists and FIS Receive areas (aligned 1K/256B).
-        - [ ] Start Command Engine (CMD.ST) and FIS Receive (CMD.FRE).
-    - [ ] **Command Handling:**
-        - [ ] Build Command Tables (PRDTs).
-        - [ ] Issue commands via Command Issue (CI) bitmask.
-        - [ ] Handle completion interrupts.
-- [ ] **NVMe:**
-    - [ ] **Controller Initialization:**
-        - [ ] Check CAP (Capabilities) register (Timeout, Doorbell stride).
-        - [ ] Disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0.
-        - [ ] Configure Admin Queue Attributes (AQA).
-        - [ ] Create Admin Submission/Completion Queues (ASQ/ACQ).
-        - [ ] Enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1.
-    - [ ] **Namespace Discovery:**
-        - [ ] Issue `Identify Controller` command.
-        - [ ] Issue `Identify Namespace` for active NSIDs.
-    - [ ] **I/O Queue Creation:**
-        - [ ] Determine number of queues supported.
-        - [ ] Issue `Create I/O Completion Queue`.
-        - [ ] Issue `Create I/O Submission Queue`.
-    - [ ] **Block I/O:**
-        - [ ] PRP (Physical Region Page) List construction for data buffers.
-        - [ ] Issue Read/Write NVM commands.
-- [ ] **Partitioning & DevFS:**
-    - [ ] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c -->
-    - [ ] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS. <!-- geom_subr.c -->
-- [ ] **Input:** <!-- ps2.c, keyboard.c, mouse.c, input.h -->
+- [ ] **AHCI:** (REQ: REQ-03-0407)
+    - [ ] **HBA Initialization:** (REQ: REQ-03-0408)
+        - [ ] Enable AHCI Mode (GHC.AE). (REQ: REQ-03-0409)
+        - [ ] Perform HBA Reset processes (GHC.HR). (REQ: REQ-03-0410)
+        - [ ] Capability detection (CAP, CAP2). (REQ: REQ-03-0411)
+        - [ ] MSI-X / Interrupt setup. (REQ: REQ-03-0412)
+    - [ ] **Port Enumeration:** (REQ: REQ-03-0413)
+        - [ ] Check Implemented Ports (PI). (REQ: REQ-03-0414)
+        - [ ] Determine Port Type (SSTS.DET). (REQ: REQ-03-0415)
+        - [ ] Allocate Command Lists and FIS Receive areas (aligned 1K/256B). (REQ: REQ-03-0416)
+        - [ ] Start Command Engine (CMD.ST) and FIS Receive (CMD.FRE). (REQ: REQ-03-0417)
+    - [ ] **Command Handling:** (REQ: REQ-03-0418)
+        - [ ] Build Command Tables (PRDTs). (REQ: REQ-03-0419)
+        - [ ] Issue commands via Command Issue (CI) bitmask. (REQ: REQ-03-0420)
+        - [ ] Handle completion interrupts. (REQ: REQ-03-0421)
+- [ ] **NVMe:** (REQ: REQ-03-0422)
+    - [ ] **Controller Initialization:** (REQ: REQ-03-0423)
+        - [ ] Check CAP (Capabilities) register (Timeout, Doorbell stride). (REQ: REQ-03-0424)
+        - [ ] Disable Controller (CC.EN = 0) and wait for CSTS.RDY = 0. (REQ: REQ-03-0425)
+        - [ ] Configure Admin Queue Attributes (AQA). (REQ: REQ-03-0426)
+        - [ ] Create Admin Submission/Completion Queues (ASQ/ACQ). (REQ: REQ-03-0427)
+        - [ ] Enable Controller (CC.EN = 1) and wait for CSTS.RDY = 1. (REQ: REQ-03-0428)
+    - [ ] **Namespace Discovery:** (REQ: REQ-03-0429)
+        - [ ] Issue `Identify Controller` command. (REQ: REQ-03-0430)
+        - [ ] Issue `Identify Namespace` for active NSIDs. (REQ: REQ-03-0431)
+    - [ ] **I/O Queue Creation:** (REQ: REQ-03-0432)
+        - [ ] Determine number of queues supported. (REQ: REQ-03-0433)
+        - [ ] Issue `Create I/O Completion Queue`. (REQ: REQ-03-0434)
+        - [ ] Issue `Create I/O Submission Queue`. (REQ: REQ-03-0435)
+    - [ ] **Block I/O:** (REQ: REQ-03-0436)
+        - [ ] PRP (Physical Region Page) List construction for data buffers. (REQ: REQ-03-0437)
+        - [ ] Issue Read/Write NVM commands. (REQ: REQ-03-0438)
+- [ ] **Partitioning & DevFS:** (REQ: REQ-03-0439)
+    - [ ] **Scanner:** Detect MBR, GPT, and BSD Disklabel partition tables. <!-- geom.h, geom_subr.c, geom_mbr.c, geom_gpt.c, geom_bsd.c, test_geom.c --> (REQ: REQ-03-0440)
+    - [ ] **Registration:** Register device nodes (`/dev/storage/sata0`, `/dev/storage/sata0s1`) with DevFS. <!-- geom_subr.c --> (REQ: REQ-03-0441)
+- [ ] **Input:** <!-- ps2.c, keyboard.c, mouse.c, input.h --> (REQ: REQ-03-0442)
 
-    - [ ] **PS/2 Controller (`sys/drivers/input/ps2.c`, `ps2.h`):**
+    - [ ] **PS/2 Controller (`sys/drivers/input/ps2.c`, `ps2.h`):** (REQ: REQ-03-0443)
 
         > **Files:** `ps2.c` (controller driver), `ps2.h` (registers,
         > commands, status bits, device commands).
 
-        - [ ] **I/O Primitives:**
-            - [ ] `ps2_wait_write()`: spin on status port bit 1 (input buffer empty), timeout guard.
-            - [ ] `ps2_wait_read()`: spin on status port bit 0 (output buffer full), timeout guard.
-            - [ ] `ps2_write_command(cmd)`: wait‑then‑write to port 0x64.
-            - [ ] `ps2_write_data(data)`: wait‑then‑write to port 0x60.
-            - [ ] `ps2_read_data()`: wait‑then‑read from port 0x60 (return 0xFF on timeout).
-            - [ ] `ps2_read_data_timeout(data, loops)`: bounded read with explicit loop count.
-            - [ ] `ps2_flush()`: drain up to 16 stale bytes from output buffer.
-            - [ ] `ps2_write_aux(data)`: write to port 2 device via `0xD4` prefix.
-            - [ ] `ps2_send_command_with_response(cmd, response)`: write command, read single response byte.
-        - [ ] **Initialization Sequence (`ps2_init`):**
-            - [ ] Step 1: Disable both ports (`0xAD`, `0xA7`) to prevent IRQs during setup.
-            - [ ] Step 2: Flush output buffer (`ps2_flush()`).
-            - [ ] Step 3: Read configuration byte (`0x20`), disable IRQs (bits 0‑1), enable translation (bit 6), set system flag (bit 2), write back (`0x60`).
-            - [ ] Step 4: Controller self‑test (`0xAA`) — expect `0x55`; abort on failure/timeout.
-            - [ ] Step 4b: Re‑write configuration byte (self‑test may reset it).
-            - [ ] Step 5: Dual‑channel detection — enable port 2 (`0xA8`), re‑read config, check bit 5 (P2 clock); disable port 2 again.
-            - [ ] Step 6: Interface tests — `0xAB` (port 1), `0xA9` (port 2 if dual), expect `0x00`.
-            - [ ] Step 7: Enable ports (`0xAE`, `0xA8`).
-            - [ ] Step 8: Enable IRQs — set config bits 0 (and 1 if dual).
-            - [ ] Step 9: Mouse init on port 2 — reset (`0xFF`), wait ACK (`0xFA`) + BAT (`0xAA`) + device ID, enable data reporting (`0xF4`).
-        - [ ] **Error Recovery:**
-            - [ ] Retry self‑test once on failure (some controllers need two attempts).
-            - [ ] Log port test failure codes to kernel console.
-            - [ ] Continue with single‑channel if port 2 test fails.
-            - [ ] Timeout constants tuned per real hardware profiles (QEMU, Bochs, real i8042).
+        - [ ] **I/O Primitives:** (REQ: REQ-03-0444)
+            - [ ] `ps2_wait_write()`: spin on status port bit 1 (input buffer empty), timeout guard. (REQ: REQ-03-0445)
+            - [ ] `ps2_wait_read()`: spin on status port bit 0 (output buffer full), timeout guard. (REQ: REQ-03-0446)
+            - [ ] `ps2_write_command(cmd)`: wait‑then‑write to port 0x64. (REQ: REQ-03-0447)
+            - [ ] `ps2_write_data(data)`: wait‑then‑write to port 0x60. (REQ: REQ-03-0448)
+            - [ ] `ps2_read_data()`: wait‑then‑read from port 0x60 (return 0xFF on timeout). (REQ: REQ-03-0449)
+            - [ ] `ps2_read_data_timeout(data, loops)`: bounded read with explicit loop count. (REQ: REQ-03-0450)
+            - [ ] `ps2_flush()`: drain up to 16 stale bytes from output buffer. (REQ: REQ-03-0451)
+            - [ ] `ps2_write_aux(data)`: write to port 2 device via `0xD4` prefix. (REQ: REQ-03-0452)
+            - [ ] `ps2_send_command_with_response(cmd, response)`: write command, read single response byte. (REQ: REQ-03-0453)
+        - [ ] **Initialization Sequence (`ps2_init`):** (REQ: REQ-03-0454)
+            - [ ] Step 1: Disable both ports (`0xAD`, `0xA7`) to prevent IRQs during setup. (REQ: REQ-03-0455)
+            - [ ] Step 2: Flush output buffer (`ps2_flush()`). (REQ: REQ-03-0456)
+            - [ ] Step 3: Read configuration byte (`0x20`), disable IRQs (bits 0‑1), enable translation (bit 6), set system flag (bit 2), write back (`0x60`). (REQ: REQ-03-0457)
+            - [ ] Step 4: Controller self‑test (`0xAA`) — expect `0x55`; abort on failure/timeout. (REQ: REQ-03-0458)
+            - [ ] Step 4b: Re‑write configuration byte (self‑test may reset it). (REQ: REQ-03-0459)
+            - [ ] Step 5: Dual‑channel detection — enable port 2 (`0xA8`), re‑read config, check bit 5 (P2 clock); disable port 2 again. (REQ: REQ-03-0460)
+            - [ ] Step 6: Interface tests — `0xAB` (port 1), `0xA9` (port 2 if dual), expect `0x00`. (REQ: REQ-03-0461)
+            - [ ] Step 7: Enable ports (`0xAE`, `0xA8`). (REQ: REQ-03-0462)
+            - [ ] Step 8: Enable IRQs — set config bits 0 (and 1 if dual). (REQ: REQ-03-0463)
+            - [ ] Step 9: Mouse init on port 2 — reset (`0xFF`), wait ACK (`0xFA`) + BAT (`0xAA`) + device ID, enable data reporting (`0xF4`). (REQ: REQ-03-0464)
+        - [ ] **Error Recovery:** (REQ: REQ-03-0465)
+            - [ ] Retry self‑test once on failure (some controllers need two attempts). (REQ: REQ-03-0466)
+            - [ ] Log port test failure codes to kernel console. (REQ: REQ-03-0467)
+            - [ ] Continue with single‑channel if port 2 test fails. (REQ: REQ-03-0468)
+            - [ ] Timeout constants tuned per real hardware profiles (QEMU, Bochs, real i8042). (REQ: REQ-03-0469)
 
-    - [ ] **Keyboard Driver (`sys/drivers/input/keyboard.c`, `keyboard.h`):**
+    - [ ] **Keyboard Driver (`sys/drivers/input/keyboard.c`, `keyboard.h`):** (REQ: REQ-03-0470)
 
         > **Files:** `keyboard.c` (IRQ1 handler, scancode decoder, key
         > buffer), `keyboard.h` (public API).
 
-        - [ ] **IRQ1 Handler (`keyboard_handler`):**
-            - [ ] Read scancode from port 0x60.
-            - [ ] Harvest entropy from TSC + scancode into RNG pool.
-            - [ ] Dispatch to scancode decoder state machine.
-            - [ ] Send EOI (or rely on IDT dispatcher).
-        - [ ] **Scancode Set Decoding:**
-            - [ ] **Set 1 (XT‑compatible, default with translation):**
-                - [ ] Single‑byte make codes (0x01–0x58).
-                - [ ] Single‑byte break codes (make | 0x80).
-                - [ ] Extended prefix `0xE0` → two‑byte sequences:
-                    - [ ] Right Ctrl (E0 1D / E0 9D), Right Alt (E0 38 / E0 B8).
-                    - [ ] Arrow keys (E0 48/50/4B/4D).
-                    - [ ] Insert (E0 52), Delete (E0 53), Home (E0 47), End (E0 4F).
-                    - [ ] Page Up (E0 49), Page Down (E0 51).
-                    - [ ] Print Screen (E0 2A E0 37 / E0 B7 E0 AA).
-                    - [ ] Pause/Break (E1 1D 45 E1 9D C5 — three‑byte E1 sequence).
-                - [ ] Discard spurious `0xE1` prefix after handling Pause.
-            - [ ] **Set 2 (AT) — Optional Future:**
-                - [ ] Stub for native Set 2 decoding (for controllers without translation).
-                - [ ] `0xF0` break prefix instead of bit 7.
-        - [ ] **Scancode‑to‑Keycode Translation:**
-            - [ ] Define `KEY_*` keycodes independent of scancode set (internal enum/defines).
-            - [ ] Map Set 1 scancodes to keycodes via lookup table.
-            - [ ] Separate table for extended (E0‑prefixed) scancodes.
-        - [ ] **Modifier Tracking:**
-            - [ ] Track left/right independently: `kbd_lshift`/`kbd_rshift`, `kbd_lctrl`/`kbd_rctrl`, `kbd_lalt`/`kbd_ralt`.
-            - [ ] Aggregate flags: `kbd_shift`, `kbd_ctrl`, `kbd_alt`.
-            - [ ] Caps Lock toggle state (latch on make, ignore break).
-            - [ ] Num Lock toggle state.
-            - [ ] Scroll Lock toggle state.
-            - [ ] Update LED indicator state to match lock toggles (see LED Control below).
-        - [ ] **Keymap (Scancode/Keycode → Character):**
-            - [ ] **US QWERTY layout tables:**
-                - [ ] `kbd_us[128]`: unshifted ASCII mapping.
-                - [ ] `kbd_us_shifted[128]`: shifted ASCII mapping.
-                - [ ] Caps Lock interaction: uppercase letters but not symbols.
-                - [ ] Num Lock interaction: numpad keys → digits vs navigation.
-            - [ ] **Ctrl character generation:**
-                - [ ] `Ctrl+A..Z` → 0x01..0x1A.
-                - [ ] `Ctrl+[` → ESC (0x1B), `Ctrl+\` → FS (0x1C), `Ctrl+]` → GS (0x1D).
-            - [ ] **Alt character generation:**
-                - [ ] Alt sets bit 7 (traditional) or generates ESC prefix (VT convention).
-            - [ ] **Dead key / Compose key support (deferred):** stub interface.
-            - [ ] **Switchable keymap infrastructure:**
-                - [ ] `struct keymap` with base, shift, ctrl, altgr tables.
-                - [ ] Runtime keymap switching API (`keyboard_set_keymap()`).
-                - [ ] Additional layouts: DE, FR, UK (deferred — provide registration API only).
-        - [ ] **Function Key and Special Key Handling:**
-            - [ ] F1–F12 → generate escape sequences (VT100: `ESC O P`..`ESC O [` or `ESC [ 11~`..`ESC [ 24~`).
-            - [ ] Arrow keys → `ESC [ A/B/C/D`.
-            - [ ] Home/End/Ins/Del/PgUp/PgDn → `ESC [ 1~/2~/3~/4~/5~/6~` (or xterm variants).
-            - [ ] Alt+F1..F12 → VT switching (`vt_activate(n)`).
-            - [ ] Ctrl+F9 → debug process dump.
-            - [ ] SysRq / Print Screen → kernel debug hook (deferred).
-        - [ ] **Key Repeat (Typematic):**
-            - [ ] Send `0xF3` command to keyboard device with delay/rate parameters.
-            - [ ] Default: 250 ms delay, 30 Hz repeat (or use BIOS defaults).
-            - [ ] Alternatively implement software repeat via timer tick (deferred).
-        - [ ] **LED Control:**
-            - [ ] Send `0xED` command to keyboard device with LED status byte.
-            - [ ] Bit 0 = Scroll Lock, Bit 1 = Num Lock, Bit 2 = Caps Lock.
-            - [ ] Update LEDs on lock key toggle.
-            - [ ] Handle ACK (`0xFA`) / Resend (`0xFE`) responses.
-        - [ ] **Key Buffer (`kbd_buffer`):**
-            - [ ] Circular buffer (256 entries).
-            - [ ] `kbd_push(c)`: enqueue translated character.
-            - [ ] `keyboard_getc()`: dequeue character (returns 0 if empty).
-            - [ ] Overflow policy: drop newest keystrokes (preserve existing behavior).
-            - [ ] Consider expanding to store raw `input_event` structs instead of chars.
-        - [ ] **Input Subsystem Integration:**
-            - [ ] Register `input_dev_t` with `name="PS/2 Keyboard"`, `caps=EV_KEY`.
-            - [ ] Call `input_report_key(dev, keycode, 1)` on key press.
-            - [ ] Call `input_report_key(dev, keycode, 0)` on key release (currently missing).
-            - [ ] Call `input_sync(dev)` after each event.
-        - [ ] **VT/TTY Integration:**
-            - [ ] Push translated character to active VT's TTY via `tty_flip_buffer_push()`.
-            - [ ] Fallback to `console_push_char()` if no TTY attached.
-            - [ ] Respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it).
+        - [ ] **IRQ1 Handler (`keyboard_handler`):** (REQ: REQ-03-0471)
+            - [ ] Read scancode from port 0x60. (REQ: REQ-03-0472)
+            - [ ] Harvest entropy from TSC + scancode into RNG pool. (REQ: REQ-03-0473)
+            - [ ] Dispatch to scancode decoder state machine. (REQ: REQ-03-0474)
+            - [ ] Send EOI (or rely on IDT dispatcher). (REQ: REQ-03-0475)
+        - [ ] **Scancode Set Decoding:** (REQ: REQ-03-0476)
+            - [ ] **Set 1 (XT‑compatible, default with translation):** (REQ: REQ-03-0477)
+                - [ ] Single‑byte make codes (0x01–0x58). (REQ: REQ-03-0478)
+                - [ ] Single‑byte break codes (make | 0x80). (REQ: REQ-03-0479)
+                - [ ] Extended prefix `0xE0` → two‑byte sequences: (REQ: REQ-03-0480)
+                    - [ ] Right Ctrl (E0 1D / E0 9D), Right Alt (E0 38 / E0 B8). (REQ: REQ-03-0481)
+                    - [ ] Arrow keys (E0 48/50/4B/4D). (REQ: REQ-03-0482)
+                    - [ ] Insert (E0 52), Delete (E0 53), Home (E0 47), End (E0 4F). (REQ: REQ-03-0483)
+                    - [ ] Page Up (E0 49), Page Down (E0 51). (REQ: REQ-03-0484)
+                    - [ ] Print Screen (E0 2A E0 37 / E0 B7 E0 AA). (REQ: REQ-03-0485)
+                    - [ ] Pause/Break (E1 1D 45 E1 9D C5 — three‑byte E1 sequence). (REQ: REQ-03-0486)
+                - [ ] Discard spurious `0xE1` prefix after handling Pause. (REQ: REQ-03-0487)
+            - [ ] **Set 2 (AT) — Optional Future:** (REQ: REQ-03-0488)
+                - [ ] Stub for native Set 2 decoding (for controllers without translation). (REQ: REQ-03-0489)
+                - [ ] `0xF0` break prefix instead of bit 7. (REQ: REQ-03-0490)
+        - [ ] **Scancode‑to‑Keycode Translation:** (REQ: REQ-03-0491)
+            - [ ] Define `KEY_*` keycodes independent of scancode set (internal enum/defines). (REQ: REQ-03-0492)
+            - [ ] Map Set 1 scancodes to keycodes via lookup table. (REQ: REQ-03-0493)
+            - [ ] Separate table for extended (E0‑prefixed) scancodes. (REQ: REQ-03-0494)
+        - [ ] **Modifier Tracking:** (REQ: REQ-03-0495)
+            - [ ] Track left/right independently: `kbd_lshift`/`kbd_rshift`, `kbd_lctrl`/`kbd_rctrl`, `kbd_lalt`/`kbd_ralt`. (REQ: REQ-03-0496)
+            - [ ] Aggregate flags: `kbd_shift`, `kbd_ctrl`, `kbd_alt`. (REQ: REQ-03-0497)
+            - [ ] Caps Lock toggle state (latch on make, ignore break). (REQ: REQ-03-0498)
+            - [ ] Num Lock toggle state. (REQ: REQ-03-0499)
+            - [ ] Scroll Lock toggle state. (REQ: REQ-03-0500)
+            - [ ] Update LED indicator state to match lock toggles (see LED Control below). (REQ: REQ-03-0501)
+        - [ ] **Keymap (Scancode/Keycode → Character):** (REQ: REQ-03-0502)
+            - [ ] **US QWERTY layout tables:** (REQ: REQ-03-0503)
+                - [ ] `kbd_us[128]`: unshifted ASCII mapping. (REQ: REQ-03-0504)
+                - [ ] `kbd_us_shifted[128]`: shifted ASCII mapping. (REQ: REQ-03-0505)
+                - [ ] Caps Lock interaction: uppercase letters but not symbols. (REQ: REQ-03-0506)
+                - [ ] Num Lock interaction: numpad keys → digits vs navigation. (REQ: REQ-03-0507)
+            - [ ] **Ctrl character generation:** (REQ: REQ-03-0508)
+                - [ ] `Ctrl+A..Z` → 0x01..0x1A. (REQ: REQ-03-0509)
+                - [ ] `Ctrl+[` → ESC (0x1B), `Ctrl+\` → FS (0x1C), `Ctrl+]` → GS (0x1D). (REQ: REQ-03-0510)
+            - [ ] **Alt character generation:** (REQ: REQ-03-0511)
+                - [ ] Alt sets bit 7 (traditional) or generates ESC prefix (VT convention). (REQ: REQ-03-0512)
+            - [ ] **Dead key / Compose key support (deferred):** stub interface. (REQ: REQ-03-0513)
+            - [ ] **Switchable keymap infrastructure:** (REQ: REQ-03-0514)
+                - [ ] `struct keymap` with base, shift, ctrl, altgr tables. (REQ: REQ-03-0515)
+                - [ ] Runtime keymap switching API (`keyboard_set_keymap()`). (REQ: REQ-03-0516)
+                - [ ] Additional layouts: DE, FR, UK (deferred — provide registration API only). (REQ: REQ-03-0517)
+        - [ ] **Function Key and Special Key Handling:** (REQ: REQ-03-0518)
+            - [ ] F1–F12 → generate escape sequences (VT100: `ESC O P`..`ESC O [` or `ESC [ 11~`..`ESC [ 24~`). (REQ: REQ-03-0519)
+            - [ ] Arrow keys → `ESC [ A/B/C/D`. (REQ: REQ-03-0520)
+            - [ ] Home/End/Ins/Del/PgUp/PgDn → `ESC [ 1~/2~/3~/4~/5~/6~` (or xterm variants). (REQ: REQ-03-0521)
+            - [ ] Alt+F1..F12 → VT switching (`vt_activate(n)`). (REQ: REQ-03-0522)
+            - [ ] Ctrl+F9 → debug process dump. (REQ: REQ-03-0523)
+            - [ ] SysRq / Print Screen → kernel debug hook (deferred). (REQ: REQ-03-0524)
+        - [ ] **Key Repeat (Typematic):** (REQ: REQ-03-0525)
+            - [ ] Send `0xF3` command to keyboard device with delay/rate parameters. (REQ: REQ-03-0526)
+            - [ ] Default: 250 ms delay, 30 Hz repeat (or use BIOS defaults). (REQ: REQ-03-0527)
+            - [ ] Alternatively implement software repeat via timer tick (deferred). (REQ: REQ-03-0528)
+        - [ ] **LED Control:** (REQ: REQ-03-0529, REQ-03-0723)
+            - [ ] Send `0xED` command to keyboard device with LED status byte. (REQ: REQ-03-0530)
+            - [ ] Bit 0 = Scroll Lock, Bit 1 = Num Lock, Bit 2 = Caps Lock. (REQ: REQ-03-0531)
+            - [ ] Update LEDs on lock key toggle. (REQ: REQ-03-0532)
+            - [ ] Handle ACK (`0xFA`) / Resend (`0xFE`) responses. (REQ: REQ-03-0533)
+        - [ ] **Key Buffer (`kbd_buffer`):** (REQ: REQ-03-0534)
+            - [ ] Circular buffer (256 entries). (REQ: REQ-03-0535)
+            - [ ] `kbd_push(c)`: enqueue translated character. (REQ: REQ-03-0536)
+            - [ ] `keyboard_getc()`: dequeue character (returns 0 if empty). (REQ: REQ-03-0537)
+            - [ ] Overflow policy: drop newest keystrokes (preserve existing behavior). (REQ: REQ-03-0538)
+            - [ ] Consider expanding to store raw `input_event` structs instead of chars. (REQ: REQ-03-0539)
+        - [ ] **Input Subsystem Integration:** (REQ: REQ-03-0540, REQ-03-0578)
+            - [ ] Register `input_dev_t` with `name="PS/2 Keyboard"`, `caps=EV_KEY`. (REQ: REQ-03-0541)
+            - [ ] Call `input_report_key(dev, keycode, 1)` on key press. (REQ: REQ-03-0542)
+            - [ ] Call `input_report_key(dev, keycode, 0)` on key release (currently missing). (REQ: REQ-03-0543)
+            - [ ] Call `input_sync(dev)` after each event. (REQ: REQ-03-0544)
+        - [ ] **VT/TTY Integration:** (REQ: REQ-03-0545)
+            - [ ] Push translated character to active VT's TTY via `tty_flip_buffer_push()`. (REQ: REQ-03-0546)
+            - [ ] Fallback to `console_push_char()` if no TTY attached. (REQ: REQ-03-0547)
+            - [ ] Respect TTY discipline: raw vs cooked mode affects nothing at driver level (TTY handles it). (REQ: REQ-03-0548)
 
-    - [ ] **Mouse Driver (`sys/drivers/input/mouse.c`, `mouse.h`):**
+    - [ ] **Mouse Driver (`sys/drivers/input/mouse.c`, `mouse.h`):** (REQ: REQ-03-0549)
 
         > **Files:** `mouse.c` (IRQ12 handler, packet decoder, event
         > queue), `mouse.h` (structures, public API).
 
-        - [ ] **IRQ12 Handler (`mouse_handler`):**
-            - [ ] Read status port to confirm data available (bit 0).
-            - [ ] Read data byte from port 0x60.
-            - [ ] Harvest entropy from TSC + data byte.
-            - [ ] Feed byte to packet state machine.
-        - [ ] **Packet Decoding:**
-            - [ ] **Standard PS/2 Mouse (3‑byte):**
-                - [ ] Byte 0: buttons (bits 0–2), sign bits (bits 4–5), overflow (bits 6–7), alignment bit 3 (always 1).
-                - [ ] Byte 1: X movement (signed 9‑bit with sign from byte 0 bit 4).
-                - [ ] Byte 2: Y movement (signed 9‑bit with sign from byte 0 bit 5, Y‑axis inverted).
-                - [ ] Realignment: if byte 0 bit 3 != 1, resync by discarding bytes.
-            - [ ] **IntelliMouse Extension (4‑byte) — deferred:**
-                - [ ] Detect via magic sample‑rate sequence (200, 100, 80 → ID 0x03).
-                - [ ] Byte 3: Z‑axis (scroll wheel), signed 4‑bit.
-            - [ ] **IntelliMouse Explorer (5‑button) — deferred:**
-                - [ ] Detect via magic sequence (200, 200, 80 → ID 0x04).
-                - [ ] Byte 3: Z‑axis (bits 0–3), buttons 4–5 (bits 4–5).
-            - [ ] **Overflow Handling:**
-                - [ ] If overflow bits (byte 0 bits 6–7) are set, clamp movement to max delta.
-        - [ ] **Mouse State:**
-            - [ ] Track cumulative `mouse_x`, `mouse_y` (absolute position for cursor).
-            - [ ] Track button state (`mouse_buttons`, bits 0=left, 1=right, 2=middle).
-            - [ ] Configurable resolution/acceleration (deferred).
-        - [ ] **Event Queue:**
-            - [ ] Circular buffer of `mouse_event_t` (64 entries).
-            - [ ] `mouse_q_push(dx, dy, buttons)`: enqueue relative event.
-            - [ ] `mouse_get_event(ev)`: dequeue event (returns 0 if empty).
-            - [ ] `mouse_get_state(x, y, buttons)`: poll current absolute position + buttons.
-        - [ ] **Input Subsystem Integration:**
-            - [ ] Register `input_dev_t` with `name="PS/2 Mouse"`, `caps=EV_REL|EV_KEY`.
-            - [ ] Report `REL_X`, `REL_Y`, `REL_WHEEL` (when supported).
-            - [ ] Report `BTN_LEFT` (0x110), `BTN_RIGHT` (0x111), `BTN_MIDDLE` (0x112).
-            - [ ] `input_sync()` after each complete packet.
+        - [ ] **IRQ12 Handler (`mouse_handler`):** (REQ: REQ-03-0550)
+            - [ ] Read status port to confirm data available (bit 0). (REQ: REQ-03-0551)
+            - [ ] Read data byte from port 0x60. (REQ: REQ-03-0552)
+            - [ ] Harvest entropy from TSC + data byte. (REQ: REQ-03-0553)
+            - [ ] Feed byte to packet state machine. (REQ: REQ-03-0554)
+        - [ ] **Packet Decoding:** (REQ: REQ-03-0555)
+            - [ ] **Standard PS/2 Mouse (3‑byte):** (REQ: REQ-03-0556)
+                - [ ] Byte 0: buttons (bits 0–2), sign bits (bits 4–5), overflow (bits 6–7), alignment bit 3 (always 1). (REQ: REQ-03-0557)
+                - [ ] Byte 1: X movement (signed 9‑bit with sign from byte 0 bit 4). (REQ: REQ-03-0558)
+                - [ ] Byte 2: Y movement (signed 9‑bit with sign from byte 0 bit 5, Y‑axis inverted). (REQ: REQ-03-0559)
+                - [ ] Realignment: if byte 0 bit 3 != 1, resync by discarding bytes. (REQ: REQ-03-0560)
+            - [ ] **IntelliMouse Extension (4‑byte) — deferred:** (REQ: REQ-03-0561)
+                - [ ] Detect via magic sample‑rate sequence (200, 100, 80 → ID 0x03). (REQ: REQ-03-0562)
+                - [ ] Byte 3: Z‑axis (scroll wheel), signed 4‑bit. (REQ: REQ-03-0563)
+            - [ ] **IntelliMouse Explorer (5‑button) — deferred:** (REQ: REQ-03-0564)
+                - [ ] Detect via magic sequence (200, 200, 80 → ID 0x04). (REQ: REQ-03-0565)
+                - [ ] Byte 3: Z‑axis (bits 0–3), buttons 4–5 (bits 4–5). (REQ: REQ-03-0566)
+            - [ ] **Overflow Handling:** (REQ: REQ-03-0567)
+                - [ ] If overflow bits (byte 0 bits 6–7) are set, clamp movement to max delta. (REQ: REQ-03-0567)
+        - [ ] **Mouse State:** (REQ: REQ-03-0569)
+            - [ ] Track cumulative `mouse_x`, `mouse_y` (absolute position for cursor). (REQ: REQ-03-0570)
+            - [ ] Track button state (`mouse_buttons`, bits 0=left, 1=right, 2=middle). (REQ: REQ-03-0571)
+            - [ ] Configurable resolution/acceleration (deferred). (REQ: REQ-03-0572)
+        - [ ] **Event Queue:** (REQ: REQ-03-0573)
+            - [ ] Circular buffer of `mouse_event_t` (64 entries). (REQ: REQ-03-0574)
+            - [ ] `mouse_q_push(dx, dy, buttons)`: enqueue relative event. (REQ: REQ-03-0575)
+            - [ ] `mouse_get_event(ev)`: dequeue event (returns 0 if empty). (REQ: REQ-03-0576)
+            - [ ] `mouse_get_state(x, y, buttons)`: poll current absolute position + buttons. (REQ: REQ-03-0577)
+        - [ ] **Input Subsystem Integration:** (REQ: REQ-03-0540, REQ-03-0578)
+            - [ ] Register `input_dev_t` with `name="PS/2 Mouse"`, `caps=EV_REL|EV_KEY`. (REQ: REQ-03-0579)
+            - [ ] Report `REL_X`, `REL_Y`, `REL_WHEEL` (when supported). (REQ: REQ-03-0580)
+            - [ ] Report `BTN_LEFT` (0x110), `BTN_RIGHT` (0x111), `BTN_MIDDLE` (0x112). (REQ: REQ-03-0581)
+            - [ ] `input_sync()` after each complete packet. (REQ: REQ-03-0582)
 
-    - [ ] **Input Subsystem (`sys/input.h`):**
-        - [ ] Abstract `input_event` structure (type, code, value, timestamp).
-        - [ ] `input_register_device(dev)` / `input_unregister_device(dev)`.
-        - [ ] `input_report_key()`, `input_report_rel()`, `input_report_abs()`.
-        - [ ] `input_sync()` — event boundary marker.
-        - [ ] `/dev/input/eventN` character device interface for userspace.
-        - [ ] Event filtering: consumers subscribe to device + event type.
+    - [ ] **Input Subsystem (`sys/input.h`):** (REQ: REQ-03-0583)
+        - [ ] Abstract `input_event` structure (type, code, value, timestamp). (REQ: REQ-03-0584)
+        - [ ] `input_register_device(dev)` / `input_unregister_device(dev)`. (REQ: REQ-03-0585)
+        - [ ] `input_report_key()`, `input_report_rel()`, `input_report_abs()`. (REQ: REQ-03-0586)
+        - [ ] `input_sync()` — event boundary marker. (REQ: REQ-03-0587)
+        - [ ] `/dev/input/eventN` character device interface for userspace. (REQ: REQ-03-0588)
+        - [ ] Event filtering: consumers subscribe to device + event type. (REQ: REQ-03-0589)
 
-    - [ ] **Hot‑Plug Detection (deferred):**
-        - [ ] Monitor controller status for device insertion/removal.
-        - [ ] Re‑run device identification (`0xF2`) on port activity change.
-        - [ ] (De)register input devices dynamically.
+    - [ ] **Hot‑Plug Detection (deferred):** (REQ: REQ-03-0590)
+        - [ ] Monitor controller status for device insertion/removal. (REQ: REQ-03-0591)
+        - [ ] Re‑run device identification (`0xF2`) on port activity change. (REQ: REQ-03-0592)
+        - [ ] (De)register input devices dynamically. (REQ: REQ-03-0593)
 
-    - [ ] **Testing:**
-        - [ ] **Unit Tests:**
-            - [ ] Scancode Set 1 decoding: verify all single‑byte and E0‑extended codes.
-            - [ ] Modifier tracking: all combinations of shift/ctrl/alt/capslock/numlock.
-            - [ ] Keymap: verify ASCII output for full US‑QWERTY layout (unshifted, shifted, ctrl).
-            - [ ] Key buffer: fill, overflow, drain, verify FIFO order.
-            - [ ] Mouse packet decoding: standard 3‑byte packets with known dx/dy/buttons.
-            - [ ] Mouse packet realignment: inject byte with bit 3 clear, verify resync.
-            - [ ] Mouse overflow: inject overflow bits, verify clamping.
-            - [ ] Mouse event queue: fill, overflow, drain.
-        - [ ] **Property Tests:**
-            - [ ] Key buffer invariant: `0 <= head, tail < KBD_BUFFER_SIZE`, head == tail ↔ empty.
-            - [ ] Mouse queue invariant: `0 <= head, tail < MOUSE_QUEUE_SIZE`.
-            - [ ] Randomized scancode sequences never crash handler or corrupt state.
-        - [ ] **Integration Tests:**
-            - [ ] Boot kernel in QEMU, inject keyboard scancodes via monitor (`sendkey`), verify TTY output.
-            - [ ] Boot kernel, inject mouse events, verify `mouse_get_state()` returns expected position.
-            - [ ] Alt+F1..F12 switches VT correctly.
-            - [ ] Ctrl+C / Ctrl+D / Ctrl+Z generate correct control characters.
+    - [ ] **Testing:** (REQ: REQ-03-0218, REQ-03-0317, REQ-03-0396, REQ-03-0594, REQ-03-0926, REQ-03-1120)
+        - [ ] **Unit Tests:** (REQ: REQ-03-0219, REQ-03-0595, REQ-03-1121)
+            - [ ] Scancode Set 1 decoding: verify all single‑byte and E0‑extended codes. (REQ: REQ-03-0596)
+            - [ ] Modifier tracking: all combinations of shift/ctrl/alt/capslock/numlock. (REQ: REQ-03-0597)
+            - [ ] Keymap: verify ASCII output for full US‑QWERTY layout (unshifted, shifted, ctrl). (REQ: REQ-03-0598)
+            - [ ] Key buffer: fill, overflow, drain, verify FIFO order. (REQ: REQ-03-0599)
+            - [ ] Mouse packet decoding: standard 3‑byte packets with known dx/dy/buttons. (REQ: REQ-03-0600)
+            - [ ] Mouse packet realignment: inject byte with bit 3 clear, verify resync. (REQ: REQ-03-0601)
+            - [ ] Mouse overflow: inject overflow bits, verify clamping. (REQ: REQ-03-0602)
+            - [ ] Mouse event queue: fill, overflow, drain. (REQ: REQ-03-0603)
+        - [ ] **Property Tests:** (REQ: REQ-03-0226, REQ-03-0604)
+            - [ ] Key buffer invariant: `0 <= head, tail < KBD_BUFFER_SIZE`, head == tail ↔ empty. (REQ: REQ-03-0605)
+            - [ ] Mouse queue invariant: `0 <= head, tail < MOUSE_QUEUE_SIZE`. (REQ: REQ-03-0606)
+            - [ ] Randomized scancode sequences never crash handler or corrupt state. (REQ: REQ-03-0607)
+        - [ ] **Integration Tests:** (REQ: REQ-03-0230, REQ-03-0608, REQ-03-1133)
+            - [ ] Boot kernel in QEMU, inject keyboard scancodes via monitor (`sendkey`), verify TTY output. (REQ: REQ-03-0609)
+            - [ ] Boot kernel, inject mouse events, verify `mouse_get_state()` returns expected position. (REQ: REQ-03-0610)
+            - [ ] Alt+F1..F12 switches VT correctly. (REQ: REQ-03-0611)
+            - [ ] Ctrl+C / Ctrl+D / Ctrl+Z generate correct control characters. (REQ: REQ-03-0612)
 
-    - [ ] **Documentation:**
-        - [ ] Internal doc: PS/2 controller initialization sequence and error handling.
-        - [ ] Internal doc: scancode set 1 table and extended key mapping.
-        - [ ] Internal doc: input subsystem event model and device registration.
+    - [ ] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)
+        - [ ] Internal doc: PS/2 controller initialization sequence and error handling. (REQ: REQ-03-0614)
+        - [ ] Internal doc: scancode set 1 table and extended key mapping. (REQ: REQ-03-0615)
+        - [ ] Internal doc: input subsystem event model and device registration. (REQ: REQ-03-0616)
 
-- [ ] **Console Subsystem (`sys/console`):**
-    - [ ] **TTY Subsystem (Core):**
-        - [ ] **Structures (`tty_t`):**
-            - [ ] **Buffers & Queues:**
-                - [ ] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data.
-                - [ ] **Write Buffer (Output):** Queue for driver consumption.
-                - [ ] **Canon Buffer (Cooked):** Line-editing buffer for `ICANON` mode.
-                - [ ] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`.
-            - [ ] **State Control (`termios`):**
-                - [ ] `c_iflag`: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON).
-                - [ ] `c_oflag`: Output modes (OPOST, ONLCR, OXTABS).
-                - [ ] `c_cflag`: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS).
-                - [ ] `c_lflag`: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP).
-                - [ ] `c_cc`: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME, VSTART, VSTOP, VWERASE).
-                - [ ] `winsize`: Window size tracking (rows/cols) + `SIGWINCH`.
-            - [ ] **Line Discipline (`N_TTY`):**
-                - [ ] **Input Processing (`n_tty_receive_buf`):**
-                    - [ ] Parity checks and stripping.
-                    - [ ] Newline translation (CR->NL).
-                    - [ ] Software flow control (XON/XOFF detection).
-                    - [ ] Signal generation check (`ISIG`).
-                - [ ] **Canonical Editing (`n_tty_read`):**
-                    - [ ] Backspace/Delete handling (`VERASE`).
-                    - [ ] Line kill (`VKILL`).
-                    - [ ] Word erase (`VWERASE`).
-                    - [ ] EOF handling (`VEOF` / Ctrl+D).
-                - [ ] **Output Post-processing (`n_tty_write`):**
-                    - [ ] Newline expansion (NL -> CR/NL).
-                    - [ ] Tab expansion (optional).
-                - [ ] **Echoing Logic:**
-                    - [ ] Raw echo (input char -> output).
-                    - [ ] Control char echo (`^C`).
-                    - [ ] Erase echo (backspace-space-backspace sequence).
-            - [ ] **Driver Interface (`tty_driver`):**
-                - [ ] `install` / `remove`: setup private data.
-                - [ ] `open` / `close`: hardware init/shutdown.
-                - [ ] `write`: device output path.
-                - [ ] `put_char`: optimized single-char write.
-                - [ ] `flush_chars`: kick hardware transmission.
-                - [ ] `write_room`: check available hardware buffer space.
-                - [ ] `chars_in_buffer`: check pending bytes.
-                - [ ] `ioctl`: hardware-specific controls.
-                - [ ] `throttle` / `unthrottle`: hardware flow control hooks.
-            - [ ] **Session/Job Control:**
-                - [ ] `tty_struct.session`: Pointer to current session.
-                - [ ] `tty_struct.pgrp`: Pointer to foreground process group.
-                - [ ] `tty_check_change()`: Verify background writes (`SIGTTOU`).
-        - [ ] **API:**
-            - [ ] `tty_init()`: Initialize subsystem.
-            - [ ] `tty_alloc()`: Create a new TTY device.
-            - [ ] `tty_register_device()`: Register with DevFS `/dev/ttyX`.
-            - [ ] `tty_open`, `tty_close`: Refcounting and session logic.
-            - [ ] `tty_read`, `tty_write`: Dispatch to ldisc.
-            - [ ] `tty_ioctl`:
-                - [ ] `TIOCSCTTY`: Become controlling TTY.
-                - [ ] `TIOCSPGRP` / `TIOCGPGRP`: Manage foreground group.
-                - [ ] `TCGETS` / `TCSETS`: Termios get/set.
-                - [ ] `TIOCGWINSZ`: Window size.
-    - [ ] **Virtual Terminal (VT) Layer:**
-        - [ ] **VT Management:** Array of `vt_state_t` structures (vt0..vtN).
-        - [ ] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`).
-        - [ ] **Emulation:** VT102 state machine (escape codes).
-    - [ ] **Backend Drivers:**
-        - [ ] **VGA Text Mode Console:**
-            - [ ] **Initialization:**
-                - [ ] Detect VGA presence (BIOS/PCI enumeration).
-                - [ ] Set 80x25 or 80x50 text mode.
-                - [ ] Map video memory (0xB8000) into kernel address space.
-                - [ ] Initialize attribute byte defaults (white on black).
-            - [ ] **Text Output:**
-                - [ ] Implement `vga_putchar(char c, uint8_t attr)`.
-                - [ ] Handle control characters (CR, LF, BS, TAB, BEL).
-                - [ ] Implement `vga_write(const char *buf, size_t len)`.
-                - [ ] Tab stop handling (configurable tab width).
-            - [ ] **Cursor Control:**
-                - [ ] Read/write hardware cursor position (CRTC registers 0x0E/0x0F).
-                - [ ] Cursor shape control (underline, block, invisible).
-                - [ ] Cursor blink enable/disable.
-            - [ ] **Scrolling:**
-                - [ ] Software scroll (memmove video buffer).
-                - [ ] Hardware scroll (CRTC start address register).
-                - [ ] Scroll region support (VT102 DECSTBM).
-            - [ ] **Attributes:**
-                - [ ] 16-color foreground/background palette.
-                - [ ] Blink/bright background toggle (attribute controller).
-                - [ ] Reverse video, bold, underline emulation.
-            - [ ] **TTY Binding:**
-                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`.
-                - [ ] Implement `tty_driver->write()` callback.
-                - [ ] Implement `tty_driver->ioctl()` for VGA-specific controls.
-        - [ ] **Keyboard Input (PS/2 to TTY):**
-            - [ ] Fix PS/2 driver build errors (constant mismatches in `test_ps2.c`).
-            - [ ] **Input Path:**
-                - [ ] Hook keyboard driver to TTY input queue.
-                - [ ] Convert scancodes to ASCII via keymap.
-                - [ ] Handle modifier keys (Shift, Ctrl, Alt, AltGr).
-                - [ ] Generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A).
-            - [ ] **Special Keys:**
-                - [ ] Function keys (F1-F12) to escape sequences.
-                - [ ] Arrow keys to ANSI escape sequences.
-                - [ ] Insert, Delete, Home, End, PgUp, PgDn sequences.
-                - [ ] Numeric keypad handling (NumLock state).
-            - [ ] **Console Switching:**
-                - [ ] Alt+F1..F12 for virtual console switch.
-                - [ ] Ctrl+Alt+Del for reboot/shutdown hook.
-                - [ ] SysRq key handling (magic SysRq sequences).
-            - [ ] **LED Control:**
-                - [ ] Sync Caps Lock, Num Lock, Scroll Lock LEDs.
-                - [ ] LED state persistence across console switches.
-        - [ ] **Framebuffer Console (Graphical):**
-            - [ ] **Core Infrastructure:**
-                - [ ] `struct fb_info` device abstraction.
-                - [ ] Framebuffer registration/deregistration API.
-                - [ ] Memory mapping (physical to kernel virtual).
-                - [ ] `/dev/fb/[0-N]` device node creation.
-            - [ ] **Drivers:**
-                - [ ] **VESA VBE (Linear Framebuffer):**
-                    - [ ] VBE 2.0+ detection and capability query.
-                    - [ ] Mode enumeration and selection.
-                    - [ ] Linear framebuffer mapping (LFB base address).
-                    - [ ] Protected mode interface (PM32 entry points).
-                    - [ ] EDID retrieval for monitor detection.
-                - [ ] **UEFI GOP (Graphics Output Protocol):**
-                    - [ ] GOP protocol location and initialization.
-                    - [ ] Mode query and switching.
-                    - [ ] Framebuffer base and stride retrieval.
-                    - [ ] EFI runtime services integration.
-                - [ ] **Bochs Graphics Adapter (BGA):**
-                    - [ ] BGA detection (PCI vendor/device ID, I/O ports).
-                    - [ ] VBE DISPI register interface.
-                    - [ ] Mode setting (resolution, bpp, enable LFB).
-                    - [ ] Virtual resolution and display offset.
-                    - [ ] Bank switching (legacy mode fallback).
-                - [ ] **VirtIO-GPU:**
-                    - [ ] VirtIO device discovery and setup.
-                    - [ ] Resource creation (2D scanout).
-                    - [ ] Transfer to host (flush dirty regions).
-                    - [ ] Display info query (resolution, format).
-                    - [ ] Cursor image upload and positioning.
-            - [ ] **Pixel Formats:**
-                - [ ] 8-bit indexed (palette-based).
-                - [ ] 16-bit (RGB565, ARGB1555).
-                - [ ] 24-bit (RGB888, BGR888).
-                - [ ] 32-bit (ARGB8888, XRGB8888, ABGR8888).
-                - [ ] Endianness handling (little/big endian).
-                - [ ] Format conversion routines.
-            - [ ] **Rendering:**
-                - [ ] **Font Support:**
-                    - [ ] PSF1 font parser (256/512 glyphs, fixed width).
-                    - [ ] PSF2 font parser (Unicode table, variable metrics).
-                    - [ ] BDF/PCF font support (optional).
-                    - [ ] Built-in fallback font (8x16 VGA ROM font).
-                    - [ ] Font glyph cache (hash table lookup).
-                    - [ ] Unicode to glyph mapping (cmap).
-                - [ ] **Blitting Operations:**
-                    - [ ] `fb_fillrect()`: Solid color fill with ROP support.
-                    - [ ] `fb_copyarea()`: Screen-to-screen blit.
-                    - [ ] `fb_imageblit()`: Mono/color image to framebuffer.
-                    - [ ] Accelerated ops detection and fallback.
-                    - [ ] Clipping (viewport bounds checking).
-                - [ ] **Character Rendering:**
-                    - [ ] Glyph rendering with foreground/background colors.
-                    - [ ] Bold rendering (shift and OR, or bold font).
-                    - [ ] Italic rendering (shear transform, or italic font).
-                    - [ ] Underline and strikethrough rendering.
-                    - [ ] Reverse video attribute.
-                - [ ] **Performance:**
-                    - [ ] Double buffering (offscreen back buffer).
-                    - [ ] Dirty rectangle tracking.
-                    - [ ] Deferred updates (batch flush on vsync).
-                    - [ ] Write-combining memory type (PAT/MTRR).
-            - [ ] **Cursor:**
-                - [ ] **Software Cursor:**
-                    - [ ] XOR cursor rendering.
-                    - [ ] Cursor save/restore (background preservation).
-                    - [ ] Cursor blink timer integration.
-                - [ ] **Hardware Cursor:**
-                    - [ ] Cursor image upload (ARGB format).
-                    - [ ] Cursor position registers.
-                    - [ ] Hot spot offset configuration.
-                    - [ ] Cursor enable/disable.
-            - [ ] **Emulation (VT102/ANSI):**
-                - [ ] **Parser State Machine:**
-                    - [ ] Ground state (printable characters).
-                    - [ ] Escape state (ESC received).
-                    - [ ] CSI state (ESC [ sequences).
-                    - [ ] OSC state (Operating System Commands).
-                    - [ ] DCS state (Device Control Strings).
-                    - [ ] Parameter accumulation and parsing.
-                - [ ] **Cursor Control Sequences:**
-                    - [ ] CUU/CUD/CUF/CUB (cursor movement).
-                    - [ ] CUP/HVP (absolute positioning).
-                    - [ ] CNL/CPL (next/previous line).
-                    - [ ] CHA/VPA (column/row absolute).
-                    - [ ] SC/RC (save/restore cursor position).
-                    - [ ] DECSC/DECRC (save/restore with attributes).
-                - [ ] **Erase Sequences:**
-                    - [ ] ED (erase display: to end, to start, all).
-                    - [ ] EL (erase line: to end, to start, all).
-                    - [ ] ECH (erase characters).
-                    - [ ] DCH/ICH (delete/insert characters).
-                    - [ ] DL/IL (delete/insert lines).
-                - [ ] **Attribute Sequences (SGR):**
-                    - [ ] Reset (SGR 0).
-                    - [ ] Bold/dim/italic/underline/blink/reverse/hidden.
-                    - [ ] 8-color foreground/background (30-37, 40-47).
-                    - [ ] Bright colors (90-97, 100-107).
-                    - [ ] 256-color mode (38;5;N, 48;5;N).
-                    - [ ] 24-bit true color (38;2;R;G;B, 48;2;R;G;B).
-                - [ ] **Scrolling:**
-                    - [ ] DECSTBM (set top/bottom margins).
-                    - [ ] SU/SD (scroll up/down).
-                    - [ ] IND/RI (index/reverse index).
-                    - [ ] Smooth scroll support (optional).
-                - [ ] **Modes:**
-                    - [ ] DECCKM (cursor key mode: application/normal).
-                    - [ ] DECAWM (auto-wrap mode).
-                    - [ ] DECOM (origin mode: absolute/relative).
-                    - [ ] DECTCEM (cursor visibility).
-                    - [ ] Alternate screen buffer (DECSET 1049).
-                    - [ ] Bracketed paste mode (DECSET 2004).
-                - [ ] **Character Sets:**
-                    - [ ] G0/G1/G2/G3 character set designation.
-                    - [ ] SI/SO (shift in/out for G0/G1).
-                    - [ ] DEC Special Graphics (line drawing).
-                    - [ ] UTF-8 decoding and Unicode support.
-                - [ ] **Tabs:**
-                    - [ ] HTS (horizontal tab set).
-                    - [ ] TBC (tab clear: current, all).
-                    - [ ] CHT/CBT (cursor horizontal tab forward/back).
-                    - [ ] Default tab stops (every 8 columns).
-                - [ ] **Reports:**
-                    - [ ] DSR (device status report).
-                    - [ ] CPR (cursor position report).
-                    - [ ] DA (device attributes).
-                    - [ ] DECID (terminal ID).
-            - [ ] **TTY Binding:**
-                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`.
-                - [ ] `tty_driver->write()` with escape sequence processing.
-                - [ ] `tty_driver->ioctl()` for FB-specific controls.
-                - [ ] Window size tracking (TIOCGWINSZ/TIOCSWINSZ).
-        - [ ] **Serial Console (Headless):**
-            - [ ] **UART Drivers:**
-                - [ ] 8250/16550 UART driver (I/O port and MMIO).
-                - [ ] Baud rate configuration (divisor latch).
-                - [ ] Line control (data bits, parity, stop bits).
-                - [ ] FIFO control (16550A FIFO enable, trigger level).
-                - [ ] Modem control signals (DTR, RTS).
-                - [ ] Modem status signals (CTS, DSR, DCD, RI).
-                - [ ] Interrupt-driven I/O (IRQ handler).
-                - [ ] Polling mode fallback (for early boot).
-            - [ ] **Console Output:**
-                - [ ] VT102 pass-through (raw escape sequences).
-                - [ ] Output buffering and flow control.
-                - [ ] XON/XOFF software flow control.
-                - [ ] RTS/CTS hardware flow control.
-                - [ ] Break signal transmission.
-            - [ ] **Console Input:**
-                - [ ] Character reception and buffering.
-                - [ ] Break signal detection.
-                - [ ] Framing and parity error handling.
-                - [ ] Overrun error handling.
-            - [ ] **TTY Binding:**
-                - [ ] Register as `tty_driver` for `/dev/ttyS[0-N]`.
-                - [ ] `tty_driver->write()` callback.
-                - [ ] `tty_driver->ioctl()` for serial-specific controls.
-                - [ ] `tty_driver->set_termios()` for baud/parity changes.
-            - [ ] **Kernel Console:**
-                - [ ] Early boot console (before TTY init).
-                - [ ] `console=ttyS0,115200n8` kernel parameter parsing.
-                - [ ] Kernel panic output to serial.
-                - [ ] SysRq over serial (break + key).
-    - [ ] **Features:**
-        - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles.
-        - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.??
-- [ ] **RNG Subsystem (`/dev/random`, `/dev/urandom`):** <!-- random.c, random_internal.h, sys/random.h -->
-    - [ ] **Core Infrastructure:**
-        - [ ] **Data Structures:**
-            - [ ] Define `struct entropy_pool` (input pool, output pool, counters). <!-- random_internal.h -->
-            - [ ] Define `struct chacha20_ctx` (key, counter, block buffer). <!-- random_internal.h -->
-            - [ ] Define `struct rng_state` (global RNG state, seeded flag, reseed counter). <!-- random_internal.h -->
-            - [ ] Create `spinlock_t entropy_lock` for pool access. <!-- random.c -->
-            - [ ] Create `spinlock_t output_lock` for CSPRNG state. <!-- random.c -->
-            - [ ] Define entropy estimation structures (bits per source). <!-- random_internal.h -->
-        - [ ] **Header Files:**
-            - [ ] Create `sys/include/sys/random.h` (public API).
-            - [ ] Create `sys/kern/random_internal.h` (internal structures).
-            - [ ] Define `GRND_NONBLOCK`, `GRND_RANDOM`, `GRND_INSECURE` flags. <!-- sys/random.h -->
-        - [ ] **Initialization:**
-            - [ ] Implement `random_init()` called from `kmain`. <!-- random.c:449, main.c -->
-            - [ ] Initialize entropy pools to zero. <!-- random.c:454 -->
-            - [ ] Initialize CSPRNG state. <!-- random.c:456-458 -->
-            - [ ] Set initial seeded flag to false. <!-- random.c:453 (memset) -->
-            - [ ] Register `/dev/random` and `/dev/urandom` device nodes. <!-- random.c:478-494 -->
-    - [ ] **CSPRNG Algorithm (ChaCha20):** <!-- random.c:30-159 -->
-        - [ ] **Core Implementation:**
-            - [ ] Implement ChaCha20 quarter-round function. <!-- random.c:33-38 QR macro -->
-            - [ ] Implement ChaCha20 column and diagonal rounds. <!-- random.c:48-58 -->
-            - [ ] Implement ChaCha20 block function (20 rounds). <!-- random.c:41-63 -->
-            - [ ] Implement keystream generation with counter increment. <!-- random.c:107-115 -->
-            - [ ] Implement output serialization (little-endian). <!-- random.c:100-105 -->
-        - [ ] **Key Management:**
-            - [ ] Implement `chacha20_init(ctx, key, nonce)`. <!-- random.c:66-91 -->
-            - [ ] Implement `chacha20_rekey(ctx)` (fast-key-erasure). <!-- random.c:140-154 -->
-            - [ ] Implement `chacha20_wipe(ctx)` (secure zeroing). <!-- random.c:157-159 -->
-        - [ ] **Output Generation:**
-            - [ ] Implement `chacha20_extract(ctx, buf, len)`. <!-- random.c:119-137 -->
-            - [ ] Buffer partial blocks for efficiency. <!-- random.c:123-134 -->
-            - [ ] Rekey after every 1MB of output (configurable). <!-- random.c:397-401 RESEED_INTERVAL -->
-        - [ ] **Testing:**
-            - [ ] RFC 7539 test vectors (known answer tests).
-            - [ ] Block function correctness tests.
-            - [ ] Counter wraparound handling tests.
-    - [ ] **Entropy Mixing (Input Pool):** <!-- random.c:161-224 -->
-        - [ ] **Mixing Function:**
-            - [ ] Implement LFSR-based mixing (Linux-style). <!-- random.c:177-192 -->
-            - [ ] Implement CRC32-based fast mixing. <!-- Uses twist table -->
-            - [ ] Implement SHA-256 compression for extraction. <!-- Simplified compression random.c:198-206 -->
-            - [ ] Implement twist table for polynomial feedback. <!-- random.c:166-169 -->
-        - [ ] **Pool Management:**
-            - [ ] Define input pool size (4096 bits / 512 bytes). <!-- random_internal.h ENTROPY_POOL_SIZE -->
-            - [ ] Implement `pool_mix_bytes(pool, data, len)`. <!-- random.c:177-195 -->
-            - [ ] Implement `pool_extract_bytes(pool, out, len)`. <!-- random.c:209-224 -->
-            - [ ] Track estimated entropy bits in pool. <!-- entropy_pool.entropy_count -->
-        - [ ] **Entropy Estimation:**
-            - [ ] Conservative entropy crediting (bits per event). <!-- random.c:317-321 -->
-            - [ ] Overflow protection (cap at pool size). <!-- random.c:318-320 -->
-            - [ ] Debit entropy on extraction. <!-- random.c:361 -->
-            - [ ] Track total entropy collected since boot. <!-- entropy_pool.total_harvested -->
-    - [ ] **Entropy Sources & Harvesting:** <!-- random.c:303-345 -->
-        - [ ] **Harvesting Infrastructure:**
-            - [ ] Implement `random_harvest(data, len, bits, source)` (general API). <!-- random.c:307-326 -->
-            - [ ] Implement `random_harvest_fast(data, len)` (ISR-safe, no lock). <!-- random.c:328-341 -->
-            - [ ] Implement `random_harvest_direct(data, len, bits)` (high-quality). <!-- random.c:343-345 -->
-            - [ ] Define `enum entropy_source` (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG). <!-- sys/random.h -->
-            - [ ] Per-source entropy rate limiting. <!-- rng_state.harvest_count[] -->
-        - [ ] **Timing-Based Sources:**
-            - [ ] **Interrupt Timing:**
-                - [ ] Hook `pit_handler` for timer jitter (TSC delta). <!-- via isr_handler(IRQ0) -->
-                - [ ] Hook `isr_handler` for interrupt timing. <!-- idt.c:isr_handler -->
-                - [ ] Mix TSC low bits on each interrupt. <!-- random_harvest_fast -->
-                - [ ] Credit ~1 bit per interrupt timing sample. <!-- using random_harvest_fast (mixing only) -->
-            - [ ] **Keyboard/Mouse:** <!-- keyboard.c, mouse.c -->
-                - [ ] Hook `keyboard_handler` (scancode + timing). <!-- keyboard.c:68-72 -->
-                - [ ] Hook PS/2 mouse driver (movement + timing). <!-- mouse.c:54-58 -->
-                - [ ] Credit ~2-4 bits per HID event. <!-- Uses random_harvest_fast -->
-            - [ ] **Disk I/O:**
-                - [ ] Hook IDE/AHCI/VirtIO completion interrupts. <!-- Hooked virtio_blk (sync), ide -->
-                - [ ] Mix seek time / completion jitter.
-                - [ ] Credit ~1 bit per I/O completion.
-            - [ ] **Network:**
-                - [ ] Hook network packet arrival (timing + data).
-                - [ ] Mix packet timing and partial payload.
-                - [ ] Credit ~2 bits per packet timing.
-        - [ ] **Hardware RNG (RDRAND/RDSEED):** <!-- random.c:226-301 -->
-            - [ ] **Detection:**
-                - [ ] CPUID feature detection for RDRAND (ECX bit 30). <!-- random.c:241-244 -->
-                - [ ] CPUID feature detection for RDSEED (EBX bit 18). <!-- random.c:251-254 -->
-                - [ ] Runtime availability flags. <!-- rng_state.has_rdrand, has_rdseed -->
-            - [ ] **Implementation:**
-                - [ ] Implement `rdrand32()`, `rdrand64()` with retry loop. <!-- random.c:266-287 -->
-                - [ ] Implement `rdseed32()`, `rdseed64()` with failure handling.
-                - [ ] Fallback path when HWRNG unavailable. <!-- random.c:267 -->
-            - [ ] **Integration:**
-                - [ ] Periodic HWRNG harvesting (if available). <!-- random.c:464-468 -->
-                - [ ] Mix HWRNG output into entropy pool. <!-- random.c:295 -->
-                - [ ] Use HWRNG for fast-path output (XOR with CSPRNG).
-                - [ ] Credit ~32 bits per RDRAND invocation (conservative). <!-- random.c:296 -->
-        - [ ] **Jitter Entropy (CPU Timing):**
-            - [ ] Use BogoMIPS calibration loop for jitter measurement.
-            - [ ] Implement `jitterentropy_collect()` (memory access timing).
-            - [ ] CPU execution jitter measurement.
-            - [ ] Memory access timing variations.
-            - [ ] Minimum samples before crediting.
-        - [ ] **VirtIO Entropy Device:**
-            - [ ] VirtIO RNG device detection (device type 4).
-            - [ ] Request entropy from hypervisor.
-            - [ ] Mix hypervisor-provided randomness.
-            - [ ] Credit appropriately (host-dependent quality).
-    - [ ] **Reseeding & State Management:** <!-- random.c:356-372 -->
-        - [ ] **Reseed Logic:**
-            - [ ] Implement `random_reseed()` (extract from input pool). <!-- random.c:356-372 -->
-            - [ ] Minimum entropy threshold before first seed (256 bits). <!-- random.c:389, 471 -->
-            - [ ] Reseed interval (time-based or output-based). <!-- RESEED_INTERVAL, random.c:397 -->
-            - [ ] Reseed on entropy pool reaching threshold. <!-- random.c:389-391 -->
-        - [ ] **Seeded State Tracking:**
-            - [ ] Track `rng_seeded` boolean. <!-- rng_state.seeded -->
-            - [ ] Track `reseed_count` for auditing. <!-- rng_state.reseed_count -->
-            - [ ] Implement `random_is_seeded()` query. <!-- random.c:351-353 -->
-            - [ ] Block reads until first seed (for `/dev/random`). <!-- random.c:382-392 -->
-        - [ ] **Catastrophic Reseed:**
-            - [ ] Full state replacement on seed file load.
-            - [ ] Wipe previous state before new key material.
-            - [ ] Notify waiters after reseed.
-    - [ ] **Device Interfaces:** <!-- random.c:410-494 -->
-        - [ ] **`/dev/random` (Blocking):**
-            - [ ] Implement `random_dev_open()`. <!-- implicit via fs_node_t -->
-            - [ ] Implement `random_dev_read()` with blocking. <!-- random.c:415-421 -->
-            - [ ] Block until minimum entropy available. <!-- random.c:382-392 -->
-            - [ ] Wait queue for blocked readers (`random_wait`).
-            - [ ] Wakeup on entropy addition.
-            - [ ] Implement `random_dev_poll()` (POLLIN when seeded).
-        - [ ] **`/dev/urandom` (Non-blocking):**
-            - [ ] Implement `urandom_dev_read()` (always returns data). <!-- random.c:424-430 -->
-            - [ ] Warn once if read before seeded (dmesg).
-            - [ ] High throughput (CSPRNG stream). <!-- ChaCha20 stream -->
-            - [ ] No entropy debit (unlimited output). <!-- GRND_INSECURE -->
-        - [ ] **Shared Implementation:**
-            - [ ] Device major/minor number allocation. <!-- implicit -->
-            - [ ] `struct file_operations` registration. <!-- fs_node_t callbacks -->
-            - [ ] Character device creation. <!-- devfs_register_device -->
-            - [ ] Permissions check (world-readable). <!-- inherits from devfs -->
-        - [ ] **`getrandom()` Syscall:**
-            - [ ] Implement `sys_getrandom(buf, len, flags)`.
-            - [ ] `GRND_RANDOM` flag (use blocking pool).
-            - [ ] `GRND_NONBLOCK` flag (return EAGAIN if not seeded).
-            - [ ] `GRND_INSECURE` flag (return data even if not seeded).
-            - [ ] Personality support (native, Linux, FreeBSD).
-            - [ ] Register syscall number in all personality tables.
-        - [ ] **Kernel Internal API:**
-            - [ ] Implement `get_random_bytes(buf, len)` (kernel consumers).
-            - [ ] Implement `get_random_u32()`, `get_random_u64()`.
-            - [ ] Implement `get_random_bytes_wait(buf, len)` (blocking).
-            - [ ] Early boot fallback (before seeded).
-    - [ ] **IOCTLs & Administrative Interface:**
-        - [ ] **IOCTL Commands:**
-            - [ ] `RNDGETENTCNT`: Return entropy estimate (bits).
-            - [ ] `RNDADDTOENTCNT`: Add to entropy count (privileged).
-            - [ ] `RNDADDENTROPY`: Add entropy data + credit (privileged).
-            - [ ] `RNDZAPENTCNT`: Zero entropy count (privileged).
-            - [ ] `RNDCLEARPOOL`: Clear entropy pool (privileged).
-            - [ ] `RNDRESEEDCRNG`: Force CSPRNG reseed (privileged).
-        - [ ] **Implementation:**
-            - [ ] Implement `random_dev_ioctl()` dispatcher.
-            - [ ] Privilege checks (CAP_SYS_ADMIN or root).
-            - [ ] Input validation for user-provided entropy.
-            - [ ] Copyin/copyout for userspace buffers.
-        - [ ] **Sysctl Interface (Optional):**
-            - [ ] `kern.random.entropy_avail` (read-only).
-            - [ ] `kern.random.poolsize` (read-only).
-            - [ ] `kern.random.uuid` (read-only, per-read UUID).
-            - [ ] `kern.random.boot_id` (read-only, boot UUID).
-    - [ ] **Security & Correctness:**
-        - [ ] **Fork Safety:**
-            - [ ] Implement `random_reseed_on_fork()` hook.
-            - [ ] Call from `proc_fork()` after child creation.
-            - [ ] Mix PID, timestamp into child's CSPRNG state.
-            - [ ] Ensure parent and child diverge immediately.
-            - [ ] Wipe any copied CSPRNG buffer in child.
-        - [ ] **Exec Safety:**
-            - [ ] Wipe userspace-visible RNG state on `execve`.
-            - [ ] Reset any per-process CSPRNG state.
-            - [ ] Ensure no entropy leakage across exec boundary.
-        - [ ] **Memory Protection:**
-            - [ ] Use `explicit_bzero()` for sensitive state clearing.
-            - [ ] Mark CSPRNG state pages non-swappable.
-            - [ ] Clear key material immediately after rekey.
-            - [ ] Avoid leaving entropy in temporary buffers.
-        - [ ] **Backtracking Resistance:**
-            - [ ] Fast-key-erasure design (rekey after extraction).
-            - [ ] Cannot recover previous output given current state.
-            - [ ] Wipe intermediate state after each operation.
-        - [ ] **Prediction Resistance:**
-            - [ ] Periodic reseed from entropy pool.
-            - [ ] Mix in fresh entropy continuously.
-            - [ ] HWRNG XOR for defense-in-depth.
-        - [ ] **Audit & Logging:**
-            - [ ] Log first seed event.
-            - [ ] Log reseed events (rate-limited).
-            - [ ] Log HWRNG initialization status.
-            - [ ] Log warnings for uninitialized reads.
-    - [ ] **Boot-time Entropy & Seed File:**
-        - [ ] **Early Boot Entropy:**
-            - [ ] Collect BIOS/firmware timestamps.
-            - [ ] Collect Multiboot structure addresses.
-            - [ ] Collect memory map contents.
-            - [ ] Collect interrupt timing during init.
-        - [ ] **Seed File Support:**
-            - [ ] Read seed file from root filesystem on mount.
-            - [ ] Expected path: `/var/db/entropy/seed`.
-            - [ ] Seed file format: raw 256 bytes minimum.
-            - [ ] Mix seed file into entropy pool.
-            - [ ] Immediately overwrite seed file with fresh randomness.
-        - [ ] **Shutdown Handling:**
-            - [ ] Write fresh seed file on clean shutdown.
-            - [ ] Ensure seed file written before unmount.
-            - [ ] Atomic write (write temp, rename).
-    - [ ] **Performance Optimization:**
-        - [ ] **Fast Path:**
-            - [ ] Per-CPU CSPRNG state (avoid lock contention).
-            - [ ] Batch output generation (64-byte blocks).
-            - [ ] Minimize lock hold time.
-            - [ ] Lockless entropy harvesting counters.
-        - [ ] **Benchmarking:**
-            - [ ] Create `sys/tests/bench_rng.c` for throughput.
-            - [ ] Measure `get_random_bytes()` MB/s.
-            - [ ] Measure `read(/dev/urandom)` MB/s.
-            - [ ] Measure entropy harvesting overhead.
-            - [ ] Profile lock contention under load.
-        - [ ] **Optimization Targets:**
-            - [ ] Target: >100 MB/s for `/dev/urandom`.
-            - [ ] Target: <1μs for `get_random_u32()`.
-            - [ ] Target: <100ns for `random_harvest_fast()`.
-    - [ ] **Testing:**
-        - [ ] **Unit Tests:**
-            - [ ] `test_chacha20.c`: RFC 7539 test vectors.
-            - [ ] `test_entropy_pool.c`: Mixing function correctness.
-            - [ ] `test_rng_seeding.c`: Reseed logic validation.
-            - [ ] `test_rng_fork.c`: Parent/child output divergence.
-            - [ ] `test_rng_exec.c`: State wipe on exec.
-            - [ ] `test_getrandom.c`: Syscall interface validation.
-        - [ ] **Statistical Tests:**
-            - [ ] Dieharder test suite integration.
-            - [ ] NIST SP 800-22 test suite.
-            - [ ] TestU01 BigCrush (optional).
-            - [ ] Minimum: Frequency, runs, and chi-square tests.
-        - [ ] **Integration Tests:**
-            - [ ] Boot-to-seeded timing measurement.
-            - [ ] Stress test under heavy read load.
-            - [ ] Multi-process concurrent read test.
-            - [ ] HWRNG fallback path testing.
-    - [ ] **Documentation:**
-        - [ ] **Man Pages:**
-            - [ ] `man4/random.4`: Device interface documentation.
-            - [ ] `man2/getrandom.2`: Syscall documentation.
-            - [ ] Document blocking vs non-blocking behavior.
-            - [ ] Document entropy sources and estimation.
-            - [ ] Document security properties and limitations.
-        - [ ] **Kernel Documentation:**
-            - [ ] Architecture overview in `doc/random.md`.
-            - [ ] Entropy source hookup guide.
-            - [ ] Security model documentation.
-            - [ ] Performance tuning guide.
+- [ ] **Console Subsystem (`sys/console`):** (REQ: REQ-03-0617)
+    - [ ] **TTY Subsystem (Core):** (REQ: REQ-03-0618)
+        - [ ] **Structures (`tty_t`):** (REQ: REQ-03-0619)
+            - [ ] **Buffers & Queues:** (REQ: REQ-03-0620)
+                - [ ] **Read Buffer (Raw Input):** Circular buffer for incoming IRQ data. (REQ: REQ-03-0621)
+                - [ ] **Write Buffer (Output):** Queue for driver consumption. (REQ: REQ-03-0622)
+                - [ ] **Canon Buffer (Cooked):** Line-editing buffer for `ICANON` mode. (REQ: REQ-03-0623)
+                - [ ] **Flow Control:** Low-water/High-water marks for `IXON`/`IXOFF`. (REQ: REQ-03-0624)
+            - [ ] **State Control (`termios`):** (REQ: REQ-03-0625)
+                - [ ] `c_iflag`: Input modes (IGNBRK, ISTRIP, INLCR, IGNCR, ICRNL, IXON). (REQ: REQ-03-0626)
+                - [ ] `c_oflag`: Output modes (OPOST, ONLCR, OXTABS). (REQ: REQ-03-0627)
+                - [ ] `c_cflag`: Control modes (CSIZE, PARENB, CSTOPB, CRTSCTS). (REQ: REQ-03-0628)
+                - [ ] `c_lflag`: Local modes (ICANON, ECHO, ECHOE, ECHOK, ISIG, TOSTOP). (REQ: REQ-03-0629)
+                - [ ] `c_cc`: Control characters (VINTR, VQUIT, VERASE, VKILL, VEOF, VMIN, VTIME, VSTART, VSTOP, VWERASE). (REQ: REQ-03-0630)
+                - [ ] `winsize`: Window size tracking (rows/cols) + `SIGWINCH`. (REQ: REQ-03-0631)
+            - [ ] **Line Discipline (`N_TTY`):** (REQ: REQ-03-0632)
+                - [ ] **Input Processing (`n_tty_receive_buf`):** (REQ: REQ-03-0633)
+                    - [ ] Parity checks and stripping. (REQ: REQ-03-0634)
+                    - [ ] Newline translation (CR->NL). (REQ: REQ-03-0635)
+                    - [ ] Software flow control (XON/XOFF detection). (REQ: REQ-03-0636)
+                    - [ ] Signal generation check (`ISIG`). (REQ: REQ-03-0637)
+                - [ ] **Canonical Editing (`n_tty_read`):** (REQ: REQ-03-0638)
+                    - [ ] Backspace/Delete handling (`VERASE`). (REQ: REQ-03-0639)
+                    - [ ] Line kill (`VKILL`). (REQ: REQ-03-0640)
+                    - [ ] Word erase (`VWERASE`). (REQ: REQ-03-0641)
+                    - [ ] EOF handling (`VEOF` / Ctrl+D). (REQ: REQ-03-0642)
+                - [ ] **Output Post-processing (`n_tty_write`):** (REQ: REQ-03-0643)
+                    - [ ] Newline expansion (NL -> CR/NL). (REQ: REQ-03-0644)
+                    - [ ] Tab expansion (optional). (REQ: REQ-03-0645)
+                - [ ] **Echoing Logic:** (REQ: REQ-03-0646)
+                    - [ ] Raw echo (input char -> output). (REQ: REQ-03-0647)
+                    - [ ] Control char echo (`^C`). (REQ: REQ-03-0648)
+                    - [ ] Erase echo (backspace-space-backspace sequence). (REQ: REQ-03-0649)
+            - [ ] **Driver Interface (`tty_driver`):** (REQ: REQ-03-0650)
+                - [ ] `install` / `remove`: setup private data. (REQ: REQ-03-0651)
+                - [ ] `open` / `close`: hardware init/shutdown. (REQ: REQ-03-0652)
+                - [ ] `write`: device output path. (REQ: REQ-03-0653)
+                - [ ] `put_char`: optimized single-char write. (REQ: REQ-03-0654)
+                - [ ] `flush_chars`: kick hardware transmission. (REQ: REQ-03-0655)
+                - [ ] `write_room`: check available hardware buffer space. (REQ: REQ-03-0656)
+                - [ ] `chars_in_buffer`: check pending bytes. (REQ: REQ-03-0657)
+                - [ ] `ioctl`: hardware-specific controls. (REQ: REQ-03-0658)
+                - [ ] `throttle` / `unthrottle`: hardware flow control hooks. (REQ: REQ-03-0659)
+            - [ ] **Session/Job Control:** (REQ: REQ-03-0660)
+                - [ ] `tty_struct.session`: Pointer to current session. (REQ: REQ-03-0661)
+                - [ ] `tty_struct.pgrp`: Pointer to foreground process group. (REQ: REQ-03-0662)
+                - [ ] `tty_check_change()`: Verify background writes (`SIGTTOU`). (REQ: REQ-03-0663)
+        - [ ] **API:** (REQ: REQ-03-0664)
+            - [ ] `tty_init()`: Initialize subsystem. (REQ: REQ-03-0665)
+            - [ ] `tty_alloc()`: Create a new TTY device. (REQ: REQ-03-0666)
+            - [ ] `tty_register_device()`: Register with DevFS `/dev/ttyX`. (REQ: REQ-03-0667)
+            - [ ] `tty_open`, `tty_close`: Refcounting and session logic. (REQ: REQ-03-0668)
+            - [ ] `tty_read`, `tty_write`: Dispatch to ldisc. (REQ: REQ-03-0669)
+            - [ ] `tty_ioctl`: (REQ: REQ-03-0670)
+                - [ ] `TIOCSCTTY`: Become controlling TTY. (REQ: REQ-03-0671)
+                - [ ] `TIOCSPGRP` / `TIOCGPGRP`: Manage foreground group. (REQ: REQ-03-0672)
+                - [ ] `TCGETS` / `TCSETS`: Termios get/set. (REQ: REQ-03-0673)
+                - [ ] `TIOCGWINSZ`: Window size. (REQ: REQ-03-0674)
+    - [ ] **Virtual Terminal (VT) Layer:** (REQ: REQ-03-0675)
+        - [ ] **VT Management:** Array of `vt_state_t` structures (vt0..vtN). (REQ: REQ-03-0676)
+        - [ ] **Switching:** `vt_activate(n)`, keyboard shortcuts (`Alt+Fn`). (REQ: REQ-03-0677)
+        - [ ] **Emulation:** VT102 state machine (escape codes). (REQ: REQ-03-0678)
+    - [ ] **Backend Drivers:** (REQ: REQ-03-0679)
+        - [ ] **VGA Text Mode Console:** (REQ: REQ-03-0680)
+            - [ ] **Initialization:** (REQ: REQ-03-0681, REQ-03-0905)
+                - [ ] Detect VGA presence (BIOS/PCI enumeration). (REQ: REQ-03-0682)
+                - [ ] Set 80x25 or 80x50 text mode. (REQ: REQ-03-0683)
+                - [ ] Map video memory (0xB8000) into kernel address space. (REQ: REQ-03-0684)
+                - [ ] Initialize attribute byte defaults (white on black). (REQ: REQ-03-0685)
+            - [ ] **Text Output:** (REQ: REQ-03-0686)
+                - [ ] Implement `vga_putchar(char c, uint8_t attr)`. (REQ: REQ-03-0687)
+                - [ ] Handle control characters (CR, LF, BS, TAB, BEL). (REQ: REQ-03-0688)
+                - [ ] Implement `vga_write(const char *buf, size_t len)`. (REQ: REQ-03-0689)
+                - [ ] Tab stop handling (configurable tab width). (REQ: REQ-03-0690)
+            - [ ] **Cursor Control:** (REQ: REQ-03-0691)
+                - [ ] Read/write hardware cursor position (CRTC registers 0x0E/0x0F). (REQ: REQ-03-0692)
+                - [ ] Cursor shape control (underline, block, invisible). (REQ: REQ-03-0693)
+                - [ ] Cursor blink enable/disable. (REQ: REQ-03-0694)
+            - [ ] **Scrolling:** (REQ: REQ-03-0695, REQ-03-0826)
+                - [ ] Software scroll (memmove video buffer). (REQ: REQ-03-0696)
+                - [ ] Hardware scroll (CRTC start address register). (REQ: REQ-03-0697)
+                - [ ] Scroll region support (VT102 DECSTBM). (REQ: REQ-03-0698)
+            - [ ] **Attributes:** (REQ: REQ-03-0699)
+                - [ ] 16-color foreground/background palette. (REQ: REQ-03-0700)
+                - [ ] Blink/bright background toggle (attribute controller). (REQ: REQ-03-0701)
+                - [ ] Reverse video, bold, underline emulation. (REQ: REQ-03-0702)
+            - [ ] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
+                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`. (REQ: REQ-03-0704, REQ-03-0854)
+                - [ ] Implement `tty_driver->write()` callback. (REQ: REQ-03-0705)
+                - [ ] Implement `tty_driver->ioctl()` for VGA-specific controls. (REQ: REQ-03-0706)
+        - [ ] **Keyboard Input (PS/2 to TTY):** (REQ: REQ-03-0707)
+            - [ ] Fix PS/2 driver build errors (constant mismatches in `test_ps2.c`). (REQ: REQ-03-0708)
+            - [ ] **Input Path:** (REQ: REQ-03-0709)
+                - [ ] Hook keyboard driver to TTY input queue. (REQ: REQ-03-0710)
+                - [ ] Convert scancodes to ASCII via keymap. (REQ: REQ-03-0711)
+                - [ ] Handle modifier keys (Shift, Ctrl, Alt, AltGr). (REQ: REQ-03-0712)
+                - [ ] Generate control codes (Ctrl+C → 0x03, Ctrl+Z → 0x1A). (REQ: REQ-03-0713)
+            - [ ] **Special Keys:** (REQ: REQ-03-0714)
+                - [ ] Function keys (F1-F12) to escape sequences. (REQ: REQ-03-0715)
+                - [ ] Arrow keys to ANSI escape sequences. (REQ: REQ-03-0716)
+                - [ ] Insert, Delete, Home, End, PgUp, PgDn sequences. (REQ: REQ-03-0717)
+                - [ ] Numeric keypad handling (NumLock state). (REQ: REQ-03-0718)
+            - [ ] **Console Switching:** (REQ: REQ-03-0719)
+                - [ ] Alt+F1..F12 for virtual console switch. (REQ: REQ-03-0720)
+                - [ ] Ctrl+Alt+Del for reboot/shutdown hook. (REQ: REQ-03-0721)
+                - [ ] SysRq key handling (magic SysRq sequences). (REQ: REQ-03-0722)
+            - [ ] **LED Control:** (REQ: REQ-03-0529, REQ-03-0723)
+                - [ ] Sync Caps Lock, Num Lock, Scroll Lock LEDs. (REQ: REQ-03-0724)
+                - [ ] LED state persistence across console switches. (REQ: REQ-03-0725)
+        - [ ] **Framebuffer Console (Graphical):** (REQ: REQ-03-0726)
+            - [ ] **Core Infrastructure:** (REQ: REQ-03-0727, REQ-03-0893)
+                - [ ] `struct fb_info` device abstraction. (REQ: REQ-03-0728)
+                - [ ] Framebuffer registration/deregistration API. (REQ: REQ-03-0729)
+                - [ ] Memory mapping (physical to kernel virtual). (REQ: REQ-03-0730)
+                - [ ] `/dev/fb/[0-N]` device node creation. (REQ: REQ-03-0731)
+            - [ ] **Drivers:** (REQ: REQ-03-0732)
+                - [ ] **VESA VBE (Linear Framebuffer):** (REQ: REQ-03-0733)
+                    - [ ] VBE 2.0+ detection and capability query. (REQ: REQ-03-0734)
+                    - [ ] Mode enumeration and selection. (REQ: REQ-03-0735)
+                    - [ ] Linear framebuffer mapping (LFB base address). (REQ: REQ-03-0736)
+                    - [ ] Protected mode interface (PM32 entry points). (REQ: REQ-03-0737)
+                    - [ ] EDID retrieval for monitor detection. (REQ: REQ-03-0738)
+                - [ ] **UEFI GOP (Graphics Output Protocol):** (REQ: REQ-03-0739)
+                    - [ ] GOP protocol location and initialization. (REQ: REQ-03-0740)
+                    - [ ] Mode query and switching. (REQ: REQ-03-0741)
+                    - [ ] Framebuffer base and stride retrieval. (REQ: REQ-03-0742)
+                    - [ ] EFI runtime services integration. (REQ: REQ-03-0743)
+                - [ ] **Bochs Graphics Adapter (BGA):** (REQ: REQ-03-0744)
+                    - [ ] BGA detection (PCI vendor/device ID, I/O ports). (REQ: REQ-03-0745)
+                    - [ ] VBE DISPI register interface. (REQ: REQ-03-0746)
+                    - [ ] Mode setting (resolution, bpp, enable LFB). (REQ: REQ-03-0747)
+                    - [ ] Virtual resolution and display offset. (REQ: REQ-03-0748)
+                    - [ ] Bank switching (legacy mode fallback). (REQ: REQ-03-0749)
+                - [ ] **VirtIO-GPU:** (REQ: REQ-03-0750)
+                    - [ ] VirtIO device discovery and setup. (REQ: REQ-03-0751)
+                    - [ ] Resource creation (2D scanout). (REQ: REQ-03-0752)
+                    - [ ] Transfer to host (flush dirty regions). (REQ: REQ-03-0753)
+                    - [ ] Display info query (resolution, format). (REQ: REQ-03-0754)
+                    - [ ] Cursor image upload and positioning. (REQ: REQ-03-0755)
+            - [ ] **Pixel Formats:** (REQ: REQ-03-0756)
+                - [ ] 8-bit indexed (palette-based). (REQ: REQ-03-0757)
+                - [ ] 16-bit (RGB565, ARGB1555). (REQ: REQ-03-0758)
+                - [ ] 24-bit (RGB888, BGR888). (REQ: REQ-03-0759)
+                - [ ] 32-bit (ARGB8888, XRGB8888, ABGR8888). (REQ: REQ-03-0760)
+                - [ ] Endianness handling (little/big endian). (REQ: REQ-03-0761)
+                - [ ] Format conversion routines. (REQ: REQ-03-0762)
+            - [ ] **Rendering:** (REQ: REQ-03-0763)
+                - [ ] **Font Support:** (REQ: REQ-03-0764)
+                    - [ ] PSF1 font parser (256/512 glyphs, fixed width). (REQ: REQ-03-0765)
+                    - [ ] PSF2 font parser (Unicode table, variable metrics). (REQ: REQ-03-0766)
+                    - [ ] BDF/PCF font support (optional). (REQ: REQ-03-0767)
+                    - [ ] Built-in fallback font (8x16 VGA ROM font). (REQ: REQ-03-0768)
+                    - [ ] Font glyph cache (hash table lookup). (REQ: REQ-03-0769)
+                    - [ ] Unicode to glyph mapping (cmap). (REQ: REQ-03-0770)
+                - [ ] **Blitting Operations:** (REQ: REQ-03-0771)
+                    - [ ] `fb_fillrect()`: Solid color fill with ROP support. (REQ: REQ-03-0772)
+                    - [ ] `fb_copyarea()`: Screen-to-screen blit. (REQ: REQ-03-0773)
+                    - [ ] `fb_imageblit()`: Mono/color image to framebuffer. (REQ: REQ-03-0774)
+                    - [ ] Accelerated ops detection and fallback. (REQ: REQ-03-0775)
+                    - [ ] Clipping (viewport bounds checking). (REQ: REQ-03-0776)
+                - [ ] **Character Rendering:** (REQ: REQ-03-0777)
+                    - [ ] Glyph rendering with foreground/background colors. (REQ: REQ-03-0778)
+                    - [ ] Bold rendering (shift and OR, or bold font). (REQ: REQ-03-0779)
+                    - [ ] Italic rendering (shear transform, or italic font). (REQ: REQ-03-0780)
+                    - [ ] Underline and strikethrough rendering. (REQ: REQ-03-0781)
+                    - [ ] Reverse video attribute. (REQ: REQ-03-0782)
+                - [ ] **Performance:** (REQ: REQ-03-0783)
+                    - [ ] Double buffering (offscreen back buffer). (REQ: REQ-03-0784)
+                    - [ ] Dirty rectangle tracking. (REQ: REQ-03-0785)
+                    - [ ] Deferred updates (batch flush on vsync). (REQ: REQ-03-0786)
+                    - [ ] Write-combining memory type (PAT/MTRR). (REQ: REQ-03-0787)
+            - [ ] **Cursor:** (REQ: REQ-03-0788)
+                - [ ] **Software Cursor:** (REQ: REQ-03-0789)
+                    - [ ] XOR cursor rendering. (REQ: REQ-03-0790)
+                    - [ ] Cursor save/restore (background preservation). (REQ: REQ-03-0791)
+                    - [ ] Cursor blink timer integration. (REQ: REQ-03-0792)
+                - [ ] **Hardware Cursor:** (REQ: REQ-03-0793)
+                    - [ ] Cursor image upload (ARGB format). (REQ: REQ-03-0794)
+                    - [ ] Cursor position registers. (REQ: REQ-03-0795)
+                    - [ ] Hot spot offset configuration. (REQ: REQ-03-0796)
+                    - [ ] Cursor enable/disable. (REQ: REQ-03-0797)
+            - [ ] **Emulation (VT102/ANSI):** (REQ: REQ-03-0798)
+                - [ ] **Parser State Machine:** (REQ: REQ-03-0799)
+                    - [ ] Ground state (printable characters). (REQ: REQ-03-0800)
+                    - [ ] Escape state (ESC received). (REQ: REQ-03-0801)
+                    - [ ] CSI state (ESC [ sequences). (REQ: REQ-03-0802)
+                    - [ ] OSC state (Operating System Commands). (REQ: REQ-03-0803)
+                    - [ ] DCS state (Device Control Strings). (REQ: REQ-03-0804)
+                    - [ ] Parameter accumulation and parsing. (REQ: REQ-03-0805)
+                - [ ] **Cursor Control Sequences:** (REQ: REQ-03-0806)
+                    - [ ] CUU/CUD/CUF/CUB (cursor movement). (REQ: REQ-03-0807)
+                    - [ ] CUP/HVP (absolute positioning). (REQ: REQ-03-0808)
+                    - [ ] CNL/CPL (next/previous line). (REQ: REQ-03-0809)
+                    - [ ] CHA/VPA (column/row absolute). (REQ: REQ-03-0810)
+                    - [ ] SC/RC (save/restore cursor position). (REQ: REQ-03-0811)
+                    - [ ] DECSC/DECRC (save/restore with attributes). (REQ: REQ-03-0812)
+                - [ ] **Erase Sequences:** (REQ: REQ-03-0813)
+                    - [ ] ED (erase display: to end, to start, all). (REQ: REQ-03-0814)
+                    - [ ] EL (erase line: to end, to start, all). (REQ: REQ-03-0815)
+                    - [ ] ECH (erase characters). (REQ: REQ-03-0816)
+                    - [ ] DCH/ICH (delete/insert characters). (REQ: REQ-03-0817)
+                    - [ ] DL/IL (delete/insert lines). (REQ: REQ-03-0818)
+                - [ ] **Attribute Sequences (SGR):** (REQ: REQ-03-0819)
+                    - [ ] Reset (SGR 0). (REQ: REQ-03-0820)
+                    - [ ] Bold/dim/italic/underline/blink/reverse/hidden. (REQ: REQ-03-0821)
+                    - [ ] 8-color foreground/background (30-37, 40-47). (REQ: REQ-03-0822)
+                    - [ ] Bright colors (90-97, 100-107). (REQ: REQ-03-0823)
+                    - [ ] 256-color mode (38;5;N, 48;5;N). (REQ: REQ-03-0824)
+                    - [ ] 24-bit true color (38;2;R;G;B, 48;2;R;G;B). (REQ: REQ-03-0825)
+                - [ ] **Scrolling:** (REQ: REQ-03-0695, REQ-03-0826)
+                    - [ ] DECSTBM (set top/bottom margins). (REQ: REQ-03-0827)
+                    - [ ] SU/SD (scroll up/down). (REQ: REQ-03-0828)
+                    - [ ] IND/RI (index/reverse index). (REQ: REQ-03-0829)
+                    - [ ] Smooth scroll support (optional). (REQ: REQ-03-0830)
+                - [ ] **Modes:** (REQ: REQ-03-0831)
+                    - [ ] DECCKM (cursor key mode: application/normal). (REQ: REQ-03-0832)
+                    - [ ] DECAWM (auto-wrap mode). (REQ: REQ-03-0833)
+                    - [ ] DECOM (origin mode: absolute/relative). (REQ: REQ-03-0834)
+                    - [ ] DECTCEM (cursor visibility). (REQ: REQ-03-0835)
+                    - [ ] Alternate screen buffer (DECSET 1049). (REQ: REQ-03-0836)
+                    - [ ] Bracketed paste mode (DECSET 2004). (REQ: REQ-03-0837)
+                - [ ] **Character Sets:** (REQ: REQ-03-0838)
+                    - [ ] G0/G1/G2/G3 character set designation. (REQ: REQ-03-0839)
+                    - [ ] SI/SO (shift in/out for G0/G1). (REQ: REQ-03-0840)
+                    - [ ] DEC Special Graphics (line drawing). (REQ: REQ-03-0841)
+                    - [ ] UTF-8 decoding and Unicode support. (REQ: REQ-03-0842)
+                - [ ] **Tabs:** (REQ: REQ-03-0843)
+                    - [ ] HTS (horizontal tab set). (REQ: REQ-03-0844)
+                    - [ ] TBC (tab clear: current, all). (REQ: REQ-03-0845)
+                    - [ ] CHT/CBT (cursor horizontal tab forward/back). (REQ: REQ-03-0846)
+                    - [ ] Default tab stops (every 8 columns). (REQ: REQ-03-0847)
+                - [ ] **Reports:** (REQ: REQ-03-0848)
+                    - [ ] DSR (device status report). (REQ: REQ-03-0849)
+                    - [ ] CPR (cursor position report). (REQ: REQ-03-0850)
+                    - [ ] DA (device attributes). (REQ: REQ-03-0851)
+                    - [ ] DECID (terminal ID). (REQ: REQ-03-0852)
+            - [ ] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
+                - [ ] Register as `tty_driver` for `/dev/tty[1-N]`. (REQ: REQ-03-0704, REQ-03-0854)
+                - [ ] `tty_driver->write()` with escape sequence processing. (REQ: REQ-03-0855)
+                - [ ] `tty_driver->ioctl()` for FB-specific controls. (REQ: REQ-03-0856)
+                - [ ] Window size tracking (TIOCGWINSZ/TIOCSWINSZ). (REQ: REQ-03-0857)
+        - [ ] **Serial Console (Headless):** (REQ: REQ-03-0858)
+            - [ ] **UART Drivers:** (REQ: REQ-03-0859)
+                - [ ] 8250/16550 UART driver (I/O port and MMIO). (REQ: REQ-03-0860)
+                - [ ] Baud rate configuration (divisor latch). (REQ: REQ-03-0861)
+                - [ ] Line control (data bits, parity, stop bits). (REQ: REQ-03-0862)
+                - [ ] FIFO control (16550A FIFO enable, trigger level). (REQ: REQ-03-0863)
+                - [ ] Modem control signals (DTR, RTS). (REQ: REQ-03-0864)
+                - [ ] Modem status signals (CTS, DSR, DCD, RI). (REQ: REQ-03-0865)
+                - [ ] Interrupt-driven I/O (IRQ handler). (REQ: REQ-03-0866)
+                - [ ] Polling mode fallback (for early boot). (REQ: REQ-03-0867)
+            - [ ] **Console Output:** (REQ: REQ-03-0868)
+                - [ ] VT102 pass-through (raw escape sequences). (REQ: REQ-03-0869)
+                - [ ] Output buffering and flow control. (REQ: REQ-03-0870)
+                - [ ] XON/XOFF software flow control. (REQ: REQ-03-0871)
+                - [ ] RTS/CTS hardware flow control. (REQ: REQ-03-0872)
+                - [ ] Break signal transmission. (REQ: REQ-03-0873)
+            - [ ] **Console Input:** (REQ: REQ-03-0874)
+                - [ ] Character reception and buffering. (REQ: REQ-03-0875)
+                - [ ] Break signal detection. (REQ: REQ-03-0876)
+                - [ ] Framing and parity error handling. (REQ: REQ-03-0877)
+                - [ ] Overrun error handling. (REQ: REQ-03-0878)
+            - [ ] **TTY Binding:** (REQ: REQ-03-0703, REQ-03-0853, REQ-03-0879)
+                - [ ] Register as `tty_driver` for `/dev/ttyS[0-N]`. (REQ: REQ-03-0880)
+                - [ ] `tty_driver->write()` callback. (REQ: REQ-03-0881)
+                - [ ] `tty_driver->ioctl()` for serial-specific controls. (REQ: REQ-03-0882)
+                - [ ] `tty_driver->set_termios()` for baud/parity changes. (REQ: REQ-03-0883)
+            - [ ] **Kernel Console:** (REQ: REQ-03-0884)
+                - [ ] Early boot console (before TTY init). (REQ: REQ-03-0885)
+                - [ ] `console=ttyS0,115200n8` kernel parameter parsing. (REQ: REQ-03-0886)
+                - [ ] Kernel panic output to serial. (REQ: REQ-03-0887)
+                - [ ] SysRq over serial (break + key). (REQ: REQ-03-0888)
+    - [ ] **Features:** (REQ: REQ-03-0889)
+        - [ ] **Multi-Terminal:** Support switching (`Alt+F1`, etc.) between virtual consoles. (REQ: REQ-03-0890)
+        - [ ] **Legacy Support:** CGA/Hercules/EGA fallback modes.?? (REQ: REQ-03-0891)
+- [ ] **RNG Subsystem (`/dev/random`, `/dev/urandom`):** <!-- random.c, random_internal.h, sys/random.h --> (REQ: REQ-03-0892)
+    - [ ] **Core Infrastructure:** (REQ: REQ-03-0727, REQ-03-0893)
+        - [ ] **Data Structures:** (REQ: REQ-03-0894)
+            - [ ] Define `struct entropy_pool` (input pool, output pool, counters). <!-- random_internal.h --> (REQ: REQ-03-0895)
+            - [ ] Define `struct chacha20_ctx` (key, counter, block buffer). <!-- random_internal.h --> (REQ: REQ-03-0896)
+            - [ ] Define `struct rng_state` (global RNG state, seeded flag, reseed counter). <!-- random_internal.h --> (REQ: REQ-03-0897)
+            - [ ] Create `spinlock_t entropy_lock` for pool access. <!-- random.c --> (REQ: REQ-03-0898)
+            - [ ] Create `spinlock_t output_lock` for CSPRNG state. <!-- random.c --> (REQ: REQ-03-0899)
+            - [ ] Define entropy estimation structures (bits per source). <!-- random_internal.h --> (REQ: REQ-03-0900)
+        - [ ] **Header Files:** (REQ: REQ-03-0901)
+            - [ ] Create `sys/include/sys/random.h` (public API). (REQ: REQ-03-0902)
+            - [ ] Create `sys/kern/random_internal.h` (internal structures). (REQ: REQ-03-0903)
+            - [ ] Define `GRND_NONBLOCK`, `GRND_RANDOM`, `GRND_INSECURE` flags. <!-- sys/random.h --> (REQ: REQ-03-0904)
+        - [ ] **Initialization:** (REQ: REQ-03-0681, REQ-03-0905)
+            - [ ] Implement `random_init()` called from `kmain`. <!-- random.c:449, main.c --> (REQ: REQ-03-0906)
+            - [ ] Initialize entropy pools to zero. <!-- random.c:454 --> (REQ: REQ-03-0907)
+            - [ ] Initialize CSPRNG state. <!-- random.c:456-458 --> (REQ: REQ-03-0908)
+            - [ ] Set initial seeded flag to false. <!-- random.c:453 (memset) --> (REQ: REQ-03-0909)
+            - [ ] Register `/dev/random` and `/dev/urandom` device nodes. <!-- random.c:478-494 --> (REQ: REQ-03-0910)
+    - [ ] **CSPRNG Algorithm (ChaCha20):** <!-- random.c:30-159 --> (REQ: REQ-03-0911)
+        - [ ] **Core Implementation:** (REQ: REQ-03-0912)
+            - [ ] Implement ChaCha20 quarter-round function. <!-- random.c:33-38 QR macro --> (REQ: REQ-03-0913)
+            - [ ] Implement ChaCha20 column and diagonal rounds. <!-- random.c:48-58 --> (REQ: REQ-03-0914)
+            - [ ] Implement ChaCha20 block function (20 rounds). <!-- random.c:41-63 --> (REQ: REQ-03-0915)
+            - [ ] Implement keystream generation with counter increment. <!-- random.c:107-115 --> (REQ: REQ-03-0916)
+            - [ ] Implement output serialization (little-endian). <!-- random.c:100-105 --> (REQ: REQ-03-0917)
+        - [ ] **Key Management:** (REQ: REQ-03-0918)
+            - [ ] Implement `chacha20_init(ctx, key, nonce)`. <!-- random.c:66-91 --> (REQ: REQ-03-0919)
+            - [ ] Implement `chacha20_rekey(ctx)` (fast-key-erasure). <!-- random.c:140-154 --> (REQ: REQ-03-0920)
+            - [ ] Implement `chacha20_wipe(ctx)` (secure zeroing). <!-- random.c:157-159 --> (REQ: REQ-03-0921)
+        - [ ] **Output Generation:** (REQ: REQ-03-0922)
+            - [ ] Implement `chacha20_extract(ctx, buf, len)`. <!-- random.c:119-137 --> (REQ: REQ-03-0923)
+            - [ ] Buffer partial blocks for efficiency. <!-- random.c:123-134 --> (REQ: REQ-03-0924)
+            - [ ] Rekey after every 1MB of output (configurable). <!-- random.c:397-401 RESEED_INTERVAL --> (REQ: REQ-03-0925)
+        - [ ] **Testing:** (REQ: REQ-03-0218, REQ-03-0317, REQ-03-0396, REQ-03-0594, REQ-03-0926, REQ-03-1120)
+            - [ ] RFC 7539 test vectors (known answer tests). (REQ: REQ-03-0927)
+            - [ ] Block function correctness tests. (REQ: REQ-03-0928)
+            - [ ] Counter wraparound handling tests. (REQ: REQ-03-0929)
+    - [ ] **Entropy Mixing (Input Pool):** <!-- random.c:161-224 --> (REQ: REQ-03-0930)
+        - [ ] **Mixing Function:** (REQ: REQ-03-0931)
+            - [ ] Implement LFSR-based mixing (Linux-style). <!-- random.c:177-192 --> (REQ: REQ-03-0932)
+            - [ ] Implement CRC32-based fast mixing. <!-- Uses twist table --> (REQ: REQ-03-0933)
+            - [ ] Implement SHA-256 compression for extraction. <!-- Simplified compression random.c:198-206 --> (REQ: REQ-03-0934)
+            - [ ] Implement twist table for polynomial feedback. <!-- random.c:166-169 --> (REQ: REQ-03-0935)
+        - [ ] **Pool Management:** (REQ: REQ-03-0936)
+            - [ ] Define input pool size (4096 bits / 512 bytes). <!-- random_internal.h ENTROPY_POOL_SIZE --> (REQ: REQ-03-0937)
+            - [ ] Implement `pool_mix_bytes(pool, data, len)`. <!-- random.c:177-195 --> (REQ: REQ-03-0938)
+            - [ ] Implement `pool_extract_bytes(pool, out, len)`. <!-- random.c:209-224 --> (REQ: REQ-03-0939)
+            - [ ] Track estimated entropy bits in pool. <!-- entropy_pool.entropy_count --> (REQ: REQ-03-0940)
+        - [ ] **Entropy Estimation:** (REQ: REQ-03-0941)
+            - [ ] Conservative entropy crediting (bits per event). <!-- random.c:317-321 --> (REQ: REQ-03-0942)
+            - [ ] Overflow protection (cap at pool size). <!-- random.c:318-320 --> (REQ: REQ-03-0943)
+            - [ ] Debit entropy on extraction. <!-- random.c:361 --> (REQ: REQ-03-0944)
+            - [ ] Track total entropy collected since boot. <!-- entropy_pool.total_harvested --> (REQ: REQ-03-0945)
+    - [ ] **Entropy Sources & Harvesting:** <!-- random.c:303-345 --> (REQ: REQ-03-0946)
+        - [ ] **Harvesting Infrastructure:** (REQ: REQ-03-0947)
+            - [ ] Implement `random_harvest(data, len, bits, source)` (general API). <!-- random.c:307-326 --> (REQ: REQ-03-0948)
+            - [ ] Implement `random_harvest_fast(data, len)` (ISR-safe, no lock). <!-- random.c:328-341 --> (REQ: REQ-03-0949)
+            - [ ] Implement `random_harvest_direct(data, len, bits)` (high-quality). <!-- random.c:343-345 --> (REQ: REQ-03-0950)
+            - [ ] Define `enum entropy_source` (KEYBOARD, MOUSE, DISK, NET, IRQ, HWRNG). <!-- sys/random.h --> (REQ: REQ-03-0951)
+            - [ ] Per-source entropy rate limiting. <!-- rng_state.harvest_count[] --> (REQ: REQ-03-0952)
+        - [ ] **Timing-Based Sources:** (REQ: REQ-03-0953)
+            - [ ] **Interrupt Timing:** (REQ: REQ-03-0954)
+                - [ ] Hook `pit_handler` for timer jitter (TSC delta). <!-- via isr_handler(IRQ0) --> (REQ: REQ-03-0955)
+                - [ ] Hook `isr_handler` for interrupt timing. <!-- idt.c:isr_handler --> (REQ: REQ-03-0956)
+                - [ ] Mix TSC low bits on each interrupt. <!-- random_harvest_fast --> (REQ: REQ-03-0957)
+                - [ ] Credit ~1 bit per interrupt timing sample. <!-- using random_harvest_fast (mixing only) --> (REQ: REQ-03-0958)
+            - [ ] **Keyboard/Mouse:** <!-- keyboard.c, mouse.c --> (REQ: REQ-03-0959)
+                - [ ] Hook `keyboard_handler` (scancode + timing). <!-- keyboard.c:68-72 --> (REQ: REQ-03-0960)
+                - [ ] Hook PS/2 mouse driver (movement + timing). <!-- mouse.c:54-58 --> (REQ: REQ-03-0961)
+                - [ ] Credit ~2-4 bits per HID event. <!-- Uses random_harvest_fast --> (REQ: REQ-03-0962)
+            - [ ] **Disk I/O:** (REQ: REQ-03-0963)
+                - [ ] Hook IDE/AHCI/VirtIO completion interrupts. <!-- Hooked virtio_blk (sync), ide --> (REQ: REQ-03-0964)
+                - [ ] Mix seek time / completion jitter. (REQ: REQ-03-0965)
+                - [ ] Credit ~1 bit per I/O completion. (REQ: REQ-03-0966)
+            - [ ] **Network:** (REQ: REQ-03-0967)
+                - [ ] Hook network packet arrival (timing + data). (REQ: REQ-03-0968)
+                - [ ] Mix packet timing and partial payload. (REQ: REQ-03-0969)
+                - [ ] Credit ~2 bits per packet timing. (REQ: REQ-03-0970)
+        - [ ] **Hardware RNG (RDRAND/RDSEED):** <!-- random.c:226-301 --> (REQ: REQ-03-0971)
+            - [ ] **Detection:** (REQ: REQ-03-0972)
+                - [ ] CPUID feature detection for RDRAND (ECX bit 30). <!-- random.c:241-244 --> (REQ: REQ-03-0973)
+                - [ ] CPUID feature detection for RDSEED (EBX bit 18). <!-- random.c:251-254 --> (REQ: REQ-03-0974)
+                - [ ] Runtime availability flags. <!-- rng_state.has_rdrand, has_rdseed --> (REQ: REQ-03-0975)
+            - [ ] **Implementation:** (REQ: REQ-03-0976, REQ-03-1049)
+                - [ ] Implement `rdrand32()`, `rdrand64()` with retry loop. <!-- random.c:266-287 --> (REQ: REQ-03-0977)
+                - [ ] Implement `rdseed32()`, `rdseed64()` with failure handling. (REQ: REQ-03-0978)
+                - [ ] Fallback path when HWRNG unavailable. <!-- random.c:267 --> (REQ: REQ-03-0979)
+            - [ ] **Integration:** (REQ: REQ-03-0200, REQ-03-0980)
+                - [ ] Periodic HWRNG harvesting (if available). <!-- random.c:464-468 --> (REQ: REQ-03-0981)
+                - [ ] Mix HWRNG output into entropy pool. <!-- random.c:295 --> (REQ: REQ-03-0982)
+                - [ ] Use HWRNG for fast-path output (XOR with CSPRNG). (REQ: REQ-03-0983)
+                - [ ] Credit ~32 bits per RDRAND invocation (conservative). <!-- random.c:296 --> (REQ: REQ-03-0984)
+        - [ ] **Jitter Entropy (CPU Timing):** (REQ: REQ-03-0985)
+            - [ ] Use BogoMIPS calibration loop for jitter measurement. (REQ: REQ-03-0986)
+            - [ ] Implement `jitterentropy_collect()` (memory access timing). (REQ: REQ-03-0987)
+            - [ ] CPU execution jitter measurement. (REQ: REQ-03-0988)
+            - [ ] Memory access timing variations. (REQ: REQ-03-0989)
+            - [ ] Minimum samples before crediting. (REQ: REQ-03-0990)
+        - [ ] **VirtIO Entropy Device:** (REQ: REQ-03-0991)
+            - [ ] VirtIO RNG device detection (device type 4). (REQ: REQ-03-0992)
+            - [ ] Request entropy from hypervisor. (REQ: REQ-03-0993)
+            - [ ] Mix hypervisor-provided randomness. (REQ: REQ-03-0994)
+            - [ ] Credit appropriately (host-dependent quality). (REQ: REQ-03-0995)
+    - [ ] **Reseeding & State Management:** <!-- random.c:356-372 --> (REQ: REQ-03-0996)
+        - [ ] **Reseed Logic:** (REQ: REQ-03-0997)
+            - [ ] Implement `random_reseed()` (extract from input pool). <!-- random.c:356-372 --> (REQ: REQ-03-0998)
+            - [ ] Minimum entropy threshold before first seed (256 bits). <!-- random.c:389, 471 --> (REQ: REQ-03-0999)
+            - [ ] Reseed interval (time-based or output-based). <!-- RESEED_INTERVAL, random.c:397 --> (REQ: REQ-03-1000)
+            - [ ] Reseed on entropy pool reaching threshold. <!-- random.c:389-391 --> (REQ: REQ-03-1001)
+        - [ ] **Seeded State Tracking:** (REQ: REQ-03-1002)
+            - [ ] Track `rng_seeded` boolean. <!-- rng_state.seeded --> (REQ: REQ-03-1003)
+            - [ ] Track `reseed_count` for auditing. <!-- rng_state.reseed_count --> (REQ: REQ-03-1004)
+            - [ ] Implement `random_is_seeded()` query. <!-- random.c:351-353 --> (REQ: REQ-03-1005)
+            - [ ] Block reads until first seed (for `/dev/random`). <!-- random.c:382-392 --> (REQ: REQ-03-1006)
+        - [ ] **Catastrophic Reseed:** (REQ: REQ-03-1007)
+            - [ ] Full state replacement on seed file load. (REQ: REQ-03-1008)
+            - [ ] Wipe previous state before new key material. (REQ: REQ-03-1009)
+            - [ ] Notify waiters after reseed. (REQ: REQ-03-1010)
+    - [ ] **Device Interfaces:** <!-- random.c:410-494 --> (REQ: REQ-03-1011)
+        - [ ] **`/dev/random` (Blocking):** (REQ: REQ-03-1012)
+            - [ ] Implement `random_dev_open()`. <!-- implicit via fs_node_t --> (REQ: REQ-03-1013)
+            - [ ] Implement `random_dev_read()` with blocking. <!-- random.c:415-421 --> (REQ: REQ-03-1014)
+            - [ ] Block until minimum entropy available. <!-- random.c:382-392 --> (REQ: REQ-03-1015)
+            - [ ] Wait queue for blocked readers (`random_wait`). (REQ: REQ-03-1016)
+            - [ ] Wakeup on entropy addition. (REQ: REQ-03-1017)
+            - [ ] Implement `random_dev_poll()` (POLLIN when seeded). (REQ: REQ-03-1018)
+        - [ ] **`/dev/urandom` (Non-blocking):** (REQ: REQ-03-1019)
+            - [ ] Implement `urandom_dev_read()` (always returns data). <!-- random.c:424-430 --> (REQ: REQ-03-1020)
+            - [ ] Warn once if read before seeded (dmesg). (REQ: REQ-03-1021)
+            - [ ] High throughput (CSPRNG stream). <!-- ChaCha20 stream --> (REQ: REQ-03-1022)
+            - [ ] No entropy debit (unlimited output). <!-- GRND_INSECURE --> (REQ: REQ-03-1023)
+        - [ ] **Shared Implementation:** (REQ: REQ-03-1024)
+            - [ ] Device major/minor number allocation. <!-- implicit --> (REQ: REQ-03-1025)
+            - [ ] `struct file_operations` registration. <!-- fs_node_t callbacks --> (REQ: REQ-03-1026)
+            - [ ] Character device creation. <!-- devfs_register_device --> (REQ: REQ-03-1027)
+            - [ ] Permissions check (world-readable). <!-- inherits from devfs --> (REQ: REQ-03-1028)
+        - [ ] **`getrandom()` Syscall:** (REQ: REQ-03-1029)
+            - [ ] Implement `sys_getrandom(buf, len, flags)`. (REQ: REQ-03-1030)
+            - [ ] `GRND_RANDOM` flag (use blocking pool). (REQ: REQ-03-1031)
+            - [ ] `GRND_NONBLOCK` flag (return EAGAIN if not seeded). (REQ: REQ-03-1032)
+            - [ ] `GRND_INSECURE` flag (return data even if not seeded). (REQ: REQ-03-1033)
+            - [ ] Personality support (native, Linux, FreeBSD). (REQ: REQ-03-1034)
+            - [ ] Register syscall number in all personality tables. (REQ: REQ-03-1035)
+        - [ ] **Kernel Internal API:** (REQ: REQ-03-1036)
+            - [ ] Implement `get_random_bytes(buf, len)` (kernel consumers). (REQ: REQ-03-1037)
+            - [ ] Implement `get_random_u32()`, `get_random_u64()`. (REQ: REQ-03-1038)
+            - [ ] Implement `get_random_bytes_wait(buf, len)` (blocking). (REQ: REQ-03-1039)
+            - [ ] Early boot fallback (before seeded). (REQ: REQ-03-1040)
+    - [ ] **IOCTLs & Administrative Interface:** (REQ: REQ-03-1041)
+        - [ ] **IOCTL Commands:** (REQ: REQ-03-1042)
+            - [ ] `RNDGETENTCNT`: Return entropy estimate (bits). (REQ: REQ-03-1043)
+            - [ ] `RNDADDTOENTCNT`: Add to entropy count (privileged). (REQ: REQ-03-1044)
+            - [ ] `RNDADDENTROPY`: Add entropy data + credit (privileged). (REQ: REQ-03-1045)
+            - [ ] `RNDZAPENTCNT`: Zero entropy count (privileged). (REQ: REQ-03-1046)
+            - [ ] `RNDCLEARPOOL`: Clear entropy pool (privileged). (REQ: REQ-03-1047)
+            - [ ] `RNDRESEEDCRNG`: Force CSPRNG reseed (privileged). (REQ: REQ-03-1048)
+        - [ ] **Implementation:** (REQ: REQ-03-0976, REQ-03-1049)
+            - [ ] Implement `random_dev_ioctl()` dispatcher. (REQ: REQ-03-1050)
+            - [ ] Privilege checks (CAP_SYS_ADMIN or root). (REQ: REQ-03-1051)
+            - [ ] Input validation for user-provided entropy. (REQ: REQ-03-1052)
+            - [ ] Copyin/copyout for userspace buffers. (REQ: REQ-03-1053)
+        - [ ] **Sysctl Interface (Optional):** (REQ: REQ-03-1054)
+            - [ ] `kern.random.entropy_avail` (read-only). (REQ: REQ-03-1055)
+            - [ ] `kern.random.poolsize` (read-only). (REQ: REQ-03-1056)
+            - [ ] `kern.random.uuid` (read-only, per-read UUID). (REQ: REQ-03-1057)
+            - [ ] `kern.random.boot_id` (read-only, boot UUID). (REQ: REQ-03-1058)
+    - [ ] **Security & Correctness:** (REQ: REQ-03-1059)
+        - [ ] **Fork Safety:** (REQ: REQ-03-1060)
+            - [ ] Implement `random_reseed_on_fork()` hook. (REQ: REQ-03-1061)
+            - [ ] Call from `proc_fork()` after child creation. (REQ: REQ-03-1062)
+            - [ ] Mix PID, timestamp into child's CSPRNG state. (REQ: REQ-03-1063)
+            - [ ] Ensure parent and child diverge immediately. (REQ: REQ-03-1064)
+            - [ ] Wipe any copied CSPRNG buffer in child. (REQ: REQ-03-1065)
+        - [ ] **Exec Safety:** (REQ: REQ-03-1066)
+            - [ ] Wipe userspace-visible RNG state on `execve`. (REQ: REQ-03-1067)
+            - [ ] Reset any per-process CSPRNG state. (REQ: REQ-03-1068)
+            - [ ] Ensure no entropy leakage across exec boundary. (REQ: REQ-03-1069)
+        - [ ] **Memory Protection:** (REQ: REQ-03-1070)
+            - [ ] Use `explicit_bzero()` for sensitive state clearing. (REQ: REQ-03-1071)
+            - [ ] Mark CSPRNG state pages non-swappable. (REQ: REQ-03-1072)
+            - [ ] Clear key material immediately after rekey. (REQ: REQ-03-1073)
+            - [ ] Avoid leaving entropy in temporary buffers. (REQ: REQ-03-1074)
+        - [ ] **Backtracking Resistance:** (REQ: REQ-03-1075)
+            - [ ] Fast-key-erasure design (rekey after extraction). (REQ: REQ-03-1076)
+            - [ ] Cannot recover previous output given current state. (REQ: REQ-03-1077)
+            - [ ] Wipe intermediate state after each operation. (REQ: REQ-03-1078)
+        - [ ] **Prediction Resistance:** (REQ: REQ-03-1079)
+            - [ ] Periodic reseed from entropy pool. (REQ: REQ-03-1080)
+            - [ ] Mix in fresh entropy continuously. (REQ: REQ-03-1081)
+            - [ ] HWRNG XOR for defense-in-depth. (REQ: REQ-03-1082)
+        - [ ] **Audit & Logging:** (REQ: REQ-03-1083)
+            - [ ] Log first seed event. (REQ: REQ-03-1084)
+            - [ ] Log reseed events (rate-limited). (REQ: REQ-03-1085)
+            - [ ] Log HWRNG initialization status. (REQ: REQ-03-1086)
+            - [ ] Log warnings for uninitialized reads. (REQ: REQ-03-1087)
+    - [ ] **Boot-time Entropy & Seed File:** (REQ: REQ-03-1088)
+        - [ ] **Early Boot Entropy:** (REQ: REQ-03-1089)
+            - [ ] Collect BIOS/firmware timestamps. (REQ: REQ-03-1090)
+            - [ ] Collect Multiboot structure addresses. (REQ: REQ-03-1091)
+            - [ ] Collect memory map contents. (REQ: REQ-03-1092)
+            - [ ] Collect interrupt timing during init. (REQ: REQ-03-1093)
+        - [ ] **Seed File Support:** (REQ: REQ-03-1094)
+            - [ ] Read seed file from root filesystem on mount. (REQ: REQ-03-1095)
+            - [ ] Expected path: `/var/db/entropy/seed`. (REQ: REQ-03-1096)
+            - [ ] Seed file format: raw 256 bytes minimum. (REQ: REQ-03-1097)
+            - [ ] Mix seed file into entropy pool. (REQ: REQ-03-1098)
+            - [ ] Immediately overwrite seed file with fresh randomness. (REQ: REQ-03-1099)
+        - [ ] **Shutdown Handling:** (REQ: REQ-03-1100)
+            - [ ] Write fresh seed file on clean shutdown. (REQ: REQ-03-1101)
+            - [ ] Ensure seed file written before unmount. (REQ: REQ-03-1102)
+            - [ ] Atomic write (write temp, rename). (REQ: REQ-03-1103)
+    - [ ] **Performance Optimization:** (REQ: REQ-03-1104)
+        - [ ] **Fast Path:** (REQ: REQ-03-1105)
+            - [ ] Per-CPU CSPRNG state (avoid lock contention). (REQ: REQ-03-1106)
+            - [ ] Batch output generation (64-byte blocks). (REQ: REQ-03-1107)
+            - [ ] Minimize lock hold time. (REQ: REQ-03-1108)
+            - [ ] Lockless entropy harvesting counters. (REQ: REQ-03-1109)
+        - [ ] **Benchmarking:** (REQ: REQ-03-1110)
+            - [ ] Create `sys/tests/bench_rng.c` for throughput. (REQ: REQ-03-1111)
+            - [ ] Measure `get_random_bytes()` MB/s. (REQ: REQ-03-1112)
+            - [ ] Measure `read(/dev/urandom)` MB/s. (REQ: REQ-03-1113)
+            - [ ] Measure entropy harvesting overhead. (REQ: REQ-03-1114)
+            - [ ] Profile lock contention under load. (REQ: REQ-03-1115)
+        - [ ] **Optimization Targets:** (REQ: REQ-03-1116)
+            - [ ] Target: >100 MB/s for `/dev/urandom`. (REQ: REQ-03-1117)
+            - [ ] Target: <1μs for `get_random_u32()`. (REQ: REQ-03-1118)
+            - [ ] Target: <100ns for `random_harvest_fast()`. (REQ: REQ-03-1119)
+    - [ ] **Testing:** (REQ: REQ-03-0218, REQ-03-0317, REQ-03-0396, REQ-03-0594, REQ-03-0926, REQ-03-1120)
+        - [ ] **Unit Tests:** (REQ: REQ-03-0219, REQ-03-0595, REQ-03-1121)
+            - [ ] `test_chacha20.c`: RFC 7539 test vectors. (REQ: REQ-03-1122)
+            - [ ] `test_entropy_pool.c`: Mixing function correctness. (REQ: REQ-03-1123)
+            - [ ] `test_rng_seeding.c`: Reseed logic validation. (REQ: REQ-03-1124)
+            - [ ] `test_rng_fork.c`: Parent/child output divergence. (REQ: REQ-03-1125)
+            - [ ] `test_rng_exec.c`: State wipe on exec. (REQ: REQ-03-1126)
+            - [ ] `test_getrandom.c`: Syscall interface validation. (REQ: REQ-03-1127)
+        - [ ] **Statistical Tests:** (REQ: REQ-03-1128)
+            - [ ] Dieharder test suite integration. (REQ: REQ-03-1129)
+            - [ ] NIST SP 800-22 test suite. (REQ: REQ-03-1130)
+            - [ ] TestU01 BigCrush (optional). (REQ: REQ-03-1131)
+            - [ ] Minimum: Frequency, runs, and chi-square tests. (REQ: REQ-03-1132)
+        - [ ] **Integration Tests:** (REQ: REQ-03-0230, REQ-03-0608, REQ-03-1133)
+            - [ ] Boot-to-seeded timing measurement. (REQ: REQ-03-1134)
+            - [ ] Stress test under heavy read load. (REQ: REQ-03-1135)
+            - [ ] Multi-process concurrent read test. (REQ: REQ-03-1136)
+            - [ ] HWRNG fallback path testing. (REQ: REQ-03-1137)
+    - [ ] **Documentation:** (REQ: REQ-03-0236, REQ-03-0324, REQ-03-0403, REQ-03-0613, REQ-03-1138)
+        - [ ] **Man Pages:** (REQ: REQ-03-1139)
+            - [ ] `man4/random.4`: Device interface documentation. (REQ: REQ-03-1140)
+            - [ ] `man2/getrandom.2`: Syscall documentation. (REQ: REQ-03-1141)
+            - [ ] Document blocking vs non-blocking behavior. (REQ: REQ-03-1142)
+            - [ ] Document entropy sources and estimation. (REQ: REQ-03-1143)
+            - [ ] Document security properties and limitations. (REQ: REQ-03-1144)
+        - [ ] **Kernel Documentation:** (REQ: REQ-03-1145)
+            - [ ] Architecture overview in `doc/random.md`. (REQ: REQ-03-1146)
+            - [ ] Entropy source hookup guide. (REQ: REQ-03-1147)
+            - [ ] Security model documentation. (REQ: REQ-03-1148)
+            - [ ] Performance tuning guide. (REQ: REQ-03-1149)
 
 
 ## User Stories
