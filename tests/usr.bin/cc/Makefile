@@ -6,6 +6,9 @@ all: test
 
 test:
 	$(MAKE) -C $(TOP)/usr.bin/cc NATIVE_BUILD=1
+	# Compile and run test_ast2ir
+	$(CC) $(CFLAGS) -I$(TOP)/usr.bin/cc/include test_ast2ir.c $(TOP)/usr.bin/cc/cmd/pipeline.c $(TOP)/usr.bin/cc/frontend/preproc.c $(TOP)/usr.bin/cc/frontend/lexer.c $(TOP)/usr.bin/cc/frontend/parser.c $(TOP)/usr.bin/cc/frontend/sema.c $(TOP)/usr.bin/cc/frontend/builtin.c $(TOP)/usr.bin/cc/middle/ast2ir.c $(TOP)/usr.bin/cc/middle/legalize.c $(TOP)/usr.bin/cc/middle/passes/opt.c $(TOP)/usr.bin/cc/middle/ssa/module.c $(TOP)/usr.bin/cc/middle/ssa/func.c $(TOP)/usr.bin/cc/middle/ssa/bblock.c $(TOP)/usr.bin/cc/middle/ssa/instr_set.c $(TOP)/usr.bin/cc/backend/select.c $(TOP)/usr.bin/cc/backend/regalloc.c $(TOP)/usr.bin/cc/backend/frame.c $(TOP)/usr.bin/cc/backend/emit_s.c -o test_ast2ir_bin || true
+	./test_ast2ir_bin
 	$(TOP)/usr.bin/cc/ir-verifier valid.ir
 	! $(TOP)/usr.bin/cc/ir-verifier invalid_missing_term.ir
 	! $(TOP)/usr.bin/cc/ir-verifier invalid_use_before_def.ir
@@ -836,3 +839,4 @@ clean:
 	      /tmp/cc_pp_s4_ours.ab
 	rm -f /tmp/cc_native_c99_simd_intrinsics /tmp/cc_native_c99_simd_intrinsics_32.o \
 	      /tmp/cc_simd_macro_probe.c /tmp/cc_simd_macro_none.i /tmp/cc_simd_macro_avx.i /tmp/cc_simd_macro_avx2.i
+	rm -f test_ast2ir_bin
