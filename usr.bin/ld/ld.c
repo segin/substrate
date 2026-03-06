@@ -10044,13 +10044,16 @@ static int apply_all_relocations(elfobj_t *obj, const ld_ctx_t *ctx, int allow_u
                 return -1;
             }
             if (machine == EM_X86_64 &&
-                (type == R_X86_64_GOTPCRELX || type == R_X86_64_REX_GOTPCRELX) &&
+                (type == R_X86_64_GOTPCREL ||
+                 type == R_X86_64_GOTPCRELX ||
+                 type == R_X86_64_REX_GOTPCRELX) &&
                 sym != NULL && elf_symbol_shndx(sym) != SHN_UNDEF &&
                 off >= 2 && buf[off - 2] == 0x8b) {
                 /*
-                 * R_X86_64_{REX_,}GOTPCRELX uses S+A-P math in elf_reloc.c.
-                 * For local/non-preemptible symbols this is valid only when
-                 * the instruction is relaxed from MOV mem->reg to LEA.
+                 * We currently materialize GOTPCREL-family relocations with
+                 * S+A-P math in elf_reloc.c. For resolved/non-preemptible
+                 * symbols that is only valid when we relax MOV mem->reg into
+                 * LEA so the instruction yields the symbol address.
                  */
                 buf[off - 2] = 0x8d;
             }

@@ -3187,6 +3187,8 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             const cc_function_t *fn;
             int gaddr;
             long mem_size;
+            int expr_is_array_obj = (e->array_ndim > 0);
+            int expr_is_struct_obj = (e->value_type == CC_TYPE_VOID && e->struct_id >= 0);
             if (e->ident != NULL &&
                 (strcmp(e->ident, "__func__") == 0 || strcmp(e->ident, "__FUNCTION__") == 0 ||
                  strcmp(e->ident, "__PRETTY_FUNCTION__") == 0)) {
@@ -3203,19 +3205,26 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                 }
                 return in.dst;
             }
-                if (g != NULL) {
-                    if ((g->array_ndim > 0 && g->array_len >= 0) ||
-                        is_array_object_decl(g->type, g->array_len, g->array_ndim)) {
-                        return emit_global_addr(sf, g->name, diag);
-                    }
-                    if (g->type == CC_TYPE_VOID && g->type_struct_id >= 0) {
-                        return emit_global_addr(sf, g->name, diag);
-                    }
-                    mem_size = type_size_bytes_with_struct(tu, g->type, g->type_struct_id);
-                    if (mem_size <= 0) {
-                        set_diag(diag, "unsupported global object type in lowering");
-                        return -1;
-                    }
+            if (g != NULL) {
+                /*
+                 * Use expression-level array metadata first. This keeps
+                 * lowering consistent with semantic analysis when a symbol has
+                 * multiple declarations and only some carry explicit array
+                 * bounds (e.g. typedef-backed extern declarations).
+                 */
+                if (expr_is_array_obj ||
+                    (g->array_ndim > 0 && g->array_len >= 0) ||
+                    is_array_object_decl(g->type, g->array_len, g->array_ndim)) {
+                    return emit_global_addr(sf, g->name, diag);
+                }
+                if (expr_is_struct_obj || (g->type == CC_TYPE_VOID && g->type_struct_id >= 0)) {
+                    return emit_global_addr(sf, g->name, diag);
+                }
+                mem_size = type_size_bytes_with_struct(tu, g->type, g->type_struct_id);
+                if (mem_size <= 0) {
+                    set_diag(diag, "unsupported global object type in lowering");
+                    return -1;
+                }
                 gaddr = emit_global_addr(sf, g->name, diag);
                 if (gaddr < 0) {
                     return -1;
