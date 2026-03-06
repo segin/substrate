@@ -207,7 +207,7 @@ void kmem_dev_init(void) {
     devfs_register_device(&kmem_node);
 
     char buf[128];
-    sprintf(buf, "/dev/kmem initialized (Policy: R=%d W=%d)\n", kmem_allow_read, kmem_allow_write);
+    sprintf(buf, "kmem: /dev/kmem initialized (Policy: R=%d W=%d)\n", kmem_allow_read, kmem_allow_write);
     kprint(buf);
 
     /* Initialize Kernel Test Helper (if linked) */

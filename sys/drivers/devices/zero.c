@@ -159,5 +159,5 @@ void zero_init(void) {
     zero_node.rdev = (1 << 8) | 5;
 
     devfs_register_device(&zero_node);
-    kprint("/dev/zero initialized\n");
+    kprint("zero: /dev/zero initialized\n");
 }

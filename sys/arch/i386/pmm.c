@@ -28,6 +28,10 @@ static uint8_t pmm_bitmap_static[4096];
 
 /* Memory region tracking for overlap detection and validation */
 #define PMM_MAX_REGIONS 128
+#define PMM_MAX_USABLE_RANGES 128
+#define PMM_MAX_MODULE_REGIONS 8
+#define PMM_MAX_BOOT_REGIONS 16
+#define PMM_PHYS_VIRT_BASE 0xC0000000U
 
 typedef struct pmm_region {
     phys_addr_t start;
@@ -50,11 +54,73 @@ static phys_addr_t mboot_info_start = 0;
 static phys_addr_t mboot_info_end = 0;
 
 /* Module bounds */
-static phys_addr_t module_regions_start[8];
-static phys_addr_t module_regions_end[8];
+static phys_addr_t module_regions_start[PMM_MAX_MODULE_REGIONS];
+static phys_addr_t module_regions_end[PMM_MAX_MODULE_REGIONS];
 static int module_region_count = 0;
 
+/* Boot metadata bounds (mmap, cmdline, module list, etc.) */
+static phys_addr_t boot_regions_start[PMM_MAX_BOOT_REGIONS];
+static phys_addr_t boot_regions_end[PMM_MAX_BOOT_REGIONS];
+static int boot_region_count = 0;
+
+/* Usable regions accepted after overlap rejection */
+typedef struct pmm_usable_range {
+    phys_addr_t start;
+    phys_addr_t end;
+} pmm_usable_range_t;
+
+static pmm_usable_range_t pmm_usable_ranges[PMM_MAX_USABLE_RANGES];
+static int pmm_usable_range_count = 0;
+
+typedef struct multiboot_module {
+    uint32_t mod_start;
+    uint32_t mod_end;
+    uint32_t string;
+    uint32_t reserved;
+} __attribute__((packed)) multiboot_module_t;
+
 // ==================== Boot Memory Detection Helpers ====================
+
+static void pmm_reset_walk_state(void) {
+    memset(pmm_regions, 0, sizeof(pmm_regions));
+    memset(pmm_usable_ranges, 0, sizeof(pmm_usable_ranges));
+    pmm_region_count = 0;
+    pmm_usable_range_count = 0;
+    pmm_total_usable_ram = 0;
+    pmm_total_reserved_ram = 0;
+}
+
+static void pmm_clear_boot_exclusions(void) {
+    mboot_info_start = 0;
+    mboot_info_end = 0;
+    module_region_count = 0;
+    boot_region_count = 0;
+    memset(module_regions_start, 0, sizeof(module_regions_start));
+    memset(module_regions_end, 0, sizeof(module_regions_end));
+    memset(boot_regions_start, 0, sizeof(boot_regions_start));
+    memset(boot_regions_end, 0, sizeof(boot_regions_end));
+}
+
+static uint32_t pmm_virt_to_phys(uint32_t addr) {
+    if (addr >= PMM_PHYS_VIRT_BASE) {
+        return addr - PMM_PHYS_VIRT_BASE;
+    }
+    return addr;
+}
+
+static void pmm_mark_used_range(phys_addr_t start, phys_addr_t end) {
+    uint32_t page_start = start & ~(PMM_BLOCK_SIZE - 1);
+    uint32_t page_end = end & ~(PMM_BLOCK_SIZE - 1);
+
+    for (uint32_t addr = page_start; addr < page_end; addr += PMM_BLOCK_SIZE) {
+        vm_phys_mark_used(addr);
+        if (addr > 0xFFFFFFFFU - PMM_BLOCK_SIZE) {
+            break;
+        }
+    }
+}
+
+static void pmm_cb_init_buddy(phys_addr_t start, phys_addr_t length, void *arg);
 
 /*
  * pmm_init_kernel_bounds - Initialize kernel physical bounds from linker symbols
@@ -85,18 +151,45 @@ static void pmm_init_kernel_bounds(void) {
  */
 static void pmm_record_multiboot_info(uint32_t mboot_addr) {
     if (!mboot_addr) return;
-    
-    /* Convert to physical if virtual */
-    if (mboot_addr >= 0xC0000000) {
-        mboot_addr -= 0xC0000000;
-    }
-    
+
+    mboot_addr = pmm_virt_to_phys(mboot_addr);
+
     mboot_info_start = mboot_addr;
     mboot_info_end = mboot_addr + sizeof(multiboot_info_t);
-    
+
     /* Round to page boundaries */
     mboot_info_start &= ~(PMM_BLOCK_SIZE - 1);
     mboot_info_end = (mboot_info_end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
+}
+
+static void pmm_record_boot_region(uint32_t start, uint32_t end) {
+    if (!start || end <= start || boot_region_count >= PMM_MAX_BOOT_REGIONS) {
+        return;
+    }
+
+    uint32_t page_start = start & ~(PMM_BLOCK_SIZE - 1);
+    uint64_t page_end64 = ((uint64_t)end + PMM_BLOCK_SIZE - 1) & ~((uint64_t)PMM_BLOCK_SIZE - 1);
+    if (page_end64 > 0xFFFFFFFFULL) {
+        page_end64 = 0xFFFFFFFFULL;
+    }
+    uint32_t page_end = (uint32_t)page_end64;
+    if (page_end <= page_start) {
+        return;
+    }
+
+    boot_regions_start[boot_region_count] = page_start;
+    boot_regions_end[boot_region_count] = page_end;
+    boot_region_count++;
+}
+
+static void pmm_record_multiboot_string(uint32_t phys_addr) {
+    if (!phys_addr) {
+        return;
+    }
+
+    const char *s = (const char *)(uintptr_t)(phys_addr + PMM_PHYS_VIRT_BASE);
+    size_t len = strnlen(s, 4096);
+    pmm_record_boot_region(phys_addr, phys_addr + (uint32_t)len + 1);
 }
 
 /*
@@ -104,37 +197,68 @@ static void pmm_record_multiboot_info(uint32_t mboot_addr) {
  *
  * Modules loaded by the bootloader must not be overwritten.
  */
-static void __attribute__((unused)) pmm_record_module_regions(uint32_t mods_addr, uint32_t mods_count) {
+static void pmm_record_module_regions(uint32_t mods_addr, uint32_t mods_count) {
     if (!mods_addr || mods_count == 0) return;
-    
-    module_region_count = 0;
-    
-    /* Convert to virtual if physical */
-    if (mods_addr < 0xC0000000) {
-        mods_addr += 0xC0000000;
-    }
-    
+
+    uint32_t mods_addr_phys = pmm_virt_to_phys(mods_addr);
+    uint32_t mods_addr_virt = mods_addr_phys + PMM_PHYS_VIRT_BASE;
+
     /* Limit to our array size */
-    if (mods_count > 8) mods_count = 8;
-    
-    for (uint32_t i = 0; i < mods_count && module_region_count < 8; i++) {
-        uint32_t *mod_entry = (uint32_t *)(uintptr_t)(mods_addr + i * 16);
-        uint32_t mod_start = mod_entry[0];
-        uint32_t mod_end = mod_entry[1];
-        
+    if (mods_count > PMM_MAX_MODULE_REGIONS) mods_count = PMM_MAX_MODULE_REGIONS;
+
+    for (uint32_t i = 0; i < mods_count && module_region_count < PMM_MAX_MODULE_REGIONS; i++) {
+        const multiboot_module_t *mod = (const multiboot_module_t *)(uintptr_t)(
+            mods_addr_virt + i * sizeof(multiboot_module_t));
+        uint32_t mod_start = mod->mod_start;
+        uint32_t mod_end = mod->mod_end;
+
         if (mod_start < mod_end) {
-            /* Convert to virtual if physical */
-            if (mod_start < 0xC0000000) mod_start += 0xC0000000;
-            if (mod_end < 0xC0000000) mod_end += 0xC0000000;
-            
             /* Round to page boundaries */
             mod_start &= ~(PMM_BLOCK_SIZE - 1);
             mod_end = (mod_end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
-            
+            if (mod_end <= mod_start) {
+                continue;
+            }
+
             module_regions_start[module_region_count] = mod_start;
             module_regions_end[module_region_count] = mod_end;
             module_region_count++;
         }
+    }
+}
+
+void pmm_record_boot_info(const multiboot_info_t *mbi) {
+    pmm_clear_boot_exclusions();
+
+    if (!mbi) {
+        return;
+    }
+
+    uint32_t mbi_virt = (uint32_t)(uintptr_t)mbi;
+    uint32_t mbi_phys = pmm_virt_to_phys(mbi_virt);
+
+    pmm_record_multiboot_info(mbi_phys);
+    pmm_record_boot_region(mbi_phys, mbi_phys + sizeof(*mbi));
+
+    if ((mbi->flags & MULTIBOOT_INFO_MEM_MAP) && mbi->mmap_addr && mbi->mmap_length) {
+        pmm_record_boot_region(mbi->mmap_addr, mbi->mmap_addr + mbi->mmap_length);
+    }
+
+    if ((mbi->flags & MULTIBOOT_INFO_MODS) && mbi->mods_addr && mbi->mods_count) {
+        uint32_t mods_count = mbi->mods_count;
+        if (mods_count > PMM_MAX_MODULE_REGIONS) {
+            mods_count = PMM_MAX_MODULE_REGIONS;
+        }
+        uint32_t mod_list_bytes = mods_count * sizeof(multiboot_module_t);
+        pmm_record_boot_region(mbi->mods_addr, mbi->mods_addr + mod_list_bytes);
+        pmm_record_module_regions(mbi->mods_addr, mbi->mods_count);
+    }
+
+    if (mbi->flags & MULTIBOOT_INFO_CMDLINE) {
+        pmm_record_multiboot_string(mbi->cmdline);
+    }
+    if (mbi->flags & MULTIBOOT_INFO_BOOT_LOADER_NAME) {
+        pmm_record_multiboot_string(mbi->boot_loader_name);
     }
 }
 
@@ -163,15 +287,12 @@ static int pmm_add_region(phys_addr_t start, phys_addr_t end, uint32_t type) {
  * Returns 1 if overlap detected, 0 otherwise. If overlap is detected,
  * out_start and out_end are set to the overlapping range.
  */
-static int pmm_check_overlap(phys_addr_t start, phys_addr_t end,
-                             phys_addr_t *out_start, phys_addr_t *out_end) {
-    for (int i = 0; i < pmm_region_count; i++) {
-        if (!pmm_regions[i].valid) continue;
-        
-        phys_addr_t r_start = pmm_regions[i].start;
-        phys_addr_t r_end = pmm_regions[i].end;
-        
-        /* Check for overlap: [start, end) overlaps with [r_start, r_end) */
+static int pmm_check_usable_overlap(phys_addr_t start, phys_addr_t end,
+                                    phys_addr_t *out_start, phys_addr_t *out_end) {
+    for (int i = 0; i < pmm_usable_range_count; i++) {
+        phys_addr_t r_start = pmm_usable_ranges[i].start;
+        phys_addr_t r_end = pmm_usable_ranges[i].end;
+
         if (start < r_end && end > r_start) {
             if (out_start) *out_start = (start > r_start) ? start : r_start;
             if (out_end) *out_end = (end < r_end) ? end : r_end;
@@ -196,31 +317,25 @@ static void __attribute__((unused)) pmm_reserve_regions(void) {
         
         /* Reserve non-usable regions */
         if (type != MULTIBOOT_MEMORY_AVAILABLE && type != E820_USABLE) {
-            for (phys_addr_t addr = start; addr < end; addr += PMM_BLOCK_SIZE) {
-                vm_phys_mark_used(addr);
-            }
+            pmm_mark_used_range(start, end);
         }
     }
     
     /* Reserve kernel region */
-    for (phys_addr_t addr = kernel_phys_start; addr < kernel_phys_end; addr += PMM_BLOCK_SIZE) {
-        vm_phys_mark_used(addr);
-    }
+    pmm_mark_used_range(kernel_phys_start, kernel_phys_end);
     
     /* Reserve Multiboot info region */
     if (mboot_info_start < mboot_info_end) {
-        for (phys_addr_t addr = mboot_info_start; addr < mboot_info_end; addr += PMM_BLOCK_SIZE) {
-            vm_phys_mark_used(addr);
-        }
+        pmm_mark_used_range(mboot_info_start, mboot_info_end);
+    }
+
+    for (int i = 0; i < boot_region_count; i++) {
+        pmm_mark_used_range(boot_regions_start[i], boot_regions_end[i]);
     }
     
     /* Reserve module regions */
     for (int i = 0; i < module_region_count; i++) {
-        for (phys_addr_t addr = module_regions_start[i]; 
-             addr < module_regions_end[i]; 
-             addr += PMM_BLOCK_SIZE) {
-            vm_phys_mark_used(addr);
-        }
+        pmm_mark_used_range(module_regions_start[i], module_regions_end[i]);
     }
 }
 
@@ -331,8 +446,7 @@ void pmm_reclaim_setup(void) {
 
 // Validate memory map entry type
 static int pmm_is_usable_type(uint32_t type) {
-    return (type == MULTIBOOT_MEMORY_AVAILABLE || 
-            type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE);
+    return (type == MULTIBOOT_MEMORY_AVAILABLE);
 }
 
 /*
@@ -477,24 +591,102 @@ void pmm_walk_mmap(uint32_t mmap_addr, uint32_t mmap_length, pmm_region_callback
 struct pmm_stats_ctx {
     uint64_t max_phys;
     uint64_t total_usable;
-    uint64_t total_reserved;
 };
 
 static void pmm_cb_stats(phys_addr_t start, phys_addr_t length, void *arg) {
     struct pmm_stats_ctx *ctx = arg;
-    if (start + length > ctx->max_phys) {
-        ctx->max_phys = start + length;
+    phys_addr_t end = start + length;
+
+    if (end <= start) {
+        return;
     }
-    ctx->total_usable += length;
-    
-    /* Check for overlap with existing regions before adding */
-    phys_addr_t overlap_start, overlap_end;
-    if (pmm_check_overlap(start, start + length, &overlap_start, &overlap_end)) {
-        /* Subtract overlap from usable count */
-        ctx->total_usable -= (overlap_end - overlap_start);
+    if (end > ctx->max_phys) {
+        ctx->max_phys = end;
     }
-    
-    pmm_add_region(start, start + length, MULTIBOOT_MEMORY_AVAILABLE);
+
+    /*
+     * Reject overlapping usable regions; we only keep the first accepted region.
+     * Pass 2 seeds the buddy allocator strictly from this accepted list.
+     */
+    if (pmm_check_usable_overlap(start, end, NULL, NULL)) {
+        return;
+    }
+
+    if (pmm_usable_range_count >= PMM_MAX_USABLE_RANGES) {
+        return;
+    }
+
+    pmm_usable_ranges[pmm_usable_range_count].start = start;
+    pmm_usable_ranges[pmm_usable_range_count].end = end;
+    pmm_usable_range_count++;
+    ctx->total_usable += (uint64_t)(end - start);
+    pmm_add_region(start, end, MULTIBOOT_MEMORY_AVAILABLE);
+}
+
+static void pmm_add_range_excluding_regions(phys_addr_t start, phys_addr_t end) {
+    phys_addr_t cursor = start;
+
+    while (cursor < end) {
+        int found = 0;
+        phys_addr_t hit_start = end;
+        phys_addr_t hit_end = end;
+
+        for (int i = 0; i < boot_region_count; i++) {
+            phys_addr_t ex_start = boot_regions_start[i];
+            phys_addr_t ex_end = boot_regions_end[i];
+
+            if (ex_end <= cursor || ex_start >= end) {
+                continue;
+            }
+
+            phys_addr_t clipped_start = (ex_start > cursor) ? ex_start : cursor;
+            if (!found || clipped_start < hit_start) {
+                found = 1;
+                hit_start = clipped_start;
+                hit_end = ex_end;
+            }
+        }
+
+        for (int i = 0; i < module_region_count; i++) {
+            phys_addr_t ex_start = module_regions_start[i];
+            phys_addr_t ex_end = module_regions_end[i];
+
+            if (ex_end <= cursor || ex_start >= end) {
+                continue;
+            }
+
+            phys_addr_t clipped_start = (ex_start > cursor) ? ex_start : cursor;
+            if (!found || clipped_start < hit_start) {
+                found = 1;
+                hit_start = clipped_start;
+                hit_end = ex_end;
+            }
+        }
+
+        if (!found) {
+            vm_phys_add_range(cursor, end);
+            break;
+        }
+
+        if (cursor < hit_start) {
+            vm_phys_add_range(cursor, hit_start);
+        }
+
+        if (hit_end <= cursor) {
+            break;
+        }
+        cursor = hit_end;
+    }
+}
+
+static void pmm_seed_usable_ranges(void) {
+    for (int i = 0; i < pmm_usable_range_count; i++) {
+        phys_addr_t start = pmm_usable_ranges[i].start;
+        phys_addr_t end = pmm_usable_ranges[i].end;
+        if (end > start) {
+            pmm_cb_init_buddy(start, end - start, NULL);
+        }
+    }
 }
 
 static void pmm_cb_init_buddy(phys_addr_t start, phys_addr_t length, void *arg) {
@@ -529,59 +721,24 @@ static void pmm_cb_init_buddy(phys_addr_t start, phys_addr_t length, void *arg) 
         safe_start = wm_end;
     }
     
-    /* Check for overlap with Multiboot info region */
-    if (safe_start < mboot_info_end && end > mboot_info_start) {
-        if (safe_start < mboot_info_start) {
-            /* Add range before multiboot info */
-            vm_phys_add_range(safe_start, mboot_info_start);
-        }
-        safe_start = mboot_info_end;
-    }
-    
-    /* Check for overlap with module regions */
-    for (int i = 0; i < module_region_count; i++) {
-        phys_addr_t mod_start = module_regions_start[i];
-        phys_addr_t mod_end = module_regions_end[i];
-        
-        if (safe_start < mod_end && end > mod_start) {
-            if (safe_start < mod_start) {
-                /* Add range before module */
-                vm_phys_add_range(safe_start, mod_start);
-            }
-            safe_start = mod_end;
-        }
-    }
-    
-    /* Add remaining range */
     if (safe_start < end) {
-        vm_phys_add_range(safe_start, end);
+        pmm_add_range_excluding_regions(safe_start, end);
     }
 }
 
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // 0. Initialize kernel bounds first (needed for all subsequent operations)
     pmm_init_kernel_bounds();
-    
-    // 1. Record bootloader metadata region for exclusion.
-    // NOTE: pmm_init() is called with mmap_addr (memory map buffer), not the
-    // multiboot_info_t pointer itself. Do not interpret mmap_addr as MBI.
-    if (mmap_addr) {
-        uint32_t mmap_phys = mmap_addr;
-        if (mmap_phys >= 0xC0000000) {
-            mmap_phys -= 0xC0000000;
-        }
-        pmm_record_multiboot_info(mmap_phys);
-    }
+    pmm_reset_walk_state();
 
     // 2. Pass 1: Find limits with 64-bit accumulation for >4GB systems
-    struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0, .total_reserved = 0 };
+    struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0 };
     if (mmap_addr && mmap_length) {
         pmm_walk_mmap(mmap_addr, mmap_length, pmm_cb_stats, &stats);
     }
     
     /* Save global stats for reporting */
     pmm_total_usable_ram = stats.total_usable;
-    pmm_total_reserved_ram = stats.total_reserved;
 
     // 3. Init Watermark
     pmm_watermark_init(kernel_phys_end, (uint32_t)stats.max_phys);
@@ -628,8 +785,8 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // 6. Reserve kernel image first (non-usable ranges are never added as free)
     pmm_reserve_kernel();
     
-    // 7. Init Ranges via Buddy using Iterator (skips reserved areas)
-    pmm_walk_mmap(mmap_addr, mmap_length, pmm_cb_init_buddy, NULL);
+    // 7. Seed buddy only from accepted non-overlapping usable ranges
+    pmm_seed_usable_ranges();
     
     // 8. Final safety reservation
     pmm_reserve_kernel();
@@ -820,7 +977,7 @@ void pmm_walk_e820(const e820_entry_t *map, uint32_t count,
             uint64_t r_start64 = map[i].addr;
             uint64_t r_end64 = map[i].addr + map[i].len;
             if (r_start64 < 0x100000000ULL) {
-                if (r_end64 > 0x100000000ULL) r_end64 = 0x100000000ULL;
+                if (r_end64 > 0xFFFFFFFFULL) r_end64 = 0xFFFFFFFFULL;
                 pmm_add_region((phys_addr_t)r_start64, (phys_addr_t)r_end64, map[i].type);
                 pmm_total_reserved_ram += (r_end64 - r_start64);
             }
@@ -876,6 +1033,8 @@ void pmm_dump_e820(const e820_entry_t *map, uint32_t count) {
 void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     /* Initialize kernel bounds first */
     pmm_init_kernel_bounds();
+    pmm_reset_walk_state();
+    pmm_clear_boot_exclusions();
     
     if (!map || count == 0) {
         kprint("PMM: No e820 map provided, using fallback 16MB\n");
@@ -904,12 +1063,11 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     pmm_dump_e820(map, count);
     
     /* Pass 1: Find limits with 64-bit accumulation */
-    struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0, .total_reserved = 0 };
+    struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0 };
     pmm_walk_e820(map, count, pmm_cb_stats, &stats);
     
     /* Save global stats */
     pmm_total_usable_ram = stats.total_usable;
-    pmm_total_reserved_ram = stats.total_reserved;
     
     /* Init Watermark */
     pmm_watermark_init(kernel_phys_end, (uint32_t)stats.max_phys);
@@ -944,8 +1102,8 @@ void pmm_init_e820(e820_entry_t *map, uint32_t count) {
     pmm_reserve_kernel();
     pmm_reserve_regions();
     
-    /* Add usable ranges */
-    pmm_walk_e820(map, count, pmm_cb_init_buddy, NULL);
+    /* Add accepted usable ranges */
+    pmm_seed_usable_ranges();
     
     /* Final safety reservation */
     pmm_reserve_kernel();

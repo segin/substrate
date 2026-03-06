@@ -95,6 +95,10 @@ static void init_memory(multiboot_info_t *mboot_info) {
         mboot_copy.flags |= MULTIBOOT_INFO_MEM_MAP;
     }
 
+    if (mboot_info) {
+        pmm_record_boot_info(mboot_info);
+    }
+
     // Initialize PMM
     if (mmap_addr) {
         pmm_init(mmap_addr, mmap_length);

@@ -20,6 +20,7 @@ char *strchr(const char *s, int c);
 char *strrchr(const char *s, int c);
 char *strstr(const char *haystack, const char *needle);
 size_t strlen(const char *s);
+size_t strnlen(const char *s, size_t maxlen);
 char *strdup(const char *s);
 char *strtok(char *str, const char *delim);
 size_t strspn(const char *s, const char *accept);

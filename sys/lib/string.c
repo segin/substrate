@@ -62,8 +62,6 @@ void *memmove(void *dest, const void *src, size_t n) {
     return dest;
 }
 
-size_t strlen(const char *s);
-
 size_t strlcpy(char *dst, const char *src, size_t size) {
     size_t src_len = strlen(src);
     if (size > 0) {
@@ -165,6 +163,14 @@ size_t strlen(const char *s) {
             }
         }
     }
+}
+
+size_t strnlen(const char *s, size_t maxlen) {
+    size_t len = 0;
+    while (len < maxlen && s[len] != '\0') {
+        len++;
+    }
+    return len;
 }
 
 char *strcpy(char *dest, const char *src) {
