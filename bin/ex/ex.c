@@ -271,12 +271,14 @@ int parse_address(buffer_t *b, char **cmd_ptr) {
     return addr;
 }
 
-void parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2) {
+int parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2) {
     *addr1 = -1;
     *addr2 = -1;
+    int explicit_range = 0;
     
     int a1 = parse_address(b, cmd_ptr);
     if (a1 != -1) {
+        explicit_range = 1;
         *addr1 = a1;
         *addr2 = a1; // default if no comma
         
@@ -289,7 +291,7 @@ void parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2) {
             if (a2 != -1) {
                 *addr2 = a2;
             } else {
-                *addr2 = b->line_count; // "1," means 1 to end if missing? Varies. Usually error. But let's assume valid.
+                *addr2 = b->line_count; // "1," means 1 to end
             }
         }
     } else {
@@ -302,6 +304,7 @@ void parse_range(buffer_t *b, char **cmd_ptr, int *addr1, int *addr2) {
             *addr2 = idx;
         }
     }
+    return explicit_range;
 }
 
 int input_mode = 0; // 0=cmd, 1=append, 2=insert, 3=change
@@ -325,7 +328,7 @@ void do_command(buffer_t *b, char *cmd) {
     if (*cmd == '"') return;
     
     int addr1, addr2;
-    parse_range(b, &cmd, &addr1, &addr2);
+    int explicit_range = parse_range(b, &cmd, &addr1, &addr2);
     
     while (*cmd && isspace((unsigned char)*cmd)) cmd++;
     
@@ -678,12 +681,18 @@ void do_command(buffer_t *b, char *cmd) {
                 line_t *nxt = buf_get_line(b, addr1 + i);
                 if (nxt) total_len += nxt->len;
             }
-            char *joined = malloc(total_len + 1);
+            char *joined = malloc(total_len + (addr2 - addr1 + 1));
             joined[0] = '\0';
             strcat(joined, first->text);
             for (int i = 1; i <= (addr2 - addr1); i++) {
                 line_t *nxt = buf_get_line(b, addr1 + 1);
                 if (nxt) {
+                    // Add a space if the previous string doesn't end with a space and the next doesn't start with one
+                    size_t cur_len = strlen(joined);
+                    if (cur_len > 0 && joined[cur_len-1] != ' ' && joined[cur_len-1] != '\t' && nxt->text[0] != ' ' && nxt->text[0] != '\t' && nxt->text[0] != ')') {
+                        strcat(joined, " ");
+                        total_len++;
+                    }
                     strcat(joined, nxt->text);
                     buf_delete(b, nxt);
                 }
@@ -818,7 +827,7 @@ void do_command(buffer_t *b, char *cmd) {
         }
         
         // global commands apply to the whole file by default if no range given
-        if (addr1 == -1) { addr1 = 1; addr2 = b->line_count; }
+        if (!explicit_range) { addr1 = 1; addr2 = b->line_count; }
         
         // Mark pass
         if (addr1 > 0 && addr2 >= addr1) {
