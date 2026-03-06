@@ -418,12 +418,13 @@ static int exec_copy_args(char *const array[], int count, char **k_array, char *
 // Helper to set up the user stack
 static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int argc, char **k_envp, int envc,
                             uint32_t at_entry, uint32_t at_base, fs_node_t *file) {
-    uint32_t user_stack_base = 0xBFFF0000;
-    uint32_t user_stack_size = 16; // 64KB
+    uint32_t user_stack_top = 0xC0000000;
+    uint32_t user_stack_size = 256; // 1MB initial user stack
+    uint32_t user_stack_base = user_stack_top - (user_stack_size * 0x1000);
     
     // Track physical addresses for kernel-space access
     typedef struct { uint32_t va; void *pa; } stack_page_t;
-    stack_page_t stack_pages[16];
+    stack_page_t stack_pages[256];
     
     for (uint32_t i = 0; i < user_stack_size; i++) {
         uint32_t va = user_stack_base + i * 0x1000;
@@ -442,7 +443,7 @@ static int exec_setup_stack(pmap_t pmap, uint32_t *sp_out, char **k_argv, int ar
         memset(pa, 0, 0x1000);
     }
     
-    uint32_t sp = 0xBFFFFFFC; // Start at very top (leave 4 bytes margin)
+    uint32_t sp = user_stack_top - 4; // Start at top of user stack region
     
     // Helper to write to user stack via kernel mapping
     #define STACK_WRITE32(user_va, val) do { \

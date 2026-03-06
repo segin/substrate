@@ -4,6 +4,7 @@
 #include <sys/file.h>
 #include <vfs/vfs.h>
 #include <kern/version.h>
+#include <sys/session.h>
 #include <drivers/console/uart/uart.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
@@ -187,6 +188,15 @@ void console_attach_std_fds(struct process *proc) {
     // Associate process with console TTY
     if (console_tty) {
         proc->tty = console_tty;
+        /*
+         * Init becomes session leader before this call.
+         * Make that session/pgrp foreground on the console so
+         * job-control shells don't spin on tcgetpgrp/getpgrp mismatch.
+         */
+        if (proc->p_pgrp && proc->p_pgrp->pg_session) {
+            console_tty->session = proc->p_pgrp->pg_session->s_sid;
+            console_tty->pgrp = proc->p_pgrp->pg_id;
+        }
     }
 
     // Populate FDs 0, 1, 2 (stdin, stdout, stderr)

@@ -195,8 +195,9 @@ isr_exit:
 # User data selector: 0x23 (0x20 | 3)
 .global jump_to_userspace
 jump_to_userspace:
-    # Load parameters from GLOBAL variables
-    # This bypasses stack parameter passing completely
+    # Load cdecl parameters:
+    #   [esp+4]  = entry_point
+    #   [esp+8]  = user_stack
     mov 4(%esp), %ecx
     mov 8(%esp), %edx
     
@@ -225,6 +226,10 @@ jump_to_userspace:
     push %eax
     push $0x1B          # User CS
     push %ecx           # User EIP (loaded earlier)
+
+    # Linux i386 process entry ABI: %edx carries rtld_fini callback.
+    # Kernel-launched processes must provide NULL unless dynamic loader set it.
+    xor %edx, %edx
     
     # Jump to user mode
     iret
@@ -234,13 +239,6 @@ jump_to_userspace:
 # This restores registers and returns to userspace via IRET
 .global fork_child_return
 fork_child_return:
-    # DEBUG: Output 'C' to serial port to show child reached here
-    mov $0x3F8, %dx
-    mov $'C', %al
-    outb %al, %dx
-    mov $'\n', %al
-    outb %al, %dx
-
     # Pop segment registers
     pop %eax
     mov %ax, %gs

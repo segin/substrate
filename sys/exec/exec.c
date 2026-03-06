@@ -14,6 +14,7 @@
 #include <sys/proc.h>
 #include <sys/stat.h>
 #include <kern/console.h>
+#include <exec/formats/elf.h>
 struct thr_param;
 #include <sys/syscall_impl.h>
 #include <sys/kern_syscalls.h>
@@ -73,6 +74,19 @@ int exec_dispatch(const char *path, char *const argv[], char *const envp[]) {
             }
         }
         h = h->next;
+    }
+
+    /*
+     * Fallback for the current in-tree loader wiring:
+     * userland execve() must still be able to execute ELF even when
+     * no explicit handler registration has occurred yet.
+     */
+    if (len >= 4 &&
+        (unsigned char)header_buf[0] == 0x7f &&
+        header_buf[1] == 'E' &&
+        header_buf[2] == 'L' &&
+        header_buf[3] == 'F') {
+        return elf_execve(fd, path, argv, envp);
     }
 
     kern_close(fd);
