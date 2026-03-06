@@ -13,6 +13,8 @@
 #include <string.h> // For memset, memcpy
 #include <stdio.h>
 #include <stdatomic.h>
+#include <limits.h>
+#include <errno.h>
 
 void exit(int status) {
     _exit(status);
@@ -306,6 +308,132 @@ long strtol(const char *nptr, char **endptr, int base) {
     return acc;
 }
 
+unsigned long long strtoull(const char *nptr, char **endptr, int base) {
+    const char *s = nptr;
+    unsigned long long acc = 0;
+    int any = 0;
+    int neg = 0;
+    int overflow = 0;
+    unsigned long long cutoff;
+    unsigned int cutlim;
+
+    if (base < 0 || base == 1 || base > 36) {
+        if (endptr) *endptr = (char *)nptr;
+        errno = EINVAL;
+        return 0;
+    }
+
+    while (isspace((unsigned char)*s)) s++;
+    if (*s == '-') {
+        neg = 1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+
+    if ((base == 0 || base == 16) &&
+        s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        s += 2;
+        base = 16;
+    }
+    if (base == 0) {
+        base = (*s == '0') ? 8 : 10;
+    }
+
+    cutoff = ULLONG_MAX / (unsigned int)base;
+    cutlim = (unsigned int)(ULLONG_MAX % (unsigned int)base);
+
+    while (*s) {
+        unsigned int digit;
+        unsigned char ch = (unsigned char)*s;
+
+        if (ch >= '0' && ch <= '9') digit = (unsigned int)(ch - '0');
+        else if (ch >= 'a' && ch <= 'z') digit = (unsigned int)(ch - 'a' + 10);
+        else if (ch >= 'A' && ch <= 'Z') digit = (unsigned int)(ch - 'A' + 10);
+        else break;
+
+        if ((int)digit >= base) break;
+
+        if (acc > cutoff || (acc == cutoff && digit > cutlim)) {
+            overflow = 1;
+            any = 1;
+        } else {
+            acc = (acc * (unsigned int)base) + digit;
+            any = 1;
+        }
+        s++;
+    }
+
+    if (!any) {
+        if (endptr) *endptr = (char *)nptr;
+        return 0;
+    }
+
+    if (overflow) {
+        errno = ERANGE;
+        acc = ULLONG_MAX;
+    } else if (neg) {
+        acc = 0ULL - acc;
+    }
+
+    if (endptr) *endptr = (char *)s;
+    return acc;
+}
+
+unsigned long strtoul(const char *nptr, char **endptr, int base) {
+    unsigned long long v = strtoull(nptr, endptr, base);
+    if (v > ULONG_MAX) {
+        errno = ERANGE;
+        return ULONG_MAX;
+    }
+    return (unsigned long)v;
+}
+
+long long strtoll(const char *nptr, char **endptr, int base) {
+    const char *s = nptr;
+    int neg = 0;
+    char *local_end = NULL;
+    unsigned long long limit;
+    unsigned long long mag;
+    int saved_errno = errno;
+    int over = 0;
+
+    while (isspace((unsigned char)*s)) s++;
+    if (*s == '-') {
+        neg = 1;
+        s++;
+    } else if (*s == '+') {
+        s++;
+    }
+
+    errno = 0;
+    mag = strtoull(s, &local_end, base);
+    over = (errno == ERANGE);
+    if (!over) errno = saved_errno;
+    if (local_end == s) {
+        if (endptr) *endptr = (char *)nptr;
+        return 0;
+    }
+
+    if (endptr) *endptr = local_end;
+
+    if (neg) {
+        limit = (unsigned long long)LLONG_MAX + 1ULL;
+        if (mag > limit || (over && mag == ULLONG_MAX)) {
+            errno = ERANGE;
+            return LLONG_MIN;
+        }
+        if (mag == limit) return LLONG_MIN;
+        return -(long long)mag;
+    }
+
+    if (mag > (unsigned long long)LLONG_MAX || (over && mag == ULLONG_MAX)) {
+        errno = ERANGE;
+        return LLONG_MAX;
+    }
+    return (long long)mag;
+}
+
 int atoi(const char *nptr) {
     return (int)atol(nptr);
 }
@@ -324,7 +452,7 @@ long atol(const char *nptr) {
 }
 
 long long atoll(const char *nptr) {
-    return (long long)atol(nptr);
+    return strtoll(nptr, NULL, 10);
 }
 
 double atof(const char *nptr) {
