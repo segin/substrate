@@ -151,6 +151,8 @@ typedef struct {
     ext2_fs_t *fs;
     uint32_t inode_num;
     ext2_inode_t inode;
+    uint16_t cache_slot;
+    uint16_t pin_count;
     struct dirent current_dirent; // For readdir
 
     // Readdir cache for sequential access optimization

@@ -25,23 +25,6 @@ static fs_node_t *vfs_cross_mountpoint(fs_node_t *node) {
     if ((node->flags & FS_MOUNTPOINT) && node->ptr) {
         return node->ptr;
     }
-
-    struct mount *mp;
-    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
-        fs_node_t *covered = mp->mnt_node_covered;
-        if (!covered || !mp->mnt_node_root) continue;
-
-        if (covered == node) {
-            return mp->mnt_node_root;
-        }
-
-        if (covered->inode != 0 &&
-            covered->inode == node->inode &&
-            ((covered->flags & 0x7) == (node->flags & 0x7))) {
-            return mp->mnt_node_root;
-        }
-    }
-
     return node;
 }
 

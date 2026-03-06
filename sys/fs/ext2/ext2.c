@@ -19,6 +19,22 @@ static int ext2_node_cache_idx = 0;
 
 static uma_zone_t *ext2_block_cache;
 
+static void ext2_node_open(fs_node_t *node) {
+    if (!node) return;
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx) return;
+    ctx->pin_count++;
+}
+
+static void ext2_node_close(fs_node_t *node) {
+    if (!node) return;
+    ext2_node_t *ctx = (ext2_node_t *)(uintptr_t)node->impl;
+    if (!ctx) return;
+    if (ctx->pin_count > 0) {
+        ctx->pin_count--;
+    }
+}
+
 // Forward declarations
 fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data);
 size_t ext2_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
@@ -462,7 +478,19 @@ uint32_t ext2_inode_write(ext2_node_t *node, off_t offset, uint32_t size, const 
 
 // Allocate a node from the cache
 fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inode) {
-    int idx = ext2_node_cache_idx++ % EXT2_NODE_CACHE_SIZE;
+    int idx = -1;
+    int start = ext2_node_cache_idx % EXT2_NODE_CACHE_SIZE;
+    for (int i = 0; i < EXT2_NODE_CACHE_SIZE; i++) {
+        int probe = (start + i) % EXT2_NODE_CACHE_SIZE;
+        if (ext2_node_cache[probe].pin_count == 0) {
+            idx = probe;
+            ext2_node_cache_idx = (probe + 1) % EXT2_NODE_CACHE_SIZE;
+            break;
+        }
+    }
+    if (idx < 0) {
+        return NULL;
+    }
     
     ext2_node_t *ctx = &ext2_node_cache[idx];
     fs_node_t *node = &ext2_fs_node_cache[idx];
@@ -501,6 +529,10 @@ fs_node_t *ext2_alloc_node(ext2_fs_t *fs, uint32_t inode_num, ext2_inode_t *inod
     node->uid = inode->i_uid;
     node->gid = inode->i_gid;
     node->impl = (uintptr_t)ctx;
+    node->open = ext2_node_open;
+    node->close = ext2_node_close;
+    ctx->cache_slot = (uint16_t)idx;
+    ctx->pin_count = 0;
     
     // Set type and callbacks based on inode mode
     uint16_t type = inode->i_mode & 0xF000;
@@ -827,6 +859,8 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_root_ctx.fs = &ext2_fs;
     ext2_root_ctx.inode_num = EXT2_ROOT_INO;
     memcpy(&ext2_root_ctx.inode, &root_inode, sizeof(ext2_inode_t));
+    ext2_root_ctx.cache_slot = 0xFFFF;
+    ext2_root_ctx.pin_count = 0;
     
     memset(&ext2_root, 0, sizeof(fs_node_t));
     strncpy(ext2_root.name, "/", sizeof(ext2_root.name) - 1);
@@ -834,9 +868,14 @@ fs_node_t *ext2_mount(const char *device, uint32_t flags, void *data) {
     ext2_root.flags = FS_DIRECTORY;
     ext2_root.inode = EXT2_ROOT_INO;
     ext2_root.length = root_inode.i_size;
+    ext2_root.mask = root_inode.i_mode & 0x0FFF;
+    ext2_root.uid = root_inode.i_uid;
+    ext2_root.gid = root_inode.i_gid;
     ext2_root.impl = (uintptr_t)&ext2_root_ctx;
     ext2_root.readdir = ext2_readdir;
     ext2_root.finddir = ext2_finddir;
+    ext2_root.open = ext2_node_open;
+    ext2_root.close = ext2_node_close;
     
     kprint("EXT2: Mounted successfully\n");
     return &ext2_root;
