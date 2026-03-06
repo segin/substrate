@@ -3288,7 +3288,7 @@ static int emit_x86_64(FILE *fp, const cc_ssa_module_t *m, const char *src_path,
         has_sret = sret_mem_size > 16 ? 1 : 0;
         param_gpr_bias = has_sret ? 1 : 0;
 
-        if (build_slot_layout(f, 16, &lay, diag) != 0) {
+        if (build_slot_layout(f, 8, &lay, diag) != 0) {
             if (diag != NULL && diag->message[0] == '\0') {
                 set_diag(diag, "x86_64: failed to build slot layout");
             }
@@ -4559,7 +4559,7 @@ static int emit_i386(FILE *fp, const cc_ssa_module_t *m, const char *src_path, i
         } else {
             use_x87_fp = g_i386_has_sse2 ? 0 : 1;
         }
-        if (build_slot_layout(f, 16, &lay, diag) != 0) {
+        if (build_slot_layout(f, 8, &lay, diag) != 0) {
             return -1;
         }
         frame = lay.frame_bytes;
