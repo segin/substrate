@@ -635,6 +635,7 @@ static int resolve_src_sec_index(const elfobj_t *obj, uint16_t shndx, size_t *ou
 static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
                                const struct elf_link_input *input,
                                const uint64_t *sec_bases, const uint8_t *sec_included,
+                               struct elf_symbol **sym_map,
                                size_t input_index) {
     size_t i;
 
@@ -646,7 +647,13 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
         uint16_t shndx = SHN_UNDEF;
         const char *sec_name = "";
 
-        if (sym == NULL || sym->name == NULL || sym->name[0] == '\0') {
+        if (sym == NULL) {
+            continue;
+        }
+        if (sym_map != NULL && i < input->obj->symbol_count) {
+            sym_map[i] = NULL;
+        }
+        if (sym->name == NULL || sym->name[0] == '\0') {
             continue;
         }
         if (plan->version_hook != NULL &&
@@ -684,6 +691,23 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
             }
         }
 
+        if (sym->bind == STB_LOCAL) {
+            n = elf_add_symbol(out, sym->name, value, sym->size, sym->bind, sym->type);
+            if (n == NULL) {
+                return out->last_err == ELF_OK ? ELF_ERR_OOM : out->last_err;
+            }
+            n->other = sym->other;
+            n->shndx = shndx;
+            n->ver_index = sym->ver_index;
+            if (sym_map != NULL && i < input->obj->symbol_count) {
+                sym_map[i] = n;
+            }
+            if (plan_push_map_entry(plan, n->name, sec_name, input->name, n->value, input_index) != ELF_OK) {
+                return ELF_ERR_OOM;
+            }
+            continue;
+        }
+
         existing = elf_find_symbol(out, sym->name);
         if (existing == NULL) {
             n = elf_add_symbol(out, sym->name, value, sym->size, sym->bind, sym->type);
@@ -693,10 +717,17 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
             n->other = sym->other;
             n->shndx = shndx;
             n->ver_index = sym->ver_index;
+            if (sym_map != NULL && i < input->obj->symbol_count) {
+                sym_map[i] = n;
+            }
             if (plan_push_map_entry(plan, n->name, sec_name, input->name, n->value, input_index) != ELF_OK) {
                 return ELF_ERR_OOM;
             }
             continue;
+        }
+
+        if (sym_map != NULL && i < input->obj->symbol_count) {
+            sym_map[i] = existing;
         }
 
         if (existing->shndx == SHN_UNDEF && shndx != SHN_UNDEF) {
@@ -725,6 +756,7 @@ static elf_err_t merge_symbols(elf_link_plan_t *plan, elfobj_t *out,
 static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
                                    const struct elf_link_input *input,
                                    const uint64_t *sec_bases, const uint8_t *sec_included,
+                                   struct elf_symbol **sym_map,
                                    size_t input_index) {
     size_t i;
     (void)plan;
@@ -753,6 +785,15 @@ static elf_err_t merge_relocations(elf_link_plan_t *plan, elfobj_t *out,
 
         if (r->symbol == NULL) {
             continue;
+        }
+        if (sym_map != NULL && r->symbol->index < input->obj->symbol_count) {
+            dst_sym = sym_map[r->symbol->index];
+            if (dst_sym != NULL) {
+                if (elf_add_relocation(dst_sec, off, dst_sym, r->type, r->addend) != ELF_OK) {
+                    return ELF_ERR_RELOC;
+                }
+                continue;
+            }
         }
         if (r->symbol->name == NULL || r->symbol->name[0] == '\0') {
             char anon_name[96];
@@ -931,6 +972,7 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
         const struct elf_link_input *in = &plan->inputs[i];
         uint64_t *sec_bases;
         uint8_t *sec_included;
+        struct elf_symbol **sym_map;
         elf_err_t err;
 
         if (in->obj == NULL) {
@@ -950,22 +992,26 @@ elf_err_t elf_link_plan_link(elf_link_plan_t *plan, elfobj_t **output) {
 
         sec_bases = (uint64_t *)elf__calloc(in->obj->section_count, sizeof(sec_bases[0]));
         sec_included = (uint8_t *)elf__calloc(in->obj->section_count, sizeof(sec_included[0]));
-        if ((sec_bases == NULL || sec_included == NULL) && in->obj->section_count != 0) {
+        sym_map = (struct elf_symbol **)elf__calloc(in->obj->symbol_count, sizeof(sym_map[0]));
+        if ((sec_bases == NULL || sec_included == NULL || sym_map == NULL) &&
+            (in->obj->section_count != 0 || in->obj->symbol_count != 0)) {
             free(sec_bases);
             free(sec_included);
+            free(sym_map);
             elf_close(out);
             return ELF_ERR_OOM;
         }
 
         err = merge_sections(plan, out, in, sec_bases, sec_included, &comdat_seen);
         if (err == ELF_OK) {
-            err = merge_symbols(plan, out, in, sec_bases, sec_included, i);
+            err = merge_symbols(plan, out, in, sec_bases, sec_included, sym_map, i);
         }
         if (err == ELF_OK) {
-            err = merge_relocations(plan, out, in, sec_bases, sec_included, i);
+            err = merge_relocations(plan, out, in, sec_bases, sec_included, sym_map, i);
         }
         free(sec_bases);
         free(sec_included);
+        free(sym_map);
         if (err != ELF_OK) {
             comdat_set_free(&comdat_seen);
             elf_close(out);

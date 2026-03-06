@@ -1,7 +1,6 @@
 #include <elfobj.h>
 #include "elf_private.h"
 
-#include <elf.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
