@@ -248,16 +248,28 @@ void syscall_handler(registers_t *regs) {
 }
 
 /* Arch-specific syscalls that require registers_t */
-int sys_fork(void) {
-    // Fork needs access to the current syscall's register frame
+int arch_fork_with_stack(void *child_stack) {
     if (!current_thread || !current_thread->syscall_regs) return -1;
-    return sched_fork_process(current_process, current_thread->syscall_regs);
+
+    /*
+     * Copy the trap frame before handing it to fork logic.
+     * Using the live pointer directly is fragile if deeper call chains or
+     * asynchronous paths touch the current kernel stack frame.
+     */
+    registers_t regs = *(registers_t *)current_thread->syscall_regs;
+    if (child_stack) {
+        regs.useresp = (uint32_t)(uintptr_t)child_stack;
+    }
+    return sched_fork_process(current_process, &regs);
+}
+
+int sys_fork(void) {
+    return arch_fork_with_stack(NULL);
 }
 
 int sys_vfork(void) {
-    // vfork: child shares parent's address space, parent blocks until child exec/exit
-    if (!current_thread || !current_thread->syscall_regs) return -1;
-    return sched_fork_process(current_process, current_thread->syscall_regs);
+    /* Current implementation aliases vfork to fork semantics. */
+    return arch_fork_with_stack(NULL);
 }
 
 extern void isr128(void); 

@@ -3,6 +3,8 @@
 #include <sys/tty.h>
 #include <sys/file.h>
 #include <vfs/vfs.h>
+#include <kern/version.h>
+#include <drivers/console/uart/uart.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
 #include <stdio.h>
@@ -83,8 +85,20 @@ static size_t console_node_read(fs_node_t *node, off_t offset, size_t size, uint
 
 static size_t console_node_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
     (void)node; (void)offset;
-    if (!console_tty) return 0;
-    return tty_write(console_tty, (const char*)buffer, size);
+    if (!console_tty) {
+        backend_write((const char *)buffer, size);
+        return size;
+    }
+
+    int written = tty_write(console_tty, (const char*)buffer, size);
+    if (serial_debug_enabled && size > 0) {
+        uart_write((const char *)buffer, size);
+    }
+    if (written <= 0 && size > 0) {
+        backend_write((const char *)buffer, size);
+        return size;
+    }
+    return (size_t)written;
 }
 
 static int console_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
@@ -99,13 +113,29 @@ static int console_node_poll(fs_node_t *node, void *waiter) {
     return tty_poll(console_tty, waiter);
 }
 
+static void console_node_open(fs_node_t *node) {
+    (void)node;
+    if (console_tty) {
+        tty_open(console_tty);
+    }
+}
+
+static void console_node_close(fs_node_t *node) {
+    (void)node;
+    if (console_tty) {
+        tty_close(console_tty);
+    }
+}
+
 static fs_node_t console_node = {
     .name = "console",
     .flags = FS_CHARDEVICE,
     .read = console_node_read,
     .write = console_node_write,
     .ioctl = console_node_ioctl,
-    .poll = console_node_poll
+    .poll = console_node_poll,
+    .open = console_node_open,
+    .close = console_node_close
 };
 
 fs_node_t *console_get_node(void) {

@@ -1,340 +1,203 @@
 /*
- * test_ntsync.c - NTSYNC Driver Unit Tests
- *
- * Tests for Windows NT synchronization primitive driver:
- * - Semaphore operations (create, post, read)
- * - Mutex operations (create, unlock, read, kill_owner)
- * - Event operations (create, set, reset, pulse, read)
- * - Wait operations (wait_any, wait_all)
+ * test_ntsync.c - Behavioral tests for ntsync driver
  */
 
+#include <kern/console.h>
+#include <kern/file.h>
+#include <sys/errno.h>
+#include <sys/fcntl.h>
 #include <sys/ntsync.h>
+#include <sys/proc.h>
+#include <vfs/vfs.h>
 #include <stdint.h>
 #include <string.h>
-#include <errno.h>
 
-/* Test framework macros */
+extern process_t *current_process;
+
+extern int kern_open(const char *path, int flags, int mode);
+extern int kern_close(int fd);
+extern int kern_ioctl(int fd, uint32_t request, void *arg);
+
+static int tests_passed;
+static int tests_failed;
+
 #define TEST_ASSERT(cond, msg) do { \
     if (!(cond)) { \
-        test_fail(__func__, __LINE__, msg); \
-        return 1; \
+        kprint("  [NTSYNC] FAIL: "); \
+        kprint(msg); \
+        kprint("\n"); \
+        tests_failed++; \
+        return; \
     } \
-} while(0)
+} while (0)
 
-#define TEST_PASS() do { test_pass(__func__); return 0; } while(0)
+static void test_open_isolation(void) {
+    int fd1 = kern_open("/dev/ntsync", O_RDWR, 0);
+    int fd2 = kern_open("/dev/ntsync", O_RDWR, 0);
 
-static int tests_passed = 0;
-static int tests_failed = 0;
+    TEST_ASSERT(fd1 >= 0, "open #1 failed");
+    TEST_ASSERT(fd2 >= 0, "open #2 failed");
+    TEST_ASSERT(fd1 != fd2, "duplicate fd allocation");
 
-extern void kprint(const char *s);
-static void test_pass(const char *name) {
-    (void)name;
+    file_t *f1 = current_process->fds[fd1];
+    file_t *f2 = current_process->fds[fd2];
+    TEST_ASSERT(f1 && f1->f_data, "fd1 missing file data");
+    TEST_ASSERT(f2 && f2->f_data, "fd2 missing file data");
+
+    fs_node_t *n1 = (fs_node_t *)f1->f_data;
+    fs_node_t *n2 = (fs_node_t *)f2->f_data;
+
+    TEST_ASSERT(n1 != n2, "shared fs_node between opens");
+    TEST_ASSERT(n1->impl != 0, "fd1 instance not initialized");
+    TEST_ASSERT(n2->impl != 0, "fd2 instance not initialized");
+    TEST_ASSERT(n1->impl != n2->impl, "shared ntsync instance between opens");
+
+    kern_close(fd2);
+    kern_close(fd1);
     tests_passed++;
 }
 
-static void test_fail(const char *name, int line, const char *msg) {
-    (void)name;
-    (void)line;
-    (void)msg;
-    tests_failed++;
+static void test_wait_arg_validation(void) {
+    int inst_fd = kern_open("/dev/ntsync", O_RDWR, 0);
+    TEST_ASSERT(inst_fd >= 0, "instance open failed");
+
+    struct ntsync_event_args eargs;
+    eargs.signaled = 0;
+    eargs.manual = 0;
+
+    int event_fd = kern_ioctl(inst_fd, NTSYNC_IOC_CREATE_EVENT, &eargs);
+    TEST_ASSERT(event_fd >= 0, "event creation failed");
+
+    int objs[1];
+    objs[0] = event_fd;
+
+    struct ntsync_wait_args wait;
+    memset(&wait, 0, sizeof(wait));
+    wait.timeout = 0;
+    wait.objs = (uint64_t)(uintptr_t)objs;
+    wait.count = 1;
+    wait.owner = 1;
+
+    wait.pad = 1;
+    TEST_ASSERT(kern_ioctl(inst_fd, NTSYNC_IOC_WAIT_ANY, &wait) == -EINVAL,
+                "WAIT_ANY accepted non-zero pad");
+
+    wait.pad = 0;
+    wait.flags = 0x80000000U;
+    TEST_ASSERT(kern_ioctl(inst_fd, NTSYNC_IOC_WAIT_ANY, &wait) == -EINVAL,
+                "WAIT_ANY accepted unknown flags");
+
+    wait.flags = 0x80000000U;
+    TEST_ASSERT(kern_ioctl(inst_fd, NTSYNC_IOC_WAIT_ALL, &wait) == -EINVAL,
+                "WAIT_ALL accepted unknown flags");
+
+    kern_close(event_fd);
+    kern_close(inst_fd);
+    tests_passed++;
 }
 
-/* ========== Semaphore Tests ========== */
+static void test_auto_event_wait_consumes_signal(void) {
+    int inst_fd = kern_open("/dev/ntsync", O_RDWR, 0);
+    TEST_ASSERT(inst_fd >= 0, "instance open failed");
 
-/*
- * Test: Semaphore args validation
- */
-static int test_sem_args_validation(void) {
-    struct ntsync_sem_args args;
-    
-    /* count > max should fail */
-    args.count = 10;
-    args.max = 5;
-    /* We can't actually call the ioctl from here, but we test the structure */
-    TEST_ASSERT(args.count > args.max, "Invalid sem args should be detected");
-    
-    TEST_PASS();
+    struct ntsync_event_args eargs;
+    eargs.signaled = 0;
+    eargs.manual = 0;
+
+    int event_fd = kern_ioctl(inst_fd, NTSYNC_IOC_CREATE_EVENT, &eargs);
+    TEST_ASSERT(event_fd >= 0, "event creation failed");
+
+    uint32_t prev = 0xFFFFFFFFU;
+    TEST_ASSERT(kern_ioctl(event_fd, NTSYNC_IOC_SET_EVENT, &prev) == 0,
+                "SET_EVENT failed");
+    TEST_ASSERT(prev == 0, "SET_EVENT previous state incorrect");
+
+    int objs[1];
+    objs[0] = event_fd;
+
+    struct ntsync_wait_args wait;
+    memset(&wait, 0, sizeof(wait));
+    wait.timeout = UINT64_MAX;
+    wait.objs = (uint64_t)(uintptr_t)objs;
+    wait.count = 1;
+    wait.owner = 7;
+
+    TEST_ASSERT(kern_ioctl(inst_fd, NTSYNC_IOC_WAIT_ANY, &wait) == 0,
+                "WAIT_ANY failed to acquire signaled auto event");
+    TEST_ASSERT(wait.index == 0, "WAIT_ANY returned wrong index");
+
+    struct ntsync_event_args state;
+    memset(&state, 0, sizeof(state));
+    TEST_ASSERT(kern_ioctl(event_fd, NTSYNC_IOC_READ_EVENT, &state) == 0,
+                "READ_EVENT failed");
+    TEST_ASSERT(state.signaled == 0, "auto-reset event remained signaled after acquire");
+
+    wait.timeout = 0;
+    TEST_ASSERT(kern_ioctl(inst_fd, NTSYNC_IOC_WAIT_ANY, &wait) == -ETIMEDOUT,
+                "WAIT_ANY did not time out after auto-reset consume");
+
+    kern_close(event_fd);
+    kern_close(inst_fd);
+    tests_passed++;
 }
 
-/*
- * Test: Semaphore state transitions
- */
-static int test_sem_state_transitions(void) {
-    struct ntsync_sem_args args;
-    
-    /* Initial state */
-    args.count = 3;
-    args.max = 10;
-    
-    TEST_ASSERT(args.count <= args.max, "count should be <= max");
-    TEST_ASSERT(args.count > 0, "should be signaled when count > 0");
-    
-    /* After decrement */
-    args.count = 0;
-    TEST_ASSERT(args.count == 0, "should be non-signaled when count == 0");
-    
-    TEST_PASS();
+static void test_alert_not_spurious_success(void) {
+    int inst_fd = kern_open("/dev/ntsync", O_RDWR, 0);
+    TEST_ASSERT(inst_fd >= 0, "instance open failed");
+
+    struct ntsync_event_args eargs;
+    eargs.signaled = 0;
+    eargs.manual = 0;
+
+    int wait_event_fd = kern_ioctl(inst_fd, NTSYNC_IOC_CREATE_EVENT, &eargs);
+    TEST_ASSERT(wait_event_fd >= 0, "wait object creation failed");
+
+    int alert_event_fd = kern_ioctl(inst_fd, NTSYNC_IOC_CREATE_EVENT, &eargs);
+    TEST_ASSERT(alert_event_fd >= 0, "alert object creation failed");
+
+    int objs[1];
+    objs[0] = wait_event_fd;
+
+    struct ntsync_wait_args wait;
+    memset(&wait, 0, sizeof(wait));
+    wait.timeout = 0;
+    wait.objs = (uint64_t)(uintptr_t)objs;
+    wait.count = 1;
+    wait.owner = 42;
+    wait.alert = (uint32_t)alert_event_fd;
+
+    TEST_ASSERT(kern_ioctl(inst_fd, NTSYNC_IOC_WAIT_ANY, &wait) == -ETIMEDOUT,
+                "WAIT_ANY reported alert without signal");
+
+    kern_close(alert_event_fd);
+    kern_close(wait_event_fd);
+    kern_close(inst_fd);
+    tests_passed++;
 }
 
-/* ========== Mutex Tests ========== */
-
-/*
- * Test: Mutex args validation
- */
-static int test_mutex_args_validation(void) {
-    struct ntsync_mutex_args args;
-    
-    /* owner==0 && count>0 is invalid */
-    args.owner = 0;
-    args.count = 1;
-    int invalid1 = (args.owner == 0 && args.count != 0);
-    TEST_ASSERT(invalid1, "owner==0 && count>0 should be invalid");
-    
-    /* owner!=0 && count==0 is invalid */
-    args.owner = 123;
-    args.count = 0;
-    int invalid2 = (args.owner != 0 && args.count == 0);
-    TEST_ASSERT(invalid2, "owner!=0 && count==0 should be invalid");
-    
-    /* Valid: both 0 */
-    args.owner = 0;
-    args.count = 0;
-    int valid1 = (args.owner == 0 && args.count == 0);
-    TEST_ASSERT(valid1, "owner==0 && count==0 should be valid");
-    
-    /* Valid: both nonzero */
-    args.owner = 123;
-    args.count = 1;
-    int valid2 = (args.owner != 0 && args.count != 0);
-    TEST_ASSERT(valid2, "owner!=0 && count!=0 should be valid");
-    
-    TEST_PASS();
-}
-
-/*
- * Test: Mutex ownership semantics
- */
-static int test_mutex_ownership(void) {
-    struct ntsync_mutex_args args;
-    
-    /* Unowned mutex */
-    args.owner = 0;
-    args.count = 0;
-    TEST_ASSERT(args.owner == 0, "unowned mutex has owner == 0");
-    
-    /* Acquire by thread 100 */
-    args.owner = 100;
-    args.count = 1;
-    TEST_ASSERT(args.owner == 100, "owned after acquire");
-    TEST_ASSERT(args.count == 1, "count == 1 on first acquire");
-    
-    /* Recursive acquire */
-    args.count++;
-    TEST_ASSERT(args.count == 2, "count increments on recursive acquire");
-    
-    /* Release once */
-    args.count--;
-    TEST_ASSERT(args.count == 1, "count decrements on release");
-    TEST_ASSERT(args.owner == 100, "still owned after partial release");
-    
-    /* Full release */
-    args.count--;
-    if (args.count == 0) args.owner = 0;
-    TEST_ASSERT(args.owner == 0, "unowned after full release");
-    
-    TEST_PASS();
-}
-
-/* ========== Event Tests ========== */
-
-/*
- * Test: Event state transitions (manual-reset)
- */
-static int test_event_manual_reset(void) {
-    struct ntsync_event_args args;
-    
-    /* Create manual-reset event, initially signaled */
-    args.signaled = 1;
-    args.manual = 1;
-    
-    TEST_ASSERT(args.signaled == 1, "initially signaled");
-    TEST_ASSERT(args.manual == 1, "manual-reset type");
-    
-    /* Reset */
-    args.signaled = 0;
-    TEST_ASSERT(args.signaled == 0, "reset clears signal");
-    
-    /* Set */
-    args.signaled = 1;
-    TEST_ASSERT(args.signaled == 1, "set restores signal");
-    
-    /* Manual-reset: acquisition does NOT clear signal */
-    /* (this is semantic, just verify the flag) */
-    TEST_ASSERT(args.manual == 1, "still manual-reset after operations");
-    
-    TEST_PASS();
-}
-
-/*
- * Test: Event state transitions (auto-reset)
- */
-static int test_event_auto_reset(void) {
-    struct ntsync_event_args args;
-    
-    /* Create auto-reset event */
-    args.signaled = 1;
-    args.manual = 0;
-    
-    TEST_ASSERT(args.signaled == 1, "initially signaled");
-    TEST_ASSERT(args.manual == 0, "auto-reset type");
-    
-    /* Simulate acquisition (auto-reset clears signal) */
-    if (!args.manual) {
-        args.signaled = 0;
-    }
-    TEST_ASSERT(args.signaled == 0, "auto-reset clears on acquisition");
-    
-    TEST_PASS();
-}
-
-/* ========== Wait Args Tests ========== */
-
-/*
- * Test: Wait args structure layout
- */
-static int test_wait_args_layout(void) {
-    struct ntsync_wait_args args;
-    
-    /* Verify structure can hold required fields */
-    args.timeout = 0xFFFFFFFFFFFFFFFFULL;
-    args.objs = 0x12345678;
-    args.count = 5;
-    args.owner = 1000;
-    args.index = 0;
-    args.alert = 0;
-    args.flags = NTSYNC_WAIT_REALTIME;
-    args.pad = 0;
-    
-    TEST_ASSERT(args.timeout == 0xFFFFFFFFFFFFFFFFULL, "infinite timeout");
-    TEST_ASSERT(args.count == 5, "5 objects");
-    TEST_ASSERT(args.owner == 1000, "owner 1000");
-    TEST_ASSERT(args.flags == NTSYNC_WAIT_REALTIME, "realtime flag");
-    TEST_ASSERT(args.pad == 0, "padding zeroed");
-    
-    TEST_PASS();
-}
-
-/*
- * Test: Wait count limits
- */
-static int test_wait_count_limits(void) {
-    struct ntsync_wait_args args;
-    
-    /* Valid count */
-    args.count = NTSYNC_MAX_WAIT_COUNT;
-    TEST_ASSERT(args.count <= 64, "max 64 objects");
-    
-    /* Zero count should be rejected */
-    args.count = 0;
-    TEST_ASSERT(args.count == 0, "zero count detected");
-    
-    /* Overflow count should be rejected */
-    args.count = NTSYNC_MAX_WAIT_COUNT + 1;
-    TEST_ASSERT(args.count > NTSYNC_MAX_WAIT_COUNT, "overflow detected");
-    
-    TEST_PASS();
-}
-
-/* ========== Property Tests ========== */
-
-/*
- * Property: Semaphore count never exceeds max
- */
-static int test_sem_prop_bounded(void) {
-    struct ntsync_sem_args args;
-    
-    for (int max = 1; max <= 100; max++) {
-        for (int count = 0; count <= max; count++) {
-            args.max = max;
-            args.count = count;
-            TEST_ASSERT(args.count <= args.max, "count never exceeds max");
-        }
-    }
-    
-    TEST_PASS();
-}
-
-/*
- * Property: Mutex recursion count is bounded
- */
-static int test_mutex_prop_recursion_bounded(void) {
-    struct ntsync_mutex_args args;
-    
-    args.owner = 42;
-    args.count = 0;
-    
-    /* Simulate recursive acquires */
-    for (int i = 0; i < 1000; i++) {
-        if (args.count == 0) args.owner = 42;
-        args.count++;
-    }
-    
-    /* Should have 1000 recursions */
-    TEST_ASSERT(args.count == 1000, "tracked 1000 recursive acquires");
-    
-    /* Simulate recursive releases */
-    for (int i = 0; i < 1000; i++) {
-        args.count--;
-        if (args.count == 0) args.owner = 0;
-    }
-    
-    TEST_ASSERT(args.count == 0, "fully released after 1000 releases");
-    TEST_ASSERT(args.owner == 0, "unowned after full release");
-    
-    TEST_PASS();
-}
-
-/* ========== Test Runner ========== */
-
-typedef int (*test_fn)(void);
-
-struct test_case {
-    const char *name;
-    test_fn fn;
-};
-
-static struct test_case ntsync_tests[] = {
-    {"sem_args_validation", test_sem_args_validation},
-    {"sem_state_transitions", test_sem_state_transitions},
-    {"mutex_args_validation", test_mutex_args_validation},
-    {"mutex_ownership", test_mutex_ownership},
-    {"event_manual_reset", test_event_manual_reset},
-    {"event_auto_reset", test_event_auto_reset},
-    {"wait_args_layout", test_wait_args_layout},
-    {"wait_count_limits", test_wait_count_limits},
-    {"sem_prop_bounded", test_sem_prop_bounded},
-    {"mutex_prop_recursion_bounded", test_mutex_prop_recursion_bounded},
-    {NULL, NULL}
-};
-
-static int test_ntsync_run_all(void) {
+void test_ntsync(void) {
     tests_passed = 0;
     tests_failed = 0;
-    
-    for (int i = 0; ntsync_tests[i].fn != NULL; i++) {
-        ntsync_tests[i].fn();
-    }
-    
-    return tests_failed;
-}
 
-/*
- * Entry point for test runner
- */
-void test_ntsync(void) {
     kprint("  [NTSYNC] Running ntsync tests...\n");
-    int failed = test_ntsync_run_all();
-    if (failed == 0) {
+
+    /*
+     * Kernel tests run before VFS mount setup in current boot order.
+     * If /dev is not ready yet, skip and rely on host behavioral tests.
+     */
+    int probe_fd = kern_open("/dev/ntsync", O_RDWR, 0);
+    if (probe_fd < 0) {
+        kprint("  [NTSYNC] Skipping (device path unavailable at this boot stage)\n");
+        return;
+    }
+    kern_close(probe_fd);
+
+    test_open_isolation();
+    test_wait_arg_validation();
+    test_auto_event_wait_consumes_signal();
+    test_alert_not_spurious_success();
+
+    if (tests_failed == 0) {
         kprint("  [NTSYNC] All tests passed\n");
     } else {
         kprint("  [NTSYNC] Some tests failed\n");

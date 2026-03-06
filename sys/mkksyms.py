@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 import sys
+import re
+
+IDENT_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 
 def main():
     if len(sys.argv) != 1:
@@ -13,9 +16,8 @@ def main():
     print('    char name[56];')
     print('};')
     print('')
-    print('struct ksym ksym_table[] = {')
+    print('')
 
-    count = 0
     symbols = []
 
     for line in sys.stdin:
@@ -24,28 +26,45 @@ def main():
         if len(parts) >= 3:
             addr_str, type_char, name = parts[0], parts[1], parts[2]
 
-            # Interested in Text/Data/Bss/ROData
-            if type_char.lower() not in ['t', 'd', 'b', 'r', 'a']:
+            # Only use global symbols. Local/static symbols don't have stable
+            # C names we can reference as pointers in generated C.
+            if type_char not in ['T', 'D', 'B', 'R', 'A']:
                 continue
 
             # Filter out mapping symbols or compiler internals if necessary
             if name.startswith('$') or name.startswith('.L'):
                 continue
+            if not IDENT_RE.match(name):
+                continue
 
             try:
                 addr = int(addr_str, 16)
-                symbols.append((addr, name))
+                symbols.append((addr, type_char, name))
             except ValueError:
                 pass
 
     # Sort symbols by address
     symbols.sort(key=lambda x: x[0])
 
-    for addr, name in symbols:
+    # Emit extern declarations so table entries use real linked pointers.
+    decls = set()
+    for _, type_char, name in symbols:
+        if type_char == 'T':
+            decls.add(f'extern void {name}(void);')
+        else:
+            decls.add(f'extern char {name}[];')
+
+    for decl in sorted(decls):
+        print(decl)
+    print('')
+    print('struct ksym ksym_table[] = {')
+
+    count = 0
+    for _, _, name in symbols:
         # Truncate to 55 chars
         if len(name) > 55:
             name = name[:55]
-        print(f'    {{ 0x{addr:08x}, "{name}" }},')
+        print(f'    {{ (uint32_t)(uintptr_t)&{name}, "{name}" }},')
         count += 1
 
     print('    { 0xFFFFFFFF, "" }')

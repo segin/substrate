@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stddef.h>
 #include <vm/vm_kmem.h>
+#include <kern/console.h>
 
 extern fs_node_t *console_get_node(void);
 
@@ -41,6 +42,9 @@ static int tty_ioctl_proxy(fs_node_t *node, uint32_t request, void *arg) {
 static fs_node_t tty_node = {
     .name = "tty",
     .flags = FS_CHARDEVICE,
+    .mask = 0666,
+    .uid = 0,
+    .gid = 0,
     .read = tty_read_proxy,
     .write = tty_write_proxy,
     .ioctl = tty_ioctl_proxy
@@ -96,6 +100,9 @@ static fs_node_t *devfs_create_dir_node(const char *name) {
     memset(node, 0, sizeof(fs_node_t));
     strncpy(node->name, name, 127);
     node->flags = FS_DIRECTORY;
+    node->mask = 0755;
+    node->uid = 0;
+    node->gid = 0;
     node->readdir = &devfs_dir_readdir;
     node->finddir = &devfs_dir_finddir;
     return node;
@@ -129,6 +136,52 @@ static fs_node_t *devfs_dir_finddir(fs_node_t *node, char *name) {
     if (child) return child->node;
 
     return NULL;
+}
+
+static int devfs_valid_component(const char *name, size_t len) {
+    if (!name || len == 0) return 0;
+    if (len == 1 && name[0] == '.') return 0;
+    if (len == 2 && name[0] == '.' && name[1] == '.') return 0;
+    return 1;
+}
+
+static int devfs_path_allowed(const char *path) {
+    const char *sep;
+    size_t top_len;
+    char top[128];
+    devfs_entry_t *top_entry;
+
+    if (!path || !path[0]) return 0;
+    if (path[0] == '/') return 0;
+
+    sep = strchr(path, '/');
+    if (!sep) {
+        return devfs_valid_component(path, strlen(path));
+    }
+
+    top_len = (size_t)(sep - path);
+    if (!devfs_valid_component(path, top_len)) return 0;
+    if (top_len >= sizeof(top)) return 0;
+
+    strncpy(top, path, top_len);
+    top[top_len] = '\0';
+
+    if (!root_entry) return 0;
+    top_entry = devfs_find_child(root_entry, top);
+    if (!top_entry || !top_entry->node) return 0;
+    if ((top_entry->node->flags & 0x7) != FS_DIRECTORY) return 0;
+
+    /* Validate all remaining path components. */
+    while (*sep == '/') {
+        const char *comp = sep + 1;
+        const char *next = strchr(comp, '/');
+        size_t len = next ? (size_t)(next - comp) : strlen(comp);
+        if (!devfs_valid_component(comp, len)) return 0;
+        if (!next) break;
+        sep = next;
+    }
+
+    return 1;
 }
 
 static void devfs_add_entry(const char *path, fs_node_t *node) {
@@ -169,17 +222,31 @@ static void devfs_add_entry(const char *path, fs_node_t *node) {
 }
 
 void devfs_register_device(fs_node_t *node) {
-    if (node->flags == FS_BLOCKDEVICE) {
-        // Storage devices go under storage/
-        char path[128];
+    char path[128];
+
+    if (!node || !node->name[0]) {
+        return;
+    }
+
+    if (!devfs_path_allowed(node->name)) {
+        kprintf("devfs: rejected device path '%s'\n", node->name);
+        return;
+    }
+
+    if (strchr(node->name, '/')) {
+        devfs_add_entry(node->name, node);
+        return;
+    }
+
+    if ((node->flags & 0x7) == FS_BLOCKDEVICE) {
         strncpy(path, "storage/", sizeof(path) - 1);
         path[sizeof(path) - 1] = '\0';
         strncat(path, node->name, sizeof(path) - strlen(path) - 1);
         devfs_add_entry(path, node);
-    } else {
-        // Character devices use their name (which may include slashes)
-        devfs_add_entry(node->name, node);
+        return;
     }
+
+    devfs_add_entry(node->name, node);
 }
 
 static fs_node_t devfs_root_node;
@@ -201,6 +268,9 @@ void devfs_init(void) {
     strncpy(devfs_root_node.name, "dev", sizeof(devfs_root_node.name) - 1);
     devfs_root_node.name[sizeof(devfs_root_node.name) - 1] = '\0';
     devfs_root_node.flags = FS_DIRECTORY;
+    devfs_root_node.mask = 0755;
+    devfs_root_node.uid = 0;
+    devfs_root_node.gid = 0;
     devfs_root_node.readdir = &devfs_dir_readdir;
     devfs_root_node.finddir = &devfs_dir_finddir;
 
@@ -213,6 +283,26 @@ void devfs_init(void) {
         root_entry->node = &devfs_root_node;
 
         devfs_root_node.impl = (uintptr_t)root_entry;
+
+        /* Create common subsystem directories eagerly. */
+        if (!devfs_find_child(root_entry, "comm")) {
+            fs_node_t *comm_dir = devfs_create_dir_node("comm");
+            if (comm_dir) {
+                devfs_create_entry("comm", comm_dir, root_entry);
+            }
+        }
+        if (!devfs_find_child(root_entry, "storage")) {
+            fs_node_t *storage_dir = devfs_create_dir_node("storage");
+            if (storage_dir) {
+                devfs_create_entry("storage", storage_dir, root_entry);
+            }
+        }
+        if (!devfs_find_child(root_entry, "input")) {
+            fs_node_t *input_dir = devfs_create_dir_node("input");
+            if (input_dir) {
+                devfs_create_entry("input", input_dir, root_entry);
+            }
+        }
     }
     
     devfs_root_node_ptr = &devfs_root_node; // Export for VFS device lookup

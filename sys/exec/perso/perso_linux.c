@@ -251,6 +251,51 @@ int linux_sys_ftruncate(int fd, int32_t length) {
     return sys_ftruncate(fd, (uint32_t)length, 0);
 }
 
+static int linux_sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {
+    (void)parent_tidptr;
+    (void)tls;
+    (void)child_tidptr;
+    extern int arch_fork_with_stack(void *child_stack);
+
+    const uint32_t CLONE_SIGNAL_MASK     = 0x000000FFu;
+    const uint32_t CLONE_VM              = 0x00000100u;
+    const uint32_t CLONE_VFORK           = 0x00004000u;
+    const uint32_t CLONE_SETTLS          = 0x00080000u;
+    const uint32_t CLONE_PARENT_SETTID   = 0x00100000u;
+    const uint32_t CLONE_CHILD_CLEARTID  = 0x00200000u;
+    const uint32_t CLONE_CHILD_SETTID    = 0x01000000u;
+
+    const uint32_t supported =
+        CLONE_SIGNAL_MASK |
+        CLONE_VM |
+        CLONE_VFORK |
+        CLONE_SETTLS |
+        CLONE_PARENT_SETTID |
+        CLONE_CHILD_CLEARTID |
+        CLONE_CHILD_SETTID;
+
+    if (flags & ~supported) {
+        return -22; /* EINVAL */
+    }
+
+    /*
+     * Process-only compatibility:
+     * - CLONE_VM is accepted only with CLONE_VFORK.
+     * - Thread-group/shared-resource clone modes remain unsupported.
+     */
+    if ((flags & CLONE_VM) && !(flags & CLONE_VFORK)) {
+        return -22; /* EINVAL */
+    }
+    if ((flags & CLONE_VFORK) && !(flags & CLONE_VM)) {
+        return -22; /* EINVAL */
+    }
+
+    if (flags & CLONE_VFORK) {
+        return sys_vfork();
+    }
+    return arch_fork_with_stack(child_stack);
+}
+
 /* Linux Block Device ioctl handler - 0x1200 range (stub) */
 static int linux_ioctl_blk(int fd, uint32_t request, void *arg) {
     (void)fd; (void)request; (void)arg;
@@ -325,7 +370,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_stat_new]       = (void*)linux_sys_stat,
     [LINUX_SYS_lstat_new]      = (void*)linux_sys_lstat,
     [LINUX_SYS_fstat_new]      = (void*)linux_sys_fstat,
-    [LINUX_SYS_clone]          = &sys_clone,
+    [LINUX_SYS_clone]          = (void*)linux_sys_clone,
     [LINUX_SYS_uname]          = &sys_uname,
     [LINUX_SYS_getpgid]        = &sys_getpgid,
     [LINUX_SYS_fchdir]         = &sys_fchdir,

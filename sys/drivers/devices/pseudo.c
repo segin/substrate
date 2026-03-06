@@ -1,5 +1,6 @@
 #include <arch/x86-common/io.h>
 #include <drivers/input/keyboard.h>
+#include <drivers/console/uart/uart.h>
 #include <kern/console.h>
 #include <string.h>
 #include <sys/errno.h>
@@ -10,6 +11,7 @@
 
 extern void mem_init(void);
 extern void mem_test_init(void);
+extern void lpt_init(void);
 
 // /dev/null
 // Implemented in null.c
@@ -135,6 +137,10 @@ void pseudo_init(void) {
     zero_init();
 
     /* Note: /dev/random and /dev/urandom now registered by random_init() */
+
+    /* Register communication character devices under /dev/comm/. */
+    uart_devfs_init();
+    lpt_init();
 
     memset(&tty_node, 0, sizeof(fs_node_t));
     strcpy(tty_node.name, "tty");

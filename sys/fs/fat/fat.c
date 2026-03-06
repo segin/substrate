@@ -13,6 +13,21 @@ static fat_node_t fat_node_cache[FAT_NODE_CACHE_SIZE];
 static fs_node_t fat_fs_node_cache[FAT_NODE_CACHE_SIZE];
 static int fat_node_cache_idx = 0;
 
+static uint32_t fat_default_mask(uint8_t attr) {
+    uint32_t mask;
+    if (attr & FAT_ATTR_DIRECTORY) {
+        mask = 0755;
+    } else {
+        mask = 0644;
+    }
+
+    if (attr & FAT_ATTR_READ_ONLY) {
+        mask &= ~0222;
+    }
+
+    return mask;
+}
+
 // Read sectors from device
 static int fat_read_sectors(fat_fs_t *fs, uint32_t sector, uint32_t count, void *buffer) {
     if (!fs->device || !fs->device->read) return -1;
@@ -243,6 +258,9 @@ static fs_node_t *fat_alloc_node(fat_fs_t *fs, const char *name, uint32_t first_
     node->name[127] = '\0';
     node->impl = (uint32_t)(uintptr_t)ctx;
     node->length = size;
+    node->mask = fat_default_mask(attr);
+    node->uid = 0;
+    node->gid = 0;
     
     if (attr & FAT_ATTR_DIRECTORY) {
         node->flags = FS_DIRECTORY;
@@ -408,6 +426,9 @@ fs_node_t *fat_mount(const char *device, uint32_t flags, void *data) {
     memset(&fat_root_node, 0, sizeof(fs_node_t));
     strcpy(fat_root_node.name, "/");
     fat_root_node.flags = FS_DIRECTORY;
+    fat_root_node.mask = fat_default_mask(FAT_ATTR_DIRECTORY);
+    fat_root_node.uid = 0;
+    fat_root_node.gid = 0;
     fat_root_node.impl = (uint32_t)(uintptr_t)&fat_root_ctx;
     fat_root_node.readdir = fat_readdir;
     fat_root_node.finddir = fat_finddir;

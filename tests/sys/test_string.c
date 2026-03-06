@@ -128,6 +128,17 @@ static void test_strcmp(void) {
     if (strcmp("\x01", "\xff") >= 0) fail("strcmp unsigned comparison ('\\x01', '\\xff') should be negative");
 }
 
+static void test_strlen_strnlen(void) {
+    ASSERT_EQ(strlen(""), 0, "strlen empty");
+    ASSERT_EQ(strlen("substrate"), 9, "strlen basic");
+
+    ASSERT_EQ(strnlen("", 0), 0, "strnlen empty zero max");
+    ASSERT_EQ(strnlen("abc", 0), 0, "strnlen zero limit");
+    ASSERT_EQ(strnlen("abc", 2), 2, "strnlen truncation");
+    ASSERT_EQ(strnlen("abc", 3), 3, "strnlen exact");
+    ASSERT_EQ(strnlen("abc", 10), 3, "strnlen max beyond end");
+}
+
 static void test_strchr_basic(void) {
     char buf[] = "Hello World";
 
@@ -269,6 +280,7 @@ void run_string_tests(void) {
     test_strchr_empty();
     test_strchr_comprehensive();
     test_strcmp();
+    test_strlen_strnlen();
     test_memcmp();
 
     if (failed_tests == 0) {

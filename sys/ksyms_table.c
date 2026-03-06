@@ -5,2846 +5,2854 @@ struct ksym {
     char name[56];
 };
 
+
+extern char _kernel_end[];
+extern char boot_time[];
+extern char cpu_count[];
+extern char cpus[];
+extern char curpmap[];
+extern char current_process[];
+extern char current_thread[];
+extern char devfs_root_node_ptr[];
+extern char device_pager_ops[];
+extern char early_exception_num[];
+extern char fb[];
+extern char fb_active[];
+extern char font_8x16[];
+extern char font_8x8[];
+extern char fs_root[];
+extern char hw_text_active[];
+extern char idt_entries[];
+extern char idt_ptr[];
+extern char kbd_alt[];
+extern char kbd_ctrl[];
+extern char kbd_extended[];
+extern char kbd_lalt[];
+extern char kbd_lctrl[];
+extern char kbd_lshift[];
+extern char kbd_ralt[];
+extern char kbd_rctrl[];
+extern char kbd_rshift[];
+extern char kbd_shift[];
+extern char kbd_us[];
+extern char kbd_us_shifted[];
+extern char kernel_hostname[];
+extern char kernel_process[];
+extern char mountlist[];
+extern char num_cpus[];
+extern char personality_freebsd[];
+extern char personality_linux[];
+extern char personality_native[];
+extern char personality_netbsd[];
+extern char personality_openbsd[];
+extern char personality_sunos[];
+extern char personality_svr3[];
+extern char personality_svr4[];
+extern char processes[];
+extern char proctree_lock[];
+extern char rng_state[];
+extern char rootvnode[];
+extern char securelevel[];
+extern char serial_debug_enabled[];
+extern char sig_trampoline_code[];
+extern char sig_trampoline_size[];
+extern char sigprop[];
+extern char stack_top[];
+extern char swap_node[];
+extern char swap_pager_ops[];
+extern char syscall_trace_enabled[];
+extern char sysctl__children[];
+extern char sysctl_debug[];
+extern char sysctl_debug_children[];
+extern char sysctl_debug_kmem_test_addr[];
+extern char sysctl_debug_kmem_test_size[];
+extern char sysctl_debug_test_uid[];
+extern char sysctl_hw[];
+extern char sysctl_hw_children[];
+extern char sysctl_hw_machine[];
+extern char sysctl_hw_model[];
+extern char sysctl_hw_ncpu[];
+extern char sysctl_hw_pagesize[];
+extern char sysctl_kern[];
+extern char sysctl_kern_children[];
+extern char sysctl_kern_domainname[];
+extern char sysctl_kern_hostname[];
+extern char sysctl_kern_kmem_allow_read[];
+extern char sysctl_kern_kmem_allow_write[];
+extern char sysctl_kern_maxproc[];
+extern char sysctl_kern_osrelease[];
+extern char sysctl_kern_osrevision[];
+extern char sysctl_kern_ostype[];
+extern char sysctl_kern_securelevel[];
+extern char sysctl_kern_version[];
+extern char sysctl_vm[];
+extern char sysctl_vm_children[];
+extern char threads[];
+extern char udf_ctx[];
+extern char udf_vnodeops[];
+extern char vfs_cache_count[];
+extern char vfs_cache_limit[];
+extern char vnode_pager_ops[];
+extern char vnstats[];
+extern char zimage_start[];
+extern void __ashldi3(void);
+extern void __ashrdi3(void);
+extern void __divdi3(void);
+extern void __lshrdi3(void);
+extern void __moddi3(void);
+extern void __muldi3(void);
+extern void __negdi2(void);
+extern void __udivdi3(void);
+extern void __umoddi3(void);
+extern void _kernel_start(void);
+extern void _setup_end(void);
+extern void _setup_phys_end(void);
+extern void _setup_phys_start(void);
+extern void _setup_start(void);
+extern void _start(void);
+extern void acct_process(void);
+extern void ahci_init(void);
+extern void ansi_init(void);
+extern void ansi_process(void);
+extern void arch_fork_with_stack(void);
+extern void arch_set_kernel_stack(void);
+extern void arch_switch_to(void);
+extern void atapi_get_link(void);
+extern void atapi_scsi_init(void);
+extern void bga_init(void);
+extern void bga_install(void);
+extern void bga_is_available(void);
+extern void bga_scroll(void);
+extern void blkdev_get(void);
+extern void blkdev_read_bytes(void);
+extern void blkdev_register(void);
+extern void blkdev_write_bytes(void);
+extern void bus_compatible_match(void);
+extern void bus_id_match(void);
+extern void bus_match_device(void);
+extern void cache_enter(void);
+extern void cache_lookup(void);
+extern void cache_purge(void);
+extern void chacha20_block(void);
+extern void chacha20_extract(void);
+extern void chacha20_init(void);
+extern void chacha20_rekey(void);
+extern void chacha20_wipe(void);
+extern void close_fs(void);
+extern void cmdline_get(void);
+extern void cmdline_get_full(void);
+extern void cmdline_has(void);
+extern void cmdline_init(void);
+extern void coff_load_file(void);
+extern void compat_fstat_stub(void);
+extern void compat_lseek32(void);
+extern void compat_lstat_stub(void);
+extern void compat_stat_stub(void);
+extern void compat_time32(void);
+extern void compress(void);
+extern void console_attach_std_fds(void);
+extern void console_clear(void);
+extern void console_get_node(void);
+extern void console_init(void);
+extern void console_push_char(void);
+extern void console_putchar(void);
+extern void console_register(void);
+extern void console_register_devfs(void);
+extern void console_set_tty(void);
+extern void console_write(void);
+extern void copyin(void);
+extern void copyinstr(void);
+extern void copyout(void);
+extern void cpuid_init(void);
+extern void crc32(void);
+extern void crc32_init(void);
+extern void debug_dump_processes(void);
+extern void devfs_init(void);
+extern void devfs_register_device(void);
+extern void device_create(void);
+extern void device_find_child(void);
+extern void device_get(void);
+extern void device_put(void);
+extern void device_register(void);
+extern void device_unregister(void);
+extern void do_sysinfo(void);
+extern void driver_attach(void);
+extern void driver_blacklist_add(void);
+extern void driver_detach(void);
+extern void driver_is_blacklisted(void);
+extern void driver_override(void);
+extern void driver_register(void);
+extern void driver_unregister(void);
+extern void early_exception_handler(void);
+extern void early_gdt_init(void);
+extern void early_idt_init(void);
+extern void early_isr0(void);
+extern void early_isr1(void);
+extern void early_isr10(void);
+extern void early_isr11(void);
+extern void early_isr12(void);
+extern void early_isr13(void);
+extern void early_isr14(void);
+extern void early_isr15(void);
+extern void early_isr16(void);
+extern void early_isr17(void);
+extern void early_isr18(void);
+extern void early_isr19(void);
+extern void early_isr2(void);
+extern void early_isr20(void);
+extern void early_isr21(void);
+extern void early_isr22(void);
+extern void early_isr23(void);
+extern void early_isr24(void);
+extern void early_isr25(void);
+extern void early_isr26(void);
+extern void early_isr27(void);
+extern void early_isr28(void);
+extern void early_isr29(void);
+extern void early_isr3(void);
+extern void early_isr30(void);
+extern void early_isr31(void);
+extern void early_isr4(void);
+extern void early_isr5(void);
+extern void early_isr6(void);
+extern void early_isr7(void);
+extern void early_isr8(void);
+extern void early_isr9(void);
+extern void early_isr_common(void);
+extern void early_uart_print(void);
+extern void efi_main(void);
+extern void elf_check_file(void);
+extern void elf_execve(void);
+extern void elf_load(void);
+extern void elf_load_file(void);
+extern void exec_dispatch(void);
+extern void exec_register_handler(void);
+extern void exfat_init(void);
+extern void ext2_add_entry(void);
+extern void ext2_alloc_block(void);
+extern void ext2_alloc_inode(void);
+extern void ext2_alloc_inode_block(void);
+extern void ext2_alloc_node(void);
+extern void ext2_file_read(void);
+extern void ext2_file_write(void);
+extern void ext2_find_next_zero_bit(void);
+extern void ext2_finddir(void);
+extern void ext2_free_block(void);
+extern void ext2_free_inode(void);
+extern void ext2_get_block_num(void);
+extern void ext2_get_blocks_extent(void);
+extern void ext2_init(void);
+extern void ext2_inode_read(void);
+extern void ext2_inode_write(void);
+extern void ext2_mount(void);
+extern void ext2_read_block(void);
+extern void ext2_read_blocks(void);
+extern void ext2_read_inode(void);
+extern void ext2_readdir(void);
+extern void ext2_readlink(void);
+extern void ext2_remove_entry(void);
+extern void ext2_write_block(void);
+extern void ext2_write_inode(void);
+extern void fat_file_read(void);
+extern void fat_finddir(void);
+extern void fat_get_next_cluster(void);
+extern void fat_init(void);
+extern void fat_mount(void);
+extern void fat_parse_lfn(void);
+extern void fat_readdir(void);
+extern void fb_clear(void);
+extern void fb_console_init(void);
+extern void fb_init(void);
+extern void fb_putc(void);
+extern void fb_putpixel(void);
+extern void fb_write(void);
+extern void fd_close_all(void);
+extern void file_alloc(void);
+extern void file_close_ptr(void);
+extern void file_free(void);
+extern void finddir_fs(void);
+extern void fork_child_return(void);
+extern void fpu_handler(void);
+extern void fpu_init(void);
+extern void fpu_restore_context(void);
+extern void fpu_save_context(void);
+extern void freebsd_sendsig(void);
+extern void freebsd_sys_sigreturn(void);
+extern void full_init(void);
+extern void fuse_fs_init(void);
+extern void fuse_init(void);
+extern void futex_exit_cleanup(void);
+extern void futex_get_key(void);
+extern void futex_lock_pi(void);
+extern void futex_thread_exit(void);
+extern void futex_unlock_pi(void);
+extern void futex_wake_exited_thread(void);
+extern void fuzz_pmap_enter(void);
+extern void gdt_flush(void);
+extern void gdt_init(void);
+extern void gdt_init_cpu(void);
+extern void gdt_set_gate(void);
+extern void geom_add_partition(void);
+extern void geom_bsd_fstype_name(void);
+extern void geom_bsd_init(void);
+extern void geom_find_partition(void);
+extern void geom_get_partition_count(void);
+extern void geom_gpt_init(void);
+extern void geom_guid_equal(void);
+extern void geom_guid_is_zero(void);
+extern void geom_init(void);
+extern void geom_mbr_init(void);
+extern void geom_mbr_type_name(void);
+extern void geom_read_sector(void);
+extern void geom_read_sectors(void);
+extern void geom_register_class(void);
+extern void geom_register_disk(void);
+extern void geom_scan(void);
+extern void get_hz(void);
+extern void get_ticks(void);
+extern void get_time(void);
+extern void get_uptime(void);
+extern void get_uptime_ms(void);
+extern void getnewvnode(void);
+extern void hw_text_console_write_shim(void);
+extern void hw_text_init(void);
+extern void hw_text_set_color(void);
+extern void ide_atapi_packet(void);
+extern void ide_atapi_read_capacity(void);
+extern void ide_atapi_read_sectors(void);
+extern void ide_atapi_read_toc(void);
+extern void ide_bm_clear_interrupt(void);
+extern void ide_bm_start(void);
+extern void ide_bm_status(void);
+extern void ide_bm_stop(void);
+extern void ide_dma_init(void);
+extern void ide_dma_read(void);
+extern void ide_dma_setup(void);
+extern void ide_dma_write(void);
+extern void ide_identify(void);
+extern void ide_identify_atapi(void);
+extern void ide_init(void);
+extern void ide_irq_handler(void);
+extern void ide_prdt_setup(void);
+extern void ide_read_ctrl(void);
+extern void ide_read_reg(void);
+extern void ide_read_sectors(void);
+extern void ide_read_sectors_ext(void);
+extern void ide_write_ctrl(void);
+extern void ide_write_reg(void);
+extern void ide_write_sectors(void);
+extern void ide_write_sectors_ext(void);
+extern void idt_flush(void);
+extern void idt_init(void);
+extern void idt_set_gate(void);
+extern void init_task(void);
+extern void input_enqueue(void);
+extern void input_init(void);
+extern void input_notify_readers(void);
+extern void input_register_devfs(void);
+extern void input_register_device(void);
+extern void input_report_event(void);
+extern void input_sync(void);
+extern void input_unregister_device(void);
+extern void ioapic_get_count(void);
+extern void ioapic_init(void);
+extern void ioapic_mask_all(void);
+extern void ioapic_register(void);
+extern void ioapic_set_mask(void);
+extern void ioapic_set_routing(void);
+extern void ioapic_set_routing_ex(void);
+extern void isr0(void);
+extern void isr1(void);
+extern void isr10(void);
+extern void isr11(void);
+extern void isr12(void);
+extern void isr128(void);
+extern void isr13(void);
+extern void isr14(void);
+extern void isr15(void);
+extern void isr16(void);
+extern void isr17(void);
+extern void isr18(void);
+extern void isr19(void);
+extern void isr2(void);
+extern void isr20(void);
+extern void isr21(void);
+extern void isr22(void);
+extern void isr23(void);
+extern void isr24(void);
+extern void isr25(void);
+extern void isr26(void);
+extern void isr27(void);
+extern void isr28(void);
+extern void isr29(void);
+extern void isr3(void);
+extern void isr30(void);
+extern void isr31(void);
+extern void isr32(void);
+extern void isr33(void);
+extern void isr34(void);
+extern void isr35(void);
+extern void isr36(void);
+extern void isr37(void);
+extern void isr38(void);
+extern void isr39(void);
+extern void isr4(void);
+extern void isr40(void);
+extern void isr41(void);
+extern void isr42(void);
+extern void isr43(void);
+extern void isr44(void);
+extern void isr45(void);
+extern void isr46(void);
+extern void isr47(void);
+extern void isr5(void);
+extern void isr6(void);
+extern void isr7(void);
+extern void isr8(void);
+extern void isr9(void);
+extern void isr_handler(void);
+extern void jump_to_userspace(void);
+extern void kasprintf(void);
+extern void kbd_push(void);
+extern void kern_access(void);
+extern void kern_acct(void);
+extern void kern_chdir(void);
+extern void kern_chroot(void);
+extern void kern_clock_gettime(void);
+extern void kern_close(void);
+extern void kern_execve(void);
+extern void kern_fchdir(void);
+extern void kern_fstat(void);
+extern void kern_getcwd(void);
+extern void kern_getdents(void);
+extern void kern_gettimeofday(void);
+extern void kern_hostname(void);
+extern void kern_ioctl(void);
+extern void kern_link(void);
+extern void kern_lstat(void);
+extern void kern_mkdir(void);
+extern void kern_mount(void);
+extern void kern_open(void);
+extern void kern_pipe(void);
+extern void kern_poll(void);
+extern void kern_proc_info(void);
+extern void kern_proc_list(void);
+extern void kern_read(void);
+extern void kern_readlink(void);
+extern void kern_sigaction(void);
+extern void kern_sigaltstack(void);
+extern void kern_sigpending(void);
+extern void kern_sigprocmask(void);
+extern void kern_sigsuspend(void);
+extern void kern_sigtimedwait(void);
+extern void kern_sigwait(void);
+extern void kern_stat(void);
+extern void kern_stime(void);
+extern void kern_thr_new(void);
+extern void kern_time(void);
+extern void kern_times(void);
+extern void kern_umount(void);
+extern void kern_uname(void);
+extern void kern_unlink(void);
+extern void kern_wait4(void);
+extern void kern_waitpid(void);
+extern void kern_write(void);
+extern void keyboard_getc(void);
+extern void keyboard_handler(void);
+extern void keyboard_init(void);
+extern void kfree(void);
+extern void kinit_task(void);
+extern void kmain(void);
+extern void kmalloc(void);
+extern void kmem_dev_init(void);
+extern void kmem_get_stats(void);
+extern void kmem_init(void);
+extern void kmem_test_init(void);
+extern void kobject_get(void);
+extern void kobject_init(void);
+extern void kobject_put(void);
+extern void kprint(void);
+extern void kprintf(void);
+extern void kset_init(void);
+extern void ksym_init(void);
+extern void ksym_lookup(void);
+extern void ksym_print(void);
+extern void ksym_resolve(void);
+extern void kthread_create(void);
+extern void kthread_exit(void);
+extern void kvasprintf(void);
+extern void kzalloc(void);
+extern void lapic_disable(void);
+extern void lapic_enable(void);
+extern void lapic_get_base(void);
+extern void lapic_get_error(void);
+extern void lapic_get_id(void);
+extern void lapic_init(void);
+extern void lapic_is_initialized(void);
+extern void lapic_print_error(void);
+extern void lapic_send_eoi(void);
+extern void lapic_send_init(void);
+extern void lapic_send_ipi(void);
+extern void lapic_send_ipi_all_excl_self(void);
+extern void lapic_send_ipi_ex(void);
+extern void lapic_send_nmi(void);
+extern void lapic_send_nmi_all_excl_self(void);
+extern void lapic_send_sipi(void);
+extern void lapic_set_base(void);
+extern void lapic_setup_error(void);
+extern void lapic_timer_calibrate(void);
+extern void lapic_timer_delay_ms(void);
+extern void lapic_timer_delay_us(void);
+extern void lapic_timer_oneshot(void);
+extern void lapic_timer_periodic(void);
+extern void lapic_timer_set_divider(void);
+extern void lapic_timer_stop(void);
+extern void lapic_timer_ticks_per_ms(void);
+extern void ldt_activate(void);
+extern void ldt_free_process(void);
+extern void ldt_init_process(void);
+extern void linear_fb_putpixel(void);
+extern void link_fs(void);
+extern void linux_sendsig(void);
+extern void linux_sys__llseek(void);
+extern void linux_sys_fstat(void);
+extern void linux_sys_fstat64(void);
+extern void linux_sys_ftruncate(void);
+extern void linux_sys_lseek(void);
+extern void linux_sys_lstat(void);
+extern void linux_sys_lstat64(void);
+extern void linux_sys_mmap(void);
+extern void linux_sys_mmap2(void);
+extern void linux_sys_rt_sigreturn(void);
+extern void linux_sys_sigreturn(void);
+extern void linux_sys_stat(void);
+extern void linux_sys_stat64(void);
+extern void linux_sys_truncate(void);
+extern void linux_to_native_signal(void);
+extern void lpt_init(void);
+extern void mem_init(void);
+extern void mem_test_init(void);
+extern void memcmp(void);
+extern void memcpy(void);
+extern void memmove(void);
+extern void memset(void);
+extern void minix_init(void);
+extern void mmap_fs(void);
+extern void mock_kfree(void);
+extern void mock_kmalloc(void);
+extern void mouse_get_event(void);
+extern void mouse_get_state(void);
+extern void mouse_handler(void);
+extern void mouse_init(void);
+extern void mutex_init(void);
+extern void mutex_is_held(void);
+extern void mutex_lock(void);
+extern void mutex_trylock(void);
+extern void mutex_unlock(void);
+extern void namei(void);
+extern void namei_init(void);
+extern void native_to_linux_signal(void);
+extern void nchinit(void);
+extern void netbsd_sendsig(void);
+extern void netbsd_sys_getrusage(void);
+extern void netbsd_sys_sigreturn(void);
+extern void ntsync_init(void);
+extern void null_init(void);
+extern void nvme_init(void);
+extern void open_fs(void);
+extern void openbsd_sendsig(void);
+extern void openbsd_sys_getrusage(void);
+extern void openbsd_sys_sigreturn(void);
+extern void p9_init(void);
+extern void panic(void);
+extern void pci_check_device(void);
+extern void pci_find_device(void);
+extern void pci_init(void);
+extern void pci_read(void);
+extern void pci_scan(void);
+extern void pci_write(void);
+extern void pe_load_file(void);
+extern void percpu_get(void);
+extern void percpu_get_cpu(void);
+extern void percpu_get_cpu_id(void);
+extern void percpu_init(void);
+extern void percpu_init_cpu(void);
+extern void perso_lookup(void);
+extern void perso_name(void);
+extern void pgrp_add_proc(void);
+extern void pgrp_alloc(void);
+extern void pgrp_check_orphan(void);
+extern void pgrp_find(void);
+extern void pgrp_free(void);
+extern void pgrp_is_orphaned(void);
+extern void pgrp_remove_proc(void);
+extern void pgrp_signal(void);
+extern void pgsignal(void);
+extern void pipe_create(void);
+extern void pm_init(void);
+extern void pmap_activate(void);
+extern void pmap_bootstrap(void);
+extern void pmap_check(void);
+extern void pmap_clear_reference(void);
+extern void pmap_copy(void);
+extern void pmap_copy_page(void);
+extern void pmap_create(void);
+extern void pmap_destroy(void);
+extern void pmap_dump(void);
+extern void pmap_enter(void);
+extern void pmap_enter_batch(void);
+extern void pmap_enter_large(void);
+extern void pmap_extract(void);
+extern void pmap_fault(void);
+extern void pmap_flush_global_pages(void);
+extern void pmap_fork(void);
+extern void pmap_invalidate_all(void);
+extern void pmap_invalidate_page(void);
+extern void pmap_is_modified_range(void);
+extern void pmap_is_referenced(void);
+extern void pmap_is_referenced_range(void);
+extern void pmap_kenter(void);
+extern void pmap_kernel(void);
+extern void pmap_kremove(void);
+extern void pmap_map_trampoline(void);
+extern void pmap_null_allow(void);
+extern void pmap_null_protect(void);
+extern void pmap_page_is_cow(void);
+extern void pmap_protect(void);
+extern void pmap_reference(void);
+extern void pmap_release(void);
+extern void pmap_remove(void);
+extern void pmap_shootdown_all(void);
+extern void pmap_shootdown_commit(void);
+extern void pmap_shootdown_defer(void);
+extern void pmap_shootdown_handler(void);
+extern void pmap_shootdown_page(void);
+extern void pmap_shootdown_range(void);
+extern void pmap_shootdown_wait(void);
+extern void pmap_test_and_clear_modify(void);
+extern void pmap_test_and_clear_ref(void);
+extern void pmap_track_access(void);
+extern void pmap_track_modify(void);
+extern void pmap_zero_page(void);
+extern void pmm_alloc_block(void);
+extern void pmm_alloc_contiguous(void);
+extern void pmm_dump_e820(void);
+extern void pmm_dump_mmap(void);
+extern void pmm_enable_highmem(void);
+extern void pmm_free_block(void);
+extern void pmm_free_contiguous(void);
+extern void pmm_get_free_memory(void);
+extern void pmm_get_page(void);
+extern void pmm_get_total_memory(void);
+extern void pmm_get_used_blocks(void);
+extern void pmm_init(void);
+extern void pmm_init_e820(void);
+extern void pmm_reclaim_range(void);
+extern void pmm_reclaim_setup(void);
+extern void pmm_record_boot_info(void);
+extern void pmm_walk_e820(void);
+extern void pmm_walk_mmap(void);
+extern void pmm_watermark_alloc(void);
+extern void pmm_watermark_init(void);
+extern void pmm_watermark_used(void);
+extern void poll_fs(void);
+extern void pool_extract_bytes(void);
+extern void pool_init(void);
+extern void pool_mix_bytes(void);
+extern void proc_add_child(void);
+extern void proc_alloc_fd(void);
+extern void proc_clear_fd(void);
+extern void proc_create(void);
+extern void proc_exit(void);
+extern void proc_find(void);
+extern void proc_fork(void);
+extern void proc_get_bitness(void);
+extern void proc_get_last_pid(void);
+extern void proc_remove_child(void);
+extern void proc_reparent_children(void);
+extern void proc_set_bitness(void);
+extern void proc_set_fd(void);
+extern void procfs_init(void);
+extern void procfs_register_entry(void);
+extern void property_pmap_kernel_consistency(void);
+extern void ps2_init(void);
+extern void ps2_read_data(void);
+extern void ps2_read_data_timeout(void);
+extern void ps2_wait_read(void);
+extern void ps2_wait_write(void);
+extern void ps2_write_aux(void);
+extern void ps2_write_command(void);
+extern void ps2_write_data(void);
+extern void pseudo_init(void);
+extern void psignal(void);
+extern void pv_insert(void);
+extern void pv_remove(void);
+extern void pv_remove_all(void);
+extern void ramdisk_create(void);
+extern void ramdisk_init(void);
+extern void random_detect_hwrng(void);
+extern void random_get_bytes(void);
+extern void random_get_bytes_flags(void);
+extern void random_harvest(void);
+extern void random_harvest_direct(void);
+extern void random_harvest_fast(void);
+extern void random_harvest_hwrng(void);
+extern void random_has_rdrand(void);
+extern void random_has_rdseed(void);
+extern void random_init(void);
+extern void random_is_seeded(void);
+extern void rdrand32(void);
+extern void rdrand64(void);
+extern void rdseed32(void);
+extern void rdseed64(void);
+extern void read_fs(void);
+extern void readdir_fs(void);
+extern void readlink_fs(void);
+extern void rtc_init(void);
+extern void rtc_read_time(void);
+extern void run_chacha20_tests(void);
+extern void run_cow_stats_tests(void);
+extern void run_crc32_tests(void);
+extern void run_devfs_special_device_tests(void);
+extern void run_div64_tests(void);
+extern void run_ext2_perf_test(void);
+extern void run_ext2_read_perf_test(void);
+extern void run_getcwd_tests(void);
+extern void run_kernel_tests(void);
+extern void run_kobject_tests(void);
+extern void run_kthread_create_tests(void);
+extern void run_ldt_tests(void);
+extern void run_link_property_tests(void);
+extern void run_link_tests(void);
+extern void run_minix_inode_tests(void);
+extern void run_minix_mount_tests(void);
+extern void run_minix_readdir_tests(void);
+extern void run_minix_write_tests(void);
+extern void run_mkdir_tests(void);
+extern void run_mmap_tests(void);
+extern void run_mount_tests(void);
+extern void run_nanosleep_tests(void);
+extern void run_pid_tests(void);
+extern void run_pmap_protect_property_tests(void);
+extern void run_pmap_tests(void);
+extern void run_printf_specifier_tests(void);
+extern void run_printf_vsnprintf_tests(void);
+extern void run_ps2_tests(void);
+extern void run_reboot_tests(void);
+extern void run_rng_tests(void);
+extern void run_sched_bench(void);
+extern void run_sched_dequeue_bench(void);
+extern void run_sched_perf_tests(void);
+extern void run_scsi_tests(void);
+extern void run_signal_tests(void);
+extern void run_sigstop_tests(void);
+extern void run_string_tests(void);
+extern void run_tty_tests(void);
+extern void run_udf_write_tests(void);
+extern void run_uma_tests(void);
+extern void run_unlink_property_tests(void);
+extern void run_unlink_tests(void);
+extern void run_vfs_busy_tests(void);
+extern void run_vfs_cache_tests(void);
+extern void run_vfs_error_tests(void);
+extern void run_vm_cow_tests(void);
+extern void run_vm_expanded_tests(void);
+extern void run_vm_fault_tests(void);
+extern void run_vm_map_benchmark(void);
+extern void run_vm_map_tests(void);
+extern void run_vm_object_tests(void);
+extern void run_vm_pager_tests(void);
+extern void run_vm_policy_tests(void);
+extern void run_vnode_lock_tests(void);
+extern void run_vnode_ops_tests(void);
+extern void runqueue_add(void);
+extern void runqueue_count(void);
+extern void runqueue_init(void);
+extern void runqueue_level_for_thread(void);
+extern void runqueue_peek(void);
+extern void runqueue_pop(void);
+extern void runqueue_remove(void);
+extern void rusage_add_ctx_switch(void);
+extern void rusage_add_fault(void);
+extern void rusage_add_io(void);
+extern void rusage_add_signal(void);
+extern void rusage_add_tick(void);
+extern void rusage_copy_to_child(void);
+extern void rusage_finalize(void);
+extern void rusage_init(void);
+extern void rusage_update_maxrss(void);
+extern void sched_alloc_thread(void);
+extern void sched_can_run_on_cpu(void);
+extern void sched_clear_affinity(void);
+extern void sched_count_runnable(void);
+extern void sched_count_threads(void);
+extern void sched_create_thread(void);
+extern void sched_dequeue(void);
+extern void sched_enqueue(void);
+extern void sched_ensure_context(void);
+extern void sched_enter_critical(void);
+extern void sched_fork_process(void);
+extern void sched_fork_thread(void);
+extern void sched_get_affinity(void);
+extern void sched_get_affinity_linear(void);
+extern void sched_get_affinity_self(void);
+extern void sched_get_affinity_via_func(void);
+extern void sched_get_cpu_load(void);
+extern void sched_get_current_runqueue(void);
+extern void sched_get_current_tid(void);
+extern void sched_get_loadavg(void);
+extern void sched_get_runqueue(void);
+extern void sched_get_system_load(void);
+extern void sched_get_thread(void);
+extern void sched_idle_balance(void);
+extern void sched_init(void);
+extern void sched_init_generic(void);
+extern void sched_is_idle(void);
+extern void sched_iterate_threads(void);
+extern void sched_load_balance(void);
+extern void sched_migrate_if_needed(void);
+extern void sched_needs_load_balance(void);
+extern void sched_periodic_balance(void);
+extern void sched_pick_next(void);
+extern void sched_set_affinity(void);
+extern void sched_set_affinity_self(void);
+extern void sched_set_priority(void);
+extern void sched_sleep(void);
+extern void sched_sleep_until(void);
+extern void sched_smp_init(void);
+extern void sched_spawn_kernel_process(void);
+extern void sched_steal_thread(void);
+extern void sched_switch(void);
+extern void sched_tick(void);
+extern void sched_update_loadavg(void);
+extern void sched_wakeup(void);
+extern void sched_wakeup_n(void);
+extern void sched_yield(void);
+extern void scsi_abort_request(void);
+extern void scsi_auto_attach(void);
+extern void scsi_cdb_inquiry(void);
+extern void scsi_cdb_read_10(void);
+extern void scsi_cdb_read_capacity_10(void);
+extern void scsi_cdb_test_unit_ready(void);
+extern void scsi_cdb_write_10(void);
+extern void scsi_complete_request(void);
+extern void scsi_create_bus_node(void);
+extern void scsi_ctl_init(void);
+extern void scsi_dev_attach(void);
+extern void scsi_dev_detach(void);
+extern void scsi_dev_init(void);
+extern void scsi_dev_lookup(void);
+extern void scsi_device_alloc(void);
+extern void scsi_device_free(void);
+extern void scsi_device_lookup(void);
+extern void scsi_device_register(void);
+extern void scsi_device_unregister(void);
+extern void scsi_execute(void);
+extern void scsi_execute_sync(void);
+extern void scsi_init(void);
+extern void scsi_inquiry(void);
+extern void scsi_lock_door(void);
+extern void scsi_probe_lun(void);
+extern void scsi_process_queue(void);
+extern void scsi_queue_request(void);
+extern void scsi_read_capacity(void);
+extern void scsi_read_toc(void);
+extern void scsi_register_link(void);
+extern void scsi_report_luns(void);
+extern void scsi_request_alloc(void);
+extern void scsi_request_free(void);
+extern void scsi_request_init(void);
+extern void scsi_request_sense(void);
+extern void scsi_scan_bus(void);
+extern void scsi_sense_asc(void);
+extern void scsi_sense_ascq(void);
+extern void scsi_sense_key(void);
+extern void scsi_sense_string(void);
+extern void scsi_start_stop(void);
+extern void scsi_test_unit_ready(void);
+extern void scsi_unregister_link(void);
+extern void sema_getvalue(void);
+extern void sema_init(void);
+extern void sema_post(void);
+extern void sema_wait(void);
+extern void sendsig(void);
+extern void session_alloc(void);
+extern void session_find(void);
+extern void session_free(void);
+extern void set_boot_time(void);
+extern void set_kernel_stack(void);
+extern void sigexit(void);
+extern void signal_handle_pending(void);
+extern void signal_send_group(void);
+extern void sleepq_add(void);
+extern void sleepq_add_private(void);
+extern void sleepq_has_waiters(void);
+extern void sleepq_has_waiters_private(void);
+extern void sleepq_init(void);
+extern void sleepq_requeue(void);
+extern void sleepq_requeue_private(void);
+extern void sleepq_wake_all(void);
+extern void sleepq_wake_all_private(void);
+extern void sleepq_wake_n(void);
+extern void sleepq_wake_n_private(void);
+extern void sleepq_wake_one(void);
+extern void sleepq_wake_one_private(void);
+extern void smp_ap_entry(void);
+extern void smp_boot_all_aps(void);
+extern void smp_boot_ap(void);
+extern void smp_discover_cores(void);
+extern void smp_get_cpu_count(void);
+extern void smp_get_cpu_id(void);
+extern void smp_init(void);
+extern void snprintf(void);
+extern void spinlock_acquire(void);
+extern void spinlock_init(void);
+extern void spinlock_is_held(void);
+extern void spinlock_release(void);
+extern void spinlock_try_acquire(void);
+extern void sprintf(void);
+extern void stack_trace(void);
+extern void stack_trace_from(void);
+extern void strcat(void);
+extern void strchr(void);
+extern void strcmp(void);
+extern void strcpy(void);
+extern void strcspn(void);
+extern void strlcpy(void);
+extern void strlen(void);
+extern void strncat(void);
+extern void strncmp(void);
+extern void strncpy(void);
+extern void strnlen(void);
+extern void strpbrk(void);
+extern void strspn(void);
+extern void strstr(void);
+extern void swapper_get_idle_thread(void);
+extern void swapper_get_proc(void);
+extern void swapper_idle_loop(void);
+extern void swapper_init(void);
+extern void swapper_request_work(void);
+extern void switch_to(void);
+extern void symlink_fs(void);
+extern void sys__exit(void);
+extern void sys_access(void);
+extern void sys_acct(void);
+extern void sys_alarm(void);
+extern void sys_brk(void);
+extern void sys_chdir(void);
+extern void sys_chmod(void);
+extern void sys_chroot(void);
+extern void sys_clock_gettime(void);
+extern void sys_clone(void);
+extern void sys_close(void);
+extern void sys_compat_execv(void);
+extern void sys_cpu_count(void);
+extern void sys_creat(void);
+extern void sys_dup(void);
+extern void sys_dup2(void);
+extern void sys_execve(void);
+extern void sys_exit(void);
+extern void sys_fchdir(void);
+extern void sys_fcntl(void);
+extern void sys_fork(void);
+extern void sys_freebsd11_fstat(void);
+extern void sys_freebsd11_lstat(void);
+extern void sys_freebsd11_stat(void);
+extern void sys_freebsd4_uname(void);
+extern void sys_freebsd_fstat(void);
+extern void sys_freebsd_lseek(void);
+extern void sys_freebsd_lstat(void);
+extern void sys_freebsd_mmap(void);
+extern void sys_freebsd_stat(void);
+extern void sys_fstat(void);
+extern void sys_fstatfs(void);
+extern void sys_ftruncate(void);
+extern void sys_futex(void);
+extern void sys_get_robust_list(void);
+extern void sys_getcwd(void);
+extern void sys_getdents(void);
+extern void sys_getegid(void);
+extern void sys_geteuid(void);
+extern void sys_getgid(void);
+extern void sys_getpgid(void);
+extern void sys_getpgrp(void);
+extern void sys_getpid(void);
+extern void sys_getppid(void);
+extern void sys_getpriority(void);
+extern void sys_getrusage(void);
+extern void sys_getsid(void);
+extern void sys_gettimeofday(void);
+extern void sys_getuid(void);
+extern void sys_hostname(void);
+extern void sys_ioctl(void);
+extern void sys_kill(void);
+extern void sys_lchown(void);
+extern void sys_link(void);
+extern void sys_lseek(void);
+extern void sys_lstat(void);
+extern void sys_mkdir(void);
+extern void sys_mknod(void);
+extern void sys_mlock(void);
+extern void sys_mmap(void);
+extern void sys_modify_ldt(void);
+extern void sys_mount(void);
+extern void sys_mprotect(void);
+extern void sys_msgsys(void);
+extern void sys_msync(void);
+extern void sys_munlock(void);
+extern void sys_munmap(void);
+extern void sys_nanosleep(void);
+extern void sys_nice(void);
+extern void sys_open(void);
+extern void sys_pause(void);
+extern void sys_pgrpsys(void);
+extern void sys_pipe(void);
+extern void sys_pmap_stats(void);
+extern void sys_poll(void);
+extern void sys_proc_cmdline(void);
+extern void sys_proc_count(void);
+extern void sys_proc_cwd(void);
+extern void sys_proc_environ(void);
+extern void sys_proc_exe(void);
+extern void sys_proc_fds(void);
+extern void sys_proc_info(void);
+extern void sys_proc_list(void);
+extern void sys_proc_maps(void);
+extern void sys_proc_threads(void);
+extern void sys_prof(void);
+extern void sys_ptrace(void);
+extern void sys_read(void);
+extern void sys_readlink(void);
+extern void sys_reboot(void);
+extern void sys_rmdir(void);
+extern void sys_rt_sigreturn(void);
+extern void sys_semsys(void);
+extern void sys_set_robust_list(void);
+extern void sys_set_thread_area(void);
+extern void sys_setgid(void);
+extern void sys_setpgid(void);
+extern void sys_setpriority(void);
+extern void sys_setsid(void);
+extern void sys_setuid(void);
+extern void sys_shmsys(void);
+extern void sys_sigaction(void);
+extern void sys_sigaltstack(void);
+extern void sys_signal(void);
+extern void sys_sigpending(void);
+extern void sys_sigprocmask(void);
+extern void sys_sigret(void);
+extern void sys_sigreturn(void);
+extern void sys_sigsuspend(void);
+extern void sys_sigsys(void);
+extern void sys_sigtimedwait(void);
+extern void sys_sigwait(void);
+extern void sys_stat(void);
+extern void sys_statfs(void);
+extern void sys_stime(void);
+extern void sys_sync(void);
+extern void sys_sysarch(void);
+extern void sys_sysctl(void);
+extern void sys_sysi86(void);
+extern void sys_sysinfo(void);
+extern void sys_thr_exit(void);
+extern void sys_thr_join(void);
+extern void sys_thr_new(void);
+extern void sys_thr_self(void);
+extern void sys_time(void);
+extern void sys_times(void);
+extern void sys_truncate(void);
+extern void sys_uadmin(void);
+extern void sys_ulimit(void);
+extern void sys_umount(void);
+extern void sys_uname(void);
+extern void sys_unlink(void);
+extern void sys_utime(void);
+extern void sys_utssys(void);
+extern void sys_vfork(void);
+extern void sys_vm86(void);
+extern void sys_vm_stats(void);
+extern void sys_wait4(void);
+extern void sys_waitpid(void);
+extern void sys_write(void);
+extern void syscall_handler(void);
+extern void syscall_init(void);
+extern void sysctl_find_oid(void);
+extern void sysctl_handle_int(void);
+extern void sysctl_handle_opaque(void);
+extern void sysctl_handle_string(void);
+extern void sysctl_init(void);
+extern void sysctl_register_oid(void);
+extern void sysctl_unregister_oid(void);
+extern void sysfs_init(void);
+extern void test_bitness(void);
+extern void test_bus_compatible_match_logic(void);
+extern void test_bus_id_match_logic(void);
+extern void test_bus_match_logic(void);
+extern void test_bus_struct_layout(void);
+extern void test_console_perf(void);
+extern void test_cow_perf(void);
+extern void test_cow_stats_read(void);
+extern void test_device_allocation(void);
+extern void test_device_refcounting(void);
+extern void test_device_registration_logic(void);
+extern void test_device_struct_layout(void);
+extern void test_device_unregister_logic(void);
+extern void test_driver_attach_logic(void);
+extern void test_driver_detach_logic(void);
+extern void test_driver_override_logic(void);
+extern void test_driver_registration_logic(void);
+extern void test_driver_struct_signatures(void);
+extern void test_driver_unregister_logic(void);
+extern void test_e820_parsing(void);
+extern void test_fb_modes(void);
+extern void test_fb_perf(void);
+extern void test_find_child_logic(void);
+extern void test_futex(void);
+extern void test_futex_private(void);
+extern void test_futex_private_run_all(void);
+extern void test_futex_run_all(void);
+extern void test_geom(void);
+extern void test_ide_dma(void);
+extern void test_ide_perf(void);
+extern void test_kernel_pmap_protection(void);
+extern void test_ksyms(void);
+extern void test_large_mapping(void);
+extern void test_mem(void);
+extern void test_mmap_anonymous(void);
+extern void test_mmap_fixed(void);
+extern void test_mmap_fixed_overlap(void);
+extern void test_mmap_fixed_unaligned(void);
+extern void test_mmap_parsing(void);
+extern void test_mount_permissions(void);
+extern void test_mprotect(void);
+extern void test_multiple_mappings(void);
+extern void test_multiple_pmaps(void);
+extern void test_ntsync(void);
+extern void test_null_pmap(void);
+extern void test_pge_detection(void);
+extern void test_pge_global_flush(void);
+extern void test_pipe_race(void);
+extern void test_pmap_check(void);
+extern void test_pmap_dump(void);
+extern void test_pmap_hw_mappings(void);
+extern void test_pmap_large_replace(void);
+extern void test_pmap_lifecycle(void);
+extern void test_pmap_pse(void);
+extern void test_pmm_buddy(void);
+extern void test_pmm_watermark(void);
+extern void test_printf_flags(void);
+extern void test_printf_hash_flag(void);
+extern void test_printf_new(void);
+extern void test_printf_octal(void);
+extern void test_printf_plus_flag(void);
+extern void test_printf_space_flag(void);
+extern void test_printf_star(void);
+extern void test_printf_vsnprintf(void);
+extern void test_printf_width(void);
+extern void test_printf_zero_flag(void);
+extern void test_pte_user(void);
+extern void test_resource_helpers(void);
+extern void test_scsi(void);
+extern void test_stacktrace(void);
+extern void test_sys_mmap(void);
+extern void test_sys_mprotect(void);
+extern void test_sys_munmap(void);
+extern void test_sysctl(void);
+extern void test_sysctl_handlers(void);
+extern void test_sysinfo(void);
+extern void test_tty_alloc(void);
+extern void test_tty_canonical(void);
+extern void test_tty_ixoff(void);
+extern void test_tty_termios(void);
+extern void test_uma_alloc_free(void);
+extern void test_uma_ctor_dtor(void);
+extern void test_uma_dynamic_stress(void);
+extern void test_uma_large_objects(void);
+extern void test_uma_limits(void);
+extern void test_uma_many_allocs(void);
+extern void test_uma_redzone(void);
+extern void test_uma_zero_fill(void);
+extern void test_vm_fault_cow(void);
+extern void test_vm_fault_simple(void);
+extern void test_vm_map_benchmark(void);
+extern void test_vm_map_entry_flags(void);
+extern void test_vm_map_find_space(void);
+extern void test_vm_map_fork_cow(void);
+extern void test_vm_map_insert_lookup(void);
+extern void test_vm_map_lifecycle(void);
+extern void test_vm_map_remove(void);
+extern void test_vm_map_wire(void);
+extern void test_vm_object_dynamic_free(void);
+extern void test_vm_object_lifecycle(void);
+extern void test_vm_object_pages(void);
+extern void test_vm_object_shadow(void);
+extern void test_vm_page_queue(void);
+extern void test_vm_pager_io(void);
+extern void test_vm_pager_lifecycle(void);
+extern void test_vm_phys(void);
+extern void test_vm_policy_lru(void);
+extern void test_vm_policy_writeback(void);
+extern void timer_tick(void);
+extern void timeval_add(void);
+extern void trampoline_end(void);
+extern void trampoline_start(void);
+extern void trapsignal(void);
+extern void truncate_fs(void);
+extern void tss_flush(void);
+extern void tss_iomap_init(void);
+extern void tss_set_iomap(void);
+extern void tss_set_iomap_range(void);
+extern void tty_alloc(void);
+extern void tty_close(void);
+extern void tty_default_termios(void);
+extern void tty_flip_buffer_push(void);
+extern void tty_free(void);
+extern void tty_hangup(void);
+extern void tty_init(void);
+extern void tty_ioctl(void);
+extern void tty_ioctl_kern(void);
+extern void tty_open(void);
+extern void tty_poll(void);
+extern void tty_read(void);
+extern void tty_register_device(void);
+extern void tty_write(void);
+extern void turnstile_block(void);
+extern void turnstile_get_inherited_priority(void);
+extern void turnstile_init(void);
+extern void turnstile_release(void);
+extern void uart_devfs_init(void);
+extern void uart_get_console(void);
+extern void uart_getc(void);
+extern void uart_handler(void);
+extern void uart_init(void);
+extern void uart_is_transmit_empty(void);
+extern void uart_putc(void);
+extern void uart_received(void);
+extern void uart_select_port(void);
+extern void uart_write(void);
+extern void udf_add_fid(void);
+extern void udf_alloc_block(void);
+extern void udf_crc(void);
+extern void udf_create_fe(void);
+extern void udf_find_avdp(void);
+extern void udf_free_block(void);
+extern void udf_init(void);
+extern void udf_read_fe(void);
+extern void udf_read_file(void);
+extern void udf_read_fsd(void);
+extern void udf_read_space_bitmap(void);
+extern void udf_read_tag(void);
+extern void udf_read_vds(void);
+extern void udf_remove_fid(void);
+extern void udf_tag_checksum(void);
+extern void udf_truncate(void);
+extern void udf_write_file(void);
+extern void uiomove(void);
+extern void uma_debug_check_redzone_impl(void);
+extern void uma_debug_fill_redzone(void);
+extern void uma_debug_poison_alloc_impl(void);
+extern void uma_debug_poison_free_impl(void);
+extern void uma_enable_dynamic_alloc(void);
+extern void uma_leak_report(void);
+extern void uma_reclaim(void);
+extern void uma_startup(void);
+extern void uma_zalloc(void);
+extern void uma_zcreate(void);
+extern void uma_zdestroy(void);
+extern void uma_zfree(void);
+extern void uma_zone_check_leaks(void);
+extern void uma_zone_get_cur(void);
+extern void uma_zone_reserve(void);
+extern void uma_zone_set_max(void);
+extern void uma_zone_stat(void);
+extern void unlink_fs(void);
+extern void validate_user_addr(void);
+extern void vclean(void);
+extern void vdrop(void);
+extern void vfs_check_permissions(void);
+extern void vfs_get_filesystems(void);
+extern void vfs_init(void);
+extern void vfs_lookup(void);
+extern void vfs_lookup_lstat(void);
+extern void vfs_mkdir(void);
+extern void vfs_mknod(void);
+extern void vfs_mount(void);
+extern void vfs_mount_legacy(void);
+extern void vfs_register_filesystem(void);
+extern void vfs_root(void);
+extern void vfs_start(void);
+extern void vfs_statfs(void);
+extern void vfs_sync(void);
+extern void vfs_unmount(void);
+extern void vfs_unmount_legacy(void);
+extern void vga_install(void);
+extern void vget(void);
+extern void vgone(void);
+extern void vhold(void);
+extern void video_ask_mode(void);
+extern void video_register_driver(void);
+extern void video_set_viewport(void);
+extern void virtio_9p_send(void);
+extern void virtio_9p_setup(void);
+extern void virtio_blk_setup(void);
+extern void virtio_get_io_base(void);
+extern void virtio_init(void);
+extern void virtio_scsi_get_link(void);
+extern void virtio_scsi_poll(void);
+extern void virtio_scsi_setup(void);
+extern void vm86_bios_call(void);
+extern void vm86_bios_ret_point(void);
+extern void vm86_enter(void);
+extern void vm86_gpf_handler(void);
+extern void vm86_init_bsd(void);
+extern void vm86_monitor_get(void);
+extern void vm86_monitor_init(void);
+extern void vm86_monitor_signal_fault(void);
+extern void vm_area_create(void);
+extern void vm_area_destroy(void);
+extern void vm_area_find(void);
+extern void vm_area_free_all(void);
+extern void vm_area_insert(void);
+extern void vm_area_remove(void);
+extern void vm_fault(void);
+extern void vm_map_create(void);
+extern void vm_map_destroy(void);
+extern void vm_map_find_space(void);
+extern void vm_map_fork(void);
+extern void vm_map_init(void);
+extern void vm_map_insert(void);
+extern void vm_map_lookup(void);
+extern void vm_map_protect(void);
+extern void vm_map_remove(void);
+extern void vm_map_unwire(void);
+extern void vm_map_wire(void);
+extern void vm_object_add_page(void);
+extern void vm_object_allocate(void);
+extern void vm_object_deallocate(void);
+extern void vm_object_init(void);
+extern void vm_object_lookup_page(void);
+extern void vm_object_reference(void);
+extern void vm_object_remove_page(void);
+extern void vm_object_shadow(void);
+extern void vm_page_activate(void);
+extern void vm_page_age_scan(void);
+extern void vm_page_alloc(void);
+extern void vm_page_deactivate(void);
+extern void vm_page_estimate_working_set(void);
+extern void vm_page_free(void);
+extern void vm_page_get_stats(void);
+extern void vm_page_hold(void);
+extern void vm_page_init(void);
+extern void vm_page_insert(void);
+extern void vm_page_is_evict_candidate(void);
+extern void vm_page_launder(void);
+extern void vm_page_mark_for_writeback(void);
+extern void vm_page_needs_writeback(void);
+extern void vm_page_remove(void);
+extern void vm_page_should_pageout(void);
+extern void vm_page_try_to_free(void);
+extern void vm_page_unhold(void);
+extern void vm_page_unwire(void);
+extern void vm_page_wakeup_daemon(void);
+extern void vm_page_wire(void);
+extern void vm_page_writeback_done(void);
+extern void vm_pageout(void);
+extern void vm_pageout_scan(void);
+extern void vm_pager_allocate(void);
+extern void vm_pager_deallocate(void);
+extern void vm_pager_get_pages(void);
+extern void vm_pager_has_page(void);
+extern void vm_pager_put_pages(void);
+extern void vm_phys_add_range(void);
+extern void vm_phys_alloc_contiguous(void);
+extern void vm_phys_alloc_page(void);
+extern void vm_phys_early_init(void);
+extern void vm_phys_free_contiguous(void);
+extern void vm_phys_free_page(void);
+extern void vm_phys_get_free(void);
+extern void vm_phys_get_used(void);
+extern void vm_phys_mark_used(void);
+extern void vm_phys_paddr_to_page(void);
+extern void vm_swap_get_stats(void);
+extern void vm_swapon(void);
+extern void vm_zone_alloc(void);
+extern void vm_zone_create(void);
+extern void vm_zone_free(void);
+extern void vm_zone_init(void);
+extern void vn_islocked(void);
+extern void vn_lock(void);
+extern void vn_unlock(void);
+extern void vnode_cache_insert(void);
+extern void vnode_cache_remove(void);
+extern void vnode_create(void);
+extern void vnode_init(void);
+extern void vnode_lookup_cache(void);
+extern void vnode_reclaim(void);
+extern void vop_access(void);
+extern void vop_bmap(void);
+extern void vop_cachedlookup(void);
+extern void vop_close(void);
+extern void vop_create(void);
+extern void vop_fsync(void);
+extern void vop_getattr(void);
+extern void vop_inactive(void);
+extern void vop_ioctl(void);
+extern void vop_link(void);
+extern void vop_lookup(void);
+extern void vop_mkdir(void);
+extern void vop_mknod(void);
+extern void vop_open(void);
+extern void vop_pathconf(void);
+extern void vop_poll(void);
+extern void vop_print(void);
+extern void vop_read(void);
+extern void vop_readdir(void);
+extern void vop_readlink(void);
+extern void vop_reclaim(void);
+extern void vop_remove(void);
+extern void vop_rename(void);
+extern void vop_rmdir(void);
+extern void vop_setattr(void);
+extern void vop_strategy(void);
+extern void vop_symlink(void);
+extern void vop_whiteout(void);
+extern void vop_write(void);
+extern void vput(void);
+extern void vref(void);
+extern void vrele(void);
+extern void vsnprintf(void);
+extern void vsprintf(void);
+extern void vt_activate(void);
+extern void vt_get_active(void);
+extern void vt_get_state(void);
+extern void vt_init(void);
+extern void write_fs(void);
+extern void zero_init(void);
+
 struct ksym ksym_table[] = {
-    { 0x00100000, "_setup_phys_start" },
-    { 0x00100000, "_setup_start" },
-    { 0x00100024, "_start" },
-    { 0x00100155, "efi_main" },
-    { 0x00100936, "_setup_end" },
-    { 0x00100936, "_setup_phys_end" },
-    { 0xc0100936, "_kernel_start" },
-    { 0xc0101000, "higher_half" },
-    { 0xc0101029, "set_gate" },
-    { 0xc010110a, "gdt_set_gate" },
-    { 0xc010114d, "setup_tss" },
-    { 0xc0101220, "gdt_init_cpu" },
-    { 0xc010134c, "gdt_init" },
-    { 0xc0101362, "set_kernel_stack" },
-    { 0xc0101376, "tss_iomap_init" },
-    { 0xc01013b0, "tss_set_iomap" },
-    { 0xc010144f, "tss_set_iomap_range" },
-    { 0xc0101492, "ldt_activate" },
-    { 0xc01014f7, "ldt_init_process" },
-    { 0xc0101517, "ldt_free_process" },
-    { 0xc0101561, "fill_ldt_entry" },
-    { 0xc010165e, "sys_modify_ldt" },
-    { 0xc010184c, "arch_switch_to" },
-    { 0xc01018ba, "arch_set_kernel_stack" },
-    { 0xc01018d1, "thread_exit_wrapper" },
-    { 0xc01018f7, "sched_init" },
-    { 0xc01019bb, "sched_fork_thread" },
-    { 0xc0101ba6, "sched_create_thread" },
-    { 0xc0101c5a, "outb" },
-    { 0xc0101c79, "idt_init" },
-    { 0xc01021cc, "idt_set_gate" },
-    { 0xc0102245, "isr_handler" },
-    { 0xc0102788, "idt_flush" },
-    { 0xc0102790, "gdt_flush" },
-    { 0xc01027ac, ".flush" },
-    { 0xc01027ad, "tss_flush" },
-    { 0xc01027b5, "switch_to" },
-    { 0xc01027cc, "isr0" },
-    { 0xc01027d6, "isr1" },
-    { 0xc01027e0, "isr2" },
-    { 0xc01027ea, "isr3" },
-    { 0xc01027f4, "isr4" },
-    { 0xc01027fe, "isr5" },
-    { 0xc0102808, "isr6" },
-    { 0xc0102812, "isr7" },
-    { 0xc010281c, "isr8" },
-    { 0xc0102824, "isr9" },
-    { 0xc010282e, "isr10" },
-    { 0xc0102836, "isr11" },
-    { 0xc010283e, "isr12" },
-    { 0xc0102846, "isr13" },
-    { 0xc010284e, "isr14" },
-    { 0xc0102856, "isr15" },
-    { 0xc0102860, "isr16" },
-    { 0xc010286a, "isr17" },
-    { 0xc0102872, "isr18" },
-    { 0xc010287c, "isr19" },
-    { 0xc0102886, "isr20" },
-    { 0xc0102890, "isr21" },
-    { 0xc010289a, "isr22" },
-    { 0xc01028a4, "isr23" },
-    { 0xc01028ae, "isr24" },
-    { 0xc01028b8, "isr25" },
-    { 0xc01028c2, "isr26" },
-    { 0xc01028cc, "isr27" },
-    { 0xc01028d6, "isr28" },
-    { 0xc01028e0, "isr29" },
-    { 0xc01028ea, "isr30" },
-    { 0xc01028f2, "isr31" },
-    { 0xc01028f9, "isr32" },
-    { 0xc0102900, "isr33" },
-    { 0xc0102907, "isr34" },
-    { 0xc010290e, "isr35" },
-    { 0xc0102915, "isr36" },
-    { 0xc010291c, "isr37" },
-    { 0xc0102923, "isr38" },
-    { 0xc010292a, "isr39" },
-    { 0xc0102931, "isr40" },
-    { 0xc0102938, "isr41" },
-    { 0xc010293f, "isr42" },
-    { 0xc0102946, "isr43" },
-    { 0xc010294d, "isr44" },
-    { 0xc0102954, "isr45" },
-    { 0xc010295b, "isr46" },
-    { 0xc0102962, "isr47" },
-    { 0xc0102969, "isr128" },
-    { 0xc0102973, "isr_common_stub" },
-    { 0xc01029a3, "call_syscall" },
-    { 0xc01029a8, "isr_exit" },
-    { 0xc01029bc, "jump_to_userspace" },
-    { 0xc01029e4, "fork_child_return" },
-    { 0xc01029ff, "pmm_init_kernel_bounds" },
-    { 0xc0102a53, "pmm_record_multiboot_info" },
-    { 0xc0102aa7, "pmm_record_module_regions" },
-    { 0xc0102b9e, "pmm_add_region" },
-    { 0xc0102c12, "pmm_check_overlap" },
-    { 0xc0102caf, "pmm_reserve_regions" },
-    { 0xc0102df4, "pmm_report_memory_stats" },
-    { 0xc0102f05, "pmm_watermark_init" },
-    { 0xc0102f2f, "pmm_watermark_alloc" },
-    { 0xc0102f9a, "pmm_watermark_used" },
-    { 0xc0102fae, "pmm_mark_used" },
-    { 0xc0102fc5, "pmm_reserve_kernel" },
-    { 0xc0103028, "pmm_reclaim_setup" },
-    { 0xc010309c, "pmm_is_usable_type" },
-    { 0xc01030b9, "pmm_validate_mmap_entry" },
-    { 0xc0103190, "pmm_walk_mmap" },
-    { 0xc0103354, "pmm_cb_stats" },
-    { 0xc0103414, "pmm_cb_init_buddy" },
-    { 0xc0103546, "pmm_init" },
-    { 0xc010377b, "pmm_get_total_memory" },
-    { 0xc0103798, "pmm_get_free_memory" },
-    { 0xc01037a8, "pmm_alloc_block" },
-    { 0xc01037d0, "pmm_free_block" },
-    { 0xc010380c, "pmm_alloc_contiguous" },
-    { 0xc010383d, "pmm_free_contiguous" },
-    { 0xc010387c, "pmm_get_used_blocks" },
-    { 0xc0103889, "pmm_reclaim_range" },
-    { 0xc01038a3, "pmm_get_page" },
-    { 0xc01038b9, "pmm_dump_mmap" },
-    { 0xc01039f1, "pmm_is_e820_usable_type" },
-    { 0xc0103a00, "pmm_validate_e820_entry" },
-    { 0xc0103ad5, "pmm_walk_e820" },
-    { 0xc0103cc6, "pmm_dump_e820" },
-    { 0xc0103e11, "pmm_init_e820" },
-    { 0xc010406c, "outl" },
-    { 0xc0104084, "inl" },
-    { 0xc01040a0, "pci_read" },
-    { 0xc0104141, "pci_write" },
-    { 0xc01041c6, "pci_check_device" },
-    { 0xc01042fc, "pci_scan" },
-    { 0xc010434f, "pci_find_device" },
-    { 0xc01043b7, "pci_init" },
-    { 0xc01043d5, "sys_set_thread_area" },
-    { 0xc01044d0, "syscall_handler" },
-    { 0xc0104bb1, "sys_fork" },
-    { 0xc0104bf5, "sys_vfork" },
-    { 0xc0104c39, "syscall_init" },
-    { 0xc0104c5c, "pmap_stat_inc" },
-    { 0xc0104c98, "pmap_list_add" },
-    { 0xc0104ced, "pmap_list_remove" },
-    { 0xc0104d70, "pmap_lock_acquire" },
-    { 0xc0104d93, "pmap_lock_release" },
-    { 0xc0104da3, "pmap_bootstrap" },
-    { 0xc0105008, "pmap_null_protect" },
-    { 0xc0105039, "pmap_null_allow" },
-    { 0xc010508b, "pmap_kernel" },
-    { 0xc0105095, "pmap_create" },
-    { 0xc010524d, "pmap_destroy" },
-    { 0xc0105462, "pmap_reference" },
-    { 0xc0105487, "pmap_release" },
-    { 0xc01054d7, "pmap_fork" },
-    { 0xc01056b8, "pmap_activate" },
-    { 0xc01056eb, "pmap_enter" },
-    { 0xc0105820, "pmap_enter_batch" },
-    { 0xc01059e2, "pmap_map_trampoline" },
-    { 0xc0105a73, "pmap_enter_large" },
-    { 0xc0105c17, "pmap_remove" },
-    { 0xc0105ccd, "pmap_kenter" },
-    { 0xc0105dd3, "pmap_kremove" },
-    { 0xc0105e3a, "pmap_extract" },
-    { 0xc0105f17, "pmap_protect" },
-    { 0xc0106158, "pmap_copy" },
-    { 0xc010643e, "pmap_page_is_cow" },
-    { 0xc01064fc, "pmap_invalidate_page" },
-    { 0xc0106510, "pmap_invalidate_all" },
-    { 0xc010652d, "pmap_flush_global_pages" },
-    { 0xc0106571, "pmap_shootdown_handler" },
-    { 0xc01065de, "pmap_shootdown_page" },
-    { 0xc0106641, "pmap_shootdown_range" },
-    { 0xc01066be, "pmap_shootdown_all" },
-    { 0xc010671d, "pmap_shootdown_defer" },
-    { 0xc0106759, "pmap_shootdown_commit" },
-    { 0xc01067b5, "pmap_shootdown_wait" },
-    { 0xc01067e5, "pmap_is_referenced" },
-    { 0xc01068b1, "pmap_clear_reference" },
-    { 0xc0106986, "pmap_is_referenced_range" },
-    { 0xc0106a51, "pmap_test_and_clear_ref" },
-    { 0xc0106b2f, "pmap_track_access" },
-    { 0xc0106c76, "pmap_is_modified_range" },
-    { 0xc0106d41, "pmap_test_and_clear_modify" },
-    { 0xc0106e1f, "pmap_track_modify" },
-    { 0xc0106f51, "pmap_fault" },
-    { 0xc0107173, "sys_pmap_stats" },
-    { 0xc01071ef, "pmap_copy_page" },
-    { 0xc0107241, "pmap_zero_page" },
-    { 0xc0107286, "pmap_check" },
-    { 0xc01073e9, "pmap_dump" },
-    { 0xc0107604, "smp_discover_cores" },
-    { 0xc0107966, "smp_ap_entry" },
-    { 0xc0107a1f, "smp_boot_ap" },
-    { 0xc0107c8b, "smp_boot_all_aps" },
-    { 0xc0107d95, "smp_init" },
-    { 0xc0107da3, "smp_get_cpu_count" },
-    { 0xc0107dad, "smp_get_cpu_id" },
-    { 0xc0107dbc, "trampoline_start" },
-    { 0xc0107dd3, "trampoline_start32" },
-    { 0xc0107dec, "trampoline_gdt" },
-    { 0xc0107e04, "trampoline_gdt_ptr" },
-    { 0xc0107e0c, "trampoline_stack" },
-    { 0xc0107e10, "trampoline_entry" },
-    { 0xc0107e14, "fpu_save_context" },
-    { 0xc0107e14, "trampoline_end" },
-    { 0xc0107e2c, "fpu_restore_context" },
-    { 0xc0107e44, "fpu_handler" },
-    { 0xc0107e96, "fpu_init" },
-    { 0xc0107f47, "efi_print" },
-    { 0xc0107fb9, "efi_print_hex" },
-    { 0xc0108030, "vm86_monitor_init" },
-    { 0xc01080a9, "vm86_monitor_get" },
-    { 0xc01080b3, "vm86_monitor_signal_fault" },
-    { 0xc01080e4, "sys_vm86" },
-    { 0xc0108121, "vm86_init_bsd" },
-    { 0xc0108170, "vm86_gpf_handler" },
-    { 0xc01085a2, "vm86_bios_call" },
-    { 0xc010869c, "vm86_enter" },
-    { 0xc01086dd, "vm86_bios_ret_point" },
-    { 0xc01086e5, "sys_sysarch" },
-    { 0xc0108718, "populate_siginfo" },
-    { 0xc010878c, "populate_ucontext" },
-    { 0xc01088ec, "sendsig" },
-    { 0xc0108cc9, "sys_sigreturn" },
-    { 0xc0108e4c, "sys_rt_sigreturn" },
-    { 0xc010901c, "early_uart_putc" },
-    { 0xc0109052, "early_uart_print" },
-    { 0xc010907d, "early_print_hex" },
-    { 0xc01090d5, "early_exception_handler" },
-    { 0xc0109131, "early_isr0" },
-    { 0xc0109145, "early_isr1" },
-    { 0xc0109159, "early_isr2" },
-    { 0xc010916d, "early_isr3" },
-    { 0xc0109181, "early_isr4" },
-    { 0xc0109195, "early_isr5" },
-    { 0xc01091a9, "early_isr6" },
-    { 0xc01091bd, "early_isr7" },
-    { 0xc01091d1, "early_isr8" },
-    { 0xc01091e5, "early_isr9" },
-    { 0xc01091f9, "early_isr10" },
-    { 0xc010920d, "early_isr11" },
-    { 0xc0109221, "early_isr12" },
-    { 0xc0109235, "early_isr13" },
-    { 0xc0109249, "early_isr14" },
-    { 0xc010925d, "early_isr15" },
-    { 0xc0109271, "early_isr16" },
-    { 0xc0109285, "early_isr17" },
-    { 0xc0109299, "early_isr18" },
-    { 0xc01092ad, "early_isr19" },
-    { 0xc01092c1, "early_isr20" },
-    { 0xc01092d5, "early_isr21" },
-    { 0xc01092e9, "early_isr22" },
-    { 0xc01092fd, "early_isr23" },
-    { 0xc0109311, "early_isr24" },
-    { 0xc0109325, "early_isr25" },
-    { 0xc0109339, "early_isr26" },
-    { 0xc010934d, "early_isr27" },
-    { 0xc0109361, "early_isr28" },
-    { 0xc0109375, "early_isr29" },
-    { 0xc0109389, "early_isr30" },
-    { 0xc010939d, "early_isr31" },
-    { 0xc01093b1, "early_isr_addr" },
-    { 0xc01094de, "early_gdt_init" },
-    { 0xc010959d, "early_idt_set_gate" },
-    { 0xc01095e9, "early_idt_init" },
-    { 0xc0109636, "percpu_get" },
-    { 0xc010968b, "percpu_get_cpu" },
-    { 0xc01096b1, "percpu_init_cpu" },
-    { 0xc01097b4, "percpu_init" },
-    { 0xc01097da, "percpu_get_cpu_id" },
-    { 0xc01097ef, "lapic_read" },
-    { 0xc0109811, "lapic_write" },
-    { 0xc0109834, "lapic_set_base" },
-    { 0xc0109842, "lapic_get_base" },
-    { 0xc010984c, "lapic_init" },
-    { 0xc01099e4, "lapic_is_initialized" },
-    { 0xc01099f0, "lapic_enable" },
-    { 0xc0109ae1, "lapic_disable" },
-    { 0xc0109b2c, "outb" },
-    { 0xc0109b4b, "inb" },
-    { 0xc0109b68, "lapic_timer_calibrate" },
-    { 0xc0109e3b, "lapic_timer_set_divider" },
-    { 0xc0109e67, "lapic_timer_periodic" },
-    { 0xc0109ea8, "lapic_timer_oneshot" },
-    { 0xc0109ee4, "lapic_timer_stop" },
-    { 0xc0109f16, "lapic_timer_ticks_per_ms" },
-    { 0xc0109f20, "lapic_timer_delay_ms" },
-    { 0xc010a02f, "lapic_timer_delay_us" },
-    { 0xc010a193, "lapic_setup_error" },
-    { 0xc010a25d, "lapic_get_error" },
-    { 0xc010a28e, "lapic_print_error" },
-    { 0xc010a3a3, "lapic_send_eoi" },
-    { 0xc010a3b8, "lapic_get_id" },
-    { 0xc010a3ca, "lapic_ipi_wait" },
-    { 0xc010a3eb, "lapic_send_ipi_ex" },
-    { 0xc010a442, "lapic_send_ipi" },
-    { 0xc010a46b, "lapic_send_ipi_all_excl_self" },
-    { 0xc010a4a6, "lapic_send_init" },
-    { 0xc010a50d, "lapic_send_sipi" },
-    { 0xc010a561, "lapic_send_nmi" },
-    { 0xc010a5ac, "lapic_send_nmi_all_excl_self" },
-    { 0xc010a5dc, "ioapic_read" },
-    { 0xc010a601, "ioapic_write" },
-    { 0xc010a62c, "ioapic_register" },
-    { 0xc010a856, "ioapic_init" },
-    { 0xc010a871, "ioapic_find_gsi" },
-    { 0xc010a8d5, "ioapic_get_count" },
-    { 0xc010a8df, "ioapic_set_routing" },
-    { 0xc010a963, "ioapic_set_routing_ex" },
-    { 0xc010aa45, "ioapic_set_mask" },
-    { 0xc010aacf, "ioapic_mask_all" },
-    { 0xc010ab6a, "outb" },
-    { 0xc010ab89, "inb" },
-    { 0xc010aba6, "rtc_read_reg" },
-    { 0xc010abcd, "rtc_is_updating" },
-    { 0xc010abf0, "bcd_to_binary" },
-    { 0xc010ac1b, "is_leap_year" },
-    { 0xc010ac7f, "to_unix_time" },
-    { 0xc010adb7, "rtc_read_time" },
-    { 0xc010af6c, "rtc_init" },
-    { 0xc010afa1, "crc32_init" },
-    { 0xc010b017, "crc32" },
-    { 0xc010b07a, "memcpy" },
-    { 0xc010b1ad, "memmove" },
-    { 0xc010b22a, "strlcpy" },
-    { 0xc010b281, "memset" },
-    { 0xc010b35a, "memcmp" },
-    { 0xc010b3b2, "strlen" },
-    { 0xc010b47c, "strcpy" },
-    { 0xc010b4ac, "strncpy" },
-    { 0xc010b502, "strcmp" },
-    { 0xc010b541, "strncmp" },
-    { 0xc010b597, "strchr" },
-    { 0xc010b5c5, "strspn" },
-    { 0xc010b61e, "strcspn" },
-    { 0xc010b677, "strpbrk" },
-    { 0xc010b6b4, "strcat" },
-    { 0xc010b6f4, "strncat" },
-    { 0xc010b747, "itoa" },
-    { 0xc010b91b, "utoa_hex" },
-    { 0xc010b9d5, "utoa_oct" },
-    { 0xc010ba74, "ftoa" },
-    { 0xc010bcb5, "etoa" },
-    { 0xc010bec8, "gtoa" },
-    { 0xc010c10e, "emit_char" },
-    { 0xc010c159, "emit_string" },
-    { 0xc010c192, "emit_padding" },
-    { 0xc010c1c7, "format_int" },
-    { 0xc010c4b3, "format_uint" },
-    { 0xc010c6e5, "format_oct" },
-    { 0xc010c811, "format_hex" },
-    { 0xc010ca2e, "format_float" },
-    { 0xc010cc10, "format_ptr" },
-    { 0xc010cd0d, "format_string" },
-    { 0xc010cdc1, "format_char" },
-    { 0xc010cde0, "vsnprintf" },
-    { 0xc010d6d0, "snprintf" },
-    { 0xc010d6f9, "sprintf" },
-    { 0xc010d721, "vsprintf" },
-    { 0xc010d73c, "kvasprintf" },
-    { 0xc010d7aa, "kasprintf" },
-    { 0xc010d7d0, "udiv64" },
-    { 0xc010d8c0, "__udivdi3" },
-    { 0xc010d8f9, "__umoddi3" },
-    { 0xc010d93a, "__divdi3" },
-    { 0xc010da16, "__moddi3" },
-    { 0xc010dab8, "__ashldi3" },
-    { 0xc010daf5, "__lshrdi3" },
-    { 0xc010db32, "__ashrdi3" },
-    { 0xc010dbd4, "__muldi3" },
-    { 0xc010dd02, "__negdi2" },
-    { 0xc010dd23, "compress" },
-    { 0xc010dd7d, "kern_acct" },
-    { 0xc010de14, "sys_acct" },
-    { 0xc010de6a, "acct_process" },
-    { 0xc010df8f, "sys_getpgrp" },
-    { 0xc010dfba, "get_ticks" },
-    { 0xc010dfca, "get_time" },
-    { 0xc010dff8, "get_uptime" },
-    { 0xc010e00f, "get_uptime_ms" },
-    { 0xc010e04c, "get_hz" },
-    { 0xc010e056, "set_boot_time" },
-    { 0xc010e07c, "kern_time" },
-    { 0xc010e0a9, "kern_stime" },
-    { 0xc010e0fb, "kern_gettimeofday" },
-    { 0xc010e1a7, "kern_clock_gettime" },
-    { 0xc010e2ae, "kern_times" },
-    { 0xc010e2f2, "sys_time" },
-    { 0xc010e33e, "sys_stime" },
-    { 0xc010e374, "sys_gettimeofday" },
-    { 0xc010e3ef, "sys_clock_gettime" },
-    { 0xc010e431, "sys_times" },
-    { 0xc010e473, "timer_tick" },
-    { 0xc010e4c6, "init_memory" },
-    { 0xc010e6a3, "strstr" },
-    { 0xc010e726, "init_root_fs" },
-    { 0xc010e9a5, "kinit_task" },
-    { 0xc010eb1d, "init_task" },
-    { 0xc010eb34, "kmain" },
-    { 0xc010eef1, "panic" },
-    { 0xc010efa9, "stack_trace" },
-    { 0xc010f0e6, "stack_trace_from" },
-    { 0xc010f251, "ksym_lookup" },
-    { 0xc010f2d7, "ksym_resolve" },
-    { 0xc010f35f, "ksym_print" },
-    { 0xc010f38b, "ksym_init" },
-    { 0xc010f3bd, "spinlock_init" },
-    { 0xc010f3df, "spinlock_acquire" },
-    { 0xc010f436, "spinlock_try_acquire" },
-    { 0xc010f482, "spinlock_release" },
-    { 0xc010f4c4, "spinlock_is_held" },
-    { 0xc010f4f7, "mutex_init" },
-    { 0xc010f533, "mutex_trylock" },
-    { 0xc010f568, "mutex_lock" },
-    { 0xc010f686, "mutex_unlock" },
-    { 0xc010f6d5, "mutex_is_held" },
-    { 0xc010f701, "sema_init" },
-    { 0xc010f730, "sema_wait" },
-    { 0xc010f7b2, "sema_post" },
-    { 0xc010f803, "sema_getvalue" },
-    { 0xc010f83a, "kthread_create" },
-    { 0xc010f8ca, "kthread_exit" },
-    { 0xc010f8f0, "turnstile_hash_func" },
-    { 0xc010f8fe, "ts_lock" },
-    { 0xc010f921, "ts_unlock" },
-    { 0xc010f931, "turnstile_alloc" },
-    { 0xc010f97e, "turnstile_lookup" },
-    { 0xc010f9c6, "turnstile_insert" },
-    { 0xc010f9fd, "turnstile_remove" },
-    { 0xc010fa5b, "turnstile_init" },
-    { 0xc010fa85, "turnstile_block" },
-    { 0xc010fb8a, "turnstile_release" },
-    { 0xc010fc25, "turnstile_get_inherited_priority" },
-    { 0xc010fca5, "kern_sigaction" },
-    { 0xc010fe25, "sys_sigaction" },
-    { 0xc010feb2, "kern_sigprocmask" },
-    { 0xc010ff34, "sys_sigprocmask" },
-    { 0xc010ffc2, "kern_sigpending" },
-    { 0xc010ffe9, "sys_sigpending" },
-    { 0xc0110028, "kern_sigsuspend" },
-    { 0xc01100a9, "kern_sigaltstack" },
-    { 0xc0110137, "sys_sigaltstack" },
-    { 0xc01101c1, "sys_sigsuspend" },
-    { 0xc011020a, "sys_sigwait" },
-    { 0xc011026f, "kern_sigwait" },
-    { 0xc011036c, "sys_sigtimedwait" },
-    { 0xc011042f, "kern_sigtimedwait" },
-    { 0xc01106f1, "psignal" },
-    { 0xc0110a89, "pgsignal" },
-    { 0xc0110ace, "trapsignal" },
-    { 0xc0110b54, "sigexit" },
-    { 0xc0110bba, "sys_kill" },
-    { 0xc0110d40, "signal_send_group" },
-    { 0xc0110d5e, "signal_handle_pending" },
-    { 0xc01110ce, "swapper_init" },
-    { 0xc01111c2, "swapper_get_proc" },
-    { 0xc01111cc, "swapper_get_idle_thread" },
-    { 0xc01111d6, "swapper_request_work" },
-    { 0xc01111e6, "swapper_idle_loop" },
-    { 0xc0111244, "sched_ensure_context" },
-    { 0xc011125e, "sched_enter_critical" },
-    { 0xc0111269, "sched_is_idle" },
-    { 0xc011128e, "validate_uaddr" },
-    { 0xc01112b2, "futex_read_timespec" },
-    { 0xc0111309, "futex_get_key" },
-    { 0xc011135d, "futex_read_user" },
-    { 0xc01113aa, "futex_cmpxchg_user" },
-    { 0xc011141d, "futex_handle_dead_owner" },
-    { 0xc01114a3, "futex_thread_exit" },
-    { 0xc01115d4, "futex_exit_cleanup" },
-    { 0xc01115ee, "futex_wake_exited_thread" },
-    { 0xc0111631, "sys_set_robust_list" },
-    { 0xc0111691, "sys_get_robust_list" },
-    { 0xc011176f, "sys_futex" },
-    { 0xc0111afa, "pi_spinlock" },
-    { 0xc0111b1d, "pi_unlock" },
-    { 0xc0111b2d, "pi_hash_func" },
-    { 0xc0111b53, "pi_state_alloc" },
-    { 0xc0111bd7, "pi_waiter_alloc" },
-    { 0xc0111c33, "pi_lookup" },
-    { 0xc0111c9d, "pi_get_or_create" },
-    { 0xc0111d27, "pi_insert_waiter" },
-    { 0xc0111dab, "pi_remove_waiter" },
-    { 0xc0111ded, "pi_top_waiter_prio" },
-    { 0xc0111e0c, "pi_boost_owner" },
-    { 0xc0111e80, "pi_deboost_owner" },
-    { 0xc0111f20, "futex_lock_pi" },
-    { 0xc0112367, "futex_unlock_pi" },
-    { 0xc011250e, "kobject_init" },
-    { 0xc0112547, "kset_init" },
-    { 0xc0112576, "kobject_get" },
-    { 0xc011258e, "kobject_put" },
-    { 0xc01125d3, "cmdline_init" },
-    { 0xc0112643, "cmdline_has" },
-    { 0xc01126f2, "cmdline_get" },
-    { 0xc01127f2, "cmdline_get_full" },
-    { 0xc011283f, "dump_thread_callback" },
-    { 0xc0112997, "debug_dump_processes" },
-    { 0xc0112a72, "sleepq_hash_func" },
-    { 0xc0112a98, "sq_lock" },
-    { 0xc0112ac8, "sq_unlock" },
-    { 0xc0112ae0, "sleepq_alloc" },
-    { 0xc0112b4d, "sleepq_lookup" },
-    { 0xc0112ba8, "sleepq_insert" },
-    { 0xc0112bcb, "sleepq_remove" },
-    { 0xc0112c18, "sleepq_init" },
-    { 0xc0112c59, "sleepq_add_internal" },
-    { 0xc0112d6d, "sleepq_add" },
-    { 0xc0112d88, "sleepq_add_private" },
-    { 0xc0112db4, "sleepq_wake_one_internal" },
-    { 0xc0112eac, "sleepq_wake_one" },
-    { 0xc0112ec0, "sleepq_wake_one_private" },
-    { 0xc0112eda, "sleepq_wake_all_internal" },
-    { 0xc0112fb8, "sleepq_wake_all" },
-    { 0xc0112fcc, "sleepq_wake_all_private" },
-    { 0xc0112fe6, "sleepq_wake_n_internal" },
-    { 0xc011311f, "sleepq_wake_n" },
-    { 0xc0113136, "sleepq_wake_n_private" },
-    { 0xc0113163, "sleepq_has_waiters_internal" },
-    { 0xc01131db, "sleepq_has_waiters" },
-    { 0xc01131ef, "sleepq_has_waiters_private" },
-    { 0xc0113219, "sleepq_requeue_internal" },
-    { 0xc01134e0, "sleepq_requeue" },
-    { 0xc0113503, "sleepq_requeue_private" },
-    { 0xc011353c, "chacha20_block_internal" },
-    { 0xc01139ad, "chacha20_init" },
-    { 0xc0113b20, "chacha20_block" },
-    { 0xc0113c11, "chacha20_extract" },
-    { 0xc0113ce1, "chacha20_rekey" },
-    { 0xc0113d4e, "chacha20_wipe" },
-    { 0xc0113d6c, "pool_init" },
-    { 0xc0113d8a, "pool_mix_bytes" },
-    { 0xc0113e6a, "pool_compress" },
-    { 0xc0113f3f, "pool_extract_bytes" },
-    { 0xc0113fab, "random_detect_hwrng" },
-    { 0xc011404c, "random_has_rdrand" },
-    { 0xc0114056, "random_has_rdseed" },
-    { 0xc0114060, "rdrand32" },
-    { 0xc01140af, "rdrand64" },
-    { 0xc0114107, "rdseed32" },
-    { 0xc0114158, "rdseed64" },
-    { 0xc01141b0, "random_harvest_hwrng" },
-    { 0xc0114244, "random_harvest" },
-    { 0xc01142ed, "random_harvest_fast" },
-    { 0xc011438d, "random_harvest_direct" },
-    { 0xc01143a9, "random_is_seeded" },
-    { 0xc01143b3, "random_reseed" },
-    { 0xc0114485, "random_get_bytes" },
-    { 0xc01144a0, "random_get_bytes_flags" },
-    { 0xc01145ac, "random_dev_read" },
-    { 0xc01145e3, "urandom_dev_read" },
-    { 0xc011461a, "random_dev_write" },
-    { 0xc0114648, "random_init" },
-    { 0xc01147e3, "outb" },
-    { 0xc0114802, "inb" },
-    { 0xc011481f, "ensure_file_zone_init" },
-    { 0xc0114882, "file_alloc" },
-    { 0xc01148b8, "file_free" },
-    { 0xc01148dd, "kern_write" },
-    { 0xc01149a9, "truncate_fs" },
-    { 0xc0114a18, "sys_write" },
-    { 0xc0114b38, "kern_read" },
-    { 0xc0114bdd, "sys_read" },
-    { 0xc0114cf2, "sys_open" },
-    { 0xc0114d39, "kern_open" },
-    { 0xc0114e96, "file_close_ptr" },
-    { 0xc0114ee0, "kern_close" },
-    { 0xc0114f5f, "sys_close" },
-    { 0xc0114f75, "sys_lseek" },
-    { 0xc0115050, "sys_truncate" },
-    { 0xc01150f9, "sys_ftruncate" },
-    { 0xc011518d, "sys_getdents" },
-    { 0xc0115225, "kern_getdents" },
-    { 0xc01153d2, "sys_uname" },
-    { 0xc0115420, "kern_uname" },
-    { 0xc011551f, "sys_exit" },
-    { 0xc011553a, "sys__exit" },
-    { 0xc0115555, "sys_thr_new" },
-    { 0xc01155e4, "sys_thr_self" },
-    { 0xc01155f1, "kern_thr_new" },
-    { 0xc0115691, "sys_thr_exit" },
-    { 0xc01156d1, "sys_thr_join" },
-    { 0xc011579c, "fill_stat" },
-    { 0xc0115988, "sys_chroot" },
-    { 0xc01159c9, "kern_chroot" },
-    { 0xc0115a91, "sys_mkdir" },
-    { 0xc0115ad5, "kern_mkdir" },
-    { 0xc0115aff, "sys_rmdir" },
-    { 0xc0115b33, "sys_getuid" },
-    { 0xc0115b43, "sys_getgid" },
-    { 0xc0115b53, "sys_getppid" },
-    { 0xc0115b60, "sys_geteuid" },
-    { 0xc0115b70, "sys_getegid" },
-    { 0xc0115b80, "sys_setuid" },
-    { 0xc0115c03, "sys_setgid" },
-    { 0xc0115c86, "sys_clone" },
-    { 0xc0115c90, "sys_stat" },
-    { 0xc0115d06, "kern_stat" },
-    { 0xc0115d7c, "sys_lstat" },
-    { 0xc0115df2, "kern_lstat" },
-    { 0xc0115e68, "sys_poll" },
-    { 0xc0115f3e, "kern_poll" },
-    { 0xc01160b4, "sys_fstat" },
-    { 0xc01160f9, "kern_fstat" },
-    { 0xc011615d, "sys_ioctl" },
-    { 0xc011618a, "kern_ioctl" },
-    { 0xc0116206, "sys_unlink" },
-    { 0xc0116247, "kern_unlink" },
-    { 0xc0116424, "sys_link" },
-    { 0xc0116490, "kern_link" },
-    { 0xc01166a0, "sys_readlink" },
-    { 0xc0116766, "kern_readlink" },
-    { 0xc01168b4, "sys_access" },
-    { 0xc01168f8, "kern_access" },
-    { 0xc01169c8, "sys_mlock" },
-    { 0xc01169d2, "sys_munlock" },
-    { 0xc01169dc, "sys_sync" },
-    { 0xc01169e6, "sys_pipe" },
-    { 0xc0116a28, "kern_pipe" },
-    { 0xc0116ba4, "sys_dup" },
-    { 0xc0116c28, "sys_dup2" },
-    { 0xc0116cf6, "sys_chmod" },
-    { 0xc0116d00, "sys_lchown" },
-    { 0xc0116d0a, "sys_fcntl" },
-    { 0xc0116d14, "sys_creat" },
-    { 0xc0116d2f, "sys_signal" },
-    { 0xc0116d6b, "sys_waitpid" },
-    { 0xc0116dcd, "kern_waitpid" },
-    { 0xc0116de8, "sys_getpid" },
-    { 0xc0116e04, "sys_execve" },
-    { 0xc0116e4b, "kern_execve" },
-    { 0xc0116e67, "sys_mknod" },
-    { 0xc0116e71, "sys_mount" },
-    { 0xc0116f1e, "kern_mount" },
-    { 0xc0116f69, "sys_umount" },
-    { 0xc0116faa, "kern_umount" },
-    { 0xc0116fe3, "sys_nanosleep" },
-    { 0xc0117341, "sys_chdir" },
-    { 0xc0117382, "kern_chdir" },
-    { 0xc0117453, "kern_fchdir" },
-    { 0xc01174cb, "sys_fchdir" },
-    { 0xc01174db, "find_name_by_inode" },
-    { 0xc0117620, "sys_getcwd" },
-    { 0xc01176d3, "kern_getcwd" },
-    { 0xc01179d6, "sys_proc_info" },
-    { 0xc0117a1b, "kern_proc_info" },
-    { 0xc0117b63, "sys_proc_list" },
-    { 0xc0117c27, "kern_proc_list" },
-    { 0xc0117cf0, "sys_proc_count" },
-    { 0xc0117d2e, "sys_cpu_count" },
-    { 0xc0117d3b, "sys_hostname" },
-    { 0xc0117dad, "kern_hostname" },
-    { 0xc0117e41, "sys_proc_threads" },
-    { 0xc0117e4b, "sys_proc_fds" },
-    { 0xc0117e55, "sys_proc_maps" },
-    { 0xc0117e5f, "sys_proc_cwd" },
-    { 0xc0117e69, "sys_proc_exe" },
-    { 0xc0117e73, "sys_proc_cmdline" },
-    { 0xc0117e7d, "sys_proc_environ" },
-    { 0xc0117e87, "sys_reboot" },
-    { 0xc0117f11, "sys_setpriority" },
-    { 0xc01181ed, "sys_getpriority" },
-    { 0xc0118385, "device_create" },
-    { 0xc0118465, "device_register" },
-    { 0xc0118566, "device_unregister" },
-    { 0xc011872b, "device_get" },
-    { 0xc0118741, "device_put" },
-    { 0xc0118781, "device_find_child" },
-    { 0xc0118810, "driver_blacklist_add" },
-    { 0xc011885b, "driver_is_blacklisted" },
-    { 0xc01188ad, "driver_override" },
-    { 0xc01188c2, "probe_device" },
-    { 0xc011897c, "driver_register" },
-    { 0xc0118b17, "driver_attach" },
-    { 0xc0118c66, "driver_detach" },
-    { 0xc0118d69, "driver_unregister" },
-    { 0xc0118efd, "bus_match_device" },
-    { 0xc011902b, "bus_id_match" },
-    { 0xc01190e5, "bus_compatible_match" },
-    { 0xc0119154, "sysctl_init" },
-    { 0xc011929f, "sys_sysctl" },
-    { 0xc0119454, "sysctl_register_oid" },
-    { 0xc01194e0, "sysctl_unregister_oid" },
-    { 0xc0119560, "sysctl_find_oid" },
-    { 0xc011962c, "sysctl_handle_int" },
-    { 0xc0119702, "sysctl_handle_string" },
-    { 0xc01197df, "sysctl_handle_opaque" },
-    { 0xc0119859, "do_sysinfo" },
-    { 0xc0119931, "sys_sysinfo" },
-    { 0xc0119958, "sys_vm_stats" },
-    { 0xc0119ab6, "sched_set_affinity" },
-    { 0xc0119b23, "sched_get_affinity" },
-    { 0xc0119b6e, "sched_set_affinity_self" },
-    { 0xc0119b9c, "sched_get_affinity_self" },
-    { 0xc0119bc7, "sched_can_run_on_cpu" },
-    { 0xc0119c23, "sched_clear_affinity" },
-    { 0xc0119c3b, "sched_migrate_if_needed" },
-    { 0xc0119cc2, "ffs64" },
-    { 0xc0119d23, "runqueue_init" },
-    { 0xc0119dc5, "runqueue_level_for_thread" },
-    { 0xc0119dfb, "bitmap_set" },
-    { 0xc0119e8a, "bitmap_clear" },
-    { 0xc0119f21, "runqueue_add" },
-    { 0xc011a01e, "runqueue_remove" },
-    { 0xc011a148, "runqueue_peek" },
-    { 0xc011a1b6, "runqueue_pop" },
-    { 0xc011a1e6, "runqueue_count" },
-    { 0xc011a1f4, "runqueue_empty" },
-    { 0xc011a233, "sched_smp_init" },
-    { 0xc011a288, "sched_get_runqueue" },
-    { 0xc011a2b2, "sched_get_current_runqueue" },
-    { 0xc011a2d0, "sched_enqueue" },
-    { 0xc011a3e5, "sched_dequeue" },
-    { 0xc011a492, "sched_pick_next" },
-    { 0xc011a4f8, "sched_get_cpu_load" },
-    { 0xc011a524, "sched_get_system_load" },
-    { 0xc011a560, "sched_needs_load_balance" },
-    { 0xc011a602, "find_busiest_cpu" },
-    { 0xc011a66b, "sched_steal_thread" },
-    { 0xc011a79b, "sched_load_balance" },
-    { 0xc011a80f, "sched_idle_balance" },
-    { 0xc011a890, "sched_periodic_balance" },
-    { 0xc011a921, "sched_count_runnable" },
-    { 0xc011a988, "sched_count_threads" },
-    { 0xc011a9c6, "sched_update_loadavg" },
-    { 0xc011aa31, "sched_get_loadavg" },
-    { 0xc011aa5c, "uiomove" },
-    { 0xc011abc2, "validate_user_addr" },
-    { 0xc011ac0f, "copyout" },
-    { 0xc011ac7d, "copyin" },
-    { 0xc011aceb, "copyinstr" },
-    { 0xc011ad99, "geom_init" },
-    { 0xc011adbd, "geom_register_class" },
-    { 0xc011ae10, "geom_read_sector" },
-    { 0xc011ae5d, "geom_read_sectors" },
-    { 0xc011aeb1, "geom_part_read" },
-    { 0xc011af49, "geom_part_write" },
-    { 0xc011aff5, "geom_add_partition" },
-    { 0xc011b1f3, "geom_find_partition" },
-    { 0xc011b241, "geom_get_partition_count" },
-    { 0xc011b259, "geom_scan" },
-    { 0xc011b30e, "geom_register_disk" },
-    { 0xc011b35f, "geom_mbr_type_name" },
-    { 0xc011b46b, "geom_bsd_fstype_name" },
-    { 0xc011b4e4, "geom_guid_equal" },
-    { 0xc011b507, "geom_guid_is_zero" },
-    { 0xc011b53d, "parse_extended" },
-    { 0xc011b784, "geom_mbr_sniff" },
-    { 0xc011bbbc, "geom_mbr_init" },
-    { 0xc011bbd5, "gpt_type_name" },
-    { 0xc011bc99, "geom_gpt_sniff" },
-    { 0xc011c0ea, "geom_gpt_init" },
-    { 0xc011c103, "geom_bsd_sniff" },
-    { 0xc011c47e, "geom_bsd_init" },
-    { 0xc011c497, "pm_init" },
-    { 0xc011c51d, "proc_find" },
-    { 0xc011c562, "proc_get_last_pid" },
-    { 0xc011c56f, "proc_create" },
-    { 0xc011c83d, "proc_fork" },
-    { 0xc011ca5b, "proc_add_child" },
-    { 0xc011caae, "proc_remove_child" },
-    { 0xc011cb62, "sched_fork_process" },
-    { 0xc011cb7b, "sched_spawn_kernel_process" },
-    { 0xc011cc0e, "fd_close_all" },
-    { 0xc011cc6d, "proc_alloc_fd" },
-    { 0xc011cd52, "proc_set_fd" },
-    { 0xc011cdce, "proc_clear_fd" },
-    { 0xc011cde4, "proc_reparent_children" },
-    { 0xc011cec9, "proc_exit" },
-    { 0xc011d344, "proc_set_bitness" },
-    { 0xc011d366, "proc_get_bitness" },
-    { 0xc011d382, "sched_init_generic" },
-    { 0xc011d3fa, "sched_alloc_thread" },
-    { 0xc011d5e7, "sched_context_switch" },
-    { 0xc011d6fd, "sched_yield" },
-    { 0xc011d84e, "sched_switch" },
-    { 0xc011d89c, "sched_get_current_tid" },
-    { 0xc011d8b8, "sched_get_thread" },
-    { 0xc011d900, "sched_set_priority" },
-    { 0xc011d93a, "sched_sleep" },
-    { 0xc011d997, "sched_sleep_until" },
-    { 0xc011da02, "sched_tick" },
-    { 0xc011daf7, "sched_wakeup" },
-    { 0xc011db10, "sched_wakeup_n" },
-    { 0xc011dbb3, "sched_iterate_threads" },
-    { 0xc011dc02, "find_waitable_child" },
-    { 0xc011ddcc, "kern_wait4" },
-    { 0xc011e1e3, "sys_wait4" },
-    { 0xc011e278, "pgrp_hashval" },
-    { 0xc011e291, "session_alloc" },
-    { 0xc011e312, "session_free" },
-    { 0xc011e34f, "pgrp_alloc" },
-    { 0xc011e419, "pgrp_free" },
-    { 0xc011e511, "pgrp_find" },
-    { 0xc011e58c, "__pgrp_add_proc" },
-    { 0xc011e5cf, "pgrp_add_proc" },
-    { 0xc011e609, "__pgrp_remove_proc" },
-    { 0xc011e67e, "pgrp_remove_proc" },
-    { 0xc011e6b5, "sys_setsid" },
-    { 0xc011e760, "sys_getsid" },
-    { 0xc011e7f0, "sys_getpgid" },
-    { 0xc011e870, "sys_setpgid" },
-    { 0xc011ea3c, "pgrp_signal" },
-    { 0xc011ea78, "session_find" },
-    { 0xc011ead5, "pgrp_is_orphaned" },
-    { 0xc011eb61, "pgrp_check_orphan" },
-    { 0xc011ebe2, "rusage_add_tick" },
-    { 0xc011ec7e, "rusage_add_fault" },
-    { 0xc011ecbe, "rusage_add_ctx_switch" },
-    { 0xc011ecfe, "rusage_add_signal" },
-    { 0xc011ed21, "rusage_update_maxrss" },
-    { 0xc011ed55, "rusage_add_io" },
-    { 0xc011ed95, "rusage_finalize" },
-    { 0xc011f165, "rusage_init" },
-    { 0xc011f1a6, "rusage_copy_to_child" },
-    { 0xc011f1e7, "timeval_add" },
-    { 0xc011f278, "sys_getrusage" },
-    { 0xc011f317, "outb" },
-    { 0xc011f336, "inb" },
-    { 0xc011f353, "init_hercules" },
-    { 0xc011f3bd, "init_cga" },
-    { 0xc011f437, "vga_write_regs" },
-    { 0xc011f660, "vga_putpixel_linear" },
-    { 0xc011f6ae, "vga_putpixel_planar" },
-    { 0xc011f7d9, "herc_putpixel" },
-    { 0xc011f898, "cga_putpixel" },
-    { 0xc011f98c, "vga_list_modes" },
-    { 0xc011fa77, "vga_set_mode_internal" },
-    { 0xc011fb4c, "vga_probe" },
-    { 0xc011fb56, "vga_init_driver" },
-    { 0xc011fbe7, "vga_install" },
-    { 0xc011fc00, "rgb_to_index" },
-    { 0xc011fc5c, "fb_get_raw_pixel" },
-    { 0xc011fd14, "linear_fb_putpixel" },
-    { 0xc01200fa, "fb_putpixel" },
-    { 0xc0120122, "fb_clear" },
-    { 0xc012050f, "video_set_viewport" },
-    { 0xc0120549, "fb_fs_ioctl" },
-    { 0xc0120787, "fb_fs_mmap" },
-    { 0xc0120841, "video_register_driver" },
-    { 0xc0120863, "mb_probe" },
-    { 0xc012088d, "mb_init" },
-    { 0xc01208fd, "mb_list_modes" },
-    { 0xc012095c, "fb_init" },
-    { 0xc0120d73, "optimized_memcpy" },
-    { 0xc0120e4c, "fb_console_clear" },
-    { 0xc0120ec7, "fb_console_init" },
-    { 0xc0120eea, "fb_putc" },
-    { 0xc012122f, "fb_write" },
-    { 0xc0121279, "outw" },
-    { 0xc012129a, "inw" },
-    { 0xc01212b9, "bga_write" },
-    { 0xc01212f4, "bga_read" },
-    { 0xc0121322, "bga_is_available" },
-    { 0xc0121354, "bga_init" },
-    { 0xc01214cc, "bga_set_viewport" },
-    { 0xc01214f8, "bga_scroll" },
-    { 0xc012150f, "bga_list_modes" },
-    { 0xc0121594, "bga_install" },
-    { 0xc01215ad, "outb" },
-    { 0xc01215cc, "hw_text_entry" },
-    { 0xc01215ed, "hw_text_update_cursor" },
-    { 0xc012168c, "hw_text_putentryat" },
-    { 0xc0121705, "hw_text_scroll" },
-    { 0xc01217ca, "cb_putc" },
-    { 0xc01219dd, "cb_set_color" },
-    { 0xc0121a15, "cb_clear_screen" },
-    { 0xc0121a9e, "cb_move_cursor" },
-    { 0xc0121b11, "cb_get_cursor" },
-    { 0xc0121b40, "cb_get_dimensions" },
-    { 0xc0121b58, "cb_get_color" },
-    { 0xc0121b93, "vt_tty_open" },
-    { 0xc0121be5, "vt_tty_close" },
-    { 0xc0121c0d, "vt_tty_write" },
-    { 0xc0121c8f, "vt_tty_put_char" },
-    { 0xc0121cb1, "vt_tty_write_room" },
-    { 0xc0121cbb, "vt_tty_ioctl" },
-    { 0xc0121cc5, "hw_text_console_write_shim" },
-    { 0xc0121d48, "hw_text_set_color" },
-    { 0xc0121d91, "hw_text_init" },
-    { 0xc0121e3d, "bios_putc" },
-    { 0xc0121e97, "bios_puts" },
-    { 0xc0121fae, "bios_getc" },
-    { 0xc0121fe7, "video_ask_mode" },
-    { 0xc0122232, "input_init" },
-    { 0xc012225a, "input_register_device" },
-    { 0xc01222b7, "input_unregister_device" },
-    { 0xc0122387, "input_notify_readers" },
-    { 0xc01223a0, "input_report_event" },
-    { 0xc012248f, "input_sync" },
-    { 0xc01224a9, "input_enqueue" },
-    { 0xc01224da, "input_read" },
-    { 0xc0122602, "input_register_devfs" },
-    { 0xc012265b, "inb" },
-    { 0xc0122678, "input_report_key" },
-    { 0xc012269d, "kbd_push" },
-    { 0xc01226e7, "keyboard_getc" },
-    { 0xc0122736, "keyboard_init" },
-    { 0xc0122769, "keyboard_handler" },
-    { 0xc0122b70, "outb" },
-    { 0xc0122b8f, "inb" },
-    { 0xc0122bac, "ps2_wait_write" },
-    { 0xc0122bec, "ps2_wait_read" },
-    { 0xc0122c2c, "ps2_write_command" },
-    { 0xc0122c5e, "ps2_write_data" },
-    { 0xc0122c90, "ps2_write_aux" },
-    { 0xc0122cc3, "ps2_read_data" },
-    { 0xc0122ce2, "ps2_read_data_timeout" },
-    { 0xc0122d27, "ps2_flush" },
-    { 0xc0122d7b, "ps2_send_command_with_response" },
-    { 0xc0122db1, "ps2_init" },
-    { 0xc01231bf, "inb" },
-    { 0xc01231dc, "input_report_key" },
-    { 0xc0123201, "input_report_rel" },
-    { 0xc0123226, "mouse_q_push" },
-    { 0xc01232b0, "mouse_get_event" },
-    { 0xc012331b, "mouse_init" },
-    { 0xc0123348, "mouse_handler" },
-    { 0xc012355c, "mouse_get_state" },
-    { 0xc0123596, "ansi_init" },
-    { 0xc01235b7, "handle_csi" },
-    { 0xc0123994, "ansi_process" },
-    { 0xc0123ba1, "console_init" },
-    { 0xc0123bb9, "console_set_tty" },
-    { 0xc0123bc7, "console_register" },
-    { 0xc0123c10, "backend_write" },
-    { 0xc0123c8f, "console_write" },
-    { 0xc0123ca9, "console_putchar" },
-    { 0xc0123cc9, "console_clear" },
-    { 0xc0123cfe, "console_push_char" },
-    { 0xc0123d2c, "console_node_read" },
-    { 0xc0123d68, "console_node_write" },
-    { 0xc0123da4, "console_node_ioctl" },
-    { 0xc0123dd4, "console_node_poll" },
-    { 0xc0123e00, "console_get_node" },
-    { 0xc0123e0a, "console_register_devfs" },
-    { 0xc0123e23, "kprint" },
-    { 0xc0123e68, "kprintf" },
-    { 0xc0123eb2, "console_attach_std_fds" },
-    { 0xc0123ff0, "intr_disable" },
-    { 0xc0124001, "intr_restore" },
-    { 0xc012400c, "tty_default_termios" },
-    { 0xc0124095, "tty_fs_read" },
-    { 0xc01240ca, "tty_fs_write" },
-    { 0xc01240ff, "tty_fs_ioctl" },
-    { 0xc0124128, "tty_fs_open" },
-    { 0xc012414b, "tty_fs_close" },
-    { 0xc012416e, "tty_register_device" },
-    { 0xc012423e, "tty_init" },
-    { 0xc012425e, "tty_alloc" },
-    { 0xc012435a, "tty_free" },
-    { 0xc01243d6, "tty_buf_put" },
-    { 0xc0124453, "tty_buf_get" },
-    { 0xc01244cb, "tty_canon_len" },
-    { 0xc0124653, "tty_send_xchar" },
-    { 0xc01246b4, "tty_output_locked" },
-    { 0xc012475e, "tty_start_locked" },
-    { 0xc01248ed, "canon" },
-    { 0xc0124bd7, "tty_echo" },
-    { 0xc0124d76, "tty_flip_buffer_push" },
-    { 0xc0125178, "tty_check_read" },
-    { 0xc01251f5, "tty_check_write" },
-    { 0xc0125288, "tty_read" },
-    { 0xc0125451, "tty_write" },
-    { 0xc0125525, "tty_ioctl_kern" },
-    { 0xc012587a, "tty_ioctl" },
-    { 0xc0125a18, "tty_open" },
-    { 0xc0125ae2, "tty_close" },
-    { 0xc0125b6b, "tty_hangup" },
-    { 0xc0125c04, "tty_poll" },
-    { 0xc0125d0e, "outb" },
-    { 0xc0125d2d, "update_hw_cursor" },
-    { 0xc0125d9c, "vt_init" },
-    { 0xc0125e77, "vt_get_active" },
-    { 0xc0125e81, "vt_get_state" },
-    { 0xc0125ea7, "vt_activate" },
-    { 0xc0125f76, "outb" },
-    { 0xc0125f95, "inb" },
-    { 0xc0125fb2, "uart_console_write" },
-    { 0xc0125fcc, "uart_set_termios" },
-    { 0xc01262f5, "uart_get_console" },
-    { 0xc01262ff, "uart_init" },
-    { 0xc0126383, "uart_tx_pump" },
-    { 0xc012641b, "uart_handler" },
-    { 0xc0126550, "uart_received" },
-    { 0xc0126568, "uart_getc" },
-    { 0xc01265a3, "uart_is_transmit_empty" },
-    { 0xc01265bb, "uart_putc" },
-    { 0xc0126634, "uart_write" },
-    { 0xc012666a, "blkdev_vfs_read" },
-    { 0xc01266bd, "blkdev_vfs_write" },
-    { 0xc0126710, "blkdev_register" },
-    { 0xc0126820, "blkdev_get" },
-    { 0xc0126864, "blkdev_read_bytes" },
-    { 0xc0126b3b, "blkdev_write_bytes" },
-    { 0xc0126ebc, "scsi_be32" },
-    { 0xc0126eff, "scsi_put_be16" },
-    { 0xc0126f2a, "scsi_put_be32" },
-    { 0xc0126f68, "kernel_time_ms" },
-    { 0xc0126f75, "scsi_init" },
-    { 0xc0127104, "scsi_register_link" },
-    { 0xc01271a2, "scsi_unregister_link" },
-    { 0xc012721f, "scsi_device_alloc" },
-    { 0xc0127279, "scsi_device_free" },
-    { 0xc01272be, "scsi_device_register" },
-    { 0xc0127408, "scsi_device_unregister" },
-    { 0xc0127464, "scsi_device_lookup" },
-    { 0xc01274c6, "scsi_request_alloc" },
-    { 0xc012753d, "scsi_request_free" },
-    { 0xc0127581, "scsi_request_init" },
-    { 0xc012763a, "scsi_execute" },
-    { 0xc012787c, "scsi_execute_sync" },
-    { 0xc012792e, "scsi_queue_request" },
-    { 0xc01279c8, "scsi_process_queue" },
-    { 0xc0127a48, "scsi_abort_request" },
-    { 0xc0127b2c, "scsi_complete_request" },
-    { 0xc0127bad, "scsi_test_unit_ready" },
-    { 0xc0127be3, "scsi_inquiry" },
-    { 0xc0127c1c, "scsi_read_capacity" },
-    { 0xc0127c96, "scsi_request_sense" },
-    { 0xc0127ce2, "scsi_start_stop" },
-    { 0xc0127d34, "scsi_report_luns" },
-    { 0xc0127dbc, "scsi_sense_key" },
-    { 0xc0127e22, "scsi_sense_asc" },
-    { 0xc0127e82, "scsi_sense_ascq" },
-    { 0xc0127ee2, "scsi_asc_ascq_lookup" },
-    { 0xc0127f3a, "scsi_sense_string" },
-    { 0xc0127f98, "scsi_cdb_test_unit_ready" },
-    { 0xc0127fb9, "scsi_cdb_inquiry" },
-    { 0xc0127fec, "scsi_cdb_read_capacity_10" },
-    { 0xc012800d, "scsi_cdb_read_10" },
-    { 0xc0128061, "scsi_cdb_write_10" },
-    { 0xc01280b5, "scsi_probe_lun" },
-    { 0xc01284b2, "scsi_scan_bus" },
-    { 0xc0128662, "scsi_blk_read" },
-    { 0xc01286f3, "scsi_blk_write" },
-    { 0xc0128796, "scsi_read_toc" },
-    { 0xc0128807, "scsi_lock_door" },
-    { 0xc0128856, "scsi_dev_attach" },
-    { 0xc0128a68, "scsi_dev_detach" },
-    { 0xc0128ae6, "scsi_dev_lookup" },
-    { 0xc0128b2d, "scsi_dev_init" },
-    { 0xc0128b46, "sg_ioctl" },
-    { 0xc0128e59, "scsi_create_generic_node" },
-    { 0xc0128f4a, "bus_ioctl" },
-    { 0xc01290c1, "scsi_create_bus_node" },
-    { 0xc01291b3, "scsi_ctl_init" },
-    { 0xc01291d1, "scsi_auto_attach" },
-    { 0xc01291fe, "inb" },
-    { 0xc012921b, "atapi_execute" },
-    { 0xc012932e, "atapi_reset_device" },
-    { 0xc01293e9, "atapi_reset_bus" },
-    { 0xc0129479, "atapi_probe_devices" },
-    { 0xc01296c8, "atapi_scsi_init" },
-    { 0xc01297ad, "atapi_get_link" },
-    { 0xc01297c7, "outb" },
-    { 0xc01297e6, "inb" },
-    { 0xc0129803, "outw" },
-    { 0xc0129824, "outl" },
-    { 0xc012983c, "insw" },
-    { 0xc0129871, "outsw" },
-    { 0xc01298a6, "intr_disable" },
-    { 0xc01298b7, "intr_restore" },
-    { 0xc01298c2, "ide_write_reg" },
-    { 0xc0129906, "ide_read_reg" },
-    { 0xc012993e, "ide_write_ctrl" },
-    { 0xc0129976, "ide_read_ctrl" },
-    { 0xc01299a2, "ide_bm_write8" },
-    { 0xc01299fd, "ide_bm_read8" },
-    { 0xc0129a53, "ide_bm_write32" },
-    { 0xc0129aa6, "ide_wait_bsy" },
-    { 0xc0129b2a, "ide_wait_drq" },
-    { 0xc0129bb4, "ide_wait_ready" },
-    { 0xc0129c8a, "ide_select_drive" },
-    { 0xc0129cdd, "ide_prdt_setup" },
-    { 0xc0129e60, "ide_bm_start" },
-    { 0xc0129e91, "ide_bm_stop" },
-    { 0xc0129eb1, "ide_bm_status" },
-    { 0xc0129ece, "ide_bm_clear_interrupt" },
-    { 0xc0129f09, "ide_dma_init" },
-    { 0xc0129f8c, "ide_dma_read" },
-    { 0xc012a36f, "ide_dma_write" },
-    { 0xc012a752, "ide_dma_setup" },
-    { 0xc012a7ed, "ide_read_sectors" },
-    { 0xc012a90b, "ide_read_sectors_ext" },
-    { 0xc012aab4, "ide_write_sectors" },
-    { 0xc012abd2, "ide_write_sectors_ext" },
-    { 0xc012ad7b, "ide_identify" },
-    { 0xc012aea0, "ide_identify_atapi" },
-    { 0xc012af92, "ide_atapi_packet" },
-    { 0xc012b297, "ide_atapi_read_capacity" },
-    { 0xc012b35e, "ide_atapi_read_sectors" },
-    { 0xc012b3fe, "ide_atapi_read_toc" },
-    { 0xc012b47e, "ide_blkdev_read" },
-    { 0xc012b5a6, "ide_blkdev_write" },
-    { 0xc012b6b0, "ide_irq_handler" },
-    { 0xc012b735, "ide_init" },
-    { 0xc012bccc, "ahci_init" },
-    { 0xc012bce5, "nvme_init" },
-    { 0xc012bcfe, "ramdisk_read" },
-    { 0xc012bd9e, "ramdisk_write" },
-    { 0xc012be3e, "ramdisk_create" },
-    { 0xc012bf21, "ramdisk_init" },
-    { 0xc012bf3b, "outb" },
-    { 0xc012bf5a, "inb" },
-    { 0xc012bf77, "port_read" },
-    { 0xc012c011, "port_write" },
-    { 0xc012c0af, "stdin_readlink" },
-    { 0xc012c0f4, "stdout_readlink" },
-    { 0xc012c139, "stderr_readlink" },
-    { 0xc012c17e, "dev_tty_read" },
-    { 0xc012c203, "dev_tty_write" },
-    { 0xc012c263, "pseudo_init" },
-    { 0xc012c43d, "full_open" },
-    { 0xc012c443, "full_close" },
-    { 0xc012c449, "full_read" },
-    { 0xc012c4d5, "full_write" },
-    { 0xc012c4ee, "full_poll" },
-    { 0xc012c4f8, "full_ioctl" },
-    { 0xc012c502, "full_mmap" },
-    { 0xc012c51b, "full_init" },
-    { 0xc012c5e8, "null_open" },
-    { 0xc012c5ee, "null_close" },
-    { 0xc012c5f4, "null_read" },
-    { 0xc012c60d, "null_write" },
-    { 0xc012c624, "null_ioctl" },
-    { 0xc012c62e, "null_poll" },
-    { 0xc012c638, "null_mmap" },
-    { 0xc012c651, "null_init" },
-    { 0xc012c71e, "ntsync_spinlock_acquire" },
-    { 0xc012c740, "ntsync_spinlock_release" },
-    { 0xc012c750, "ntsync_object_ref" },
-    { 0xc012c760, "ntsync_object_unref" },
-    { 0xc012c797, "ntsync_instance_ref" },
-    { 0xc012c7a4, "ntsync_instance_unref" },
-    { 0xc012c7d8, "waiter_enqueue" },
-    { 0xc012c830, "waiter_dequeue" },
-    { 0xc012c879, "ntsync_is_signaled" },
-    { 0xc012c8eb, "ntsync_acquire" },
-    { 0xc012c9cd, "ntsync_wake_one" },
-    { 0xc012ca05, "ntsync_wake_all" },
-    { 0xc012ca44, "ntsync_sem_post" },
-    { 0xc012cba7, "ntsync_read_sem" },
-    { 0xc012cc14, "ntsync_mutex_unlock" },
-    { 0xc012cd11, "ntsync_read_mutex" },
-    { 0xc012cdd1, "ntsync_kill_owner" },
-    { 0xc012ce98, "ntsync_set_event" },
-    { 0xc012cf3e, "ntsync_reset_event" },
-    { 0xc012cfac, "ntsync_pulse_event" },
-    { 0xc012d048, "ntsync_read_event" },
-    { 0xc012d0b5, "ntsync_obj_ioctl" },
-    { 0xc012d258, "ntsync_obj_close" },
-    { 0xc012d29d, "ntsync_create_object" },
-    { 0xc012d5a5, "ntsync_wait_any" },
-    { 0xc012e29a, "ntsync_wait_all" },
-    { 0xc012efbe, "ntsync_ioctl" },
-    { 0xc012f0a2, "ntsync_open_callback" },
-    { 0xc012f155, "ntsync_close" },
-    { 0xc012f18d, "ntsync_init" },
-    { 0xc012f20a, "check_privileges" },
-    { 0xc012f24a, "kmem_open" },
-    { 0xc012f250, "kmem_read" },
-    { 0xc012f2ac, "kmem_write" },
-    { 0xc012f308, "kmem_ioctl" },
-    { 0xc012f322, "kmem_poll" },
-    { 0xc012f32c, "kmem_mmap" },
-    { 0xc012f345, "kmem_dev_init" },
-    { 0xc012f433, "kmem_test_init" },
-    { 0xc012f51a, "zero_phys_from_virt" },
-    { 0xc012f527, "zero_virt_from_phys" },
-    { 0xc012f534, "zero_open" },
-    { 0xc012f53a, "zero_close" },
-    { 0xc012f540, "zero_read" },
-    { 0xc012f56a, "zero_write" },
-    { 0xc012f581, "zero_ioctl" },
-    { 0xc012f58b, "zero_poll" },
-    { 0xc012f595, "zero_mmap" },
-    { 0xc012f77b, "zero_init" },
-    { 0xc012f848, "mem_window_setup" },
-    { 0xc012f8d2, "mem_window_teardown" },
-    { 0xc012f8eb, "mem_open" },
-    { 0xc012f8f1, "mem_read" },
-    { 0xc012fa32, "mem_write" },
-    { 0xc012fb82, "mem_mmap" },
-    { 0xc012fd6d, "mem_ioctl" },
-    { 0xc012feab, "mem_init" },
-    { 0xc012ff8c, "itoa_hex" },
-    { 0xc012ffe5, "mem_test_read" },
-    { 0xc0130122, "mem_test_init" },
-    { 0xc01301e2, "virtio_get_io_base" },
-    { 0xc013023f, "virtio_init" },
-    { 0xc01303a2, "outb" },
-    { 0xc01303cb, "outw" },
-    { 0xc01303f6, "inw" },
-    { 0xc013041f, "outl" },
-    { 0xc0130441, "virtio_blk_setup" },
-    { 0xc0130637, "virtio_blk_read_sectors" },
-    { 0xc0130870, "outb" },
-    { 0xc0130899, "inb" },
-    { 0xc01308c0, "outw" },
-    { 0xc01308eb, "inw" },
-    { 0xc0130914, "outl" },
-    { 0xc0130936, "virtio_9p_setup" },
-    { 0xc0130bbc, "virtio_9p_send" },
-    { 0xc0130d31, "outb" },
-    { 0xc0130d5a, "outw" },
-    { 0xc0130d85, "inw" },
-    { 0xc0130dae, "outl" },
-    { 0xc0130dd0, "inl" },
-    { 0xc0130df6, "vscsi_setup_queue" },
-    { 0xc0130f6a, "vscsi_execute" },
-    { 0xc013130d, "vscsi_send_tmf" },
-    { 0xc01314ee, "vscsi_reset_device" },
-    { 0xc01315e2, "vscsi_reset_bus" },
-    { 0xc01316b0, "vscsi_process_events" },
-    { 0xc01317ee, "vscsi_setup_event_buffers" },
-    { 0xc01318dc, "virtio_scsi_setup" },
-    { 0xc0131ca1, "virtio_scsi_poll" },
-    { 0xc0131cd2, "virtio_scsi_get_link" },
-    { 0xc0131cf8, "vfs_init" },
-    { 0xc0131d80, "vfs_register_filesystem" },
-    { 0xc0131d9a, "vfs_get_filesystems" },
-    { 0xc0131da4, "vfs_mount_legacy" },
-    { 0xc0132155, "read_fs" },
-    { 0xc01321b7, "write_fs" },
-    { 0xc013223a, "open_fs" },
-    { 0xc0132270, "close_fs" },
-    { 0xc013229a, "readdir_fs" },
-    { 0xc01322ed, "vfs_is_busy" },
-    { 0xc01323f9, "finddir_fs" },
-    { 0xc0132413, "finddir_fs_internal" },
-    { 0xc013258e, "vfs_lookup" },
-    { 0xc0132684, "vfs_lookup_lstat" },
-    { 0xc0132795, "vfs_check_permissions" },
-    { 0xc0132875, "readlink_fs" },
-    { 0xc01328b1, "symlink_fs" },
-    { 0xc01328ed, "link_fs" },
-    { 0xc0132929, "unlink_fs" },
-    { 0xc0132962, "mmap_fs" },
-    { 0xc01329b6, "poll_fs" },
-    { 0xc0132a1f, "vfs_strrchr" },
-    { 0xc0132a69, "vfs_mkdir" },
-    { 0xc0132bd8, "vfs_mknod" },
-    { 0xc0132d04, "vfs_unmount_legacy" },
-    { 0xc0132f5f, "vnode_hash" },
-    { 0xc0132f7e, "vnode_init" },
-    { 0xc0133049, "vnode_freelist_add" },
-    { 0xc01330cc, "vnode_freelist_remove" },
-    { 0xc0133196, "vnode_recycle" },
-    { 0xc01332b1, "getnewvnode" },
-    { 0xc01333ce, "vref" },
-    { 0xc0133455, "vrele" },
-    { 0xc013355c, "vhold" },
-    { 0xc0133598, "vdrop" },
-    { 0xc01335ee, "vn_lock" },
-    { 0xc013380c, "vn_unlock" },
-    { 0xc0133903, "vn_islocked" },
-    { 0xc0133934, "vget" },
-    { 0xc013396e, "vput" },
-    { 0xc0133993, "vgone" },
-    { 0xc0133a37, "vclean" },
-    { 0xc0133afd, "vnode_reclaim" },
-    { 0xc0133b6a, "vnode_cache_insert" },
-    { 0xc0133bed, "vnode_cache_remove" },
-    { 0xc0133c8b, "vnode_lookup_cache" },
-    { 0xc0133d3e, "vnode_create" },
-    { 0xc0133d80, "namei_init" },
-    { 0xc0133dac, "namei" },
-    { 0xc01348bb, "cache_hash" },
-    { 0xc0134907, "cache_lookup" },
-    { 0xc0134a0c, "cache_enter" },
-    { 0xc0134c27, "cache_purge" },
-    { 0xc0134d10, "nchinit" },
-    { 0xc0134d51, "vfs_mount" },
-    { 0xc0134ef8, "vfs_unmount" },
-    { 0xc0134fee, "vfs_start" },
-    { 0xc013502e, "vfs_root" },
-    { 0xc0135087, "vfs_statfs" },
-    { 0xc01350c7, "vfs_sync" },
-    { 0xc0135154, "vop_lookup" },
-    { 0xc01351a3, "vop_cachedlookup" },
-    { 0xc0135216, "vop_create" },
-    { 0xc0135267, "vop_mknod" },
-    { 0xc01352b8, "vop_mkdir" },
-    { 0xc0135309, "vop_remove" },
-    { 0xc013535a, "vop_rmdir" },
-    { 0xc01353ab, "vop_link" },
-    { 0xc013540d, "vop_whiteout" },
-    { 0xc013545e, "vop_access" },
-    { 0xc01355f6, "vop_getattr" },
-    { 0xc0135636, "vop_setattr" },
-    { 0xc0135676, "vop_pathconf" },
-    { 0xc01356b6, "vop_open" },
-    { 0xc01357b2, "vop_close" },
-    { 0xc01358a0, "vop_read" },
-    { 0xc0135986, "vop_write" },
-    { 0xc0135af8, "vop_ioctl" },
-    { 0xc0135b3e, "vop_poll" },
-    { 0xc0135b7f, "vop_fsync" },
-    { 0xc0135bef, "vop_bmap" },
-    { 0xc0135c8e, "vop_strategy" },
-    { 0xc0135cd8, "vop_readdir" },
-    { 0xc0135d32, "vop_rename" },
-    { 0xc0135dad, "vop_symlink" },
-    { 0xc0135e04, "vop_readlink" },
-    { 0xc0135e55, "vop_inactive" },
-    { 0xc0135e92, "vop_reclaim" },
-    { 0xc0135ecf, "vop_print" },
-    { 0xc0135f09, "ext2_find_next_zero_bit" },
-    { 0xc0136004, "ext2_read_block" },
-    { 0xc013609b, "ext2_read_blocks" },
-    { 0xc0136138, "ext2_read_inode" },
-    { 0xc013629f, "ext2_write_block" },
-    { 0xc0136336, "ext2_write_inode" },
-    { 0xc01364e4, "ext2_get_block_num" },
-    { 0xc013671c, "ext2_get_blocks_extent" },
-    { 0xc013681f, "ext2_inode_read" },
-    { 0xc0136cc9, "ext2_alloc_inode_block" },
-    { 0xc0136e45, "ext2_inode_write" },
-    { 0xc0137159, "ext2_alloc_node" },
-    { 0xc0137478, "ext2_readlink" },
-    { 0xc01374fd, "ext2_file_read" },
-    { 0xc0137537, "ext2_file_write" },
-    { 0xc01375bb, "ext2_readdir" },
-    { 0xc0137943, "ext2_finddir" },
-    { 0xc0137e7c, "ext2_mount" },
-    { 0xc01381cf, "ext2_init" },
-    { 0xc013821b, "ext2_alloc_block" },
-    { 0xc01384a9, "ext2_free_block" },
-    { 0xc0138627, "ext2_alloc_inode" },
-    { 0xc01388ea, "ext2_free_inode" },
-    { 0xc0138a80, "ext2_add_entry" },
-    { 0xc013905d, "ext2_remove_entry" },
-    { 0xc0139464, "fat_read_sectors" },
-    { 0xc013951c, "fat_get_next_cluster" },
-    { 0xc0139617, "fat_cluster_to_sector" },
-    { 0xc0139637, "fat_parse_short_name" },
-    { 0xc01396f2, "fat_parse_lfn" },
-    { 0xc0139882, "fat_file_read" },
-    { 0xc0139a47, "fat_readdir" },
-    { 0xc0139c92, "fat_alloc_node" },
-    { 0xc0139da9, "fat_finddir" },
-    { 0xc0139fe2, "fat_mount" },
-    { 0xc013a380, "fat_init" },
-    { 0xc013a3a9, "exfat_init" },
-    { 0xc013a3c2, "minix_init" },
-    { 0xc013a3eb, "minix_get_zone_v1" },
-    { 0xc013a577, "minix_get_zone_v2" },
-    { 0xc013a6fa, "minix_get_zone" },
-    { 0xc013a768, "minix_alloc_zone" },
-    { 0xc013a7e0, "minix_read_inode" },
-    { 0xc013ac95, "minix_free_block" },
-    { 0xc013ad85, "minix_free_inode" },
-    { 0xc013ae6c, "minix_free_all_zones" },
-    { 0xc013b6a6, "minix_read" },
-    { 0xc013b880, "minix_write" },
-    { 0xc013ba50, "minix_readlink" },
-    { 0xc013ba70, "minix_readdir" },
-    { 0xc013bb1b, "minix_finddir" },
-    { 0xc013bc03, "minix_mount" },
-    { 0xc013bdc0, "minix_unmount" },
-    { 0xc013be36, "minix_alloc_inode" },
-    { 0xc013bfd6, "minix_dir_add" },
-    { 0xc013c12c, "minix_mknod" },
-    { 0xc013c3f3, "minix_symlink" },
-    { 0xc013c6b3, "minix_link" },
-    { 0xc013c8dc, "minix_unlink" },
-    { 0xc013cbed, "minix_write_inode" },
-    { 0xc013cd89, "minix_write_inode_raw" },
-    { 0xc013ce7c, "udf_tag_checksum" },
-    { 0xc013ced4, "udf_crc_init" },
-    { 0xc013cf5f, "udf_crc" },
-    { 0xc013cfc0, "udf_read_tag" },
-    { 0xc013d0ef, "udf_find_avdp" },
-    { 0xc013d251, "udf_read_vds" },
-    { 0xc013d3ae, "udf_read_fsd" },
-    { 0xc013d448, "udf_read_fe" },
-    { 0xc013d4d6, "udf_read_file" },
-    { 0xc013d96a, "udf_alloc_node" },
-    { 0xc013daa3, "udf_vfs_read" },
-    { 0xc013dae5, "udf_vfs_readdir" },
-    { 0xc013dcc2, "udf_vfs_finddir" },
-    { 0xc013de88, "udf_vfs_mkdir" },
-    { 0xc013e067, "udf_vop_mkdir" },
-    { 0xc013e141, "udf_mount" },
-    { 0xc013e3b1, "udf_init" },
-    { 0xc013e3df, "udf_write_space_bitmap" },
-    { 0xc013e4d7, "udf_read_space_bitmap" },
-    { 0xc013e5bf, "udf_alloc_block" },
-    { 0xc013e6a1, "udf_free_block" },
-    { 0xc013e70e, "udf_create_fe" },
-    { 0xc013e864, "udf_ext_create_aed" },
-    { 0xc013e90d, "udf_ext_write_aed" },
-    { 0xc013e9af, "udf_convert_inline_to_short_ad" },
-    { 0xc013eaf2, "udf_write_extent_data_long" },
-    { 0xc013ef60, "udf_write_extent_data" },
-    { 0xc013f88f, "udf_write_file" },
-    { 0xc013fcbd, "udf_add_fid" },
-    { 0xc013fe6b, "udf_remove_fid" },
-    { 0xc013fff8, "udf_free_short_ad_chain" },
-    { 0xc0140184, "udf_process_short_ads" },
-    { 0xc014054c, "udf_free_long_ad_chain" },
-    { 0xc01406d2, "udf_process_long_ads" },
-    { 0xc0140af1, "udf_truncate" },
-    { 0xc0141bb7, "tty_read_proxy" },
-    { 0xc0141c45, "tty_write_proxy" },
-    { 0xc0141cd3, "tty_ioctl_proxy" },
-    { 0xc0141d4f, "devfs_find_child" },
-    { 0xc0141d97, "devfs_create_entry" },
-    { 0xc0141e3b, "devfs_create_dir_node" },
-    { 0xc0141eb6, "devfs_dir_readdir" },
-    { 0xc0141f71, "devfs_dir_finddir" },
-    { 0xc0141fbc, "devfs_add_entry" },
-    { 0xc01420df, "devfs_register_device" },
-    { 0xc014216f, "devfs_mount" },
-    { 0xc0142179, "devfs_init" },
-    { 0xc014226f, "gen_cpuinfo" },
-    { 0xc014228d, "gen_meminfo" },
-    { 0xc01422d3, "gen_uptime" },
-    { 0xc01422f9, "gen_cmdline" },
-    { 0xc014234e, "gen_version" },
-    { 0xc014236e, "gen_loadavg" },
-    { 0xc014240e, "proc_pmap_stats_read" },
-    { 0xc01424a5, "gen_filesystems" },
-    { 0xc01425c0, "procfs_free_node" },
-    { 0xc01425e2, "procfs_get_node" },
-    { 0xc014262f, "procfs_generic_read" },
-    { 0xc014277d, "proc_generate_status" },
-    { 0xc01428f0, "proc_pid_status_read" },
-    { 0xc0142a99, "proc_pid_cmdline_read" },
-    { 0xc0142b5f, "proc_pid_readdir" },
-    { 0xc0142bf2, "proc_pid_finddir" },
-    { 0xc0142d11, "procfs_readdir" },
-    { 0xc0142edd, "procfs_finddir" },
-    { 0xc014302f, "procfs_mount" },
-    { 0xc0143039, "procfs_init" },
-    { 0xc014315e, "sysfs_readdir" },
-    { 0xc0143256, "sysfs_finddir" },
-    { 0xc01432ef, "sysfs_mount" },
-    { 0xc01432f9, "sysfs_init" },
-    { 0xc0143361, "fuse_dev_read" },
-    { 0xc01433ef, "fuse_dev_write" },
-    { 0xc014340c, "fuse_init" },
-    { 0xc0143478, "fuse_vfs_read" },
-    { 0xc0143491, "fuse_mount" },
-    { 0xc01434c9, "fuse_fs_init" },
-    { 0xc01434e2, "p9_alloc_fid" },
-    { 0xc01434f5, "p9_version" },
-    { 0xc014362e, "p9_attach" },
-    { 0xc01437c4, "p9_vfs_read" },
-    { 0xc014398e, "p9_mount" },
-    { 0xc01439f3, "p9_init" },
-    { 0xc0143a0c, "pipe_wait" },
-    { 0xc0143a4a, "pipe_read" },
-    { 0xc0143b47, "pipe_write" },
-    { 0xc0143c59, "pipe_create" },
-    { 0xc0143dad, "exec_reset_signals" },
-    { 0xc0143e45, "elf_check_file" },
-    { 0xc0143ea3, "elf_load" },
-    { 0xc0144788, "is_user_ptr" },
-    { 0xc014479b, "capture_ptr" },
-    { 0xc01447ef, "exec_count_args" },
-    { 0xc014485e, "exec_copy_args" },
-    { 0xc01449b9, "exec_setup_stack" },
-    { 0xc0145c3f, "elf_execve" },
-    { 0xc01464f4, "elf_load_file" },
-    { 0xc01464fe, "pe_load_file" },
-    { 0xc014651b, "coff_load_file" },
-    { 0xc0146a94, "exec_register_handler" },
-    { 0xc0146ab6, "exec_dispatch" },
-    { 0xc0146c27, "perso_lookup" },
-    { 0xc0146c4c, "perso_name" },
-    { 0xc0146c74, "sys_freebsd4_uname" },
-    { 0xc0146d5b, "linux_to_native_signal" },
-    { 0xc0146d97, "native_to_linux_signal" },
-    { 0xc0146dd3, "linux_ioctl_tty" },
-    { 0xc0147028, "linux_sys_mmap" },
-    { 0xc014708b, "linux_sys_mmap2" },
-    { 0xc01470be, "linux_sys_lseek" },
-    { 0xc01470eb, "linux_sys__llseek" },
-    { 0xc0147149, "linux_sys_truncate" },
-    { 0xc0147165, "linux_sys_ftruncate" },
-    { 0xc0147181, "linux_ioctl_blk" },
-    { 0xc014718b, "linux_sys_ioctl" },
-    { 0xc01471f1, "netbsd_sys_getrusage" },
-    { 0xc01472dc, "openbsd_sys_getrusage" },
-    { 0xc01473b2, "compat_lseek32" },
-    { 0xc014741a, "compat_time32" },
-    { 0xc014745c, "compat_stat_stub" },
-    { 0xc01474d2, "compat_lstat_stub" },
-    { 0xc0147548, "compat_fstat_stub" },
-    { 0xc014758d, "translate_stat_to_freebsd" },
-    { 0xc0147699, "sys_freebsd_stat" },
-    { 0xc0147728, "sys_freebsd_lstat" },
-    { 0xc01477b7, "sys_freebsd_fstat" },
-    { 0xc0147818, "translate_stat_to_freebsd11" },
-    { 0xc0147923, "sys_freebsd11_stat" },
-    { 0xc01479b2, "sys_freebsd11_lstat" },
-    { 0xc0147a41, "sys_freebsd11_fstat" },
-    { 0xc0147aa2, "sys_freebsd_lseek" },
-    { 0xc0147abe, "sys_freebsd_mmap" },
-    { 0xc0147b08, "sys_nice" },
-    { 0xc0147b12, "sys_mprotect" },
-    { 0xc0147b1c, "sys_sigret" },
-    { 0xc0147b26, "sys_ptrace" },
-    { 0xc0147b30, "sys_alarm" },
-    { 0xc0147b3a, "sys_pause" },
-    { 0xc0147b44, "sys_utime" },
-    { 0xc0147b4e, "sys_statfs" },
-    { 0xc0147b58, "sys_fstatfs" },
-    { 0xc0147b62, "sys_ulimit" },
-    { 0xc0147b6c, "sys_prof" },
-    { 0xc0147b76, "sys_pgrpsys" },
-    { 0xc0147b80, "sys_sigsys" },
-    { 0xc0147b8a, "sys_msgsys" },
-    { 0xc0147b94, "sys_sysi86" },
-    { 0xc0147b9e, "sys_shmsys" },
-    { 0xc0147ba8, "sys_semsys" },
-    { 0xc0147bb2, "sys_uadmin" },
-    { 0xc0147bbc, "sys_utssys" },
-    { 0xc0147bc6, "sys_compat_execv" },
-    { 0xc0147be1, "linux_sys_stat" },
-    { 0xc0147d66, "linux_sys_lstat" },
-    { 0xc0147eeb, "linux_sys_fstat" },
-    { 0xc0147ff7, "linux_sys_stat64" },
-    { 0xc01481be, "linux_sys_lstat64" },
-    { 0xc0148385, "linux_sys_fstat64" },
-    { 0xc01484c7, "populate_linux_siginfo" },
-    { 0xc0148539, "linux_sendsig" },
-    { 0xc01488de, "linux_sys_sigreturn" },
-    { 0xc01489e8, "linux_sys_rt_sigreturn" },
-    { 0xc0148afb, "freebsd_sendsig" },
-    { 0xc0148c7a, "freebsd_sys_sigreturn" },
-    { 0xc0148d85, "netbsd_sendsig" },
-    { 0xc0148ed5, "netbsd_sys_sigreturn" },
-    { 0xc0148fe0, "openbsd_sendsig" },
-    { 0xc0149130, "openbsd_sys_sigreturn" },
-    { 0xc014923b, "vm_page_valid" },
-    { 0xc0149272, "vm_page_init" },
-    { 0xc01492a0, "enqueue" },
-    { 0xc01492d7, "dequeue" },
-    { 0xc0149330, "pv_pool_init" },
-    { 0xc0149393, "pv_alloc" },
-    { 0xc014941c, "pv_free" },
-    { 0xc0149464, "pv_insert" },
-    { 0xc01494c1, "pv_remove" },
-    { 0xc0149524, "pv_remove_all" },
-    { 0xc014956c, "vm_page_insert" },
-    { 0xc01495b8, "vm_page_remove" },
-    { 0xc0149603, "vm_page_alloc" },
-    { 0xc0149663, "vm_page_free" },
-    { 0xc014976b, "vm_page_activate" },
-    { 0xc01497e1, "vm_page_deactivate" },
-    { 0xc0149857, "vm_page_wire" },
-    { 0xc0149901, "vm_page_unwire" },
-    { 0xc014996b, "vm_page_hold" },
-    { 0xc014998a, "vm_page_unhold" },
-    { 0xc01499b5, "vm_pageout_scan" },
-    { 0xc0149ac2, "vm_page_try_to_free" },
-    { 0xc0149b3a, "vm_page_launder" },
-    { 0xc0149c8e, "vm_pageout" },
-    { 0xc0149e32, "vm_page_wakeup_daemon" },
-    { 0xc0149e4a, "vm_page_needs_writeback" },
-    { 0xc0149ea6, "vm_page_mark_for_writeback" },
-    { 0xc0149f00, "vm_page_writeback_done" },
-    { 0xc0149f47, "vm_page_age_scan" },
-    { 0xc014a0d6, "vm_page_is_evict_candidate" },
-    { 0xc014a170, "vm_page_get_stats" },
-    { 0xc014a247, "vm_page_estimate_working_set" },
-    { 0xc014a2b0, "vm_page_should_pageout" },
-    { 0xc014a2f9, "alloc_entry" },
-    { 0xc014a30e, "alloc_hole" },
-    { 0xc014a323, "free_hole" },
-    { 0xc014a33c, "hole_size" },
-    { 0xc014a35d, "get_max_gap" },
-    { 0xc014a375, "update_max_gap" },
-    { 0xc014a3dd, "free_entry" },
-    { 0xc014a3f6, "rb_rotate_left" },
-    { 0xc014a49b, "rb_rotate_right" },
-    { 0xc014a540, "rb_insert_fixup" },
-    { 0xc014a6d0, "rb_insert_hole" },
-    { 0xc014a7b0, "rb_transplant" },
-    { 0xc014a805, "rb_minimum" },
-    { 0xc014a822, "rb_delete_fixup" },
-    { 0xc014aae0, "rb_delete_hole" },
-    { 0xc014ac53, "hole_find_space" },
-    { 0xc014acc3, "hole_find_containing" },
-    { 0xc014ad19, "hole_consume" },
-    { 0xc014af4b, "hole_find_ending_at" },
-    { 0xc014af97, "hole_find_starting_at" },
-    { 0xc014afe2, "hole_insert" },
-    { 0xc014b177, "vm_map_init" },
-    { 0xc014b273, "vm_map_create" },
-    { 0xc014b2dc, "vm_map_splay" },
-    { 0xc014b434, "vm_map_lookup_entry" },
-    { 0xc014b53f, "vm_map_insert" },
-    { 0xc014b734, "vm_map_find_space" },
-    { 0xc014b770, "vm_map_remove" },
-    { 0xc014bba0, "vm_map_lookup" },
-    { 0xc014bbc8, "free_holes_tree" },
-    { 0xc014bc0b, "vm_map_destroy" },
-    { 0xc014bcc5, "vm_map_protect" },
-    { 0xc014bd86, "vm_map_wire" },
-    { 0xc014bdf7, "vm_map_unwire" },
-    { 0xc014be80, "vm_map_fork" },
-    { 0xc014c050, "alloc_object" },
-    { 0xc014c097, "vm_object_init" },
-    { 0xc014c0b1, "vm_object_allocate" },
-    { 0xc014c163, "vm_object_reference" },
-    { 0xc014c17e, "vm_object_deallocate" },
-    { 0xc014c204, "vm_object_add_page" },
-    { 0xc014c253, "vm_object_remove_page" },
-    { 0xc014c2b1, "vm_object_lookup_page" },
-    { 0xc014c2ff, "vm_object_shadow" },
-    { 0xc014c376, "page_copy" },
-    { 0xc014c390, "page_zero" },
-    { 0xc014c3a7, "vm_fault" },
-    { 0xc014c822, "vm_zone_init" },
-    { 0xc014c842, "vm_zone_create" },
-    { 0xc014c8b9, "zone_grow" },
-    { 0xc014c946, "vm_zone_alloc" },
-    { 0xc014c9ac, "vm_zone_free" },
-    { 0xc014c9ed, "kmem_init" },
-    { 0xc014ca62, "kmem_zone_index" },
-    { 0xc014ca9d, "kmalloc" },
-    { 0xc014cbd6, "kfree" },
-    { 0xc014cc95, "kzalloc" },
-    { 0xc014ccca, "kmem_get_stats" },
-    { 0xc014cd1b, "sys_mmap" },
-    { 0xc014d1ac, "sys_munmap" },
-    { 0xc014d23d, "sys_brk" },
-    { 0xc014d536, "sys_msync" },
-    { 0xc014d67a, "alloc_swap_block" },
-    { 0xc014d720, "free_swap_block" },
-    { 0xc014d78e, "swap_pager_alloc" },
-    { 0xc014d84f, "swap_pager_dealloc" },
-    { 0xc014d8d7, "swap_pager_getpage" },
-    { 0xc014d9c9, "swap_pager_putpage" },
-    { 0xc014dac2, "vm_swap_get_stats" },
-    { 0xc014db7a, "swap_pager_haspage" },
-    { 0xc014dbc6, "vm_swapon" },
-    { 0xc014dcfc, "vm_pager_allocate" },
-    { 0xc014de02, "vm_pager_deallocate" },
-    { 0xc014de32, "vm_pager_get_pages" },
-    { 0xc014deaf, "vm_pager_put_pages" },
-    { 0xc014df2c, "vm_pager_has_page" },
-    { 0xc014df72, "stub_alloc" },
-    { 0xc014dfae, "stub_dealloc" },
-    { 0xc014dfc7, "stub_getput" },
-    { 0xc014dfda, "vnode_getpage" },
-    { 0xc014e097, "vnode_putpage" },
-    { 0xc014e138, "vnode_haspage" },
-    { 0xc014e168, "uma_debug_check_redzone" },
-    { 0xc014e191, "uma_debug_poison_free" },
-    { 0xc014e1ba, "uma_debug_poison_alloc" },
-    { 0xc014e1e3, "uma_hash" },
-    { 0xc014e1fc, "uma_hash_insert" },
-    { 0xc014e234, "uma_hash_remove" },
-    { 0xc014e293, "uma_startup" },
-    { 0xc014e2eb, "uma_enable_dynamic_alloc" },
-    { 0xc014e30b, "uma_bucket_alloc" },
-    { 0xc014e350, "uma_zcreate" },
-    { 0xc014e6d3, "uma_zdestroy" },
-    { 0xc014e80e, "uma_slab_alloc" },
-    { 0xc014eaa4, "uma_slab_free" },
-    { 0xc014eb96, "uma_slab_alloc_item" },
-    { 0xc014ec1e, "uma_slab_free_item" },
-    { 0xc014ec8f, "uma_find_slab" },
-    { 0xc014ed06, "uma_slab_unlink" },
-    { 0xc014ed5c, "uma_zalloc_slab" },
-    { 0xc014ee5e, "uma_zfree_slab" },
-    { 0xc014ef31, "uma_curcpu" },
-    { 0xc014ef3e, "uma_zalloc" },
-    { 0xc014f1ce, "uma_zfree" },
-    { 0xc014f30a, "uma_reclaim" },
-    { 0xc014f462, "uma_zone_stat" },
-    { 0xc014f4a9, "uma_zone_get_cur" },
-    { 0xc014f4b4, "uma_zone_set_max" },
-    { 0xc014f4d5, "uma_zone_reserve" },
-    { 0xc014f52d, "uma_zone_check_leaks" },
-    { 0xc014f545, "uma_leak_report" },
-    { 0xc014f7aa, "uma_debug_fill_redzone" },
-    { 0xc014f805, "uma_debug_check_redzone_impl" },
-    { 0xc014f905, "uma_debug_poison_free_impl" },
-    { 0xc014f95b, "uma_debug_poison_alloc_impl" },
-    { 0xc014f9c2, "intr_disable" },
-    { 0xc014f9d3, "intr_restore" },
-    { 0xc014f9de, "vm_phys_buddy_enqueue" },
-    { 0xc014fa47, "vm_phys_buddy_dequeue" },
-    { 0xc014fab8, "vm_phys_paddr_to_page" },
-    { 0xc014fae8, "vm_phys_alloc_locked" },
-    { 0xc014fbc5, "vm_phys_free_locked" },
-    { 0xc014fc8f, "vm_phys_early_init" },
-    { 0xc014fd41, "vm_phys_add_range" },
-    { 0xc014fe58, "vm_phys_alloc_page" },
-    { 0xc014fed6, "vm_phys_free_page" },
-    { 0xc014ff8b, "vm_phys_alloc_contiguous" },
-    { 0xc0150077, "vm_phys_free_contiguous" },
-    { 0xc015010a, "vm_phys_get_free" },
-    { 0xc0150114, "vm_phys_get_used" },
-    { 0xc0150128, "vm_phys_mark_used" },
-    { 0xc01501b7, "run_kernel_tests" },
-    { 0xc0150e1e, "vm_area_create" },
-    { 0xc0150e7f, "vm_area_destroy" },
-    { 0xc0150e9e, "vm_area_find" },
-    { 0xc0150edc, "vm_area_insert" },
-    { 0xc0150f4d, "vm_area_remove" },
-    { 0xc0150f97, "vm_area_free_all" },
-    { 0xc0150fcc, "vm_find_free_range" },
-    { 0xc0151091, "test_sys_mmap" },
-    { 0xc01513fc, "test_sys_munmap" },
-    { 0xc015167b, "test_sys_mprotect" },
-    { 0xc015179d, "test_mmap_anonymous" },
-    { 0xc0151959, "test_multiple_mappings" },
-    { 0xc0151bbb, "test_mmap_fixed" },
-    { 0xc0151c6f, "test_mprotect" },
-    { 0xc0151d86, "test_large_mapping" },
-    { 0xc0151f67, "test_mmap_fixed_unaligned" },
-    { 0xc0152006, "test_mmap_fixed_overlap" },
-    { 0xc015220c, "run_mmap_tests" },
-    { 0xc0152288, "test_pmap_lifecycle" },
-    { 0xc0152379, "test_pmap_large_replace" },
-    { 0xc015265f, "test_multiple_pmaps" },
-    { 0xc0152873, "test_kernel_pmap_protection" },
-    { 0xc015295c, "test_null_pmap" },
-    { 0xc0152992, "test_memory_leak" },
-    { 0xc0152a9c, "test_pmap_pse" },
-    { 0xc0152cb5, "test_pmap_check" },
-    { 0xc0152dab, "test_pmap_dump" },
-    { 0xc0152e49, "test_pge_detection" },
-    { 0xc0152f05, "test_pge_global_flush" },
-    { 0xc0152f94, "itoa" },
-    { 0xc015307a, "run_pmap_tests" },
-    { 0xc0153152, "property_protect_rw" },
-    { 0xc015315c, "property_copy_cow" },
-    { 0xc01531ec, "run_pmap_protect_property_tests" },
-    { 0xc015321f, "test_pmap_hw_mappings" },
-    { 0xc0153296, "property_pmap_kernel_consistency" },
-    { 0xc015332f, "fuzz_pmap_enter" },
-    { 0xc0153451, "run_vm_expanded_tests" },
-    { 0xc0153469, "run_pid_tests" },
-    { 0xc01534d9, "run_unlink_tests" },
-    { 0xc01536e5, "run_unlink_property_tests" },
-    { 0xc015378d, "run_link_tests" },
-    { 0xc0153854, "run_link_property_tests" },
-    { 0xc01538f5, "test_cow_stats_read" },
-    { 0xc0153977, "run_cow_stats_tests" },
-    { 0xc01539a5, "rdtsc" },
-    { 0xc01539d1, "test_vm_map_lifecycle" },
-    { 0xc0153b86, "test_vm_map_insert_lookup" },
-    { 0xc0153f00, "test_vm_map_find_space" },
-    { 0xc015410a, "test_vm_map_remove" },
-    { 0xc01542a7, "test_vm_map_entry_flags" },
-    { 0xc0154411, "test_vm_map_wire" },
-    { 0xc01546f5, "test_vm_map_benchmark" },
-    { 0xc0154887, "run_vm_map_tests" },
-    { 0xc01548d3, "rdtsc" },
-    { 0xc01548ff, "run_vm_map_benchmark" },
-    { 0xc0154a92, "test_vm_object_lifecycle" },
-    { 0xc0154d0e, "test_vm_object_shadow" },
-    { 0xc0154f38, "test_vm_object_pages" },
-    { 0xc01551fa, "test_vm_object_dynamic_free" },
-    { 0xc01553d8, "run_vm_object_tests" },
-    { 0xc0155415, "test_vm_fault_simple" },
-    { 0xc015564c, "test_vm_fault_cow" },
-    { 0xc015590e, "run_vm_fault_tests" },
-    { 0xc0155941, "test_vm_map_fork_cow" },
-    { 0xc0155c4d, "run_vm_cow_tests" },
-    { 0xc0155c7b, "test_vm_pager_lifecycle" },
-    { 0xc0155d7b, "test_vm_pager_io" },
-    { 0xc0155f2c, "run_vm_pager_tests" },
-    { 0xc0155f5f, "test_vm_policy_lru" },
-    { 0xc01561fa, "test_vm_policy_writeback" },
-    { 0xc0156413, "run_vm_policy_tests" },
-    { 0xc0156446, "test_uma_large_alloc" },
-    { 0xc01565a0, "test_uma_large_objects" },
-    { 0xc01568ea, "test_uma_alloc_free" },
-    { 0xc0156b27, "test_uma_zero_fill" },
-    { 0xc0156cc8, "ctor_test" },
-    { 0xc0156cdf, "dtor_test" },
-    { 0xc0156cf2, "test_uma_ctor_dtor" },
-    { 0xc0156ed5, "test_uma_many_allocs" },
-    { 0xc01570df, "test_uma_redzone" },
-    { 0xc01571d2, "test_uma_dynamic_stress" },
-    { 0xc0157407, "test_uma_limits" },
-    { 0xc0157655, "run_uma_tests" },
-    { 0xc01576a6, "test_pass" },
-    { 0xc01576b9, "test_fail" },
-    { 0xc01576cc, "test_futex_validate_kernel_addr" },
-    { 0xc0157730, "test_futex_validate_unaligned" },
-    { 0xc0157790, "test_futex_wake_empty" },
-    { 0xc01577f4, "test_futex_wait_mismatch" },
-    { 0xc0157858, "test_futex_wait_timeout" },
-    { 0xc01578d3, "test_futex_set_robust_list" },
-    { 0xc015797e, "test_futex_set_robust_list_badsize" },
-    { 0xc01579d6, "test_futex_get_robust_list" },
-    { 0xc0157afa, "test_futex_unknown_op" },
-    { 0xc0157b64, "test_futex_cmp_requeue_mismatch" },
-    { 0xc0157bd4, "test_futex_unlock_pi_not_owner" },
-    { 0xc0157c3b, "test_futex_trylock_pi_contended" },
-    { 0xc0157ca2, "test_futex_wake_prop_bounded" },
-    { 0xc0157d4c, "test_futex_robust_list_prop_multiset" },
-    { 0xc0157e81, "test_futex_run_all" },
-    { 0xc0157ec9, "test_futex" },
-    { 0xc0157f12, "test_pass" },
-    { 0xc0157f25, "test_fail" },
-    { 0xc0157f38, "test_futex_wait_private_mismatch" },
-    { 0xc0157f9f, "test_futex_wake_private_empty" },
-    { 0xc0158006, "test_futex_requeue_private_empty" },
-    { 0xc0158076, "test_futex_private_run_all" },
-    { 0xc01580be, "test_futex_private" },
-    { 0xc0158107, "test_pass" },
-    { 0xc015811a, "test_fail" },
-    { 0xc015812d, "test_sem_args_validation" },
-    { 0xc015817a, "test_sem_state_transitions" },
-    { 0xc0158212, "test_mutex_args_validation" },
-    { 0xc0158362, "test_mutex_ownership" },
-    { 0xc01584d2, "test_event_manual_reset" },
-    { 0xc01585cb, "test_event_auto_reset" },
-    { 0xc0158671, "test_wait_args_layout" },
-    { 0xc015879f, "test_wait_count_limits" },
-    { 0xc015883f, "test_sem_prop_bounded" },
-    { 0xc01588b5, "test_mutex_prop_recursion_bounded" },
-    { 0xc01589ac, "test_ntsync_run_all" },
-    { 0xc01589f4, "test_ntsync" },
-    { 0xc0158a3d, "test_pass" },
-    { 0xc0158a50, "test_fail" },
-    { 0xc0158a63, "test_mbr_struct_size" },
-    { 0xc0158a7a, "test_mbr_entry_layout" },
-    { 0xc0158b5f, "test_mbr_signature_offset" },
-    { 0xc0158bdb, "test_gpt_header_size" },
-    { 0xc0158bf2, "test_gpt_entry_size" },
-    { 0xc0158c09, "test_gpt_header_layout" },
-    { 0xc0158d08, "test_bsd_label_size" },
-    { 0xc0158d1f, "test_bsd_partition_size" },
-    { 0xc0158d36, "test_bsd_magic" },
-    { 0xc0158d4d, "test_mbr_types" },
-    { 0xc0158d64, "test_bsd_fstypes" },
-    { 0xc0158d7b, "test_guid_compare" },
-    { 0xc0158ecb, "test_gpt_known_guids" },
-    { 0xc0158f8f, "test_partition_size_positive" },
-    { 0xc0159039, "test_partition_flags" },
-    { 0xc01590aa, "test_geom_run_all" },
-    { 0xc01590f2, "test_geom" },
-    { 0xc015913b, "test_assert" },
-    { 0xc0159194, "verify_user_page_pte_u" },
-    { 0xc015923d, "verify_kernel_page_no_pte_u" },
-    { 0xc01592f0, "test_user_range_has_pte_u" },
-    { 0xc015941b, "test_kernel_range_no_pte_u" },
-    { 0xc0159535, "test_specific_addresses" },
-    { 0xc015958f, "test_pte_user" },
-    { 0xc01595f8, "test_assert" },
-    { 0xc0159651, "nested_function_3" },
-    { 0xc015966a, "nested_function_2" },
-    { 0xc0159678, "nested_function_1" },
-    { 0xc0159686, "test_stack_trace_basic" },
-    { 0xc01596b6, "test_stack_trace_nested" },
-    { 0xc01596eb, "test_stack_trace_from_regs" },
-    { 0xc0159733, "test_stacktrace" },
-    { 0xc015979c, "test_assert" },
-    { 0xc01597f5, "test_ksym_lookup_known" },
-    { 0xc0159867, "test_ksym_lookup_offset" },
-    { 0xc01598dd, "test_ksym_resolve_basic" },
-    { 0xc0159975, "test_ksym_unknown" },
-    { 0xc01599c3, "test_ksyms" },
-    { 0xc0159a36, "mmap_test_cb" },
-    { 0xc0159a86, "test_basic_valid_entry" },
-    { 0xc0159c0e, "test_zero_length_skipped" },
-    { 0xc0159d74, "test_reserved_type_skipped" },
-    { 0xc0159eda, "test_above_4gb_skipped" },
-    { 0xc0159fc9, "test_spanning_4gb_clamped" },
-    { 0xc015a156, "test_empty_map" },
-    { 0xc015a219, "test_null_callback_safe" },
-    { 0xc015a29b, "test_acpi_reclaimable_included" },
-    { 0xc015a38b, "test_mmap_parsing" },
-    { 0xc015a3f9, "e820_test_cb" },
-    { 0xc015a449, "test_e820_basic_valid_entry" },
-    { 0xc015a5ca, "test_e820_zero_length_skipped" },
-    { 0xc015a722, "test_e820_reserved_skipped" },
-    { 0xc015a87a, "test_e820_acpi_skipped" },
-    { 0xc015a962, "test_e820_nvs_skipped" },
-    { 0xc015aa4a, "test_e820_bad_skipped" },
-    { 0xc015ab32, "test_e820_above_4gb_skipped" },
-    { 0xc015ac1a, "test_e820_spanning_4gb_clamped" },
-    { 0xc015ada0, "test_e820_empty_map" },
-    { 0xc015ae63, "test_e820_null_callback_safe" },
-    { 0xc015aede, "test_e820_mixed_types" },
-    { 0xc015afd7, "test_e820_parsing" },
-    { 0xc015b054, "test_single_page_alloc" },
-    { 0xc015b1e4, "test_single_page_free" },
-    { 0xc015b330, "test_contiguous_order0" },
-    { 0xc015b42b, "test_contiguous_order2" },
-    { 0xc015b6ab, "test_contiguous_order4" },
-    { 0xc015b7a4, "test_alloc_no_overlap" },
-    { 0xc015b9ac, "test_realloc_after_free" },
-    { 0xc015baff, "test_paddr_to_page" },
-    { 0xc015bbfe, "test_contiguous_zero_count" },
-    { 0xc015bc98, "test_free_count_tracking" },
-    { 0xc015be1e, "test_vm_phys" },
-    { 0xc015be96, "test_page_alloc_initial_state" },
-    { 0xc015c036, "test_page_activate" },
-    { 0xc015c1a8, "test_page_deactivate" },
-    { 0xc015c368, "test_page_wire" },
-    { 0xc015c537, "test_page_unwire" },
-    { 0xc015c762, "test_page_hold" },
-    { 0xc015c8c7, "test_page_unhold" },
-    { 0xc015ca2c, "test_wired_not_evictable" },
-    { 0xc015cb47, "test_busy_not_evictable" },
-    { 0xc015cc6c, "test_active_not_evictable" },
-    { 0xc015cd8c, "test_inactive_age0_evictable" },
-    { 0xc015ceb3, "test_get_stats" },
-    { 0xc015d028, "test_vm_page_queue" },
-    { 0xc015d0aa, "run_mkdir_tests" },
-    { 0xc015d1b7, "scsi_be16" },
-    { 0xc015d1d8, "scsi_be32" },
-    { 0xc015d21b, "scsi_put_be16" },
-    { 0xc015d246, "scsi_put_be32" },
-    { 0xc015d284, "mock_execute" },
-    { 0xc015d2b1, "test_scsi" },
-    { 0xc015db3f, "run_scsi_tests" },
-    { 0xc015db4d, "test_sigmask" },
-    { 0xc015db7a, "test_sys_kill_errors" },
-    { 0xc015dc8e, "test_psignal_delivery" },
-    { 0xc015dd9d, "test_init_protection" },
-    { 0xc015dee3, "run_signal_tests" },
-    { 0xc015df20, "test_bitness" },
-    { 0xc015e086, "run_rng_tests" },
-    { 0xc015e290, "inb" },
-    { 0xc015e2ad, "run_ps2_tests" },
-    { 0xc015e368, "mock_read" },
-    { 0xc015e3c1, "mock_write" },
-    { 0xc015e3d8, "run_minix_mount_tests" },
-    { 0xc015e655, "mock_read" },
-    { 0xc015e6b3, "mock_write" },
-    { 0xc015e73c, "run_minix_write_tests" },
-    { 0xc015ea57, "mock_read" },
-    { 0xc015eab5, "mock_write" },
-    { 0xc015eba2, "setup_mock_minix" },
-    { 0xc015ec51, "run_minix_inode_tests" },
-    { 0xc015ef04, "mount_permission_worker" },
-    { 0xc015efc6, "test_mount_permissions" },
-    { 0xc015f0b0, "count_mounts" },
-    { 0xc015f0de, "run_mount_tests" },
-    { 0xc015f3dd, "test_device_struct_layout" },
-    { 0xc015f452, "dummy_probe" },
-    { 0xc015f45c, "dummy_attach" },
-    { 0xc015f466, "dummy_detach" },
-    { 0xc015f470, "dummy_suspend" },
-    { 0xc015f47a, "dummy_resume" },
-    { 0xc015f484, "dummy_shutdown" },
-    { 0xc015f48a, "dummy_reset" },
-    { 0xc015f494, "dummy_match" },
-    { 0xc015f49e, "test_driver_struct_signatures" },
-    { 0xc015f515, "dummy_match" },
-    { 0xc015f51f, "dummy_probe" },
-    { 0xc015f529, "dummy_remove" },
-    { 0xc015f533, "test_bus_struct_layout" },
-    { 0xc015f56a, "resource_contains" },
-    { 0xc015f5af, "resource_overlaps" },
-    { 0xc015f5f4, "resource_size" },
-    { 0xc015f63d, "test_resource_helpers" },
-    { 0xc015f7ee, "mock_kmalloc" },
-    { 0xc015f82f, "mock_kfree" },
-    { 0xc015f835, "test_device_allocation" },
-    { 0xc015f936, "reset_bus" },
-    { 0xc015f968, "test_device_registration_logic" },
-    { 0xc015facb, "reset_bus" },
-    { 0xc015fafd, "test_device_unregister_logic" },
-    { 0xc015fc51, "test_device_refcounting" },
-    { 0xc015fce9, "test_find_child_logic" },
-    { 0xc015fe19, "test_match" },
-    { 0xc015fe23, "test_probe" },
-    { 0xc015fe42, "reset_bus" },
-    { 0xc015fe7e, "test_driver_registration_logic" },
-    { 0xc0160038, "test_detach" },
-    { 0xc0160057, "reset_bus" },
-    { 0xc0160089, "test_driver_unregister_logic" },
-    { 0xc0160187, "test_match" },
-    { 0xc0160191, "test_attach" },
-    { 0xc01601b0, "test_attach_fail" },
-    { 0xc01601ba, "reset_bus" },
-    { 0xc01601f6, "test_driver_attach_logic" },
-    { 0xc016039a, "test_match" },
-    { 0xc01603a4, "test_detach" },
-    { 0xc01603c3, "test_detach_fail" },
-    { 0xc01603cd, "reset_bus" },
-    { 0xc0160409, "test_driver_detach_logic" },
-    { 0xc016055d, "test_printf_new" },
-    { 0xc01606f2, "test_printf_flags" },
-    { 0xc0160e24, "test_printf_plus_flag" },
-    { 0xc0160fd8, "test_printf_space_flag" },
-    { 0xc016112b, "test_printf_hash_flag" },
-    { 0xc0161248, "test_printf_zero_flag" },
-    { 0xc0161456, "test_printf_width" },
-    { 0xc016168b, "test_printf_octal" },
-    { 0xc01618d2, "mock_read" },
-    { 0xc0161930, "mock_write" },
-    { 0xc01619ab, "test_udf_allocation_writeback" },
-    { 0xc0161b97, "test_udf_large_file_write" },
-    { 0xc0161df5, "test_udf_truncate_extent" },
-    { 0xc01621ed, "test_udf_truncate_extent_long" },
-    { 0xc01625fa, "run_udf_write_tests" },
-    { 0xc0162617, "test_sigstop_immutability" },
-    { 0xc016270c, "test_sigstop_delivery" },
-    { 0xc016288c, "run_sigstop_tests" },
-    { 0xc01628bf, "match_always" },
-    { 0xc01628c9, "match_never" },
-    { 0xc01628d3, "match_specific_device" },
-    { 0xc01628e9, "test_bus_match_logic" },
-    { 0xc0162c09, "test_bus_id_match_logic" },
-    { 0xc0162eb2, "test_bus_compatible_match_logic" },
-    { 0xc016305c, "match_always" },
-    { 0xc0163066, "test_driver_override_logic" },
-    { 0xc0163241, "mock_unmount_fn" },
-    { 0xc0163255, "mock_mount_fn" },
-    { 0xc01632b6, "run_vfs_error_tests" },
-    { 0xc0163427, "rdtsc" },
-    { 0xc0163453, "test_console_perf" },
-    { 0xc0163591, "test_sysinfo" },
-    { 0xc0163725, "dummy_thread_func" },
-    { 0xc0163746, "run_kthread_create_tests" },
-    { 0xc0163810, "rdtsc" },
-    { 0xc016383c, "test_fb_perf" },
-    { 0xc0163bce, "test_fb_modes" },
-    { 0xc0163e12, "fail" },
-    { 0xc0163e56, "test_strpbrk" },
-    { 0xc0164126, "test_strcspn" },
-    { 0xc016427c, "test_strcmp" },
-    { 0xc016441f, "test_strchr_basic" },
-    { 0xc016455d, "test_strchr_empty" },
-    { 0xc0164620, "test_strchr_comprehensive" },
-    { 0xc01647de, "test_memcmp" },
-    { 0xc0164a8d, "run_string_tests" },
-    { 0xc0164b0e, "test_uid_check" },
-    { 0xc0164bb1, "test_sysctl" },
-    { 0xc0164c44, "setup_req" },
-    { 0xc0164c82, "test_sysctl_handle_int" },
-    { 0xc0164ea8, "test_sysctl_handle_string" },
-    { 0xc016511a, "test_sysctl_handle_opaque" },
-    { 0xc01652ce, "test_sysctl_handlers" },
-    { 0xc0165331, "rdtsc" },
-    { 0xc016535d, "test_cow_perf" },
-    { 0xc0165645, "inw" },
-    { 0xc0165664, "insw" },
-    { 0xc0165699, "naive_read_loop" },
-    { 0xc01656e2, "optimized_read_loop" },
-    { 0xc0165706, "rdtsc" },
-    { 0xc0165732, "test_ide_perf" },
-    { 0xc0165923, "mock_read" },
-    { 0xc0165981, "mock_write" },
-    { 0xc01659df, "run_ext2_perf_test" },
-    { 0xc0165c67, "mock_read" },
-    { 0xc0165cd8, "mock_write" },
-    { 0xc0165d49, "run_ext2_read_perf_test" },
-    { 0xc01660ff, "rdtsc" },
-    { 0xc016612b, "sched_get_affinity_linear" },
-    { 0xc0166199, "sched_get_affinity_via_func" },
-    { 0xc01661d6, "run_sched_perf_tests" },
-    { 0xc01662aa, "mock_vop_create" },
-    { 0xc01662b4, "mock_vop_mknod" },
-    { 0xc01662be, "mock_vop_mkdir" },
-    { 0xc01662c8, "mock_vop_remove" },
-    { 0xc01662d2, "mock_vop_rmdir" },
-    { 0xc01662dc, "mock_vop_whiteout" },
-    { 0xc01662e6, "mock_vop_getattr" },
-    { 0xc0166329, "mock_vop_setattr" },
-    { 0xc0166333, "mock_vop_pathconf" },
-    { 0xc0166346, "mock_vop_readdir" },
-    { 0xc0166350, "run_vnode_ops_tests" },
-    { 0xc0166995, "test_printf_star" },
-    { 0xc0166e4d, "run_printf_specifier_tests" },
-    { 0xc0167f51, "call_vsnprintf" },
-    { 0xc0167f7a, "test_printf_vsnprintf" },
-    { 0xc0167f8c, "run_printf_vsnprintf_tests" },
-    { 0xc0168792, "run_getcwd_tests" },
-    { 0xc0168acd, "helper_lock_thread" },
-    { 0xc0168b8d, "test_exclusive_blocking" },
-    { 0xc0168c95, "helper_shared_thread" },
-    { 0xc0168d34, "test_concurrent_shared" },
-    { 0xc0168e61, "helper_shared_block_excl_thread" },
-    { 0xc0168eef, "test_shared_blocks_exclusive" },
-    { 0xc0168fe7, "run_vnode_lock_tests" },
-    { 0xc0169090, "parse_phys_addr" },
-    { 0xc01692a1, "test_mem" },
-    { 0xc016969e, "assert_eq_u64" },
-    { 0xc0169741, "assert_eq_i64" },
-    { 0xc01697e4, "test_unsigned_div" },
-    { 0xc0169980, "test_unsigned_mod" },
-    { 0xc0169a7f, "test_signed_div" },
-    { 0xc0169c18, "test_signed_mod" },
-    { 0xc0169d69, "test_shifts" },
-    { 0xc016a129, "test_mul" },
-    { 0xc016a216, "test_neg" },
-    { 0xc016a2b9, "test_explicit_calls" },
-    { 0xc016a41a, "run_div64_tests" },
-    { 0xc016a4d1, "test_crc32_empty" },
-    { 0xc016a541, "test_crc32_basic" },
-    { 0xc016a5b1, "test_crc32_fox" },
-    { 0xc016a621, "test_crc32_zeros" },
-    { 0xc016a6c3, "test_crc32_ones" },
-    { 0xc016a743, "test_crc32_unaligned" },
-    { 0xc016a7e7, "run_crc32_tests" },
-    { 0xc016a868, "check_all_zero" },
-    { 0xc016a8a0, "test_null_device" },
-    { 0xc016ab1e, "test_full_device" },
-    { 0xc016ad82, "test_zero_device" },
-    { 0xc016b04f, "run_devfs_special_device_tests" },
-    { 0xc016b0a4, "run_ldt_tests" },
-    { 0xc016b3f1, "mock_write" },
-    { 0xc016b44c, "mock_put_char" },
-    { 0xc016b46e, "mock_set_termios" },
-    { 0xc016b481, "test_tty_alloc" },
-    { 0xc016b535, "test_tty_canonical" },
-    { 0xc016b5ce, "test_tty_ixoff" },
-    { 0xc016b763, "test_tty_termios" },
-    { 0xc016b84e, "run_tty_tests" },
-    { 0xc016b876, "mock_read" },
-    { 0xc016b931, "mock_write" },
-    { 0xc016b948, "run_minix_readdir_tests" },
-    { 0xc016bcaf, "bg_thread_func" },
-    { 0xc016bcea, "test_ide_dma" },
-    { 0xc016bf06, "rdtsc" },
-    { 0xc016bf32, "run_sched_bench" },
-    { 0xc016c02c, "rdtsc" },
-    { 0xc016c058, "run_sched_dequeue_bench" },
-    { 0xc016c1d2, "fail" },
-    { 0xc016c216, "my_release" },
-    { 0xc016c231, "test_kobject_init" },
-    { 0xc016c2d2, "test_kobject_init_name_truncation" },
-    { 0xc016c35e, "test_kobject_get" },
-    { 0xc016c3e3, "test_kobject_put_basic" },
-    { 0xc016c481, "test_kobject_release_callback" },
-    { 0xc016c536, "test_kset_init" },
-    { 0xc016c61c, "test_kset_init_name_truncation" },
-    { 0xc016c6ab, "run_kobject_tests" },
-    { 0xc016c734, "create_mock_vnode" },
-    { 0xc016c798, "free_mock_vnode" },
-    { 0xc016c7b1, "test_vfs_cache_limit" },
-    { 0xc016ca23, "test_vfs_cache_lru" },
-    { 0xc016cbd6, "run_vfs_cache_tests" },
-    { 0xc016cc31, "dummy_mount" },
-    { 0xc016cca9, "run_vfs_busy_tests" },
-    { 0xc016ce45, "run_nanosleep_tests" },
-    { 0xc016d0ca, "run_reboot_tests" },
-    { 0xc016d199, "test_pipe_race" },
-    { 0xc016d325, "run_chacha20_tests" },
-    { 0xc016d487, "__x86.get_pc_thunk.ax" },
-    { 0xc016d48b, "__x86.get_pc_thunk.bx" },
-    { 0xc016d48f, "__x86.get_pc_thunk.cx" },
-    { 0xc016ee04, "hex_digits" },
-    { 0xc016f1c0, "days_in_month" },
-    { 0xc016fa80, "sigprop" },
-    { 0xc016fc60, "twist_table" },
-    { 0xc016ff38, "GEOM_GPT_TYPE_EFI_SYSTEM" },
-    { 0xc016ff48, "GEOM_GPT_TYPE_MS_BASIC_DATA" },
-    { 0xc016ff58, "GEOM_GPT_TYPE_LINUX_FS" },
-    { 0xc016ff68, "GEOM_GPT_TYPE_LINUX_SWAP" },
-    { 0xc016ff78, "GEOM_GPT_TYPE_FREEBSD_UFS" },
-    { 0xc016ff88, "GEOM_GPT_TYPE_FREEBSD_ZFS" },
-    { 0xc017022c, "GEOM_GPT_TYPE_EFI_SYSTEM" },
-    { 0xc017023c, "GEOM_GPT_TYPE_MS_BASIC_DATA" },
-    { 0xc017024c, "GEOM_GPT_TYPE_LINUX_FS" },
-    { 0xc017025c, "GEOM_GPT_TYPE_LINUX_SWAP" },
-    { 0xc017026c, "GEOM_GPT_TYPE_FREEBSD_UFS" },
-    { 0xc017027c, "GEOM_GPT_TYPE_FREEBSD_ZFS" },
-    { 0xc01702cc, "GEOM_GPT_TYPE_EFI_SYSTEM" },
-    { 0xc01702dc, "GEOM_GPT_TYPE_MS_BASIC_DATA" },
-    { 0xc01702ec, "GEOM_GPT_TYPE_LINUX_FS" },
-    { 0xc01702fc, "GEOM_GPT_TYPE_LINUX_SWAP" },
-    { 0xc017030c, "GEOM_GPT_TYPE_FREEBSD_UFS" },
-    { 0xc017031c, "GEOM_GPT_TYPE_FREEBSD_ZFS" },
-    { 0xc01703f4, "GEOM_GPT_TYPE_EFI_SYSTEM" },
-    { 0xc0170404, "GEOM_GPT_TYPE_MS_BASIC_DATA" },
-    { 0xc0170414, "GEOM_GPT_TYPE_LINUX_FS" },
-    { 0xc0170424, "GEOM_GPT_TYPE_LINUX_SWAP" },
-    { 0xc0170434, "GEOM_GPT_TYPE_FREEBSD_UFS" },
-    { 0xc0170444, "GEOM_GPT_TYPE_FREEBSD_ZFS" },
-    { 0xc01704e0, "regs_13h" },
-    { 0xc0170520, "regs_12h" },
-    { 0xc0170560, "regs_10h" },
-    { 0xc01705c0, "vga_modes" },
-    { 0xc01706b4, "regs.1" },
-    { 0xc01706c0, "regs.0" },
-    { 0xc0170820, "font_8x16" },
-    { 0xc0171820, "font_8x8" },
-    { 0xc01720a0, "ansi_cb" },
-    { 0xc0173000, "scsi_asc_ascq_table" },
-    { 0xc0173a0c, "GEOM_GPT_TYPE_EFI_SYSTEM" },
-    { 0xc0173a1c, "GEOM_GPT_TYPE_MS_BASIC_DATA" },
-    { 0xc0173a2c, "GEOM_GPT_TYPE_LINUX_FS" },
-    { 0xc0173a3c, "GEOM_GPT_TYPE_LINUX_SWAP" },
-    { 0xc0173a4c, "GEOM_GPT_TYPE_FREEBSD_UFS" },
-    { 0xc0173a5c, "GEOM_GPT_TYPE_FREEBSD_ZFS" },
-    { 0xc0178ac0, "__func__.13" },
-    { 0xc0178ae0, "__func__.12" },
-    { 0xc0178b00, "__func__.11" },
-    { 0xc0178b18, "__func__.10" },
-    { 0xc0178b34, "__func__.9" },
-    { 0xc0178b4c, "__func__.8" },
-    { 0xc0178b80, "__func__.7" },
-    { 0xc0178ba4, "__func__.6" },
-    { 0xc0178bc0, "__func__.5" },
-    { 0xc0178be0, "__func__.4" },
-    { 0xc0178c00, "__func__.3" },
-    { 0xc0178c20, "__func__.2" },
-    { 0xc0178c40, "__func__.1" },
-    { 0xc0178c60, "__func__.0" },
-    { 0xc0178e00, "__func__.2" },
-    { 0xc0178e24, "__func__.1" },
-    { 0xc0178e60, "__func__.0" },
-    { 0xc0179334, "__func__.9" },
-    { 0xc0179350, "__func__.8" },
-    { 0xc017936c, "__func__.7" },
-    { 0xc0179388, "__func__.6" },
-    { 0xc01793a0, "__func__.5" },
-    { 0xc01793b8, "__func__.4" },
-    { 0xc01793d0, "__func__.3" },
-    { 0xc01793e8, "__func__.2" },
-    { 0xc0179400, "__func__.1" },
-    { 0xc0179420, "__func__.0" },
-    { 0xc0179444, "GEOM_GPT_TYPE_EFI_SYSTEM" },
-    { 0xc0179454, "GEOM_GPT_TYPE_MS_BASIC_DATA" },
-    { 0xc0179464, "GEOM_GPT_TYPE_LINUX_FS" },
-    { 0xc0179474, "GEOM_GPT_TYPE_LINUX_SWAP" },
-    { 0xc0179484, "GEOM_GPT_TYPE_FREEBSD_UFS" },
-    { 0xc0179494, "GEOM_GPT_TYPE_FREEBSD_ZFS" },
-    { 0xc0179728, "__func__.14" },
-    { 0xc0179740, "__func__.13" },
-    { 0xc0179758, "__func__.12" },
-    { 0xc0179774, "__func__.11" },
-    { 0xc017978c, "__func__.10" },
-    { 0xc01797a0, "__func__.9" },
-    { 0xc01797b8, "__func__.8" },
-    { 0xc01797cc, "__func__.7" },
-    { 0xc01797e4, "__func__.6" },
-    { 0xc01797f4, "__func__.5" },
-    { 0xc0179804, "__func__.4" },
-    { 0xc0179818, "__func__.3" },
-    { 0xc017982c, "__func__.2" },
-    { 0xc0179844, "__func__.1" },
-    { 0xc0179864, "__func__.0" },
-    { 0xc0182dc0, "test_key" },
-    { 0xc0182de0, "test_nonce" },
-    { 0xc0182dec, "test_block_counter" },
-    { 0xc0182e00, "test_keystream" },
-    { 0xc0182f33, "zimage_start" },
-    { 0xc0183124, "setup_sects" },
-    { 0xc0183125, "root_flags" },
-    { 0xc0183127, "syssize" },
-    { 0xc018312b, "ram_size" },
-    { 0xc018312d, "vid_mode" },
-    { 0xc018312f, "root_dev" },
-    { 0xc0183131, "boot_flag" },
-    { 0xc0183135, "header_magic" },
-    { 0xc0183139, "header_version" },
-    { 0xc018313b, "realmode_swtch" },
-    { 0xc018313f, "start_sys_seg" },
-    { 0xc0183141, "kernel_version" },
-    { 0xc0183143, "type_of_loader" },
-    { 0xc0183144, "loadflags" },
-    { 0xc0183145, "setup_move_size" },
-    { 0xc0183147, "code32_start" },
-    { 0xc018314b, "ramdisk_image" },
-    { 0xc018314f, "ramdisk_size" },
-    { 0xc0183153, "bootsect_kludge" },
-    { 0xc0183157, "heap_end_ptr" },
-    { 0xc0183159, "pad1" },
-    { 0xc018315b, "cmd_line_ptr" },
-    { 0xc018315f, "initrd_addr_max" },
-    { 0xc0183163, "setup_start" },
-    { 0xc0194000, "exception_messages" },
-    { 0xc0194084, "kernel_pmap_ptr" },
-    { 0xc0195000, "sig_trampoline_code" },
-    { 0xc0196000, "sig_trampoline_size" },
-    { 0xc0196004, "lapic_phys_base" },
-    { 0xc0196020, "kernel_hostname" },
-    { 0xc019615c, "state_names" },
-    { 0xc0196180, "sysctl_kern" },
-    { 0xc01961c0, "sysctl_hw" },
-    { 0xc0196200, "sysctl_vm" },
-    { 0xc0196240, "sysctl_debug" },
-    { 0xc019626c, "kernel_ostype" },
-    { 0xc0196278, "kernel_osrelease" },
-    { 0xc01962a0, "kernel_version" },
-    { 0xc01962e0, "kernel_maxproc" },
-    { 0xc0196300, "kernel_hostname" },
-    { 0xc0196400, "kernel_domainname" },
-    { 0xc0196500, "sysctl_kern_securelevel" },
-    { 0xc0196540, "sysctl_kern_ostype" },
-    { 0xc0196580, "sysctl_kern_osrelease" },
-    { 0xc01965c0, "sysctl_kern_osrevision" },
-    { 0xc0196600, "sysctl_kern_version" },
-    { 0xc0196640, "sysctl_kern_maxproc" },
-    { 0xc0196680, "sysctl_kern_hostname" },
-    { 0xc01966c0, "sysctl_kern_domainname" },
-    { 0xc01966ec, "hw_machine" },
-    { 0xc01966f4, "hw_model" },
-    { 0xc0196704, "hw_ncpu" },
-    { 0xc0196708, "hw_pagesize" },
-    { 0xc0196720, "sysctl_hw_machine" },
-    { 0xc0196760, "sysctl_hw_model" },
-    { 0xc01967a0, "sysctl_hw_ncpu" },
-    { 0xc01967e0, "sysctl_hw_pagesize" },
-    { 0xc019680c, "num_cpus" },
-    { 0xc0196810, "geom_mbr_class" },
-    { 0xc0196820, "geom_gpt_class" },
-    { 0xc0196830, "geom_bsd_class" },
-    { 0xc0196840, "next_pid" },
-    { 0xc0196860, "vga_driver" },
-    { 0xc0196880, "mb_driver" },
-    { 0xc01968a0, "fb_console_backend" },
-    { 0xc01968c0, "bga_modes" },
-    { 0xc0196960, "bga_driver" },
-    { 0xc0196980, "vga_buffer" },
-    { 0xc01969a0, "vt_driver" },
-    { 0xc01969e8, "vt_kprint_backend" },
-    { 0xc0196a00, "legacy_dev" },
-    { 0xc0196a60, "kbd_us" },
-    { 0xc0196ae0, "kbd_us_shifted" },
-    { 0xc0196b60, "kbd_dev" },
-    { 0xc0196bc0, "mouse_dev" },
-    { 0xc0196c20, "console_node" },
-    { 0xc0196d2c, "uart_console" },
-    { 0xc0196d60, "keys.0" },
-    { 0xc0196da0, "kmem_allow_read" },
-    { 0xc0196dc0, "sysctl_kern_kmem_allow_read" },
-    { 0xc0196e00, "sysctl_kern_kmem_allow_write" },
-    { 0xc0196e40, "kmem_test_size" },
-    { 0xc0196e60, "sysctl_debug_kmem_test_addr" },
-    { 0xc0196ea0, "sysctl_debug_kmem_test_size" },
-    { 0xc0196ecc, "vfs_cache_limit" },
-    { 0xc0196ee0, "ext2_filesystem" },
-    { 0xc0196f20, "fat_filesystem" },
-    { 0xc0196f60, "minix_fs" },
-    { 0xc0196fa0, "udf_vnodeops" },
-    { 0xc0197020, "udf_filesystem" },
-    { 0xc0197060, "tty_node" },
-    { 0xc0197180, "devfs_fs" },
-    { 0xc01971c0, "procfs_entries" },
-    { 0xc0197220, "procfs_fs" },
-    { 0xc0197260, "sysfs_fs" },
-    { 0xc01972a0, "fuse_fs" },
-    { 0xc01972e0, "p9_fs" },
-    { 0xc0197320, "personalities" },
-    { 0xc0197720, "native_syscalls" },
-    { 0xc0198080, "native_names" },
-    { 0xc01989e0, "native_fmts" },
-    { 0xc019cb80, "personality_native" },
-    { 0xc019cbc0, "freebsd_syscalls" },
-    { 0xc019d520, "freebsd_names" },
-    { 0xc019de80, "freebsd_fmts" },
-    { 0xc01a2020, "personality_freebsd" },
-    { 0xc01a2060, "native_to_linux_sigtbl" },
-    { 0xc01a20e0, "linux_to_native_sigtbl" },
-    { 0xc01a2160, "linux_syscalls" },
-    { 0xc01a2ac0, "linux_names" },
-    { 0xc01a3420, "linux_fmts" },
-    { 0xc01a75c0, "personality_linux" },
-    { 0xc01a7600, "svr3_syscalls" },
-    { 0xc01a7f60, "svr3_names" },
-    { 0xc01a88c0, "svr3_fmts" },
-    { 0xc01aca60, "personality_svr3" },
-    { 0xc01acaa0, "svr4_syscalls" },
-    { 0xc01ad400, "svr4_names" },
-    { 0xc01add60, "svr4_fmts" },
-    { 0xc01b1f00, "personality_svr4" },
-    { 0xc01b1f40, "netbsd_syscalls" },
-    { 0xc01b28a0, "netbsd_names" },
-    { 0xc01b3200, "netbsd_fmts" },
-    { 0xc01b73a0, "personality_netbsd" },
-    { 0xc01b73e0, "openbsd_syscalls" },
-    { 0xc01b7d40, "openbsd_names" },
-    { 0xc01b86a0, "openbsd_fmts" },
-    { 0xc01bc840, "personality_openbsd" },
-    { 0xc01bc880, "sunos_syscalls" },
-    { 0xc01bd1e0, "sunos_names" },
-    { 0xc01bdb40, "sunos_fmts" },
-    { 0xc01c1ce0, "personality_sunos" },
-    { 0xc01c1d20, "vm_page_free_min" },
-    { 0xc01c1d24, "vm_page_free_target" },
-    { 0xc01c1d28, "vm_page_free_reserved" },
-    { 0xc01c1d40, "kmem_zone_names" },
-    { 0xc01c1d64, "swap_lock" },
-    { 0xc01c1d70, "swap_pager_ops" },
-    { 0xc01c1d88, "vnode_pager_ops" },
-    { 0xc01c1da0, "device_pager_ops" },
-    { 0xc01c1db8, "uma_ncpu" },
-    { 0xc01c1dbc, "vm_phys_low_watermark" },
-    { 0xc01c1dc0, "futex_tests" },
-    { 0xc01c1e40, "futex_private_tests" },
-    { 0xc01c1e60, "ntsync_tests" },
-    { 0xc01c1ec0, "geom_tests" },
-    { 0xc01c1f40, "mock_link" },
-    { 0xc01c1f80, "mock_dev" },
-    { 0xc01c20a0, "mock_fs" },
-    { 0xc01c20e0, "sysctl_debug_test_uid" },
-    { 0xc01c2120, "mock_ops" },
-    { 0xc01c21a0, "mock_driver" },
-    { 0xc01c2200, "dummy_fs" },
-    { 0xc01c2228, "_GLOBAL_OFFSET_TABLE_" },
-    { 0xc01c2240, "vblk_disk" },
-    { 0xc01c3000, "boot_page_directory" },
-    { 0xc01c4000, "boot_page_table1" },
-    { 0xc01c5000, "boot_page_table2" },
-    { 0xc01c6000, "boot_page_table3" },
-    { 0xc01c7000, "boot_page_table4" },
-    { 0xc01c8000, "boot_page_table_lapic" },
-    { 0xc01c9000, "stack_bottom" },
-    { 0xc01cd000, "idt_entries" },
-    { 0xc01cd000, "stack_top" },
-    { 0xc01cd800, "idt_ptr" },
-    { 0xc01cd820, "pmm_bitmap_static" },
-    { 0xc01ce820, "pmm_regions" },
-    { 0xc01cf020, "pmm_region_count" },
-    { 0xc01cf028, "pmm_total_usable_ram" },
-    { 0xc01cf030, "pmm_total_reserved_ram" },
-    { 0xc01cf038, "kernel_phys_start" },
-    { 0xc01cf03c, "kernel_phys_end" },
-    { 0xc01cf040, "mboot_info_start" },
-    { 0xc01cf044, "mboot_info_end" },
-    { 0xc01cf060, "module_regions_start" },
-    { 0xc01cf080, "module_regions_end" },
-    { 0xc01cf0a0, "module_region_count" },
-    { 0xc01cf0a4, "watermark_base" },
-    { 0xc01cf0a8, "watermark_ptr" },
-    { 0xc01cf0ac, "watermark_end" },
-    { 0xc01cf0b0, "pci_devices_head" },
-    { 0xc01cf0b4, "pci_devices_tail" },
-    { 0xc01d0000, "curpmap" },
-    { 0xc01d1000, "kernel_page_directory" },
-    { 0xc01d2000, "kernel_page_tables" },
-    { 0xc01f3000, "kernel_pmap_store" },
-    { 0xc01f3050, "pmap_list_head" },
-    { 0xc01f3054, "pmap_list_lock" },
-    { 0xc01f3058, "pmap_lock" },
-    { 0xc01f3060, "global_pmap_stats" },
-    { 0xc01f308c, "pmap_has_pcid" },
-    { 0xc01f3090, "shootdown_va" },
-    { 0xc01f3094, "shootdown_len" },
-    { 0xc01f3098, "shootdown_all" },
-    { 0xc01f309c, "shootdown_pending" },
-    { 0xc01f30a0, "shootdown_ack_count" },
-    { 0xc01f30c0, "deferred_pages" },
-    { 0xc01f3100, "deferred_count" },
-    { 0xc01f3120, "cpus" },
-    { 0xc01f3180, "cpu_count" },
-    { 0xc01f3190, "ap_stacks" },
-    { 0xc0213190, "aps_ready" },
-    { 0xc0213194, "fpu_present" },
-    { 0xc0213198, "current_vm86_monitor" },
-    { 0xc02131a0, "early_exception_num" },
-    { 0xc02131a4, "early_gdt" },
-    { 0xc02131bc, "early_gdt_ptr" },
-    { 0xc02131e0, "early_idt" },
-    { 0xc02132e0, "early_idt_ptr" },
-    { 0xc0213300, "percpu_data_array" },
-    { 0xc0255300, "lapic_base" },
-    { 0xc0255304, "lapic_initialized" },
-    { 0xc0255308, "lapic_timer_frequency" },
-    { 0xc025530c, "lapic_ticks_per_ms" },
-    { 0xc0255320, "ioapics" },
-    { 0xc02553a0, "ioapic_count" },
-    { 0xc02553c0, "crc32_table" },
-    { 0xc02557c0, "crc32_initialized" },
-    { 0xc02557e0, "acct_node" },
-    { 0xc02557e8, "boot_time" },
-    { 0xc02557f0, "ticks" },
-    { 0xc0255800, "serial_debug_enabled" },
-    { 0xc0255804, "syscall_trace_enabled" },
-    { 0xc0255820, "mboot_copy" },
-    { 0xc02558a0, "mboot_mmap_copy" },
-    { 0xc0255ea0, "mboot_mods_copy" },
-    { 0xc0255f20, "mboot_orig_addr" },
-    { 0xc0255f40, "fake_mbi.0" },
-    { 0xc0255fc0, "turnstile_hash" },
-    { 0xc02563c0, "turnstile_lock" },
-    { 0xc02563e0, "turnstile_pool" },
-    { 0xc02569e0, "turnstile_pool_next" },
-    { 0xc0256a00, "swapper_proc" },
-    { 0xc0256f80, "swapper_thread" },
-    { 0xc0257024, "idle_work_pending" },
-    { 0xc0257040, "pi_hash" },
-    { 0xc0257140, "pi_lock" },
-    { 0xc0257160, "pi_pool" },
-    { 0xc0257560, "waiter_pool" },
-    { 0xc0257d60, "pi_pool_idx" },
-    { 0xc0257d64, "waiter_pool_idx" },
-    { 0xc0257d80, "kernel_cmdline" },
-    { 0xc0258180, "initialized" },
-    { 0xc0258184, "name_buf.0" },
-    { 0xc02581a0, "sleepq_hash" },
-    { 0xc02585a0, "sleepq_locks" },
-    { 0xc02589a0, "sleepq_pool" },
-    { 0xc02597a0, "sleepq_pool_next" },
-    { 0xc02597a4, "pool_lock" },
-    { 0xc02597c0, "rng_state" },
-    { 0xc0259abc, "entropy_lock" },
-    { 0xc0259ac8, "output_lock" },
-    { 0xc0259ad4, "random_wait_channel" },
-    { 0xc0259ae0, "random_node" },
-    { 0xc0259c00, "urandom_node" },
-    { 0xc0259d0c, "file_zone" },
-    { 0xc0259d10, "init_lock.0" },
-    { 0xc0259d20, "driver_blacklist" },
-    { 0xc0259da0, "blacklist_count" },
-    { 0xc0259da4, "blacklist_lock" },
-    { 0xc0259db0, "sysctl__children" },
-    { 0xc0259db4, "sysctl_kern_children" },
-    { 0xc0259db8, "sysctl_hw_children" },
-    { 0xc0259dbc, "sysctl_vm_children" },
-    { 0xc0259dc0, "sysctl_debug_children" },
-    { 0xc0259dc4, "securelevel" },
-    { 0xc0259dc8, "sysctl_mutex" },
-    { 0xc0259de0, "sysctl_initialized" },
-    { 0xc0259e00, "cpu_runqueues" },
-    { 0xc0261300, "balance_counters.0" },
-    { 0xc0261380, "avenrun" },
-    { 0xc026138c, "geom_classes" },
-    { 0xc0261390, "geom_disks" },
-    { 0xc0261394, "geom_all_partitions" },
-    { 0xc02613a0, "entry_buf.0" },
-    { 0xc02653a0, "processes" },
-    { 0xc026aaa0, "current_process" },
-    { 0xc026aaa4, "kernel_process" },
-    { 0xc026aaa8, "proctree_lock" },
-    { 0xc026aac0, "pid_lock" },
-    { 0xc026aae0, "threads" },
-    { 0xc026d3e0, "current_thread" },
-    { 0xc026d400, "slot_generations" },
-    { 0xc026d500, "pgrp_hash" },
-    { 0xc026d540, "fb" },
-    { 0xc026d568, "fb_active" },
-    { 0xc026d56c, "current_driver" },
-    { 0xc026d580, "fb_node" },
-    { 0xc026d68c, "video_drivers" },
-    { 0xc026d690, "saved_mbi" },
-    { 0xc026d694, "cursor_x" },
-    { 0xc026d698, "cursor_y" },
-    { 0xc026d69c, "view_y_offset" },
-    { 0xc026d6a0, "bga_lfb_addr" },
-    { 0xc026d6a4, "hw_text_active" },
-    { 0xc026d6a8, "current_vt_ctx" },
-    { 0xc026d6c0, "input_devices" },
-    { 0xc026d6e0, "global_event_log" },
-    { 0xc026dce0, "global_seq" },
-    { 0xc026dd00, "event_node" },
-    { 0xc026de20, "kbd_shift" },
-    { 0xc026de24, "kbd_ctrl" },
-    { 0xc026de28, "kbd_alt" },
-    { 0xc026de2c, "kbd_lshift" },
-    { 0xc026de30, "kbd_rshift" },
-    { 0xc026de34, "kbd_lctrl" },
-    { 0xc026de38, "kbd_rctrl" },
-    { 0xc026de3c, "kbd_lalt" },
-    { 0xc026de40, "kbd_ralt" },
-    { 0xc026de44, "kbd_extended" },
-    { 0xc026de60, "kbd_buffer" },
-    { 0xc026df60, "kbd_head" },
-    { 0xc026df64, "kbd_tail" },
-    { 0xc026df68, "ps2_dual_channel" },
-    { 0xc026df80, "mouse_buttons" },
-    { 0xc026dfa0, "mouse_queue" },
-    { 0xc026e2a0, "mouse_q_head" },
-    { 0xc026e2a4, "mouse_q_tail" },
-    { 0xc026e2a8, "mouse_cycle" },
-    { 0xc026e2a9, "mouse_byte" },
-    { 0xc026e2ac, "mouse_x" },
-    { 0xc026e2b0, "mouse_y" },
-    { 0xc026e2c0, "backends" },
-    { 0xc026e2c4, "console_tty" },
-    { 0xc026e2e0, "ttys" },
-    { 0xc026e3e0, "vt_states" },
-    { 0xc027a3b0, "active_vt" },
-    { 0xc027a3c0, "uart_tx_buf" },
-    { 0xc027b3c0, "uart_tx_head" },
-    { 0xc027b3c4, "uart_tx_tail" },
-    { 0xc027b3c8, "uart_tx_active" },
-    { 0xc027b3e0, "blkdev_list" },
-    { 0xc027b400, "scsi_device_list" },
-    { 0xc027b404, "scsi_device_count" },
-    { 0xc027b420, "scsi_links" },
-    { 0xc027b440, "scsi_link_count" },
-    { 0xc027b460, "scsi_request_pool" },
-    { 0xc027dee0, "scsi_free_requests" },
-    { 0xc027df00, "scsi_device_pool" },
-    { 0xc027e440, "scsi_free_devices" },
-    { 0xc027e460, "scsi_dev_list" },
-    { 0xc027e464, "scsi_dev_count" },
-    { 0xc027e480, "scsi_dev_pool" },
-    { 0xc0280f00, "sg_list" },
-    { 0xc0280f20, "sg_pool" },
-    { 0xc0285420, "sg_count" },
-    { 0xc0285440, "bus_nodes" },
-    { 0xc0285ce0, "bus_count" },
-    { 0xc0285d00, "atapi_link" },
-    { 0xc0285d48, "atapi_initialized" },
-    { 0xc0285d60, "ide_channels" },
-    { 0xc0285f80, "ide_devices" },
-    { 0xc0286080, "ide_device_count" },
-    { 0xc0286084, "ide_contexts" },
-    { 0xc02860a0, "ide_blkdevs" },
-    { 0xc02865c0, "ide_irq_complete" },
-    { 0xc02865e0, "ramdisks" },
-    { 0xc0287020, "ramdisk_count" },
-    { 0xc0287040, "tty_node" },
-    { 0xc0287160, "port_node.3" },
-    { 0xc0287280, "stdin_node.2" },
-    { 0xc02873a0, "stdout_node.1" },
-    { 0xc02874c0, "stderr_node.0" },
-    { 0xc02875e0, "full_node" },
-    { 0xc0287700, "null_node" },
-    { 0xc0287820, "ntsync_device" },
-    { 0xc0287940, "kmem_allow_write" },
-    { 0xc0287960, "kmem_node" },
-    { 0xc0287a6c, "kmem_test_buffer" },
-    { 0xc0287a80, "zero_node" },
-    { 0xc0287ba0, "mem_allow" },
-    { 0xc0287ba4, "mem_secure_level" },
-    { 0xc0287ba8, "mem_high_lock" },
-    { 0xc0287bc0, "mem_high_window" },
-    { 0xc0287be0, "mem_node" },
-    { 0xc0287d00, "test_page_virt" },
-    { 0xc0287d04, "test_page_phys" },
-    { 0xc0287d20, "mem_test_node" },
-    { 0xc0287e40, "vblk" },
-    { 0xc0287e60, "v9p" },
-    { 0xc0287ec0, "vscsi_dev" },
-    { 0xc0287f68, "vscsi_initialized" },
-    { 0xc0287f80, "events.0" },
-    { 0xc0287fc0, "mountlist" },
-    { 0xc0287fc8, "fs_root" },
-    { 0xc0287fcc, "rootvnode" },
-    { 0xc0287fd0, "filesystems" },
-    { 0xc0287fe0, "link_target.2" },
-    { 0xc02880e0, "component.1" },
-    { 0xc02881e0, "component.0" },
-    { 0xc02882e0, "vnstats" },
-    { 0xc02882f4, "vnode_zone" },
-    { 0xc02882f8, "vnode_freelist_head" },
-    { 0xc02882fc, "vnode_freelist_tail" },
-    { 0xc0288300, "vnode_freelist_lock" },
-    { 0xc0288320, "vnode_hashtable" },
-    { 0xc0288720, "vnode_hash_lock" },
-    { 0xc028872c, "numvnodes" },
-    { 0xc0288730, "namei_zone" },
-    { 0xc0288740, "vfs_cache_count" },
-    { 0xc0288760, "nchash" },
-    { 0xc0289760, "nclru" },
-    { 0xc0289780, "ext2_fs" },
-    { 0xc0289880, "ext2_bgd_table" },
-    { 0xc028a080, "ext2_root_ctx" },
-    { 0xc028a6e0, "ext2_root" },
-    { 0xc028a800, "ext2_node_cache" },
-    { 0xc02a3b00, "ext2_fs_node_cache" },
-    { 0xc02a7e00, "ext2_node_cache_idx" },
-    { 0xc02a7e04, "ext2_block_cache" },
-    { 0xc02a7e20, "fat_global_fs" },
-    { 0xc02a7ea0, "fat_root_node" },
-    { 0xc02a7fac, "fat_root_ctx" },
-    { 0xc02a7fe0, "fat_node_cache" },
-    { 0xc02a85e0, "fat_fs_node_cache" },
-    { 0xc02ac8e0, "fat_node_cache_idx" },
-    { 0xc02ac900, "cluster_buf.5" },
-    { 0xc02b4900, "dir_buf.4" },
-    { 0xc02bc900, "lfn_buffer.3" },
-    { 0xc02bca00, "dirent.2" },
-    { 0xc02bcb20, "dir_buf.1" },
-    { 0xc02c4b20, "lfn_buffer.0" },
-    { 0xc02c4c20, "udf_ctx" },
-    { 0xc02c4c60, "udf_crc_table" },
-    { 0xc02c4e60, "udf_crc_initialized" },
-    { 0xc02c4e80, "udf_node_cache" },
-    { 0xc02c7f80, "udf_fs_node_cache" },
-    { 0xc02cc280, "udf_node_cache_idx" },
-    { 0xc02cc2a0, "udf_dirent" },
-    { 0xc02cc3c0, "udf_root" },
-    { 0xc02cc4e0, "udf_root_ctx" },
-    { 0xc02cc5c0, "sector_buf.6" },
-    { 0xc02ccdc0, "sector_buf.5" },
-    { 0xc02cd5c0, "sector_buf.4" },
-    { 0xc02cddc0, "sector_buf.3" },
-    { 0xc02ce5c0, "sector_buf.2" },
-    { 0xc02cedc0, "dir_buf.1" },
-    { 0xc02cfdc0, "dir_buf.0" },
-    { 0xc02d0dc0, "space_bitmap" },
-    { 0xc02d0dc4, "space_bitmap_size" },
-    { 0xc02d0dc8, "space_bitmap_sector" },
-    { 0xc02d0de0, "sector_buf.4" },
-    { 0xc02d2de0, "sector_buf.3" },
-    { 0xc02d35e0, "dir_buf.2" },
-    { 0xc02d45e0, "dir_buf.1" },
-    { 0xc02d55e0, "sector_buf.0" },
-    { 0xc02d5de0, "devfs_root_node_ptr" },
-    { 0xc02d5de4, "root_entry" },
-    { 0xc02d5e00, "dev_dirent" },
-    { 0xc02d5f20, "devfs_root_node" },
-    { 0xc02d6040, "procfs_static_nodes" },
-    { 0xc02d68a0, "proc_dirent" },
-    { 0xc02d69c0, "procfs_root_node" },
-    { 0xc02d6ae0, "sys_dirent" },
-    { 0xc02d6c00, "sysfs_root_node" },
-    { 0xc02d6d20, "sub_node.0" },
-    { 0xc02d6e40, "request_queue" },
-    { 0xc02d70c0, "fuse_q_head" },
-    { 0xc02d70c4, "fuse_q_tail" },
-    { 0xc02d70e0, "fuse_device_node" },
-    { 0xc02d7200, "fuse_root.0" },
-    { 0xc02d7320, "p9_next_fid" },
-    { 0xc02d7340, "p9_root.0" },
-    { 0xc02d744c, "exec_handlers" },
-    { 0xc02d7460, "active_queue" },
-    { 0xc02d7464, "inactive_queue" },
-    { 0xc02d7468, "wired_queue" },
-    { 0xc02d746c, "laundry_queue" },
-    { 0xc02d7480, "pv_pool" },
-    { 0xc02d8080, "pv_free_list" },
-    { 0xc02d8084, "pv_pool_initialized" },
-    { 0xc02d8088, "vm_stat_free_count" },
-    { 0xc02d808c, "vm_stat_active_count" },
-    { 0xc02d8090, "vm_stat_inactive_count" },
-    { 0xc02d8094, "vm_stat_wire_count" },
-    { 0xc02d8098, "vm_stat_pageouts" },
-    { 0xc02d809c, "vm_stat_pageins" },
-    { 0xc02d80a0, "vm_stat_faults" },
-    { 0xc02d80a4, "vm_pages_needed" },
-    { 0xc02d80c0, "bootstrap_objects" },
-    { 0xc02d87c0, "next_bootstrap_object" },
-    { 0xc02d87c4, "kmalloc_ready" },
-    { 0xc02d87e0, "vm_zone_bootstrap" },
-    { 0xc02d89c0, "kmem_zones" },
-    { 0xc02d8a00, "kmem_stats" },
-    { 0xc02d8a40, "swap_node" },
-    { 0xc02d8a60, "swap_bitmap" },
-    { 0xc02d8ae0, "swap_num_pages" },
-    { 0xc02d8b00, "uma_zones" },
-    { 0xc02d8b10, "uma_bootstrap_mem" },
-    { 0xc02df690, "uma_bootstrap_idx" },
-    { 0xc02df694, "uma_dynamic_alloc" },
-    { 0xc02df6a0, "uma_bucket_pool" },
-    { 0xc02e37a0, "uma_bucket_idx" },
-    { 0xc02e37c0, "uma_page_hash" },
-    { 0xc02e77c0, "vm_phys_free_lists" },
-    { 0xc02e77ec, "vm_phys_free_count" },
-    { 0xc02e77f0, "vm_phys_lock" },
-    { 0xc02e77fc, "vm_phys_page_array" },
-    { 0xc02e7800, "vm_phys_page_count" },
-    { 0xc02e8000, "tests_passed" },
-    { 0xc02e8004, "tests_failed" },
-    { 0xc02e8008, "tests_passed" },
-    { 0xc02e800c, "tests_failed" },
-    { 0xc02e8010, "tests_passed" },
-    { 0xc02e8014, "tests_failed" },
-    { 0xc02e8018, "tests_passed" },
-    { 0xc02e801c, "tests_failed" },
-    { 0xc02e8020, "tests_passed" },
-    { 0xc02e8024, "tests_failed" },
-    { 0xc02e8028, "tests_passed" },
-    { 0xc02e802c, "tests_failed" },
-    { 0xc02e8030, "tests_passed" },
-    { 0xc02e8034, "tests_failed" },
-    { 0xc02e8038, "tests_passed" },
-    { 0xc02e803c, "tests_failed" },
-    { 0xc02e8040, "tests_passed" },
-    { 0xc02e8044, "tests_failed" },
-    { 0xc02e8048, "tests_passed" },
-    { 0xc02e804c, "tests_failed" },
-    { 0xc02e8050, "ctor_calls" },
-    { 0xc02e8054, "dtor_calls" },
-    { 0xc02e8058, "tests_passed" },
-    { 0xc02e805c, "tests_failed" },
-    { 0xc02e8060, "tests_passed" },
-    { 0xc02e8064, "tests_failed" },
-    { 0xc02e8068, "tests_passed" },
-    { 0xc02e806c, "tests_failed" },
-    { 0xc02e8070, "tests_passed" },
-    { 0xc02e8074, "tests_failed" },
-    { 0xc02e8078, "tests_passed" },
-    { 0xc02e807c, "tests_failed" },
-    { 0xc02e8080, "tests_passed" },
-    { 0xc02e8084, "tests_failed" },
-    { 0xc02e8088, "tests_passed" },
-    { 0xc02e808c, "tests_failed" },
-    { 0xc02e8090, "passed" },
-    { 0xc02e8094, "failed" },
-    { 0xc02e8098, "passed" },
-    { 0xc02e809c, "failed" },
-    { 0xc02e80a0, "passed" },
-    { 0xc02e80a4, "failed" },
-    { 0xc02e80a8, "passed" },
-    { 0xc02e80ac, "failed" },
-    { 0xc02e80b0, "mock_execute_calls" },
-    { 0xc02e80b4, "mock_execute_return" },
-    { 0xc02e80c0, "mock_sb_buf" },
-    { 0xc02e84c0, "mock_disk" },
-    { 0xc03014c0, "write_inode_occurred" },
-    { 0xc03014e0, "mock_disk" },
-    { 0xc031a4e0, "fail_inode_write" },
-    { 0xc031a4e1, "fail_dir_write" },
-    { 0xc031a4e4, "test_worker_status" },
-    { 0xc031a4e8, "test_worker_done" },
-    { 0xc031a500, "test_heap" },
-    { 0xc031b500, "heap_idx" },
-    { 0xc031b504, "probe_called" },
-    { 0xc031b508, "probe_target" },
-    { 0xc031b50c, "detach_called" },
-    { 0xc031b510, "detach_target" },
-    { 0xc031b514, "attach_called" },
-    { 0xc031b518, "attach_target" },
-    { 0xc031b51c, "detach_called" },
-    { 0xc031b520, "detach_target" },
-    { 0xc031b540, "mock_disk" },
-    { 0xc0323540, "last_write_offset" },
-    { 0xc0323544, "last_write_size" },
-    { 0xc0323548, "write_called" },
-    { 0xc032354c, "mock_unmount_called" },
-    { 0xc0324000, "mock_fb_mem" },
-    { 0xc032dc40, "failed_tests" },
-    { 0xc032dc60, "mock_disk" },
-    { 0xc036dc60, "mock_disk" },
-    { 0xc036dc64, "test_vp" },
-    { 0xc036dc68, "helper_started" },
-    { 0xc036dc6c, "helper_done" },
-    { 0xc036dc70, "shared_count" },
-    { 0xc036dc74, "failed_tests" },
-    { 0xc036dc78, "failed_tests" },
-    { 0xc036dc80, "mock_out_buf" },
-    { 0xc036e080, "mock_out_len" },
-    { 0xc036e084, "mock_set_termios_called" },
-    { 0xc036e0a0, "mock_sb_buf" },
-    { 0xc036e4a0, "mock_inode_buf" },
-    { 0xc036e8a0, "mock_dir_buf" },
-    { 0xc036eca0, "bg_counter" },
-    { 0xc036eca8, "stop_bg_thread" },
-    { 0xc036ecac, "failed_tests" },
-    { 0xc036ecb0, "release_called" },
-    { 0xc036ecb4, "released_obj" },
-    { 0xc036ecb8, "test_error" },
-    { 0xc036ecbc, "r_node" },
-    { 0xc036ecc0, "w_node" },
-    { 0xc036ecc4, "_kernel_end" },
+    { (uint32_t)(uintptr_t)&_setup_phys_start, "_setup_phys_start" },
+    { (uint32_t)(uintptr_t)&_setup_start, "_setup_start" },
+    { (uint32_t)(uintptr_t)&_start, "_start" },
+    { (uint32_t)(uintptr_t)&efi_main, "efi_main" },
+    { (uint32_t)(uintptr_t)&_setup_end, "_setup_end" },
+    { (uint32_t)(uintptr_t)&_setup_phys_end, "_setup_phys_end" },
+    { (uint32_t)(uintptr_t)&_kernel_start, "_kernel_start" },
+    { (uint32_t)(uintptr_t)&gdt_set_gate, "gdt_set_gate" },
+    { (uint32_t)(uintptr_t)&gdt_init_cpu, "gdt_init_cpu" },
+    { (uint32_t)(uintptr_t)&gdt_init, "gdt_init" },
+    { (uint32_t)(uintptr_t)&set_kernel_stack, "set_kernel_stack" },
+    { (uint32_t)(uintptr_t)&tss_iomap_init, "tss_iomap_init" },
+    { (uint32_t)(uintptr_t)&tss_set_iomap, "tss_set_iomap" },
+    { (uint32_t)(uintptr_t)&tss_set_iomap_range, "tss_set_iomap_range" },
+    { (uint32_t)(uintptr_t)&ldt_activate, "ldt_activate" },
+    { (uint32_t)(uintptr_t)&ldt_init_process, "ldt_init_process" },
+    { (uint32_t)(uintptr_t)&ldt_free_process, "ldt_free_process" },
+    { (uint32_t)(uintptr_t)&sys_modify_ldt, "sys_modify_ldt" },
+    { (uint32_t)(uintptr_t)&arch_switch_to, "arch_switch_to" },
+    { (uint32_t)(uintptr_t)&arch_set_kernel_stack, "arch_set_kernel_stack" },
+    { (uint32_t)(uintptr_t)&sched_init, "sched_init" },
+    { (uint32_t)(uintptr_t)&sched_fork_thread, "sched_fork_thread" },
+    { (uint32_t)(uintptr_t)&sched_create_thread, "sched_create_thread" },
+    { (uint32_t)(uintptr_t)&idt_init, "idt_init" },
+    { (uint32_t)(uintptr_t)&idt_set_gate, "idt_set_gate" },
+    { (uint32_t)(uintptr_t)&isr_handler, "isr_handler" },
+    { (uint32_t)(uintptr_t)&idt_flush, "idt_flush" },
+    { (uint32_t)(uintptr_t)&gdt_flush, "gdt_flush" },
+    { (uint32_t)(uintptr_t)&tss_flush, "tss_flush" },
+    { (uint32_t)(uintptr_t)&switch_to, "switch_to" },
+    { (uint32_t)(uintptr_t)&isr0, "isr0" },
+    { (uint32_t)(uintptr_t)&isr1, "isr1" },
+    { (uint32_t)(uintptr_t)&isr2, "isr2" },
+    { (uint32_t)(uintptr_t)&isr3, "isr3" },
+    { (uint32_t)(uintptr_t)&isr4, "isr4" },
+    { (uint32_t)(uintptr_t)&isr5, "isr5" },
+    { (uint32_t)(uintptr_t)&isr6, "isr6" },
+    { (uint32_t)(uintptr_t)&isr7, "isr7" },
+    { (uint32_t)(uintptr_t)&isr8, "isr8" },
+    { (uint32_t)(uintptr_t)&isr9, "isr9" },
+    { (uint32_t)(uintptr_t)&isr10, "isr10" },
+    { (uint32_t)(uintptr_t)&isr11, "isr11" },
+    { (uint32_t)(uintptr_t)&isr12, "isr12" },
+    { (uint32_t)(uintptr_t)&isr13, "isr13" },
+    { (uint32_t)(uintptr_t)&isr14, "isr14" },
+    { (uint32_t)(uintptr_t)&isr15, "isr15" },
+    { (uint32_t)(uintptr_t)&isr16, "isr16" },
+    { (uint32_t)(uintptr_t)&isr17, "isr17" },
+    { (uint32_t)(uintptr_t)&isr18, "isr18" },
+    { (uint32_t)(uintptr_t)&isr19, "isr19" },
+    { (uint32_t)(uintptr_t)&isr20, "isr20" },
+    { (uint32_t)(uintptr_t)&isr21, "isr21" },
+    { (uint32_t)(uintptr_t)&isr22, "isr22" },
+    { (uint32_t)(uintptr_t)&isr23, "isr23" },
+    { (uint32_t)(uintptr_t)&isr24, "isr24" },
+    { (uint32_t)(uintptr_t)&isr25, "isr25" },
+    { (uint32_t)(uintptr_t)&isr26, "isr26" },
+    { (uint32_t)(uintptr_t)&isr27, "isr27" },
+    { (uint32_t)(uintptr_t)&isr28, "isr28" },
+    { (uint32_t)(uintptr_t)&isr29, "isr29" },
+    { (uint32_t)(uintptr_t)&isr30, "isr30" },
+    { (uint32_t)(uintptr_t)&isr31, "isr31" },
+    { (uint32_t)(uintptr_t)&isr32, "isr32" },
+    { (uint32_t)(uintptr_t)&isr33, "isr33" },
+    { (uint32_t)(uintptr_t)&isr34, "isr34" },
+    { (uint32_t)(uintptr_t)&isr35, "isr35" },
+    { (uint32_t)(uintptr_t)&isr36, "isr36" },
+    { (uint32_t)(uintptr_t)&isr37, "isr37" },
+    { (uint32_t)(uintptr_t)&isr38, "isr38" },
+    { (uint32_t)(uintptr_t)&isr39, "isr39" },
+    { (uint32_t)(uintptr_t)&isr40, "isr40" },
+    { (uint32_t)(uintptr_t)&isr41, "isr41" },
+    { (uint32_t)(uintptr_t)&isr42, "isr42" },
+    { (uint32_t)(uintptr_t)&isr43, "isr43" },
+    { (uint32_t)(uintptr_t)&isr44, "isr44" },
+    { (uint32_t)(uintptr_t)&isr45, "isr45" },
+    { (uint32_t)(uintptr_t)&isr46, "isr46" },
+    { (uint32_t)(uintptr_t)&isr47, "isr47" },
+    { (uint32_t)(uintptr_t)&isr128, "isr128" },
+    { (uint32_t)(uintptr_t)&jump_to_userspace, "jump_to_userspace" },
+    { (uint32_t)(uintptr_t)&fork_child_return, "fork_child_return" },
+    { (uint32_t)(uintptr_t)&pmm_record_boot_info, "pmm_record_boot_info" },
+    { (uint32_t)(uintptr_t)&pmm_watermark_init, "pmm_watermark_init" },
+    { (uint32_t)(uintptr_t)&pmm_watermark_alloc, "pmm_watermark_alloc" },
+    { (uint32_t)(uintptr_t)&pmm_watermark_used, "pmm_watermark_used" },
+    { (uint32_t)(uintptr_t)&pmm_reclaim_setup, "pmm_reclaim_setup" },
+    { (uint32_t)(uintptr_t)&pmm_walk_mmap, "pmm_walk_mmap" },
+    { (uint32_t)(uintptr_t)&pmm_enable_highmem, "pmm_enable_highmem" },
+    { (uint32_t)(uintptr_t)&pmm_init, "pmm_init" },
+    { (uint32_t)(uintptr_t)&pmm_get_total_memory, "pmm_get_total_memory" },
+    { (uint32_t)(uintptr_t)&pmm_get_free_memory, "pmm_get_free_memory" },
+    { (uint32_t)(uintptr_t)&pmm_alloc_block, "pmm_alloc_block" },
+    { (uint32_t)(uintptr_t)&pmm_free_block, "pmm_free_block" },
+    { (uint32_t)(uintptr_t)&pmm_alloc_contiguous, "pmm_alloc_contiguous" },
+    { (uint32_t)(uintptr_t)&pmm_free_contiguous, "pmm_free_contiguous" },
+    { (uint32_t)(uintptr_t)&pmm_get_used_blocks, "pmm_get_used_blocks" },
+    { (uint32_t)(uintptr_t)&pmm_reclaim_range, "pmm_reclaim_range" },
+    { (uint32_t)(uintptr_t)&pmm_get_page, "pmm_get_page" },
+    { (uint32_t)(uintptr_t)&pmm_dump_mmap, "pmm_dump_mmap" },
+    { (uint32_t)(uintptr_t)&pmm_walk_e820, "pmm_walk_e820" },
+    { (uint32_t)(uintptr_t)&pmm_dump_e820, "pmm_dump_e820" },
+    { (uint32_t)(uintptr_t)&pmm_init_e820, "pmm_init_e820" },
+    { (uint32_t)(uintptr_t)&pci_read, "pci_read" },
+    { (uint32_t)(uintptr_t)&pci_write, "pci_write" },
+    { (uint32_t)(uintptr_t)&pci_check_device, "pci_check_device" },
+    { (uint32_t)(uintptr_t)&pci_scan, "pci_scan" },
+    { (uint32_t)(uintptr_t)&pci_find_device, "pci_find_device" },
+    { (uint32_t)(uintptr_t)&pci_init, "pci_init" },
+    { (uint32_t)(uintptr_t)&sys_set_thread_area, "sys_set_thread_area" },
+    { (uint32_t)(uintptr_t)&syscall_handler, "syscall_handler" },
+    { (uint32_t)(uintptr_t)&arch_fork_with_stack, "arch_fork_with_stack" },
+    { (uint32_t)(uintptr_t)&sys_fork, "sys_fork" },
+    { (uint32_t)(uintptr_t)&sys_vfork, "sys_vfork" },
+    { (uint32_t)(uintptr_t)&syscall_init, "syscall_init" },
+    { (uint32_t)(uintptr_t)&pmap_bootstrap, "pmap_bootstrap" },
+    { (uint32_t)(uintptr_t)&pmap_null_protect, "pmap_null_protect" },
+    { (uint32_t)(uintptr_t)&pmap_null_allow, "pmap_null_allow" },
+    { (uint32_t)(uintptr_t)&pmap_kernel, "pmap_kernel" },
+    { (uint32_t)(uintptr_t)&pmap_create, "pmap_create" },
+    { (uint32_t)(uintptr_t)&pmap_destroy, "pmap_destroy" },
+    { (uint32_t)(uintptr_t)&pmap_reference, "pmap_reference" },
+    { (uint32_t)(uintptr_t)&pmap_release, "pmap_release" },
+    { (uint32_t)(uintptr_t)&pmap_fork, "pmap_fork" },
+    { (uint32_t)(uintptr_t)&pmap_activate, "pmap_activate" },
+    { (uint32_t)(uintptr_t)&pmap_enter, "pmap_enter" },
+    { (uint32_t)(uintptr_t)&pmap_enter_batch, "pmap_enter_batch" },
+    { (uint32_t)(uintptr_t)&pmap_map_trampoline, "pmap_map_trampoline" },
+    { (uint32_t)(uintptr_t)&pmap_enter_large, "pmap_enter_large" },
+    { (uint32_t)(uintptr_t)&pmap_remove, "pmap_remove" },
+    { (uint32_t)(uintptr_t)&pmap_kenter, "pmap_kenter" },
+    { (uint32_t)(uintptr_t)&pmap_kremove, "pmap_kremove" },
+    { (uint32_t)(uintptr_t)&pmap_extract, "pmap_extract" },
+    { (uint32_t)(uintptr_t)&pmap_protect, "pmap_protect" },
+    { (uint32_t)(uintptr_t)&pmap_copy, "pmap_copy" },
+    { (uint32_t)(uintptr_t)&pmap_page_is_cow, "pmap_page_is_cow" },
+    { (uint32_t)(uintptr_t)&pmap_invalidate_page, "pmap_invalidate_page" },
+    { (uint32_t)(uintptr_t)&pmap_invalidate_all, "pmap_invalidate_all" },
+    { (uint32_t)(uintptr_t)&pmap_flush_global_pages, "pmap_flush_global_pages" },
+    { (uint32_t)(uintptr_t)&pmap_shootdown_handler, "pmap_shootdown_handler" },
+    { (uint32_t)(uintptr_t)&pmap_shootdown_page, "pmap_shootdown_page" },
+    { (uint32_t)(uintptr_t)&pmap_shootdown_range, "pmap_shootdown_range" },
+    { (uint32_t)(uintptr_t)&pmap_shootdown_all, "pmap_shootdown_all" },
+    { (uint32_t)(uintptr_t)&pmap_shootdown_defer, "pmap_shootdown_defer" },
+    { (uint32_t)(uintptr_t)&pmap_shootdown_commit, "pmap_shootdown_commit" },
+    { (uint32_t)(uintptr_t)&pmap_shootdown_wait, "pmap_shootdown_wait" },
+    { (uint32_t)(uintptr_t)&pmap_is_referenced, "pmap_is_referenced" },
+    { (uint32_t)(uintptr_t)&pmap_clear_reference, "pmap_clear_reference" },
+    { (uint32_t)(uintptr_t)&pmap_is_referenced_range, "pmap_is_referenced_range" },
+    { (uint32_t)(uintptr_t)&pmap_test_and_clear_ref, "pmap_test_and_clear_ref" },
+    { (uint32_t)(uintptr_t)&pmap_track_access, "pmap_track_access" },
+    { (uint32_t)(uintptr_t)&pmap_is_modified_range, "pmap_is_modified_range" },
+    { (uint32_t)(uintptr_t)&pmap_test_and_clear_modify, "pmap_test_and_clear_modify" },
+    { (uint32_t)(uintptr_t)&pmap_track_modify, "pmap_track_modify" },
+    { (uint32_t)(uintptr_t)&pmap_fault, "pmap_fault" },
+    { (uint32_t)(uintptr_t)&sys_pmap_stats, "sys_pmap_stats" },
+    { (uint32_t)(uintptr_t)&pmap_copy_page, "pmap_copy_page" },
+    { (uint32_t)(uintptr_t)&pmap_zero_page, "pmap_zero_page" },
+    { (uint32_t)(uintptr_t)&pmap_check, "pmap_check" },
+    { (uint32_t)(uintptr_t)&pmap_dump, "pmap_dump" },
+    { (uint32_t)(uintptr_t)&smp_discover_cores, "smp_discover_cores" },
+    { (uint32_t)(uintptr_t)&smp_ap_entry, "smp_ap_entry" },
+    { (uint32_t)(uintptr_t)&smp_boot_ap, "smp_boot_ap" },
+    { (uint32_t)(uintptr_t)&smp_boot_all_aps, "smp_boot_all_aps" },
+    { (uint32_t)(uintptr_t)&smp_init, "smp_init" },
+    { (uint32_t)(uintptr_t)&smp_get_cpu_count, "smp_get_cpu_count" },
+    { (uint32_t)(uintptr_t)&smp_get_cpu_id, "smp_get_cpu_id" },
+    { (uint32_t)(uintptr_t)&trampoline_start, "trampoline_start" },
+    { (uint32_t)(uintptr_t)&fpu_save_context, "fpu_save_context" },
+    { (uint32_t)(uintptr_t)&trampoline_end, "trampoline_end" },
+    { (uint32_t)(uintptr_t)&fpu_restore_context, "fpu_restore_context" },
+    { (uint32_t)(uintptr_t)&fpu_handler, "fpu_handler" },
+    { (uint32_t)(uintptr_t)&fpu_init, "fpu_init" },
+    { (uint32_t)(uintptr_t)&vm86_monitor_init, "vm86_monitor_init" },
+    { (uint32_t)(uintptr_t)&vm86_monitor_get, "vm86_monitor_get" },
+    { (uint32_t)(uintptr_t)&vm86_monitor_signal_fault, "vm86_monitor_signal_fault" },
+    { (uint32_t)(uintptr_t)&sys_vm86, "sys_vm86" },
+    { (uint32_t)(uintptr_t)&vm86_init_bsd, "vm86_init_bsd" },
+    { (uint32_t)(uintptr_t)&vm86_gpf_handler, "vm86_gpf_handler" },
+    { (uint32_t)(uintptr_t)&vm86_bios_call, "vm86_bios_call" },
+    { (uint32_t)(uintptr_t)&vm86_enter, "vm86_enter" },
+    { (uint32_t)(uintptr_t)&vm86_bios_ret_point, "vm86_bios_ret_point" },
+    { (uint32_t)(uintptr_t)&sys_sysarch, "sys_sysarch" },
+    { (uint32_t)(uintptr_t)&sendsig, "sendsig" },
+    { (uint32_t)(uintptr_t)&sys_sigreturn, "sys_sigreturn" },
+    { (uint32_t)(uintptr_t)&sys_rt_sigreturn, "sys_rt_sigreturn" },
+    { (uint32_t)(uintptr_t)&early_uart_print, "early_uart_print" },
+    { (uint32_t)(uintptr_t)&early_exception_handler, "early_exception_handler" },
+    { (uint32_t)(uintptr_t)&early_isr_common, "early_isr_common" },
+    { (uint32_t)(uintptr_t)&early_isr0, "early_isr0" },
+    { (uint32_t)(uintptr_t)&early_isr1, "early_isr1" },
+    { (uint32_t)(uintptr_t)&early_isr2, "early_isr2" },
+    { (uint32_t)(uintptr_t)&early_isr3, "early_isr3" },
+    { (uint32_t)(uintptr_t)&early_isr4, "early_isr4" },
+    { (uint32_t)(uintptr_t)&early_isr5, "early_isr5" },
+    { (uint32_t)(uintptr_t)&early_isr6, "early_isr6" },
+    { (uint32_t)(uintptr_t)&early_isr7, "early_isr7" },
+    { (uint32_t)(uintptr_t)&early_isr8, "early_isr8" },
+    { (uint32_t)(uintptr_t)&early_isr9, "early_isr9" },
+    { (uint32_t)(uintptr_t)&early_isr10, "early_isr10" },
+    { (uint32_t)(uintptr_t)&early_isr11, "early_isr11" },
+    { (uint32_t)(uintptr_t)&early_isr12, "early_isr12" },
+    { (uint32_t)(uintptr_t)&early_isr13, "early_isr13" },
+    { (uint32_t)(uintptr_t)&early_isr14, "early_isr14" },
+    { (uint32_t)(uintptr_t)&early_isr15, "early_isr15" },
+    { (uint32_t)(uintptr_t)&early_isr16, "early_isr16" },
+    { (uint32_t)(uintptr_t)&early_isr17, "early_isr17" },
+    { (uint32_t)(uintptr_t)&early_isr18, "early_isr18" },
+    { (uint32_t)(uintptr_t)&early_isr19, "early_isr19" },
+    { (uint32_t)(uintptr_t)&early_isr20, "early_isr20" },
+    { (uint32_t)(uintptr_t)&early_isr21, "early_isr21" },
+    { (uint32_t)(uintptr_t)&early_isr22, "early_isr22" },
+    { (uint32_t)(uintptr_t)&early_isr23, "early_isr23" },
+    { (uint32_t)(uintptr_t)&early_isr24, "early_isr24" },
+    { (uint32_t)(uintptr_t)&early_isr25, "early_isr25" },
+    { (uint32_t)(uintptr_t)&early_isr26, "early_isr26" },
+    { (uint32_t)(uintptr_t)&early_isr27, "early_isr27" },
+    { (uint32_t)(uintptr_t)&early_isr28, "early_isr28" },
+    { (uint32_t)(uintptr_t)&early_isr29, "early_isr29" },
+    { (uint32_t)(uintptr_t)&early_isr30, "early_isr30" },
+    { (uint32_t)(uintptr_t)&early_isr31, "early_isr31" },
+    { (uint32_t)(uintptr_t)&early_gdt_init, "early_gdt_init" },
+    { (uint32_t)(uintptr_t)&early_idt_init, "early_idt_init" },
+    { (uint32_t)(uintptr_t)&percpu_get, "percpu_get" },
+    { (uint32_t)(uintptr_t)&percpu_get_cpu, "percpu_get_cpu" },
+    { (uint32_t)(uintptr_t)&percpu_init_cpu, "percpu_init_cpu" },
+    { (uint32_t)(uintptr_t)&percpu_init, "percpu_init" },
+    { (uint32_t)(uintptr_t)&percpu_get_cpu_id, "percpu_get_cpu_id" },
+    { (uint32_t)(uintptr_t)&lapic_set_base, "lapic_set_base" },
+    { (uint32_t)(uintptr_t)&lapic_get_base, "lapic_get_base" },
+    { (uint32_t)(uintptr_t)&lapic_init, "lapic_init" },
+    { (uint32_t)(uintptr_t)&lapic_is_initialized, "lapic_is_initialized" },
+    { (uint32_t)(uintptr_t)&lapic_enable, "lapic_enable" },
+    { (uint32_t)(uintptr_t)&lapic_disable, "lapic_disable" },
+    { (uint32_t)(uintptr_t)&lapic_timer_calibrate, "lapic_timer_calibrate" },
+    { (uint32_t)(uintptr_t)&lapic_timer_set_divider, "lapic_timer_set_divider" },
+    { (uint32_t)(uintptr_t)&lapic_timer_periodic, "lapic_timer_periodic" },
+    { (uint32_t)(uintptr_t)&lapic_timer_oneshot, "lapic_timer_oneshot" },
+    { (uint32_t)(uintptr_t)&lapic_timer_stop, "lapic_timer_stop" },
+    { (uint32_t)(uintptr_t)&lapic_timer_ticks_per_ms, "lapic_timer_ticks_per_ms" },
+    { (uint32_t)(uintptr_t)&lapic_timer_delay_ms, "lapic_timer_delay_ms" },
+    { (uint32_t)(uintptr_t)&lapic_timer_delay_us, "lapic_timer_delay_us" },
+    { (uint32_t)(uintptr_t)&lapic_setup_error, "lapic_setup_error" },
+    { (uint32_t)(uintptr_t)&lapic_get_error, "lapic_get_error" },
+    { (uint32_t)(uintptr_t)&lapic_print_error, "lapic_print_error" },
+    { (uint32_t)(uintptr_t)&lapic_send_eoi, "lapic_send_eoi" },
+    { (uint32_t)(uintptr_t)&lapic_get_id, "lapic_get_id" },
+    { (uint32_t)(uintptr_t)&lapic_send_ipi_ex, "lapic_send_ipi_ex" },
+    { (uint32_t)(uintptr_t)&lapic_send_ipi, "lapic_send_ipi" },
+    { (uint32_t)(uintptr_t)&lapic_send_ipi_all_excl_self, "lapic_send_ipi_all_excl_self" },
+    { (uint32_t)(uintptr_t)&lapic_send_init, "lapic_send_init" },
+    { (uint32_t)(uintptr_t)&lapic_send_sipi, "lapic_send_sipi" },
+    { (uint32_t)(uintptr_t)&lapic_send_nmi, "lapic_send_nmi" },
+    { (uint32_t)(uintptr_t)&lapic_send_nmi_all_excl_self, "lapic_send_nmi_all_excl_self" },
+    { (uint32_t)(uintptr_t)&ioapic_register, "ioapic_register" },
+    { (uint32_t)(uintptr_t)&ioapic_init, "ioapic_init" },
+    { (uint32_t)(uintptr_t)&ioapic_get_count, "ioapic_get_count" },
+    { (uint32_t)(uintptr_t)&ioapic_set_routing, "ioapic_set_routing" },
+    { (uint32_t)(uintptr_t)&ioapic_set_routing_ex, "ioapic_set_routing_ex" },
+    { (uint32_t)(uintptr_t)&ioapic_set_mask, "ioapic_set_mask" },
+    { (uint32_t)(uintptr_t)&ioapic_mask_all, "ioapic_mask_all" },
+    { (uint32_t)(uintptr_t)&rtc_read_time, "rtc_read_time" },
+    { (uint32_t)(uintptr_t)&rtc_init, "rtc_init" },
+    { (uint32_t)(uintptr_t)&crc32_init, "crc32_init" },
+    { (uint32_t)(uintptr_t)&crc32, "crc32" },
+    { (uint32_t)(uintptr_t)&memcpy, "memcpy" },
+    { (uint32_t)(uintptr_t)&memmove, "memmove" },
+    { (uint32_t)(uintptr_t)&strlcpy, "strlcpy" },
+    { (uint32_t)(uintptr_t)&memset, "memset" },
+    { (uint32_t)(uintptr_t)&memcmp, "memcmp" },
+    { (uint32_t)(uintptr_t)&strlen, "strlen" },
+    { (uint32_t)(uintptr_t)&strnlen, "strnlen" },
+    { (uint32_t)(uintptr_t)&strcpy, "strcpy" },
+    { (uint32_t)(uintptr_t)&strncpy, "strncpy" },
+    { (uint32_t)(uintptr_t)&strcmp, "strcmp" },
+    { (uint32_t)(uintptr_t)&strncmp, "strncmp" },
+    { (uint32_t)(uintptr_t)&strchr, "strchr" },
+    { (uint32_t)(uintptr_t)&strspn, "strspn" },
+    { (uint32_t)(uintptr_t)&strcspn, "strcspn" },
+    { (uint32_t)(uintptr_t)&strpbrk, "strpbrk" },
+    { (uint32_t)(uintptr_t)&strcat, "strcat" },
+    { (uint32_t)(uintptr_t)&strncat, "strncat" },
+    { (uint32_t)(uintptr_t)&vsnprintf, "vsnprintf" },
+    { (uint32_t)(uintptr_t)&snprintf, "snprintf" },
+    { (uint32_t)(uintptr_t)&sprintf, "sprintf" },
+    { (uint32_t)(uintptr_t)&vsprintf, "vsprintf" },
+    { (uint32_t)(uintptr_t)&kvasprintf, "kvasprintf" },
+    { (uint32_t)(uintptr_t)&kasprintf, "kasprintf" },
+    { (uint32_t)(uintptr_t)&__udivdi3, "__udivdi3" },
+    { (uint32_t)(uintptr_t)&__umoddi3, "__umoddi3" },
+    { (uint32_t)(uintptr_t)&__divdi3, "__divdi3" },
+    { (uint32_t)(uintptr_t)&__moddi3, "__moddi3" },
+    { (uint32_t)(uintptr_t)&__ashldi3, "__ashldi3" },
+    { (uint32_t)(uintptr_t)&__lshrdi3, "__lshrdi3" },
+    { (uint32_t)(uintptr_t)&__ashrdi3, "__ashrdi3" },
+    { (uint32_t)(uintptr_t)&__muldi3, "__muldi3" },
+    { (uint32_t)(uintptr_t)&__negdi2, "__negdi2" },
+    { (uint32_t)(uintptr_t)&compress, "compress" },
+    { (uint32_t)(uintptr_t)&kern_acct, "kern_acct" },
+    { (uint32_t)(uintptr_t)&sys_acct, "sys_acct" },
+    { (uint32_t)(uintptr_t)&acct_process, "acct_process" },
+    { (uint32_t)(uintptr_t)&sys_getpgrp, "sys_getpgrp" },
+    { (uint32_t)(uintptr_t)&get_ticks, "get_ticks" },
+    { (uint32_t)(uintptr_t)&get_time, "get_time" },
+    { (uint32_t)(uintptr_t)&get_uptime, "get_uptime" },
+    { (uint32_t)(uintptr_t)&get_uptime_ms, "get_uptime_ms" },
+    { (uint32_t)(uintptr_t)&get_hz, "get_hz" },
+    { (uint32_t)(uintptr_t)&set_boot_time, "set_boot_time" },
+    { (uint32_t)(uintptr_t)&kern_time, "kern_time" },
+    { (uint32_t)(uintptr_t)&kern_stime, "kern_stime" },
+    { (uint32_t)(uintptr_t)&kern_gettimeofday, "kern_gettimeofday" },
+    { (uint32_t)(uintptr_t)&kern_clock_gettime, "kern_clock_gettime" },
+    { (uint32_t)(uintptr_t)&kern_times, "kern_times" },
+    { (uint32_t)(uintptr_t)&sys_time, "sys_time" },
+    { (uint32_t)(uintptr_t)&sys_stime, "sys_stime" },
+    { (uint32_t)(uintptr_t)&sys_gettimeofday, "sys_gettimeofday" },
+    { (uint32_t)(uintptr_t)&sys_clock_gettime, "sys_clock_gettime" },
+    { (uint32_t)(uintptr_t)&sys_times, "sys_times" },
+    { (uint32_t)(uintptr_t)&timer_tick, "timer_tick" },
+    { (uint32_t)(uintptr_t)&strstr, "strstr" },
+    { (uint32_t)(uintptr_t)&kinit_task, "kinit_task" },
+    { (uint32_t)(uintptr_t)&init_task, "init_task" },
+    { (uint32_t)(uintptr_t)&kmain, "kmain" },
+    { (uint32_t)(uintptr_t)&panic, "panic" },
+    { (uint32_t)(uintptr_t)&stack_trace, "stack_trace" },
+    { (uint32_t)(uintptr_t)&stack_trace_from, "stack_trace_from" },
+    { (uint32_t)(uintptr_t)&ksym_lookup, "ksym_lookup" },
+    { (uint32_t)(uintptr_t)&ksym_resolve, "ksym_resolve" },
+    { (uint32_t)(uintptr_t)&ksym_print, "ksym_print" },
+    { (uint32_t)(uintptr_t)&ksym_init, "ksym_init" },
+    { (uint32_t)(uintptr_t)&spinlock_init, "spinlock_init" },
+    { (uint32_t)(uintptr_t)&spinlock_acquire, "spinlock_acquire" },
+    { (uint32_t)(uintptr_t)&spinlock_try_acquire, "spinlock_try_acquire" },
+    { (uint32_t)(uintptr_t)&spinlock_release, "spinlock_release" },
+    { (uint32_t)(uintptr_t)&spinlock_is_held, "spinlock_is_held" },
+    { (uint32_t)(uintptr_t)&mutex_init, "mutex_init" },
+    { (uint32_t)(uintptr_t)&mutex_trylock, "mutex_trylock" },
+    { (uint32_t)(uintptr_t)&mutex_lock, "mutex_lock" },
+    { (uint32_t)(uintptr_t)&mutex_unlock, "mutex_unlock" },
+    { (uint32_t)(uintptr_t)&mutex_is_held, "mutex_is_held" },
+    { (uint32_t)(uintptr_t)&sema_init, "sema_init" },
+    { (uint32_t)(uintptr_t)&sema_wait, "sema_wait" },
+    { (uint32_t)(uintptr_t)&sema_post, "sema_post" },
+    { (uint32_t)(uintptr_t)&sema_getvalue, "sema_getvalue" },
+    { (uint32_t)(uintptr_t)&kthread_create, "kthread_create" },
+    { (uint32_t)(uintptr_t)&kthread_exit, "kthread_exit" },
+    { (uint32_t)(uintptr_t)&turnstile_init, "turnstile_init" },
+    { (uint32_t)(uintptr_t)&turnstile_block, "turnstile_block" },
+    { (uint32_t)(uintptr_t)&turnstile_release, "turnstile_release" },
+    { (uint32_t)(uintptr_t)&turnstile_get_inherited_priority, "turnstile_get_inherited_priority" },
+    { (uint32_t)(uintptr_t)&kern_sigaction, "kern_sigaction" },
+    { (uint32_t)(uintptr_t)&sys_sigaction, "sys_sigaction" },
+    { (uint32_t)(uintptr_t)&kern_sigprocmask, "kern_sigprocmask" },
+    { (uint32_t)(uintptr_t)&sys_sigprocmask, "sys_sigprocmask" },
+    { (uint32_t)(uintptr_t)&kern_sigpending, "kern_sigpending" },
+    { (uint32_t)(uintptr_t)&sys_sigpending, "sys_sigpending" },
+    { (uint32_t)(uintptr_t)&kern_sigsuspend, "kern_sigsuspend" },
+    { (uint32_t)(uintptr_t)&kern_sigaltstack, "kern_sigaltstack" },
+    { (uint32_t)(uintptr_t)&sys_sigaltstack, "sys_sigaltstack" },
+    { (uint32_t)(uintptr_t)&sys_sigsuspend, "sys_sigsuspend" },
+    { (uint32_t)(uintptr_t)&sys_sigwait, "sys_sigwait" },
+    { (uint32_t)(uintptr_t)&kern_sigwait, "kern_sigwait" },
+    { (uint32_t)(uintptr_t)&sys_sigtimedwait, "sys_sigtimedwait" },
+    { (uint32_t)(uintptr_t)&kern_sigtimedwait, "kern_sigtimedwait" },
+    { (uint32_t)(uintptr_t)&psignal, "psignal" },
+    { (uint32_t)(uintptr_t)&pgsignal, "pgsignal" },
+    { (uint32_t)(uintptr_t)&trapsignal, "trapsignal" },
+    { (uint32_t)(uintptr_t)&sigexit, "sigexit" },
+    { (uint32_t)(uintptr_t)&sys_kill, "sys_kill" },
+    { (uint32_t)(uintptr_t)&signal_send_group, "signal_send_group" },
+    { (uint32_t)(uintptr_t)&signal_handle_pending, "signal_handle_pending" },
+    { (uint32_t)(uintptr_t)&swapper_init, "swapper_init" },
+    { (uint32_t)(uintptr_t)&swapper_get_proc, "swapper_get_proc" },
+    { (uint32_t)(uintptr_t)&swapper_get_idle_thread, "swapper_get_idle_thread" },
+    { (uint32_t)(uintptr_t)&swapper_request_work, "swapper_request_work" },
+    { (uint32_t)(uintptr_t)&swapper_idle_loop, "swapper_idle_loop" },
+    { (uint32_t)(uintptr_t)&sched_ensure_context, "sched_ensure_context" },
+    { (uint32_t)(uintptr_t)&sched_enter_critical, "sched_enter_critical" },
+    { (uint32_t)(uintptr_t)&sched_is_idle, "sched_is_idle" },
+    { (uint32_t)(uintptr_t)&futex_get_key, "futex_get_key" },
+    { (uint32_t)(uintptr_t)&futex_thread_exit, "futex_thread_exit" },
+    { (uint32_t)(uintptr_t)&futex_exit_cleanup, "futex_exit_cleanup" },
+    { (uint32_t)(uintptr_t)&futex_wake_exited_thread, "futex_wake_exited_thread" },
+    { (uint32_t)(uintptr_t)&sys_set_robust_list, "sys_set_robust_list" },
+    { (uint32_t)(uintptr_t)&sys_get_robust_list, "sys_get_robust_list" },
+    { (uint32_t)(uintptr_t)&sys_futex, "sys_futex" },
+    { (uint32_t)(uintptr_t)&futex_lock_pi, "futex_lock_pi" },
+    { (uint32_t)(uintptr_t)&futex_unlock_pi, "futex_unlock_pi" },
+    { (uint32_t)(uintptr_t)&kobject_init, "kobject_init" },
+    { (uint32_t)(uintptr_t)&kset_init, "kset_init" },
+    { (uint32_t)(uintptr_t)&kobject_get, "kobject_get" },
+    { (uint32_t)(uintptr_t)&kobject_put, "kobject_put" },
+    { (uint32_t)(uintptr_t)&cmdline_init, "cmdline_init" },
+    { (uint32_t)(uintptr_t)&cmdline_has, "cmdline_has" },
+    { (uint32_t)(uintptr_t)&cmdline_get, "cmdline_get" },
+    { (uint32_t)(uintptr_t)&cmdline_get_full, "cmdline_get_full" },
+    { (uint32_t)(uintptr_t)&debug_dump_processes, "debug_dump_processes" },
+    { (uint32_t)(uintptr_t)&sleepq_init, "sleepq_init" },
+    { (uint32_t)(uintptr_t)&sleepq_add, "sleepq_add" },
+    { (uint32_t)(uintptr_t)&sleepq_add_private, "sleepq_add_private" },
+    { (uint32_t)(uintptr_t)&sleepq_wake_one, "sleepq_wake_one" },
+    { (uint32_t)(uintptr_t)&sleepq_wake_one_private, "sleepq_wake_one_private" },
+    { (uint32_t)(uintptr_t)&sleepq_wake_all, "sleepq_wake_all" },
+    { (uint32_t)(uintptr_t)&sleepq_wake_all_private, "sleepq_wake_all_private" },
+    { (uint32_t)(uintptr_t)&sleepq_wake_n, "sleepq_wake_n" },
+    { (uint32_t)(uintptr_t)&sleepq_wake_n_private, "sleepq_wake_n_private" },
+    { (uint32_t)(uintptr_t)&sleepq_has_waiters, "sleepq_has_waiters" },
+    { (uint32_t)(uintptr_t)&sleepq_has_waiters_private, "sleepq_has_waiters_private" },
+    { (uint32_t)(uintptr_t)&sleepq_requeue, "sleepq_requeue" },
+    { (uint32_t)(uintptr_t)&sleepq_requeue_private, "sleepq_requeue_private" },
+    { (uint32_t)(uintptr_t)&chacha20_init, "chacha20_init" },
+    { (uint32_t)(uintptr_t)&chacha20_block, "chacha20_block" },
+    { (uint32_t)(uintptr_t)&chacha20_extract, "chacha20_extract" },
+    { (uint32_t)(uintptr_t)&chacha20_rekey, "chacha20_rekey" },
+    { (uint32_t)(uintptr_t)&chacha20_wipe, "chacha20_wipe" },
+    { (uint32_t)(uintptr_t)&pool_init, "pool_init" },
+    { (uint32_t)(uintptr_t)&pool_mix_bytes, "pool_mix_bytes" },
+    { (uint32_t)(uintptr_t)&pool_extract_bytes, "pool_extract_bytes" },
+    { (uint32_t)(uintptr_t)&random_detect_hwrng, "random_detect_hwrng" },
+    { (uint32_t)(uintptr_t)&random_has_rdrand, "random_has_rdrand" },
+    { (uint32_t)(uintptr_t)&random_has_rdseed, "random_has_rdseed" },
+    { (uint32_t)(uintptr_t)&rdrand32, "rdrand32" },
+    { (uint32_t)(uintptr_t)&rdrand64, "rdrand64" },
+    { (uint32_t)(uintptr_t)&rdseed32, "rdseed32" },
+    { (uint32_t)(uintptr_t)&rdseed64, "rdseed64" },
+    { (uint32_t)(uintptr_t)&random_harvest_hwrng, "random_harvest_hwrng" },
+    { (uint32_t)(uintptr_t)&random_harvest, "random_harvest" },
+    { (uint32_t)(uintptr_t)&random_harvest_fast, "random_harvest_fast" },
+    { (uint32_t)(uintptr_t)&random_harvest_direct, "random_harvest_direct" },
+    { (uint32_t)(uintptr_t)&random_is_seeded, "random_is_seeded" },
+    { (uint32_t)(uintptr_t)&random_get_bytes, "random_get_bytes" },
+    { (uint32_t)(uintptr_t)&random_get_bytes_flags, "random_get_bytes_flags" },
+    { (uint32_t)(uintptr_t)&random_init, "random_init" },
+    { (uint32_t)(uintptr_t)&file_alloc, "file_alloc" },
+    { (uint32_t)(uintptr_t)&file_free, "file_free" },
+    { (uint32_t)(uintptr_t)&kern_write, "kern_write" },
+    { (uint32_t)(uintptr_t)&truncate_fs, "truncate_fs" },
+    { (uint32_t)(uintptr_t)&sys_write, "sys_write" },
+    { (uint32_t)(uintptr_t)&kern_read, "kern_read" },
+    { (uint32_t)(uintptr_t)&sys_read, "sys_read" },
+    { (uint32_t)(uintptr_t)&sys_open, "sys_open" },
+    { (uint32_t)(uintptr_t)&kern_open, "kern_open" },
+    { (uint32_t)(uintptr_t)&file_close_ptr, "file_close_ptr" },
+    { (uint32_t)(uintptr_t)&kern_close, "kern_close" },
+    { (uint32_t)(uintptr_t)&sys_close, "sys_close" },
+    { (uint32_t)(uintptr_t)&sys_lseek, "sys_lseek" },
+    { (uint32_t)(uintptr_t)&sys_truncate, "sys_truncate" },
+    { (uint32_t)(uintptr_t)&sys_ftruncate, "sys_ftruncate" },
+    { (uint32_t)(uintptr_t)&sys_getdents, "sys_getdents" },
+    { (uint32_t)(uintptr_t)&kern_getdents, "kern_getdents" },
+    { (uint32_t)(uintptr_t)&sys_uname, "sys_uname" },
+    { (uint32_t)(uintptr_t)&kern_uname, "kern_uname" },
+    { (uint32_t)(uintptr_t)&sys_exit, "sys_exit" },
+    { (uint32_t)(uintptr_t)&sys__exit, "sys__exit" },
+    { (uint32_t)(uintptr_t)&sys_thr_new, "sys_thr_new" },
+    { (uint32_t)(uintptr_t)&sys_thr_self, "sys_thr_self" },
+    { (uint32_t)(uintptr_t)&kern_thr_new, "kern_thr_new" },
+    { (uint32_t)(uintptr_t)&sys_thr_exit, "sys_thr_exit" },
+    { (uint32_t)(uintptr_t)&sys_thr_join, "sys_thr_join" },
+    { (uint32_t)(uintptr_t)&sys_chroot, "sys_chroot" },
+    { (uint32_t)(uintptr_t)&kern_chroot, "kern_chroot" },
+    { (uint32_t)(uintptr_t)&sys_mkdir, "sys_mkdir" },
+    { (uint32_t)(uintptr_t)&kern_mkdir, "kern_mkdir" },
+    { (uint32_t)(uintptr_t)&sys_rmdir, "sys_rmdir" },
+    { (uint32_t)(uintptr_t)&sys_getuid, "sys_getuid" },
+    { (uint32_t)(uintptr_t)&sys_getgid, "sys_getgid" },
+    { (uint32_t)(uintptr_t)&sys_getppid, "sys_getppid" },
+    { (uint32_t)(uintptr_t)&sys_geteuid, "sys_geteuid" },
+    { (uint32_t)(uintptr_t)&sys_getegid, "sys_getegid" },
+    { (uint32_t)(uintptr_t)&sys_setuid, "sys_setuid" },
+    { (uint32_t)(uintptr_t)&sys_setgid, "sys_setgid" },
+    { (uint32_t)(uintptr_t)&sys_clone, "sys_clone" },
+    { (uint32_t)(uintptr_t)&sys_stat, "sys_stat" },
+    { (uint32_t)(uintptr_t)&kern_stat, "kern_stat" },
+    { (uint32_t)(uintptr_t)&sys_lstat, "sys_lstat" },
+    { (uint32_t)(uintptr_t)&kern_lstat, "kern_lstat" },
+    { (uint32_t)(uintptr_t)&sys_poll, "sys_poll" },
+    { (uint32_t)(uintptr_t)&kern_poll, "kern_poll" },
+    { (uint32_t)(uintptr_t)&sys_fstat, "sys_fstat" },
+    { (uint32_t)(uintptr_t)&kern_fstat, "kern_fstat" },
+    { (uint32_t)(uintptr_t)&sys_ioctl, "sys_ioctl" },
+    { (uint32_t)(uintptr_t)&kern_ioctl, "kern_ioctl" },
+    { (uint32_t)(uintptr_t)&sys_unlink, "sys_unlink" },
+    { (uint32_t)(uintptr_t)&kern_unlink, "kern_unlink" },
+    { (uint32_t)(uintptr_t)&sys_link, "sys_link" },
+    { (uint32_t)(uintptr_t)&kern_link, "kern_link" },
+    { (uint32_t)(uintptr_t)&sys_readlink, "sys_readlink" },
+    { (uint32_t)(uintptr_t)&kern_readlink, "kern_readlink" },
+    { (uint32_t)(uintptr_t)&sys_access, "sys_access" },
+    { (uint32_t)(uintptr_t)&kern_access, "kern_access" },
+    { (uint32_t)(uintptr_t)&sys_mlock, "sys_mlock" },
+    { (uint32_t)(uintptr_t)&sys_munlock, "sys_munlock" },
+    { (uint32_t)(uintptr_t)&sys_sync, "sys_sync" },
+    { (uint32_t)(uintptr_t)&sys_pipe, "sys_pipe" },
+    { (uint32_t)(uintptr_t)&kern_pipe, "kern_pipe" },
+    { (uint32_t)(uintptr_t)&sys_dup, "sys_dup" },
+    { (uint32_t)(uintptr_t)&sys_dup2, "sys_dup2" },
+    { (uint32_t)(uintptr_t)&sys_chmod, "sys_chmod" },
+    { (uint32_t)(uintptr_t)&sys_lchown, "sys_lchown" },
+    { (uint32_t)(uintptr_t)&sys_fcntl, "sys_fcntl" },
+    { (uint32_t)(uintptr_t)&sys_creat, "sys_creat" },
+    { (uint32_t)(uintptr_t)&sys_signal, "sys_signal" },
+    { (uint32_t)(uintptr_t)&sys_waitpid, "sys_waitpid" },
+    { (uint32_t)(uintptr_t)&kern_waitpid, "kern_waitpid" },
+    { (uint32_t)(uintptr_t)&sys_getpid, "sys_getpid" },
+    { (uint32_t)(uintptr_t)&sys_execve, "sys_execve" },
+    { (uint32_t)(uintptr_t)&kern_execve, "kern_execve" },
+    { (uint32_t)(uintptr_t)&sys_mknod, "sys_mknod" },
+    { (uint32_t)(uintptr_t)&sys_mount, "sys_mount" },
+    { (uint32_t)(uintptr_t)&kern_mount, "kern_mount" },
+    { (uint32_t)(uintptr_t)&sys_umount, "sys_umount" },
+    { (uint32_t)(uintptr_t)&kern_umount, "kern_umount" },
+    { (uint32_t)(uintptr_t)&sys_nanosleep, "sys_nanosleep" },
+    { (uint32_t)(uintptr_t)&sys_chdir, "sys_chdir" },
+    { (uint32_t)(uintptr_t)&kern_chdir, "kern_chdir" },
+    { (uint32_t)(uintptr_t)&kern_fchdir, "kern_fchdir" },
+    { (uint32_t)(uintptr_t)&sys_fchdir, "sys_fchdir" },
+    { (uint32_t)(uintptr_t)&sys_getcwd, "sys_getcwd" },
+    { (uint32_t)(uintptr_t)&kern_getcwd, "kern_getcwd" },
+    { (uint32_t)(uintptr_t)&sys_proc_info, "sys_proc_info" },
+    { (uint32_t)(uintptr_t)&kern_proc_info, "kern_proc_info" },
+    { (uint32_t)(uintptr_t)&sys_proc_list, "sys_proc_list" },
+    { (uint32_t)(uintptr_t)&kern_proc_list, "kern_proc_list" },
+    { (uint32_t)(uintptr_t)&sys_proc_count, "sys_proc_count" },
+    { (uint32_t)(uintptr_t)&sys_cpu_count, "sys_cpu_count" },
+    { (uint32_t)(uintptr_t)&sys_hostname, "sys_hostname" },
+    { (uint32_t)(uintptr_t)&kern_hostname, "kern_hostname" },
+    { (uint32_t)(uintptr_t)&sys_proc_threads, "sys_proc_threads" },
+    { (uint32_t)(uintptr_t)&sys_proc_fds, "sys_proc_fds" },
+    { (uint32_t)(uintptr_t)&sys_proc_maps, "sys_proc_maps" },
+    { (uint32_t)(uintptr_t)&sys_proc_cwd, "sys_proc_cwd" },
+    { (uint32_t)(uintptr_t)&sys_proc_exe, "sys_proc_exe" },
+    { (uint32_t)(uintptr_t)&sys_proc_cmdline, "sys_proc_cmdline" },
+    { (uint32_t)(uintptr_t)&sys_proc_environ, "sys_proc_environ" },
+    { (uint32_t)(uintptr_t)&sys_reboot, "sys_reboot" },
+    { (uint32_t)(uintptr_t)&sys_setpriority, "sys_setpriority" },
+    { (uint32_t)(uintptr_t)&sys_getpriority, "sys_getpriority" },
+    { (uint32_t)(uintptr_t)&device_create, "device_create" },
+    { (uint32_t)(uintptr_t)&device_register, "device_register" },
+    { (uint32_t)(uintptr_t)&device_unregister, "device_unregister" },
+    { (uint32_t)(uintptr_t)&device_get, "device_get" },
+    { (uint32_t)(uintptr_t)&device_put, "device_put" },
+    { (uint32_t)(uintptr_t)&device_find_child, "device_find_child" },
+    { (uint32_t)(uintptr_t)&driver_blacklist_add, "driver_blacklist_add" },
+    { (uint32_t)(uintptr_t)&driver_is_blacklisted, "driver_is_blacklisted" },
+    { (uint32_t)(uintptr_t)&driver_override, "driver_override" },
+    { (uint32_t)(uintptr_t)&driver_register, "driver_register" },
+    { (uint32_t)(uintptr_t)&driver_attach, "driver_attach" },
+    { (uint32_t)(uintptr_t)&driver_detach, "driver_detach" },
+    { (uint32_t)(uintptr_t)&driver_unregister, "driver_unregister" },
+    { (uint32_t)(uintptr_t)&bus_match_device, "bus_match_device" },
+    { (uint32_t)(uintptr_t)&bus_id_match, "bus_id_match" },
+    { (uint32_t)(uintptr_t)&bus_compatible_match, "bus_compatible_match" },
+    { (uint32_t)(uintptr_t)&sysctl_init, "sysctl_init" },
+    { (uint32_t)(uintptr_t)&sys_sysctl, "sys_sysctl" },
+    { (uint32_t)(uintptr_t)&sysctl_register_oid, "sysctl_register_oid" },
+    { (uint32_t)(uintptr_t)&sysctl_unregister_oid, "sysctl_unregister_oid" },
+    { (uint32_t)(uintptr_t)&sysctl_find_oid, "sysctl_find_oid" },
+    { (uint32_t)(uintptr_t)&sysctl_handle_int, "sysctl_handle_int" },
+    { (uint32_t)(uintptr_t)&sysctl_handle_string, "sysctl_handle_string" },
+    { (uint32_t)(uintptr_t)&sysctl_handle_opaque, "sysctl_handle_opaque" },
+    { (uint32_t)(uintptr_t)&do_sysinfo, "do_sysinfo" },
+    { (uint32_t)(uintptr_t)&sys_sysinfo, "sys_sysinfo" },
+    { (uint32_t)(uintptr_t)&sys_vm_stats, "sys_vm_stats" },
+    { (uint32_t)(uintptr_t)&sched_set_affinity, "sched_set_affinity" },
+    { (uint32_t)(uintptr_t)&sched_get_affinity, "sched_get_affinity" },
+    { (uint32_t)(uintptr_t)&sched_set_affinity_self, "sched_set_affinity_self" },
+    { (uint32_t)(uintptr_t)&sched_get_affinity_self, "sched_get_affinity_self" },
+    { (uint32_t)(uintptr_t)&sched_can_run_on_cpu, "sched_can_run_on_cpu" },
+    { (uint32_t)(uintptr_t)&sched_clear_affinity, "sched_clear_affinity" },
+    { (uint32_t)(uintptr_t)&sched_migrate_if_needed, "sched_migrate_if_needed" },
+    { (uint32_t)(uintptr_t)&runqueue_init, "runqueue_init" },
+    { (uint32_t)(uintptr_t)&runqueue_level_for_thread, "runqueue_level_for_thread" },
+    { (uint32_t)(uintptr_t)&runqueue_add, "runqueue_add" },
+    { (uint32_t)(uintptr_t)&runqueue_remove, "runqueue_remove" },
+    { (uint32_t)(uintptr_t)&runqueue_peek, "runqueue_peek" },
+    { (uint32_t)(uintptr_t)&runqueue_pop, "runqueue_pop" },
+    { (uint32_t)(uintptr_t)&runqueue_count, "runqueue_count" },
+    { (uint32_t)(uintptr_t)&sched_smp_init, "sched_smp_init" },
+    { (uint32_t)(uintptr_t)&sched_get_runqueue, "sched_get_runqueue" },
+    { (uint32_t)(uintptr_t)&sched_get_current_runqueue, "sched_get_current_runqueue" },
+    { (uint32_t)(uintptr_t)&sched_enqueue, "sched_enqueue" },
+    { (uint32_t)(uintptr_t)&sched_dequeue, "sched_dequeue" },
+    { (uint32_t)(uintptr_t)&sched_pick_next, "sched_pick_next" },
+    { (uint32_t)(uintptr_t)&sched_get_cpu_load, "sched_get_cpu_load" },
+    { (uint32_t)(uintptr_t)&sched_get_system_load, "sched_get_system_load" },
+    { (uint32_t)(uintptr_t)&sched_needs_load_balance, "sched_needs_load_balance" },
+    { (uint32_t)(uintptr_t)&sched_steal_thread, "sched_steal_thread" },
+    { (uint32_t)(uintptr_t)&sched_load_balance, "sched_load_balance" },
+    { (uint32_t)(uintptr_t)&sched_idle_balance, "sched_idle_balance" },
+    { (uint32_t)(uintptr_t)&sched_periodic_balance, "sched_periodic_balance" },
+    { (uint32_t)(uintptr_t)&sched_count_runnable, "sched_count_runnable" },
+    { (uint32_t)(uintptr_t)&sched_count_threads, "sched_count_threads" },
+    { (uint32_t)(uintptr_t)&sched_update_loadavg, "sched_update_loadavg" },
+    { (uint32_t)(uintptr_t)&sched_get_loadavg, "sched_get_loadavg" },
+    { (uint32_t)(uintptr_t)&uiomove, "uiomove" },
+    { (uint32_t)(uintptr_t)&validate_user_addr, "validate_user_addr" },
+    { (uint32_t)(uintptr_t)&copyout, "copyout" },
+    { (uint32_t)(uintptr_t)&copyin, "copyin" },
+    { (uint32_t)(uintptr_t)&copyinstr, "copyinstr" },
+    { (uint32_t)(uintptr_t)&geom_init, "geom_init" },
+    { (uint32_t)(uintptr_t)&geom_register_class, "geom_register_class" },
+    { (uint32_t)(uintptr_t)&geom_read_sector, "geom_read_sector" },
+    { (uint32_t)(uintptr_t)&geom_read_sectors, "geom_read_sectors" },
+    { (uint32_t)(uintptr_t)&geom_add_partition, "geom_add_partition" },
+    { (uint32_t)(uintptr_t)&geom_find_partition, "geom_find_partition" },
+    { (uint32_t)(uintptr_t)&geom_get_partition_count, "geom_get_partition_count" },
+    { (uint32_t)(uintptr_t)&geom_scan, "geom_scan" },
+    { (uint32_t)(uintptr_t)&geom_register_disk, "geom_register_disk" },
+    { (uint32_t)(uintptr_t)&geom_mbr_type_name, "geom_mbr_type_name" },
+    { (uint32_t)(uintptr_t)&geom_bsd_fstype_name, "geom_bsd_fstype_name" },
+    { (uint32_t)(uintptr_t)&geom_guid_equal, "geom_guid_equal" },
+    { (uint32_t)(uintptr_t)&geom_guid_is_zero, "geom_guid_is_zero" },
+    { (uint32_t)(uintptr_t)&geom_mbr_init, "geom_mbr_init" },
+    { (uint32_t)(uintptr_t)&geom_gpt_init, "geom_gpt_init" },
+    { (uint32_t)(uintptr_t)&geom_bsd_init, "geom_bsd_init" },
+    { (uint32_t)(uintptr_t)&pm_init, "pm_init" },
+    { (uint32_t)(uintptr_t)&proc_find, "proc_find" },
+    { (uint32_t)(uintptr_t)&proc_get_last_pid, "proc_get_last_pid" },
+    { (uint32_t)(uintptr_t)&proc_create, "proc_create" },
+    { (uint32_t)(uintptr_t)&proc_fork, "proc_fork" },
+    { (uint32_t)(uintptr_t)&proc_add_child, "proc_add_child" },
+    { (uint32_t)(uintptr_t)&proc_remove_child, "proc_remove_child" },
+    { (uint32_t)(uintptr_t)&sched_fork_process, "sched_fork_process" },
+    { (uint32_t)(uintptr_t)&sched_spawn_kernel_process, "sched_spawn_kernel_process" },
+    { (uint32_t)(uintptr_t)&fd_close_all, "fd_close_all" },
+    { (uint32_t)(uintptr_t)&proc_alloc_fd, "proc_alloc_fd" },
+    { (uint32_t)(uintptr_t)&proc_set_fd, "proc_set_fd" },
+    { (uint32_t)(uintptr_t)&proc_clear_fd, "proc_clear_fd" },
+    { (uint32_t)(uintptr_t)&proc_reparent_children, "proc_reparent_children" },
+    { (uint32_t)(uintptr_t)&proc_exit, "proc_exit" },
+    { (uint32_t)(uintptr_t)&proc_set_bitness, "proc_set_bitness" },
+    { (uint32_t)(uintptr_t)&proc_get_bitness, "proc_get_bitness" },
+    { (uint32_t)(uintptr_t)&sched_init_generic, "sched_init_generic" },
+    { (uint32_t)(uintptr_t)&sched_alloc_thread, "sched_alloc_thread" },
+    { (uint32_t)(uintptr_t)&sched_yield, "sched_yield" },
+    { (uint32_t)(uintptr_t)&sched_switch, "sched_switch" },
+    { (uint32_t)(uintptr_t)&sched_get_current_tid, "sched_get_current_tid" },
+    { (uint32_t)(uintptr_t)&sched_get_thread, "sched_get_thread" },
+    { (uint32_t)(uintptr_t)&sched_set_priority, "sched_set_priority" },
+    { (uint32_t)(uintptr_t)&sched_sleep, "sched_sleep" },
+    { (uint32_t)(uintptr_t)&sched_sleep_until, "sched_sleep_until" },
+    { (uint32_t)(uintptr_t)&sched_tick, "sched_tick" },
+    { (uint32_t)(uintptr_t)&sched_wakeup, "sched_wakeup" },
+    { (uint32_t)(uintptr_t)&sched_wakeup_n, "sched_wakeup_n" },
+    { (uint32_t)(uintptr_t)&sched_iterate_threads, "sched_iterate_threads" },
+    { (uint32_t)(uintptr_t)&kern_wait4, "kern_wait4" },
+    { (uint32_t)(uintptr_t)&sys_wait4, "sys_wait4" },
+    { (uint32_t)(uintptr_t)&session_alloc, "session_alloc" },
+    { (uint32_t)(uintptr_t)&session_free, "session_free" },
+    { (uint32_t)(uintptr_t)&pgrp_alloc, "pgrp_alloc" },
+    { (uint32_t)(uintptr_t)&pgrp_free, "pgrp_free" },
+    { (uint32_t)(uintptr_t)&pgrp_find, "pgrp_find" },
+    { (uint32_t)(uintptr_t)&pgrp_add_proc, "pgrp_add_proc" },
+    { (uint32_t)(uintptr_t)&pgrp_remove_proc, "pgrp_remove_proc" },
+    { (uint32_t)(uintptr_t)&sys_setsid, "sys_setsid" },
+    { (uint32_t)(uintptr_t)&sys_getsid, "sys_getsid" },
+    { (uint32_t)(uintptr_t)&sys_getpgid, "sys_getpgid" },
+    { (uint32_t)(uintptr_t)&sys_setpgid, "sys_setpgid" },
+    { (uint32_t)(uintptr_t)&pgrp_signal, "pgrp_signal" },
+    { (uint32_t)(uintptr_t)&session_find, "session_find" },
+    { (uint32_t)(uintptr_t)&pgrp_is_orphaned, "pgrp_is_orphaned" },
+    { (uint32_t)(uintptr_t)&pgrp_check_orphan, "pgrp_check_orphan" },
+    { (uint32_t)(uintptr_t)&rusage_add_tick, "rusage_add_tick" },
+    { (uint32_t)(uintptr_t)&rusage_add_fault, "rusage_add_fault" },
+    { (uint32_t)(uintptr_t)&rusage_add_ctx_switch, "rusage_add_ctx_switch" },
+    { (uint32_t)(uintptr_t)&rusage_add_signal, "rusage_add_signal" },
+    { (uint32_t)(uintptr_t)&rusage_update_maxrss, "rusage_update_maxrss" },
+    { (uint32_t)(uintptr_t)&rusage_add_io, "rusage_add_io" },
+    { (uint32_t)(uintptr_t)&rusage_finalize, "rusage_finalize" },
+    { (uint32_t)(uintptr_t)&rusage_init, "rusage_init" },
+    { (uint32_t)(uintptr_t)&rusage_copy_to_child, "rusage_copy_to_child" },
+    { (uint32_t)(uintptr_t)&timeval_add, "timeval_add" },
+    { (uint32_t)(uintptr_t)&sys_getrusage, "sys_getrusage" },
+    { (uint32_t)(uintptr_t)&vga_install, "vga_install" },
+    { (uint32_t)(uintptr_t)&linear_fb_putpixel, "linear_fb_putpixel" },
+    { (uint32_t)(uintptr_t)&fb_putpixel, "fb_putpixel" },
+    { (uint32_t)(uintptr_t)&fb_clear, "fb_clear" },
+    { (uint32_t)(uintptr_t)&video_set_viewport, "video_set_viewport" },
+    { (uint32_t)(uintptr_t)&video_register_driver, "video_register_driver" },
+    { (uint32_t)(uintptr_t)&fb_init, "fb_init" },
+    { (uint32_t)(uintptr_t)&fb_console_init, "fb_console_init" },
+    { (uint32_t)(uintptr_t)&fb_putc, "fb_putc" },
+    { (uint32_t)(uintptr_t)&fb_write, "fb_write" },
+    { (uint32_t)(uintptr_t)&bga_is_available, "bga_is_available" },
+    { (uint32_t)(uintptr_t)&bga_init, "bga_init" },
+    { (uint32_t)(uintptr_t)&bga_scroll, "bga_scroll" },
+    { (uint32_t)(uintptr_t)&bga_install, "bga_install" },
+    { (uint32_t)(uintptr_t)&hw_text_console_write_shim, "hw_text_console_write_shim" },
+    { (uint32_t)(uintptr_t)&hw_text_set_color, "hw_text_set_color" },
+    { (uint32_t)(uintptr_t)&hw_text_init, "hw_text_init" },
+    { (uint32_t)(uintptr_t)&video_ask_mode, "video_ask_mode" },
+    { (uint32_t)(uintptr_t)&input_init, "input_init" },
+    { (uint32_t)(uintptr_t)&input_register_device, "input_register_device" },
+    { (uint32_t)(uintptr_t)&input_unregister_device, "input_unregister_device" },
+    { (uint32_t)(uintptr_t)&input_notify_readers, "input_notify_readers" },
+    { (uint32_t)(uintptr_t)&input_report_event, "input_report_event" },
+    { (uint32_t)(uintptr_t)&input_sync, "input_sync" },
+    { (uint32_t)(uintptr_t)&input_enqueue, "input_enqueue" },
+    { (uint32_t)(uintptr_t)&input_register_devfs, "input_register_devfs" },
+    { (uint32_t)(uintptr_t)&kbd_push, "kbd_push" },
+    { (uint32_t)(uintptr_t)&keyboard_getc, "keyboard_getc" },
+    { (uint32_t)(uintptr_t)&keyboard_init, "keyboard_init" },
+    { (uint32_t)(uintptr_t)&keyboard_handler, "keyboard_handler" },
+    { (uint32_t)(uintptr_t)&ps2_wait_write, "ps2_wait_write" },
+    { (uint32_t)(uintptr_t)&ps2_wait_read, "ps2_wait_read" },
+    { (uint32_t)(uintptr_t)&ps2_write_command, "ps2_write_command" },
+    { (uint32_t)(uintptr_t)&ps2_write_data, "ps2_write_data" },
+    { (uint32_t)(uintptr_t)&ps2_write_aux, "ps2_write_aux" },
+    { (uint32_t)(uintptr_t)&ps2_read_data, "ps2_read_data" },
+    { (uint32_t)(uintptr_t)&ps2_read_data_timeout, "ps2_read_data_timeout" },
+    { (uint32_t)(uintptr_t)&ps2_init, "ps2_init" },
+    { (uint32_t)(uintptr_t)&mouse_get_event, "mouse_get_event" },
+    { (uint32_t)(uintptr_t)&mouse_init, "mouse_init" },
+    { (uint32_t)(uintptr_t)&mouse_handler, "mouse_handler" },
+    { (uint32_t)(uintptr_t)&mouse_get_state, "mouse_get_state" },
+    { (uint32_t)(uintptr_t)&ansi_init, "ansi_init" },
+    { (uint32_t)(uintptr_t)&ansi_process, "ansi_process" },
+    { (uint32_t)(uintptr_t)&console_init, "console_init" },
+    { (uint32_t)(uintptr_t)&console_set_tty, "console_set_tty" },
+    { (uint32_t)(uintptr_t)&console_register, "console_register" },
+    { (uint32_t)(uintptr_t)&console_write, "console_write" },
+    { (uint32_t)(uintptr_t)&console_putchar, "console_putchar" },
+    { (uint32_t)(uintptr_t)&console_clear, "console_clear" },
+    { (uint32_t)(uintptr_t)&console_push_char, "console_push_char" },
+    { (uint32_t)(uintptr_t)&console_get_node, "console_get_node" },
+    { (uint32_t)(uintptr_t)&console_register_devfs, "console_register_devfs" },
+    { (uint32_t)(uintptr_t)&kprint, "kprint" },
+    { (uint32_t)(uintptr_t)&kprintf, "kprintf" },
+    { (uint32_t)(uintptr_t)&console_attach_std_fds, "console_attach_std_fds" },
+    { (uint32_t)(uintptr_t)&tty_default_termios, "tty_default_termios" },
+    { (uint32_t)(uintptr_t)&tty_register_device, "tty_register_device" },
+    { (uint32_t)(uintptr_t)&tty_init, "tty_init" },
+    { (uint32_t)(uintptr_t)&tty_alloc, "tty_alloc" },
+    { (uint32_t)(uintptr_t)&tty_free, "tty_free" },
+    { (uint32_t)(uintptr_t)&tty_flip_buffer_push, "tty_flip_buffer_push" },
+    { (uint32_t)(uintptr_t)&tty_read, "tty_read" },
+    { (uint32_t)(uintptr_t)&tty_write, "tty_write" },
+    { (uint32_t)(uintptr_t)&tty_ioctl_kern, "tty_ioctl_kern" },
+    { (uint32_t)(uintptr_t)&tty_ioctl, "tty_ioctl" },
+    { (uint32_t)(uintptr_t)&tty_open, "tty_open" },
+    { (uint32_t)(uintptr_t)&tty_close, "tty_close" },
+    { (uint32_t)(uintptr_t)&tty_hangup, "tty_hangup" },
+    { (uint32_t)(uintptr_t)&tty_poll, "tty_poll" },
+    { (uint32_t)(uintptr_t)&vt_init, "vt_init" },
+    { (uint32_t)(uintptr_t)&vt_get_active, "vt_get_active" },
+    { (uint32_t)(uintptr_t)&vt_get_state, "vt_get_state" },
+    { (uint32_t)(uintptr_t)&vt_activate, "vt_activate" },
+    { (uint32_t)(uintptr_t)&uart_select_port, "uart_select_port" },
+    { (uint32_t)(uintptr_t)&uart_get_console, "uart_get_console" },
+    { (uint32_t)(uintptr_t)&uart_devfs_init, "uart_devfs_init" },
+    { (uint32_t)(uintptr_t)&uart_init, "uart_init" },
+    { (uint32_t)(uintptr_t)&uart_handler, "uart_handler" },
+    { (uint32_t)(uintptr_t)&uart_received, "uart_received" },
+    { (uint32_t)(uintptr_t)&uart_getc, "uart_getc" },
+    { (uint32_t)(uintptr_t)&uart_is_transmit_empty, "uart_is_transmit_empty" },
+    { (uint32_t)(uintptr_t)&uart_putc, "uart_putc" },
+    { (uint32_t)(uintptr_t)&uart_write, "uart_write" },
+    { (uint32_t)(uintptr_t)&blkdev_register, "blkdev_register" },
+    { (uint32_t)(uintptr_t)&blkdev_get, "blkdev_get" },
+    { (uint32_t)(uintptr_t)&blkdev_read_bytes, "blkdev_read_bytes" },
+    { (uint32_t)(uintptr_t)&blkdev_write_bytes, "blkdev_write_bytes" },
+    { (uint32_t)(uintptr_t)&scsi_init, "scsi_init" },
+    { (uint32_t)(uintptr_t)&scsi_register_link, "scsi_register_link" },
+    { (uint32_t)(uintptr_t)&scsi_unregister_link, "scsi_unregister_link" },
+    { (uint32_t)(uintptr_t)&scsi_device_alloc, "scsi_device_alloc" },
+    { (uint32_t)(uintptr_t)&scsi_device_free, "scsi_device_free" },
+    { (uint32_t)(uintptr_t)&scsi_device_register, "scsi_device_register" },
+    { (uint32_t)(uintptr_t)&scsi_device_unregister, "scsi_device_unregister" },
+    { (uint32_t)(uintptr_t)&scsi_device_lookup, "scsi_device_lookup" },
+    { (uint32_t)(uintptr_t)&scsi_request_alloc, "scsi_request_alloc" },
+    { (uint32_t)(uintptr_t)&scsi_request_free, "scsi_request_free" },
+    { (uint32_t)(uintptr_t)&scsi_request_init, "scsi_request_init" },
+    { (uint32_t)(uintptr_t)&scsi_execute, "scsi_execute" },
+    { (uint32_t)(uintptr_t)&scsi_execute_sync, "scsi_execute_sync" },
+    { (uint32_t)(uintptr_t)&scsi_queue_request, "scsi_queue_request" },
+    { (uint32_t)(uintptr_t)&scsi_process_queue, "scsi_process_queue" },
+    { (uint32_t)(uintptr_t)&scsi_abort_request, "scsi_abort_request" },
+    { (uint32_t)(uintptr_t)&scsi_complete_request, "scsi_complete_request" },
+    { (uint32_t)(uintptr_t)&scsi_test_unit_ready, "scsi_test_unit_ready" },
+    { (uint32_t)(uintptr_t)&scsi_inquiry, "scsi_inquiry" },
+    { (uint32_t)(uintptr_t)&scsi_read_capacity, "scsi_read_capacity" },
+    { (uint32_t)(uintptr_t)&scsi_request_sense, "scsi_request_sense" },
+    { (uint32_t)(uintptr_t)&scsi_start_stop, "scsi_start_stop" },
+    { (uint32_t)(uintptr_t)&scsi_report_luns, "scsi_report_luns" },
+    { (uint32_t)(uintptr_t)&scsi_sense_key, "scsi_sense_key" },
+    { (uint32_t)(uintptr_t)&scsi_sense_asc, "scsi_sense_asc" },
+    { (uint32_t)(uintptr_t)&scsi_sense_ascq, "scsi_sense_ascq" },
+    { (uint32_t)(uintptr_t)&scsi_sense_string, "scsi_sense_string" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_test_unit_ready, "scsi_cdb_test_unit_ready" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_inquiry, "scsi_cdb_inquiry" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_read_capacity_10, "scsi_cdb_read_capacity_10" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_read_10, "scsi_cdb_read_10" },
+    { (uint32_t)(uintptr_t)&scsi_cdb_write_10, "scsi_cdb_write_10" },
+    { (uint32_t)(uintptr_t)&scsi_probe_lun, "scsi_probe_lun" },
+    { (uint32_t)(uintptr_t)&scsi_scan_bus, "scsi_scan_bus" },
+    { (uint32_t)(uintptr_t)&scsi_read_toc, "scsi_read_toc" },
+    { (uint32_t)(uintptr_t)&scsi_lock_door, "scsi_lock_door" },
+    { (uint32_t)(uintptr_t)&scsi_dev_attach, "scsi_dev_attach" },
+    { (uint32_t)(uintptr_t)&scsi_dev_detach, "scsi_dev_detach" },
+    { (uint32_t)(uintptr_t)&scsi_dev_lookup, "scsi_dev_lookup" },
+    { (uint32_t)(uintptr_t)&scsi_dev_init, "scsi_dev_init" },
+    { (uint32_t)(uintptr_t)&scsi_create_bus_node, "scsi_create_bus_node" },
+    { (uint32_t)(uintptr_t)&scsi_ctl_init, "scsi_ctl_init" },
+    { (uint32_t)(uintptr_t)&scsi_auto_attach, "scsi_auto_attach" },
+    { (uint32_t)(uintptr_t)&atapi_scsi_init, "atapi_scsi_init" },
+    { (uint32_t)(uintptr_t)&atapi_get_link, "atapi_get_link" },
+    { (uint32_t)(uintptr_t)&ide_write_reg, "ide_write_reg" },
+    { (uint32_t)(uintptr_t)&ide_read_reg, "ide_read_reg" },
+    { (uint32_t)(uintptr_t)&ide_write_ctrl, "ide_write_ctrl" },
+    { (uint32_t)(uintptr_t)&ide_read_ctrl, "ide_read_ctrl" },
+    { (uint32_t)(uintptr_t)&ide_prdt_setup, "ide_prdt_setup" },
+    { (uint32_t)(uintptr_t)&ide_bm_start, "ide_bm_start" },
+    { (uint32_t)(uintptr_t)&ide_bm_stop, "ide_bm_stop" },
+    { (uint32_t)(uintptr_t)&ide_bm_status, "ide_bm_status" },
+    { (uint32_t)(uintptr_t)&ide_bm_clear_interrupt, "ide_bm_clear_interrupt" },
+    { (uint32_t)(uintptr_t)&ide_dma_init, "ide_dma_init" },
+    { (uint32_t)(uintptr_t)&ide_dma_read, "ide_dma_read" },
+    { (uint32_t)(uintptr_t)&ide_dma_write, "ide_dma_write" },
+    { (uint32_t)(uintptr_t)&ide_dma_setup, "ide_dma_setup" },
+    { (uint32_t)(uintptr_t)&ide_read_sectors, "ide_read_sectors" },
+    { (uint32_t)(uintptr_t)&ide_read_sectors_ext, "ide_read_sectors_ext" },
+    { (uint32_t)(uintptr_t)&ide_write_sectors, "ide_write_sectors" },
+    { (uint32_t)(uintptr_t)&ide_write_sectors_ext, "ide_write_sectors_ext" },
+    { (uint32_t)(uintptr_t)&ide_identify, "ide_identify" },
+    { (uint32_t)(uintptr_t)&ide_identify_atapi, "ide_identify_atapi" },
+    { (uint32_t)(uintptr_t)&ide_atapi_packet, "ide_atapi_packet" },
+    { (uint32_t)(uintptr_t)&ide_atapi_read_capacity, "ide_atapi_read_capacity" },
+    { (uint32_t)(uintptr_t)&ide_atapi_read_sectors, "ide_atapi_read_sectors" },
+    { (uint32_t)(uintptr_t)&ide_atapi_read_toc, "ide_atapi_read_toc" },
+    { (uint32_t)(uintptr_t)&ide_irq_handler, "ide_irq_handler" },
+    { (uint32_t)(uintptr_t)&ide_init, "ide_init" },
+    { (uint32_t)(uintptr_t)&ahci_init, "ahci_init" },
+    { (uint32_t)(uintptr_t)&nvme_init, "nvme_init" },
+    { (uint32_t)(uintptr_t)&ramdisk_create, "ramdisk_create" },
+    { (uint32_t)(uintptr_t)&ramdisk_init, "ramdisk_init" },
+    { (uint32_t)(uintptr_t)&pseudo_init, "pseudo_init" },
+    { (uint32_t)(uintptr_t)&full_init, "full_init" },
+    { (uint32_t)(uintptr_t)&null_init, "null_init" },
+    { (uint32_t)(uintptr_t)&ntsync_init, "ntsync_init" },
+    { (uint32_t)(uintptr_t)&kmem_dev_init, "kmem_dev_init" },
+    { (uint32_t)(uintptr_t)&kmem_test_init, "kmem_test_init" },
+    { (uint32_t)(uintptr_t)&zero_init, "zero_init" },
+    { (uint32_t)(uintptr_t)&mem_init, "mem_init" },
+    { (uint32_t)(uintptr_t)&mem_test_init, "mem_test_init" },
+    { (uint32_t)(uintptr_t)&lpt_init, "lpt_init" },
+    { (uint32_t)(uintptr_t)&cpuid_init, "cpuid_init" },
+    { (uint32_t)(uintptr_t)&virtio_get_io_base, "virtio_get_io_base" },
+    { (uint32_t)(uintptr_t)&virtio_init, "virtio_init" },
+    { (uint32_t)(uintptr_t)&virtio_blk_setup, "virtio_blk_setup" },
+    { (uint32_t)(uintptr_t)&virtio_9p_setup, "virtio_9p_setup" },
+    { (uint32_t)(uintptr_t)&virtio_9p_send, "virtio_9p_send" },
+    { (uint32_t)(uintptr_t)&virtio_scsi_setup, "virtio_scsi_setup" },
+    { (uint32_t)(uintptr_t)&virtio_scsi_poll, "virtio_scsi_poll" },
+    { (uint32_t)(uintptr_t)&virtio_scsi_get_link, "virtio_scsi_get_link" },
+    { (uint32_t)(uintptr_t)&vfs_init, "vfs_init" },
+    { (uint32_t)(uintptr_t)&vfs_register_filesystem, "vfs_register_filesystem" },
+    { (uint32_t)(uintptr_t)&vfs_get_filesystems, "vfs_get_filesystems" },
+    { (uint32_t)(uintptr_t)&vfs_mount_legacy, "vfs_mount_legacy" },
+    { (uint32_t)(uintptr_t)&read_fs, "read_fs" },
+    { (uint32_t)(uintptr_t)&write_fs, "write_fs" },
+    { (uint32_t)(uintptr_t)&open_fs, "open_fs" },
+    { (uint32_t)(uintptr_t)&close_fs, "close_fs" },
+    { (uint32_t)(uintptr_t)&readdir_fs, "readdir_fs" },
+    { (uint32_t)(uintptr_t)&finddir_fs, "finddir_fs" },
+    { (uint32_t)(uintptr_t)&vfs_lookup, "vfs_lookup" },
+    { (uint32_t)(uintptr_t)&vfs_lookup_lstat, "vfs_lookup_lstat" },
+    { (uint32_t)(uintptr_t)&vfs_check_permissions, "vfs_check_permissions" },
+    { (uint32_t)(uintptr_t)&readlink_fs, "readlink_fs" },
+    { (uint32_t)(uintptr_t)&symlink_fs, "symlink_fs" },
+    { (uint32_t)(uintptr_t)&link_fs, "link_fs" },
+    { (uint32_t)(uintptr_t)&unlink_fs, "unlink_fs" },
+    { (uint32_t)(uintptr_t)&mmap_fs, "mmap_fs" },
+    { (uint32_t)(uintptr_t)&poll_fs, "poll_fs" },
+    { (uint32_t)(uintptr_t)&vfs_mkdir, "vfs_mkdir" },
+    { (uint32_t)(uintptr_t)&vfs_mknod, "vfs_mknod" },
+    { (uint32_t)(uintptr_t)&vfs_unmount_legacy, "vfs_unmount_legacy" },
+    { (uint32_t)(uintptr_t)&vnode_init, "vnode_init" },
+    { (uint32_t)(uintptr_t)&getnewvnode, "getnewvnode" },
+    { (uint32_t)(uintptr_t)&vref, "vref" },
+    { (uint32_t)(uintptr_t)&vrele, "vrele" },
+    { (uint32_t)(uintptr_t)&vhold, "vhold" },
+    { (uint32_t)(uintptr_t)&vdrop, "vdrop" },
+    { (uint32_t)(uintptr_t)&vn_lock, "vn_lock" },
+    { (uint32_t)(uintptr_t)&vn_unlock, "vn_unlock" },
+    { (uint32_t)(uintptr_t)&vn_islocked, "vn_islocked" },
+    { (uint32_t)(uintptr_t)&vget, "vget" },
+    { (uint32_t)(uintptr_t)&vput, "vput" },
+    { (uint32_t)(uintptr_t)&vgone, "vgone" },
+    { (uint32_t)(uintptr_t)&vclean, "vclean" },
+    { (uint32_t)(uintptr_t)&vnode_reclaim, "vnode_reclaim" },
+    { (uint32_t)(uintptr_t)&vnode_cache_insert, "vnode_cache_insert" },
+    { (uint32_t)(uintptr_t)&vnode_cache_remove, "vnode_cache_remove" },
+    { (uint32_t)(uintptr_t)&vnode_lookup_cache, "vnode_lookup_cache" },
+    { (uint32_t)(uintptr_t)&vnode_create, "vnode_create" },
+    { (uint32_t)(uintptr_t)&namei_init, "namei_init" },
+    { (uint32_t)(uintptr_t)&namei, "namei" },
+    { (uint32_t)(uintptr_t)&cache_lookup, "cache_lookup" },
+    { (uint32_t)(uintptr_t)&cache_enter, "cache_enter" },
+    { (uint32_t)(uintptr_t)&cache_purge, "cache_purge" },
+    { (uint32_t)(uintptr_t)&nchinit, "nchinit" },
+    { (uint32_t)(uintptr_t)&vfs_mount, "vfs_mount" },
+    { (uint32_t)(uintptr_t)&vfs_unmount, "vfs_unmount" },
+    { (uint32_t)(uintptr_t)&vfs_start, "vfs_start" },
+    { (uint32_t)(uintptr_t)&vfs_root, "vfs_root" },
+    { (uint32_t)(uintptr_t)&vfs_statfs, "vfs_statfs" },
+    { (uint32_t)(uintptr_t)&vfs_sync, "vfs_sync" },
+    { (uint32_t)(uintptr_t)&vop_lookup, "vop_lookup" },
+    { (uint32_t)(uintptr_t)&vop_cachedlookup, "vop_cachedlookup" },
+    { (uint32_t)(uintptr_t)&vop_create, "vop_create" },
+    { (uint32_t)(uintptr_t)&vop_mknod, "vop_mknod" },
+    { (uint32_t)(uintptr_t)&vop_mkdir, "vop_mkdir" },
+    { (uint32_t)(uintptr_t)&vop_remove, "vop_remove" },
+    { (uint32_t)(uintptr_t)&vop_rmdir, "vop_rmdir" },
+    { (uint32_t)(uintptr_t)&vop_link, "vop_link" },
+    { (uint32_t)(uintptr_t)&vop_whiteout, "vop_whiteout" },
+    { (uint32_t)(uintptr_t)&vop_access, "vop_access" },
+    { (uint32_t)(uintptr_t)&vop_getattr, "vop_getattr" },
+    { (uint32_t)(uintptr_t)&vop_setattr, "vop_setattr" },
+    { (uint32_t)(uintptr_t)&vop_pathconf, "vop_pathconf" },
+    { (uint32_t)(uintptr_t)&vop_open, "vop_open" },
+    { (uint32_t)(uintptr_t)&vop_close, "vop_close" },
+    { (uint32_t)(uintptr_t)&vop_read, "vop_read" },
+    { (uint32_t)(uintptr_t)&vop_write, "vop_write" },
+    { (uint32_t)(uintptr_t)&vop_ioctl, "vop_ioctl" },
+    { (uint32_t)(uintptr_t)&vop_poll, "vop_poll" },
+    { (uint32_t)(uintptr_t)&vop_fsync, "vop_fsync" },
+    { (uint32_t)(uintptr_t)&vop_bmap, "vop_bmap" },
+    { (uint32_t)(uintptr_t)&vop_strategy, "vop_strategy" },
+    { (uint32_t)(uintptr_t)&vop_readdir, "vop_readdir" },
+    { (uint32_t)(uintptr_t)&vop_rename, "vop_rename" },
+    { (uint32_t)(uintptr_t)&vop_symlink, "vop_symlink" },
+    { (uint32_t)(uintptr_t)&vop_readlink, "vop_readlink" },
+    { (uint32_t)(uintptr_t)&vop_inactive, "vop_inactive" },
+    { (uint32_t)(uintptr_t)&vop_reclaim, "vop_reclaim" },
+    { (uint32_t)(uintptr_t)&vop_print, "vop_print" },
+    { (uint32_t)(uintptr_t)&ext2_find_next_zero_bit, "ext2_find_next_zero_bit" },
+    { (uint32_t)(uintptr_t)&ext2_read_block, "ext2_read_block" },
+    { (uint32_t)(uintptr_t)&ext2_read_blocks, "ext2_read_blocks" },
+    { (uint32_t)(uintptr_t)&ext2_read_inode, "ext2_read_inode" },
+    { (uint32_t)(uintptr_t)&ext2_write_block, "ext2_write_block" },
+    { (uint32_t)(uintptr_t)&ext2_write_inode, "ext2_write_inode" },
+    { (uint32_t)(uintptr_t)&ext2_get_block_num, "ext2_get_block_num" },
+    { (uint32_t)(uintptr_t)&ext2_get_blocks_extent, "ext2_get_blocks_extent" },
+    { (uint32_t)(uintptr_t)&ext2_inode_read, "ext2_inode_read" },
+    { (uint32_t)(uintptr_t)&ext2_alloc_inode_block, "ext2_alloc_inode_block" },
+    { (uint32_t)(uintptr_t)&ext2_inode_write, "ext2_inode_write" },
+    { (uint32_t)(uintptr_t)&ext2_alloc_node, "ext2_alloc_node" },
+    { (uint32_t)(uintptr_t)&ext2_readlink, "ext2_readlink" },
+    { (uint32_t)(uintptr_t)&ext2_file_read, "ext2_file_read" },
+    { (uint32_t)(uintptr_t)&ext2_file_write, "ext2_file_write" },
+    { (uint32_t)(uintptr_t)&ext2_readdir, "ext2_readdir" },
+    { (uint32_t)(uintptr_t)&ext2_finddir, "ext2_finddir" },
+    { (uint32_t)(uintptr_t)&ext2_mount, "ext2_mount" },
+    { (uint32_t)(uintptr_t)&ext2_init, "ext2_init" },
+    { (uint32_t)(uintptr_t)&ext2_alloc_block, "ext2_alloc_block" },
+    { (uint32_t)(uintptr_t)&ext2_free_block, "ext2_free_block" },
+    { (uint32_t)(uintptr_t)&ext2_alloc_inode, "ext2_alloc_inode" },
+    { (uint32_t)(uintptr_t)&ext2_free_inode, "ext2_free_inode" },
+    { (uint32_t)(uintptr_t)&ext2_add_entry, "ext2_add_entry" },
+    { (uint32_t)(uintptr_t)&ext2_remove_entry, "ext2_remove_entry" },
+    { (uint32_t)(uintptr_t)&fat_get_next_cluster, "fat_get_next_cluster" },
+    { (uint32_t)(uintptr_t)&fat_parse_lfn, "fat_parse_lfn" },
+    { (uint32_t)(uintptr_t)&fat_file_read, "fat_file_read" },
+    { (uint32_t)(uintptr_t)&fat_readdir, "fat_readdir" },
+    { (uint32_t)(uintptr_t)&fat_finddir, "fat_finddir" },
+    { (uint32_t)(uintptr_t)&fat_mount, "fat_mount" },
+    { (uint32_t)(uintptr_t)&fat_init, "fat_init" },
+    { (uint32_t)(uintptr_t)&exfat_init, "exfat_init" },
+    { (uint32_t)(uintptr_t)&minix_init, "minix_init" },
+    { (uint32_t)(uintptr_t)&udf_tag_checksum, "udf_tag_checksum" },
+    { (uint32_t)(uintptr_t)&udf_crc, "udf_crc" },
+    { (uint32_t)(uintptr_t)&udf_read_tag, "udf_read_tag" },
+    { (uint32_t)(uintptr_t)&udf_find_avdp, "udf_find_avdp" },
+    { (uint32_t)(uintptr_t)&udf_read_vds, "udf_read_vds" },
+    { (uint32_t)(uintptr_t)&udf_read_fsd, "udf_read_fsd" },
+    { (uint32_t)(uintptr_t)&udf_read_fe, "udf_read_fe" },
+    { (uint32_t)(uintptr_t)&udf_read_file, "udf_read_file" },
+    { (uint32_t)(uintptr_t)&udf_init, "udf_init" },
+    { (uint32_t)(uintptr_t)&udf_read_space_bitmap, "udf_read_space_bitmap" },
+    { (uint32_t)(uintptr_t)&udf_alloc_block, "udf_alloc_block" },
+    { (uint32_t)(uintptr_t)&udf_free_block, "udf_free_block" },
+    { (uint32_t)(uintptr_t)&udf_create_fe, "udf_create_fe" },
+    { (uint32_t)(uintptr_t)&udf_write_file, "udf_write_file" },
+    { (uint32_t)(uintptr_t)&udf_add_fid, "udf_add_fid" },
+    { (uint32_t)(uintptr_t)&udf_remove_fid, "udf_remove_fid" },
+    { (uint32_t)(uintptr_t)&udf_truncate, "udf_truncate" },
+    { (uint32_t)(uintptr_t)&devfs_register_device, "devfs_register_device" },
+    { (uint32_t)(uintptr_t)&devfs_init, "devfs_init" },
+    { (uint32_t)(uintptr_t)&procfs_register_entry, "procfs_register_entry" },
+    { (uint32_t)(uintptr_t)&procfs_init, "procfs_init" },
+    { (uint32_t)(uintptr_t)&sysfs_init, "sysfs_init" },
+    { (uint32_t)(uintptr_t)&fuse_init, "fuse_init" },
+    { (uint32_t)(uintptr_t)&fuse_fs_init, "fuse_fs_init" },
+    { (uint32_t)(uintptr_t)&p9_init, "p9_init" },
+    { (uint32_t)(uintptr_t)&pipe_create, "pipe_create" },
+    { (uint32_t)(uintptr_t)&elf_check_file, "elf_check_file" },
+    { (uint32_t)(uintptr_t)&elf_load, "elf_load" },
+    { (uint32_t)(uintptr_t)&elf_execve, "elf_execve" },
+    { (uint32_t)(uintptr_t)&elf_load_file, "elf_load_file" },
+    { (uint32_t)(uintptr_t)&pe_load_file, "pe_load_file" },
+    { (uint32_t)(uintptr_t)&coff_load_file, "coff_load_file" },
+    { (uint32_t)(uintptr_t)&exec_register_handler, "exec_register_handler" },
+    { (uint32_t)(uintptr_t)&exec_dispatch, "exec_dispatch" },
+    { (uint32_t)(uintptr_t)&perso_lookup, "perso_lookup" },
+    { (uint32_t)(uintptr_t)&perso_name, "perso_name" },
+    { (uint32_t)(uintptr_t)&sys_freebsd4_uname, "sys_freebsd4_uname" },
+    { (uint32_t)(uintptr_t)&linux_to_native_signal, "linux_to_native_signal" },
+    { (uint32_t)(uintptr_t)&native_to_linux_signal, "native_to_linux_signal" },
+    { (uint32_t)(uintptr_t)&linux_sys_mmap, "linux_sys_mmap" },
+    { (uint32_t)(uintptr_t)&linux_sys_mmap2, "linux_sys_mmap2" },
+    { (uint32_t)(uintptr_t)&linux_sys_lseek, "linux_sys_lseek" },
+    { (uint32_t)(uintptr_t)&linux_sys__llseek, "linux_sys__llseek" },
+    { (uint32_t)(uintptr_t)&linux_sys_truncate, "linux_sys_truncate" },
+    { (uint32_t)(uintptr_t)&linux_sys_ftruncate, "linux_sys_ftruncate" },
+    { (uint32_t)(uintptr_t)&netbsd_sys_getrusage, "netbsd_sys_getrusage" },
+    { (uint32_t)(uintptr_t)&openbsd_sys_getrusage, "openbsd_sys_getrusage" },
+    { (uint32_t)(uintptr_t)&compat_lseek32, "compat_lseek32" },
+    { (uint32_t)(uintptr_t)&compat_time32, "compat_time32" },
+    { (uint32_t)(uintptr_t)&compat_stat_stub, "compat_stat_stub" },
+    { (uint32_t)(uintptr_t)&compat_lstat_stub, "compat_lstat_stub" },
+    { (uint32_t)(uintptr_t)&compat_fstat_stub, "compat_fstat_stub" },
+    { (uint32_t)(uintptr_t)&sys_freebsd_stat, "sys_freebsd_stat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd_lstat, "sys_freebsd_lstat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd_fstat, "sys_freebsd_fstat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd11_stat, "sys_freebsd11_stat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd11_lstat, "sys_freebsd11_lstat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd11_fstat, "sys_freebsd11_fstat" },
+    { (uint32_t)(uintptr_t)&sys_freebsd_lseek, "sys_freebsd_lseek" },
+    { (uint32_t)(uintptr_t)&sys_freebsd_mmap, "sys_freebsd_mmap" },
+    { (uint32_t)(uintptr_t)&sys_nice, "sys_nice" },
+    { (uint32_t)(uintptr_t)&sys_mprotect, "sys_mprotect" },
+    { (uint32_t)(uintptr_t)&sys_sigret, "sys_sigret" },
+    { (uint32_t)(uintptr_t)&sys_ptrace, "sys_ptrace" },
+    { (uint32_t)(uintptr_t)&sys_alarm, "sys_alarm" },
+    { (uint32_t)(uintptr_t)&sys_pause, "sys_pause" },
+    { (uint32_t)(uintptr_t)&sys_utime, "sys_utime" },
+    { (uint32_t)(uintptr_t)&sys_statfs, "sys_statfs" },
+    { (uint32_t)(uintptr_t)&sys_fstatfs, "sys_fstatfs" },
+    { (uint32_t)(uintptr_t)&sys_ulimit, "sys_ulimit" },
+    { (uint32_t)(uintptr_t)&sys_prof, "sys_prof" },
+    { (uint32_t)(uintptr_t)&sys_pgrpsys, "sys_pgrpsys" },
+    { (uint32_t)(uintptr_t)&sys_sigsys, "sys_sigsys" },
+    { (uint32_t)(uintptr_t)&sys_msgsys, "sys_msgsys" },
+    { (uint32_t)(uintptr_t)&sys_sysi86, "sys_sysi86" },
+    { (uint32_t)(uintptr_t)&sys_shmsys, "sys_shmsys" },
+    { (uint32_t)(uintptr_t)&sys_semsys, "sys_semsys" },
+    { (uint32_t)(uintptr_t)&sys_uadmin, "sys_uadmin" },
+    { (uint32_t)(uintptr_t)&sys_utssys, "sys_utssys" },
+    { (uint32_t)(uintptr_t)&sys_compat_execv, "sys_compat_execv" },
+    { (uint32_t)(uintptr_t)&linux_sys_stat, "linux_sys_stat" },
+    { (uint32_t)(uintptr_t)&linux_sys_lstat, "linux_sys_lstat" },
+    { (uint32_t)(uintptr_t)&linux_sys_fstat, "linux_sys_fstat" },
+    { (uint32_t)(uintptr_t)&linux_sys_stat64, "linux_sys_stat64" },
+    { (uint32_t)(uintptr_t)&linux_sys_lstat64, "linux_sys_lstat64" },
+    { (uint32_t)(uintptr_t)&linux_sys_fstat64, "linux_sys_fstat64" },
+    { (uint32_t)(uintptr_t)&linux_sendsig, "linux_sendsig" },
+    { (uint32_t)(uintptr_t)&linux_sys_sigreturn, "linux_sys_sigreturn" },
+    { (uint32_t)(uintptr_t)&linux_sys_rt_sigreturn, "linux_sys_rt_sigreturn" },
+    { (uint32_t)(uintptr_t)&freebsd_sendsig, "freebsd_sendsig" },
+    { (uint32_t)(uintptr_t)&freebsd_sys_sigreturn, "freebsd_sys_sigreturn" },
+    { (uint32_t)(uintptr_t)&netbsd_sendsig, "netbsd_sendsig" },
+    { (uint32_t)(uintptr_t)&netbsd_sys_sigreturn, "netbsd_sys_sigreturn" },
+    { (uint32_t)(uintptr_t)&openbsd_sendsig, "openbsd_sendsig" },
+    { (uint32_t)(uintptr_t)&openbsd_sys_sigreturn, "openbsd_sys_sigreturn" },
+    { (uint32_t)(uintptr_t)&vm_page_init, "vm_page_init" },
+    { (uint32_t)(uintptr_t)&pv_insert, "pv_insert" },
+    { (uint32_t)(uintptr_t)&pv_remove, "pv_remove" },
+    { (uint32_t)(uintptr_t)&pv_remove_all, "pv_remove_all" },
+    { (uint32_t)(uintptr_t)&vm_page_insert, "vm_page_insert" },
+    { (uint32_t)(uintptr_t)&vm_page_remove, "vm_page_remove" },
+    { (uint32_t)(uintptr_t)&vm_page_alloc, "vm_page_alloc" },
+    { (uint32_t)(uintptr_t)&vm_page_free, "vm_page_free" },
+    { (uint32_t)(uintptr_t)&vm_page_activate, "vm_page_activate" },
+    { (uint32_t)(uintptr_t)&vm_page_deactivate, "vm_page_deactivate" },
+    { (uint32_t)(uintptr_t)&vm_page_wire, "vm_page_wire" },
+    { (uint32_t)(uintptr_t)&vm_page_unwire, "vm_page_unwire" },
+    { (uint32_t)(uintptr_t)&vm_page_hold, "vm_page_hold" },
+    { (uint32_t)(uintptr_t)&vm_page_unhold, "vm_page_unhold" },
+    { (uint32_t)(uintptr_t)&vm_pageout_scan, "vm_pageout_scan" },
+    { (uint32_t)(uintptr_t)&vm_page_try_to_free, "vm_page_try_to_free" },
+    { (uint32_t)(uintptr_t)&vm_page_launder, "vm_page_launder" },
+    { (uint32_t)(uintptr_t)&vm_pageout, "vm_pageout" },
+    { (uint32_t)(uintptr_t)&vm_page_wakeup_daemon, "vm_page_wakeup_daemon" },
+    { (uint32_t)(uintptr_t)&vm_page_needs_writeback, "vm_page_needs_writeback" },
+    { (uint32_t)(uintptr_t)&vm_page_mark_for_writeback, "vm_page_mark_for_writeback" },
+    { (uint32_t)(uintptr_t)&vm_page_writeback_done, "vm_page_writeback_done" },
+    { (uint32_t)(uintptr_t)&vm_page_age_scan, "vm_page_age_scan" },
+    { (uint32_t)(uintptr_t)&vm_page_is_evict_candidate, "vm_page_is_evict_candidate" },
+    { (uint32_t)(uintptr_t)&vm_page_get_stats, "vm_page_get_stats" },
+    { (uint32_t)(uintptr_t)&vm_page_estimate_working_set, "vm_page_estimate_working_set" },
+    { (uint32_t)(uintptr_t)&vm_page_should_pageout, "vm_page_should_pageout" },
+    { (uint32_t)(uintptr_t)&vm_map_init, "vm_map_init" },
+    { (uint32_t)(uintptr_t)&vm_map_create, "vm_map_create" },
+    { (uint32_t)(uintptr_t)&vm_map_insert, "vm_map_insert" },
+    { (uint32_t)(uintptr_t)&vm_map_find_space, "vm_map_find_space" },
+    { (uint32_t)(uintptr_t)&vm_map_remove, "vm_map_remove" },
+    { (uint32_t)(uintptr_t)&vm_map_lookup, "vm_map_lookup" },
+    { (uint32_t)(uintptr_t)&vm_map_destroy, "vm_map_destroy" },
+    { (uint32_t)(uintptr_t)&vm_map_protect, "vm_map_protect" },
+    { (uint32_t)(uintptr_t)&vm_map_wire, "vm_map_wire" },
+    { (uint32_t)(uintptr_t)&vm_map_unwire, "vm_map_unwire" },
+    { (uint32_t)(uintptr_t)&vm_map_fork, "vm_map_fork" },
+    { (uint32_t)(uintptr_t)&vm_object_init, "vm_object_init" },
+    { (uint32_t)(uintptr_t)&vm_object_allocate, "vm_object_allocate" },
+    { (uint32_t)(uintptr_t)&vm_object_reference, "vm_object_reference" },
+    { (uint32_t)(uintptr_t)&vm_object_deallocate, "vm_object_deallocate" },
+    { (uint32_t)(uintptr_t)&vm_object_add_page, "vm_object_add_page" },
+    { (uint32_t)(uintptr_t)&vm_object_remove_page, "vm_object_remove_page" },
+    { (uint32_t)(uintptr_t)&vm_object_lookup_page, "vm_object_lookup_page" },
+    { (uint32_t)(uintptr_t)&vm_object_shadow, "vm_object_shadow" },
+    { (uint32_t)(uintptr_t)&vm_fault, "vm_fault" },
+    { (uint32_t)(uintptr_t)&vm_zone_init, "vm_zone_init" },
+    { (uint32_t)(uintptr_t)&vm_zone_create, "vm_zone_create" },
+    { (uint32_t)(uintptr_t)&vm_zone_alloc, "vm_zone_alloc" },
+    { (uint32_t)(uintptr_t)&vm_zone_free, "vm_zone_free" },
+    { (uint32_t)(uintptr_t)&kmem_init, "kmem_init" },
+    { (uint32_t)(uintptr_t)&kmalloc, "kmalloc" },
+    { (uint32_t)(uintptr_t)&kfree, "kfree" },
+    { (uint32_t)(uintptr_t)&kzalloc, "kzalloc" },
+    { (uint32_t)(uintptr_t)&kmem_get_stats, "kmem_get_stats" },
+    { (uint32_t)(uintptr_t)&sys_mmap, "sys_mmap" },
+    { (uint32_t)(uintptr_t)&sys_munmap, "sys_munmap" },
+    { (uint32_t)(uintptr_t)&sys_brk, "sys_brk" },
+    { (uint32_t)(uintptr_t)&sys_msync, "sys_msync" },
+    { (uint32_t)(uintptr_t)&vm_swap_get_stats, "vm_swap_get_stats" },
+    { (uint32_t)(uintptr_t)&vm_swapon, "vm_swapon" },
+    { (uint32_t)(uintptr_t)&vm_pager_allocate, "vm_pager_allocate" },
+    { (uint32_t)(uintptr_t)&vm_pager_deallocate, "vm_pager_deallocate" },
+    { (uint32_t)(uintptr_t)&vm_pager_get_pages, "vm_pager_get_pages" },
+    { (uint32_t)(uintptr_t)&vm_pager_put_pages, "vm_pager_put_pages" },
+    { (uint32_t)(uintptr_t)&vm_pager_has_page, "vm_pager_has_page" },
+    { (uint32_t)(uintptr_t)&uma_startup, "uma_startup" },
+    { (uint32_t)(uintptr_t)&uma_enable_dynamic_alloc, "uma_enable_dynamic_alloc" },
+    { (uint32_t)(uintptr_t)&uma_zcreate, "uma_zcreate" },
+    { (uint32_t)(uintptr_t)&uma_zdestroy, "uma_zdestroy" },
+    { (uint32_t)(uintptr_t)&uma_zalloc, "uma_zalloc" },
+    { (uint32_t)(uintptr_t)&uma_zfree, "uma_zfree" },
+    { (uint32_t)(uintptr_t)&uma_reclaim, "uma_reclaim" },
+    { (uint32_t)(uintptr_t)&uma_zone_stat, "uma_zone_stat" },
+    { (uint32_t)(uintptr_t)&uma_zone_get_cur, "uma_zone_get_cur" },
+    { (uint32_t)(uintptr_t)&uma_zone_set_max, "uma_zone_set_max" },
+    { (uint32_t)(uintptr_t)&uma_zone_reserve, "uma_zone_reserve" },
+    { (uint32_t)(uintptr_t)&uma_zone_check_leaks, "uma_zone_check_leaks" },
+    { (uint32_t)(uintptr_t)&uma_leak_report, "uma_leak_report" },
+    { (uint32_t)(uintptr_t)&uma_debug_fill_redzone, "uma_debug_fill_redzone" },
+    { (uint32_t)(uintptr_t)&uma_debug_check_redzone_impl, "uma_debug_check_redzone_impl" },
+    { (uint32_t)(uintptr_t)&uma_debug_poison_free_impl, "uma_debug_poison_free_impl" },
+    { (uint32_t)(uintptr_t)&uma_debug_poison_alloc_impl, "uma_debug_poison_alloc_impl" },
+    { (uint32_t)(uintptr_t)&vm_phys_paddr_to_page, "vm_phys_paddr_to_page" },
+    { (uint32_t)(uintptr_t)&vm_phys_early_init, "vm_phys_early_init" },
+    { (uint32_t)(uintptr_t)&vm_phys_add_range, "vm_phys_add_range" },
+    { (uint32_t)(uintptr_t)&vm_phys_alloc_page, "vm_phys_alloc_page" },
+    { (uint32_t)(uintptr_t)&vm_phys_free_page, "vm_phys_free_page" },
+    { (uint32_t)(uintptr_t)&vm_phys_alloc_contiguous, "vm_phys_alloc_contiguous" },
+    { (uint32_t)(uintptr_t)&vm_phys_free_contiguous, "vm_phys_free_contiguous" },
+    { (uint32_t)(uintptr_t)&vm_phys_get_free, "vm_phys_get_free" },
+    { (uint32_t)(uintptr_t)&vm_phys_get_used, "vm_phys_get_used" },
+    { (uint32_t)(uintptr_t)&vm_phys_mark_used, "vm_phys_mark_used" },
+    { (uint32_t)(uintptr_t)&run_kernel_tests, "run_kernel_tests" },
+    { (uint32_t)(uintptr_t)&vm_area_create, "vm_area_create" },
+    { (uint32_t)(uintptr_t)&vm_area_destroy, "vm_area_destroy" },
+    { (uint32_t)(uintptr_t)&vm_area_find, "vm_area_find" },
+    { (uint32_t)(uintptr_t)&vm_area_insert, "vm_area_insert" },
+    { (uint32_t)(uintptr_t)&vm_area_remove, "vm_area_remove" },
+    { (uint32_t)(uintptr_t)&vm_area_free_all, "vm_area_free_all" },
+    { (uint32_t)(uintptr_t)&test_sys_mmap, "test_sys_mmap" },
+    { (uint32_t)(uintptr_t)&test_sys_munmap, "test_sys_munmap" },
+    { (uint32_t)(uintptr_t)&test_sys_mprotect, "test_sys_mprotect" },
+    { (uint32_t)(uintptr_t)&test_mmap_anonymous, "test_mmap_anonymous" },
+    { (uint32_t)(uintptr_t)&test_multiple_mappings, "test_multiple_mappings" },
+    { (uint32_t)(uintptr_t)&test_mmap_fixed, "test_mmap_fixed" },
+    { (uint32_t)(uintptr_t)&test_mprotect, "test_mprotect" },
+    { (uint32_t)(uintptr_t)&test_large_mapping, "test_large_mapping" },
+    { (uint32_t)(uintptr_t)&test_mmap_fixed_unaligned, "test_mmap_fixed_unaligned" },
+    { (uint32_t)(uintptr_t)&test_mmap_fixed_overlap, "test_mmap_fixed_overlap" },
+    { (uint32_t)(uintptr_t)&run_mmap_tests, "run_mmap_tests" },
+    { (uint32_t)(uintptr_t)&test_pmap_lifecycle, "test_pmap_lifecycle" },
+    { (uint32_t)(uintptr_t)&test_pmap_large_replace, "test_pmap_large_replace" },
+    { (uint32_t)(uintptr_t)&test_multiple_pmaps, "test_multiple_pmaps" },
+    { (uint32_t)(uintptr_t)&test_kernel_pmap_protection, "test_kernel_pmap_protection" },
+    { (uint32_t)(uintptr_t)&test_null_pmap, "test_null_pmap" },
+    { (uint32_t)(uintptr_t)&test_pmap_pse, "test_pmap_pse" },
+    { (uint32_t)(uintptr_t)&test_pmap_check, "test_pmap_check" },
+    { (uint32_t)(uintptr_t)&test_pmap_dump, "test_pmap_dump" },
+    { (uint32_t)(uintptr_t)&test_pge_detection, "test_pge_detection" },
+    { (uint32_t)(uintptr_t)&test_pge_global_flush, "test_pge_global_flush" },
+    { (uint32_t)(uintptr_t)&run_pmap_tests, "run_pmap_tests" },
+    { (uint32_t)(uintptr_t)&run_pmap_protect_property_tests, "run_pmap_protect_property_tests" },
+    { (uint32_t)(uintptr_t)&test_pmap_hw_mappings, "test_pmap_hw_mappings" },
+    { (uint32_t)(uintptr_t)&property_pmap_kernel_consistency, "property_pmap_kernel_consistency" },
+    { (uint32_t)(uintptr_t)&fuzz_pmap_enter, "fuzz_pmap_enter" },
+    { (uint32_t)(uintptr_t)&run_vm_expanded_tests, "run_vm_expanded_tests" },
+    { (uint32_t)(uintptr_t)&run_pid_tests, "run_pid_tests" },
+    { (uint32_t)(uintptr_t)&run_unlink_tests, "run_unlink_tests" },
+    { (uint32_t)(uintptr_t)&run_unlink_property_tests, "run_unlink_property_tests" },
+    { (uint32_t)(uintptr_t)&run_link_tests, "run_link_tests" },
+    { (uint32_t)(uintptr_t)&run_link_property_tests, "run_link_property_tests" },
+    { (uint32_t)(uintptr_t)&test_cow_stats_read, "test_cow_stats_read" },
+    { (uint32_t)(uintptr_t)&run_cow_stats_tests, "run_cow_stats_tests" },
+    { (uint32_t)(uintptr_t)&test_vm_map_lifecycle, "test_vm_map_lifecycle" },
+    { (uint32_t)(uintptr_t)&test_vm_map_insert_lookup, "test_vm_map_insert_lookup" },
+    { (uint32_t)(uintptr_t)&test_vm_map_find_space, "test_vm_map_find_space" },
+    { (uint32_t)(uintptr_t)&test_vm_map_remove, "test_vm_map_remove" },
+    { (uint32_t)(uintptr_t)&test_vm_map_entry_flags, "test_vm_map_entry_flags" },
+    { (uint32_t)(uintptr_t)&test_vm_map_wire, "test_vm_map_wire" },
+    { (uint32_t)(uintptr_t)&test_vm_map_benchmark, "test_vm_map_benchmark" },
+    { (uint32_t)(uintptr_t)&run_vm_map_tests, "run_vm_map_tests" },
+    { (uint32_t)(uintptr_t)&run_vm_map_benchmark, "run_vm_map_benchmark" },
+    { (uint32_t)(uintptr_t)&test_vm_object_lifecycle, "test_vm_object_lifecycle" },
+    { (uint32_t)(uintptr_t)&test_vm_object_shadow, "test_vm_object_shadow" },
+    { (uint32_t)(uintptr_t)&test_vm_object_pages, "test_vm_object_pages" },
+    { (uint32_t)(uintptr_t)&test_vm_object_dynamic_free, "test_vm_object_dynamic_free" },
+    { (uint32_t)(uintptr_t)&run_vm_object_tests, "run_vm_object_tests" },
+    { (uint32_t)(uintptr_t)&test_vm_fault_simple, "test_vm_fault_simple" },
+    { (uint32_t)(uintptr_t)&test_vm_fault_cow, "test_vm_fault_cow" },
+    { (uint32_t)(uintptr_t)&run_vm_fault_tests, "run_vm_fault_tests" },
+    { (uint32_t)(uintptr_t)&test_vm_map_fork_cow, "test_vm_map_fork_cow" },
+    { (uint32_t)(uintptr_t)&run_vm_cow_tests, "run_vm_cow_tests" },
+    { (uint32_t)(uintptr_t)&test_vm_pager_lifecycle, "test_vm_pager_lifecycle" },
+    { (uint32_t)(uintptr_t)&test_vm_pager_io, "test_vm_pager_io" },
+    { (uint32_t)(uintptr_t)&run_vm_pager_tests, "run_vm_pager_tests" },
+    { (uint32_t)(uintptr_t)&test_vm_policy_lru, "test_vm_policy_lru" },
+    { (uint32_t)(uintptr_t)&test_vm_policy_writeback, "test_vm_policy_writeback" },
+    { (uint32_t)(uintptr_t)&run_vm_policy_tests, "run_vm_policy_tests" },
+    { (uint32_t)(uintptr_t)&test_uma_large_objects, "test_uma_large_objects" },
+    { (uint32_t)(uintptr_t)&test_uma_alloc_free, "test_uma_alloc_free" },
+    { (uint32_t)(uintptr_t)&test_uma_zero_fill, "test_uma_zero_fill" },
+    { (uint32_t)(uintptr_t)&test_uma_ctor_dtor, "test_uma_ctor_dtor" },
+    { (uint32_t)(uintptr_t)&test_uma_many_allocs, "test_uma_many_allocs" },
+    { (uint32_t)(uintptr_t)&test_uma_redzone, "test_uma_redzone" },
+    { (uint32_t)(uintptr_t)&test_uma_dynamic_stress, "test_uma_dynamic_stress" },
+    { (uint32_t)(uintptr_t)&test_uma_limits, "test_uma_limits" },
+    { (uint32_t)(uintptr_t)&run_uma_tests, "run_uma_tests" },
+    { (uint32_t)(uintptr_t)&test_futex_run_all, "test_futex_run_all" },
+    { (uint32_t)(uintptr_t)&test_futex, "test_futex" },
+    { (uint32_t)(uintptr_t)&test_futex_private_run_all, "test_futex_private_run_all" },
+    { (uint32_t)(uintptr_t)&test_futex_private, "test_futex_private" },
+    { (uint32_t)(uintptr_t)&test_ntsync, "test_ntsync" },
+    { (uint32_t)(uintptr_t)&test_geom, "test_geom" },
+    { (uint32_t)(uintptr_t)&test_pte_user, "test_pte_user" },
+    { (uint32_t)(uintptr_t)&test_stacktrace, "test_stacktrace" },
+    { (uint32_t)(uintptr_t)&test_ksyms, "test_ksyms" },
+    { (uint32_t)(uintptr_t)&test_mmap_parsing, "test_mmap_parsing" },
+    { (uint32_t)(uintptr_t)&test_e820_parsing, "test_e820_parsing" },
+    { (uint32_t)(uintptr_t)&test_vm_phys, "test_vm_phys" },
+    { (uint32_t)(uintptr_t)&test_vm_page_queue, "test_vm_page_queue" },
+    { (uint32_t)(uintptr_t)&test_pmm_watermark, "test_pmm_watermark" },
+    { (uint32_t)(uintptr_t)&test_pmm_buddy, "test_pmm_buddy" },
+    { (uint32_t)(uintptr_t)&run_mkdir_tests, "run_mkdir_tests" },
+    { (uint32_t)(uintptr_t)&test_scsi, "test_scsi" },
+    { (uint32_t)(uintptr_t)&run_scsi_tests, "run_scsi_tests" },
+    { (uint32_t)(uintptr_t)&run_signal_tests, "run_signal_tests" },
+    { (uint32_t)(uintptr_t)&test_bitness, "test_bitness" },
+    { (uint32_t)(uintptr_t)&run_rng_tests, "run_rng_tests" },
+    { (uint32_t)(uintptr_t)&run_ps2_tests, "run_ps2_tests" },
+    { (uint32_t)(uintptr_t)&run_minix_mount_tests, "run_minix_mount_tests" },
+    { (uint32_t)(uintptr_t)&run_minix_write_tests, "run_minix_write_tests" },
+    { (uint32_t)(uintptr_t)&run_minix_inode_tests, "run_minix_inode_tests" },
+    { (uint32_t)(uintptr_t)&test_mount_permissions, "test_mount_permissions" },
+    { (uint32_t)(uintptr_t)&run_mount_tests, "run_mount_tests" },
+    { (uint32_t)(uintptr_t)&test_device_struct_layout, "test_device_struct_layout" },
+    { (uint32_t)(uintptr_t)&test_driver_struct_signatures, "test_driver_struct_signatures" },
+    { (uint32_t)(uintptr_t)&test_bus_struct_layout, "test_bus_struct_layout" },
+    { (uint32_t)(uintptr_t)&test_resource_helpers, "test_resource_helpers" },
+    { (uint32_t)(uintptr_t)&mock_kmalloc, "mock_kmalloc" },
+    { (uint32_t)(uintptr_t)&mock_kfree, "mock_kfree" },
+    { (uint32_t)(uintptr_t)&test_device_allocation, "test_device_allocation" },
+    { (uint32_t)(uintptr_t)&test_device_registration_logic, "test_device_registration_logic" },
+    { (uint32_t)(uintptr_t)&test_device_unregister_logic, "test_device_unregister_logic" },
+    { (uint32_t)(uintptr_t)&test_device_refcounting, "test_device_refcounting" },
+    { (uint32_t)(uintptr_t)&test_find_child_logic, "test_find_child_logic" },
+    { (uint32_t)(uintptr_t)&test_driver_registration_logic, "test_driver_registration_logic" },
+    { (uint32_t)(uintptr_t)&test_driver_unregister_logic, "test_driver_unregister_logic" },
+    { (uint32_t)(uintptr_t)&test_driver_attach_logic, "test_driver_attach_logic" },
+    { (uint32_t)(uintptr_t)&test_driver_detach_logic, "test_driver_detach_logic" },
+    { (uint32_t)(uintptr_t)&test_printf_new, "test_printf_new" },
+    { (uint32_t)(uintptr_t)&test_printf_flags, "test_printf_flags" },
+    { (uint32_t)(uintptr_t)&test_printf_plus_flag, "test_printf_plus_flag" },
+    { (uint32_t)(uintptr_t)&test_printf_space_flag, "test_printf_space_flag" },
+    { (uint32_t)(uintptr_t)&test_printf_hash_flag, "test_printf_hash_flag" },
+    { (uint32_t)(uintptr_t)&test_printf_zero_flag, "test_printf_zero_flag" },
+    { (uint32_t)(uintptr_t)&test_printf_width, "test_printf_width" },
+    { (uint32_t)(uintptr_t)&test_printf_octal, "test_printf_octal" },
+    { (uint32_t)(uintptr_t)&run_udf_write_tests, "run_udf_write_tests" },
+    { (uint32_t)(uintptr_t)&run_sigstop_tests, "run_sigstop_tests" },
+    { (uint32_t)(uintptr_t)&test_bus_match_logic, "test_bus_match_logic" },
+    { (uint32_t)(uintptr_t)&test_bus_id_match_logic, "test_bus_id_match_logic" },
+    { (uint32_t)(uintptr_t)&test_bus_compatible_match_logic, "test_bus_compatible_match_logic" },
+    { (uint32_t)(uintptr_t)&test_driver_override_logic, "test_driver_override_logic" },
+    { (uint32_t)(uintptr_t)&run_vfs_error_tests, "run_vfs_error_tests" },
+    { (uint32_t)(uintptr_t)&test_console_perf, "test_console_perf" },
+    { (uint32_t)(uintptr_t)&test_sysinfo, "test_sysinfo" },
+    { (uint32_t)(uintptr_t)&run_kthread_create_tests, "run_kthread_create_tests" },
+    { (uint32_t)(uintptr_t)&test_fb_perf, "test_fb_perf" },
+    { (uint32_t)(uintptr_t)&test_fb_modes, "test_fb_modes" },
+    { (uint32_t)(uintptr_t)&run_string_tests, "run_string_tests" },
+    { (uint32_t)(uintptr_t)&test_sysctl, "test_sysctl" },
+    { (uint32_t)(uintptr_t)&test_sysctl_handlers, "test_sysctl_handlers" },
+    { (uint32_t)(uintptr_t)&test_cow_perf, "test_cow_perf" },
+    { (uint32_t)(uintptr_t)&test_ide_perf, "test_ide_perf" },
+    { (uint32_t)(uintptr_t)&run_ext2_perf_test, "run_ext2_perf_test" },
+    { (uint32_t)(uintptr_t)&run_ext2_read_perf_test, "run_ext2_read_perf_test" },
+    { (uint32_t)(uintptr_t)&sched_get_affinity_linear, "sched_get_affinity_linear" },
+    { (uint32_t)(uintptr_t)&sched_get_affinity_via_func, "sched_get_affinity_via_func" },
+    { (uint32_t)(uintptr_t)&run_sched_perf_tests, "run_sched_perf_tests" },
+    { (uint32_t)(uintptr_t)&run_vnode_ops_tests, "run_vnode_ops_tests" },
+    { (uint32_t)(uintptr_t)&test_printf_star, "test_printf_star" },
+    { (uint32_t)(uintptr_t)&run_printf_specifier_tests, "run_printf_specifier_tests" },
+    { (uint32_t)(uintptr_t)&test_printf_vsnprintf, "test_printf_vsnprintf" },
+    { (uint32_t)(uintptr_t)&run_printf_vsnprintf_tests, "run_printf_vsnprintf_tests" },
+    { (uint32_t)(uintptr_t)&run_getcwd_tests, "run_getcwd_tests" },
+    { (uint32_t)(uintptr_t)&run_vnode_lock_tests, "run_vnode_lock_tests" },
+    { (uint32_t)(uintptr_t)&test_mem, "test_mem" },
+    { (uint32_t)(uintptr_t)&run_div64_tests, "run_div64_tests" },
+    { (uint32_t)(uintptr_t)&run_crc32_tests, "run_crc32_tests" },
+    { (uint32_t)(uintptr_t)&run_devfs_special_device_tests, "run_devfs_special_device_tests" },
+    { (uint32_t)(uintptr_t)&run_ldt_tests, "run_ldt_tests" },
+    { (uint32_t)(uintptr_t)&test_tty_alloc, "test_tty_alloc" },
+    { (uint32_t)(uintptr_t)&test_tty_canonical, "test_tty_canonical" },
+    { (uint32_t)(uintptr_t)&test_tty_ixoff, "test_tty_ixoff" },
+    { (uint32_t)(uintptr_t)&test_tty_termios, "test_tty_termios" },
+    { (uint32_t)(uintptr_t)&run_tty_tests, "run_tty_tests" },
+    { (uint32_t)(uintptr_t)&run_minix_readdir_tests, "run_minix_readdir_tests" },
+    { (uint32_t)(uintptr_t)&test_ide_dma, "test_ide_dma" },
+    { (uint32_t)(uintptr_t)&run_sched_bench, "run_sched_bench" },
+    { (uint32_t)(uintptr_t)&run_sched_dequeue_bench, "run_sched_dequeue_bench" },
+    { (uint32_t)(uintptr_t)&run_kobject_tests, "run_kobject_tests" },
+    { (uint32_t)(uintptr_t)&run_vfs_cache_tests, "run_vfs_cache_tests" },
+    { (uint32_t)(uintptr_t)&run_vfs_busy_tests, "run_vfs_busy_tests" },
+    { (uint32_t)(uintptr_t)&run_nanosleep_tests, "run_nanosleep_tests" },
+    { (uint32_t)(uintptr_t)&run_reboot_tests, "run_reboot_tests" },
+    { (uint32_t)(uintptr_t)&test_pipe_race, "test_pipe_race" },
+    { (uint32_t)(uintptr_t)&run_chacha20_tests, "run_chacha20_tests" },
+    { (uint32_t)(uintptr_t)&sigprop, "sigprop" },
+    { (uint32_t)(uintptr_t)&font_8x16, "font_8x16" },
+    { (uint32_t)(uintptr_t)&font_8x8, "font_8x8" },
+    { (uint32_t)(uintptr_t)&zimage_start, "zimage_start" },
+    { (uint32_t)(uintptr_t)&sig_trampoline_code, "sig_trampoline_code" },
+    { (uint32_t)(uintptr_t)&sig_trampoline_size, "sig_trampoline_size" },
+    { (uint32_t)(uintptr_t)&kernel_hostname, "kernel_hostname" },
+    { (uint32_t)(uintptr_t)&sysctl_kern, "sysctl_kern" },
+    { (uint32_t)(uintptr_t)&sysctl_hw, "sysctl_hw" },
+    { (uint32_t)(uintptr_t)&sysctl_vm, "sysctl_vm" },
+    { (uint32_t)(uintptr_t)&sysctl_debug, "sysctl_debug" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_securelevel, "sysctl_kern_securelevel" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_ostype, "sysctl_kern_ostype" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_osrelease, "sysctl_kern_osrelease" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_osrevision, "sysctl_kern_osrevision" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_version, "sysctl_kern_version" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_maxproc, "sysctl_kern_maxproc" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_hostname, "sysctl_kern_hostname" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_domainname, "sysctl_kern_domainname" },
+    { (uint32_t)(uintptr_t)&sysctl_hw_machine, "sysctl_hw_machine" },
+    { (uint32_t)(uintptr_t)&sysctl_hw_model, "sysctl_hw_model" },
+    { (uint32_t)(uintptr_t)&sysctl_hw_ncpu, "sysctl_hw_ncpu" },
+    { (uint32_t)(uintptr_t)&sysctl_hw_pagesize, "sysctl_hw_pagesize" },
+    { (uint32_t)(uintptr_t)&num_cpus, "num_cpus" },
+    { (uint32_t)(uintptr_t)&kbd_us, "kbd_us" },
+    { (uint32_t)(uintptr_t)&kbd_us_shifted, "kbd_us_shifted" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_kmem_allow_read, "sysctl_kern_kmem_allow_read" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_kmem_allow_write, "sysctl_kern_kmem_allow_write" },
+    { (uint32_t)(uintptr_t)&sysctl_debug_kmem_test_addr, "sysctl_debug_kmem_test_addr" },
+    { (uint32_t)(uintptr_t)&sysctl_debug_kmem_test_size, "sysctl_debug_kmem_test_size" },
+    { (uint32_t)(uintptr_t)&vfs_cache_limit, "vfs_cache_limit" },
+    { (uint32_t)(uintptr_t)&udf_vnodeops, "udf_vnodeops" },
+    { (uint32_t)(uintptr_t)&personality_native, "personality_native" },
+    { (uint32_t)(uintptr_t)&personality_freebsd, "personality_freebsd" },
+    { (uint32_t)(uintptr_t)&personality_linux, "personality_linux" },
+    { (uint32_t)(uintptr_t)&personality_svr3, "personality_svr3" },
+    { (uint32_t)(uintptr_t)&personality_svr4, "personality_svr4" },
+    { (uint32_t)(uintptr_t)&personality_netbsd, "personality_netbsd" },
+    { (uint32_t)(uintptr_t)&personality_openbsd, "personality_openbsd" },
+    { (uint32_t)(uintptr_t)&personality_sunos, "personality_sunos" },
+    { (uint32_t)(uintptr_t)&swap_pager_ops, "swap_pager_ops" },
+    { (uint32_t)(uintptr_t)&vnode_pager_ops, "vnode_pager_ops" },
+    { (uint32_t)(uintptr_t)&device_pager_ops, "device_pager_ops" },
+    { (uint32_t)(uintptr_t)&sysctl_debug_test_uid, "sysctl_debug_test_uid" },
+    { (uint32_t)(uintptr_t)&idt_entries, "idt_entries" },
+    { (uint32_t)(uintptr_t)&stack_top, "stack_top" },
+    { (uint32_t)(uintptr_t)&idt_ptr, "idt_ptr" },
+    { (uint32_t)(uintptr_t)&curpmap, "curpmap" },
+    { (uint32_t)(uintptr_t)&cpus, "cpus" },
+    { (uint32_t)(uintptr_t)&cpu_count, "cpu_count" },
+    { (uint32_t)(uintptr_t)&early_exception_num, "early_exception_num" },
+    { (uint32_t)(uintptr_t)&boot_time, "boot_time" },
+    { (uint32_t)(uintptr_t)&serial_debug_enabled, "serial_debug_enabled" },
+    { (uint32_t)(uintptr_t)&syscall_trace_enabled, "syscall_trace_enabled" },
+    { (uint32_t)(uintptr_t)&rng_state, "rng_state" },
+    { (uint32_t)(uintptr_t)&sysctl__children, "sysctl__children" },
+    { (uint32_t)(uintptr_t)&sysctl_kern_children, "sysctl_kern_children" },
+    { (uint32_t)(uintptr_t)&sysctl_hw_children, "sysctl_hw_children" },
+    { (uint32_t)(uintptr_t)&sysctl_vm_children, "sysctl_vm_children" },
+    { (uint32_t)(uintptr_t)&sysctl_debug_children, "sysctl_debug_children" },
+    { (uint32_t)(uintptr_t)&securelevel, "securelevel" },
+    { (uint32_t)(uintptr_t)&processes, "processes" },
+    { (uint32_t)(uintptr_t)&current_process, "current_process" },
+    { (uint32_t)(uintptr_t)&kernel_process, "kernel_process" },
+    { (uint32_t)(uintptr_t)&proctree_lock, "proctree_lock" },
+    { (uint32_t)(uintptr_t)&threads, "threads" },
+    { (uint32_t)(uintptr_t)&current_thread, "current_thread" },
+    { (uint32_t)(uintptr_t)&fb, "fb" },
+    { (uint32_t)(uintptr_t)&fb_active, "fb_active" },
+    { (uint32_t)(uintptr_t)&hw_text_active, "hw_text_active" },
+    { (uint32_t)(uintptr_t)&kbd_shift, "kbd_shift" },
+    { (uint32_t)(uintptr_t)&kbd_ctrl, "kbd_ctrl" },
+    { (uint32_t)(uintptr_t)&kbd_alt, "kbd_alt" },
+    { (uint32_t)(uintptr_t)&kbd_lshift, "kbd_lshift" },
+    { (uint32_t)(uintptr_t)&kbd_rshift, "kbd_rshift" },
+    { (uint32_t)(uintptr_t)&kbd_lctrl, "kbd_lctrl" },
+    { (uint32_t)(uintptr_t)&kbd_rctrl, "kbd_rctrl" },
+    { (uint32_t)(uintptr_t)&kbd_lalt, "kbd_lalt" },
+    { (uint32_t)(uintptr_t)&kbd_ralt, "kbd_ralt" },
+    { (uint32_t)(uintptr_t)&kbd_extended, "kbd_extended" },
+    { (uint32_t)(uintptr_t)&mountlist, "mountlist" },
+    { (uint32_t)(uintptr_t)&fs_root, "fs_root" },
+    { (uint32_t)(uintptr_t)&rootvnode, "rootvnode" },
+    { (uint32_t)(uintptr_t)&vnstats, "vnstats" },
+    { (uint32_t)(uintptr_t)&vfs_cache_count, "vfs_cache_count" },
+    { (uint32_t)(uintptr_t)&udf_ctx, "udf_ctx" },
+    { (uint32_t)(uintptr_t)&devfs_root_node_ptr, "devfs_root_node_ptr" },
+    { (uint32_t)(uintptr_t)&swap_node, "swap_node" },
+    { (uint32_t)(uintptr_t)&_kernel_end, "_kernel_end" },
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 2838;
+int ksym_count = 1422;

@@ -6,14 +6,9 @@
 #include <errno.h>
 
 /*
- * test_ntsync_fd.c - Verification test for NTSync FD Allocation
- *
- * This test verifies that the NTSync driver correctly allocates real kernel
- * file descriptors using proc_alloc_fd() rather than returning raw object indices.
- * It mocks the kernel environment to simulate ioctl calls and checks the returned FDs.
+ * test_ntsync_fd.c - Host verification tests for ntsync core behavior.
  */
 
-// Mock kernel headers
 #ifndef _KERNEL
 #define _KERNEL
 #endif
@@ -21,7 +16,6 @@
 #define HOST_TEST
 #endif
 
-// Mock types
 typedef struct process process_t;
 typedef struct thread thread_t;
 typedef struct file file_t;
@@ -32,13 +26,12 @@ typedef struct fs_node fs_node_t;
 #include <kern/file.h>
 #include <vfs/vfs.h>
 
-// Globals
 process_t *current_process;
 thread_t *current_thread;
 
-// Mock implementations
-int mock_fd_counter = 10; // Start from 10 to avoid 0-2 and to detect if indices are used (which would start from 0)
+int mock_fd_counter = 10;
 file_t *mock_files[MAX_FD];
+static int mock_sleep_until_ret = -ETIMEDOUT;
 
 int proc_alloc_fd(process_t *p) {
     (void)p;
@@ -47,14 +40,18 @@ int proc_alloc_fd(process_t *p) {
 }
 
 void proc_set_fd(process_t *p, int fd, file_t *f) {
-    (void)p;
+    if (p && fd >= 0 && fd < MAX_FD) {
+        p->fds[fd] = f;
+    }
     if (fd >= 0 && fd < MAX_FD) {
         mock_files[fd] = f;
     }
 }
 
 void proc_clear_fd(process_t *p, int fd) {
-    (void)p;
+    if (p && fd >= 0 && fd < MAX_FD) {
+        p->fds[fd] = NULL;
+    }
     if (fd >= 0 && fd < MAX_FD) {
         mock_files[fd] = NULL;
     }
@@ -91,80 +88,189 @@ void devfs_register_device(fs_node_t *node) {
     (void)node;
 }
 
-// Stubs for other dependencies
 void sched_wakeup(void *chan) { (void)chan; }
 void sched_sleep(void *chan) { (void)chan; }
-int sched_sleep_until(void *chan, uint64_t deadline) { (void)chan; (void)deadline; return 0; }
+int sched_sleep_until(void *chan, uint64_t deadline) { (void)chan; (void)deadline; return mock_sleep_until_ret; }
 time_t get_time(void) { return 0; }
 time_t get_uptime(void) { return 0; }
 uint64_t get_ticks(void) { return 0; }
 
-// Include the source directly to test static functions
 #include "../../sys/drivers/devices/ntsync.c"
 
-int main() {
-    printf("Running ntsync FD allocation test...\n");
+#define ASSERT_TRUE(cond, msg) do { \
+    if (!(cond)) { \
+        fprintf(stderr, "FAIL: %s\n", msg); \
+        return 1; \
+    } \
+} while (0)
 
-    // Setup
-    current_process = calloc(1, sizeof(process_t));
-    current_thread = calloc(1, sizeof(thread_t));
+static void reset_mock_state(void) {
+    memset(mock_files, 0, sizeof(mock_files));
+    mock_fd_counter = 10;
+    mock_sleep_until_ret = -ETIMEDOUT;
+}
 
-    // Init driver
-    ntsync_init();
-
-    // Open device instance
+static int test_fd_allocation(void) {
     fs_node_t inst_node;
     memset(&inst_node, 0, sizeof(inst_node));
 
-    // We simulate open() by calling the open callback directly.
-    // The driver sets node->impl to the new instance.
     ntsync_open_callback(&inst_node);
+    ASSERT_TRUE(inst_node.impl != 0, "failed to open ntsync instance");
 
-    if (inst_node.impl == 0) {
-        printf("FAIL: Failed to open ntsync instance\n");
-        return 1;
-    }
-
-    // Create Semaphore
     struct ntsync_sem_args args;
     args.count = 1;
     args.max = 5;
 
-    // We simulate ioctl() by calling the ioctl callback directly.
     int fd = ntsync_ioctl(&inst_node, NTSYNC_IOC_CREATE_SEM, &args);
+    ASSERT_TRUE(fd == 10, "expected first fd from proc_alloc_fd");
+    ASSERT_TRUE(mock_files[fd] != NULL, "proc_set_fd was not called");
 
-    if (fd < 0) {
-        printf("FAIL: ioctl returned error %d\n", fd);
-        return 1;
-    }
-
-    printf("Got FD: %d\n", fd);
-
-    // Check if it used our mock allocator (expecting 10)
-    // If it used internal index, it would likely be 0 (first object)
-    if (fd != 10) {
-        printf("FAIL: Expected FD 10 (from proc_alloc_fd), got %d. Possible raw index returned?\n", fd);
-        return 1;
-    }
-
-    if (mock_files[fd] == NULL) {
-        printf("FAIL: File object not set in mock table via proc_set_fd\n");
-        return 1;
-    }
-
-    // Create another one
     fd = ntsync_ioctl(&inst_node, NTSYNC_IOC_CREATE_SEM, &args);
-    printf("Got FD: %d\n", fd);
-    if (fd != 11) {
-        printf("FAIL: Expected FD 11, got %d\n", fd);
+    ASSERT_TRUE(fd == 11, "expected second fd from proc_alloc_fd");
+
+    ntsync_close(&inst_node);
+    return 0;
+}
+
+static int test_wait_arg_validation(void) {
+    fs_node_t inst_node;
+    memset(&inst_node, 0, sizeof(inst_node));
+    ntsync_open_callback(&inst_node);
+    ASSERT_TRUE(inst_node.impl != 0, "instance open failed");
+
+    struct ntsync_event_args eargs;
+    eargs.signaled = 0;
+    eargs.manual = 0;
+
+    int event_fd = ntsync_ioctl(&inst_node, NTSYNC_IOC_CREATE_EVENT, &eargs);
+    ASSERT_TRUE(event_fd >= 0, "event creation failed");
+
+    int objs[1] = { event_fd };
+    struct ntsync_wait_args wait;
+    memset(&wait, 0, sizeof(wait));
+    wait.timeout = 0;
+    wait.objs = (uint64_t)(uintptr_t)objs;
+    wait.count = 1;
+    wait.owner = 1;
+
+    wait.pad = 1;
+    ASSERT_TRUE(ntsync_ioctl(&inst_node, NTSYNC_IOC_WAIT_ANY, &wait) == -EINVAL,
+                "WAIT_ANY accepted non-zero pad");
+
+    wait.pad = 0;
+    wait.flags = 0x40000000U;
+    ASSERT_TRUE(ntsync_ioctl(&inst_node, NTSYNC_IOC_WAIT_ANY, &wait) == -EINVAL,
+                "WAIT_ANY accepted unknown flags");
+
+    wait.flags = 0x40000000U;
+    ASSERT_TRUE(ntsync_ioctl(&inst_node, NTSYNC_IOC_WAIT_ALL, &wait) == -EINVAL,
+                "WAIT_ALL accepted unknown flags");
+
+    ntsync_close(&inst_node);
+    return 0;
+}
+
+static int test_auto_reset_wait_any_consumes(void) {
+    fs_node_t inst_node;
+    memset(&inst_node, 0, sizeof(inst_node));
+    ntsync_open_callback(&inst_node);
+    ASSERT_TRUE(inst_node.impl != 0, "instance open failed");
+
+    struct ntsync_event_args eargs;
+    eargs.signaled = 0;
+    eargs.manual = 0;
+
+    int event_fd = ntsync_ioctl(&inst_node, NTSYNC_IOC_CREATE_EVENT, &eargs);
+    ASSERT_TRUE(event_fd >= 0, "event creation failed");
+
+    file_t *f = mock_files[event_fd];
+    ASSERT_TRUE(f != NULL, "event file missing");
+
+    uint32_t prev = 0xFFFFFFFFU;
+    ASSERT_TRUE(ntsync_obj_ioctl((fs_node_t *)f->f_data, NTSYNC_IOC_SET_EVENT, &prev) == 0,
+                "SET_EVENT failed");
+    ASSERT_TRUE(prev == 0, "SET_EVENT previous state mismatch");
+
+    int objs[1] = { event_fd };
+    struct ntsync_wait_args wait;
+    memset(&wait, 0, sizeof(wait));
+    wait.timeout = UINT64_MAX;
+    wait.objs = (uint64_t)(uintptr_t)objs;
+    wait.count = 1;
+    wait.owner = 123;
+
+    ASSERT_TRUE(ntsync_ioctl(&inst_node, NTSYNC_IOC_WAIT_ANY, &wait) == 0,
+                "WAIT_ANY failed on signaled auto event");
+    ASSERT_TRUE(wait.index == 0, "WAIT_ANY returned wrong index");
+
+    struct ntsync_event_args state;
+    memset(&state, 0, sizeof(state));
+    ASSERT_TRUE(ntsync_obj_ioctl((fs_node_t *)f->f_data, NTSYNC_IOC_READ_EVENT, &state) == 0,
+                "READ_EVENT failed");
+    ASSERT_TRUE(state.signaled == 0, "auto-reset event remained signaled after acquire");
+
+    wait.timeout = 0;
+    ASSERT_TRUE(ntsync_ioctl(&inst_node, NTSYNC_IOC_WAIT_ANY, &wait) == -ETIMEDOUT,
+                "WAIT_ANY should time out after event consumption");
+
+    ntsync_close(&inst_node);
+    return 0;
+}
+
+static int test_alert_not_spurious(void) {
+    fs_node_t inst_node;
+    memset(&inst_node, 0, sizeof(inst_node));
+    ntsync_open_callback(&inst_node);
+    ASSERT_TRUE(inst_node.impl != 0, "instance open failed");
+
+    struct ntsync_event_args eargs;
+    eargs.signaled = 0;
+    eargs.manual = 0;
+
+    int wait_fd = ntsync_ioctl(&inst_node, NTSYNC_IOC_CREATE_EVENT, &eargs);
+    int alert_fd = ntsync_ioctl(&inst_node, NTSYNC_IOC_CREATE_EVENT, &eargs);
+    ASSERT_TRUE(wait_fd >= 0 && alert_fd >= 0, "event creation failed");
+
+    int objs[1] = { wait_fd };
+    struct ntsync_wait_args wait;
+    memset(&wait, 0, sizeof(wait));
+    wait.timeout = 0;
+    wait.objs = (uint64_t)(uintptr_t)objs;
+    wait.count = 1;
+    wait.owner = 9;
+    wait.alert = (uint32_t)alert_fd;
+
+    ASSERT_TRUE(ntsync_ioctl(&inst_node, NTSYNC_IOC_WAIT_ANY, &wait) == -ETIMEDOUT,
+                "WAIT_ANY incorrectly returned alert success");
+
+    ntsync_close(&inst_node);
+    return 0;
+}
+
+int main(void) {
+    printf("Running ntsync host tests...\n");
+
+    current_process = calloc(1, sizeof(process_t));
+    current_thread = calloc(1, sizeof(thread_t));
+    if (!current_process || !current_thread) {
+        fprintf(stderr, "FAIL: allocation failure\n");
         return 1;
     }
 
-    printf("PASS: FD allocation works correctly and uses kernel allocator\n");
+    ntsync_init();
 
-    // Cleanup
-    free(current_process);
-    free(current_thread);
+    reset_mock_state();
+    if (test_fd_allocation() != 0) return 1;
 
+    reset_mock_state();
+    if (test_wait_arg_validation() != 0) return 1;
+
+    reset_mock_state();
+    if (test_auto_reset_wait_any_consumes() != 0) return 1;
+
+    reset_mock_state();
+    if (test_alert_not_spurious() != 0) return 1;
+
+    printf("PASS: ntsync host tests\n");
     return 0;
 }

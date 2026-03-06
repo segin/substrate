@@ -25,6 +25,9 @@ static fs_node_t *sysfs_finddir(fs_node_t *node, char *name) {
         memset(&sub_node, 0, sizeof(fs_node_t));
         strncpy(sub_node.name, name, sizeof(sub_node.name) - 1);
         sub_node.flags = FS_DIRECTORY;
+        sub_node.mask = 0555;
+        sub_node.uid = 0;
+        sub_node.gid = 0;
         sub_node.readdir = &sysfs_readdir; // Simple reuse for proto
         return &sub_node;
     }
@@ -47,6 +50,9 @@ void sysfs_init(void) {
     memset(&sysfs_root_node, 0, sizeof(fs_node_t));
     strncpy(sysfs_root_node.name, "sys", sizeof(sysfs_root_node.name));
     sysfs_root_node.flags = FS_DIRECTORY;
+    sysfs_root_node.mask = 0555;
+    sysfs_root_node.uid = 0;
+    sysfs_root_node.gid = 0;
     sysfs_root_node.readdir = &sysfs_readdir;
     sysfs_root_node.finddir = &sysfs_finddir;
 

@@ -55,6 +55,42 @@ static uma_zone_t *file_zone = NULL;
 
 #define IO_CHUNK_SIZE 4096
 
+static int cloned_node_file_close(struct file *fp, struct thread *td) {
+    (void)td;
+    if (!fp || !fp->f_data) {
+        return 0;
+    }
+
+    kfree(fp->f_data, sizeof(fs_node_t));
+    fp->f_data = NULL;
+    return 0;
+}
+
+static struct fileops cloned_node_fileops = {
+    .fo_close = cloned_node_file_close,
+};
+
+static fs_node_t *vfs_prepare_open_node(fs_node_t *node, struct file **f_out) {
+    if (!node || !f_out || !*f_out) {
+        return NULL;
+    }
+
+    /*
+     * Char devices may keep mutable per-open state in fs_node fields.
+     * Clone node storage so callbacks cannot alias shared devfs nodes.
+     */
+    if (((node->flags & 0x7) == FS_CHARDEVICE) && node->open) {
+        fs_node_t *clone = kmalloc(sizeof(fs_node_t));
+        if (!clone) {
+            return NULL;
+        }
+        memcpy(clone, node, sizeof(fs_node_t));
+        (*f_out)->f_ops = &cloned_node_fileops;
+        return clone;
+    }
+
+    return node;
+}
 
 
 static void ensure_file_zone_init(void) {
@@ -230,16 +266,14 @@ int kern_open(const char *path, int flags, int mode) {
     if (fd == -1) return -1;
 
     // Lookup file
-    // Handle absolute/relative. For now assume root relative if starts with /
     fs_node_t *node = 0;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
     if (path[0] == '/') {
-        // Skip leading / for finddir which usually expects name in dir
-        if (path[1] == 0) node = root;
-        else node = finddir_fs(root, (char*)path + 1);
+        node = vfs_lookup(root, path);
     } else {
-        node = finddir_fs(root, (char*)path);
+        node = vfs_lookup(cwd, path);
     }
 
     if (!node) {
@@ -253,13 +287,20 @@ int kern_open(const char *path, int flags, int mode) {
         return -1;
     }
 
-    f->f_data = node;
+    fs_node_t *open_node = vfs_prepare_open_node(node, &f);
+    if (!open_node) {
+        file_free(f);
+        proc_clear_fd(current_process, fd);
+        return -1;
+    }
+
+    f->f_data = open_node;
     f->f_offset = 0;
     f->f_flag = (short)flags;
     f->f_count = 1;
 
     proc_set_fd(current_process, fd, f);
-    open_fs(node, 1, 0); // Open read/write?
+    open_fs(open_node, 1, 0); // Open read/write?
 
     return fd;
 }
@@ -270,6 +311,9 @@ void file_close_ptr(file_t *f) {
     f->f_count--;
     if (f->f_count <= 0) {
         close_fs((fs_node_t*)f->f_data);
+        if (f->f_ops && f->f_ops->fo_close) {
+            f->f_ops->fo_close(f, current_thread);
+        }
         file_free(f);
     }
 }
@@ -527,21 +571,25 @@ extern int sys_sysarch(int op, void *args);
 static void fill_stat(struct stat *buf, fs_node_t *node) {
     if (!buf) return;
     memset(buf, 0, sizeof(struct stat));
+
+    uint32_t ftype = node->flags & 0x7;
+    mode_t perms = (mode_t)(node->mask & 07777);
+
     buf->st_ino = node->inode;
     buf->st_size = (off_t)node->length;
     buf->st_uid = node->uid;
     buf->st_gid = node->gid;
-    buf->st_mode = node->mask;
+    buf->st_mode = perms;
     buf->st_rdev = node->rdev;
     
     // Set file type bits
-    if ((node->flags & 0x7) == FS_DIRECTORY)
+    if (ftype == FS_DIRECTORY)
         buf->st_mode |= 0040000;  // S_IFDIR
-    else if ((node->flags & 0x7) == FS_SYMLINK)
+    else if (ftype == FS_SYMLINK)
         buf->st_mode |= 0120000;  // S_IFLNK
-    else if ((node->flags & 0x7) == FS_CHARDEVICE)
+    else if (ftype == FS_CHARDEVICE)
         buf->st_mode |= 0020000;  // S_IFCHR
-    else if ((node->flags & 0x7) == FS_BLOCKDEVICE)
+    else if (ftype == FS_BLOCKDEVICE)
         buf->st_mode |= 0060000;  // S_IFBLK
     else
         buf->st_mode |= 0100000;  // S_IFREG
@@ -569,12 +617,12 @@ int kern_chroot(const char *path) {
 
     fs_node_t *node = 0;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
     if (path[0] == '/') {
-        if (path[1] == 0) node = root;
-        else node = finddir_fs(root, (char*)path + 1);
+        node = vfs_lookup(root, path);
     } else {
-        node = finddir_fs(root, (char*)path);
+        node = vfs_lookup(cwd, path);
     }
 
     if (!node) return -1;
@@ -632,7 +680,28 @@ int sys_setgid(int g) {
     }
     return -EPERM;
 }
-int sys_clone(uint32_t f, void *s, int *p, void *t, int *c) { (void)f; (void)s; (void)p; (void)t; (void)c; return -1; }
+int sys_clone(uint32_t flags, void *child_stack, int *parent_tidptr, void *tls, int *child_tidptr) {
+    (void)parent_tidptr;
+    (void)tls;
+    (void)child_tidptr;
+    extern int arch_fork_with_stack(void *child_stack);
+
+    /*
+     * Minimal Linux clone support for fork-style usage:
+     * - allow only CSIGNAL in low 8 bits (e.g. SIGCHLD)
+     * - reject thread-sharing flags for now
+     */
+    const uint32_t CLONE_SIGNAL_MASK = 0xFFu;
+    if (flags & ~CLONE_SIGNAL_MASK) {
+        return -22; /* EINVAL */
+    }
+
+    int child_pid = arch_fork_with_stack(child_stack);
+    if (child_pid < 0) {
+        return -11; /* EAGAIN */
+    }
+    return child_pid;
+}
 
 
 int sys_stat(const char *path, struct stat *buf) { 
@@ -912,27 +981,10 @@ int kern_readlink(const char *pathname, char *buf, size_t bufsiz) {
     if (!node) return -2; // ENOENT
     
     // Check if it's a symlink
-    if (!(node->flags & FS_SYMLINK)) return -22; // EINVAL - not a symlink
-    
-    // Alloc kernel buffer
-    // Limit bufsiz to avoid DoS/ENOMEM
-    size_t ksize = (bufsiz > 4096) ? 4096 : bufsiz;
-    char *kbuf = kmalloc(ksize);
-    if (!kbuf) return -12;
+    if ((node->flags & 0x07) != FS_SYMLINK) return -22; // EINVAL - not a symlink
 
-    int ret = readlink_fs(node, kbuf, ksize);
-    if (ret < 0) {
-        kfree(kbuf, ksize);
-        return ret;
-    }
-
-    if (copyout(kbuf, buf, ret) != 0) {
-        kfree(kbuf, ksize);
-        return -14;
-    }
-
-    kfree(kbuf, ksize);
-    return ret;
+    // kern_readlink writes into a kernel buffer directly.
+    return readlink_fs(node, buf, bufsiz);
 }
 
 int sys_access(const char *path, int mode) {
@@ -946,12 +998,12 @@ int kern_access(const char *path, int mode) {
 
     fs_node_t *node = 0;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
+    fs_node_t *cwd = current_process->cwd_node ? current_process->cwd_node : root;
 
     if (path[0] == '/') {
-        if (path[1] == 0) node = root;
-        else node = finddir_fs(root, (char*)path + 1);
+        node = vfs_lookup(root, path);
     } else {
-        node = finddir_fs(root, (char*)path);
+        node = vfs_lookup(cwd, path);
     }
 
     if (!node) return -1;

@@ -3,13 +3,109 @@
 #include <arch/x86-common/io.h>
 #include <arch/i386/idt.h>
 #include <sys/termios.h>
+#include <sys/errno.h>
+#include <sys/poll.h>
+#include <vfs/vfs.h>
+#include <string.h>
+#include <stdio.h>
 
 int uart_received(void);
+
+#define UART_PORT_COUNT 4
+
+static const uint16_t uart_ports[UART_PORT_COUNT] = {
+    UART_COM1, UART_COM2, UART_COM3, UART_COM4
+};
+
 static uint16_t uart_base_port = UART_COM1;
+static fs_node_t uart_nodes[UART_PORT_COUNT];
+static int uart_nodes_registered = 0;
+
+static void uart_program_port(uint16_t port, int enable_rx_irq) {
+    outb(port + 1, 0x00);    // Disable all interrupts
+    outb(port + 3, 0x80);    // Enable DLAB (set baud rate divisor)
+    outb(port + 0, 0x03);    // Set divisor to 3 (lo byte) 38400 baud
+    outb(port + 1, 0x00);    //                  (hi byte)
+    outb(port + 3, 0x03);    // 8 bits, no parity, one stop bit
+    outb(port + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
+    outb(port + 4, 0x0B);    // RTS/DSR set
+    outb(port + 1, enable_rx_irq ? 0x01 : 0x00);
+}
+
+static uint16_t uart_node_port(const fs_node_t *node) {
+    return (uint16_t)(node ? node->impl : 0);
+}
+
+static int uart_port_received(uint16_t port) {
+    return inb(port + 5) & 1;
+}
+
+static int uart_port_is_transmit_empty(uint16_t port) {
+    return inb(port + 5) & 0x20;
+}
+
+static size_t uart_node_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    (void)offset;
+    uint16_t port = uart_node_port(node);
+    size_t count = 0;
+
+    while (count < size) {
+        if (!uart_port_received(port)) {
+            break;
+        }
+        buffer[count++] = inb(port + 0);
+    }
+
+    return count;
+}
+
+static size_t uart_node_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    (void)offset;
+    uint16_t port = uart_node_port(node);
+    size_t count = 0;
+
+    while (count < size) {
+        uint32_t spins = 0;
+        while (!uart_port_is_transmit_empty(port)) {
+            if (++spins > 100000) {
+                return count;
+            }
+        }
+        outb(port + 0, buffer[count++]);
+    }
+
+    return count;
+}
+
+static int uart_node_ioctl(fs_node_t *node, uint32_t request, void *arg) {
+    (void)node;
+    (void)request;
+    (void)arg;
+    return -ENOTTY;
+}
+
+static int uart_node_poll(fs_node_t *node, void *waiter) {
+    (void)waiter;
+    uint16_t port = uart_node_port(node);
+    int events = POLLOUT | POLLWRNORM;
+
+    if (uart_port_received(port)) {
+        events |= POLLIN | POLLRDNORM;
+    }
+
+    return events;
+}
+
+static void uart_node_open(fs_node_t *node) {
+    (void)node;
+}
+
+static void uart_node_close(fs_node_t *node) {
+    (void)node;
+}
 
 int uart_select_port(uint32_t serial_index) {
-    static const uint16_t uart_ports[] = { UART_COM1, UART_COM2, UART_COM3, UART_COM4 };
-    if (serial_index >= (sizeof(uart_ports) / sizeof(uart_ports[0]))) {
+    if (serial_index >= UART_PORT_COUNT) {
         return -1;
     }
     uart_base_port = uart_ports[serial_index];
@@ -96,17 +192,40 @@ console_backend_t *uart_get_console(void) {
     return &uart_console;
 }
 
-void uart_init(void) {
-    outb(uart_base_port + 1, 0x00);    // Disable all interrupts
-    outb(uart_base_port + 3, 0x80);    // Enable DLAB (set baud rate divisor)
-    outb(uart_base_port + 0, 0x03);    // Set divisor to 3 (lo byte) 38400 baud
-    outb(uart_base_port + 1, 0x00);    //                  (hi byte)
-    outb(uart_base_port + 3, 0x03);    // 8 bits, no parity, one stop bit
-    outb(uart_base_port + 2, 0xC7);    // Enable FIFO, clear them, with 14-byte threshold
-    outb(uart_base_port + 4, 0x0B);    // IRQs enabled, RTS/DSR set
+void uart_devfs_init(void) {
+    if (uart_nodes_registered) return;
 
-    // Enable Receiver Data Available interrupts only.
-    outb(uart_base_port + 1, 0x01);
+    for (uint32_t i = 0; i < UART_PORT_COUNT; i++) {
+        fs_node_t *node = &uart_nodes[i];
+        uint16_t port = uart_ports[i];
+
+        uart_program_port(port, 0);
+
+        memset(node, 0, sizeof(*node));
+        snprintf(node->name, sizeof(node->name), "comm/serial%u", i);
+        node->flags = FS_CHARDEVICE;
+        node->mask = 0660;
+        node->uid = 0;
+        node->gid = 0;
+        node->rdev = (4 << 8) | i;
+        node->impl = (uintptr_t)port;
+        node->open = uart_node_open;
+        node->close = uart_node_close;
+        node->read = uart_node_read;
+        node->write = uart_node_write;
+        node->ioctl = uart_node_ioctl;
+        node->poll = uart_node_poll;
+
+        devfs_register_device(node);
+        kprintf("uart: /dev/%s registered (COM%u @ 0x%x)\n",
+                node->name, i + 1, port);
+    }
+
+    uart_nodes_registered = 1;
+}
+
+void uart_init(void) {
+    uart_program_port(uart_base_port, 1);
 }
 
 void uart_handler(registers_t *regs) {
@@ -159,7 +278,7 @@ void uart_handler(registers_t *regs) {
 }
 
 int uart_received(void) {
-    return inb(uart_base_port + 5) & 1;
+    return uart_port_received(uart_base_port);
 }
 
 char uart_getc(void) {
@@ -172,7 +291,7 @@ char uart_getc(void) {
 }
 
 int uart_is_transmit_empty(void) {
-    return inb(uart_base_port + 5) & 0x20;
+    return uart_port_is_transmit_empty(uart_base_port);
 }
 
 void uart_putc(char c) {

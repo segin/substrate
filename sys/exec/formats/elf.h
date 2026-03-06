@@ -53,6 +53,7 @@ typedef struct {
 #define SHF_OS_NONCONFORMING 0x100
 #define SHF_GROUP       0x200
 #define SHF_TLS         0x400
+#define SHF_GNU_RETAIN  0x200000
 
 typedef struct {
     uint32_t p_type;
@@ -154,6 +155,16 @@ typedef struct {
 #define DT_FINI_ARRAY 26
 #define DT_INIT_ARRAYSZ 27
 #define DT_FINI_ARRAYSZ 28
+#define DT_RUNPATH 29
+#define DT_FLAGS 30
+#define DT_PREINIT_ARRAY 32
+#define DT_PREINIT_ARRAYSZ 33
+#define DT_GNU_HASH 0x6ffffef5
+#define DT_VERSYM 0x6ffffff0
+#define DT_VERDEF 0x6ffffffc
+#define DT_VERDEFNUM 0x6ffffffd
+#define DT_VERNEED 0x6ffffffe
+#define DT_VERNEEDNUM 0x6fffffff
 
 #define PT_NULL    0
 #define PT_LOAD    1
