@@ -4,6 +4,15 @@
 #include <regex.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <getopt.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <signal.h>
+#include <setjmp.h>
+
+int secure_mode = 0;
+int batch_mode = 0;
+int visual_mode = 0;
 
 typedef struct line {
     struct line *prev;
@@ -27,6 +36,33 @@ buffer_t regs[27]; // 0-25 = a-z, 26 = unnamed
 
 buffer_t undo_buf;
 int undo_valid = 0;
+
+jmp_buf main_loop_jmp;
+buffer_t *global_buf_for_sighandler = NULL;
+
+void handle_sigint(int sig) {
+    (void)sig;
+    printf("\nInterrupt\n");
+    longjmp(main_loop_jmp, 1);
+}
+
+void handle_sigterm(int sig) {
+    (void)sig;
+    if (global_buf_for_sighandler && global_buf_for_sighandler->modified && global_buf_for_sighandler->filename && global_buf_for_sighandler->head) {
+        char path[1024];
+        snprintf(path, sizeof(path), "%s.recover", global_buf_for_sighandler->filename);
+        FILE *f = fopen(path, "w");
+        if (f) {
+            line_t *curr = global_buf_for_sighandler->head;
+            while (curr) {
+                fprintf(f, "%s\n", curr->text);
+                curr = curr->next;
+            }
+            fclose(f);
+        }
+    }
+    exit(1);
+}
 
 void buf_init(buffer_t *b) {
     b->head = b->tail = b->cur = NULL;
@@ -139,6 +175,10 @@ void buf_read_file(buffer_t *b, const char *filename) {
 
 void buf_write_file(buffer_t *b, const char *filename, int append) {
     if (filename[0] == '!') {
+        if (secure_mode) {
+            fprintf(stderr, "Shell commands not allowed in secure mode\n");
+            return;
+        }
         // write to shell command
         FILE *f = popen(filename + 1, "w");
         if (!f) return;
@@ -285,7 +325,10 @@ void do_command(buffer_t *b, char *cmd) {
     while (*cmd && isspace((unsigned char)*cmd)) cmd++;
     
     // Commands implementation skeleton
-    if (cmd[0] == 'q' || (cmd[0] == 'x' && cmd[1] == 'i' && cmd[2] == 't') || (cmd[0] == 'w' && cmd[1] == 'q')) {
+    if (strcmp(cmd, "visual") == 0 || strcmp(cmd, "vi") == 0) {
+        fprintf(stderr, "ex: visual mode not implemented in this build.\n");
+        return;
+    } else if (cmd[0] == 'q' || (cmd[0] == 'x' && cmd[1] == 'i' && cmd[2] == 't') || (cmd[0] == 'w' && cmd[1] == 'q')) {
         if (cmd[0] == 'x' || cmd[0] == 'w') {
             if (b->filename) buf_write_file(b, b->filename, 0); // wq or x
         }
@@ -326,7 +369,7 @@ void do_command(buffer_t *b, char *cmd) {
         }
         if (b->filename) {
             buf_read_file(b, b->filename);
-            printf("\"%s\" %d lines\n", b->filename, b->line_count);
+            if (!batch_mode) printf("\"%s\" %d lines\n", b->filename, b->line_count);
         } else {
             fprintf(stderr, "No current filename\n");
         }
@@ -337,6 +380,10 @@ void do_command(buffer_t *b, char *cmd) {
         FILE *f = NULL;
         int is_pipe = 0;
         if (*ptr == '!') {
+            if (secure_mode) {
+                fprintf(stderr, "Shell commands not allowed in secure mode\n");
+                return;
+            }
             is_pipe = 1;
             f = popen(ptr + 1, "r");
         } else {
@@ -361,7 +408,7 @@ void do_command(buffer_t *b, char *cmd) {
             if (is_pipe) pclose(f);
             else fclose(f);
             
-            printf("\"%s\" %d lines\n", *cmd == '!' ? ptr+1 : ptr, lines_read);
+            if (!batch_mode) printf("\"%s\" %d lines\n", *cmd == '!' ? ptr+1 : ptr, lines_read);
         } else {
             perror(ptr);
         }
@@ -664,25 +711,89 @@ void do_command(buffer_t *b, char *cmd) {
         }
         
         free(re_str);
+    } else if (cmd[0] == '!') {
+        if (secure_mode) {
+            fprintf(stderr, "Shell commands not allowed in secure mode\n");
+            return;
+        }
+        system(cmd + 1);
     }
 }
 
 int main(int argc, char **argv) {
-    (void)argc;
+    int opt;
+    while ((opt = getopt(argc, argv, "sSv")) != -1) {
+        switch (opt) {
+        case 's':
+            batch_mode = 1;
+            break;
+        case 'S':
+            secure_mode = 1;
+            break;
+        case 'v':
+            visual_mode = 1;
+            break;
+        default:
+            fprintf(stderr, "Usage: %s [-s] [-S] [-v] [file]\n", argv[0]);
+            exit(1);
+        }
+    }
+
     buffer_t buf;
     buf_init(&buf);
     undo_valid = 0;
     buf_init(&undo_buf);
     for (int i=0; i<27; i++) buf_init(&regs[i]);
 
-    if (argc > 1) {
-        buf.filename = strdup(argv[1]);
+    if (optind < argc) {
+        buf.filename = strdup(argv[optind]);
         buf_read_file(&buf, buf.filename);
+    }
+    
+    if (visual_mode) {
+        fprintf(stderr, "ex: visual mode not implemented in this build.\n");
+    }
+
+    char *exinit = getenv("EXINIT");
+    if (exinit) {
+        char *exinit_cpy = strdup(exinit);
+        do_command(&buf, exinit_cpy);
+        free(exinit_cpy);
+    } else {
+        char *home = getenv("HOME");
+        if (home) {
+            char path[1024];
+            snprintf(path, sizeof(path), "%s/.exrc", home);
+            
+            struct stat st;
+            if (stat(path, &st) == 0 && (st.st_uid == getuid() || st.st_uid == 0)) {
+                FILE *f = fopen(path, "r");
+                if (f) {
+                    char *rc_line = NULL;
+                    size_t rc_cap = 0;
+                    ssize_t rc_ret;
+                    while ((rc_ret = getline(&rc_line, &rc_cap, f)) != -1) {
+                        if (rc_ret > 0 && rc_line[rc_ret-1] == '\n') rc_line[rc_ret-1] = '\0';
+                        do_command(&buf, rc_line);
+                    }
+                    free(rc_line);
+                    fclose(f);
+                }
+            }
+        }
     }
 
     char *line = NULL;
     size_t cap = 0;
     ssize_t ret;
+    
+    global_buf_for_sighandler = &buf;
+    signal(SIGINT, handle_sigint);
+    signal(SIGHUP, handle_sigterm);
+    signal(SIGTERM, handle_sigterm);
+
+    setjmp(main_loop_jmp);
+
     while ((ret = getline(&line, &cap, stdin)) != -1) {
         if (ret > 0 && line[ret-1] == '\n') line[ret-1] = '\0';
         
