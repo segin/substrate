@@ -10933,6 +10933,8 @@ static int should_skip_fn_body_for_codegen(const cc_translation_unit_t *tu, cons
 }
 
 int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag_t *diag) {
+    if (!tu || !out) return -1;
+
     size_t i;
     size_t def_count = 0;
     size_t out_i = 0;
