@@ -10,9 +10,11 @@
  */
 #include <stdio.h>
 #include <stdint.h>
+#include <string.h>
 #include <kern/console.h>
 #include <vm/vm_page.h>
 #include <vm/phys_mem.h>
+#include <vm/vm_object.h>
 
 static int passed = 0;
 static int failed = 0;
@@ -234,6 +236,60 @@ static void test_age_scan_deactivates_cold_page(void) {
     TEST_PASS("age_scan_deactivates_cold_page");
 }
 
+/* Test: vm_page_insert/remove maintains vm_object linkage */
+static void test_vm_page_object_linkage(void) {
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x4000);
+    TEST_ASSERT(obj != NULL, "object_link: object alloc failed");
+
+    vm_page_t page;
+    memset(&page, 0, sizeof(page));
+
+    vm_page_insert(&page, obj, 7);
+    TEST_ASSERT(page.object == obj, "object_link: page object not set");
+    TEST_ASSERT(page.pindex == 7, "object_link: page pindex not set");
+    TEST_ASSERT(obj->page_count == 1, "object_link: object page_count != 1");
+    TEST_ASSERT(vm_object_lookup_page(obj, 7) == &page, "object_link: lookup failed");
+
+    vm_page_remove(&page);
+    TEST_ASSERT(page.object == NULL, "object_link: page object not cleared");
+    TEST_ASSERT(page.pindex == 0, "object_link: page pindex not cleared");
+    TEST_ASSERT(obj->page_count == 0, "object_link: object page_count != 0");
+    TEST_ASSERT(vm_object_lookup_page(obj, 7) == NULL, "object_link: lookup still found page");
+
+    vm_object_deallocate(obj);
+    TEST_PASS("vm_page_object_linkage");
+}
+
+/* Test: pv_entry insert/remove/remove_all maintains backlink list */
+static void test_pv_entry_list_manipulation(void) {
+    vm_page_t page;
+    struct pmap *pmap1 = (struct pmap *)(uintptr_t)0x1000;
+    struct pmap *pmap2 = (struct pmap *)(uintptr_t)0x2000;
+
+    memset(&page, 0, sizeof(page));
+
+    pv_insert(&page, pmap1, 0x4000);
+    TEST_ASSERT(page.pv_list != NULL, "pv_list: first insert failed");
+    TEST_ASSERT(page.pv_list->pmap == pmap1, "pv_list: first pmap mismatch");
+    TEST_ASSERT(page.pv_list->va == 0x4000, "pv_list: first va mismatch");
+
+    pv_insert(&page, pmap2, 0x8000);
+    TEST_ASSERT(page.pv_list != NULL, "pv_list: second insert failed");
+    TEST_ASSERT(page.pv_list->pmap == pmap2, "pv_list: second insert not at head");
+    TEST_ASSERT(page.pv_list->next != NULL, "pv_list: missing second element");
+    TEST_ASSERT(page.pv_list->next->pmap == pmap1, "pv_list: first mapping lost");
+
+    pv_remove(&page, pmap2, 0x8000);
+    TEST_ASSERT(page.pv_list != NULL, "pv_list: head removed incorrectly");
+    TEST_ASSERT(page.pv_list->pmap == pmap1, "pv_list: wrong entry remained after remove");
+    TEST_ASSERT(page.pv_list->next == NULL, "pv_list: unexpected extra entry after remove");
+
+    pv_remove_all(&page);
+    TEST_ASSERT(page.pv_list == NULL, "pv_list: remove_all did not clear list");
+
+    TEST_PASS("pv_entry_list_manipulation");
+}
+
 /* Test entry point */
 void test_vm_page_queue(void) {
     kprint("=== VM Page Queue Unit Tests ===\n");
@@ -251,6 +307,8 @@ void test_vm_page_queue(void) {
     test_inactive_age0_evictable();
     test_get_stats();
     test_age_scan_deactivates_cold_page();
+    test_vm_page_object_linkage();
+    test_pv_entry_list_manipulation();
     
     char buf[64];
     sprintf(buf, "=== vm_page tests: %d passed, %d failed ===\n", passed, failed);
