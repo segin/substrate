@@ -1355,6 +1355,7 @@ extern void vm_page_deactivate(void);
 extern void vm_page_estimate_working_set(void);
 extern void vm_page_free(void);
 extern void vm_page_get_stats(void);
+extern void vm_page_get_thresholds(void);
 extern void vm_page_get_vmstat(void);
 extern void vm_page_hold(void);
 extern void vm_page_init(void);
@@ -2548,6 +2549,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vm_page_is_evict_candidate, "vm_page_is_evict_candidate" },
     { (uint32_t)(uintptr_t)&vm_page_get_stats, "vm_page_get_stats" },
     { (uint32_t)(uintptr_t)&vm_page_get_vmstat, "vm_page_get_vmstat" },
+    { (uint32_t)(uintptr_t)&vm_page_get_thresholds, "vm_page_get_thresholds" },
     { (uint32_t)(uintptr_t)&vm_page_record_pagein, "vm_page_record_pagein" },
     { (uint32_t)(uintptr_t)&vm_page_estimate_working_set, "vm_page_estimate_working_set" },
     { (uint32_t)(uintptr_t)&vm_page_should_pageout, "vm_page_should_pageout" },
@@ -2891,4 +2893,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1440;
+int ksym_count = 1441;

@@ -147,8 +147,16 @@ typedef struct vm_vmstat {
     uint32_t zero_fill_pages;
 } vm_vmstat_t;
 
+typedef struct vm_page_thresholds {
+    uint32_t free_reserved;
+    uint32_t free_min;
+    uint32_t free_target;
+    uint32_t inactive_target;
+} vm_page_thresholds_t;
+
 void vm_page_get_stats(vm_page_stats_t *stats);
 void vm_page_get_vmstat(vm_vmstat_t *stats);
+void vm_page_get_thresholds(vm_page_thresholds_t *thresholds);
 void vm_page_record_pagein(uint32_t count);
 int vm_page_estimate_working_set(void);   // Estimate working set size
 int vm_page_should_pageout(void);          // Hint for swapper/pageout daemon

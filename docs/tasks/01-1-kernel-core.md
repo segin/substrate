@@ -165,12 +165,12 @@
                 - [x] Unit: wire/unwire reference counting. (REQ: REQ-01-0144)
                 - [x] Unit: `vm_page_insert` / `vm_page_remove` object linkage. (REQ: REQ-01-0145)
                 - [x] Unit: `pv_entry` list manipulation (insert, remove, lookup). (REQ: REQ-01-0146)
-                - [ ] Unit: page daemon thresholds — verify scan triggers at correct free count. (REQ: REQ-01-0147)
+                - [x] Unit: page daemon thresholds — verify scan triggers at correct free count. (REQ: REQ-01-0147)
                 - [x] Property: queue length invariant — sum of all queue counts = total pages. (REQ: REQ-01-0148)
                 - [x] Property: no page appears on two queues simultaneously. (REQ: REQ-01-0149)
             - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
-                - [ ] Internal doc: page queue state machine and transitions. (REQ: REQ-01-0151)
-                - [ ] Internal doc: page daemon algorithm and tuning parameters. (REQ: REQ-01-0152)
+                - [x] Internal doc: page queue state machine and transitions. (REQ: REQ-01-0151)
+                - [x] Internal doc: page daemon algorithm and tuning parameters. (REQ: REQ-01-0152)
 
         - [ ] **PMAP Layer (Machine Dependent — i386):** (REQ: REQ-01-0153)
 

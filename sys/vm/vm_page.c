@@ -838,6 +838,15 @@ void vm_page_get_vmstat(vm_vmstat_t *stats) {
 	}
 }
 
+void vm_page_get_thresholds(vm_page_thresholds_t *thresholds) {
+	if (!thresholds) return;
+
+	thresholds->free_reserved = (uint32_t)vm_page_free_reserved;
+	thresholds->free_min = (uint32_t)vm_page_free_min;
+	thresholds->free_target = (uint32_t)vm_page_free_target;
+	thresholds->inactive_target = (uint32_t)vm_page_inactive_target;
+}
+
 void vm_page_record_pagein(uint32_t count) {
 	vm_stat_pageins += count;
 }

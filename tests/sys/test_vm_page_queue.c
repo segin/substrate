@@ -32,6 +32,14 @@ static int failed = 0;
     passed++; \
 } while(0)
 
+static void free_phys_page_list(vm_page_t *list) {
+    while (list) {
+        vm_page_t *next = list->next;
+        vm_phys_free_page(list);
+        list = next;
+    }
+}
+
 /* Test: Page allocation sets initial state correctly */
 static void test_page_alloc_initial_state(void) {
     vm_page_t *page = vm_page_alloc(NULL, 0, 0);
@@ -313,6 +321,42 @@ static void test_queue_accounting_invariant(void) {
     TEST_PASS("queue_accounting_invariant");
 }
 
+/* Unit: page daemon threshold trigger follows free_target */
+static void test_pageout_threshold_trigger(void) {
+    vm_page_thresholds_t thresholds;
+    vm_page_t *allocated = NULL;
+    vm_page_t *page;
+
+    vm_page_get_thresholds(&thresholds);
+    TEST_ASSERT(thresholds.free_target >= thresholds.free_min,
+                "pageout_threshold: free_target below free_min");
+
+    while (vm_phys_get_free() > thresholds.free_target) {
+        page = vm_phys_alloc_page();
+        TEST_ASSERT(page != NULL, "pageout_threshold: alloc to target failed");
+        page->next = allocated;
+        allocated = page;
+    }
+
+    TEST_ASSERT(vm_phys_get_free() == thresholds.free_target,
+                "pageout_threshold: did not stop at free_target");
+    TEST_ASSERT(!vm_page_should_pageout(),
+                "pageout_threshold: triggered at free_target");
+
+    page = vm_phys_alloc_page();
+    TEST_ASSERT(page != NULL, "pageout_threshold: alloc below target failed");
+    page->next = allocated;
+    allocated = page;
+
+    TEST_ASSERT(vm_phys_get_free() < thresholds.free_target,
+                "pageout_threshold: free count not below target");
+    TEST_ASSERT(vm_page_should_pageout(),
+                "pageout_threshold: did not trigger below free_target");
+
+    free_phys_page_list(allocated);
+    TEST_PASS("pageout_threshold_trigger");
+}
+
 /* Test: vm_page_insert/remove maintains vm_object linkage */
 static void test_vm_page_object_linkage(void) {
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x4000);
@@ -384,6 +428,7 @@ void test_vm_page_queue(void) {
     test_inactive_age0_evictable();
     test_get_stats();
     test_age_scan_deactivates_cold_page();
+    test_pageout_threshold_trigger();
     test_queue_integrity_checker();
     test_queue_accounting_invariant();
     test_vm_page_object_linkage();
