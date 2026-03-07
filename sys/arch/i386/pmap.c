@@ -1305,7 +1305,7 @@ int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
 
 // Atomic test and clear: check if page was accessed and clear A bit
 // Returns 1 if page was referenced (and now cleared), 0 otherwise
-int pmap_test_and_clear_ref(pmap_t pmap, uint32_t va) {
+static int pmap_test_and_clear_ref_va(pmap_t pmap, uint32_t va) {
     uint32_t *pt;
     uint32_t pti;
     if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
@@ -1332,7 +1332,7 @@ void pmap_track_access(vm_page_t *m) {
     int was_accessed = 0;
 
     while (pv) {
-        if (pmap_test_and_clear_ref(pv->pmap, pv->va)) {
+        if (pmap_test_and_clear_ref_va(pv->pmap, pv->va)) {
             was_accessed = 1;
         }
 
@@ -1363,7 +1363,7 @@ int pmap_is_modified_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
 
 // Atomic test and clear: check if page was modified and clear D bit
 // Returns 1 if page was modified (and now cleared), 0 otherwise
-int pmap_test_and_clear_modify(pmap_t pmap, uint32_t va) {
+static int pmap_test_and_clear_modify_va(pmap_t pmap, uint32_t va) {
     uint32_t *pt;
     uint32_t pti;
     if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
@@ -1383,50 +1383,39 @@ int pmap_test_and_clear_modify(pmap_t pmap, uint32_t va) {
 // Track modification for writeback scheduling
 // Used by page daemon to find dirty pages and schedule writebacks
 // Updates last_modified timestamp when D-bit is cleared
-void pmap_track_modify(vm_page_t *m, uint32_t current_time) {
-    if (!m) return;
-    
+int pmap_test_and_clear_ref(vm_page_t *m) {
+    if (!m) return 0;
+
+    int was_referenced = 0;
     struct pv_entry *pv = m->pv_list;
-    int was_modified = 0;
-    
     while (pv) {
-        pmap_t pmap = pv->pmap;
-        uint32_t va = pv->va;
-        
-        // Only check if this is the current address space
-        uint32_t cr3;
-        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-        if (pmap->pdir_phys != cr3) {
-            pv = pv->next;
-            continue;
+        if (pmap_test_and_clear_ref_va(pv->pmap, pv->va)) {
+            was_referenced = 1;
         }
-        
-        uint32_t pdi = PD_INDEX(va);
-        uint32_t pti = PT_INDEX(va);
-        
-        if (!(V_PD[pdi] & PTE_P)) {
-            pv = pv->next;
-            continue;
-        }
-        
-        uint32_t *pt = V_PT(pdi);
-        if (!(pt[pti] & PTE_P)) {
-            pv = pv->next;
-            continue;
-        }
-        
-        // Check and clear D bit
-        if (pt[pti] & PTE_D) {
-            pt[pti] &= ~PTE_D;
-            pmap_invalidate_page(va);
-            was_modified = 1;
-        }
-        
         pv = pv->next;
     }
-    
-    // Update modification timestamp for writeback scheduling
-    if (was_modified) {
+
+    return was_referenced;
+}
+
+int pmap_test_and_clear_modify(vm_page_t *m) {
+    if (!m) return 0;
+
+    int was_modified = 0;
+    struct pv_entry *pv = m->pv_list;
+    while (pv) {
+        if (pmap_test_and_clear_modify_va(pv->pmap, pv->va)) {
+            was_modified = 1;
+        }
+        pv = pv->next;
+    }
+
+    return was_modified;
+}
+
+void pmap_track_modify(vm_page_t *m, uint32_t current_time) {
+    if (!m) return;
+    if (pmap_test_and_clear_modify(m)) {
         m->last_modified = current_time;
     }
 }

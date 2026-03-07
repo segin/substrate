@@ -135,14 +135,14 @@ int pmap_is_referenced(pmap_t pmap, uintptr_t va);
 int pmap_is_modified(pmap_t pmap, uintptr_t va);
 void pmap_clear_reference(pmap_t pmap, uintptr_t va);
 void pmap_clear_modify(pmap_t pmap, uintptr_t va);
-int pmap_test_and_clear_ref(pmap_t pmap, uintptr_t va);
 int pmap_is_modified_range(pmap_t pmap, uintptr_t sva, uintptr_t eva);
-int pmap_test_and_clear_modify(pmap_t pmap, uintptr_t va);
 
 // Per-page reference/modification tracking (walks pv_list)
 struct vm_page;
 int pmap_page_is_referenced(struct vm_page *m);
 void pmap_page_clear_reference(struct vm_page *m);
+int pmap_test_and_clear_ref(struct vm_page *m);
+int pmap_test_and_clear_modify(struct vm_page *m);
 void pmap_track_access(struct vm_page *m);
 void pmap_track_modify(struct vm_page *m, uint32_t current_time);
 
