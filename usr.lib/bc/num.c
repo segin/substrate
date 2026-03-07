@@ -7,7 +7,32 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include "num.h"
+
+int bc_scale = 0;
+int bc_ibase = 10;
+int bc_obase = 10;
+
+void bc_error(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "bc: runtime error: ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    va_end(ap);
+    // In strict bc, math errors might not abort the interpreter, just the statement.
+    // For libbc, we log to stderr.
+}
+
+void bc_warn(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "bc: warning: ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, "\n");
+    va_end(ap);
+}
 
 bc_num *bc_new(void) {
     bc_num *n = malloc(sizeof(bc_num));
@@ -29,7 +54,7 @@ void bc_free(bc_num *n) {
     free(n);
 }
 
-// Ensure capacity for 'needed' digits (preserves existing)
+// Ensure capacity for 'needed' base-100 digits (preserves existing)
 void bc_expsize(bc_num *n, int needed) {
     if (needed <= n->cap) return;
     int new_cap = needed < 8 ? 8 : needed * 2;
@@ -41,6 +66,16 @@ void bc_expsize(bc_num *n, int needed) {
     n->digits = new_digits;
     memset(n->digits + n->cap, 0, new_cap - n->cap);
     n->cap = new_cap;
+}
+
+// Trim leading zero digits (both length and scale correctness)
+void bc_trim(bc_num *n) {
+    while (n->len > 0 && n->digits[n->len - 1] == 0) {
+        n->len--;
+    }
+    if (n->len == 0) {
+        n->sign = 0;
+    }
 }
 
 bc_num *bc_from_long(long long v) {
@@ -57,8 +92,6 @@ bc_num *bc_from_long(long long v) {
         n->sign = 1;
     }
 
-    // Convert digits (base 100)
-    // Max long long ~9e18 => 10 base-100 digits
     bc_expsize(n, 10);
     int i = 0;
     while (v > 0) {
@@ -69,16 +102,38 @@ bc_num *bc_from_long(long long v) {
     return n;
 }
 
-bc_num *bc_from_string(const char *s) {
+long long bc_num_to_long(bc_num *n) {
+    if (!n || n->len == 0) return 0;
+    long long res = 0;
+    long long p = 1;
+    // This only works for the integer part, which is what bc_scale/ibase need.
+    // Integer part starts at base-100 digit 'n->scale / 2'
+    int start = (n->scale + 1) / 2;
+    for (int i = start; i < n->len; i++) {
+        res += (long long)n->digits[i] * p;
+        p *= 100;
+    }
+    // Handle the half-digit if scale is odd? No, scale is decimal digits.
+    // If scale=1, "1.2" -> [20, 1]. val=12. Integer is 1.
+    // digits[0]=20. digits[1]=1. start = 1. res = 1.
+    return n->sign < 0 ? -res : res;
+}
+
+static int char_val(int c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'Z') return c - 'A' + 10;
+    return -1;
+}
+
+// Parse string honoring ibase. Support for ibase 2-36.
+// Note: single-digit decimal fraction parsing uses ibase.
+bc_num *bc_from_string_base(const char *s, int ibase) {
     bc_num *n = bc_new();
     if (!s) return n;
 
-    // Skip whitespace
     while (isspace(*s)) s++;
-
     if (*s == '\0') return n;
 
-    // Sign
     int sign = 1;
     if (*s == '-') {
         sign = -1;
@@ -87,81 +142,100 @@ bc_num *bc_from_string(const char *s) {
         s++;
     }
 
-    // Count digits and calculate scale
-    int int_digits = 0;
-    int frac_digits = 0;
+    // A parsed number is mathematically: sum(d_i * ibase^i) * ibase^-frac_len
+    // We will build it via multiplication: val = val * ibase + digit
+    bc_num *ibase_num = bc_from_long(ibase);
+    bc_num *val = bc_from_long(0);
+    
+    int frac_len = 0;
     int seen_dot = 0;
 
-    const char *p = s;
-    while (*p) {
-        if (isdigit(*p)) {
-            if (seen_dot) frac_digits++;
-            else int_digits++;
-        } else if (*p == '.') {
+    while (*s) {
+        if (*s == '.') {
             if (seen_dot) break;
             seen_dot = 1;
-        } else {
-            break;
-        }
-        p++;
-    }
-
-    int total_digits = int_digits + frac_digits;
-    if (total_digits == 0) {
-        return n; // Zero
-    }
-
-    n->sign = sign;
-    n->scale = frac_digits;
-
-    // Allocate: 2 decimal digits -> 1 base-100 digit
-    int needed = (total_digits + 1) / 2;
-    bc_expsize(n, needed);
-    n->len = needed;
-
-    // Fill digits from end
-    const char *end = p;
-    const char *curr = end - 1;
-    int digit_idx = 0;
-
-    while (curr >= s) {
-        if (*curr == '.') {
-            curr--;
+            s++;
             continue;
         }
-
-        int val = 0;
-        int multiplier = 1;
-
-        // First decimal digit (low)
-        if (isdigit(*curr)) {
-            val += (*curr - '0') * multiplier;
-            multiplier *= 10;
-            curr--;
+        
+        int d = char_val(*s);
+        if (d < 0 || d >= ibase) {
+            // For ibase <= 16, single character A-F. 
+            // What if char is invalid? Stop.
+            
+            // Wait, bc manual: digits greater than or equal to ibase are set to ibase-1
+            if (d >= ibase && d <= 35) {
+                d = ibase - 1;
+            } else {
+                break; // Not a recognized digit at all
+            }
         }
-
-        // Second decimal digit (high)
-        if (curr >= s && *curr == '.') curr--;
-        if (curr >= s && isdigit(*curr)) {
-            val += (*curr - '0') * multiplier;
-            curr--;
-        }
-
-        if (digit_idx < n->cap) {
-            n->digits[digit_idx++] = val;
-        }
+        
+        if (seen_dot) frac_len++;
+        
+        bc_num *d_num = bc_from_long(d);
+        bc_num *tmp_mul = bc_mul(val, ibase_num);
+        bc_num *tmp_add = bc_add(tmp_mul, d_num);
+        
+        bc_free(val);
+        bc_free(tmp_mul);
+        bc_free(d_num);
+        
+        val = tmp_add;
+        s++;
     }
-
-    // Trim leading zeros
-    while (n->len > 0 && n->digits[n->len - 1] == 0) {
-        n->len--;
+    
+    bc_free(ibase_num);
+    
+    // Now val holds the integer representing all digits.
+    // It is conceptually val / (ibase ^ frac_len).
+    // Let's keep it simple for now if ibase == 10.
+    if (ibase == 10) {
+        // Just set scale.
+        // Wait, val is currently a base-100 representation of the integer value.
+        // We need to shift it to align scale properly.
+        // If frac_len is say 3, "1.234" -> val=1234, scale=3. 
+        // 1234 is base-100: [34, 12]
+        val->scale = frac_len;
+        val->sign = bc_is_zero(val) ? 0 : sign;
+        bc_free(n);
+        return val;
     }
-
-    if (n->len == 0) n->sign = 0;
-
-    return n;
+    
+    // Non-10 ibase handles fractions via division:
+    // val_num = int_val / (ibase^frac_len)
+    if (frac_len > 0) {
+        bc_num *ib = bc_from_long(ibase);
+        bc_num *pow_f = bc_from_long(frac_len);
+        bc_num *denom = bc_pow(ib, pow_f);
+        bc_free(ib);
+        bc_free(pow_f);
+        
+        // Wait, bc POSIX: "fractional part of the constant is scale 
+        // determined by number of digits". 
+        // Division uses max(scale, obj->scale). Let's temporarily bump bc_scale.
+        
+        // This is tricky because bc_div uses bc_scale.
+        // In reality, constants are converted using floating point division.
+        bc_num *res = bc_div(val, denom);
+        res->sign = bc_is_zero(res) ? 0 : sign;
+        bc_free(val);
+        bc_free(denom);
+        bc_free(n);
+        return res;
+    }
+    
+    val->sign = bc_is_zero(val) ? 0 : sign;
+    bc_free(n);
+    return val;
 }
 
+bc_num *bc_from_string(const char *s, int ibase) {
+    if (ibase < 2 || ibase > 36) ibase = 10;
+    return bc_from_string_base(s, ibase);
+}
+
+// Print base 10 (optimised)
 void bc_print(bc_num *n) {
     if (!n) {
         printf("(null)");
@@ -177,7 +251,6 @@ void bc_print(bc_num *n) {
     }
     if (n->sign < 0) printf("-");
 
-    // Calculate D (total decimal digits in the significant part)
     int msd = n->digits[n->len - 1];
     int digits_in_msd = (msd >= 10) ? 2 : 1;
     int D = (n->len - 1) * 2 + digits_in_msd;
@@ -188,7 +261,6 @@ void bc_print(bc_num *n) {
         printf("0.");
         for (int i = 0; i < scale - D; i++) printf("0");
 
-        // Print all digits
         for (int i = n->len - 1; i >= 0; i--) {
             if (i == n->len - 1) printf("%d", n->digits[i]);
             else printf("%02d", n->digits[i]);
@@ -197,19 +269,15 @@ void bc_print(bc_num *n) {
         int int_part = D - scale;
         int count = 0;
 
-        // Iterate and print, inserting dot
         for (int i = n->len - 1; i >= 0; i--) {
             int val = n->digits[i];
 
-            // For MSD, handle 1 or 2 digits
             if (i == n->len - 1) {
                 if (digits_in_msd == 2) {
-                    int d1 = val / 10;
-                    int d2 = val % 10;
-                    printf("%d", d1);
+                    printf("%d", val / 10);
                     count++;
                     if (count == int_part && scale > 0) printf(".");
-                    printf("%d", d2);
+                    printf("%d", val % 10);
                     count++;
                     if (count == int_part && scale > 0) printf(".");
                 } else {
@@ -218,18 +286,79 @@ void bc_print(bc_num *n) {
                     if (count == int_part && scale > 0) printf(".");
                 }
             } else {
-                // Always 2 digits
-                int d1 = val / 10;
-                int d2 = val % 10;
-                printf("%d", d1);
+                printf("%d", val / 10);
                 count++;
                 if (count == int_part && scale > 0) printf(".");
-                printf("%d", d2);
+                printf("%d", val % 10);
                 count++;
                 if (count == int_part && scale > 0) printf(".");
             }
         }
     }
+}
+
+void bc_print_base(bc_num *n, int obase) {
+    if (obase == 10 || obase < 2) {
+        bc_print(n);
+        return;
+    }
+    
+    if (bc_is_zero(n)) {
+        if (obase <= 16) printf("0\n");
+        else printf(" 0\n");
+        return;
+    }
+    
+    if (n->sign < 0) printf("-");
+    
+    // Integer part conversion
+    // Copy integer part... (simple truncation for now)
+    // To truncate, we divide by 10^scale or similar if we supported floating point ops well.
+    // For now, if it's obase > 10, handle integers via successive division.
+    // TODO: implement full obase fractional conversion
+    if (n->scale > 0) {
+        bc_warn("libbc: obase > 10 for fractional numbers not fully implemented");
+        bc_print(n);
+        return;
+    }
+    
+    bc_num *copy = bc_dup(n);
+    copy->sign = 1;
+    copy->scale = 0; // Truncate fractional part for integer obase conversion
+    bc_num *base = bc_from_long(obase);
+    
+    // Collect digits
+    int max_digits = 1024;
+    int *out_digits = malloc(max_digits * sizeof(int));
+    int ds = 0;
+    
+    int old_scale = bc_scale;
+    bc_scale = 0;
+    
+    while (!bc_is_zero(copy)) {
+        bc_num *q = bc_div(copy, base);
+        bc_num *r = bc_mod(copy, base);
+        // Extract remainder integer
+        int rem = (int)bc_num_to_long(r);
+        if (ds < max_digits) out_digits[ds++] = rem;
+        bc_free(copy);
+        bc_free(r);
+        copy = q;
+    }
+    bc_free(copy);
+    bc_free(base);
+    bc_scale = old_scale;
+    
+    for (int i = ds - 1; i >= 0; i--) {
+        if (obase <= 16) {
+            int d = out_digits[i];
+            if (d < 10) printf("%d", d);
+            else printf("%c", 'A' + (d - 10));
+        } else {
+            printf(" %02d", out_digits[i]);
+        }
+    }
+    free(out_digits);
 }
 
 bc_num *bc_dup(bc_num *src) {
@@ -246,12 +375,25 @@ bc_num *bc_dup(bc_num *src) {
 
 // Helper: compare absolute values
 // Returns 1 if |a| > |b|, -1 if |a| < |b|, 0 if equal
+// MUST handle scale correctly
 int bc_abs_cmp(bc_num *a, bc_num *b) {
-    if (a->len > b->len) return 1;
-    if (a->len < b->len) return -1;
-    for (int i = a->len - 1; i >= 0; i--) {
-        if (a->digits[i] > b->digits[i]) return 1;
-        if (a->digits[i] < b->digits[i]) return -1;
+    // We cannot just compare length if scales differ.
+    // Align scales dynamically without allocating.
+    // Total decimal length (int + frac) ...
+    // Much easier: use align function
+    bc_num *aa, *bb;
+    bc_align_scale(a, b, &aa, &bb);
+    
+    int res = 0;
+    if (aa->len > bb->len) res = 1;
+    else if (aa->len < bb->len) res = -1;
+    else {
+        for (int i = aa->len - 1; i >= 0; i--) {
+            if (aa->digits[i] > bb->digits[i]) { res = 1; break; }
+            if (aa->digits[i] < bb->digits[i]) { res = -1; break; }
+        }
     }
-    return 0;
+    bc_free(aa);
+    bc_free(bb);
+    return res;
 }
