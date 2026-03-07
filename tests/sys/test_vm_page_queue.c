@@ -215,6 +215,25 @@ static void test_get_stats(void) {
     TEST_PASS("get_stats");
 }
 
+/* Test: age scan decrements age and deactivates cold pages */
+static void test_age_scan_deactivates_cold_page(void) {
+    vm_page_t *page = vm_page_alloc(NULL, 0, 0);
+    TEST_ASSERT(page != NULL, "age_scan: alloc failed");
+
+    page->flags &= ~PG_BUSY;
+    vm_page_activate(page);
+    page->age = 1;
+
+    vm_page_age_scan();
+
+    TEST_ASSERT(page->age == 0, "age_scan: age not decremented to zero");
+    TEST_ASSERT(page->flags & PG_INACTIVE, "age_scan: page not moved inactive");
+    TEST_ASSERT(!(page->flags & PG_ACTIVE), "age_scan: page still active");
+
+    vm_page_free(page);
+    TEST_PASS("age_scan_deactivates_cold_page");
+}
+
 /* Test entry point */
 void test_vm_page_queue(void) {
     kprint("=== VM Page Queue Unit Tests ===\n");
@@ -231,6 +250,7 @@ void test_vm_page_queue(void) {
     test_active_not_evictable();
     test_inactive_age0_evictable();
     test_get_stats();
+    test_age_scan_deactivates_cold_page();
     
     char buf[64];
     sprintf(buf, "=== vm_page tests: %d passed, %d failed ===\n", passed, failed);

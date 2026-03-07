@@ -81,6 +81,32 @@ Kernel worker model:
 - `swapper` (PID 0) remains the idle/root kernel context.
 - VM pressure is handled by a dedicated `pagedaemon` kernel process that sleeps on a wakeup channel and runs pageout work asynchronously.
 
+### 5.1 i386 PMAP Model
+
+The i386 PMAP implementation is a two-level paging design:
+- page directory + page tables
+- recursive self-map at PDE 1023
+- `V_PD` at `0xFFFFF000` and `V_PT(n)` at `0xFFC00000 + n * 4096`
+- per-process user PDEs in slots `0..767`
+- shared kernel PDEs in slots `768..1022`
+
+Address-space layout is fixed:
+- user virtual address space: `0x00000000..0xBFFFFFFF`
+- kernel virtual address space: `0xC0000000..0xFFFFFFFF`
+- kernel image load address: `0x00100000`
+- kernel image link address: `0xC0100000`
+
+Fork and copy paths use copy-on-write with per-page reverse mappings (`pv_entry`) so the VM layer can inspect hardware accessed/dirty state and resolve COW faults without synthetic software shadow bits.
+
+### 5.2 i386 TLB Strategy
+
+TLB management on i386 follows a tiered strategy:
+- single-page updates use `invlpg`
+- bulk local flushes use CR3 reload
+- SMP invalidation uses LAPIC IPIs to other CPUs plus an acknowledgement barrier
+- kernel mappings use PGE/global bits when supported
+- global flushes use the CR4.PGE toggle path
+
 Device namespace policy in `devfs`:
 - Root pseudo devices remain at `/dev/*` (for example `/dev/null`, `/dev/zero`).
 - Storage block devices are exposed under `/dev/storage/*`.

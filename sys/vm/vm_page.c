@@ -92,10 +92,12 @@ static void vm_pagedaemon(void *arg) {
 	}
 
 	for (;;) {
-		while (!vm_pages_needed) {
-			sched_sleep((void *)&vm_pages_needed);
+		uint64_t deadline = get_ticks() + get_hz();
+		sched_sleep_until((void *)&vm_pages_needed, deadline);
+		vm_page_age_scan();
+		if (vm_pages_needed || vm_page_should_pageout()) {
+			vm_pageout();
 		}
-		vm_pageout();
 		sched_yield();
 	}
 }
@@ -316,6 +318,9 @@ void vm_page_activate(vm_page_t *m) {
 	// Add to active queue
 	enqueue(&active_queue, m);
 	m->flags |= PG_ACTIVE;
+	if (m->age < VM_PAGE_AGE_INITIAL) {
+		m->age = VM_PAGE_AGE_INITIAL;
+	}
 }
 
 // Move page to inactive queue (eviction candidate)

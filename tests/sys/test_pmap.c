@@ -276,6 +276,50 @@ void test_pge_global_flush(void) {
     kprint("  PASS\n");
 }
 
+// Test: reference/modify tracking helpers
+void test_pmap_refmod_tracking(void) {
+    kprint("Test: pmap ref/modify tracking\n");
+
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    void *page_v = pmm_alloc_block();
+    TEST_ASSERT(page_v != 0, "page allocated");
+
+    uint32_t va = 0x403000;
+    uint32_t pa = (uint32_t)(uintptr_t)page_v - 0xC0000000;
+
+    pmap_activate(pmap);
+    TEST_ASSERT(pmap_enter(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "mapping created");
+
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+    V_PT(pdi)[pti] |= PTE_A | PTE_D;
+
+    TEST_ASSERT(pmap_is_referenced(pmap, va) == 1, "A-bit visible");
+    TEST_ASSERT(pmap_is_modified(pmap, va) == 1, "D-bit visible");
+    TEST_ASSERT(pmap_is_referenced_range(pmap, va, va + 0x1000) == 1, "referenced range count");
+    TEST_ASSERT(pmap_is_modified_range(pmap, va, va + 0x1000) == 1, "modified range count");
+
+    pmap_clear_reference(pmap, va);
+    pmap_clear_modify(pmap, va);
+    TEST_ASSERT(pmap_is_referenced(pmap, va) == 0, "A-bit cleared");
+    TEST_ASSERT(pmap_is_modified(pmap, va) == 0, "D-bit cleared");
+
+    V_PT(pdi)[pti] |= PTE_A | PTE_D;
+    struct vm_page *page = pmm_get_page(pa);
+    TEST_ASSERT(page != 0, "vm_page found for mapping");
+    TEST_ASSERT(pmap_test_and_clear_ref(page) == 1, "test_and_clear_ref succeeds");
+    TEST_ASSERT(pmap_is_referenced(pmap, va) == 0, "A-bit cleared through pv list");
+    TEST_ASSERT(pmap_test_and_clear_modify(page) == 1, "test_and_clear_modify succeeds");
+    TEST_ASSERT(pmap_is_modified(pmap, va) == 0, "D-bit cleared through pv list");
+
+    pmap_activate(pmap_kernel());
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
 // Test: pmap_protect upgrade/downgrade
 void test_pmap_protect_rw(void) {
     kprint("Test: pmap_protect upgrade/downgrade\n");
@@ -303,6 +347,29 @@ void test_pmap_protect_rw(void) {
     TEST_ASSERT(pmap_protect(pmap, va, va + 0x1000, VM_PROT_READ | VM_PROT_USER) == 0,
                 "pmap_protect downgrade succeeds");
     TEST_ASSERT((V_PT(pdi)[pti] & PTE_W) == 0, "downgrade clears write bit");
+
+    pmap_activate(pmap_kernel());
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
+// Test: large page remove path
+void test_pmap_large_remove(void) {
+    kprint("Test: pmap_remove large page\n");
+
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    uint32_t va = 0x800000;
+    uint32_t pa = 0x400000;
+
+    pmap_activate(pmap);
+    TEST_ASSERT(pmap_enter_large(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "large mapping created");
+    TEST_ASSERT(pmap_extract(pmap, va) == pa, "large mapping visible");
+
+    pmap_remove(pmap, va);
+    TEST_ASSERT(pmap_extract(pmap, va) == 0, "large mapping removed");
 
     pmap_activate(pmap_kernel());
     pmap_destroy(pmap);
@@ -360,8 +427,10 @@ void run_pmap_tests(void) {
     test_pmap_dump();
     test_pge_detection();
     test_pge_global_flush();
+    test_pmap_refmod_tracking();
     test_pmap_protect_rw();
     test_pmap_large_replace();
+    test_pmap_large_remove();
     test_memory_leak();
     
     kprint("\nResults: ");
