@@ -552,9 +552,7 @@ void pmm_reclaim_setup(void) {
      start &= ~(PMM_BLOCK_SIZE - 1);
      end = (end + PMM_BLOCK_SIZE - 1) & ~(PMM_BLOCK_SIZE - 1);
 
-    for (uint32_t i = start; i < end; i += PMM_BLOCK_SIZE) {
-        pmm_free_block((void*)(uintptr_t)i);
-    }
+    pmm_reclaim_range(start, end);
     kprint("Done.\n");
 }
 
@@ -1029,6 +1027,8 @@ size_t pmm_get_used_blocks(void) {
 // Redundant definitions removed
 
 void pmm_reclaim_range(uint32_t start, uint32_t end) {
+    start = pmm_virt_to_phys(start);
+    end = pmm_virt_to_phys(end);
     vm_phys_add_range(start, end);
 }
 
