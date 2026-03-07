@@ -117,6 +117,17 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         slice_count++;
     }
 
+    kprint("  ");
+    for (int d = 0; d < depth; d++) kprint("  ");
+    kprint(prefix);
+    kprint(": ");
+    if (slice_count == 0) {
+        kprint("(empty)");
+    } else {
+        kprint(summary);
+    }
+    kprint("\n");
+
     /* Second pass: register slices */
     for (int i = 0; i < (int)nparts; i++) {
         struct geom_bsd_partition *part = &label->d_partitions[i];
@@ -159,17 +170,6 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
                           geom_bsd_fstype_name(part->p_fstype), 0);
     }
 
-    kprint("  ");
-    for (int d = 0; d < depth; d++) kprint("  ");
-    kprint(prefix);
-    kprint(": partitions ");
-    if (slice_count == 0) {
-        kprint("(empty)");
-    } else {
-        kprint(summary);
-    }
-    kprint("\n");
-    
     return 0;
 }
 

@@ -174,6 +174,17 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         part_count++;
     }
 
+    kprint("  ");
+    for (int d = 0; d < depth; d++) kprint("  ");
+    kprint(prefix);
+    kprint(": ");
+    if (part_count == 0) {
+        kprint("(empty)");
+    } else {
+        kprint(summary);
+    }
+    kprint("\n");
+
     /* Second pass: register partitions */
     int part_num = 1;
     for (uint32_t i = 0; i < max_entries; i++) {
@@ -199,16 +210,6 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
                           gpt_type_name(entry->type_guid), 0);
     }
 
-    kprint("  ");
-    kprint(disk->name);
-    kprint(": partitions ");
-    if (part_count == 0) {
-        kprint("(empty)");
-    } else {
-        kprint(summary);
-    }
-    kprint("\n");
-    
     return 0;
 }
 

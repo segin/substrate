@@ -32,6 +32,14 @@ static void geom_summary_append(char *buf, size_t buf_size, int *first, const ch
     }
 }
 
+typedef struct mbr_logical_part {
+    char name[32];
+    uint64_t start;
+    uint64_t size;
+    uint8_t type;
+    uint32_t flags;
+} mbr_logical_part_t;
+
 /*
  * ============================================================
  * Extended Partition Chain Parsing
@@ -48,6 +56,7 @@ static void geom_summary_append(char *buf, size_t buf_size, int *first, const ch
  */
 static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_size,
                           const char *base_name, int *part_num,
+                          mbr_logical_part_t *logicals, size_t logical_cap,
                           char *summary, size_t summary_size, int *summary_first) {
     uint64_t ebr_lba = ext_start;
     uint8_t buf[512];
@@ -75,30 +84,32 @@ static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_si
             uint64_t part_size = entry->lba_size;
             
             /* Create partition name: ide0p5, ide0p6, etc. */
-            char part_name[32];
+            char part_name[sizeof(logicals[0].name)];
+            mbr_logical_part_t *logical = NULL;
+
+            if ((size_t)logical_count >= logical_cap) {
+                break;
+            }
+
+            logical = &logicals[logical_count];
+            memset(logical, 0, sizeof(*logical));
             snprintf(part_name, sizeof(part_name), "%sp%d", base_name, *part_num);
             (*part_num)++;
             geom_summary_append(summary, summary_size, summary_first, part_name);
             
             /* Determine if this is a container type */
-            uint32_t flags = 0;
+            logical->flags = 0;
             if (entry->type == GEOM_MBR_FREEBSD ||
                 entry->type == GEOM_MBR_OPENBSD ||
                 entry->type == GEOM_MBR_NETBSD) {
-                flags = GEOM_PART_CONTAINER;
+                logical->flags = GEOM_PART_CONTAINER;
             }
-            
-            /* Register partition */
-            geom_add_partition(disk, part_name, part_start, part_size,
-                              entry->type, 0, NULL,
-                              geom_mbr_type_name(entry->type), flags);
-            
+
+            strncpy(logical->name, part_name, sizeof(logical->name) - 1);
+            logical->start = part_start;
+            logical->size = part_size;
+            logical->type = entry->type;
             logical_count++;
-            
-            /* For BSD containers, scan for nested disklabel */
-            if (flags & GEOM_PART_CONTAINER) {
-                geom_scan(disk, part_start, 1, part_name);
-            }
         }
         
         /* Entry 1: Link to next EBR */
@@ -123,6 +134,7 @@ static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_si
 
 static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const char *prefix) {
     uint8_t buf[512];
+    mbr_logical_part_t logicals[60];
     
     /* Read sector at offset */
     if (geom_read_sector(disk, offset, buf) != 0) {
@@ -164,8 +176,12 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     uint64_t extended_size = 0;
     char summary[256] = {0};
     int first = 1;
+    int next_part = 5;
+    int logical_count = 0;
 
-    /* First pass: collect visible primary partition names. */
+    memset(logicals, 0, sizeof(logicals));
+
+    /* First pass: collect visible primary partition names and extended metadata. */
     for (int i = 0; i < 4; i++) {
         struct geom_mbr_entry *entry = &mbr->entries[i];
         
@@ -173,7 +189,29 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
             char pname[32];
             snprintf(pname, sizeof(pname), "%sp%d", prefix, i + 1);
             geom_summary_append(summary, sizeof(summary), &first, pname);
+
+            if (entry->type == GEOM_MBR_EXTENDED ||
+                entry->type == GEOM_MBR_EXTENDED_LBA) {
+                extended_found = 1;
+                extended_start = offset + entry->lba_start;
+                extended_size = entry->lba_size;
+            }
         }
+    }
+
+    if (extended_found) {
+        logical_count = parse_extended(disk, extended_start, extended_size, prefix, &next_part,
+                                      logicals, sizeof(logicals) / sizeof(logicals[0]),
+                                      summary, sizeof(summary), &first);
+    }
+
+    if (summary[0]) {
+        kprint("  ");
+        for (int d = 0; d < depth; d++) kprint("  ");
+        kprint(prefix);
+        kprint(": ");
+        kprint(summary);
+        kprint("\n");
     }
 
     /* Second pass: Register partitions and handle special types */
@@ -198,10 +236,6 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         
         if (entry->type == GEOM_MBR_EXTENDED ||
             entry->type == GEOM_MBR_EXTENDED_LBA) {
-            /* Extended partition - save for later */
-            extended_found = 1;
-            extended_start = part_start;
-            extended_size = part_size;
             flags |= GEOM_PART_CONTAINER;
         } else if (entry->type == GEOM_MBR_FREEBSD ||
                    entry->type == GEOM_MBR_OPENBSD ||
@@ -222,21 +256,15 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
             geom_scan(disk, part_start, depth + 1, part_name);
         }
     }
-    
-    /* Process extended partition chain */
-    if (extended_found) {
-        int next_part = 5;  /* Logical partitions start at 5 */
-        parse_extended(disk, extended_start, extended_size, prefix, &next_part,
-                      summary, sizeof(summary), &first);
-    }
 
-    if (summary[0]) {
-        kprint("  ");
-        for (int d = 0; d < depth; d++) kprint("  ");
-        kprint(prefix);
-        kprint(": partitions ");
-        kprint(summary);
-        kprint("\n");
+    for (int i = 0; i < logical_count; i++) {
+        geom_add_partition(disk, logicals[i].name, logicals[i].start, logicals[i].size,
+                          logicals[i].type, 0, NULL,
+                          geom_mbr_type_name(logicals[i].type), logicals[i].flags);
+
+        if ((logicals[i].flags & GEOM_PART_CONTAINER) && depth < GEOM_MAX_RECURSION) {
+            geom_scan(disk, logicals[i].start, depth + 1, logicals[i].name);
+        }
     }
     
     return 0;
