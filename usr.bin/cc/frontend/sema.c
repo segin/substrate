@@ -1928,7 +1928,12 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
 
     case CC_EXPR_SIZEOF:
         if (e->lhs != NULL) {
-            *out = type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
+            if (e->lhs->array_ndim > 0 && is_pointer_type(e->lhs->value_type)) {
+                *out = array_type_size_bytes(tu, e->lhs->value_type, e->lhs->struct_id,
+                                             e->lhs->array_ndim, e->lhs->array_dims);
+            } else {
+                *out = type_size_bytes_struct(tu, e->lhs->value_type, e->lhs->struct_id);
+            }
         } else {
             *out = array_type_size_bytes(tu, e->aux_type, e->aux_struct_id, e->array_ndim, e->array_dims);
         }

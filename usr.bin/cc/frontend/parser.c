@@ -3480,7 +3480,30 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
             if (vidx >= 0 && p->vars[vidx].array_ndim > 0) {
                 cc_type_t elem_type = p->vars[vidx].type;
                 long total;
+                long dims[CC_MAX_ARRAY_DIMS];
                 int i;
+                memset(dims, 0, sizeof(dims));
+                memcpy(dims, p->vars[vidx].array_dims, sizeof(dims));
+                if (dims[0] <= 0 && p->tu != NULL && p->vars[vidx].name != NULL) {
+                    size_t gi;
+                    for (gi = 0; gi < p->tu->global_count; ++gi) {
+                        const cc_global_t *g = &p->tu->globals[gi];
+                        if (g->name == NULL || strcmp(g->name, p->vars[vidx].name) != 0) {
+                            continue;
+                        }
+                        if (g->array_ndim > 0) {
+                            memcpy(dims, g->array_dims, sizeof(dims));
+                        }
+                        if (dims[0] <= 0 && g->array_len > 0) {
+                            dims[0] = g->array_len;
+                        }
+                        if (dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST &&
+                            g->init->arg_count > 0) {
+                            dims[0] = (long)g->init->arg_count;
+                        }
+                        break;
+                    }
+                }
                 if (is_pointer_type(elem_type)) {
                     elem_type = ptr_deref_type(elem_type);
                 }
@@ -3490,7 +3513,7 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
                 }
                 total = sz;
                 for (i = 0; i < p->vars[vidx].array_ndim; ++i) {
-                    long dim = p->vars[vidx].array_dims[i];
+                    long dim = dims[i];
                     if (dim <= 0) {
                         return -1;
                     }
@@ -3511,8 +3534,18 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
                         long total;
                         int i;
                         int ndim = g->array_ndim;
+                        long dims[CC_MAX_ARRAY_DIMS];
+                        memset(dims, 0, sizeof(dims));
+                        if (g->array_ndim > 0) {
+                            memcpy(dims, g->array_dims, sizeof(dims));
+                        }
                         if (ndim <= 0 && g->array_len > 0) {
                             ndim = 1;
+                            dims[0] = g->array_len;
+                        }
+                        if (ndim > 0 && dims[0] <= 0 && g->init != NULL && g->init->kind == CC_EXPR_INIT_LIST &&
+                            g->init->arg_count > 0) {
+                            dims[0] = (long)g->init->arg_count;
                         }
                         if (ndim <= 0) {
                             continue;
@@ -3526,7 +3559,10 @@ static int eval_const_array_bound_expr(parser_t *p, const cc_expr_t *e, long *ou
                         }
                         total = sz;
                         for (i = 0; i < ndim; ++i) {
-                            long dim = (g->array_ndim > 0) ? g->array_dims[i] : g->array_len;
+                            long dim = dims[i];
+                            if (i == 0 && dim <= 0 && g->array_len > 0) {
+                                dim = g->array_len;
+                            }
                             if (dim <= 0) {
                                 return -1;
                             }

@@ -38,11 +38,6 @@ typedef struct {
     int cur_index;
 } int_reg_state_t;
 
-typedef struct {
-    int value;
-    int first_def;
-} slot_live_order_t;
-
 static int g_i386_isa_level = 6;
 static int g_i386_has_mmx = 1;
 static int g_i386_has_sse2 = 1;
@@ -1503,30 +1498,6 @@ static int is_stackalloc_value(const slot_layout_t *lay, int v) {
     return stackalloc_off(lay, v) != 0;
 }
 
-static void slot_liveness_note_use(const cc_ssa_function_t *f, int *last_use, int v, int instr_index) {
-    if (v < 0 || v >= f->value_count) {
-        return;
-    }
-    if (instr_index > last_use[v]) {
-        last_use[v] = instr_index;
-    }
-}
-
-static int slot_live_order_cmp(const void *ap, const void *bp) {
-    const slot_live_order_t *a = (const slot_live_order_t *)ap;
-    const slot_live_order_t *b = (const slot_live_order_t *)bp;
-
-    if (a->first_def < b->first_def) return -1;
-    if (a->first_def > b->first_def) return 1;
-    if (a->value < b->value) return -1;
-    if (a->value > b->value) return 1;
-    return 0;
-}
-
-static int ssa_is_terminator_op(cc_ssa_opcode_t op) {
-    return op == CC_SSA_BR || op == CC_SSA_BR_COND || op == CC_SSA_TRAP || op == CC_SSA_RET;
-}
-
 static void emit_frame_load_reg(FILE *fp, int is_64bit, long off, const char *reg) {
     if (is_64bit) {
         fprintf(fp, "\tmovq %ld(%%rbp), %s\n", off, reg);
@@ -2319,21 +2290,8 @@ fail:
 static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_layout_t *out, cc_diag_t *diag) {
     int i;
     int nvals;
-    int *first_def;
-    int *last_use;
-    int *block_of_instr;
-    int *local_slot;
-    unsigned char *value_local;
-    int *active_values;
-    int *free_slots;
-    slot_live_order_t *order;
-    int active_count;
-    int free_count;
-    int next_slot;
-    int max_local_slots;
     int raw_frame;
     size_t j;
-    const char *unsafe_reuse;
 
     memset(out, 0, sizeof(*out));
     out->slot_size = slot_size;
@@ -2346,240 +2304,22 @@ static int build_slot_layout(const cc_ssa_function_t *f, int slot_size, slot_lay
     out->value_count = nvals;
     out->slot_of = (int *)malloc((size_t)nvals * sizeof(*out->slot_of));
     out->stackalloc_off = (int *)calloc((size_t)nvals, sizeof(*out->stackalloc_off));
-    first_def = (int *)malloc((size_t)nvals * sizeof(*first_def));
-    last_use = (int *)malloc((size_t)nvals * sizeof(*last_use));
-    block_of_instr = (int *)malloc((size_t)(f->instr_count > 0 ? f->instr_count : 1) * sizeof(*block_of_instr));
-    local_slot = (int *)malloc((size_t)nvals * sizeof(*local_slot));
-    value_local = (unsigned char *)calloc((size_t)nvals, sizeof(*value_local));
-    active_values = (int *)malloc((size_t)nvals * sizeof(*active_values));
-    free_slots = (int *)malloc((size_t)nvals * sizeof(*free_slots));
-    order = (slot_live_order_t *)malloc((size_t)nvals * sizeof(*order));
-    if (out->slot_of == NULL || out->stackalloc_off == NULL || first_def == NULL || last_use == NULL ||
-        block_of_instr == NULL || local_slot == NULL || value_local == NULL || active_values == NULL ||
-        free_slots == NULL || order == NULL) {
+    if (out->slot_of == NULL || out->stackalloc_off == NULL) {
         set_diag(diag, "out of memory building stack slot layout");
-        free(first_def);
-        free(last_use);
-        free(block_of_instr);
-        free(local_slot);
-        free(value_local);
-        free(active_values);
-        free(free_slots);
-        free(order);
         slot_layout_free(out);
         return -1;
     }
     for (i = 0; i < nvals; ++i) {
-        out->slot_of[i] = 0;
-        first_def[i] = -1;
-        last_use[i] = -1;
-        local_slot[i] = -1;
-    }
-
-    for (j = 0; j < f->instr_count; ++j) {
-        const cc_ssa_instr_t *in = &f->instrs[j];
-        size_t k;
-
-        if (in->dst >= 0 && in->dst < nvals) {
-            if (first_def[in->dst] < 0) {
-                first_def[in->dst] = (int)j;
-            }
-            if ((int)j > last_use[in->dst]) {
-                last_use[in->dst] = (int)j;
-            }
-        }
-
-        slot_liveness_note_use(f, last_use, in->lhs, (int)j);
-        slot_liveness_note_use(f, last_use, in->rhs, (int)j);
-        for (k = 0; k < in->arg_count; ++k) {
-            slot_liveness_note_use(f, last_use, in->args[k], (int)j);
-        }
-        for (k = 0; k < in->asm_in_count; ++k) {
-            int raw = in->asm_in_values[k];
-            int v = CC_SSA_ASM_MEM_INDIRECT_P(raw) ? CC_SSA_ASM_MEM_INDIRECT_DECODE(raw) : raw;
-            slot_liveness_note_use(f, last_use, v, (int)j);
-        }
-        for (k = 0; k < in->asm_out_count; ++k) {
-            int raw = in->asm_out_values[k];
-            int v = CC_SSA_ASM_MEM_INDIRECT_P(raw) ? CC_SSA_ASM_MEM_INDIRECT_DECODE(raw) : raw;
-
-            if (v < 0 || v >= nvals) {
-                continue;
-            }
-            if (first_def[v] < 0) {
-                first_def[v] = (int)j;
-            }
-            if ((int)j > last_use[v]) {
-                last_use[v] = (int)j;
-            }
-        }
+        out->slot_of[i] = i;
     }
 
     /*
-     * Default behavior: safe slot reuse restricted to values whose full
-     * lifetime is contained in a single basic block. This avoids CFG aliasing
-     * hazards while preventing pathological stack growth in temp-heavy code.
-     *
-     * Set CC_DEBUG_ENABLE_UNSAFE_SLOT_REUSE to enable old cross-block
-     * interval coloring for debugging.
+     * Keep one stack slot per SSA value to avoid lifetime overlap hazards.
+     * This favors correctness while backend MIR/register work is still in
+     * progress.
      */
-    unsafe_reuse = getenv("CC_DEBUG_ENABLE_UNSAFE_SLOT_REUSE");
-    if (unsafe_reuse == NULL || unsafe_reuse[0] == '\0') {
-        int cur_block = 0;
-        int block_count = 0;
-        int block_id;
-
-        for (j = 0; j < f->instr_count; ++j) {
-            const cc_ssa_instr_t *in = &f->instrs[j];
-            if (j > 0 && in->op == CC_SSA_LABEL) {
-                cur_block++;
-            }
-            block_of_instr[j] = cur_block;
-            if (ssa_is_terminator_op(in->op) && j + 1 < f->instr_count) {
-                cur_block++;
-            }
-        }
-        block_count = f->instr_count > 0 ? (cur_block + 1) : 1;
-
-        for (i = 0; i < nvals; ++i) {
-            if (first_def[i] < 0) {
-                value_local[i] = 0;
-                continue;
-            }
-            if (last_use[i] < first_def[i]) {
-                last_use[i] = first_def[i];
-            }
-            if (f->instr_count > 0 && block_of_instr[first_def[i]] == block_of_instr[last_use[i]]) {
-                value_local[i] = 1;
-            } else {
-                value_local[i] = 0;
-            }
-        }
-
-        next_slot = 0;
-        for (i = 0; i < nvals; ++i) {
-            if (!value_local[i]) {
-                out->slot_of[i] = next_slot++;
-            }
-        }
-
-        max_local_slots = 0;
-        for (block_id = 0; block_id < block_count; ++block_id) {
-            int local_count = 0;
-            int local_next = 0;
-
-            for (i = 0; i < nvals; ++i) {
-                if (!value_local[i] || first_def[i] < 0) {
-                    continue;
-                }
-                if (block_of_instr[first_def[i]] != block_id) {
-                    continue;
-                }
-                order[local_count].value = i;
-                order[local_count].first_def = first_def[i];
-                local_count++;
-            }
-            if (local_count == 0) {
-                continue;
-            }
-
-            qsort(order, (size_t)local_count, sizeof(*order), slot_live_order_cmp);
-            active_count = 0;
-            free_count = 0;
-            for (i = 0; i < local_count; ++i) {
-                int v = order[i].value;
-                int start = first_def[v];
-                int slot;
-                int k = 0;
-
-                while (k < active_count) {
-                    int av = active_values[k];
-                    if (last_use[av] < start) {
-                        free_slots[free_count++] = local_slot[av];
-                        active_values[k] = active_values[active_count - 1];
-                        active_count--;
-                        continue;
-                    }
-                    k++;
-                }
-
-                if (free_count > 0) {
-                    slot = free_slots[free_count - 1];
-                    free_count--;
-                } else {
-                    slot = local_next++;
-                }
-                local_slot[v] = slot;
-                active_values[active_count++] = v;
-            }
-            if (local_next > max_local_slots) {
-                max_local_slots = local_next;
-            }
-        }
-
-        for (i = 0; i < nvals; ++i) {
-            if (value_local[i] && local_slot[i] >= 0) {
-                out->slot_of[i] = next_slot + local_slot[i];
-            }
-        }
-        out->slot_count = next_slot + max_local_slots;
-        raw_frame = out->slot_count * slot_size;
-        goto stackalloc_layout;
-    }
-
-    for (i = 0; i < nvals; ++i) {
-        if (first_def[i] < 0) {
-            first_def[i] = 0;
-        }
-        if (last_use[i] < first_def[i]) {
-            last_use[i] = first_def[i];
-        }
-        order[i].value = i;
-        order[i].first_def = first_def[i];
-    }
-    qsort(order, (size_t)nvals, sizeof(*order), slot_live_order_cmp);
-
-    active_count = 0;
-    free_count = 0;
-    next_slot = 0;
-    for (i = 0; i < nvals; ++i) {
-        int v = order[i].value;
-        int start = first_def[v];
-        int slot;
-        int k = 0;
-
-        while (k < active_count) {
-            int av = active_values[k];
-            if (last_use[av] < start) {
-                free_slots[free_count++] = out->slot_of[av];
-                active_values[k] = active_values[active_count - 1];
-                active_count--;
-                continue;
-            }
-            k++;
-        }
-
-        if (free_count > 0) {
-            slot = free_slots[free_count - 1];
-            free_count--;
-        } else {
-            slot = next_slot++;
-        }
-        out->slot_of[v] = slot;
-        active_values[active_count++] = v;
-    }
-    out->slot_count = next_slot;
+    out->slot_count = nvals;
     raw_frame = out->slot_count * slot_size;
-
-stackalloc_layout:
-    free(first_def);
-    free(last_use);
-    free(block_of_instr);
-    free(local_slot);
-    free(value_local);
-    free(active_values);
-    free(free_slots);
-    free(order);
     for (j = 0; j < f->instr_count; ++j) {
         const cc_ssa_instr_t *in = &f->instrs[j];
         int bytes;
