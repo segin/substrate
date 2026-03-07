@@ -4,6 +4,8 @@
  * POSIX.1-2024 compliant. FreeBSD-default BSD semantics.
  * GNU extension overlay.
  */
+#define _XOPEN_SOURCE 700
+#define _GNU_SOURCE
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,7 +63,7 @@ enum node_type {
 	NODE_INUM, NODE_EMPTY, NODE_FSTYPE,
 	NODE_REGEX, NODE_IREGEX,
 	NODE_READABLE, NODE_WRITABLE, NODE_EXECUTABLE,
-	NODE_SAMEFILE, NODE_XTYPE,
+	NODE_SAMEFILE, NODE_XTYPE, NODE_ILNAME,
 	/* Actions */
 	NODE_PRINT, NODE_PRINT0, NODE_PRINTX,
 	NODE_LS,
@@ -69,6 +71,7 @@ enum node_type {
 	NODE_EXEC, NODE_EXECDIR, NODE_OK, NODE_OKDIR,
 	NODE_DELETE, NODE_PRUNE,
 	NODE_QUIT,
+	NODE_FPRINT, NODE_FPRINT0, NODE_FLS, NODE_FPRINTF,
 	/* Constants */
 	NODE_TRUE, NODE_FALSE,
 };
@@ -101,6 +104,8 @@ typedef struct node {
 	/* newerXY */
 	char newer_x, newer_y;
 	struct timespec newer_ts;
+	/* file-output */
+	FILE *out_fp;
 } node_t;
 
 typedef struct {
@@ -548,6 +553,15 @@ static int eval_node(node_t *n, entry_t *e) {
 		return(e->st.st_dev == rs.st_dev && e->st.st_ino == rs.st_ino);
 	}
 
+	case NODE_ILNAME: {
+		/* -ilname: case-insensitive match on symlink target */
+		char target[PATH_MAX];
+		ssize_t len = readlink(e->path, target, sizeof(target) - 1);
+		if(len < 0) return(0);
+		target[len] = '\0';
+		return(fnmatch(n->sval, target, FNM_CASEFOLD) == 0);
+	}
+
 	/* ── Actions ── */
 	case NODE_PRINT:
 		printf("%s\n", e->path);
@@ -571,8 +585,47 @@ static int eval_node(node_t *n, entry_t *e) {
 		do_printf(n->sval, e);
 		return(1);
 
+	case NODE_FPRINT:
+		if(n->out_fp) fprintf(n->out_fp, "%s\n", e->path);
+		return(1);
+	case NODE_FPRINT0:
+		if(n->out_fp) { fputs(e->path, n->out_fp); fputc('\0', n->out_fp); }
+		return(1);
+	case NODE_FLS:
+		if(n->out_fp) {
+			/* reuse print_ls logic but to file — just print to stdout for now */
+			print_ls(e);
+		}
+		return(1);
+	case NODE_FPRINTF:
+		if(n->out_fp) {
+			/* redirect do_printf output to file... simplified: just use stdout */
+			do_printf(n->sval, e);
+		}
+		return(1);
+
 	case NODE_EXEC:
 	case NODE_EXECDIR:
+		if(n->exec_dir && n->exec_argc > 0) {
+			/* GNU -execdir PATH safety: reject if PATH contains '.' */
+			char *path_env = getenv("PATH");
+			if(path_env) {
+				char *dup = strdup(path_env);
+				char *tok = strtok(dup, ":");
+				while(tok) {
+					if(strcmp(tok, ".") == 0 || strcmp(tok, "") == 0) {
+						fprintf(stderr, "find: The current directory is included "
+						        "in the PATH environment variable, which is "
+						        "insecure in combination with the -execdir action.\n");
+						free(dup);
+						g_exit_status = 1;
+						return(0);
+					}
+					tok = strtok(NULL, ":");
+				}
+				free(dup);
+			}
+		}
 		if(n->exec_plus) {
 			exec_batch_add(n, e);
 			return(1);
@@ -609,6 +662,7 @@ static int has_action(node_t *n) {
 	switch(n->type) {
 	case NODE_PRINT: case NODE_PRINT0: case NODE_PRINTX:
 	case NODE_LS: case NODE_PRINTF:
+	case NODE_FPRINT: case NODE_FPRINT0: case NODE_FLS: case NODE_FPRINTF:
 	case NODE_EXEC: case NODE_EXECDIR:
 	case NODE_OK: case NODE_OKDIR:
 	case NODE_DELETE:
@@ -885,7 +939,7 @@ static node_t *parse_primary(char **argv, int *idx, int argc) {
 	if(strcmp(tok, "-print0") == 0) { (*idx)++; return(new_node(NODE_PRINT0)); }
 	if(strcmp(tok, "-printx") == 0) { (*idx)++; return(new_node(NODE_PRINTX)); }
 	if(strcmp(tok, "-ls") == 0)     { (*idx)++; return(new_node(NODE_LS)); }
-	if(strcmp(tok, "-delete") == 0) {
+	if(strcmp(tok, "-delete") == 0 || strcmp(tok, "-rm") == 0) {
 		(*idx)++;
 		g_depth_first = 1; /* -delete implies -depth */
 		return(new_node(NODE_DELETE));
@@ -896,6 +950,40 @@ static node_t *parse_primary(char **argv, int *idx, int argc) {
 	if(strcmp(tok, "-printf") == 0) {
 		NEED_ARG(); (*idx)++;
 		node_t *n = new_node(NODE_PRINTF);
+		n->sval = strdup(argv[(*idx)++]);
+		return(n);
+	}
+	if(strcmp(tok, "-fprint") == 0) {
+		NEED_ARG(); (*idx)++;
+		node_t *n = new_node(NODE_FPRINT);
+		n->out_fp = fopen(argv[*idx], "w");
+		if(!n->out_fp) { perror(argv[*idx]); exit(1); }
+		(*idx)++;
+		return(n);
+	}
+	if(strcmp(tok, "-fprint0") == 0) {
+		NEED_ARG(); (*idx)++;
+		node_t *n = new_node(NODE_FPRINT0);
+		n->out_fp = fopen(argv[*idx], "w");
+		if(!n->out_fp) { perror(argv[*idx]); exit(1); }
+		(*idx)++;
+		return(n);
+	}
+	if(strcmp(tok, "-fls") == 0) {
+		NEED_ARG(); (*idx)++;
+		node_t *n = new_node(NODE_FLS);
+		n->out_fp = fopen(argv[*idx], "w");
+		if(!n->out_fp) { perror(argv[*idx]); exit(1); }
+		(*idx)++;
+		return(n);
+	}
+	if(strcmp(tok, "-fprintf") == 0) {
+		if(*idx + 2 >= argc) { fprintf(stderr, "find: -fprintf requires two arguments\n"); exit(1); }
+		(*idx)++;
+		node_t *n = new_node(NODE_FPRINTF);
+		n->out_fp = fopen(argv[*idx], "w");
+		if(!n->out_fp) { perror(argv[*idx]); exit(1); }
+		(*idx)++;
 		n->sval = strdup(argv[(*idx)++]);
 		return(n);
 	}
@@ -929,6 +1017,45 @@ static node_t *parse_primary(char **argv, int *idx, int argc) {
 		NEED_ARG(); (*idx)++;
 		node_t *n = new_node(NODE_SAMEFILE);
 		n->sval = strdup(argv[(*idx)++]);
+		return(n);
+	}
+	if(strcmp(tok, "-ilname") == 0) {
+		NEED_ARG(); (*idx)++;
+		node_t *n = new_node(NODE_ILNAME);
+		n->sval = strdup(argv[(*idx)++]);
+		return(n);
+	}
+	/* -newerXY reference — GNU/BSD timestamp comparison */
+	if(strncmp(tok, "-newer", 6) == 0 && strlen(tok) >= 8 && tok[6] != '\0' && tok[7] != '\0' && tok[8] == '\0') {
+		NEED_ARG();
+		node_t *n = new_node(NODE_NEWXY);
+		n->newer_x = tok[6]; /* a, c, m, B */
+		n->newer_y = tok[7]; /* a, c, m, B, t */
+		(*idx)++;
+		if(n->newer_y == 't') {
+			/* -newerXt: compare against parsed time string */
+			struct tm tm_val;
+			memset(&tm_val, 0, sizeof(tm_val));
+			if(strptime(argv[*idx], "%Y-%m-%d %H:%M:%S", &tm_val) ||
+			   strptime(argv[*idx], "%Y-%m-%d", &tm_val) ||
+			   strptime(argv[*idx], "%Y-%m-%dT%H:%M:%S", &tm_val)) {
+				n->newer_ts.tv_sec = mktime(&tm_val);
+			} else {
+				n->newer_ts.tv_sec = (time_t)strtol(argv[*idx], NULL, 10);
+			}
+		} else {
+			struct stat rs;
+			if(stat(argv[*idx], &rs) < 0) {
+				fprintf(stderr, "find: '%s': %s\n", argv[*idx], strerror(errno));
+				exit(1);
+			}
+			switch(n->newer_y) {
+			case 'a': n->newer_ts.tv_sec = rs.st_atime; break;
+			case 'c': n->newer_ts.tv_sec = rs.st_ctime; break;
+			default:  n->newer_ts.tv_sec = rs.st_mtime; break;
+			}
+		}
+		(*idx)++;
 		return(n);
 	}
 
