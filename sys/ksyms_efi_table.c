@@ -1198,6 +1198,8 @@ extern void test_vm_object_lifecycle(void);
 extern void test_vm_object_pages(void);
 extern void test_vm_object_shadow(void);
 extern void test_vm_page_queue(void);
+extern void test_vm_pageout_launders_before_scanning_active(void);
+extern void test_vm_pageout_prefers_inactive_then_active(void);
 extern void test_vm_pager_io(void);
 extern void test_vm_pager_lifecycle(void);
 extern void test_vm_phys(void);
@@ -2688,6 +2690,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&run_vm_pager_tests, "run_vm_pager_tests" },
     { (uint32_t)(uintptr_t)&test_vm_policy_lru, "test_vm_policy_lru" },
     { (uint32_t)(uintptr_t)&test_vm_policy_writeback, "test_vm_policy_writeback" },
+    { (uint32_t)(uintptr_t)&test_vm_pageout_prefers_inactive_then_active, "test_vm_pageout_prefers_inactive_then_active" },
+    { (uint32_t)(uintptr_t)&test_vm_pageout_launders_before_scanning_active, "test_vm_pageout_launders_before_scanning_active" },
     { (uint32_t)(uintptr_t)&run_vm_policy_tests, "run_vm_policy_tests" },
     { (uint32_t)(uintptr_t)&test_uma_large_objects, "test_uma_large_objects" },
     { (uint32_t)(uintptr_t)&test_uma_alloc_free, "test_uma_alloc_free" },
@@ -2889,4 +2893,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1439;
+int ksym_count = 1441;
