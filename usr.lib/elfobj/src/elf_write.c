@@ -1188,7 +1188,6 @@ done:
 }
 
 elf_err_t elf_write_file(elfobj_t *obj, const char *path) {
-    FILE *fp;
     uint8_t *buf = NULL;
     size_t size = 0;
     elf_err_t err;
@@ -1198,16 +1197,7 @@ elf_err_t elf_write_file(elfobj_t *obj, const char *path) {
     }
 
     if (obj->readonly && obj->dirty == 0 && obj->image != NULL) {
-        fp = fopen(path, "wb");
-        if (fp == NULL) {
-            return ELF_ERR_IO;
-        }
-        if (fwrite(obj->image, 1, obj->image_size, fp) != obj->image_size) {
-            fclose(fp);
-            return ELF_ERR_IO;
-        }
-        fclose(fp);
-        return ELF_OK;
+        return elf__write_file_atomic(path, obj->image, obj->image_size);
     }
 
     if (!obj->finalized) {
@@ -1222,17 +1212,11 @@ elf_err_t elf_write_file(elfobj_t *obj, const char *path) {
         return err;
     }
 
-    fp = fopen(path, "wb");
-    if (fp == NULL) {
+    err = elf__write_file_atomic(path, buf, size);
+    if (err != ELF_OK) {
         free(buf);
-        return ELF_ERR_IO;
+        return err;
     }
-    if (fwrite(buf, 1, size, fp) != size) {
-        fclose(fp);
-        free(buf);
-        return ELF_ERR_IO;
-    }
-    fclose(fp);
     free(buf);
     obj->dirty = 0;
     return ELF_OK;

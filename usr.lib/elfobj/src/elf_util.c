@@ -1,6 +1,8 @@
 #include "elf_private.h"
 #include <errno.h>
+#include <fcntl.h>
 #include <sys/mman.h>
+#include <unistd.h>
 
 static int mul_overflow(size_t a, size_t b, size_t *out) {
     if (a == 0 || b == 0) {
@@ -259,6 +261,90 @@ void elf__set_err(elfobj_t *obj, elf_err_t err, const char *msg) {
             (void)elf__diag_append(obj, ELF_DIAG_ERROR, err, UINT64_MAX, msg);
         }
     }
+}
+
+static int write_full(int fd, const uint8_t *buf, size_t size) {
+    while (size > 0) {
+        ssize_t n = write(fd, buf, size);
+        if (n < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return -1;
+        }
+        buf += (size_t)n;
+        size -= (size_t)n;
+    }
+    return 0;
+}
+
+elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size) {
+    const char *slash;
+    const char *base;
+    size_t dir_len;
+    size_t base_len;
+    size_t tmp_len;
+    char *tmp_path;
+    int fd;
+    int saved_errno;
+    const uint8_t *bytes = (const uint8_t *)buf;
+
+    if (path == NULL || (buf == NULL && size != 0)) {
+        return ELF_ERR_STATE;
+    }
+
+    slash = strrchr(path, '/');
+    if (slash != NULL) {
+        dir_len = (size_t)(slash - path) + 1;
+        base = slash + 1;
+    } else {
+        dir_len = 0;
+        base = path;
+    }
+    base_len = strlen(base);
+    tmp_len = dir_len + 1 + base_len + sizeof(".tmpXXXXXX");
+    tmp_path = (char *)malloc(tmp_len);
+    if (tmp_path == NULL) {
+        return ELF_ERR_OOM;
+    }
+
+    if (dir_len != 0) {
+        memcpy(tmp_path, path, dir_len);
+    }
+    tmp_path[dir_len] = '.';
+    memcpy(tmp_path + dir_len + 1, base, base_len);
+    memcpy(tmp_path + dir_len + 1 + base_len, ".tmpXXXXXX", sizeof(".tmpXXXXXX"));
+
+    fd = mkstemp(tmp_path);
+    if (fd < 0) {
+        free(tmp_path);
+        return ELF_ERR_IO;
+    }
+    if (size != 0 && write_full(fd, bytes, size) != 0) {
+        saved_errno = errno;
+        close(fd);
+        unlink(tmp_path);
+        free(tmp_path);
+        errno = saved_errno;
+        return ELF_ERR_IO;
+    }
+    if (close(fd) != 0) {
+        saved_errno = errno;
+        unlink(tmp_path);
+        free(tmp_path);
+        errno = saved_errno;
+        return ELF_ERR_IO;
+    }
+    if (rename(tmp_path, path) != 0) {
+        saved_errno = errno;
+        unlink(tmp_path);
+        free(tmp_path);
+        errno = saved_errno;
+        return ELF_ERR_IO;
+    }
+
+    free(tmp_path);
+    return ELF_OK;
 }
 
 static void elf_free_sections(elfobj_t *obj) {

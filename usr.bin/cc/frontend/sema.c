@@ -2000,7 +2000,50 @@ static int eval_const_int_expr(const cc_translation_unit_t *tu, const cc_expr_t 
         if (e->aux_type == CC_TYPE_VOID) {
             return -1;
         }
-        return eval_const_int_expr(tu, e->lhs, out);
+        if (eval_const_int_expr(tu, e->lhs, out) != 0) {
+            return -1;
+        }
+        if (is_integral_type(e->aux_type) && !is_pointer_type(e->aux_type)) {
+            int bits = 0;
+            unsigned long long mask;
+            unsigned long long u;
+
+            if (e->aux_type == CC_TYPE_BOOL) {
+                *out = (*out != 0) ? 1 : 0;
+                return 0;
+            }
+
+            switch (e->aux_type) {
+            case CC_TYPE_CHAR:
+            case CC_TYPE_SCHAR:
+            case CC_TYPE_UCHAR:
+                bits = 8;
+                break;
+            case CC_TYPE_SHORT:
+            case CC_TYPE_USHORT:
+                bits = 16;
+                break;
+            case CC_TYPE_INT:
+            case CC_TYPE_UINT:
+            case CC_TYPE_ENUM:
+                bits = 32;
+                break;
+            default:
+                bits = 0;
+                break;
+            }
+
+            if (bits > 0 && bits < 64) {
+                mask = (1ULL << bits) - 1ULL;
+                u = (unsigned long long)(*out) & mask;
+                if (!(e->aux_type == CC_TYPE_UCHAR || e->aux_type == CC_TYPE_USHORT || e->aux_type == CC_TYPE_UINT) &&
+                    (u & (1ULL << (bits - 1))) != 0) {
+                    u |= ~mask;
+                }
+                *out = (long)u;
+            }
+        }
+        return 0;
 
     case CC_EXPR_CALL:
         if (e->ident == NULL) {

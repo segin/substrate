@@ -456,7 +456,6 @@ static int is_decl_qual_at_token(parser_t *p);
 static cc_type_t ptr_of_type(cc_type_t t);
 static int tok_is_ident(parser_t *p, const char *s);
 static int tok_is_gnu_attribute_kw(parser_t *p);
-static int token_is_gnu_attribute_kw(const cc_token_t *t);
 static int is_ptr_declarator_tok(cc_tok_kind_t kind);
 static void decl_attrs_reset(decl_attrs_t *a);
 static void decl_attrs_clear(decl_attrs_t *a);
@@ -602,22 +601,6 @@ static cc_tok_kind_t peek_kind(parser_t *p) {
     }
     cc_lexer_deinit(&lx);
     return t.kind;
-}
-
-static int peek_tok(parser_t *p, cc_token_t *out) {
-    cc_lexer_t lx = p->lx;
-    int rc;
-    if (p->lx.logical_file != NULL) {
-        lx.logical_file = xstrdup_n(p->lx.logical_file, strlen(p->lx.logical_file));
-        if (lx.logical_file == NULL) {
-            return -1;
-        }
-    } else {
-        lx.logical_file = NULL;
-    }
-    rc = cc_lexer_next(&lx, out);
-    cc_lexer_deinit(&lx);
-    return rc;
 }
 
 static int typedef_find_visible_n(const parser_t *p, const char *name, size_t len) {
@@ -1617,52 +1600,15 @@ static int is_declspec_start(parser_t *p) {
 }
 
 static int is_type_name_start_after_lparen(parser_t *p) {
-    cc_token_t t;
-    if (p->tok.kind == TOK_LPAREN) {
-        if (peek_tok(p, &t) != 0) {
-            return 0;
-        }
-    } else {
-        t = p->tok;
+    parser_t q = *p;
+
+    if (q.tok.kind != TOK_LPAREN) {
+        return 0;
     }
-    if (is_declspec_tok(t.kind)) {
-        return 1;
+    if (next_tok(&q) != 0) {
+        return 0;
     }
-    if (t.kind == TOK_IDENT) {
-        cc_type_t bty;
-        if (typedef_find_visible_n(p, t.start, t.len) >= 0) {
-            return 1;
-        }
-        if (builtin_typedef_type_n(t.start, t.len, &bty)) {
-            return 1;
-        }
-        if (token_is_gnu_attribute_kw(&t)) {
-            return 1;
-        }
-        if ((t.len == strlen("_Atomic") && strncmp(t.start, "_Atomic", t.len) == 0) ||
-            (t.len == strlen("_BitInt") && strncmp(t.start, "_BitInt", t.len) == 0) ||
-            (t.len == strlen("_Float16") && strncmp(t.start, "_Float16", t.len) == 0) ||
-            (t.len == strlen("_Float32") && strncmp(t.start, "_Float32", t.len) == 0) ||
-            (t.len == strlen("_Float64") && strncmp(t.start, "_Float64", t.len) == 0) ||
-            (t.len == strlen("_Float128") && strncmp(t.start, "_Float128", t.len) == 0) ||
-            (t.len == strlen("_Float32x") && strncmp(t.start, "_Float32x", t.len) == 0) ||
-            (t.len == strlen("_Float64x") && strncmp(t.start, "_Float64x", t.len) == 0) ||
-            (t.len == strlen("_Float128x") && strncmp(t.start, "_Float128x", t.len) == 0) ||
-            (t.len == strlen("__float128") && strncmp(t.start, "__float128", t.len) == 0) ||
-            (t.len == strlen("typeof") && strncmp(t.start, "typeof", t.len) == 0) ||
-            (t.len == strlen("typeof_unqual") && strncmp(t.start, "typeof_unqual", t.len) == 0) ||
-            (t.len == strlen("__typeof") && strncmp(t.start, "__typeof", t.len) == 0) ||
-            (t.len == strlen("__typeof_unqual") && strncmp(t.start, "__typeof_unqual", t.len) == 0) ||
-            (t.len == strlen("__typeof__") && strncmp(t.start, "__typeof__", t.len) == 0) ||
-            (t.len == strlen("__typeof_unqual__") && strncmp(t.start, "__typeof_unqual__", t.len) == 0) ||
-            (parser_is_c23_or_newer() && t.len == strlen("bool") && strncmp(t.start, "bool", t.len) == 0)) {
-            return 1;
-        }
-    }
-    if (t.kind == TOK_LBRACK) {
-        return 1;
-    }
-    return 0;
+    return is_declspec_start(&q);
 }
 
 static int is_declspec_tok(cc_tok_kind_t k) {
@@ -4028,16 +3974,6 @@ static int tok_is_ident(parser_t *p, const char *s) {
 
 static int tok_is_gnu_attribute_kw(parser_t *p) {
     return tok_is_ident(p, "__attribute__") || tok_is_ident(p, "__attribute");
-}
-
-static int token_is_gnu_attribute_kw(const cc_token_t *t) {
-    if (t == NULL || t->kind != TOK_IDENT) {
-        return 0;
-    }
-    if (t->len == strlen("__attribute__") && strncmp(t->start, "__attribute__", t->len) == 0) {
-        return 1;
-    }
-    return t->len == strlen("__attribute") && strncmp(t->start, "__attribute", t->len) == 0;
 }
 
 static int tok_is_gnu_attr_name(parser_t *p, const char *s) {
@@ -6436,6 +6372,11 @@ static cc_expr_t *parse_primary(parser_t *p) {
     }
 
     if (p->tok.kind == TOK_IDENT) {
+        cc_type_t typedef_bty = CC_TYPE_VOID;
+        int is_typedef_name =
+            typedef_find_visible_n(p, p->tok.start, p->tok.len) >= 0 ||
+            builtin_typedef_type_n(p->tok.start, p->tok.len, &typedef_bty);
+
         if (parser_is_c23_or_newer() && tok_is_ident(p, "true")) {
             e = new_expr(CC_EXPR_INT);
             if (e == NULL) {
@@ -6474,6 +6415,10 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 return NULL;
             }
             return e;
+        }
+        if (is_typedef_name) {
+            set_diag(p->diag, p->tok.line, p->tok.col, "expected expression");
+            return NULL;
         }
         int eidx = -1;
         if (var_find_visible_n(p, p->tok.start, p->tok.len) < 0) {
@@ -7573,15 +7518,15 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (e == NULL) {
             return NULL;
         }
-        if (p->tok.kind == TOK_LPAREN && is_type_name_start_after_lparen(p)) {
-            if (next_tok(p) != 0) {
-                free_expr(e);
-                return NULL;
-            }
+        if (is_type_name_start_after_lparen(p)) {
             long sizeof_array_len = -1;
             int sizeof_array_ndim = 0;
             long sizeof_array_dims[CC_MAX_ARRAY_DIMS];
             memset(sizeof_array_dims, 0, sizeof(sizeof_array_dims));
+            if (next_tok(p) != 0) {
+                free_expr(e);
+                return NULL;
+            }
             if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, &sizeof_array_len, &sizeof_array_ndim,
                                 sizeof_array_dims, 1, "expected type name in sizeof") != 0) {
                 free_expr(e);
@@ -7623,7 +7568,7 @@ static cc_expr_t *parse_unary(parser_t *p) {
         if (expect(p, TOK_LPAREN, "expected '(' after _Alignof/alignof") != 0) {
             return NULL;
         }
-        if (is_type_name_start_after_lparen(p)) {
+        if (is_declspec_start(p)) {
             if (parse_type_name(p, &aty, &asid, NULL, NULL, NULL, 1, "expected type name in _Alignof/alignof") !=
                 0) {
                 return NULL;
@@ -7632,6 +7577,10 @@ static cc_expr_t *parse_unary(parser_t *p) {
                 return NULL;
             }
             align = parser_type_align_bytes(p, aty, asid);
+            if (align <= 0) {
+                align = g_parser_pointer_size_bytes;
+            }
+            return new_int_expr(align);
         } else {
             ae = parse_assign(p);
             if (ae == NULL) {
@@ -7650,91 +7599,96 @@ static cc_expr_t *parse_unary(parser_t *p) {
         return new_int_expr(align);
     }
 
-    if (p->tok.kind == TOK_LPAREN && is_type_name_start_after_lparen(p)) {
+    if (p->tok.kind == TOK_LPAREN) {
+        parser_t q = *p;
         cc_expr_t *e = new_expr(CC_EXPR_CAST);
-        if (e == NULL) {
-            return NULL;
-        }
-        if (next_tok(p) != 0) {
-            free_expr(e);
-            return NULL;
-        }
-        if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, NULL, NULL, NULL, 1, "expected cast type") != 0) {
-            free_expr(e);
-            return NULL;
-        }
-        if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
+        if (next_tok(&q) == 0 && is_declspec_start(&q)) {
+            if (e == NULL) {
+                return NULL;
+            }
             if (next_tok(p) != 0) {
                 free_expr(e);
                 return NULL;
             }
-            while (is_ptr_declarator_tok(p->tok.kind)) {
-                cc_type_t pty = ptr_of_type(e->aux_type);
-                if (pty == CC_TYPE_VOID) {
-                    set_ptr_depth_diag(p, __LINE__);
-                    free_expr(e);
-                    return NULL;
-                }
-                e->aux_type = pty;
+            if (parse_type_name(p, &e->aux_type, &e->aux_struct_id, NULL, NULL, NULL, 1, "expected cast type") !=
+                0) {
+                free_expr(e);
+                return NULL;
+            }
+            if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
                 if (next_tok(p) != 0) {
                     free_expr(e);
                     return NULL;
                 }
-                while (is_decl_qual_at_token(p)) {
+                while (is_ptr_declarator_tok(p->tok.kind)) {
+                    cc_type_t pty = ptr_of_type(e->aux_type);
+                    if (pty == CC_TYPE_VOID) {
+                        set_ptr_depth_diag(p, __LINE__);
+                        free_expr(e);
+                        return NULL;
+                    }
+                    e->aux_type = pty;
                     if (next_tok(p) != 0) {
+                        free_expr(e);
+                        return NULL;
+                    }
+                    while (is_decl_qual_at_token(p)) {
+                        if (next_tok(p) != 0) {
+                            free_expr(e);
+                            return NULL;
+                        }
+                    }
+                }
+                if (expect(p, TOK_RPAREN, "expected ')' in function pointer cast type") != 0) {
+                    free_expr(e);
+                    return NULL;
+                }
+                while (p->tok.kind == TOK_LPAREN) {
+                    if (skip_balanced_parens(p) != 0) {
                         free_expr(e);
                         return NULL;
                     }
                 }
             }
-            if (expect(p, TOK_RPAREN, "expected ')' in function pointer cast type") != 0) {
-                free_expr(e);
-                return NULL;
-            }
-            while (p->tok.kind == TOK_LPAREN) {
-                if (skip_balanced_parens(p) != 0) {
+            if (p->tok.kind == TOK_LBRACK) {
+                long arr_len = -1;
+                int arr_ndim = 0;
+                long arr_dims[CC_MAX_ARRAY_DIMS];
+                memset(arr_dims, 0, sizeof(arr_dims));
+                if (parse_array_suffix(p, &e->aux_type, &arr_len, &arr_ndim, arr_dims) != 0) {
                     free_expr(e);
                     return NULL;
                 }
+                if (arr_ndim > 0) {
+                    int ai;
+                    e->array_ndim = arr_ndim;
+                    for (ai = 0; ai < arr_ndim; ++ai) {
+                        e->array_dims[ai] = arr_dims[ai];
+                    }
+                }
             }
-        }
-        if (p->tok.kind == TOK_LBRACK) {
-            long arr_len = -1;
-            int arr_ndim = 0;
-            long arr_dims[CC_MAX_ARRAY_DIMS];
-            memset(arr_dims, 0, sizeof(arr_dims));
-            if (parse_array_suffix(p, &e->aux_type, &arr_len, &arr_ndim, arr_dims) != 0) {
+            if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
                 free_expr(e);
                 return NULL;
             }
-            if (arr_ndim > 0) {
-                int ai;
-                e->array_ndim = arr_ndim;
-                for (ai = 0; ai < arr_ndim; ++ai) {
-                    e->array_dims[ai] = arr_dims[ai];
+            e->value_type = e->aux_type;
+            e->struct_id = e->aux_struct_id;
+            if (p->tok.kind == TOK_LBRACE) {
+                e->lhs = parse_initializer_expr(p);
+                if (e->lhs == NULL) {
+                    free_expr(e);
+                    return NULL;
                 }
+                return e;
             }
-        }
-        if (expect(p, TOK_RPAREN, "expected ')' after cast type") != 0) {
-            free_expr(e);
-            return NULL;
-        }
-        e->value_type = e->aux_type;
-        e->struct_id = e->aux_struct_id;
-        if (p->tok.kind == TOK_LBRACE) {
-            e->lhs = parse_initializer_expr(p);
+            e->lhs = parse_unary(p);
             if (e->lhs == NULL) {
                 free_expr(e);
                 return NULL;
             }
             return e;
         }
-        e->lhs = parse_unary(p);
-        if (e->lhs == NULL) {
-            free_expr(e);
-            return NULL;
-        }
-        return e;
+        free(e);
     }
 
     if (p->tok.kind == TOK_AMP) {

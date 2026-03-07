@@ -729,7 +729,8 @@ test:
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_malloc_nonptr.c -o /tmp/cc_native_bad_attr_malloc_nonptr.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_format_nonvariadic.c -o /tmp/cc_native_bad_attr_format_nonvariadic.o
 	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_nonnull_empty.c -o /tmp/cc_native_bad_attr_nonnull_empty.o
-	! $(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_nonnull_call.c -o /tmp/cc_native_bad_attr_nonnull_call.o
+	$(TOP)/usr.bin/cc/cc -std=gnu11 -c native_bad_attr_nonnull_call.c -o /tmp/cc_native_bad_attr_nonnull_call.o 2>/tmp/cc_native_bad_attr_nonnull_call.log
+	grep -q "warning: nonnull argument 1 in call to takes_ptr is null" /tmp/cc_native_bad_attr_nonnull_call.log
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_implicit_function.c -o /tmp/cc_native_bad_c99_implicit_function.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_no_implicit_int.c -o /tmp/cc_native_bad_no_implicit_int.o
 	! $(TOP)/usr.bin/cc/cc -std=c99 -c native_bad_c99_const_assign.c -o /tmp/cc_native_bad_c99_const_assign.o

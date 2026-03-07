@@ -401,6 +401,53 @@ static cc_value_type_t type_to_val(cc_type_t t) {
                : CC_VAL_I64;
 }
 
+static int is_pointer_type(cc_type_t t);
+static int is_unsigned_integral_type(cc_type_t t);
+static int is_integral_type(cc_type_t t);
+
+static long cast_const_integral_value(long value, cc_type_t t) {
+    int bits = 0;
+    unsigned long long u;
+    unsigned long long mask;
+
+    if (!is_integral_type(t) || is_pointer_type(t)) {
+        return value;
+    }
+    if (t == CC_TYPE_BOOL) {
+        return value != 0 ? 1 : 0;
+    }
+
+    switch (t) {
+    case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
+    case CC_TYPE_UCHAR:
+        bits = 8;
+        break;
+    case CC_TYPE_SHORT:
+    case CC_TYPE_USHORT:
+        bits = 16;
+        break;
+    case CC_TYPE_INT:
+    case CC_TYPE_UINT:
+    case CC_TYPE_ENUM:
+        bits = 32;
+        break;
+    default:
+        bits = 0;
+        break;
+    }
+    if (bits <= 0 || bits >= 64) {
+        return value;
+    }
+
+    mask = (1ULL << bits) - 1ULL;
+    u = (unsigned long long)value & mask;
+    if (!is_unsigned_integral_type(t) && (u & (1ULL << (bits - 1))) != 0) {
+        u |= ~mask;
+    }
+    return (long)u;
+}
+
 static int is_pointer_type(cc_type_t t) {
     return cc_type_is_pointer(t);
 }
@@ -944,7 +991,14 @@ static int eval_const_int_expr_simple(const cc_expr_t *e, long *out) {
         *out = e->int_val;
         return 0;
     case CC_EXPR_CAST:
-        return eval_const_int_expr_simple(e->lhs, out);
+        if (e->aux_type == CC_TYPE_VOID) {
+            return -1;
+        }
+        if (eval_const_int_expr_simple(e->lhs, out) != 0) {
+            return -1;
+        }
+        *out = cast_const_integral_value(*out, e->aux_type);
+        return 0;
     case CC_EXPR_BIN:
         if (eval_const_int_expr_simple(e->lhs, &a) != 0 || eval_const_int_expr_simple(e->rhs, &b) != 0) {
             return -1;
@@ -2178,6 +2232,7 @@ static int integral_type_bits(cc_type_t t) {
     switch (t) {
     case CC_TYPE_BOOL:
     case CC_TYPE_CHAR:
+    case CC_TYPE_SCHAR:
     case CC_TYPE_UCHAR:
         return 8;
     case CC_TYPE_SHORT:
@@ -2380,7 +2435,11 @@ static int eval_const_i64_expr(const cc_translation_unit_t *tu, const cc_expr_t 
         if (e->aux_type == CC_TYPE_VOID) {
             return -1;
         }
-        return eval_const_i64_expr(tu, e->lhs, out);
+        if (eval_const_i64_expr(tu, e->lhs, out) != 0) {
+            return -1;
+        }
+        *out = cast_const_integral_value(*out, e->aux_type);
+        return 0;
 
     case CC_EXPR_SIZEOF:
         if (e->lhs != NULL) {

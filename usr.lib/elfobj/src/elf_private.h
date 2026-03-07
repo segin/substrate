@@ -251,6 +251,7 @@ char *elf__strdup(const char *s);
 int elf__bounds_ok(size_t off, size_t len, size_t total);
 int elf__u64_add(uint64_t a, uint64_t b, uint64_t *out);
 int elf__u64_mul(uint64_t a, uint64_t b, uint64_t *out);
+elf_err_t elf__write_file_atomic(const char *path, const void *buf, size_t size);
 uint16_t elf__rd16(const uint8_t *p, elfobj_endian_t e);
 uint32_t elf__rd32(const uint8_t *p, elfobj_endian_t e);
 uint64_t elf__rd64(const uint8_t *p, elfobj_endian_t e);
