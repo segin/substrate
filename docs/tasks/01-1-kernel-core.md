@@ -657,12 +657,12 @@
 
         > **Files:** `sys/fs/procfs.c`, `sys/vfs/`, mount table plumbing.
 
-        - [ ] **Mount Table Exposure:** (REQ: REQ-01-0997)
-            - [ ] Expose `/proc/mounts` as a live view of the current kernel mount table. (REQ: REQ-01-0998)
-            - [ ] Keep `/proc/mounts` synchronized with mount, unmount, and remount operations. (REQ: REQ-01-0999)
-            - [ ] Format `/proc/mounts` compatibly enough for shell tools and BusyBox-style consumers. (REQ: REQ-01-1000)
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ: REQ-01-1001)
-            - [ ] Integration: mount/unmount activity is reflected immediately in `/proc/mounts`. (REQ: REQ-01-1002)
+        - [x] **Mount Table Exposure:** (REQ: REQ-01-0997)
+            - [x] Expose `/proc/mounts` as a live view of the current kernel mount table. (REQ: REQ-01-0998)
+            - [x] Keep `/proc/mounts` synchronized with mount, unmount, and remount operations. (REQ: REQ-01-0999)
+            - [x] Format `/proc/mounts` compatibly enough for shell tools and BusyBox-style consumers. (REQ: REQ-01-1000)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ: REQ-01-1001)
+            - [x] Integration: mount/unmount activity is reflected immediately in `/proc/mounts`. (REQ: REQ-01-1002)
         - [ ] **Documentation:** (REQ: REQ-01-0062, REQ: REQ-01-1003)
             - [ ] Internal doc: `/proc/mounts` data model and formatting contract. (REQ: REQ-01-1004)
 

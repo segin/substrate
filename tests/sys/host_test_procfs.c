@@ -358,6 +358,27 @@ void test_procfs_mounts_read(void) {
     assert(strstr(buffer, "procfs /proc procfs rw 0 0\n") != NULL);
     assert(strstr(buffer, "/dev/storage/USB\\040Stick /media/USB\\040Stick fat rw 0 0\n") != NULL);
 
+    {
+        static struct mount tmp_mount;
+
+        memset(&tmp_mount, 0, sizeof(tmp_mount));
+        snprintf(tmp_mount.mnt_stat.f_mntfromname, sizeof(tmp_mount.mnt_stat.f_mntfromname), "tmpfs");
+        snprintf(tmp_mount.mnt_stat.f_mntonname, sizeof(tmp_mount.mnt_stat.f_mntonname), "/tmp");
+        snprintf(tmp_mount.mnt_stat.f_fstypename, sizeof(tmp_mount.mnt_stat.f_fstypename), "tmpfs");
+        TAILQ_INSERT_TAIL(&mountlist, &tmp_mount, mnt_list);
+
+        memset(buffer, 0, sizeof(buffer));
+        n = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+        assert(n > 0);
+        assert(strstr(buffer, "tmpfs /tmp tmpfs rw 0 0\n") != NULL);
+
+        TAILQ_REMOVE(&mountlist, &tmp_mount, mnt_list);
+        memset(buffer, 0, sizeof(buffer));
+        n = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+        assert(n > 0);
+        assert(strstr(buffer, "tmpfs /tmp tmpfs rw 0 0\n") == NULL);
+    }
+
     printf("PASS\n");
 }
 
