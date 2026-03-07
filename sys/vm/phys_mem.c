@@ -278,6 +278,25 @@ size_t vm_phys_get_used(void) {
     return used;
 }
 
+size_t vm_phys_get_order_free_count(int order) {
+    size_t count = 0;
+
+    if (order < 0 || order >= PMM_MAX_ORDER) {
+        return 0;
+    }
+
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+
+    for (vm_page_t *page = vm_phys_free_lists[order]; page; page = page->next) {
+        count++;
+    }
+
+    spinlock_release(&vm_phys_lock);
+    intr_restore(flags);
+    return count;
+}
+
 void vm_phys_mark_used(uintptr_t pa) {
     uintptr_t target_pa = pa & ~(PMM_BLOCK_SIZE - 1);
     vm_page_t *target = vm_phys_paddr_to_page(target_pa);

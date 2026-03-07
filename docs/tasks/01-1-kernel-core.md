@@ -66,7 +66,7 @@
             - [x] Unit: watermark allocator — sequential allocations, alignment, exhaustion. (REQ: REQ-01-0052)
             - [ ] Unit: buddy allocator — alloc/free single pages, verify O(1) behavior. (REQ: REQ-01-0053)
             - [x] Unit: buddy coalescing — free adjacent pages, verify order promotion. (REQ: REQ-01-0054)
-            - [ ] Unit: buddy splitting — exhaust order 0, verify split from higher order. (REQ: REQ-01-0055)
+            - [x] Unit: buddy splitting — exhaust order 0, verify split from higher order. (REQ: REQ-01-0055)
             - [x] Unit: contiguous allocation — various orders, verify alignment. (REQ: REQ-01-0056)
             - [x] Unit: memory map parsing — Multiboot and e820 with edge cases (overlaps, holes). (REQ: REQ-01-0057)
             - [x] Property: `alloc → free → alloc` returns same page (no leak). (REQ: REQ-01-0058)
@@ -74,8 +74,8 @@
             - [x] Property: buddy free list integrity (no cycles, all entries valid). (REQ: REQ-01-0060)
             - [ ] Integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU. (REQ: REQ-01-0061)
         - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
-            - [ ] Internal doc: PMM architecture (watermark → buddy transition). (REQ: REQ-01-0063)
-            - [ ] Internal doc: virtual vs physical address API convention. (REQ: REQ-01-0064)
+            - [x] Internal doc: PMM architecture (watermark → buddy transition). (REQ: REQ-01-0063)
+            - [x] Internal doc: virtual vs physical address API convention. (REQ: REQ-01-0064)
 
     - [ ] **Memory Management (BSD/Mach Design):** (REQ: REQ-01-0065)
 

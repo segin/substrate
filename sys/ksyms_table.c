@@ -1391,6 +1391,7 @@ extern void vm_phys_early_init(void);
 extern void vm_phys_free_contiguous(void);
 extern void vm_phys_free_page(void);
 extern void vm_phys_get_free(void);
+extern void vm_phys_get_order_free_count(void);
 extern void vm_phys_get_used(void);
 extern void vm_phys_mark_used(void);
 extern void vm_phys_paddr_to_page(void);
@@ -2621,6 +2622,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vm_phys_free_contiguous, "vm_phys_free_contiguous" },
     { (uint32_t)(uintptr_t)&vm_phys_get_free, "vm_phys_get_free" },
     { (uint32_t)(uintptr_t)&vm_phys_get_used, "vm_phys_get_used" },
+    { (uint32_t)(uintptr_t)&vm_phys_get_order_free_count, "vm_phys_get_order_free_count" },
     { (uint32_t)(uintptr_t)&vm_phys_mark_used, "vm_phys_mark_used" },
     { (uint32_t)(uintptr_t)&vm_phys_check_integrity, "vm_phys_check_integrity" },
     { (uint32_t)(uintptr_t)&run_kernel_tests, "run_kernel_tests" },
@@ -2897,4 +2899,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1443;
+int ksym_count = 1444;

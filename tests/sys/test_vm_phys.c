@@ -183,6 +183,44 @@ static void test_buddy_coalescing(void) {
     TEST_PASS("buddy_coalescing");
 }
 
+/* Test: single-page allocation splits an order-1 block when order 0 is empty */
+static void test_buddy_splitting_from_order1(void) {
+    vm_page_t *drained = NULL;
+    vm_page_t *block;
+    vm_page_t *split0;
+    vm_page_t *split1;
+
+    while (vm_phys_get_order_free_count(0) > 0) {
+        vm_page_t *page = vm_phys_alloc_page();
+        TEST_ASSERT(page != NULL, "split: failed draining order 0");
+        page->next = drained;
+        drained = page;
+    }
+
+    TEST_ASSERT(vm_phys_get_order_free_count(0) == 0, "split: order 0 not fully drained");
+
+    block = vm_phys_alloc_contiguous(2);
+    TEST_ASSERT(block != NULL, "split: contiguous order1 alloc failed");
+    vm_phys_free_contiguous(block, 2);
+
+    split0 = vm_phys_alloc_page();
+    split1 = vm_phys_alloc_page();
+    TEST_ASSERT(split0 != NULL && split1 != NULL, "split: split allocations failed");
+    TEST_ASSERT(split0->phys_addr == block->phys_addr, "split: first split page base mismatch");
+    TEST_ASSERT(split1->phys_addr == block->phys_addr + 0x1000, "split: second split page buddy mismatch");
+
+    vm_phys_free_page(split0);
+    vm_phys_free_page(split1);
+
+    while (drained) {
+        vm_page_t *next = drained->next;
+        vm_phys_free_page(drained);
+        drained = next;
+    }
+
+    TEST_PASS("buddy_splitting_from_order1");
+}
+
 /* Test: paddr_to_page returns correct mapping */
 static void test_paddr_to_page(void) {
     vm_page_t *page = vm_phys_alloc_page();
@@ -304,6 +342,7 @@ void test_vm_phys(void) {
     test_realloc_after_free();
     test_realloc_same_page();
     test_buddy_coalescing();
+    test_buddy_splitting_from_order1();
     test_paddr_to_page();
     test_contiguous_zero_count();
     test_free_count_tracking();
