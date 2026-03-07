@@ -6,6 +6,8 @@
 #include <arch/i386/pmm.h>
 #include <kern/console.h>
 #include <stdint.h>
+#include <sys/proc.h>
+#include <vm/vm_page.h>
 
 static int tests_passed = 0;
 static int tests_failed = 0;
@@ -353,6 +355,106 @@ void test_pmap_protect_rw(void) {
     kprint("  PASS\n");
 }
 
+// Test: pmap_fork + COW fault keeps parent isolated
+void test_pmap_fork_cow_fault(void) {
+    kprint("Test: pmap_fork COW fault isolation\n");
+
+    pmap_t parent = pmap_create();
+    TEST_ASSERT(parent != 0, "parent pmap created");
+
+    void *page_v = pmm_alloc_block();
+    TEST_ASSERT(page_v != 0, "parent page allocated");
+
+    uint32_t va = 0x404000;
+    uint32_t pa = (uint32_t)(uintptr_t)page_v - 0xC0000000;
+
+    pmap_activate(parent);
+    TEST_ASSERT(pmap_enter(parent, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "parent mapping created");
+    *(volatile uint32_t *)va = 0x11223344;
+
+    pmap_t child = pmap_fork(parent);
+    TEST_ASSERT(child != 0, "child pmap created");
+
+    process_t fake_proc = {0};
+    process_t *saved_proc = current_process;
+    fake_proc.pmap = child;
+    current_process = &fake_proc;
+
+    pmap_activate(child);
+    TEST_ASSERT(pmap_page_is_cow(child, va) == 1, "child mapping is COW");
+    TEST_ASSERT(pmap_fault(0x3, va) == 1, "COW fault handled");
+    *(volatile uint32_t *)va = 0x55667788;
+
+    uint32_t child_pa = pmap_extract(child, va);
+    TEST_ASSERT(child_pa != 0, "child mapping still present");
+
+    pmap_activate(parent);
+    uint32_t parent_pa = pmap_extract(parent, va);
+    TEST_ASSERT(parent_pa != 0, "parent mapping still present");
+    TEST_ASSERT(parent_pa != child_pa, "child received a private page");
+    TEST_ASSERT(*(volatile uint32_t *)va == 0x11223344, "parent contents unchanged");
+
+    current_process = saved_proc;
+    pmap_activate(pmap_kernel());
+    pmap_destroy(child);
+    pmap_destroy(parent);
+    kprint("  PASS\n");
+}
+
+// Test: pmap_copy handles mixed private and shared ranges
+void test_pmap_copy_mixed(void) {
+    kprint("Test: pmap_copy mixed private/shared\n");
+
+    pmap_t src = pmap_create();
+    pmap_t dst = pmap_create();
+    TEST_ASSERT(src != 0, "source pmap created");
+    TEST_ASSERT(dst != 0, "destination pmap created");
+
+    void *private_v = pmm_alloc_block();
+    void *shared_v = pmm_alloc_block();
+    TEST_ASSERT(private_v != 0, "private page allocated");
+    TEST_ASSERT(shared_v != 0, "shared page allocated");
+
+    uint32_t va_private = 0x405000;
+    uint32_t va_shared = 0x406000;
+    uint32_t pa_private = (uint32_t)(uintptr_t)private_v - 0xC0000000;
+    uint32_t pa_shared = (uint32_t)(uintptr_t)shared_v - 0xC0000000;
+
+    struct vm_page *private_page = pmm_get_page(pa_private);
+    TEST_ASSERT(private_page != 0, "private vm_page found");
+    private_page->flags |= PG_PRIVATE;
+
+    pmap_activate(src);
+    TEST_ASSERT(pmap_enter(src, va_private, pa_private, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "private source mapping created");
+    TEST_ASSERT(pmap_enter(src, va_shared, pa_shared, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "shared source mapping created");
+
+    TEST_ASSERT(pmap_copy(dst, src, va_private, va_shared + 0x1000, 1) == 0, "pmap_copy succeeded");
+    TEST_ASSERT((V_PT(PD_INDEX(va_shared))[PT_INDEX(va_shared)] & PTE_W) == 0,
+                "source shared mapping downgraded to COW");
+
+    pmap_activate(dst);
+    uint32_t dst_private_pa = pmap_extract(dst, va_private);
+    uint32_t dst_shared_pa = pmap_extract(dst, va_shared);
+    TEST_ASSERT(dst_private_pa != 0, "private mapping copied");
+    TEST_ASSERT(dst_shared_pa != 0, "shared mapping copied");
+    TEST_ASSERT(dst_private_pa != pa_private, "private mapping duplicated");
+    TEST_ASSERT(dst_shared_pa == pa_shared, "shared mapping reused");
+    TEST_ASSERT((V_PT(PD_INDEX(va_shared))[PT_INDEX(va_shared)] & PTE_W) == 0,
+                "destination shared mapping is read-only");
+
+    struct vm_page *dst_private_page = pmm_get_page(dst_private_pa);
+    TEST_ASSERT(dst_private_page != 0, "copied private vm_page found");
+    TEST_ASSERT((dst_private_page->flags & PG_PRIVATE) != 0, "copied private page stays private");
+
+    pmap_activate(pmap_kernel());
+    pmap_destroy(dst);
+    pmap_destroy(src);
+    kprint("  PASS\n");
+}
+
 // Test: large page remove path
 void test_pmap_large_remove(void) {
     kprint("Test: pmap_remove large page\n");
@@ -429,6 +531,8 @@ void run_pmap_tests(void) {
     test_pge_global_flush();
     test_pmap_refmod_tracking();
     test_pmap_protect_rw();
+    test_pmap_fork_cow_fault();
+    test_pmap_copy_mixed();
     test_pmap_large_replace();
     test_pmap_large_remove();
     test_memory_leak();

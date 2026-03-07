@@ -1140,8 +1140,10 @@ extern void test_pge_detection(void);
 extern void test_pge_global_flush(void);
 extern void test_pipe_race(void);
 extern void test_pmap_check(void);
+extern void test_pmap_copy_mixed(void);
 extern void test_pmap_dump(void);
 extern void test_pmap_enter_extract(void);
+extern void test_pmap_fork_cow_fault(void);
 extern void test_pmap_hw_mappings(void);
 extern void test_pmap_large_remove(void);
 extern void test_pmap_large_replace(void);
@@ -2644,6 +2646,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&test_pge_global_flush, "test_pge_global_flush" },
     { (uint32_t)(uintptr_t)&test_pmap_refmod_tracking, "test_pmap_refmod_tracking" },
     { (uint32_t)(uintptr_t)&test_pmap_protect_rw, "test_pmap_protect_rw" },
+    { (uint32_t)(uintptr_t)&test_pmap_fork_cow_fault, "test_pmap_fork_cow_fault" },
+    { (uint32_t)(uintptr_t)&test_pmap_copy_mixed, "test_pmap_copy_mixed" },
     { (uint32_t)(uintptr_t)&test_pmap_large_remove, "test_pmap_large_remove" },
     { (uint32_t)(uintptr_t)&run_pmap_tests, "run_pmap_tests" },
     { (uint32_t)(uintptr_t)&run_pmap_protect_property_tests, "run_pmap_protect_property_tests" },
@@ -2883,4 +2887,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1436;
+int ksym_count = 1438;
