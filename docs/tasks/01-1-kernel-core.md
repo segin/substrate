@@ -345,7 +345,7 @@
 
             - [ ] **PMAP Statistics and Debugging:** (REQ: REQ-01-0303, REQ-01-0407)
                 - [ ] Per-pmap counters: resident, wired, mapped, faults, cow_faults. (REQ: REQ-01-0304)
-                - [ ] Global counters: total_pmaps, active_pmaps. (REQ: REQ-01-0305)
+                - [x] Global counters: total_pmaps, active_pmaps. (REQ: REQ-01-0305)
                 - [x] `pmap_dump(pmap)`: debug dump of pmap contents (PDEs + PTEs). (REQ: REQ-01-0306)
                 - [x] `pmap_check(pmap)`: consistency verification (detect leaked pages, orphan PTs). (REQ: REQ-01-0307)
                 - [x] Export stats via syscall (`sys_pmap_stats`). (REQ: REQ-01-0308)

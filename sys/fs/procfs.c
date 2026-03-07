@@ -168,7 +168,8 @@ static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
         "Pages Saved by COW: %u\n"
         "TLB Single Invalidations: %u\n"
         "TLB Full Flushes: %u\n"
-        "Total PMAPs: %u\n",
+        "Total PMAPs: %u\n"
+        "Active PMAPs: %u\n",
         stats.faults,
         stats.cow_faults,
         stats.zero_fills,
@@ -179,7 +180,8 @@ static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
         stats.pages_saved_by_cow,
         stats.tlb_invlpg_count,
         stats.tlb_full_flush_count,
-        stats.total_pmaps
+        stats.total_pmaps,
+        stats.active_pmaps
     );
 }
 

@@ -45,6 +45,7 @@ struct pmap_stats {
     uint32_t tlb_invlpg_count;     // Single-page TLB invalidations (invlpg)
     uint32_t tlb_full_flush_count; // Full TLB flushes (CR3 reload)
     uint32_t total_pmaps;          // Current number of allocated pmaps
+    uint32_t active_pmaps;         // Unique pmaps referenced by live threads
 };
 
 // Syscall to get stats

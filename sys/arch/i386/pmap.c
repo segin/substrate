@@ -5,6 +5,7 @@
 #include <vm/phys_mem.h>
 #include <kern/panic.h>
 #include <kern/console.h>
+#include <kern/sched.h>
 #include <sys/smp.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
@@ -43,6 +44,7 @@ static struct pmap_stats global_pmap_stats = {0};
 static int pmap_has_pcid = 0;
 
 static void pmap_reclaim_empty_pt(pmap_t pmap, uint32_t pdi);
+static uint32_t pmap_count_active(void);
 
 
 // Helper to increment stats (global + pmap)
@@ -1318,6 +1320,35 @@ static void pmap_reclaim_empty_pt(pmap_t pmap, uint32_t pdi) {
     pmm_free_block((void *)(uintptr_t)(pt_phys + 0xC0000000));
 }
 
+static uint32_t pmap_count_active(void) {
+    pmap_t seen[MAX_THREADS];
+    uint32_t seen_count = 0;
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == -1 || threads[i].state == THREAD_ZOMBIE || !threads[i].proc) {
+            continue;
+        }
+
+        pmap_t pmap = threads[i].proc->pmap;
+        if (!pmap) {
+            continue;
+        }
+
+        int duplicate = 0;
+        for (uint32_t j = 0; j < seen_count; j++) {
+            if (seen[j] == pmap) {
+                duplicate = 1;
+                break;
+            }
+        }
+        if (!duplicate && seen_count < MAX_THREADS) {
+            seen[seen_count++] = pmap;
+        }
+    }
+
+    return seen_count;
+}
+
 int pmap_is_referenced(pmap_t pmap, uint32_t va) {
     uint32_t *pt;
     uint32_t pti;
@@ -1612,18 +1643,23 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
 
 // Syscall to expose PMAP stats (Global)
 int sys_pmap_stats(struct pmap_stats *out) {
+    struct pmap_stats stats;
+
     if (!out) return -EFAULT;
+
+    stats = global_pmap_stats;
+    stats.active_pmaps = pmap_count_active();
 
     /*
      * Export through syscall ABI safely: kernel callers may pass a kernel
      * pointer, userspace callers must receive data via copyout.
      */
     if ((uintptr_t)out >= KERN_BASE) {
-        *out = global_pmap_stats;
+        *out = stats;
         return 0;
     }
 
-    if (copyout(&global_pmap_stats, out, sizeof(global_pmap_stats)) != 0) {
+    if (copyout(&stats, out, sizeof(stats)) != 0) {
         return -EFAULT;
     }
     return 0;

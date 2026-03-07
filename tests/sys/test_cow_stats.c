@@ -26,6 +26,10 @@ void test_cow_stats_read(void) {
          kprint("FAIL (total_pmaps == 0)\n");
          return;
     }
+    if (stats.active_pmaps == 0) {
+         kprint("FAIL (active_pmaps == 0)\n");
+         return;
+    }
     
     kprint("PASS\n");
 }

@@ -15,6 +15,7 @@ struct pmap_stats {
     uint32_t tlb_invlpg_count;
     uint32_t tlb_full_flush_count;
     uint32_t total_pmaps;
+    uint32_t active_pmaps;
 };
 
 int sys_pmap_stats(struct pmap_stats *out);
