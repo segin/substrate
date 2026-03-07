@@ -39,6 +39,7 @@ static int g_daystart = 0;      /* GNU -daystart */
 static int g_ere = 0;           /* -E (ERE mode) */
 static int g_ignore_race = 0;   /* GNU -ignore_readdir_race */
 static int g_exit_status = 0;
+static int g_pruned = 0;           /* set by -prune eval, checked by traverse */
 static time_t g_now;
 static time_t g_daystart_time;
 
@@ -591,7 +592,8 @@ static int eval_node(node_t *n, entry_t *e) {
 		return(1);
 
 	case NODE_PRUNE:
-		return(1); /* handled in traverse */
+		g_pruned = 1;
+		return(1); /* also handled in traverse */
 
 	case NODE_QUIT:
 		exit(g_exit_status);
@@ -665,10 +667,9 @@ static void traverse(const char *path, node_t *expr, int depth, int is_cmdline, 
 	int pruned = 0;
 	if(!g_depth_first) {
 		if(g_mindepth < 0 || depth >= g_mindepth) {
-			int result = eval_node(expr, &e);
-			(void)result;
-			/* check if expression contained -prune */
-			/* Simple approach: if -prune in tree and matched, skip children */
+			g_pruned = 0;
+			eval_node(expr, &e);
+			if(g_pruned) pruned = 1;
 		}
 	}
 
