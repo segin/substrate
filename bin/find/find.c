@@ -42,6 +42,7 @@ static int g_ere = 0;           /* -E (ERE mode) */
 static int g_ignore_race = 0;   /* GNU -ignore_readdir_race */
 static int g_exit_status = 0;
 static int g_pruned = 0;           /* set by -prune eval, checked by traverse */
+static int g_opt_level = 1;        /* GNU -O optimization level (0-3) */
 static time_t g_now;
 static time_t g_daystart_time;
 
@@ -1205,6 +1206,77 @@ static node_t *parse_expr(char **argv, int *idx, int argc) {
 	return(parse_or(argv, idx, argc));
 }
 
+/* ── Optimizer: reorder pure predicates in AND chains ── */
+static int is_pure_test(node_t *n) {
+	if(!n) return(0);
+	switch(n->type) {
+	case NODE_NAME: case NODE_INAME: case NODE_PATH: case NODE_IPATH:
+	case NODE_WHOLENAME: case NODE_TYPE: case NODE_XTYPE:
+	case NODE_PERM: case NODE_LINKS: case NODE_USER: case NODE_GROUP:
+	case NODE_SIZE: case NODE_NEWER: case NODE_NEWXY:
+	case NODE_ATIME: case NODE_MTIME: case NODE_CTIME:
+	case NODE_AMIN: case NODE_MMIN: case NODE_CMIN:
+	case NODE_INUM: case NODE_EMPTY: case NODE_FSTYPE:
+	case NODE_REGEX: case NODE_IREGEX:
+	case NODE_READABLE: case NODE_WRITABLE: case NODE_EXECUTABLE:
+	case NODE_SAMEFILE: case NODE_ILNAME:
+	case NODE_TRUE: case NODE_FALSE:
+		return(1);
+	default:
+		return(0);
+	}
+}
+
+static int is_name_test(node_t *n) {
+	if(!n) return(0);
+	switch(n->type) {
+	case NODE_NAME: case NODE_INAME: case NODE_PATH: case NODE_IPATH:
+	case NODE_WHOLENAME: case NODE_TYPE:
+	case NODE_TRUE: case NODE_FALSE:
+		return(1);
+	default:
+		return(0);
+	}
+}
+
+/* Cost heuristic: lower = should be tested first */
+static int node_cost(node_t *n, int opt_level) {
+	if(!n) return(100);
+	if(opt_level >= 1 && is_name_test(n)) return(1);   /* filename tests are cheapest */
+	if(opt_level >= 2 && is_pure_test(n)) return(10);   /* pure tests before actions */
+	if(has_action(n)) return(50);                       /* actions are expensive */
+	return(30);
+}
+
+/*
+ * Reorder AND chains: within a left-associative AND tree, move cheaper
+ * nodes to the left so short-circuit evaluation skips expensive actions.
+ * Only reorders within AND; never crosses OR boundaries.
+ */
+static node_t *optimize_ast(node_t *n, int opt_level) {
+	if(!n || opt_level == 0) return(n);
+
+	/* Recurse into children first */
+	n->left = optimize_ast(n->left, opt_level);
+	n->right = optimize_ast(n->right, opt_level);
+
+	/* For AND nodes: if right child is cheaper than left, swap them.
+	 * This is safe because both sides are pure tests (no side effects)
+	 * or because we're only moving pure tests before impure ones. */
+	if(n->type == NODE_AND) {
+		int cost_l = node_cost(n->left, opt_level);
+		int cost_r = node_cost(n->right, opt_level);
+		/* Only swap if right is cheaper AND the cheaper one is pure */
+		if(cost_r < cost_l && is_pure_test(n->right)) {
+			node_t *tmp = n->left;
+			n->left = n->right;
+			n->right = tmp;
+		}
+	}
+
+	return(n);
+}
+
 /* ── Flush all pending exec+ batches ── */
 static void flush_batches(node_t *n) {
 	if(!n) return;
@@ -1254,7 +1326,10 @@ int main(int argc, char **argv) {
 		else if(strcmp(argv[i], "-E") == 0) { g_ere = 1; i++; }
 		else if(strcmp(argv[i], "-s") == 0) { g_sorted = 1; i++; }
 		else if(strcmp(argv[i], "-x") == 0) { g_xdev = 1; i++; }
-		else if(strcmp(argv[i], "-X") == 0) { /* OpenBSD: safe xargs, we'll handle like -printx default? just accept */ i++; }
+		else if(strcmp(argv[i], "-X") == 0) { /* OpenBSD: safe xargs */ i++; }
+		else if(strncmp(argv[i], "-O", 2) == 0 && argv[i][2] >= '0' && argv[i][2] <= '3') {
+			g_opt_level = argv[i][2] - '0'; i++;
+		}
 		else if(strcmp(argv[i], "-f") == 0) {
 			/* FreeBSD: -f path (path is next arg) */
 			i++; /* skip -f, the path is left as a starting point */
@@ -1302,6 +1377,9 @@ int main(int argc, char **argv) {
 			expr = print_node;
 		}
 	}
+
+	/* Phase 3.5: optimizer pass */
+	expr = optimize_ast(expr, g_opt_level);
 
 	/* Phase 4: traverse each starting point */
 	for(int p = 0; p < path_count; p++) {
