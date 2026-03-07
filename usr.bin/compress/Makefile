@@ -1,21 +1,31 @@
 # Makefile for usr.bin/compress
+# Builds: compress, uncompress, zcat (symlink to compress)
 
-PROG=   uncompress
-SRCS=   uncompress.c
-OBJS=   $(SRCS:.c=.o)
+PROGS=  compress uncompress
 CFLAGS= -Wall -Wextra -Wno-unused-parameter -I.
 BINDIR= /usr/bin
 
-all: $(PROG)
+all: $(PROGS) zcat
 
-$(PROG): $(OBJS)
-	$(CC) $(CFLAGS) -o $@ $(OBJS)
+compress: compress.o
+	$(CC) $(CFLAGS) -o $@ compress.o
+
+uncompress: uncompress.o
+	$(CC) $(CFLAGS) -o $@ uncompress.o
+
+zcat: compress
+	ln -sf compress zcat
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(PROG) $(OBJS)
+	rm -f compress uncompress zcat *.o
 
-install: $(PROG)
+install: $(PROGS) zcat
 	mkdir -p $(DESTDIR)$(BINDIR)
-	cp $(PROG) $(DESTDIR)$(BINDIR)/$(PROG)
+	cp compress $(DESTDIR)$(BINDIR)/compress
+	cp uncompress $(DESTDIR)$(BINDIR)/uncompress
+	ln -sf compress $(DESTDIR)$(BINDIR)/zcat
 
 .PHONY: all clean install
