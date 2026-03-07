@@ -146,6 +146,43 @@ static void test_realloc_after_free(void) {
     TEST_PASS("realloc_after_free");
 }
 
+/* Property: alloc -> free -> alloc returns same page */
+static void test_realloc_same_page(void) {
+    vm_page_t *p1 = vm_phys_alloc_page();
+    TEST_ASSERT(p1 != NULL, "same_page: first alloc failed");
+    uintptr_t phys1 = p1->phys_addr;
+
+    vm_phys_free_page(p1);
+
+    vm_page_t *p2 = vm_phys_alloc_page();
+    TEST_ASSERT(p2 != NULL, "same_page: second alloc failed");
+    TEST_ASSERT(p2->phys_addr == phys1, "same_page: allocator did not return freed page");
+
+    vm_phys_free_page(p2);
+    TEST_PASS("realloc_same_page");
+}
+
+/* Test: adjacent single-page frees coalesce back into a multi-page block */
+static void test_buddy_coalescing(void) {
+    vm_page_t *block = vm_phys_alloc_contiguous(2);
+    TEST_ASSERT(block != NULL, "coalesce: initial contiguous alloc failed");
+    uintptr_t base = block->phys_addr;
+
+    vm_page_t *page0 = vm_phys_paddr_to_page(base);
+    vm_page_t *page1 = vm_phys_paddr_to_page(base + 0x1000);
+    TEST_ASSERT(page0 != NULL && page1 != NULL, "coalesce: page lookup failed");
+
+    vm_phys_free_page(page0);
+    vm_phys_free_page(page1);
+
+    vm_page_t *merged = vm_phys_alloc_contiguous(2);
+    TEST_ASSERT(merged != NULL, "coalesce: realloc contiguous failed");
+    TEST_ASSERT(merged->phys_addr == base, "coalesce: block did not merge back to original base");
+
+    vm_phys_free_contiguous(merged, 2);
+    TEST_PASS("buddy_coalescing");
+}
+
 /* Test: paddr_to_page returns correct mapping */
 static void test_paddr_to_page(void) {
     vm_page_t *page = vm_phys_alloc_page();
@@ -236,6 +273,24 @@ static void test_free_used_invariant(void) {
     TEST_PASS("free_used_invariant");
 }
 
+/* Property: buddy free lists stay internally consistent */
+static void test_free_list_integrity(void) {
+    TEST_ASSERT(vm_phys_check_integrity(), "integrity: initial state invalid");
+
+    vm_page_t *a = vm_phys_alloc_page();
+    vm_page_t *b = vm_phys_alloc_page();
+    vm_page_t *c = vm_phys_alloc_contiguous(4);
+    TEST_ASSERT(a != NULL && b != NULL && c != NULL, "integrity: alloc failed");
+    TEST_ASSERT(vm_phys_check_integrity(), "integrity: invalid after alloc");
+
+    vm_phys_free_page(a);
+    vm_phys_free_page(b);
+    vm_phys_free_contiguous(c, 4);
+    TEST_ASSERT(vm_phys_check_integrity(), "integrity: invalid after free");
+
+    TEST_PASS("free_list_integrity");
+}
+
 /* Test entry point */
 void test_vm_phys(void) {
     kprint("=== Physical Memory Manager Integration Tests ===\n");
@@ -247,11 +302,14 @@ void test_vm_phys(void) {
     test_contiguous_order4();
     test_alloc_no_overlap();
     test_realloc_after_free();
+    test_realloc_same_page();
+    test_buddy_coalescing();
     test_paddr_to_page();
     test_contiguous_zero_count();
     test_free_count_tracking();
     test_mark_used_single_page_reservation();
     test_free_used_invariant();
+    test_free_list_integrity();
     
     char buf[64];
     sprintf(buf, "=== vm_phys tests: %d passed, %d failed ===\n", passed, failed);

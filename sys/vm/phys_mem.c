@@ -322,3 +322,60 @@ void vm_phys_mark_used(uintptr_t pa) {
     spinlock_release(&vm_phys_lock);
     intr_restore(flags);
 }
+
+int vm_phys_check_integrity(void) {
+    int ok = 1;
+    size_t accounted_free = 0;
+
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+
+    for (int order = 0; order < PMM_MAX_ORDER && ok; order++) {
+        vm_page_t *slow = vm_phys_free_lists[order];
+        vm_page_t *fast = vm_phys_free_lists[order];
+
+        while (fast && fast->next) {
+            slow = slow->next;
+            fast = fast->next->next;
+            if (slow == fast) {
+                ok = 0;
+                break;
+            }
+        }
+
+        for (vm_page_t *page = vm_phys_free_lists[order]; page; page = page->next) {
+            uintptr_t block_size = ((uintptr_t)1 << order) * PMM_BLOCK_SIZE;
+
+            if (!vm_page_valid(page)) {
+                ok = 0;
+                break;
+            }
+            if (!(page->flags & PG_FREE) || page->order != order) {
+                ok = 0;
+                break;
+            }
+            if ((page->phys_addr & (block_size - 1)) != 0) {
+                ok = 0;
+                break;
+            }
+            if (page->prev && page->prev->next != page) {
+                ok = 0;
+                break;
+            }
+            if (page->next && page->next->prev != page) {
+                ok = 0;
+                break;
+            }
+
+            accounted_free += ((size_t)1U << order);
+        }
+    }
+
+    if (ok && accounted_free != vm_phys_free_count) {
+        ok = 0;
+    }
+
+    spinlock_release(&vm_phys_lock);
+    intr_restore(flags);
+    return ok;
+}

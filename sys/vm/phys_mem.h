@@ -22,6 +22,7 @@ void vm_phys_free_contiguous(vm_page_t *page, size_t count);
 size_t vm_phys_get_free(void);
 size_t vm_phys_get_used(void);
 void vm_phys_mark_used(uintptr_t pa); // For legacy/reservation usage
+int vm_phys_check_integrity(void);
 
 // Callbacks/Helpers
 vm_page_t *vm_phys_paddr_to_page(uintptr_t pa);
