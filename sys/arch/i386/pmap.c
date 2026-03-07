@@ -18,9 +18,13 @@
 __attribute__((aligned(4096)))
 static uint32_t kernel_page_directory[1024];
 
-// Static page tables for bootstrap (128MB = 32 tables + 1 for HW)
+// Static page tables for bootstrap:
+// - direct map 0..1004MB in the higher half (PDEs 768..1018)
+// - one dedicated LAPIC MMIO table at PDE 1019
+#define PMAP_BOOTSTRAP_DIRECT_PTES 251
+#define PMAP_BOOTSTRAP_PT_COUNT (PMAP_BOOTSTRAP_DIRECT_PTES + 1)
 __attribute__((aligned(4096)))
-static uint32_t kernel_page_tables[33][1024];
+static uint32_t kernel_page_tables[PMAP_BOOTSTRAP_PT_COUNT][1024];
 
 
 
@@ -148,9 +152,9 @@ void pmap_bootstrap(void) {
         kprint("PMAP: PCID supported by CPU (but disabled in 32-bit mode)\n");
     }
 
-    // Map first 128MB (32 page tables x 4MB each) to support PMM allocations
-    // Use static page tables instead of PMM since PMM isn't initialized yet
-    for (int pt_idx = 0; pt_idx < 32; pt_idx++) {
+    // Map the contiguous higher-half direct map up to the LAPIC slot.
+    // Use static page tables instead of PMM since PMM isn't initialized yet.
+    for (int pt_idx = 0; pt_idx < PMAP_BOOTSTRAP_DIRECT_PTES; pt_idx++) {
         uint32_t *pt_virt = kernel_page_tables[pt_idx];
         uint32_t pt_phys = V2P(pt_virt);
         
@@ -160,8 +164,10 @@ void pmap_bootstrap(void) {
             pt_virt[i] = phys_addr | kernel_pte_flags; 
         }
         
-        // Entry pt_idx of PD points to this PT (Identity mapping)
-        kernel_page_directory[pt_idx] = pt_phys | PTE_P | PTE_W;
+        // Keep the early identity map only for the first 16MB.
+        if (pt_idx < 4) {
+            kernel_page_directory[pt_idx] = pt_phys | PTE_P | PTE_W;
+        }
 
         // Also map to Higher Half (0xC0000000+)
         kernel_page_directory[768 + pt_idx] = pt_phys | PTE_P | PTE_W;
@@ -173,7 +179,7 @@ void pmap_bootstrap(void) {
     // Map Hardware: Identity-map LAPIC (0xFEE00000)
     // LAPIC is at PD index 1019
     {
-        uint32_t *pt_virt = kernel_page_tables[32];
+        uint32_t *pt_virt = kernel_page_tables[PMAP_BOOTSTRAP_DIRECT_PTES];
         uint32_t pt_phys = V2P(pt_virt);
         
         // Zero the HW page table
@@ -199,7 +205,7 @@ void pmap_bootstrap(void) {
     // Enable Paging (Reload CR3)
     __asm__ volatile("mov %0, %%cr3" :: "r"(kernel_pmap_store.pdir_phys));
     
-    kprint("PMAP: Paging Enabled (Higher Half, 128MB mapped)\n");
+    kprint("PMAP: Paging Enabled (Higher Half, 1004MB direct map)\n");
 
     // Bootstrap stage is complete: allow PMM to expose high memory ranges.
     pmm_enable_highmem();

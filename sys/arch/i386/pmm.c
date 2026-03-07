@@ -34,8 +34,13 @@ static vm_page_t pmm_page_array_static[PMM_STATIC_METADATA_BLOCKS];
 #define PMM_MAX_MODULE_REGIONS 8
 #define PMM_MAX_BOOT_REGIONS 16
 #define PMM_PHYS_VIRT_BASE 0xC0000000U
-#define PMM_BOOTSTRAP_LOWMEM_LIMIT (15U * 1024U * 1024U)
+#define PMM_BOOTSTRAP_LOWMEM_LIMIT (8U * 1024U * 1024U)
 #define PMM_CONSTRAINED_RAM_LIMIT (4U * 1024U * 1024U)
+/*
+ * Higher-half direct map remains contiguous only until the LAPIC slot at
+ * 0xFEC00000 (PDE 1019). Keep generic PMM allocations below that mark.
+ */
+#define PMM_DIRECTMAP_PHYS_LIMIT 0x3EC00000U
 
 typedef struct pmm_region {
     phys_addr_t start;
@@ -77,6 +82,12 @@ static pmm_usable_range_t pmm_usable_ranges[PMM_MAX_USABLE_RANGES];
 static int pmm_usable_range_count = 0;
 static int pmm_bootstrap_lowmem_only = 1;
 static int pmm_highmem_seeded = 0;
+static uint32_t pmm_seed_phys_limit = PMM_BOOTSTRAP_LOWMEM_LIMIT;
+static uint32_t pmm_detected_max_phys = PMM_BLOCK_SIZE;
+static size_t pmm_target_total_blocks = 0;
+static size_t pmm_target_bitmap_bytes = 0;
+static size_t pmm_target_page_array_bytes = 0;
+static int pmm_metadata_needs_promotion = 0;
 
 typedef struct multiboot_module {
     uint32_t mod_start;
@@ -119,6 +130,9 @@ static void pmm_select_metadata(uint64_t max_phys, uint64_t total_usable,
                                 size_t *out_bitmap_bytes,
                                 vm_page_t **out_page_array,
                                 size_t *out_total_blocks);
+static void pmm_mark_watermark_used(void);
+static int pmm_promote_metadata(void);
+static void pmm_reserve_kernel(void);
 
 static void pmm_mark_used_range(phys_addr_t start, phys_addr_t end) {
     uint32_t page_start = start & ~(PMM_BLOCK_SIZE - 1);
@@ -469,6 +483,12 @@ static void pmm_select_metadata(uint64_t max_phys, uint64_t total_usable,
     size_t array_bytes = total_blocks * sizeof(vm_page_t);
     uint32_t saved_ptr = watermark_ptr;
 
+    pmm_detected_max_phys = max_phys_addr;
+    pmm_target_total_blocks = total_blocks;
+    pmm_target_bitmap_bytes = bitmap_bytes;
+    pmm_target_page_array_bytes = array_bytes;
+    pmm_metadata_needs_promotion = 0;
+
     uint8_t *bitmap = (uint8_t *)pmm_watermark_alloc(bitmap_bytes, 16);
     vm_page_t *page_array = NULL;
     if (bitmap) {
@@ -482,6 +502,7 @@ static void pmm_select_metadata(uint64_t max_phys, uint64_t total_usable,
         *out_bitmap_bytes = sizeof(pmm_bitmap_static);
         *out_total_blocks = PMM_STATIC_METADATA_BLOCKS;
         *out_page_array = pmm_page_array_static;
+        pmm_metadata_needs_promotion = (total_blocks > PMM_STATIC_METADATA_BLOCKS);
         return;
     }
 
@@ -782,12 +803,21 @@ static void pmm_seed_usable_ranges(void) {
     }
 }
 
+static void pmm_mark_watermark_used(void) {
+    uint32_t wm_start = watermark_base;
+    uint32_t wm_end = watermark_ptr;
+
+    for (uint32_t a = wm_start; a < wm_end; a += PMM_BLOCK_SIZE) {
+        vm_phys_mark_used(a);
+    }
+}
+
 static void pmm_cb_init_buddy(phys_addr_t start, phys_addr_t length, void *arg) {
     (void)arg;
     phys_addr_t end = start + length;
 
-    if (pmm_bootstrap_lowmem_only && end > PMM_BOOTSTRAP_LOWMEM_LIMIT) {
-        end = PMM_BOOTSTRAP_LOWMEM_LIMIT;
+    if (end > pmm_seed_phys_limit) {
+        end = pmm_seed_phys_limit;
     }
     
     /* Use proper kernel bounds from initialized globals */
@@ -823,12 +853,66 @@ static void pmm_cb_init_buddy(phys_addr_t start, phys_addr_t length, void *arg) 
     }
 }
 
+static int pmm_promote_metadata(void) {
+    if (!pmm_metadata_needs_promotion) {
+        return 0;
+    }
+
+    uint32_t metadata_limit = pmm_detected_max_phys;
+    if (metadata_limit > PMM_DIRECTMAP_PHYS_LIMIT) {
+        metadata_limit = PMM_DIRECTMAP_PHYS_LIMIT;
+    }
+    metadata_limit &= ~(PMM_BLOCK_SIZE - 1);
+
+    if (metadata_limit <= watermark_ptr) {
+        kprint("PMM: Warn - no direct-mapped headroom left for full metadata.\n");
+        return -1;
+    }
+
+    watermark_end = metadata_limit;
+    uint32_t saved_ptr = watermark_ptr;
+
+    uint8_t *pmm_bitmap = (uint8_t *)pmm_watermark_alloc(pmm_target_bitmap_bytes, 16);
+    vm_page_t *pmm_page_array = NULL;
+    if (pmm_bitmap) {
+        pmm_page_array = (vm_page_t *)pmm_watermark_alloc(pmm_target_page_array_bytes,
+                                                          PMM_BLOCK_SIZE);
+    }
+
+    if (!pmm_bitmap || !pmm_page_array) {
+        watermark_ptr = saved_ptr;
+        kprint("PMM: Warn - unable to promote metadata into direct-mapped window.\n");
+        return -1;
+    }
+
+    vm_phys_early_init(pmm_bitmap, pmm_target_bitmap_bytes, pmm_page_array,
+                       pmm_target_total_blocks);
+    pmm_reserve_kernel();
+    pmm_seed_usable_ranges();
+    pmm_reserve_kernel();
+    pmm_mark_watermark_used();
+    pmm_metadata_needs_promotion = 0;
+
+    kprint("PMM: promoted bootstrap metadata into direct-mapped RAM.\n");
+    return 0;
+}
+
 void pmm_enable_highmem(void) {
+    uint32_t seed_limit = PMM_DIRECTMAP_PHYS_LIMIT;
+
     if (pmm_highmem_seeded) {
         return;
     }
 
+    if (pmm_promote_metadata() != 0) {
+        kprint("PMM: continuing with bootstrap metadata only.\n");
+        if (pmm_metadata_needs_promotion) {
+            seed_limit = PMM_STATIC_METADATA_BLOCKS * PMM_BLOCK_SIZE;
+        }
+    }
+
     pmm_bootstrap_lowmem_only = 0;
+    pmm_seed_phys_limit = seed_limit;
 
     for (int i = 0; i < pmm_usable_range_count; i++) {
         phys_addr_t start = pmm_usable_ranges[i].start;
@@ -842,7 +926,7 @@ void pmm_enable_highmem(void) {
     }
 
     pmm_highmem_seeded = 1;
-    kprint("PMM: high memory ranges enabled after bootstrap paging.\n");
+    kprint("PMM: direct-mapped RAM ranges enabled after bootstrap paging.\n");
 }
 
 void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
@@ -851,6 +935,8 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm_reset_walk_state();
     pmm_bootstrap_lowmem_only = 1;
     pmm_highmem_seeded = 0;
+    pmm_seed_phys_limit = PMM_BOOTSTRAP_LOWMEM_LIMIT;
+    pmm_metadata_needs_promotion = 0;
 
     // 2. Pass 1: Find limits with 64-bit accumulation for >4GB systems
     struct pmm_stats_ctx stats = { .max_phys = 0x1000000, .total_usable = 0 };
@@ -862,7 +948,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm_total_usable_ram = stats.total_usable;
 
     // 3. Init Watermark
-    pmm_watermark_init(kernel_phys_end, (uint32_t)stats.max_phys);
+    pmm_watermark_init(kernel_phys_end, PMM_BOOTSTRAP_LOWMEM_LIMIT);
     
     size_t total_blocks = 0;
     size_t bitmap_bytes = 0;
@@ -879,7 +965,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     pmm_report_memory_stats();
 
     if (mmap_addr == 0 || mmap_length == 0) {
-        kprint("PMM: Fallback 15MB.\n");
+        kprint("PMM: Fallback bootstrap allocator.\n");
         // Fallback init...
         // ... (Similar to before)
         uint32_t k_end = kernel_phys_end;
@@ -897,13 +983,7 @@ void pmm_init(uint32_t mmap_addr, uint32_t mmap_length) {
     // 8. Final safety reservation
     pmm_reserve_kernel();
     
-    // Explicitly mark watermark as used (generic PMM bitmap marking)
-    uint32_t wm_start = watermark_base;
-    uint32_t wm_end = watermark_ptr;
-    // Iterate blocks
-    for (uint32_t a = wm_start; a < wm_end; a+=PMM_BLOCK_SIZE) {
-        vm_phys_mark_used(a);
-    }
+    pmm_mark_watermark_used();
 }
 
 uint32_t pmm_get_total_memory(void) {

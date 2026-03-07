@@ -89,12 +89,18 @@ The i386 PMAP implementation is a two-level paging design:
 - `V_PD` at `0xFFFFF000` and `V_PT(n)` at `0xFFC00000 + n * 4096`
 - per-process user PDEs in slots `0..767`
 - shared kernel PDEs in slots `768..1022`
+- bootstrap direct map of physical `0..1004MB` in the higher half, with PDE 1019 reserved for LAPIC MMIO
 
 Address-space layout is fixed:
 - user virtual address space: `0x00000000..0xBFFFFFFF`
 - kernel virtual address space: `0xC0000000..0xFFFFFFFF`
 - kernel image load address: `0x00100000`
 - kernel image link address: `0xC0100000`
+
+Physical-memory bootstrap is two-stage:
+- early PMM metadata allocation is constrained to the first 8MB of RAM
+- after `pmap_bootstrap()` installs the larger kernel direct map, PMM promotes itself into a full page database sized from the detected RAM map when that metadata fits inside the direct-mapped window
+- pages above the current direct-mapped physical ceiling are detected and accounted, but are not yet exposed to generic kernel allocators that rely on `phys + 0xC0000000`
 
 Fork and copy paths use copy-on-write with per-page reverse mappings (`pv_entry`) so the VM layer can inspect hardware accessed/dirty state and resolve COW faults without synthetic software shadow bits.
 

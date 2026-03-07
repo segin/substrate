@@ -126,6 +126,7 @@ void vm_phys_early_init(void *bitmap, size_t bitmap_size, vm_page_t *pages, size
     (void)bitmap_size;
     
     spinlock_init(&vm_phys_lock, "vm_phys");
+    memset(vm_phys_free_lists, 0, sizeof(vm_phys_free_lists));
     vm_phys_page_array = pages;
     vm_phys_page_count = page_count;
     vm_phys_free_count = 0;  /* Will be set by vm_phys_add_range */
