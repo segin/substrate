@@ -6,10 +6,10 @@
 ## Reimplemented Checklist (All Open)
 
 ### 7. Core Utilities (`bin/`)
-- [ ] **Process Tools:** (REQ: REQ-11-0001)
-    - [ ] **`ps`:** (REQ: REQ-11-0002)
-        - [ ] **Bitness Support:** Update to receive bitness via `sys_proc_info` and format output (`-b`). (REQ: REQ-11-0003)
-        - [ ] **Testing:** Integration tests for output verification. (REQ: REQ-11-0004)
+- [x] **Process Tools:** (REQ: REQ-11-0001)
+    - [x] **`ps`:** (REQ: REQ-11-0002)
+        - [x] **Bitness Support:** Update to receive bitness via `sys_proc_info` and format output (`-b`). (REQ: REQ-11-0003)
+        - [x] **Testing:** Integration tests for output verification. (REQ: REQ-11-0004)
 - [ ] **LDT Tools:** (REQ: REQ-11-0005)
     - [ ] **`setldt` / `ldtctl`:** CLI tool to inspect/manipulate LDT entries. (REQ: REQ-11-0006)
 - [ ] **Calculator Tools:** (REQ: REQ-11-0007)
@@ -20,8 +20,8 @@
     - [ ] **`mkfs`:** Implement `ext2` creation (Native Filesystem). (REQ: REQ-11-0012)
     - [ ] **`fsck`:** Implement `ext2` consistency check. (REQ: REQ-11-0013)
 - [ ] **Compression Tools:** (REQ: REQ-11-0014)
-    - [ ] **`compress`:** Implement `compress`, `uncompress`, `zcat` (LZW). (REQ: REQ-11-0015)
-    - [ ] **`cpio`:** Implement POSIX-compatible archive utility (`usr.bin/cpio`). (REQ: REQ-11-0016)
+    - [x] **`compress`:** Implement `compress`, `uncompress`, `zcat` (LZW). (REQ: REQ-11-0015)
+    - [x] **`cpio`:** Implement POSIX-compatible archive utility (`usr.bin/cpio`). (REQ: REQ-11-0016)
 
 
 ## User Stories
