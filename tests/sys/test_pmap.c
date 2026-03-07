@@ -234,6 +234,80 @@ void test_pmap_dump(void) {
     kprint("  PASS\n");
 }
 
+void test_pmap_mapping_counters(void) {
+    kprint("Test: pmap mapping counters\n");
+
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    void *page_v = pmm_alloc_block();
+    TEST_ASSERT(page_v != 0, "page allocated");
+
+    uint32_t va = 0x404000;
+    uint32_t pa = (uint32_t)(uintptr_t)page_v - 0xC0000000;
+
+    pmap_activate(pmap);
+    TEST_ASSERT(pmap_enter(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
+                "mapping created");
+    TEST_ASSERT(pmap->resident_count == 1, "resident_count increments");
+    TEST_ASSERT(pmap->mapped_count == 1, "mapped_count increments");
+
+    pmap_remove(pmap, va);
+    TEST_ASSERT(pmap->resident_count == 0, "resident_count decrements");
+    TEST_ASSERT(pmap->mapped_count == 0, "mapped_count decrements");
+
+    pmap_activate(pmap_kernel());
+    pmm_free_block(page_v);
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
+void test_pmap_growkernel_sync(void) {
+    kprint("Test: pmap_growkernel sync\n");
+
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    pmap_t kernel = pmap_kernel();
+    uint32_t pdi = 0;
+    for (uint32_t i = 1020; i < 1023; i++) {
+        if (!(kernel->pdir[i] & PTE_P)) {
+            pdi = i;
+            break;
+        }
+    }
+    TEST_ASSERT(pdi != 0, "free kernel PDE found");
+
+    uint32_t va = pdi << 22;
+    TEST_ASSERT((pmap->pdir[pdi] & PTE_P) == 0, "child pmap initially lacks PDE");
+
+    void *page_v = pmm_alloc_block();
+    TEST_ASSERT(page_v != 0, "kernel page allocated");
+    uint32_t pa = (uint32_t)(uintptr_t)page_v - 0xC0000000;
+
+    pmap_activate(kernel);
+    pmap_kenter(va, pa);
+    TEST_ASSERT(pmap->pdir[pdi] == kernel->pdir[pdi], "kernel PDE propagated to existing pmap");
+
+    pmap_activate(pmap);
+    TEST_ASSERT(pmap_extract(pmap, va) == pa, "propagated kernel mapping visible");
+
+    pmap_activate(kernel);
+    pmap_kremove(va);
+    TEST_ASSERT((kernel->pdir[pdi] & PTE_P) != 0, "kernel PDE retained for cleanup");
+
+    uint32_t pt_phys = kernel->pdir[pdi] & PTE_FRAME;
+    kernel->pdir[pdi] = 0;
+    pmap->pdir[pdi] = 0;
+    pmap_invalidate_page(va);
+    pmap_invalidate_page((uint32_t)V_PT(pdi));
+    pmm_free_block((void *)(uintptr_t)(pt_phys + 0xC0000000));
+    pmm_free_block(page_v);
+
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
 // Test 8: PGE detection via CR4
 void test_pge_detection(void) {
     kprint("Test: PGE detection\n");
@@ -527,6 +601,8 @@ void run_pmap_tests(void) {
     test_pmap_pse();
     test_pmap_check();
     test_pmap_dump();
+    test_pmap_mapping_counters();
+    test_pmap_growkernel_sync();
     test_pge_detection();
     test_pge_global_flush();
     test_pmap_refmod_tracking();

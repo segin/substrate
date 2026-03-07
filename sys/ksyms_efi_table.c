@@ -607,6 +607,7 @@ extern void pmap_extract(void);
 extern void pmap_fault(void);
 extern void pmap_flush_global_pages(void);
 extern void pmap_fork(void);
+extern void pmap_growkernel(void);
 extern void pmap_invalidate_all(void);
 extern void pmap_invalidate_page(void);
 extern void pmap_is_modified(void);
@@ -1142,10 +1143,12 @@ extern void test_pmap_copy_mixed(void);
 extern void test_pmap_dump(void);
 extern void test_pmap_enter_extract(void);
 extern void test_pmap_fork_cow_fault(void);
+extern void test_pmap_growkernel_sync(void);
 extern void test_pmap_hw_mappings(void);
 extern void test_pmap_large_remove(void);
 extern void test_pmap_large_replace(void);
 extern void test_pmap_lifecycle(void);
+extern void test_pmap_mapping_counters(void);
 extern void test_pmap_protect_rw(void);
 extern void test_pmap_pse(void);
 extern void test_pmap_refmod_tracking(void);
@@ -1593,6 +1596,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&pmap_shootdown_defer, "pmap_shootdown_defer" },
     { (uint32_t)(uintptr_t)&pmap_shootdown_commit, "pmap_shootdown_commit" },
     { (uint32_t)(uintptr_t)&pmap_shootdown_wait, "pmap_shootdown_wait" },
+    { (uint32_t)(uintptr_t)&pmap_growkernel, "pmap_growkernel" },
     { (uint32_t)(uintptr_t)&pmap_is_referenced, "pmap_is_referenced" },
     { (uint32_t)(uintptr_t)&pmap_is_modified, "pmap_is_modified" },
     { (uint32_t)(uintptr_t)&pmap_clear_reference, "pmap_clear_reference" },
@@ -2648,6 +2652,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&test_pmap_pse, "test_pmap_pse" },
     { (uint32_t)(uintptr_t)&test_pmap_check, "test_pmap_check" },
     { (uint32_t)(uintptr_t)&test_pmap_dump, "test_pmap_dump" },
+    { (uint32_t)(uintptr_t)&test_pmap_mapping_counters, "test_pmap_mapping_counters" },
+    { (uint32_t)(uintptr_t)&test_pmap_growkernel_sync, "test_pmap_growkernel_sync" },
     { (uint32_t)(uintptr_t)&test_pge_detection, "test_pge_detection" },
     { (uint32_t)(uintptr_t)&test_pge_global_flush, "test_pge_global_flush" },
     { (uint32_t)(uintptr_t)&test_pmap_refmod_tracking, "test_pmap_refmod_tracking" },
@@ -2895,4 +2901,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1442;
+int ksym_count = 1445;

@@ -49,6 +49,8 @@ static int pmap_has_pcid = 0;
 
 static void pmap_reclaim_empty_pt(pmap_t pmap, uint32_t pdi);
 static uint32_t pmap_count_active(void);
+static void pmap_count_map_add(pmap_t pmap, uint32_t pages);
+static void pmap_count_map_remove(pmap_t pmap, uint32_t pages);
 
 
 // Helper to increment stats (global + pmap)
@@ -107,6 +109,22 @@ static void __attribute__((unused)) pmap_lock_acquire(void) {
 
 static void __attribute__((unused)) pmap_lock_release(void) {
     __sync_lock_release(&pmap_lock);
+}
+
+static void pmap_count_map_add(pmap_t pmap, uint32_t pages) {
+    if (!pmap || pages == 0) return;
+    pmap->resident_count += pages;
+    pmap->mapped_count += pages;
+}
+
+static void pmap_count_map_remove(pmap_t pmap, uint32_t pages) {
+    if (!pmap || pages == 0) return;
+
+    if (pmap->resident_count >= pages) pmap->resident_count -= pages;
+    else pmap->resident_count = 0;
+
+    if (pmap->mapped_count >= pages) pmap->mapped_count -= pages;
+    else pmap->mapped_count = 0;
 }
 
 void pmap_bootstrap(void) {
@@ -198,6 +216,9 @@ void pmap_bootstrap(void) {
     kernel_pmap_store.pdir = kernel_page_directory;
     kernel_pmap_store.pdir_phys = V2P(kernel_page_directory);
     kernel_pmap_store.ref_count = 1;
+    kernel_pmap_store.resident_count = 0;
+    kernel_pmap_store.wired_count = 0;
+    kernel_pmap_store.mapped_count = 0;
 
     // Initialize pmap lock
     pmap_lock = 0;
@@ -293,6 +314,7 @@ pmap_t pmap_create(void) {
     pmap->ref_count = 1;
     pmap->resident_count = 0;
     pmap->wired_count = 0;
+    pmap->mapped_count = 0;
     pmap->stats.faults = 0;
     pmap->stats.cow_faults = 0;
     pmap->stats.zero_fills = 0;
@@ -506,7 +528,7 @@ pmap_t pmap_fork(pmap_t src_pmap) {
                 pv_insert(page, dst_pmap, ((uint32_t)pdi << 22) | ((uint32_t)pti << 12));
             }
             
-            dst_pmap->resident_count++;
+            pmap_count_map_add(dst_pmap, 1);
             
             // Track COW pages mapped (new stat)
             dst_pmap->stats.cow_pages_mapped++;
@@ -602,7 +624,7 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
             pv_remove(old_page, pmap, va);
         }
     } else {
-        pmap->resident_count++;
+        pmap_count_map_add(pmap, 1);
     }
 
     pt[pti] = (pa & 0xFFFFF000) | pte_flags;
@@ -673,7 +695,7 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
                 pv_remove(old_page, pmap, va);
             }
         } else {
-            pmap->resident_count++;
+            pmap_count_map_add(pmap, 1);
         }
 
         pt[pti] = (pa & 0xFFFFF000) | pte_flags;
@@ -733,6 +755,7 @@ void pmap_map_trampoline(void) {
 // Implements Page Table Eviction: If a PT exists at this PDE, it is freed.
 int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;
+    uint32_t removed = 0;
     
     // Validate alignment (4MB)
     if ((va & 0x3FFFFF) || (pa & 0x3FFFFF)) return -1;
@@ -760,6 +783,7 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
             for (int i = 0; i < 1024; i++) {
                 if (pt[i] & PTE_P) {
                     uint32_t page_phys = pt[i] & PTE_FRAME;
+                    removed++;
 
                     // Validate page address before freeing
                     // Use vm_phys_free_page via pmm_get_page to handle HighMem and refcounts safely
@@ -779,7 +803,11 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
             // 5. Invalidate TLB: Replacing a page table requires flushing all TLB entries
             // covered by it. Since iterating 1024 invlpg is slow, we do a full flush.
             pmap_invalidate_all();
+            pmap_count_map_remove(pmap, removed);
+            pmap_count_map_add(pmap, 1024);
         }
+    } else {
+        pmap_count_map_add(pmap, 1024);
     }
 
     // Build PDE flags
@@ -822,11 +850,7 @@ void pmap_remove(pmap_t pmap, uint32_t va) {
         // Align VA to 4MB boundary for check (optional but safe)
         // Remove the entire 4MB mapping
         V_PD[pdi] = 0;
-        if (pmap->resident_count >= 1024) {
-            pmap->resident_count -= 1024;
-        } else {
-            pmap->resident_count = 0;
-        }
+        pmap_count_map_remove(pmap, 1024);
         pmap_invalidate_page(va); // INVLPG invalidates the large page entry
         return;
     }
@@ -839,9 +863,7 @@ void pmap_remove(pmap_t pmap, uint32_t va) {
         pv_remove(page, pmap, va);
     }
     pt[pti] = 0;
-    if (pmap->resident_count > 0) {
-        pmap->resident_count--;
-    }
+    pmap_count_map_remove(pmap, 1);
     pmap_invalidate_page(va);
     pmap_reclaim_empty_pt(pmap, pdi);
 }
@@ -851,6 +873,7 @@ void pmap_remove(pmap_t pmap, uint32_t va) {
 void pmap_kenter(uint32_t va, uint32_t pa) {
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
+    int new_kernel_pt = 0;
 
     // Allocate page table on demand if not present
     if (!(V_PD[pdi] & PTE_P)) {
@@ -864,6 +887,7 @@ void pmap_kenter(uint32_t va, uint32_t pa) {
         // Zero using virtual address
         uint32_t *pt = (uint32_t *)pt_virt;
         for (int i = 0; i < 1024; i++) pt[i] = 0;
+        new_kernel_pt = 1;
     }
 
     uint32_t *pt = V_PT(pdi);
@@ -877,6 +901,9 @@ void pmap_kenter(uint32_t va, uint32_t pa) {
     }
     pt[pti] = (pa & 0xFFFFF000) | pte_flags;
     pmap_invalidate_page(va);
+    if (new_kernel_pt) {
+        pmap_growkernel(va);
+    }
 }
 
 // Kernel-only fast removal
@@ -1059,7 +1086,7 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
             // Set destination PTE with physical address
             uint32_t new_page_phys = (uint32_t)(uintptr_t)new_page_virt - 0xC0000000;
             dst_pt[pti] = new_page_phys | (src_pte & 0xFFF);
-            dst_pmap->resident_count++;
+            pmap_count_map_add(dst_pmap, 1);
             
             // Mark new page as private too
             vm_page_t *new_pg = pmm_get_page(new_page_phys);
@@ -1085,7 +1112,7 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
             }
             
             dst_pt[pti] = dst_pte;
-            dst_pmap->resident_count++;
+            pmap_count_map_add(dst_pmap, 1);
         }
     }
     
@@ -1324,6 +1351,25 @@ static void pmap_reclaim_empty_pt(pmap_t pmap, uint32_t pdi) {
     V_PD[pdi] = 0;
     pmap_invalidate_page((uint32_t)V_PT(pdi));
     pmm_free_block((void *)(uintptr_t)(pt_phys + 0xC0000000));
+}
+
+void pmap_growkernel(uintptr_t va) {
+    uint32_t pdi = PD_INDEX(va);
+
+    if (pdi < 768 || pdi >= 1023) {
+        return;
+    }
+
+    while (__sync_lock_test_and_set(&pmap_list_lock, 1)) {
+        __asm__ volatile("pause");
+    }
+
+    uint32_t kernel_pde = kernel_pmap_ptr->pdir[pdi];
+    for (pmap_t p = pmap_list_head; p; p = p->list_entry.next) {
+        p->pdir[pdi] = kernel_pde;
+    }
+
+    __sync_lock_release(&pmap_list_lock);
 }
 
 static uint32_t pmap_count_active(void) {

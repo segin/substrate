@@ -255,11 +255,11 @@
                         - [x] Clear write bit in parent too (both now COW). (REQ: REQ-01-0222)
                         - [x] Increment physical page reference count. (REQ: REQ-01-0223)
                     - [x] Track COW pages in pmap stats. (REQ: REQ-01-0224)
-                - [ ] **Kernel PDE Synchronization:** (REQ: REQ-01-0225)
+                - [x] **Kernel PDE Synchronization:** (REQ: REQ-01-0225)
                     - [x] `kernel_pmap` is authoritative for PDEs 768–1022. (REQ: REQ-01-0226)
                     - [x] `pmap_create()` copies kernel PDEs on creation. (REQ: REQ-01-0227)
-                    - [ ] `pmap_growkernel(va)`: when kernel maps new pages (vmalloc), update all pmaps. (REQ: REQ-01-0228)
-                        - [ ] Walk global pmap list and copy new kernel PDEs. (REQ: REQ-01-0229)
+                    - [x] `pmap_growkernel(va)`: when kernel maps new pages (vmalloc), update all pmaps. (REQ: REQ-01-0228)
+                        - [x] Walk global pmap list and copy new kernel PDEs. (REQ: REQ-01-0229)
                     - [x] Alternatively share kernel PTs by reference (current approach). (REQ: REQ-01-0230)
 
             - [x] **`pmap_protect()` — Change Page Protections:** (REQ: REQ-01-0231)
@@ -275,7 +275,7 @@
                 - [x] Support partial range copy (for `vfork`/`clone`). (REQ: REQ-01-0240)
                 - [x] Handle mixed COW and private mappings (`PG_PRIVATE` check). (REQ: REQ-01-0241)
 
-            - [ ] **Page Reference/Modification Tracking:** (REQ: REQ-01-0242)
+            - [x] **Page Reference/Modification Tracking:** (REQ: REQ-01-0242)
                 - [x] `pmap_is_referenced(pmap, va)`: check PTE Accessed (A) bit. (REQ: REQ-01-0243)
                 - [x] `pmap_is_modified(pmap, va)`: check PTE Dirty (D) bit. (REQ: REQ-01-0244)
                 - [x] `pmap_clear_reference(pmap, va)`: clear A bit, invalidate TLB. (REQ: REQ-01-0245)

@@ -63,6 +63,7 @@ struct pmap {
     int ref_count;              // refcount: Number of references (for COW sharing)
     uint32_t resident_count;    // Count of resident pages in this pmap
     uint32_t wired_count;       // Count of wired (unpageable) pages
+    uint32_t mapped_count;      // Count of mapped pages/slots in this pmap
     struct pmap_stats stats;    // Per-pmap statistics
     volatile int lock;          // Spinlock for SMP safety
     uint16_t asid;              // Address Space ID (for TLB tagging, future PCID)
@@ -86,6 +87,7 @@ pmap_t pmap_kernel(void);        // Get kernel pmap
 void pmap_reference(pmap_t pmap); // Increment ref_count
 void pmap_release(pmap_t pmap);   // Decrement ref_count, destroy if 0
 pmap_t pmap_fork(pmap_t src_pmap); // Fork with COW
+void pmap_growkernel(uintptr_t va); // Propagate new kernel PDEs to existing pmaps
 
 // Mapping Operations
 // Returns 0 on success, < 0 on error
