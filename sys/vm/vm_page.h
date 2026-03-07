@@ -92,6 +92,7 @@ void vm_page_remove(vm_page_t *page);
 
 // Queue management
 void vm_page_init(void);
+void vm_page_late_init(void);
 vm_page_t *vm_page_alloc(struct vm_object *object, uint64_t pindex, int req);
 void vm_page_free(vm_page_t *m);
 
@@ -147,6 +148,7 @@ typedef struct vm_vmstat {
 
 void vm_page_get_stats(vm_page_stats_t *stats);
 void vm_page_get_vmstat(vm_vmstat_t *stats);
+void vm_page_record_pagein(uint32_t count);
 int vm_page_estimate_working_set(void);   // Estimate working set size
 int vm_page_should_pageout(void);          // Hint for swapper/pageout daemon
 

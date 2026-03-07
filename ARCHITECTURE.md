@@ -77,6 +77,10 @@ Major kernel layers:
 - `sys/drivers/`: device drivers
 - `sys/exec/`: executable loading and personality execution paths
 
+Kernel worker model:
+- `swapper` (PID 0) remains the idle/root kernel context.
+- VM pressure is handled by a dedicated `pagedaemon` kernel process that sleeps on a wakeup channel and runs pageout work asynchronously.
+
 Device namespace policy in `devfs`:
 - Root pseudo devices remain at `/dev/*` (for example `/dev/null`, `/dev/zero`).
 - Storage block devices are exposed under `/dev/storage/*`.

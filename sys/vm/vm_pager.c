@@ -52,6 +52,7 @@ int vm_pager_get_pages(vm_pager_t *pager, vm_page_t **m, int count, bool sync) {
         int ret = pager->ops->getpage(pager, m[i], sync);
         if (ret != 0) return ret;
     }
+    vm_page_record_pagein((uint32_t)count);
     return 0;
 }
 

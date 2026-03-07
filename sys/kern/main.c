@@ -34,6 +34,7 @@
 #include <sys/param.h>
 #include <pm/pm.h>
 #include <sys/crc32.h>
+#include <vm/vm_page.h>
 #include <vfs/vfs.h>
 #include <exec/formats/elf.h>
 #include <fs/procfs.h>
@@ -117,7 +118,6 @@ static void init_memory(multiboot_info_t *mboot_info) {
     }
 
     // Initialize VM subsystem
-    extern void vm_page_init(void);
     extern void vm_object_init(void);
     extern void vm_zone_init(void);
     extern void uma_startup(void);
@@ -492,6 +492,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Initialize Scheduler
     sched_init();
     kprint("Scheduler Initialized.\n");
+
+    // Start VM background workers now that kernel threads can run.
+    vm_page_late_init();
 
     // Initialize Sysctl Subsystem
     extern void sysctl_init(void);

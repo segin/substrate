@@ -8,6 +8,7 @@
 #include <drivers/console/console.h>
 #include <kern/time.h>
 #include <kern/sched.h>
+#include <pm/pm.h>
 #include <stddef.h>
 #include <string.h>
 #include <vm/phys_mem.h>
@@ -18,12 +19,96 @@ static vm_page_t *inactive_queue = NULL;
 static vm_page_t *wired_queue = NULL;      // Pages pinned in memory (kernel, DMA)
 static vm_page_t *laundry_queue = NULL;    // Dirty pages pending writeback
 
+static int vm_pagedaemon_started = 0;
+static int vm_page_inactive_target = 128;
+
+// Thresholds (pages)
+static int vm_page_free_min = 16;      // Panic below this
+static int vm_page_free_target = 64;   // Daemon sleeps above this
+static int vm_page_free_reserved = 8;  // Reserved for kernel emergencies
+
+// Statistics exported via /proc/vmstat
+static uint32_t vm_stat_pageouts = 0;
+static uint32_t vm_stat_pageins = 0;
+static uint32_t vm_stat_reactivations = 0;
+
+// Wakeup flag for daemon
+static volatile int vm_pages_needed = 0;
+
 void vm_page_init(void) {
 	// Initialize queues
 	active_queue = NULL;
 	inactive_queue = NULL;
 	wired_queue = NULL;
 	laundry_queue = NULL;
+}
+
+static uint32_t count_queue(vm_page_t *head) {
+	uint32_t count = 0;
+	while (head) {
+		count++;
+		head = head->next;
+	}
+	return count;
+}
+
+static void vm_page_tune_thresholds(void) {
+	size_t total_pages = vm_phys_get_free() + vm_phys_get_used();
+
+	vm_page_free_reserved = 8;
+	vm_page_free_min = 16;
+	vm_page_free_target = 64;
+	vm_page_inactive_target = 128;
+
+	if (total_pages == 0) {
+		return;
+	}
+
+	{
+		int reserved = (int)(total_pages / 512);
+		int free_min = (int)(total_pages / 256);
+		int free_target = (int)(total_pages / 64);
+		int inactive_target = (int)(total_pages / 8);
+
+		if (reserved > vm_page_free_reserved) vm_page_free_reserved = reserved;
+		if (free_min > vm_page_free_min) vm_page_free_min = free_min;
+		if (free_target > vm_page_free_target) vm_page_free_target = free_target;
+		if (inactive_target > vm_page_inactive_target) vm_page_inactive_target = inactive_target;
+	}
+}
+
+static void vm_pagedaemon(void *arg) {
+	(void)arg;
+
+	if (current_process) {
+		strncpy(current_process->comm, "pagedaemon", AC_COMM_LEN);
+		current_process->comm[AC_COMM_LEN - 1] = '\0';
+		current_process->is_kernel_task = 1;
+	}
+	if (current_thread) {
+		current_thread->sched_class = SCHED_TIMESHARE;
+		current_thread->priority = 1;
+		current_thread->base_priority = 1;
+	}
+
+	for (;;) {
+		while (!vm_pages_needed) {
+			sched_sleep((void *)&vm_pages_needed);
+		}
+		vm_pageout();
+		sched_yield();
+	}
+}
+
+void vm_page_late_init(void) {
+	if (vm_pagedaemon_started) {
+		return;
+	}
+
+	vm_page_tune_thresholds();
+	if (sched_spawn_kernel_process(vm_pagedaemon, NULL) >= 0) {
+		vm_pagedaemon_started = 1;
+	}
 }
 
 // Internal helper to add a page to the head of a queue
@@ -339,19 +424,6 @@ int vm_pageout_scan(int max_scan) {
 // ==================== Page Daemon ====================
 // Background daemon that frees pages when memory is low
 
-// Thresholds (pages)
-static int vm_page_free_min = 16;      // Panic below this
-static int vm_page_free_target = 64;   // Daemon sleeps above this
-static int __attribute__((unused)) vm_page_free_reserved = 8;  // Reserved for kernel emergencies
-
-// Statistics exported via /proc/vmstat
-static uint32_t vm_stat_pageouts = 0;
-static uint32_t vm_stat_pageins = 0;
-static uint32_t vm_stat_reactivations = 0;
-
-// Wakeup flag for daemon
-static volatile int vm_pages_needed = 0;
-
 // Try to free a clean inactive page
 // Returns 1 if page was freed, 0 otherwise
 int vm_page_try_to_free(vm_page_t *m) {
@@ -418,6 +490,7 @@ void vm_page_launder(vm_page_t *m) {
 // Called periodically or when vm_pages_needed is set
 void vm_pageout(void) {
 	size_t free_count = vm_phys_get_free();
+	uint32_t inactive_count = count_queue(inactive_queue);
 
 	// Check if we need to free pages
 	if(free_count >= (size_t)vm_page_free_target && !vm_pages_needed) {
@@ -431,8 +504,13 @@ void vm_pageout(void) {
 	// Phase 0: Reclaim kernel memory (UMA, etc.)
 	uma_reclaim();
 
-	// Phase 1: Scan active queue, move cold pages to inactive
-	vm_pageout_scan(target * 2);
+	// Phase 1: Scan active queue, move cold pages to inactive until we have headroom.
+	int scan_target = target * 2;
+	if (inactive_count < (uint32_t)vm_page_inactive_target) {
+		scan_target += (int)(vm_page_inactive_target - inactive_count);
+	}
+	if (scan_target < 1) scan_target = 1;
+	vm_pageout_scan(scan_target);
 
 	// Phase 2: Try to free clean inactive pages
 	vm_page_t *m = inactive_queue;
@@ -482,7 +560,11 @@ void vm_pageout(void) {
 // Signal that pages are needed
 void vm_page_wakeup_daemon(void) {
 	vm_pages_needed = 1;
-	swapper_request_work();
+	if (vm_pagedaemon_started) {
+		sched_wakeup((void *)&vm_pages_needed);
+	} else {
+		swapper_request_work();
+	}
 }
 
 // ==================== Writeback Tracking ====================
@@ -684,6 +766,10 @@ void vm_page_get_vmstat(vm_vmstat_t *stats) {
 		stats->cow_faults = pstats.cow_faults;
 		stats->zero_fill_pages = pstats.zero_fills;
 	}
+}
+
+void vm_page_record_pagein(uint32_t count) {
+	vm_stat_pageins += count;
 }
 
 // Estimate working set size (pages actively used)

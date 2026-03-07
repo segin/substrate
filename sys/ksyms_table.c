@@ -1353,9 +1353,11 @@ extern void vm_page_hold(void);
 extern void vm_page_init(void);
 extern void vm_page_insert(void);
 extern void vm_page_is_evict_candidate(void);
+extern void vm_page_late_init(void);
 extern void vm_page_launder(void);
 extern void vm_page_mark_for_writeback(void);
 extern void vm_page_needs_writeback(void);
+extern void vm_page_record_pagein(void);
 extern void vm_page_remove(void);
 extern void vm_page_should_pageout(void);
 extern void vm_page_try_to_free(void);
@@ -2511,6 +2513,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&openbsd_sendsig, "openbsd_sendsig" },
     { (uint32_t)(uintptr_t)&openbsd_sys_sigreturn, "openbsd_sys_sigreturn" },
     { (uint32_t)(uintptr_t)&vm_page_init, "vm_page_init" },
+    { (uint32_t)(uintptr_t)&vm_page_late_init, "vm_page_late_init" },
     { (uint32_t)(uintptr_t)&pv_insert, "pv_insert" },
     { (uint32_t)(uintptr_t)&pv_remove, "pv_remove" },
     { (uint32_t)(uintptr_t)&pv_remove_all, "pv_remove_all" },
@@ -2536,6 +2539,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vm_page_is_evict_candidate, "vm_page_is_evict_candidate" },
     { (uint32_t)(uintptr_t)&vm_page_get_stats, "vm_page_get_stats" },
     { (uint32_t)(uintptr_t)&vm_page_get_vmstat, "vm_page_get_vmstat" },
+    { (uint32_t)(uintptr_t)&vm_page_record_pagein, "vm_page_record_pagein" },
     { (uint32_t)(uintptr_t)&vm_page_estimate_working_set, "vm_page_estimate_working_set" },
     { (uint32_t)(uintptr_t)&vm_page_should_pageout, "vm_page_should_pageout" },
     { (uint32_t)(uintptr_t)&vm_map_init, "vm_map_init" },
@@ -2871,4 +2875,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1430;
+int ksym_count = 1432;
