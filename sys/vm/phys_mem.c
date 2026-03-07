@@ -62,6 +62,9 @@ static vm_page_t *vm_phys_find_free_block_head(uintptr_t pa, int *out_order) {
 }
 
 vm_page_t *vm_phys_paddr_to_page(uintptr_t pa) {
+    if (!vm_phys_page_array) {
+        return NULL;
+    }
     size_t idx = pa / PMM_BLOCK_SIZE;
     if (idx < vm_phys_page_count) {
         return &vm_phys_page_array[idx];

@@ -21,8 +21,10 @@
  */
 
 // ==================== PMM Data Structures ====================
-// Static bitmap for 128MB (Fallback)
-static uint8_t pmm_bitmap_static[4096];
+// Static fallback metadata for 128MB when bootstrap allocation cannot fit dynamic tables.
+#define PMM_STATIC_METADATA_BLOCKS (4096U * 8U)
+static uint8_t pmm_bitmap_static[PMM_STATIC_METADATA_BLOCKS / 8U];
+static vm_page_t pmm_page_array_static[PMM_STATIC_METADATA_BLOCKS];
 
 // ==================== Boot Memory Detection State ====================
 
@@ -457,8 +459,8 @@ static void pmm_select_metadata(uint64_t max_phys, uint64_t total_usable,
         kprint("PMM: constrained RAM (<4MB), using static bitmap metadata.\n");
         *out_bitmap = pmm_bitmap_static;
         *out_bitmap_bytes = sizeof(pmm_bitmap_static);
-        *out_total_blocks = (*out_bitmap_bytes) * 8;
-        *out_page_array = NULL;
+        *out_total_blocks = PMM_STATIC_METADATA_BLOCKS;
+        *out_page_array = pmm_page_array_static;
         return;
     }
 
@@ -478,8 +480,8 @@ static void pmm_select_metadata(uint64_t max_phys, uint64_t total_usable,
         kprint("PMM: Warn - metadata allocation exceeded bootstrap low memory, using static bitmap.\n");
         *out_bitmap = pmm_bitmap_static;
         *out_bitmap_bytes = sizeof(pmm_bitmap_static);
-        *out_total_blocks = (*out_bitmap_bytes) * 8;
-        *out_page_array = NULL;
+        *out_total_blocks = PMM_STATIC_METADATA_BLOCKS;
+        *out_page_array = pmm_page_array_static;
         return;
     }
 
