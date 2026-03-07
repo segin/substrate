@@ -313,9 +313,9 @@ int vm_pageout_scan(int max_scan) {
 		}
 
 		// Check if page was recently accessed via PTE A bit
-		if(pmap_is_referenced(m)) {
+		if(pmap_page_is_referenced(m)) {
 			// Page was accessed - give it second chance
-			pmap_clear_reference(m);
+			pmap_page_clear_reference(m);
 			// Move to head of active queue (most recently used)
 			dequeue(&active_queue, m);
 			enqueue(&active_queue, m);
@@ -555,10 +555,10 @@ void vm_page_age_scan(void) {
 		}
 
 		// Check A-bit via pmap and update access tracking
-		if(pmap_is_referenced(m)) {
+		if(pmap_page_is_referenced(m)) {
 			// Page was accessed - reset age to max
 			m->age = VM_PAGE_AGE_MAX;
-			pmap_clear_reference(m);
+			pmap_page_clear_reference(m);
 		} else {
 			// Page not accessed - decrement age
 			if(m->age > 0) {
@@ -588,14 +588,14 @@ void vm_page_age_scan(void) {
 		}
 
 		// Check if page was accessed while inactive
-		if(pmap_is_referenced(m)) {
+		if(pmap_page_is_referenced(m)) {
 			// Reactivate
 			dequeue(&inactive_queue, m);
 			m->flags &= ~PG_INACTIVE;
 			enqueue(&active_queue, m);
 			m->flags |= PG_ACTIVE;
 			m->age = VM_PAGE_AGE_INITIAL;  // Give a second chance
-			pmap_clear_reference(m);
+			pmap_page_clear_reference(m);
 		}
 
 		m = next;
@@ -673,7 +673,7 @@ int vm_page_estimate_working_set(void) {
 	// Recently reactivated inactive pages
 	m = inactive_queue;
 	while(m) {
-		if(pmap_is_referenced(m)) count++;  // About to be reactivated
+		if(pmap_page_is_referenced(m)) count++;  // About to be reactivated
 		m = m->next;
 	}
 

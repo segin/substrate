@@ -1194,72 +1194,95 @@ void pmap_shootdown_wait(int expected_cpus) {
 // Include vm_page.h for vm_page_t
 #include <vm/vm_page.h>
 
-// Check if page was accessed (PTE A bit set)
-// Walks all PV entries for this page and checks PTE A bits
-int pmap_is_referenced(vm_page_t *m) {
-    if (!m) return 0;
-    
-    struct pv_entry *pv = m->pv_list;
-    while (pv) {
-        pmap_t pmap = pv->pmap;
-        uint32_t va = pv->va;
-        
-        // Only check if this is the current address space
-        uint32_t cr3;
-        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-        if (pmap->pdir_phys != cr3) {
-            pv = pv->next;
-            continue;
-        }
-        
-        uint32_t pdi = PD_INDEX(va);
-        uint32_t pti = PT_INDEX(va);
-        
-        if (!(V_PD[pdi] & PTE_P)) {
-            pv = pv->next;
-            continue;
-        }
-        
-        uint32_t *pt = V_PT(pdi);
-        if (pt[pti] & PTE_A) {
-            return 1;  // Page was accessed
-        }
-        
-        pv = pv->next;
+static int pmap_lookup_active_pte(pmap_t pmap, uint32_t va, uint32_t **pt_out, uint32_t *pti_out) {
+    if (!pmap || !pt_out || !pti_out) {
+        return 0;
     }
-    
-    return 0;  // Not referenced
+
+    uint32_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    if (pmap->pdir_phys != cr3) {
+        return 0;
+    }
+
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+    if (!(V_PD[pdi] & PTE_P)) {
+        return 0;
+    }
+
+    uint32_t *pt = V_PT(pdi);
+    if (!(pt[pti] & PTE_P)) {
+        return 0;
+    }
+
+    *pt_out = pt;
+    *pti_out = pti;
+    return 1;
 }
 
-// Clear accessed bit on all mappings of this page
-void pmap_clear_reference(vm_page_t *m) {
-    if (!m) return;
-    
+int pmap_is_referenced(pmap_t pmap, uint32_t va) {
+    uint32_t *pt;
+    uint32_t pti;
+    if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
+        return 0;
+    }
+    return (pt[pti] & PTE_A) ? 1 : 0;
+}
+
+int pmap_is_modified(pmap_t pmap, uint32_t va) {
+    uint32_t *pt;
+    uint32_t pti;
+    if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
+        return 0;
+    }
+    return (pt[pti] & PTE_D) ? 1 : 0;
+}
+
+void pmap_clear_reference(pmap_t pmap, uint32_t va) {
+    uint32_t *pt;
+    uint32_t pti;
+    if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
+        return;
+    }
+    if (pt[pti] & PTE_A) {
+        pt[pti] &= ~PTE_A;
+        pmap_invalidate_page(va);
+    }
+}
+
+void pmap_clear_modify(pmap_t pmap, uint32_t va) {
+    uint32_t *pt;
+    uint32_t pti;
+    if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
+        return;
+    }
+    if (pt[pti] & PTE_D) {
+        pt[pti] &= ~PTE_D;
+        pmap_invalidate_page(va);
+    }
+}
+
+int pmap_page_is_referenced(vm_page_t *m) {
+    if (!m) return 0;
+
     struct pv_entry *pv = m->pv_list;
     while (pv) {
-        pmap_t pmap = pv->pmap;
-        uint32_t va = pv->va;
-        
-        // Only modify current address space
-        uint32_t cr3;
-        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-        if (pmap->pdir_phys != cr3) {
-            pv = pv->next;
-            continue;
+        if (pmap_is_referenced(pv->pmap, pv->va)) {
+            return 1;
         }
-        
-        uint32_t pdi = PD_INDEX(va);
-        uint32_t pti = PT_INDEX(va);
-        
-        if (!(V_PD[pdi] & PTE_P)) {
-            pv = pv->next;
-            continue;
-        }
-        
-        uint32_t *pt = V_PT(pdi);
-        pt[pti] &= ~PTE_A;  // Clear accessed bit
-        pmap_invalidate_page(va);  // Flush TLB
-        
+        pv = pv->next;
+    }
+
+    return 0;
+}
+
+void pmap_page_clear_reference(vm_page_t *m) {
+    if (!m) return;
+
+    struct pv_entry *pv = m->pv_list;
+    while (pv) {
+        pmap_clear_reference(pv->pmap, pv->va);
         pv = pv->next;
     }
 }
@@ -1268,58 +1291,35 @@ void pmap_clear_reference(vm_page_t *m) {
 // Returns count of referenced pages in range
 int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
     if (!pmap) return 0;
-    
-    // Must be active address space
-    uint32_t cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-    if (pmap->pdir_phys != cr3) return 0;
-    
+
     int ref_count = 0;
-    
+
     for (uint32_t va = sva; va < eva; va += 0x1000) {
-        uint32_t pdi = PD_INDEX(va);
-        uint32_t pti = PT_INDEX(va);
-        
-        if (!(V_PD[pdi] & PTE_P)) continue;
-        
-        uint32_t *pt = V_PT(pdi);
-        if (!(pt[pti] & PTE_P)) continue;
-        
-        if (pt[pti] & PTE_A) {
+        if (pmap_is_referenced(pmap, va)) {
             ref_count++;
         }
     }
-    
+
     return ref_count;
 }
 
 // Atomic test and clear: check if page was accessed and clear A bit
 // Returns 1 if page was referenced (and now cleared), 0 otherwise
 int pmap_test_and_clear_ref(pmap_t pmap, uint32_t va) {
-    if (!pmap) return 0;
-    
-    // Must be active address space
-    uint32_t cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-    if (pmap->pdir_phys != cr3) return 0;
-    
-    uint32_t pdi = PD_INDEX(va);
-    uint32_t pti = PT_INDEX(va);
-    
-    if (!(V_PD[pdi] & PTE_P)) return 0;
-    
-    uint32_t *pt = V_PT(pdi);
-    if (!(pt[pti] & PTE_P)) return 0;
-    
-    // Test and clear A bit atomically
-    uint32_t old_pte = pt[pti];
-    if (old_pte & PTE_A) {
-        pt[pti] = old_pte & ~PTE_A;
-        pmap_invalidate_page(va);
-        return 1;  // Was referenced
+    uint32_t *pt;
+    uint32_t pti;
+    if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
+        return 0;
     }
-    
-    return 0;  // Not referenced
+
+    uint32_t old_pte = pt[pti];
+    if (!(old_pte & PTE_A)) {
+        return 0;
+    }
+
+    pt[pti] = old_pte & ~PTE_A;
+    pmap_invalidate_page(va);
+    return 1;
 }
 
 // Track access frequency for page aging
@@ -1327,46 +1327,18 @@ int pmap_test_and_clear_ref(pmap_t pmap, uint32_t va) {
 // Clears A bit and increments access_count if page was accessed
 void pmap_track_access(vm_page_t *m) {
     if (!m) return;
-    
+
     struct pv_entry *pv = m->pv_list;
     int was_accessed = 0;
-    
+
     while (pv) {
-        pmap_t pmap = pv->pmap;
-        uint32_t va = pv->va;
-        
-        // Only check if this is the current address space
-        uint32_t cr3;
-        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-        if (pmap->pdir_phys != cr3) {
-            pv = pv->next;
-            continue;
-        }
-        
-        uint32_t pdi = PD_INDEX(va);
-        uint32_t pti = PT_INDEX(va);
-        
-        if (!(V_PD[pdi] & PTE_P)) {
-            pv = pv->next;
-            continue;
-        }
-        
-        uint32_t *pt = V_PT(pdi);
-        if (!(pt[pti] & PTE_P)) {
-            pv = pv->next;
-            continue;
-        }
-        
-        // Check and clear A bit
-        if (pt[pti] & PTE_A) {
-            pt[pti] &= ~PTE_A;
-            pmap_invalidate_page(va);
+        if (pmap_test_and_clear_ref(pv->pmap, pv->va)) {
             was_accessed = 1;
         }
-        
+
         pv = pv->next;
     }
-    
+
     // Update access count with saturation
     if (was_accessed && m->access_count < 0xFFFF) {
         m->access_count++;
@@ -1377,58 +1349,35 @@ void pmap_track_access(vm_page_t *m) {
 // Returns count of modified pages in range
 int pmap_is_modified_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
     if (!pmap) return 0;
-    
-    // Must be active address space
-    uint32_t cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-    if (pmap->pdir_phys != cr3) return 0;
-    
+
     int mod_count = 0;
-    
+
     for (uint32_t va = sva; va < eva; va += 0x1000) {
-        uint32_t pdi = PD_INDEX(va);
-        uint32_t pti = PT_INDEX(va);
-        
-        if (!(V_PD[pdi] & PTE_P)) continue;
-        
-        uint32_t *pt = V_PT(pdi);
-        if (!(pt[pti] & PTE_P)) continue;
-        
-        if (pt[pti] & PTE_D) {
+        if (pmap_is_modified(pmap, va)) {
             mod_count++;
         }
     }
-    
+
     return mod_count;
 }
 
 // Atomic test and clear: check if page was modified and clear D bit
 // Returns 1 if page was modified (and now cleared), 0 otherwise
 int pmap_test_and_clear_modify(pmap_t pmap, uint32_t va) {
-    if (!pmap) return 0;
-    
-    // Must be active address space
-    uint32_t cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-    if (pmap->pdir_phys != cr3) return 0;
-    
-    uint32_t pdi = PD_INDEX(va);
-    uint32_t pti = PT_INDEX(va);
-    
-    if (!(V_PD[pdi] & PTE_P)) return 0;
-    
-    uint32_t *pt = V_PT(pdi);
-    if (!(pt[pti] & PTE_P)) return 0;
-    
-    // Test and clear D bit atomically
-    uint32_t old_pte = pt[pti];
-    if (old_pte & PTE_D) {
-        pt[pti] = old_pte & ~PTE_D;
-        pmap_invalidate_page(va);
-        return 1;  // Was modified
+    uint32_t *pt;
+    uint32_t pti;
+    if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
+        return 0;
     }
-    
-    return 0;  // Not modified
+
+    uint32_t old_pte = pt[pti];
+    if (!(old_pte & PTE_D)) {
+        return 0;
+    }
+
+    pt[pti] = old_pte & ~PTE_D;
+    pmap_invalidate_page(va);
+    return 1;
 }
 
 // Track modification for writeback scheduling
