@@ -5,6 +5,9 @@
 #include <vm/phys_mem.h>
 #include <kern/panic.h>
 #include <kern/console.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
+#include <sys/param.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -63,6 +66,7 @@ static void pmap_list_add(pmap_t pmap) {
         pmap_list_head->list_entry.prev = pmap;
     }
     pmap_list_head = pmap;
+    global_pmap_stats.total_pmaps++;
     __sync_lock_release(&pmap_list_lock);
 }
 
@@ -1573,13 +1577,20 @@ int pmap_fault(uint32_t err_code, uint32_t cr2) {
 
 // Syscall to expose PMAP stats (Global)
 int sys_pmap_stats(struct pmap_stats *out) {
-    if (!out) return -1;
-    
-    // Update dynamic global counters before returning
-    // (Assuming single threaded or atomic updates for counters handled elsewhere)
-    // For now, total_pmaps is maintained in global_pmap_stats by create/destroy
-    
-    *out = global_pmap_stats;
+    if (!out) return -EFAULT;
+
+    /*
+     * Export through syscall ABI safely: kernel callers may pass a kernel
+     * pointer, userspace callers must receive data via copyout.
+     */
+    if ((uintptr_t)out >= KERN_BASE) {
+        *out = global_pmap_stats;
+        return 0;
+    }
+
+    if (copyout(&global_pmap_stats, out, sizeof(global_pmap_stats)) != 0) {
+        return -EFAULT;
+    }
     return 0;
 }
 
