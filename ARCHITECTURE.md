@@ -100,6 +100,7 @@ Address-space layout is fixed:
 Physical-memory bootstrap is two-stage:
 - early PMM metadata allocation is constrained to the first 8MB of RAM
 - after `pmap_bootstrap()` installs the larger kernel direct map, PMM promotes itself into a full page database sized from the detected RAM map when that metadata fits inside the direct-mapped window
+- current i386 PMM accounting is capped at 3GB physical RAM
 - pages above the current direct-mapped physical ceiling are detected and accounted, but are not yet exposed to generic kernel allocators that rely on `phys + 0xC0000000`
 
 Fork and copy paths use copy-on-write with per-page reverse mappings (`pv_entry`) so the VM layer can inspect hardware accessed/dirty state and resolve COW faults without synthetic software shadow bits.

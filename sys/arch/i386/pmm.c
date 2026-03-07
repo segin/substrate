@@ -36,6 +36,7 @@ static vm_page_t pmm_page_array_static[PMM_STATIC_METADATA_BLOCKS];
 #define PMM_PHYS_VIRT_BASE 0xC0000000U
 #define PMM_BOOTSTRAP_LOWMEM_LIMIT (8U * 1024U * 1024U)
 #define PMM_CONSTRAINED_RAM_LIMIT (4U * 1024U * 1024U)
+#define PMM_PHYS_RAM_CAP 0xC0000000ULL
 /*
  * Higher-half direct map remains contiguous only until the LAPIC slot at
  * 0xFEC00000 (PDE 1019). Keep generic PMM allocations below that mark.
@@ -565,7 +566,7 @@ static int pmm_is_usable_type(uint32_t type) {
  * pmm_validate_mmap_entry - Validate a multiboot memory map entry
  *
  * Returns 0 if entry is valid and usable, non-zero to skip.
- * Validates: type, non-zero length, address range within 32-bit.
+ * Validates: type, non-zero length, address range within current i386 cap.
  */
 static int pmm_validate_mmap_entry(const multiboot_mmap_entry_t *entry,
                                    phys_addr_t *out_start, phys_addr_t *out_end) {
@@ -588,14 +589,14 @@ static int pmm_validate_mmap_entry(const multiboot_mmap_entry_t *entry,
         return -3; /* Wrap-around detected */
     }
     
-    /* Skip entries entirely above 4GB (32-bit limit) */
-    if (start64 >= 0x100000000ULL) {
-        return -4; /* Above 32-bit space */
+    /* Skip entries entirely above the current kernel-managed physical cap. */
+    if (start64 >= PMM_PHYS_RAM_CAP) {
+        return -4; /* Above kernel-managed physical cap */
     }
     
-    /* Clamp end to 4GB boundary */
-    if (end64 > 0xFFFFFFFFULL) {
-        end64 = 0xFFFFFFFFULL;
+    /* Clamp end to the current managed physical ceiling. */
+    if (end64 > PMM_PHYS_RAM_CAP) {
+        end64 = PMM_PHYS_RAM_CAP;
     }
     
     phys_addr_t start = (phys_addr_t)start64;
@@ -625,7 +626,7 @@ static int pmm_validate_mmap_entry(const multiboot_mmap_entry_t *entry,
  * Safety features:
  * - Validates entry size field to prevent infinite loops
  * - Skips zero-length entries
- * - Clamps 64-bit addresses to 32-bit
+ * - Clamps 64-bit addresses to the current i386 physical cap
  * - Detects wrap-around in entry iteration
  */
 void pmm_walk_mmap(uint32_t mmap_addr, uint32_t mmap_length, pmm_region_callback cb, void *arg) {
@@ -666,16 +667,16 @@ void pmm_walk_mmap(uint32_t mmap_addr, uint32_t mmap_length, pmm_region_callback
             entry->type == MULTIBOOT_MEMORY_ACPI_RECLAIMABLE ||
             entry->type == MULTIBOOT_MEMORY_NVS ||
             entry->type == MULTIBOOT_MEMORY_BADRAM) {
-            /* Clamp 64-bit addresses to 32-bit */
+            /* Clamp reserved regions to the current kernel-managed ceiling. */
             uint64_t r_start64 = entry->addr;
             uint64_t r_end64 = entry->addr + entry->len;
-            if (r_start64 >= 0x100000000ULL) {
-                /* Skip entries entirely above 4GB */
+            if (r_start64 >= PMM_PHYS_RAM_CAP) {
+                /* Skip entries entirely above the managed ceiling */
                 ptr += entry_size;
                 entries_processed++;
                 continue;
             }
-            if (r_end64 > 0xFFFFFFFFULL) r_end64 = 0xFFFFFFFFULL;
+            if (r_end64 > PMM_PHYS_RAM_CAP) r_end64 = PMM_PHYS_RAM_CAP;
             pmm_add_region((phys_addr_t)r_start64, (phys_addr_t)r_end64, entry->type);
             pmm_total_reserved_ram += (r_end64 - r_start64);
             ptr += entry_size;
@@ -1079,7 +1080,7 @@ static int pmm_is_e820_usable_type(uint32_t type) {
  * pmm_validate_e820_entry - Validate an e820 memory map entry
  *
  * Returns 0 if entry is valid and usable, non-zero to skip.
- * Validates: type, non-zero length, address range within 32-bit.
+ * Validates: type, non-zero length, address range within current i386 cap.
  */
 static int pmm_validate_e820_entry(const e820_entry_t *entry,
                                    phys_addr_t *out_start, phys_addr_t *out_end) {
@@ -1102,14 +1103,14 @@ static int pmm_validate_e820_entry(const e820_entry_t *entry,
         return -3; /* Wrap-around detected */
     }
     
-    /* Skip entries entirely above 4GB (32-bit limit) */
-    if (start64 >= 0x100000000ULL) {
-        return -4; /* Above 32-bit space */
+    /* Skip entries entirely above the current kernel-managed physical cap. */
+    if (start64 >= PMM_PHYS_RAM_CAP) {
+        return -4; /* Above kernel-managed physical cap */
     }
     
-    /* Clamp end to 4GB boundary */
-    if (end64 > 0xFFFFFFFFULL) {
-        end64 = 0xFFFFFFFFULL;
+    /* Clamp end to the current managed physical ceiling. */
+    if (end64 > PMM_PHYS_RAM_CAP) {
+        end64 = PMM_PHYS_RAM_CAP;
     }
     
     phys_addr_t start = (phys_addr_t)start64;
@@ -1139,7 +1140,7 @@ static int pmm_validate_e820_entry(const e820_entry_t *entry,
  * Safety features:
  * - Validates each entry before processing
  * - Skips zero-length entries
- * - Clamps 64-bit addresses to 32-bit
+ * - Clamps 64-bit addresses to the current i386 physical cap
  * - Limits to max 256 entries
  */
 void pmm_walk_e820(const e820_entry_t *map, uint32_t count, 
@@ -1159,11 +1160,11 @@ void pmm_walk_e820(const e820_entry_t *map, uint32_t count,
         /* Track reserved/ACPI/NVS regions for statistics */
         if (map[i].type == E820_RESERVED || map[i].type == E820_ACPI || 
             map[i].type == E820_NVS || map[i].type == E820_BAD) {
-            /* Clamp to 32-bit for tracking */
+            /* Clamp reserved regions to the current kernel-managed ceiling. */
             uint64_t r_start64 = map[i].addr;
             uint64_t r_end64 = map[i].addr + map[i].len;
-            if (r_start64 < 0x100000000ULL) {
-                if (r_end64 > 0xFFFFFFFFULL) r_end64 = 0xFFFFFFFFULL;
+            if (r_start64 < PMM_PHYS_RAM_CAP) {
+                if (r_end64 > PMM_PHYS_RAM_CAP) r_end64 = PMM_PHYS_RAM_CAP;
                 pmm_add_region((phys_addr_t)r_start64, (phys_addr_t)r_end64, map[i].type);
                 pmm_total_reserved_ram += (r_end64 - r_start64);
             }
