@@ -24,6 +24,21 @@
 extern int geom_guid_equal(const uint8_t *a, const uint8_t *b);
 extern int geom_guid_is_zero(const uint8_t *guid);
 
+static void geom_summary_append(char *buf, size_t buf_size, int *first, const char *name) {
+    size_t len;
+
+    if (!buf || !buf_size || !first || !name || !name[0]) return;
+    len = strlen(buf);
+    if (len >= buf_size - 1) return;
+
+    if (!*first) {
+        snprintf(buf + len, buf_size - len, " %s", name);
+    } else {
+        snprintf(buf + len, buf_size - len, "%s", name);
+        *first = 0;
+    }
+}
+
 static const char *gpt_type_name(const uint8_t *guid) {
     /* Check for well-known GUIDs */
     if (geom_guid_equal(guid, GEOM_GPT_TYPE_EFI_SYSTEM)) {
@@ -140,12 +155,10 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         /* Continue anyway - some tools don't update CRC properly */
     }
     
-    /* Print header */
-    kprint("  ");
-    kprint(disk->name);
-    kprint(": GPT");
-    
-    /* First pass: count and print partition names */
+    char summary[256] = {0};
+    int first = 1;
+
+    /* First pass: count and collect partition names. */
     int part_count = 0;
     for (uint32_t i = 0; i < max_entries; i++) {
         struct geom_gpt_entry *entry = (struct geom_gpt_entry *)(entry_buf + i * hdr->entry_size);
@@ -155,18 +168,12 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
             continue;
         }
         
-        kprint(" ");
         char pname[32];
         snprintf(pname, sizeof(pname), "%sp%d", prefix, part_count + 1);
-        kprint(pname);
+        geom_summary_append(summary, sizeof(summary), &first, pname);
         part_count++;
     }
-    
-    if (part_count == 0) {
-        kprint(" (empty)");
-    }
-    kprint("\n");
-    
+
     /* Second pass: register partitions */
     int part_num = 1;
     for (uint32_t i = 0; i < max_entries; i++) {
@@ -191,6 +198,16 @@ static int geom_gpt_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
                           0, 0, entry->type_guid,
                           gpt_type_name(entry->type_guid), 0);
     }
+
+    kprint("  ");
+    kprint(disk->name);
+    kprint(": partitions ");
+    if (part_count == 0) {
+        kprint("(empty)");
+    } else {
+        kprint(summary);
+    }
+    kprint("\n");
     
     return 0;
 }

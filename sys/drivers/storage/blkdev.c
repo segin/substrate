@@ -1,4 +1,5 @@
 #include <drivers/storage/blkdev.h>
+#include <kern/geom/geom.h>
 #include <kern/console.h>
 #include <string.h>
 #include <vm/vm_kmem.h>
@@ -6,6 +7,11 @@
 #define STACK_BUF_SIZE 512
 
 static blkdev_t *blkdev_list = NULL;
+
+typedef struct blkdev_geom_provider {
+    blkdev_t *blkdev;
+    geom_disk_t disk;
+} blkdev_geom_provider_t;
 
 // VFS read wrapper - translates byte reads to sector reads
 static size_t blkdev_vfs_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
@@ -43,6 +49,49 @@ void blkdev_register(blkdev_t *dev) {
     kprint("Block device /dev/storage/");
     kprint(dev->name);
     kprint(" registered\n");
+}
+
+static int blkdev_geom_read(struct geom_disk *disk, uint64_t sector, size_t count, void *buf) {
+    blkdev_geom_provider_t *provider = (blkdev_geom_provider_t *)disk->priv;
+    if (!provider || !provider->blkdev || !provider->blkdev->read) return -1;
+    if (count > 0xFFFFFFFFU) return -1;
+    return provider->blkdev->read(provider->blkdev, sector, (uint32_t)count, buf);
+}
+
+static int blkdev_geom_write(struct geom_disk *disk, uint64_t sector, size_t count, const void *buf) {
+    blkdev_geom_provider_t *provider = (blkdev_geom_provider_t *)disk->priv;
+    if (!provider || !provider->blkdev || !provider->blkdev->write) return -1;
+    if (count > 0xFFFFFFFFU) return -1;
+    return provider->blkdev->write(provider->blkdev, sector, (uint32_t)count, buf);
+}
+
+void blkdev_scan_partitions(blkdev_t *dev) {
+    if (!dev) return;
+
+    blkdev_geom_provider_t *provider = kmalloc(sizeof(*provider));
+    if (!provider) {
+        kprintf("blkdev: failed to allocate GEOM provider for %s\n", dev->name);
+        return;
+    }
+
+    memset(provider, 0, sizeof(*provider));
+    provider->blkdev = dev;
+    strncpy(provider->disk.name, dev->name, sizeof(provider->disk.name) - 1);
+    provider->disk.name[sizeof(provider->disk.name) - 1] = '\0';
+    provider->disk.priv = provider;
+    provider->disk.read = blkdev_geom_read;
+    provider->disk.write = dev->write ? blkdev_geom_write : NULL;
+    provider->disk.total_sectors = dev->total_sectors;
+    provider->disk.sector_size = dev->sector_size;
+
+    geom_register_disk(&provider->disk);
+}
+
+void blkdev_register_disk(blkdev_t *dev) {
+    if (!dev) return;
+
+    blkdev_register(dev);
+    blkdev_scan_partitions(dev);
 }
 
 blkdev_t *blkdev_get(const char *name) {

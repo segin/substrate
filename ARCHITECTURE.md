@@ -80,6 +80,8 @@ Major kernel layers:
 Device namespace policy in `devfs`:
 - Root pseudo devices remain at `/dev/*` (for example `/dev/null`, `/dev/zero`).
 - Storage block devices are exposed under `/dev/storage/*`.
+- Raw disk providers remain visible as `/dev/storage/<disk>` (for example `/dev/storage/ide0`), with GEOM-derived partition nodes exposed alongside them (for example `/dev/storage/ide0p1`).
+- BSD disklabels additionally expose lettered slice nodes, with `c` reserved as the whole-container alias only when a BSD disklabel is present.
 - Communication character devices self-register under `/dev/comm/*` (for example `/dev/comm/serial0`, `/dev/comm/parallel0`).
 - Nested device paths are accepted only under predeclared subsystem directories (namespace hardening against arbitrary roots like `/dev/notreal/*`).
 

@@ -83,6 +83,8 @@ typedef struct fat_fs {
     fat32_ext_bpb_t ext_bpb;        // FAT32 extended BPB
     uint32_t fat_type;              // 12, 16, or 32
     uint32_t fat_start_sector;      // First sector of FAT
+    uint32_t fat_sectors;           // FAT size in sectors
+    uint32_t root_dir_first_sector; // First root directory sector (FAT12/16)
     uint32_t root_dir_sectors;      // Root directory sectors (FAT12/16)
     uint32_t first_data_sector;     // First data cluster sector
     uint32_t total_clusters;        // Total data clusters

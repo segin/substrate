@@ -24,6 +24,8 @@ extern const char *geom_bsd_fstype_name(uint8_t fstype);
 
 static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const char *prefix) {
     uint8_t buf[512];
+    uint64_t whole_start = offset;
+    uint64_t whole_size = 0;
     
     /* BSD disklabel is usually at sector 1 relative to partition start */
     if (geom_read_sector(disk, offset + 1, buf) != 0) {
@@ -78,72 +80,75 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         /* Continue anyway for compatibility */
     }
     
-    /* Print scan header */
-    kprint("  ");
-    for (int d = 0; d < depth; d++) kprint("  ");
-    kprint(prefix);
-    kprint(": BSD");
+    if (depth == 0) {
+        whole_start = 0;
+        whole_size = disk->total_sectors;
+    } else {
+        geom_partition_t *container = geom_find_partition(prefix);
+        if (container) {
+            whole_start = container->start_lba;
+            whole_size = container->size_sectors;
+        }
+    }
     
-    /* First pass: print slice names */
+    char summary[256] = {0};
+    int first = 1;
+
+    /* First pass: collect slice names. */
     int slice_count = 0;
     for (int i = 0; i < (int)nparts; i++) {
         struct geom_bsd_partition *part = &label->d_partitions[i];
         
-        /* Skip unused partitions (size 0 or fstype unused) */
-        if (part->p_size == 0) {
-            continue;
-        }
-        
-        /* Skip partition 'c' which typically represents the whole disk */
         if (i == 2) {
+            if (whole_size == 0) {
+                continue;
+            }
+        } else if (part->p_size == 0) {
             continue;
         }
-        
-        kprint(" ");
+
         char sname[32];
         snprintf(sname, sizeof(sname), "%s%c", prefix, 'a' + i);
-        kprint(sname);
+        if (!first) {
+            strncat(summary, " ", sizeof(summary) - strlen(summary) - 1);
+        }
+        strncat(summary, sname, sizeof(summary) - strlen(summary) - 1);
+        first = 0;
         slice_count++;
     }
-    
-    if (slice_count == 0) {
-        kprint(" (empty)");
-    }
-    kprint("\n");
-    
+
     /* Second pass: register slices */
     for (int i = 0; i < (int)nparts; i++) {
         struct geom_bsd_partition *part = &label->d_partitions[i];
-        
-        /* Skip unused partitions */
-        if (part->p_size == 0) {
-            continue;
-        }
-        
-        /* Skip partition 'c' (whole disk) */
-        if (i == 2) {
-            continue;
-        }
-        
-        /* Calculate slice location
-         * Note: p_offset is relative to the disk (in sectors)
-         * We convert it relative to the container partition
-         */
+
         uint64_t slice_start;
-        uint64_t slice_size = part->p_size;
+        uint64_t slice_size;
+
+        if (i == 2) {
+            if (whole_size == 0) {
+                continue;
+            }
+            slice_start = whole_start;
+            slice_size = whole_size;
+        } else {
+            if (part->p_size == 0) {
+                continue;
+            }
+            slice_size = part->p_size;
         
-        /* BSD offsets can be:
-         * - Absolute (relative to disk start)
-         * - Relative (relative to partition start)
-         * We assume FreeBSD style (relative to containing partition)
-         */
-        slice_start = offset + part->p_offset;
-        
-        /* If offset would be before the container, assume it's disk-absolute */
-        if (part->p_offset >= offset) {
-            slice_start = part->p_offset;
+            /* BSD offsets can be:
+             * - Absolute (relative to disk start)
+             * - Relative (relative to partition start)
+             * We assume FreeBSD style (relative to containing partition)
+             */
+            slice_start = offset + part->p_offset;
+
+            /* If offset would be before the container, assume it's disk-absolute */
+            if (part->p_offset >= offset) {
+                slice_start = part->p_offset;
+            }
         }
-        
+
         /* Create slice name: ide0p1a, ide0p1b, etc. */
         char slice_name[32];
         snprintf(slice_name, sizeof(slice_name), "%s%c", prefix, 'a' + i);
@@ -153,6 +158,17 @@ static int geom_bsd_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
                           0, part->p_fstype, NULL,
                           geom_bsd_fstype_name(part->p_fstype), 0);
     }
+
+    kprint("  ");
+    for (int d = 0; d < depth; d++) kprint("  ");
+    kprint(prefix);
+    kprint(": partitions ");
+    if (slice_count == 0) {
+        kprint("(empty)");
+    } else {
+        kprint(summary);
+    }
+    kprint("\n");
     
     return 0;
 }

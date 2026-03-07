@@ -52,6 +52,7 @@ extern void ntsync_init(void);
 #include <kern/sched.h>
 #include <kern/version.h>
 #include <kern/panic.h>
+#include <kern/geom/geom.h>
 
 // Simple string functions to avoid depending on libc in core if not available
 int serial_debug_enabled = 0;
@@ -68,6 +69,13 @@ static struct {
     uint32_t pad;
 } mboot_mods_copy[8];
 static uint32_t mboot_orig_addr = 0;
+
+typedef struct multiboot_module {
+    uint32_t mod_start;
+    uint32_t mod_end;
+    uint32_t cmdline;
+    uint32_t pad;
+} __attribute__((packed)) multiboot_module_t;
 
 // 1. Address Translation Macros (since we are Higher Half)
 #define PHYSICAL_d(x) ((uint32_t)(x) - KERN_BASE)
@@ -167,6 +175,39 @@ static int parse_console_serial_index(const char *value) {
     if (value[6] < '0' || value[6] > '3') return -1;
     if (value[7] != '\0') return -1;
     return value[6] - '0';
+}
+
+static void register_boot_ramdisks(multiboot_info_t *mboot_info) {
+    if (!mboot_info) return;
+    if (!(mboot_info->flags & MULTIBOOT_INFO_MODS)) return;
+    if (!mboot_info->mods_addr || mboot_info->mods_count == 0) return;
+
+    uint32_t mods_count = mboot_info->mods_count;
+    if (mods_count > 8) {
+        mods_count = 8;
+    }
+
+    multiboot_module_t *mods = (multiboot_module_t *)(uintptr_t)VIRTUAL_d(mboot_info->mods_addr);
+
+    for (uint32_t i = 0; i < mods_count; i++) {
+        uint32_t mod_start = mods[i].mod_start;
+        uint32_t mod_end = mods[i].mod_end;
+        if (mod_end <= mod_start) {
+            continue;
+        }
+
+        size_t mod_size = (size_t)(mod_end - mod_start);
+        void *mod_virt = VIRTUAL_d(mod_start);
+        int ram_id = ramdisk_create(mod_virt, mod_size);
+
+        if (ram_id >= 0) {
+            kprintf("ramdisk: module %u -> /dev/storage/ram%d (%u bytes)\n",
+                    i, ram_id, (unsigned)mod_size);
+        } else {
+            kprintf("ramdisk: failed to register module %u (0x%08x-0x%08x)\n",
+                    i, mod_start, mod_end);
+        }
+    }
 }
 
 
@@ -442,6 +483,12 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Initialize CRC32 table (used by storage/GPT)
     crc32_init();
 
+    // Initialize partition detection before block providers enumerate disks.
+    geom_init();
+    geom_gpt_init();
+    geom_mbr_init();
+    geom_bsd_init();
+
     // Initialize Scheduler
     sched_init();
     kprint("Scheduler Initialized.\n");
@@ -476,6 +523,7 @@ void kmain(unsigned long magic, unsigned long addr) {
     pci_init();
     ide_init();
     virtio_init();
+    register_boot_ramdisks(mboot_info);
     ntsync_init();
     
     // Run Kernel Tests (if requested via cmdline 'test=...')

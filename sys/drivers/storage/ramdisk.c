@@ -62,8 +62,8 @@ int ramdisk_create(void *addr, size_t size) {
     bdev->read = ramdisk_read;
     bdev->write = ramdisk_write;
     
-    // Register with blkdev layer (auto-registers with DevFS)
-    blkdev_register(bdev);
+    // Register raw disk node and scan for partitions.
+    blkdev_register_disk(bdev);
     
     ramdisk_count++;
     return ramdisk_count - 1;

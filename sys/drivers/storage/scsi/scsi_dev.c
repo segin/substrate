@@ -160,8 +160,8 @@ int scsi_dev_attach(scsi_device_t *scsi_dev) {
     sbd->blkdev.read = scsi_blk_read;
     sbd->blkdev.write = scsi_blk_write;
     
-    /* Register with block device subsystem */
-    blkdev_register(&sbd->blkdev);
+    /* Register raw disk node and scan for partitions. */
+    blkdev_register_disk(&sbd->blkdev);
     
     /* Add to list */
     sbd->next = scsi_dev_list;

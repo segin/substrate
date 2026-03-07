@@ -1093,7 +1093,6 @@ void ide_init(void) {
                 bdev->write = ide_blkdev_write;
                 
                 blkdev_register(bdev);
-                
                 kprint("  ");
                 kprint(bdev->name);
                 kprint(": ");
@@ -1104,6 +1103,8 @@ void ide_init(void) {
                 kprint(drive_names[d]);
                 if (type == 1) kprint(", ATAPI");
                 kprint(")\n");
+
+                blkdev_scan_partitions(bdev);
                 
                 ide_device_count++;
             }

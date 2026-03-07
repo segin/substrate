@@ -17,6 +17,21 @@
 extern void geom_scan(geom_disk_t *disk, uint64_t offset, int depth, const char *prefix);
 extern const char *geom_mbr_type_name(uint8_t type);
 
+static void geom_summary_append(char *buf, size_t buf_size, int *first, const char *name) {
+    size_t len;
+
+    if (!buf || !buf_size || !first || !name || !name[0]) return;
+    len = strlen(buf);
+    if (len >= buf_size - 1) return;
+
+    if (!*first) {
+        snprintf(buf + len, buf_size - len, " %s", name);
+    } else {
+        snprintf(buf + len, buf_size - len, "%s", name);
+        *first = 0;
+    }
+}
+
 /*
  * ============================================================
  * Extended Partition Chain Parsing
@@ -32,7 +47,8 @@ extern const char *geom_mbr_type_name(uint8_t type);
  * - Entries 2-3: Must be empty
  */
 static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_size,
-                          const char *base_name, int *part_num) {
+                          const char *base_name, int *part_num,
+                          char *summary, size_t summary_size, int *summary_first) {
     uint64_t ebr_lba = ext_start;
     uint8_t buf[512];
     int logical_count = 0;
@@ -62,6 +78,7 @@ static int parse_extended(geom_disk_t *disk, uint64_t ext_start, uint64_t ext_si
             char part_name[32];
             snprintf(part_name, sizeof(part_name), "%sp%d", base_name, *part_num);
             (*part_num)++;
+            geom_summary_append(summary, summary_size, summary_first, part_name);
             
             /* Determine if this is a container type */
             uint32_t flags = 0;
@@ -141,39 +158,24 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
         return -1;
     }
     
-    /* Print scan header */
-    if (depth == 0) {
-        kprint("  ");
-        kprint(disk->name);
-        kprint(": MBR");
-    } else {
-        kprint("  ");
-        for (int d = 0; d < depth; d++) kprint("  ");
-        kprint(prefix);
-        kprint(": MBR");
-    }
-    
     /* Track extended partition for later processing */
     int extended_found = 0;
     uint64_t extended_start = 0;
     uint64_t extended_size = 0;
-    
-    /* First pass: Print all partition names */
+    char summary[256] = {0};
     int first = 1;
+
+    /* First pass: collect visible primary partition names. */
     for (int i = 0; i < 4; i++) {
         struct geom_mbr_entry *entry = &mbr->entries[i];
         
         if (entry->type != 0 && entry->lba_size > 0) {
-            if (!first) kprint(" ");
-            first = 0;
-            
             char pname[32];
             snprintf(pname, sizeof(pname), "%sp%d", prefix, i + 1);
-            kprint(pname);
+            geom_summary_append(summary, sizeof(summary), &first, pname);
         }
     }
-    kprint("\n");
-    
+
     /* Second pass: Register partitions and handle special types */
     for (int i = 0; i < 4; i++) {
         struct geom_mbr_entry *entry = &mbr->entries[i];
@@ -224,7 +226,17 @@ static int geom_mbr_sniff(geom_disk_t *disk, uint64_t offset, int depth, const c
     /* Process extended partition chain */
     if (extended_found) {
         int next_part = 5;  /* Logical partitions start at 5 */
-        parse_extended(disk, extended_start, extended_size, prefix, &next_part);
+        parse_extended(disk, extended_start, extended_size, prefix, &next_part,
+                      summary, sizeof(summary), &first);
+    }
+
+    if (summary[0]) {
+        kprint("  ");
+        for (int d = 0; d < depth; d++) kprint("  ");
+        kprint(prefix);
+        kprint(": partitions ");
+        kprint(summary);
+        kprint("\n");
     }
     
     return 0;
