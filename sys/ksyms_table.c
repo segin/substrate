@@ -1141,9 +1141,11 @@ extern void test_pge_global_flush(void);
 extern void test_pipe_race(void);
 extern void test_pmap_check(void);
 extern void test_pmap_dump(void);
+extern void test_pmap_enter_extract(void);
 extern void test_pmap_hw_mappings(void);
 extern void test_pmap_large_replace(void);
 extern void test_pmap_lifecycle(void);
+extern void test_pmap_protect_rw(void);
 extern void test_pmap_pse(void);
 extern void test_pmm_buddy(void);
 extern void test_pmm_watermark(void);
@@ -2630,6 +2632,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&test_pmap_lifecycle, "test_pmap_lifecycle" },
     { (uint32_t)(uintptr_t)&test_pmap_large_replace, "test_pmap_large_replace" },
     { (uint32_t)(uintptr_t)&test_multiple_pmaps, "test_multiple_pmaps" },
+    { (uint32_t)(uintptr_t)&test_pmap_enter_extract, "test_pmap_enter_extract" },
     { (uint32_t)(uintptr_t)&test_kernel_pmap_protection, "test_kernel_pmap_protection" },
     { (uint32_t)(uintptr_t)&test_null_pmap, "test_null_pmap" },
     { (uint32_t)(uintptr_t)&test_pmap_pse, "test_pmap_pse" },
@@ -2637,6 +2640,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&test_pmap_dump, "test_pmap_dump" },
     { (uint32_t)(uintptr_t)&test_pge_detection, "test_pge_detection" },
     { (uint32_t)(uintptr_t)&test_pge_global_flush, "test_pge_global_flush" },
+    { (uint32_t)(uintptr_t)&test_pmap_protect_rw, "test_pmap_protect_rw" },
     { (uint32_t)(uintptr_t)&run_pmap_tests, "run_pmap_tests" },
     { (uint32_t)(uintptr_t)&run_pmap_protect_property_tests, "run_pmap_protect_property_tests" },
     { (uint32_t)(uintptr_t)&test_pmap_hw_mappings, "test_pmap_hw_mappings" },
@@ -2875,4 +2879,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1432;
+int ksym_count = 1434;

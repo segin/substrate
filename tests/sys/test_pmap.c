@@ -107,6 +107,30 @@ void test_multiple_pmaps(void) {
     kprint("  PASS\n");
 }
 
+// Test: pmap_enter + pmap_extract round-trip
+void test_pmap_enter_extract(void) {
+    kprint("Test: pmap_enter/pmap_extract round-trip\n");
+
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    void *page_v = pmm_alloc_block();
+    TEST_ASSERT(page_v != 0, "page allocated");
+
+    uint32_t va = 0x401000;
+    uint32_t pa = (uint32_t)(uintptr_t)page_v - 0xC0000000;
+
+    pmap_activate(pmap);
+    int ret = pmap_enter(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0);
+    TEST_ASSERT(ret == 0, "pmap_enter succeeded");
+    TEST_ASSERT(pmap_extract(pmap, va) == pa, "pmap_extract returns mapped PA");
+    TEST_ASSERT(pmap_extract(pmap, va + 0x234) == pa + 0x234, "pmap_extract preserves page offset");
+    pmap_activate(pmap_kernel());
+
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
 // Test 3: Cannot destroy kernel pmap
 void test_kernel_pmap_protection(void) {
     kprint("Test: kernel pmap protection\n");
@@ -252,6 +276,39 @@ void test_pge_global_flush(void) {
     kprint("  PASS\n");
 }
 
+// Test: pmap_protect upgrade/downgrade
+void test_pmap_protect_rw(void) {
+    kprint("Test: pmap_protect upgrade/downgrade\n");
+
+    pmap_t pmap = pmap_create();
+    TEST_ASSERT(pmap != 0, "pmap created");
+
+    void *page_v = pmm_alloc_block();
+    TEST_ASSERT(page_v != 0, "page allocated");
+
+    uint32_t va = 0x402000;
+    uint32_t pa = (uint32_t)(uintptr_t)page_v - 0xC0000000;
+
+    pmap_activate(pmap);
+    TEST_ASSERT(pmap_enter(pmap, va, pa, VM_PROT_READ | VM_PROT_USER, 0) == 0, "read-only mapping created");
+
+    uint32_t pdi = PD_INDEX(va);
+    uint32_t pti = PT_INDEX(va);
+    TEST_ASSERT((V_PT(pdi)[pti] & PTE_W) == 0, "initial mapping is read-only");
+
+    TEST_ASSERT(pmap_protect(pmap, va, va + 0x1000, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER) == 0,
+                "pmap_protect upgrade succeeds");
+    TEST_ASSERT((V_PT(pdi)[pti] & PTE_W) != 0, "upgrade sets write bit");
+
+    TEST_ASSERT(pmap_protect(pmap, va, va + 0x1000, VM_PROT_READ | VM_PROT_USER) == 0,
+                "pmap_protect downgrade succeeds");
+    TEST_ASSERT((V_PT(pdi)[pti] & PTE_W) == 0, "downgrade clears write bit");
+
+    pmap_activate(pmap_kernel());
+    pmap_destroy(pmap);
+    kprint("  PASS\n");
+}
+
 static void itoa(int val, char *buf) {
     if (val == 0) {
         buf[0] = '0';
@@ -297,11 +354,13 @@ void run_pmap_tests(void) {
     test_multiple_pmaps();
     test_kernel_pmap_protection();
     test_null_pmap();
+    test_pmap_enter_extract();
     test_pmap_pse();
     test_pmap_check();
     test_pmap_dump();
     test_pge_detection();
     test_pge_global_flush();
+    test_pmap_protect_rw();
     test_pmap_large_replace();
     test_memory_leak();
     

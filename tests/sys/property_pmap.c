@@ -109,6 +109,34 @@ void property_kernel_pmap_immutable(void) {
     kprint("  PASS\n");
 }
 
+// Property 5: Newly created pmaps mirror kernel PDEs
+void property_kernel_pdes_match(void) {
+    kprint("Property: kernel PDE copies match kernel pmap\n");
+
+    pmap_t p = pmap_create();
+    PROP_ASSERT(p != 0, "pmap created");
+
+    pmap_t kernel = pmap_kernel();
+    for (int i = 768; i < 1023; i++) {
+        PROP_ASSERT(p->pdir[i] == kernel->pdir[i], "kernel PDE copied exactly");
+    }
+
+    pmap_destroy(p);
+    kprint("  PASS\n");
+}
+
+// Property 6: Recursive mapping points to the page directory itself
+void property_recursive_mapping_self_consistent(void) {
+    kprint("Property: recursive PDE self-consistent\n");
+
+    pmap_t p = pmap_create();
+    PROP_ASSERT(p != 0, "pmap created");
+    PROP_ASSERT((p->pdir[1023] & ~0xFFF) == p->pdir_phys, "recursive PDE points at own PD");
+
+    pmap_destroy(p);
+    kprint("  PASS\n");
+}
+
 void run_pmap_property_tests(void) {
     kprint("\n=== PMAP Property Tests ===\n");
     
@@ -116,6 +144,8 @@ void run_pmap_property_tests(void) {
     property_pmaps_are_aligned();
     property_pmaps_are_unique();
     property_kernel_pmap_immutable();
+    property_kernel_pdes_match();
+    property_recursive_mapping_self_consistent();
     
     kprint("\nProperty Test Results: ");
     kprint("Passed: ");

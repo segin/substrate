@@ -42,6 +42,7 @@ static struct pmap_stats global_pmap_stats = {0};
 // Feature flags
 static int pmap_has_pcid = 0;
 
+static void pmap_reclaim_empty_pt(pmap_t pmap, uint32_t pdi);
 
 
 // Helper to increment stats (global + pmap)
@@ -115,6 +116,7 @@ void pmap_bootstrap(void) {
     __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
     int has_pge = (edx >> 13) & 1;  // PGE bit 13 in EDX
     int has_pse = (edx >> 3) & 1;   // PSE bit 3 in EDX
+    int has_pae = (edx >> 6) & 1;   // PAE bit 6 in EDX
     pmap_has_pcid = (ecx >> 17) & 1; // PCID bit 17 in ECX
 
     if (has_pse) {
@@ -123,6 +125,10 @@ void pmap_bootstrap(void) {
         cr4 |= 0x10;  // CR4.PSE bit 4
         __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
         kprint("PMAP: PSE (4MB Pages) enabled\n");
+    }
+
+    if (has_pae) {
+        kprint("PMAP: PAE (36-bit physical) supported\n");
     }
     
     uint32_t kernel_pte_flags = PTE_P | PTE_W;
@@ -174,7 +180,7 @@ void pmap_bootstrap(void) {
         // Map the LAPIC page specifically
         uint32_t lapic_pa = 0xFEE00000;
         uint32_t lapic_pti = PT_INDEX(lapic_pa);
-        pt_virt[lapic_pti] = lapic_pa | PTE_P | PTE_W | PTE_G;
+        pt_virt[lapic_pti] = lapic_pa | PTE_P | PTE_W | PTE_PCD | PTE_G;
 
         // Map the page table into the directory
         kernel_page_directory[PD_INDEX(lapic_pa)] = pt_phys | PTE_P | PTE_W;
@@ -489,6 +495,7 @@ pmap_t pmap_fork(pmap_t src_pmap) {
             vm_page_t *page = pmm_get_page(pa);
             if (page) {
                 __sync_fetch_and_add(&page->ref_count, 1);
+                pv_insert(page, dst_pmap, ((uint32_t)pdi << 22) | ((uint32_t)pti << 12));
             }
             
             dst_pmap->resident_count++;
@@ -570,10 +577,31 @@ int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t fl
     if ((va < 0xC0000000) || (prot & VM_PROT_USER)) {
         pte_flags |= PTE_U;  // User accessible if in user space or requested
     }
+    if (va >= 0xC0000000) {
+        uint32_t cr4;
+        __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+        if (cr4 & 0x80) {
+            pte_flags |= PTE_G;
+        }
+    }
     // Note: i386 doesn't have NX bit in standard mode
 
     uint32_t *pt = V_PT(pdi);
+    uint32_t old_pte = pt[pti];
+    if (old_pte & PTE_P) {
+        vm_page_t *old_page = pmm_get_page(old_pte & PTE_FRAME);
+        if (old_page) {
+            pv_remove(old_page, pmap, va);
+        }
+    } else {
+        pmap->resident_count++;
+    }
+
     pt[pti] = (pa & 0xFFFFF000) | pte_flags;
+    vm_page_t *new_page = pmm_get_page(pa & 0xFFFFF000);
+    if (new_page) {
+        pv_insert(new_page, pmap, va);
+    }
     pmap_invalidate_page(va);
     return 0;
 }
@@ -622,8 +650,29 @@ int pmap_enter_batch(pmap_t pmap, uintptr_t va_start, int count, uintptr_t *pa_l
         if ((va < 0xC0000000) || (prot & VM_PROT_USER)) {
             pte_flags |= PTE_U;  // User accessible if in user space or requested
         }
+        if (va >= 0xC0000000) {
+            uint32_t cr4;
+            __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+            if (cr4 & 0x80) {
+                pte_flags |= PTE_G;
+            }
+        }
+
+        uint32_t old_pte = pt[pti];
+        if (old_pte & PTE_P) {
+            vm_page_t *old_page = pmm_get_page(old_pte & PTE_FRAME);
+            if (old_page) {
+                pv_remove(old_page, pmap, va);
+            }
+        } else {
+            pmap->resident_count++;
+        }
 
         pt[pti] = (pa & 0xFFFFF000) | pte_flags;
+        vm_page_t *new_page = pmm_get_page(pa & 0xFFFFF000);
+        if (new_page) {
+            pv_insert(new_page, pmap, va);
+        }
     }
 
     // Batch TLB invalidation
@@ -765,13 +814,28 @@ void pmap_remove(pmap_t pmap, uint32_t va) {
         // Align VA to 4MB boundary for check (optional but safe)
         // Remove the entire 4MB mapping
         V_PD[pdi] = 0;
+        if (pmap->resident_count >= 1024) {
+            pmap->resident_count -= 1024;
+        } else {
+            pmap->resident_count = 0;
+        }
         pmap_invalidate_page(va); // INVLPG invalidates the large page entry
         return;
     }
     
     uint32_t *pt = V_PT(pdi);
+    if (!(pt[pti] & PTE_P)) return;
+
+    vm_page_t *page = pmm_get_page(pt[pti] & PTE_FRAME);
+    if (page) {
+        pv_remove(page, pmap, va);
+    }
     pt[pti] = 0;
+    if (pmap->resident_count > 0) {
+        pmap->resident_count--;
+    }
     pmap_invalidate_page(va);
+    pmap_reclaim_empty_pt(pmap, pdi);
 }
 
 // Kernel-only fast path: no pmap/locking overhead
@@ -880,7 +944,7 @@ int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
         }
         
         // Update protection bits
-        uint32_t pte = old_pte & 0xFFFFF000;  // Keep physical address
+        uint32_t pte = old_pte & (PTE_FRAME | PTE_A | PTE_D | PTE_G | PTE_PWT | PTE_PCD);
         pte |= PTE_P;
         
         if (wants_writable) {
@@ -987,10 +1051,14 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
             // Set destination PTE with physical address
             uint32_t new_page_phys = (uint32_t)(uintptr_t)new_page_virt - 0xC0000000;
             dst_pt[pti] = new_page_phys | (src_pte & 0xFFF);
+            dst_pmap->resident_count++;
             
             // Mark new page as private too
             vm_page_t *new_pg = pmm_get_page(new_page_phys);
-            if (new_pg) new_pg->flags |= PG_PRIVATE;
+            if (new_pg) {
+                new_pg->flags |= PG_PRIVATE;
+                pv_insert(new_pg, dst_pmap, va);
+            }
         } else {
             // Shared mapping: use COW if requested
             uint32_t dst_pte = src_pte;
@@ -1005,9 +1073,11 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
             // Increment reference count on the shared physical page
             if (page) {
                 __sync_fetch_and_add(&page->ref_count, 1);
+                pv_insert(page, dst_pmap, va);
             }
             
             dst_pt[pti] = dst_pte;
+            dst_pmap->resident_count++;
         }
     }
     
@@ -1229,6 +1299,23 @@ static int pmap_lookup_active_pte(pmap_t pmap, uint32_t va, uint32_t **pt_out, u
     *pt_out = pt;
     *pti_out = pti;
     return 1;
+}
+
+static void pmap_reclaim_empty_pt(pmap_t pmap, uint32_t pdi) {
+    if (!pmap || pmap == kernel_pmap_ptr || pdi >= 768) return;
+    if (!(V_PD[pdi] & PTE_P) || (V_PD[pdi] & PTE_PS)) return;
+
+    uint32_t *pt = V_PT(pdi);
+    for (int i = 0; i < 1024; i++) {
+        if (pt[i] & PTE_P) {
+            return;
+        }
+    }
+
+    uint32_t pt_phys = V_PD[pdi] & PTE_FRAME;
+    V_PD[pdi] = 0;
+    pmap_invalidate_page((uint32_t)V_PT(pdi));
+    pmm_free_block((void *)(uintptr_t)(pt_phys + 0xC0000000));
 }
 
 int pmap_is_referenced(pmap_t pmap, uint32_t va) {
