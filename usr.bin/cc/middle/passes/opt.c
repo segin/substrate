@@ -145,12 +145,13 @@ static int fold_function(cc_ssa_function_t *f) {
         case CC_SSA_XOR:
         case CC_SSA_SHL:
         case CC_SSA_SHR:
-            if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 &&
-                st[in->lhs].known && st[in->rhs].known &&
-                st[in->lhs].type == st[in->rhs].type) {
-                if (st[in->lhs].type == CC_VAL_I64) {
+            if (dst >= 0 && in->lhs >= 0 && st[in->lhs].known &&
+                st[in->lhs].type == CC_VAL_I64 &&
+                ((in->rhs >= 0 && st[in->rhs].known && st[in->rhs].type == CC_VAL_I64) ||
+                 ((in->op == CC_SSA_SHL || in->op == CC_SSA_SHR) && in->rhs < 0))) {
+                {
                     long a = st[in->lhs].i;
-                    long b = st[in->rhs].i;
+                    long b = (in->rhs >= 0) ? st[in->rhs].i : in->imm;
                     long out = 0;
                     if (in->op == CC_SSA_DIV && b == 0) {
                         st[dst].known = 0;
@@ -191,7 +192,11 @@ static int fold_function(cc_ssa_function_t *f) {
                     st[dst].type = CC_VAL_I64;
                     st[dst].i = out;
                     changed = 1;
-                } else {
+                }
+            } else if (dst >= 0 && in->lhs >= 0 && in->rhs >= 0 &&
+                       st[in->lhs].known && st[in->rhs].known &&
+                       st[in->lhs].type == CC_VAL_F64 && st[in->rhs].type == CC_VAL_F64) {
+                {
                     double a = st[in->lhs].f;
                     double b = st[in->rhs].f;
                     double out = 0.0;

@@ -23,10 +23,10 @@ INC_DIR="-I$ROOT/include"
 "$CC_BIN" -std=c11 native_c11_atomic_fence.c -o /tmp/cc_native_c11_atomic_fence
 /tmp/cc_native_c11_atomic_fence
 "$CC_BIN" -std=c11 -S native_c11_atomic_fence.c -o /tmp/cc_native_c11_atomic_fence.s
-grep -q "lock; orl \$0, (%rsp)" /tmp/cc_native_c11_atomic_fence.s
+grep -Eq 'lock(;|[[:space:]]+)orl \$0, \(%rsp\)' /tmp/cc_native_c11_atomic_fence.s
 grep -q "# asm clobber memory" /tmp/cc_native_c11_atomic_fence.s
 "$CC_BIN" -std=c11 -m32 -S native_c11_atomic_fence.c -o /tmp/cc_native_c11_atomic_fence_32.s
-grep -q "lock; orl \$0, (%esp)" /tmp/cc_native_c11_atomic_fence_32.s
+grep -Eq 'lock(;|[[:space:]]+)orl \$0, \(%esp\)' /tmp/cc_native_c11_atomic_fence_32.s
 grep -q "# asm clobber memory" /tmp/cc_native_c11_atomic_fence_32.s
 
 "$CC_BIN" -std=c11 native_c11_unicode_literals.c -o /tmp/cc_native_c11_unicode_literals

@@ -437,6 +437,8 @@ typedef struct {
     int storage;
     int attr_flags;
     long attr_align;
+    long attr_format_index;
+    long attr_format_first_to_check;
     char *attr_section;
     char *attr_alias;
     int has_body;

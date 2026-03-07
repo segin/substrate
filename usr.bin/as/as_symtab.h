@@ -41,6 +41,11 @@ typedef struct {
     int is_common;
     unsigned long long common_size;
     unsigned long long common_align;
+    int is_absolute;
+    unsigned long long absolute_value;
+    char *alias_target;
+    int alias_from_dot;
+    long long alias_addend;
     unsigned long long size;
     char *version;
     size_t reference_count;

@@ -285,6 +285,7 @@ typedef struct {
 } parser_t;
 
 static int next_tok(parser_t *p);
+static long scalar_type_size_bytes(cc_type_t t);
 
 static void set_ptr_depth_diag(parser_t *p, int marker_line) {
     (void)marker_line;
@@ -329,6 +330,21 @@ static const cc_function_t *parser_find_function_decl(parser_t *p, const char *n
     }
 
     return best;
+}
+
+static const cc_global_t *parser_find_global_decl(parser_t *p, const char *name) {
+    size_t i;
+
+    if (p == NULL || p->tu == NULL || name == NULL || name[0] == '\0') {
+        return NULL;
+    }
+    for (i = 0; i < p->tu->global_count; ++i) {
+        const cc_global_t *g = &p->tu->globals[i];
+        if (g->name != NULL && strcmp(g->name, name) == 0) {
+            return g;
+        }
+    }
+    return NULL;
 }
 
 static int parser_sync_toplevel(parser_t *p) {
@@ -421,6 +437,8 @@ static int parser_sync_block_stmt(parser_t *p) {
 typedef struct {
     int flags;
     long align;
+    long format_index;
+    long format_first_to_check;
     char *section;
     char *alias;
 } decl_attrs_t;
@@ -445,7 +463,8 @@ static void decl_attrs_clear(decl_attrs_t *a);
 static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src);
 static int parse_c23_attribute_seq(parser_t *p, decl_attrs_t *out_attrs, int *out_stmt_flags);
 static int skip_balanced_parens(parser_t *p);
-static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, char **out_str);
+static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, long *out_num2, int *out_has_num2,
+                                    char **out_str);
 static int skip_decl_gnu_suffix(parser_t *p, decl_attrs_t *out_attrs);
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s);
 static int parse_type_name(parser_t *p, cc_type_t *out_type, int *out_struct_id, long *out_array_len,
@@ -962,6 +981,67 @@ static int parser_types_compatible(const parser_t *p, cc_type_t lhs_t, int lhs_s
     return struct_ids_compatible(p, lhs_sid, rhs_sid);
 }
 
+static int parser_generic_assoc_matches(cc_type_t assoc_type, int assoc_struct_id, cc_type_t ctrl_type, int ctrl_struct_id) {
+    if (assoc_type == ctrl_type && assoc_struct_id == ctrl_struct_id) {
+        return 1;
+    }
+    if (is_pointer_type(assoc_type) && is_pointer_type(ctrl_type)) {
+        if (assoc_type == ctrl_type && (assoc_struct_id == ctrl_struct_id || assoc_struct_id < 0 || ctrl_struct_id < 0)) {
+            return 1;
+        }
+        return 0;
+    }
+    return 0;
+}
+
+static int parser_is_float_type(cc_type_t t) {
+    return t == CC_TYPE_FLOAT || t == CC_TYPE_DOUBLE || t == CC_TYPE_LDOUBLE ||
+           t == CC_TYPE_DECIMAL32 || t == CC_TYPE_DECIMAL64 || t == CC_TYPE_DECIMAL128;
+}
+
+static int parser_is_integral_type(cc_type_t t) {
+    return t == CC_TYPE_BOOL || t == CC_TYPE_CHAR || t == CC_TYPE_SCHAR || t == CC_TYPE_UCHAR ||
+           t == CC_TYPE_SHORT || t == CC_TYPE_USHORT || t == CC_TYPE_INT || t == CC_TYPE_UINT ||
+           t == CC_TYPE_LONG || t == CC_TYPE_ULONG || t == CC_TYPE_LONG_LONG || t == CC_TYPE_ULONG_LONG ||
+           t == CC_TYPE_ENUM || t == CC_TYPE_BITINT;
+}
+
+static int parser_is_numeric_type(cc_type_t t) {
+    return parser_is_integral_type(t) || parser_is_float_type(t);
+}
+
+static int parser_is_unsigned_integral_type(cc_type_t t) {
+    return t == CC_TYPE_UCHAR || t == CC_TYPE_USHORT || t == CC_TYPE_UINT ||
+           t == CC_TYPE_ULONG || t == CC_TYPE_ULONG_LONG;
+}
+
+static cc_type_t parser_common_arith_type(cc_type_t a, cc_type_t b) {
+    long sa;
+    long sb;
+
+    if (parser_is_float_type(a) || parser_is_float_type(b)) {
+        if (a == CC_TYPE_LDOUBLE || b == CC_TYPE_LDOUBLE) return CC_TYPE_LDOUBLE;
+        if (a == CC_TYPE_DOUBLE || b == CC_TYPE_DOUBLE) return CC_TYPE_DOUBLE;
+        if (a == CC_TYPE_FLOAT || b == CC_TYPE_FLOAT) return CC_TYPE_FLOAT;
+        if (a == CC_TYPE_DECIMAL128 || b == CC_TYPE_DECIMAL128) return CC_TYPE_DECIMAL128;
+        if (a == CC_TYPE_DECIMAL64 || b == CC_TYPE_DECIMAL64) return CC_TYPE_DECIMAL64;
+        if (a == CC_TYPE_DECIMAL32 || b == CC_TYPE_DECIMAL32) return CC_TYPE_DECIMAL32;
+        return CC_TYPE_DOUBLE;
+    }
+    if (!parser_is_integral_type(a) || !parser_is_integral_type(b)) {
+        return CC_TYPE_INT;
+    }
+    sa = scalar_type_size_bytes(a);
+    sb = scalar_type_size_bytes(b);
+    if (sa < 0) sa = 4;
+    if (sb < 0) sb = 4;
+    if (sa > sb) return a;
+    if (sb > sa) return b;
+    if (parser_is_unsigned_integral_type(a) && !parser_is_unsigned_integral_type(b)) return a;
+    if (parser_is_unsigned_integral_type(b) && !parser_is_unsigned_integral_type(a)) return b;
+    return a;
+}
+
 static long scalar_type_size_bytes(cc_type_t t) {
     switch (t) {
     case CC_TYPE_BOOL:
@@ -1341,9 +1421,11 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
         return -1;
     }
     sd = &p->structs[sid];
-    for (i = 0; i < sd->member_count; ++i) {
-        if (strcmp(sd->members[i].name, name) == 0) {
-            return 1;
+    if (name != NULL) {
+        for (i = 0; i < sd->member_count; ++i) {
+            if (sd->members[i].name != NULL && strcmp(sd->members[i].name, name) == 0) {
+                return 1;
+            }
         }
     }
     next = (cc_struct_member_t *)realloc(sd->members, (sd->member_count + 1) * sizeof(*next));
@@ -1351,9 +1433,12 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
         return -1;
     }
     sd->members = next;
-    dup = xstrdup_n(name, strlen(name));
-    if (dup == NULL) {
-        return -1;
+    dup = NULL;
+    if (name != NULL) {
+        dup = xstrdup_n(name, strlen(name));
+        if (dup == NULL) {
+            return -1;
+        }
     }
     sd->members[sd->member_count].name = dup;
     sd->members[sd->member_count].type = type;
@@ -1377,11 +1462,15 @@ static int struct_member_push(parser_t *p, int sid, const char *name, cc_type_t 
     return 0;
 }
 
-static const cc_struct_member_t *struct_member_find_n(const parser_t *p, int sid, const char *name, size_t len) {
+static const cc_struct_member_t *struct_member_find_offset_n_depth(const parser_t *p, int sid, const char *name,
+                                                                   size_t len, long *out_offset, int depth) {
     size_t i;
     const cc_struct_def_t *sd;
 
-    if (sid < 0 || (size_t)sid >= p->struct_count || name == NULL) {
+    if (out_offset != NULL) {
+        *out_offset = 0;
+    }
+    if (sid < 0 || (size_t)sid >= p->struct_count || name == NULL || depth > 32) {
         return NULL;
     }
     sd = &p->structs[sid];
@@ -1394,10 +1483,33 @@ static const cc_struct_member_t *struct_member_find_n(const parser_t *p, int sid
             continue;
         }
         if (strlen(m->name) == len && strncmp(m->name, name, len) == 0) {
+            if (out_offset != NULL) {
+                *out_offset = m->offset;
+            }
             return m;
         }
     }
+    for (i = 0; i < sd->member_count; ++i) {
+        const cc_struct_member_t *m = &sd->members[i];
+        const cc_struct_member_t *inner;
+        long inner_off = 0;
+
+        if (m->name != NULL || m->type != CC_TYPE_VOID || m->type_struct_id < 0) {
+            continue;
+        }
+        inner = struct_member_find_offset_n_depth(p, m->type_struct_id, name, len, &inner_off, depth + 1);
+        if (inner != NULL) {
+            if (out_offset != NULL) {
+                *out_offset = m->offset + inner_off;
+            }
+            return inner;
+        }
+    }
     return NULL;
+}
+
+static const cc_struct_member_t *struct_member_find_n(const parser_t *p, int sid, const char *name, size_t len) {
+    return struct_member_find_offset_n_depth(p, sid, name, len, NULL, 0);
 }
 
 static void parser_free_structs(parser_t *p) {
@@ -2624,17 +2736,12 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                         free(mname);
                     } else if (skip_member_decl && mname == NULL && mtype == CC_TYPE_VOID && mstruct >= 0 &&
                                (size_t)mstruct < p->struct_count && p->structs[mstruct].complete) {
-                        size_t ai;
-                        const cc_struct_def_t *anon = &p->structs[mstruct];
-                        for (ai = 0; ai < anon->member_count; ++ai) {
-                            const cc_struct_member_t *am = &anon->members[ai];
-                            if (struct_member_push(p, sid, am->name, am->type, am->type_struct_id, am->array_len,
-                                                   am->array_ndim, am->array_dims, moff + am->offset, am->size,
-                                                   am->is_bitfield, am->bit_width, am->bit_offset, am->bit_storage_bits,
-                                                   am->bit_signed, am->bit_storage_size) != 0) {
-                                decl_attrs_clear(&mdecl_attrs);
-                                return -1;
-                            }
+                        if (struct_member_push(p, sid, NULL, mtype, mstruct, arr_saw ? arr_count : -1,
+                                               arr_saw ? arr_ndim : 0, arr_saw ? arr_dims : NULL, moff, msize,
+                                               is_bitfield, bit_width, bit_offset, bit_storage_bits, bit_signed,
+                                               bit_storage_size) != 0) {
+                            decl_attrs_clear(&mdecl_attrs);
+                            return -1;
                         }
                     }
                     if (is_union) {
@@ -3244,6 +3351,19 @@ static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type,
                 *out_struct_id = p->vars[vidx].struct_id;
                 return 0;
             }
+            {
+                const cc_global_t *g = parser_find_global_decl(p, e->ident);
+                if (g != NULL) {
+                    *out_type = g->type;
+                    *out_struct_id = g->type_struct_id;
+                    return 0;
+                }
+            }
+            if (parser_find_function_decl(p, e->ident) != NULL) {
+                *out_type = CC_TYPE_FUNC;
+                *out_struct_id = -1;
+                return 0;
+            }
         }
         *out_type = e->value_type;
         *out_struct_id = e->struct_id;
@@ -3344,6 +3464,11 @@ static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type,
                 return 0;
             }
         }
+        if (parser_is_numeric_type(lt) && parser_is_numeric_type(rt)) {
+            *out_type = parser_common_arith_type(lt, rt);
+            *out_struct_id = -1;
+            return 0;
+        }
         *out_type = e->value_type;
         *out_struct_id = e->struct_id;
         return 0;
@@ -3355,6 +3480,85 @@ static int infer_expr_type(parser_t *p, const cc_expr_t *e, cc_type_t *out_type,
                 *out_struct_id = f->ret_struct_id;
                 return 0;
             }
+        }
+        if (e->lhs != NULL && infer_expr_type(p, e->lhs, &lt, &lsid) == 0 && is_pointer_type(lt)) {
+            *out_type = ptr_deref_type(lt);
+            *out_struct_id = type_carries_struct_id(*out_type) ? lsid : -1;
+            return 0;
+        }
+        *out_type = e->value_type;
+        *out_struct_id = e->struct_id;
+        return 0;
+    case CC_EXPR_GENERIC: {
+        long selected = -1;
+        long default_idx = -1;
+        size_t i;
+        cc_type_t ctrl_type = CC_TYPE_INT;
+        int ctrl_sid = -1;
+
+        if (e->lhs != NULL) {
+            if (infer_expr_type(p, e->lhs, &ctrl_type, &ctrl_sid) != 0) {
+                ctrl_type = e->lhs->value_type;
+                ctrl_sid = e->lhs->struct_id;
+            }
+        }
+        for (i = 0; i < e->generic_count; ++i) {
+            if (e->generic_is_default != NULL && e->generic_is_default[i]) {
+                default_idx = (long)i;
+                continue;
+            }
+            if (parser_generic_assoc_matches(e->generic_types[i], e->generic_struct_ids[i], ctrl_type, ctrl_sid)) {
+                selected = (long)i;
+                break;
+            }
+        }
+        if (selected < 0) {
+            selected = default_idx;
+        }
+        if (selected < 0 || (size_t)selected >= e->arg_count || e->args == NULL || e->args[selected] == NULL) {
+            *out_type = e->value_type;
+            *out_struct_id = e->struct_id;
+            return 0;
+        }
+        if (infer_expr_type(p, e->args[selected], out_type, out_struct_id) == 0) {
+            return 0;
+        }
+        *out_type = e->args[selected]->value_type;
+        *out_struct_id = e->args[selected]->struct_id;
+        return 0;
+    }
+    case CC_EXPR_ASSIGN:
+        if (e->rhs != NULL && infer_expr_type(p, e->rhs, out_type, out_struct_id) == 0) {
+            return 0;
+        }
+        *out_type = e->value_type;
+        *out_struct_id = e->struct_id;
+        return 0;
+    case CC_EXPR_UPDATE:
+        if (e->lhs != NULL && infer_expr_type(p, e->lhs, out_type, out_struct_id) == 0) {
+            return 0;
+        }
+        *out_type = e->value_type;
+        *out_struct_id = e->struct_id;
+        return 0;
+    case CC_EXPR_TERNARY:
+        if (e->rhs != NULL && infer_expr_type(p, e->rhs, &lt, &lsid) == 0 &&
+            e->third != NULL && infer_expr_type(p, e->third, &rt, &rsid) == 0) {
+            if (lt == rt && lsid == rsid) {
+                *out_type = lt;
+                *out_struct_id = lsid;
+                return 0;
+            }
+            if (is_pointer_type(lt) && is_pointer_type(rt) &&
+                (parser_types_compatible(p, lt, lsid, 0, rt, rsid, 0) ||
+                 parser_types_compatible(p, rt, rsid, 0, lt, lsid, 0))) {
+                *out_type = lt;
+                *out_struct_id = lsid;
+                return 0;
+            }
+        }
+        if (e->third != NULL && infer_expr_type(p, e->third, out_type, out_struct_id) == 0) {
+            return 0;
         }
         *out_type = e->value_type;
         *out_struct_id = e->struct_id;
@@ -3862,6 +4066,8 @@ static void decl_attrs_reset(decl_attrs_t *a) {
     }
     a->flags = 0;
     a->align = 0;
+    a->format_index = 0;
+    a->format_first_to_check = 0;
     a->section = NULL;
     a->alias = NULL;
 }
@@ -3876,6 +4082,8 @@ static void decl_attrs_clear(decl_attrs_t *a) {
     a->alias = NULL;
     a->flags = 0;
     a->align = 0;
+    a->format_index = 0;
+    a->format_first_to_check = 0;
 }
 
 static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
@@ -3900,6 +4108,12 @@ static int decl_attrs_merge(decl_attrs_t *dst, const decl_attrs_t *src) {
     dst->flags |= src->flags;
     if (src->align > dst->align) {
         dst->align = src->align;
+    }
+    if ((src->flags & CC_ATTR_FORMAT) != 0 && src->format_index > 0) {
+        dst->format_index = src->format_index;
+    }
+    if ((src->flags & CC_ATTR_FORMAT) != 0) {
+        dst->format_first_to_check = src->format_first_to_check;
     }
     if (sec_dup != NULL) {
         free(dst->section);
@@ -4199,15 +4413,29 @@ static int parse_asm_label_list(parser_t *p, char ***items, size_t *count) {
 }
 
 static int parse_asm_stmt(parser_t *p, cc_stmt_t *s) {
+    int is_volatile_tok;
+    int is_goto_tok;
+    int is_inline_tok;
+
     s->kind = CC_STMT_ASM;
     if (next_tok(p) != 0) {
         return -1;
     }
-    while (tok_is_ident(p, "__volatile__") || tok_is_ident(p, "volatile") || p->tok.kind == TOK_KW_VOLATILE ||
-           tok_is_ident(p, "__goto__") || tok_is_ident(p, "goto") || p->tok.kind == TOK_KW_GOTO) {
-        if (tok_is_ident(p, "__goto__") || tok_is_ident(p, "goto") || p->tok.kind == TOK_KW_GOTO) {
+    while (1) {
+        is_volatile_tok =
+            tok_is_ident(p, "__volatile__") || tok_is_ident(p, "__volatile") || tok_is_ident(p, "volatile") ||
+            p->tok.kind == TOK_KW_VOLATILE;
+        is_goto_tok =
+            tok_is_ident(p, "__goto__") || tok_is_ident(p, "__goto") || tok_is_ident(p, "goto") ||
+            p->tok.kind == TOK_KW_GOTO;
+        is_inline_tok = tok_is_ident(p, "__inline__") || tok_is_ident(p, "__inline") || tok_is_ident(p, "inline") ||
+                        p->tok.kind == TOK_KW_INLINE;
+        if (!is_volatile_tok && !is_goto_tok && !is_inline_tok) {
+            break;
+        }
+        if (is_goto_tok) {
             s->asm_is_goto = 1;
-        } else {
+        } else if (is_volatile_tok) {
             s->asm_is_volatile = 1;
         }
         if (next_tok(p) != 0) {
@@ -4303,7 +4531,7 @@ static int parse_one_c23_attribute(parser_t *p, decl_attrs_t *out_attrs, int *ou
         return -1;
     }
     if (p->tok.kind == TOK_LPAREN) {
-        if (parse_gnu_attr_arguments(p, &ignored_num, &ignored_has_num, &ignored_str) != 0) {
+        if (parse_gnu_attr_arguments(p, &ignored_num, &ignored_has_num, NULL, NULL, &ignored_str) != 0) {
             free(ignored_str);
             return -1;
         }
@@ -4411,13 +4639,20 @@ static int skip_balanced_parens(parser_t *p) {
     return 0;
 }
 
-static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, char **out_str) {
+static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num, long *out_num2, int *out_has_num2,
+                                    char **out_str) {
     int depth = 1;
     if (out_has_num != NULL) {
         *out_has_num = 0;
     }
     if (out_num != NULL) {
         *out_num = 0;
+    }
+    if (out_has_num2 != NULL) {
+        *out_has_num2 = 0;
+    }
+    if (out_num2 != NULL) {
+        *out_num2 = 0;
     }
     if (out_str != NULL) {
         *out_str = NULL;
@@ -4437,6 +4672,9 @@ static int parse_gnu_attr_arguments(parser_t *p, long *out_num, int *out_has_num
             if (out_has_num != NULL && out_num != NULL && !*out_has_num && p->tok.kind == TOK_NUM) {
                 *out_has_num = 1;
                 *out_num = p->tok.num;
+            } else if (out_has_num2 != NULL && out_num2 != NULL && !*out_has_num2 && p->tok.kind == TOK_NUM) {
+                *out_has_num2 = 1;
+                *out_num2 = p->tok.num;
             } else if (out_str != NULL && *out_str == NULL && p->tok.kind == TOK_STR) {
                 *out_str = dup_string_token(&p->tok);
                 if (*out_str == NULL) {
@@ -4488,7 +4726,9 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
     int is_may_alias;
     int is_mode;
     int has_num = 0;
+    int has_num2 = 0;
     long num = 0;
+    long num2 = 0;
     char *sec = NULL;
     int any_known;
     char attr_name[96];
@@ -4543,7 +4783,7 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         return -1;
     }
     if (p->tok.kind == TOK_LPAREN) {
-        if (parse_gnu_attr_arguments(p, &num, &has_num, &sec) != 0) {
+        if (parse_gnu_attr_arguments(p, &num, &has_num, &num2, &has_num2, &sec) != 0) {
             free(sec);
             return -1;
         }
@@ -4579,6 +4819,12 @@ static int parse_one_gnu_attribute(parser_t *p, decl_attrs_t *out_attrs) {
         }
         if (is_format) {
             out_attrs->flags |= CC_ATTR_FORMAT;
+            if (has_num) {
+                out_attrs->format_index = num;
+            }
+            if (has_num2) {
+                out_attrs->format_first_to_check = num2;
+            }
         }
         if (is_nonnull) {
             out_attrs->flags |= CC_ATTR_NONNULL;
@@ -6299,16 +6545,17 @@ static cc_expr_t *parse_primary(parser_t *p) {
                 }
                 while (1) {
                     const cc_struct_member_t *m;
+                    long member_off = 0;
                     int d;
 
-                    m = struct_member_find_n(p, ssid, p->tok.start, p->tok.len);
+                    m = struct_member_find_offset_n_depth(p, ssid, p->tok.start, p->tok.len, &member_off, 0);
                     if (m == NULL) {
                         set_diag(p->diag, p->tok.line, p->tok.col,
                                  "unknown member in __builtin_offsetof designator");
                         free_expr(e);
                         return NULL;
                     }
-                    total += m->offset;
+                    total += member_off;
                     designator_ndim = m->array_ndim;
                     memset(designator_dims, 0, sizeof(designator_dims));
                     if (designator_ndim > 0 && designator_ndim <= CC_MAX_ARRAY_DIMS) {
@@ -8355,6 +8602,13 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                     return -1;
                 }
             }
+            while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
+                   tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
+                if (skip_decl_gnu_suffix(p, NULL) != 0) {
+                    free_stmt(&s);
+                    return -1;
+                }
+            }
             if (p->tok.kind == TOK_LPAREN && is_ptr_declarator_tok(peek_kind(p))) {
                 saw_nested_wrapped = 1;
                 if (next_tok(p) != 0) {
@@ -8373,6 +8627,13 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
                         return -1;
                     }
                     if (consume_decl_quals(p, &decl_saw_restrict) != 0) {
+                        free_stmt(&s);
+                        return -1;
+                    }
+                }
+                while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
+                       tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
+                    if (skip_decl_gnu_suffix(p, NULL) != 0) {
                         free_stmt(&s);
                         return -1;
                     }
@@ -8513,10 +8774,15 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             free_stmt(&s);
             return -1;
         }
+        long merged_format_index = 0;
+        long merged_format_first_to_check = 0;
+
         if (decl_attrs_merge(&merged_attrs, &base_attrs) != 0 || decl_attrs_merge(&merged_attrs, &suffix_attrs) != 0) {
             free_stmt(&s);
             return -1;
         }
+        merged_format_index = merged_attrs.format_index;
+        merged_format_first_to_check = merged_attrs.format_first_to_check;
         s.attr_flags = merged_attrs.flags;
         s.attr_align = merged_attrs.align;
         if (merged_attrs.section != NULL) {
@@ -8546,6 +8812,8 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
             fn_decl.storage = s.storage;
             fn_decl.attr_flags = s.attr_flags;
             fn_decl.attr_align = s.attr_align;
+            fn_decl.attr_format_index = merged_format_index;
+            fn_decl.attr_format_first_to_check = merged_format_first_to_check;
             fn_decl.has_body = 0;
             if (next_tok(p) != 0) {
                 free_stmt(&s);
@@ -9617,6 +9885,13 @@ static int parse_function(parser_t *p, cc_function_t *f) {
                 }
             }
         }
+        while ((p->tok.kind == TOK_LBRACK && peek_kind(p) == TOK_LBRACK) || tok_is_gnu_attribute_kw(p) ||
+               tok_is_ident(p, "__asm__") || tok_is_ident(p, "__asm") || tok_is_ident(p, "asm")) {
+            if (skip_decl_gnu_suffix(p, NULL) != 0) {
+                decl_attrs_clear(&spec_attrs);
+                return -1;
+            }
+        }
         if (p->tok.kind != TOK_IDENT) {
             set_diag(p->diag, p->tok.line, p->tok.col, "expected function name");
             decl_attrs_clear(&spec_attrs);
@@ -9692,6 +9967,8 @@ static int parse_function(parser_t *p, cc_function_t *f) {
     }
     f->attr_flags = merged_attrs.flags;
     f->attr_align = merged_attrs.align;
+    f->attr_format_index = merged_attrs.format_index;
+    f->attr_format_first_to_check = merged_attrs.format_first_to_check;
     if (merged_attrs.section != NULL) {
         f->attr_section = xstrdup_n(merged_attrs.section, strlen(merged_attrs.section));
         if (f->attr_section == NULL) {
@@ -9947,6 +10224,12 @@ static int probe_is_function_head(parser_t *p) {
                 if (next_tok(&q) != 0) {
                     goto done;
                 }
+            }
+        }
+        while ((q.tok.kind == TOK_LBRACK && peek_kind(&q) == TOK_LBRACK) || tok_is_gnu_attribute_kw(&q) ||
+               tok_is_ident(&q, "__asm__") || tok_is_ident(&q, "__asm") || tok_is_ident(&q, "asm")) {
+            if (skip_decl_gnu_suffix(&q, NULL) != 0) {
+                goto done;
             }
         }
         if (q.tok.kind != TOK_IDENT) {
@@ -10380,8 +10663,7 @@ void cc_parser_set_std_mode(const char *std_mode) {
         g_parser_enable_trigraphs = 1;
     }
     if (g_parser_std_gnu || strcmp(std_mode, "c89") == 0 || strcmp(std_mode, "c90") == 0 ||
-        strcmp(std_mode, "c95") == 0 || strcmp(std_mode, "c99") == 0 || strcmp(std_mode, "c11") == 0 ||
-        strcmp(std_mode, "c17") == 0 || strcmp(std_mode, "c18") == 0) {
+        strcmp(std_mode, "c95") == 0) {
         g_parser_allow_oldstyle_funcdecl = 1;
     } else {
         g_parser_allow_oldstyle_funcdecl = 0;

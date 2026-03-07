@@ -1156,11 +1156,15 @@ static int parse_args(int argc, char **argv, cc_opts_t *o) {
     return 0;
 }
 
-static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
+static int run_preprocess(const cc_opts_t *o, const char *in, const char *out, int as_cpp_mode) {
     cc_diag_t diag;
     const char *std_mode = o->std != NULL ? o->std : "gnu17";
-    const char *const *pp_flags = (const char *const *)o->cpp_flags.items;
+    const char *const *pp_flags_base = (const char *const *)o->cpp_flags.items;
     size_t pp_count = o->cpp_flags.count;
+    const char **pp_flags = (const char **)pp_flags_base;
+    const char *as_def1 = "-D__ASSEMBLY__";
+    const char *as_def2 = "-D__ASSEMBLER__";
+    const char **pp_flags_aug = NULL;
     const char *pp_in = in;
     int use_stdin_tmp = 0;
     char stdin_tmp[PATH_MAX];
@@ -1197,7 +1201,26 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
         use_stdin_tmp = 1;
     }
 
+    if (as_cpp_mode && strcmp(out, "/dev/stdout") != 0 && strcmp(out, "-") != 0) {
+        size_t j;
+        pp_flags_aug = (const char **)calloc(pp_count + 2, sizeof(*pp_flags_aug));
+        if (pp_flags_aug == NULL) {
+            if (use_stdin_tmp) {
+                unlink(stdin_tmp);
+            }
+            fprintf(stderr, "cpp: error: failed to allocate preprocess flags\n");
+            return -1;
+        }
+        for (j = 0; j < pp_count; ++j) {
+            pp_flags_aug[j] = pp_flags_base[j];
+        }
+        pp_flags_aug[pp_count++] = as_def1;
+        pp_flags_aug[pp_count++] = as_def2;
+        pp_flags = pp_flags_aug;
+    }
+
     if (cc_preprocess_file(pp_in, out, std_mode, pp_flags, pp_count, &diag) != 0) {
+        free(pp_flags_aug);
         if (use_stdin_tmp) {
             unlink(stdin_tmp);
         }
@@ -1215,6 +1238,128 @@ static int run_preprocess(const cc_opts_t *o, const char *in, const char *out) {
         }
         return -1;
     }
+
+    if (as_cpp_mode) {
+        FILE *fp;
+        long sz;
+        size_t rsz;
+        char *src = NULL;
+        char *dst = NULL;
+        size_t i;
+        size_t w = 0;
+        int in_str = 0;
+        char q = '\0';
+
+        fp = fopen(out, "rb");
+        if (fp == NULL) {
+            free(pp_flags_aug);
+            if (use_stdin_tmp) {
+                unlink(stdin_tmp);
+            }
+            fprintf(stderr, "cpp: error: failed to reopen preprocessed assembly output\n");
+            return -1;
+        }
+        if (fseek(fp, 0, SEEK_END) != 0) {
+            fclose(fp);
+            free(pp_flags_aug);
+            if (use_stdin_tmp) {
+                unlink(stdin_tmp);
+            }
+            fprintf(stderr, "cpp: error: failed to size preprocessed assembly output\n");
+            return -1;
+        }
+        sz = ftell(fp);
+        if (sz < 0 || fseek(fp, 0, SEEK_SET) != 0) {
+            fclose(fp);
+            free(pp_flags_aug);
+            if (use_stdin_tmp) {
+                unlink(stdin_tmp);
+            }
+            fprintf(stderr, "cpp: error: failed to read preprocessed assembly output\n");
+            return -1;
+        }
+        src = (char *)malloc((size_t)sz + 1);
+        dst = (char *)malloc((size_t)sz + 1);
+        if (src == NULL || dst == NULL) {
+            free(src);
+            free(dst);
+            fclose(fp);
+            free(pp_flags_aug);
+            if (use_stdin_tmp) {
+                unlink(stdin_tmp);
+            }
+            fprintf(stderr, "cpp: error: out of memory normalizing assembly output\n");
+            return -1;
+        }
+        rsz = fread(src, 1, (size_t)sz, fp);
+        fclose(fp);
+        if (rsz != (size_t)sz) {
+            free(src);
+            free(dst);
+            free(pp_flags_aug);
+            if (use_stdin_tmp) {
+                unlink(stdin_tmp);
+            }
+            fprintf(stderr, "cpp: error: short read normalizing assembly output\n");
+            return -1;
+        }
+        src[rsz] = '\0';
+
+        for (i = 0; i < rsz; ++i) {
+            char c = src[i];
+            if (!in_str) {
+                dst[w++] = c;
+                if (c == '"' || c == '\'') {
+                    in_str = 1;
+                    q = c;
+                }
+                continue;
+            }
+            if (c == '\\' && i + 1 < rsz) {
+                char n = src[i + 1];
+                if (n == '\\') {
+                    dst[w++] = '\\';
+                    i++;
+                    continue;
+                }
+                if (n == 't') {
+                    dst[w++] = '\t';
+                    i++;
+                    continue;
+                }
+                dst[w++] = c;
+                dst[w++] = n;
+                i++;
+                continue;
+            }
+            dst[w++] = c;
+            if (c == q) {
+                in_str = 0;
+                q = '\0';
+            }
+        }
+        dst[w] = '\0';
+
+        fp = fopen(out, "wb");
+        if (fp == NULL || fwrite(dst, 1, w, fp) != w) {
+            if (fp != NULL) {
+                fclose(fp);
+            }
+            free(src);
+            free(dst);
+            free(pp_flags_aug);
+            if (use_stdin_tmp) {
+                unlink(stdin_tmp);
+            }
+            fprintf(stderr, "cpp: error: failed writing normalized assembly output\n");
+            return -1;
+        }
+        fclose(fp);
+        free(src);
+        free(dst);
+    }
+
+    free(pp_flags_aug);
     if (use_stdin_tmp) {
         unlink(stdin_tmp);
     }
@@ -1597,7 +1742,7 @@ int cc_main(int argc, char **argv) {
             }
 
             pp_out = o.output != NULL ? o.output : "/dev/stdout";
-            if (run_preprocess(&o, in, pp_out) != 0) {
+            if (run_preprocess(&o, in, pp_out, input_is_S) != 0) {
                 goto out;
             }
             continue;
@@ -1615,7 +1760,7 @@ int cc_main(int argc, char **argv) {
                     fprintf(stderr, "cc: failed to derive .s output name\n");
                     goto out;
                 }
-                if (run_preprocess(&o, in, out_s) != 0) {
+                if (run_preprocess(&o, in, out_s, 1) != 0) {
                     goto out;
                 }
                 continue;
@@ -1625,7 +1770,7 @@ int cc_main(int argc, char **argv) {
                 fprintf(stderr, "cc: failed to create temporary preprocessed assembly file\n");
                 goto out;
             }
-            if (run_preprocess(&o, in, tmp_s) != 0) {
+            if (run_preprocess(&o, in, tmp_s, 1) != 0) {
                 goto out;
             }
 
@@ -1661,7 +1806,7 @@ int cc_main(int argc, char **argv) {
                 fprintf(stderr, "cc: failed to create temporary preprocessed file\n");
                 goto out;
             }
-            if (run_preprocess(&o, in, out_pp) != 0) {
+            if (run_preprocess(&o, in, out_pp, 0) != 0) {
                 goto out;
             }
 

@@ -139,22 +139,46 @@ static int is_x86_register_name(const char *s) {
         }
     }
     if (s[0] == 'r' && isdigit((unsigned char)s[1])) {
-        long n = strtol(s + 1, NULL, 10);
-        if (n >= 8 && n <= 31) {
-            return 1;
+        const char *p = s + 1;
+        long n;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        if (*p == 'b' || *p == 'w' || *p == 'd') {
+            ++p;
+        }
+        if (*p == '\0') {
+            n = strtol(s + 1, NULL, 10);
+            if (n >= 8 && n <= 31) {
+                return 1;
+            }
         }
     }
     if ((strncmp(s, "xmm", 3) == 0 || strncmp(s, "ymm", 3) == 0 || strncmp(s, "zmm", 3) == 0) &&
         isdigit((unsigned char)s[3])) {
-        return 1;
+        const char *p = s + 3;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        if (*p == '\0') {
+            return 1;
+        }
     }
     if (s[0] == 'k' && isdigit((unsigned char)s[1])) {
-        return 1;
+        const char *p = s + 1;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        if (*p == '\0') {
+            return 1;
+        }
     }
     return 0;
 }
 
 static int is_arm_like_register_name(const char *s) {
+    const char *p;
+
     if (s == NULL || s[0] == '\0') {
         return 0;
     }
@@ -164,7 +188,13 @@ static int is_arm_like_register_name(const char *s) {
     }
     if ((s[0] == 'r' || s[0] == 'w' || s[0] == 'x' || s[0] == 'q' || s[0] == 'd' || s[0] == 's' || s[0] == 'v') &&
         isdigit((unsigned char)s[1])) {
-        return 1;
+        p = s + 1;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        if (*p == '\0') {
+            return 1;
+        }
     }
     return 0;
 }

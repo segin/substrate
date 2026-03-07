@@ -1455,7 +1455,8 @@ static const cc_struct_member_t *find_struct_member(const cc_translation_unit_t 
         return NULL;
     }
     for (i = 0; i < tu->structs[sid].member_count; ++i) {
-        if (strcmp(tu->structs[sid].members[i].name, name) == 0) {
+        const char *mname = tu->structs[sid].members[i].name;
+        if (mname != NULL && strcmp(mname, name) == 0) {
             return &tu->structs[sid].members[i];
         }
     }
@@ -1813,6 +1814,8 @@ typedef enum {
     BUILTIN_MEMCPY,
     BUILTIN_MEMMOVE,
     BUILTIN_MEMSET,
+    BUILTIN_PREFETCH,
+    BUILTIN_STRLEN,
     BUILTIN_MEMCPY_CHK,
     BUILTIN_MEMMOVE_CHK,
     BUILTIN_MEMSET_CHK,
@@ -1923,6 +1926,12 @@ static builtin_kind_t builtin_kind(const char *name) {
     }
     if (strcmp(name, "__builtin_memset") == 0) {
         return BUILTIN_MEMSET;
+    }
+    if (strcmp(name, "__builtin_prefetch") == 0) {
+        return BUILTIN_PREFETCH;
+    }
+    if (strcmp(name, "__builtin_strlen") == 0) {
+        return BUILTIN_STRLEN;
     }
     if (strcmp(name, "__builtin___memcpy_chk") == 0) {
         return BUILTIN_MEMCPY_CHK;
@@ -2238,16 +2247,13 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
     }
 
     sh = 64 - bits;
-    c = emit_const_i64_instr(sf, sh);
-    if (c < 0) {
-        return -1;
-    }
 
     memset(&in, 0, sizeof(in));
     in.op = CC_SSA_SHL;
     in.dst = new_value(sf, CC_VAL_I64);
     in.lhs = v;
-    in.rhs = c;
+    in.rhs = -1;
+    in.imm = sh;
     if (in.dst < 0 || push_instr(sf, in) != 0) {
         set_diag(diag, "out of memory normalizing signed integer value");
         return -1;
@@ -2259,7 +2265,8 @@ static int normalize_integral_value(cc_ssa_function_t *sf, int v, cc_type_t t, c
     in.is_unsigned = 0;
     in.dst = new_value(sf, CC_VAL_I64);
     in.lhs = v;
-    in.rhs = c;
+    in.rhs = -1;
+    in.imm = sh;
     if (in.dst < 0 || push_instr(sf, in) != 0) {
         set_diag(diag, "out of memory normalizing signed integer value");
         return -1;
@@ -5128,6 +5135,56 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             }
             return call_in.dst;
         }
+        if (bk == BUILTIN_STRLEN) {
+            cc_ssa_instr_t call_in;
+            int arg0;
+            if (e->arg_count != 1 || e->args[0] == NULL) {
+                set_diag(diag, "__builtin_strlen lowering expects 1 argument");
+                return -1;
+            }
+            arg0 = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[0], diag);
+            if (arg0 < 0) {
+                return -1;
+            }
+            arg0 = cast_value(sf, arg0, CC_VAL_I64, diag);
+            if (arg0 < 0) {
+                return -1;
+            }
+            memset(&call_in, 0, sizeof(call_in));
+            call_in.op = CC_SSA_CALL;
+            call_in.call_is_variadic = 0;
+            call_in.sym = xstrdup("strlen");
+            call_in.arg_count = 1;
+            call_in.args = (int *)calloc(1, sizeof(*call_in.args));
+            call_in.dst = new_value(sf, CC_VAL_I64);
+            if (call_in.sym == NULL || call_in.args == NULL || call_in.dst < 0) {
+                free(call_in.sym);
+                free(call_in.args);
+                return -1;
+            }
+            call_in.args[0] = arg0;
+            if (push_instr(sf, call_in) != 0) {
+                free(call_in.sym);
+                free(call_in.args);
+                return -1;
+            }
+            return call_in.dst;
+        }
+        if (bk == BUILTIN_PREFETCH) {
+            size_t ai;
+            if (e->arg_count < 1 || e->arg_count > 3) {
+                set_diag(diag, "__builtin_prefetch lowering expects 1 to 3 arguments");
+                return -1;
+            }
+            for (ai = 0; ai < e->arg_count; ++ai) {
+                int v = lower_expr(tu, sf, ctx, vars, var_count, depth, e->args[ai], diag);
+                if (v < 0) {
+                    return -1;
+                }
+                (void)v;
+            }
+            return emit_const_i64_instr(sf, 0);
+        }
         if (bk == BUILTIN_CLZ || bk == BUILTIN_CTZ || bk == BUILTIN_FFS) {
             const char *builtin_name = "__builtin_clz";
             if (bk == BUILTIN_CTZ) {
@@ -5723,6 +5780,23 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
             if (e->ident != NULL && callee != NULL && callee->has_prototype && i < callee->param_count) {
                 if (callee->params[i].type == CC_TYPE_VOID && callee->params[i].type_struct_id >= 0) {
                     long agg_size = type_size_bytes_with_struct(tu, callee->params[i].type, callee->params[i].type_struct_id);
+                    int is_transparent_union = 0;
+                    int pass_union_scalar = 0;
+                    int arg_is_same_aggregate = 0;
+                    if (callee->params[i].type_struct_id >= 0 &&
+                        (size_t)callee->params[i].type_struct_id < tu->struct_count) {
+                        const cc_struct_def_t *sd = &tu->structs[callee->params[i].type_struct_id];
+                        if ((sd->attr_flags & CC_ATTR_TRANSPARENT_UNION) != 0) {
+                            is_transparent_union = 1;
+                        }
+                        if (e->args[i] != NULL && e->args[i]->value_type == CC_TYPE_VOID &&
+                            e->args[i]->struct_id == callee->params[i].type_struct_id) {
+                            arg_is_same_aggregate = 1;
+                        }
+                        if (sd->is_union && !arg_is_same_aggregate) {
+                            pass_union_scalar = 1;
+                        }
+                    }
                     av = cast_value(sf, av, CC_VAL_I64, diag);
                     if (av < 0) {
                         free(in.sym);
@@ -5730,7 +5804,7 @@ static int lower_expr(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, co
                         free(in.call_arg_abi);
                         return -1;
                     }
-                    if (agg_size > 0 && agg_size <= g_pointer_size_bytes) {
+                    if (!is_transparent_union && !pass_union_scalar && agg_size > 0 && agg_size <= g_pointer_size_bytes) {
                         cc_ssa_instr_t load_in;
                         memset(&load_in, 0, sizeof(load_in));
                         load_in.op = CC_SSA_LOAD;
@@ -7059,13 +7133,25 @@ static const cc_expr_t *unwrap_scalar_initializer_expr(const cc_expr_t *e, cc_di
 }
 
 static const cc_expr_t *selected_generic_expr(const cc_expr_t *e) {
+    size_t i;
+
     if (e == NULL || e->kind != CC_EXPR_GENERIC) {
         return NULL;
     }
-    if (e->generic_selected < 0 || e->args == NULL || (size_t)e->generic_selected >= e->arg_count) {
+    if (e->args == NULL || e->arg_count == 0) {
         return NULL;
     }
-    return e->args[e->generic_selected];
+    if (e->generic_selected >= 0 && (size_t)e->generic_selected < e->arg_count) {
+        return e->args[e->generic_selected];
+    }
+    if (e->generic_is_default != NULL && e->generic_count == e->arg_count) {
+        for (i = 0; i < e->generic_count; ++i) {
+            if (e->generic_is_default[i]) {
+                return e->args[i];
+            }
+        }
+    }
+    return e->args[0];
 }
 
 static int is_zero_initializer_expr(const cc_expr_t *e) {
@@ -8541,7 +8627,26 @@ static int lower_stmt(const cc_translation_unit_t *tu, cc_ssa_function_t *sf, va
             if (op->expr != NULL && op->expr->kind == CC_EXPR_IDENT && op->expr->ident != NULL) {
                 vidx = var_find_visible(*vars, *var_count, op->expr->ident, depth);
                 if (vidx >= 0) {
-                    out_v = (*vars)[vidx].value;
+                    if (is_mem_only) {
+                        int ptrv = ensure_local_var_addressable(tu, sf, &(*vars)[vidx], diag);
+                        if (ptrv < 0) {
+                            free_asm_instr_fields(&in);
+                            free(asm_out_store_ptr);
+                            free(asm_out_store_size);
+                            free(asm_out_store_type);
+                            free(asm_out_store_sid);
+                            return -1;
+                        }
+                        out_v = CC_SSA_ASM_MEM_INDIRECT_ENCODE(ptrv);
+                    } else {
+                        out_v = (*vars)[vidx].value;
+                        if ((*vars)[vidx].addr_value >= 0) {
+                            asm_out_store_ptr[i4] = (*vars)[vidx].addr_value;
+                            asm_out_store_size[i4] = out_sz;
+                            asm_out_store_type[i4] = op->expr->value_type;
+                            asm_out_store_sid[i4] = op->expr->struct_id;
+                        }
+                    }
                 } else if (is_mem_only) {
                     const cc_global_t *g = find_global(tu, op->expr->ident);
                     if (g != NULL) {
@@ -11589,9 +11694,43 @@ int cc_ast_to_ssa(const cc_translation_unit_t *tu, cc_ssa_module_t *out, cc_diag
                             return -1;
                         }
                     } else {
+                        if (init->arg_count == 0) {
+                            force_bss_zero = 1;
+                            out->globals[i].has_init = 0;
+                            out->globals[i].init_i = 0;
+                            out->globals[i].init_f = 0.0;
+                            out->globals[i].init_is_float = 0;
+                            out->globals[i].init_is_string = 0;
+                            out->globals[i].init_is_symbol = 0;
+                            out->globals[i].init_sym = NULL;
+                            continue;
+                        } else if (init->arg_count == 1) {
+                            long sv = 0;
+                            double sf = 0.0;
+                            int s_is_float = 0;
+                            char *ssym = NULL;
+                            if (eval_global_init_expr(tu, init->args[0], &sv, &sf, &s_is_float, &ssym) != 0) {
+                                free(ssym);
+                                if (diag != NULL && diag->message[0] == '\0') {
+                                    snprintf(diag->message, sizeof(diag->message),
+                                             "unsupported scalar list initializer for global %s", tu->globals[i].name);
+                                }
+                                cc_ssa_module_free(out);
+                                return -1;
+                            }
+                            out->globals[i].init_i = sv;
+                            out->globals[i].init_f = sf;
+                            out->globals[i].init_is_float = s_is_float;
+                            out->globals[i].init_is_string = 0;
+                            out->globals[i].init_is_symbol = ssym != NULL ? 1 : 0;
+                            out->globals[i].init_sym = ssym;
+                            out->globals[i].has_init = (ssym != NULL) || (s_is_float ? (sf != 0.0) : (sv != 0));
+                            continue;
+                        }
                         if (diag != NULL && diag->message[0] == '\0') {
                             snprintf(diag->message, sizeof(diag->message),
-                                     "unsupported list initializer for non-array global %s", tu->globals[i].name);
+                                     "unsupported scalar list initializer (arity %zu) for global %s",
+                                     init->arg_count, tu->globals[i].name);
                         }
                         cc_ssa_module_free(out);
                         return -1;

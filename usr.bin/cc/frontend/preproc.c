@@ -908,7 +908,9 @@ static int has_builtin_name(const char *name) {
         strcmp(name, "__builtin_add_overflow") == 0 || strcmp(name, "__builtin_sub_overflow") == 0 ||
         strcmp(name, "__builtin_mul_overflow") == 0 || strcmp(name, "__builtin_object_size") == 0 ||
         strcmp(name, "__builtin___memcpy_chk") == 0 || strcmp(name, "__builtin___memmove_chk") == 0 ||
-        strcmp(name, "__builtin___memset_chk") == 0 || strcmp(name, "__builtin_va_start") == 0 ||
+        strcmp(name, "__builtin___memset_chk") == 0 || strcmp(name, "__builtin_strlen") == 0 ||
+        strcmp(name, "__builtin_prefetch") == 0 ||
+        strcmp(name, "__builtin_va_start") == 0 ||
         strcmp(name, "__builtin_c23_va_start") == 0 || strcmp(name, "__builtin_va_end") == 0 ||
         strcmp(name, "__builtin_c23_va_end") == 0 || strcmp(name, "__builtin_va_copy") == 0 ||
         strcmp(name, "__builtin_c23_va_copy") == 0 || strcmp(name, "__builtin_va_arg") == 0 ||
@@ -3477,35 +3479,6 @@ static int is_va_args_token(const char *s, size_t n) {
     return token_matches(s, n, "__VA_ARGS__");
 }
 
-static int macro_body_uses_hash_ops(const char *body) {
-    size_t i = 0;
-    if (body == NULL) {
-        return 0;
-    }
-    while (body[i] != '\0') {
-        if (body[i] == '"' || body[i] == '\'') {
-            char q = body[i++];
-            while (body[i] != '\0') {
-                if (body[i] == '\\' && body[i + 1] != '\0') {
-                    i += 2;
-                    continue;
-                }
-                if (body[i] == q) {
-                    i++;
-                    break;
-                }
-                i++;
-            }
-            continue;
-        }
-        if (body[i] == '#') {
-            return 1;
-        }
-        i++;
-    }
-    return 0;
-}
-
 static char *replace_ident_token(const char *text, const char *from, const char *to) {
     sb_t out;
     size_t i = 0;
@@ -3530,19 +3503,24 @@ static char *replace_ident_token(const char *text, const char *from, const char 
     return out.buf != NULL ? out.buf : xstrdup("");
 }
 
-static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, int allow_va_opt, int allow_gnu_ext) {
+static char *replace_params(const pp_macro_t *m, char **raw_args, char **exp_args, size_t arg_count, int allow_va_opt,
+                           int allow_gnu_ext) {
     sb_t out;
     sb_t pasted;
     size_t i = 0;
-    char *va_args = NULL;
+    char *va_args_exp = NULL;
+    char *va_args_raw = NULL;
     int has_va_args = 0;
     memset(&out, 0, sizeof(out));
     memset(&pasted, 0, sizeof(pasted));
-    va_args = build_va_args_value(m, args, arg_count);
-    if (va_args == NULL) {
+    va_args_exp = build_va_args_value(m, exp_args, arg_count);
+    va_args_raw = build_va_args_value(m, raw_args, arg_count);
+    if (va_args_exp == NULL || va_args_raw == NULL) {
+        free(va_args_exp);
+        free(va_args_raw);
         return NULL;
     }
-    has_va_args = va_args[0] != '\0';
+    has_va_args = va_args_exp[0] != '\0';
     while (m->body[i] != '\0') {
         if (m->is_variadic && !has_va_args && allow_gnu_ext && m->body[i] == ',') {
             size_t k = i + 1;
@@ -3572,7 +3550,8 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, 
         }
         if (m->is_variadic && strncmp(m->body + i, "__VA_OPT__", 10) == 0) {
             if (!allow_va_opt) {
-                free(va_args);
+                free(va_args_exp);
+                free(va_args_raw);
                 sb_free(&out);
                 sb_free(&pasted);
                 return NULL;
@@ -3584,17 +3563,19 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, 
                 k++;
             }
             if (m->body[k] != '(' || parse_va_opt_body(m->body, k + 1, &end_pos, &va_opt_text) != 0) {
-                free(va_args);
+                free(va_args_exp);
+                free(va_args_raw);
                 sb_free(&out);
                 sb_free(&pasted);
                 return NULL;
             }
             if (has_va_args) {
-                char *va_opt_subst = replace_va_args_in_text(va_opt_text != NULL ? va_opt_text : "", va_args);
+                char *va_opt_subst = replace_va_args_in_text(va_opt_text != NULL ? va_opt_text : "", va_args_exp);
                 if (va_opt_subst == NULL || sb_append(&out, va_opt_subst) != 0) {
                     free(va_opt_subst);
                     free(va_opt_text);
-                    free(va_args);
+                    free(va_args_exp);
+                    free(va_args_raw);
                     sb_free(&out);
                     sb_free(&pasted);
                     return NULL;
@@ -3608,21 +3589,24 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, 
         if (m->body[i] == '"' || m->body[i] == '\'') {
             char q = m->body[i];
             if (sb_append_c(&out, q) != 0) {
-                free(va_args);
+                free(va_args_exp);
+                free(va_args_raw);
                 sb_free(&out);
                 return NULL;
             }
             i++;
             while (m->body[i] != '\0') {
                 if (sb_append_c(&out, m->body[i]) != 0) {
-                    free(va_args);
+                    free(va_args_exp);
+                    free(va_args_raw);
                     sb_free(&out);
                     return NULL;
                 }
                 if (m->body[i] == '\\' && m->body[i + 1] != '\0') {
                     i++;
                     if (sb_append_c(&out, m->body[i]) != 0) {
-                        free(va_args);
+                        free(va_args_exp);
+                        free(va_args_raw);
                         sb_free(&out);
                         return NULL;
                     }
@@ -3647,10 +3631,12 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, 
                 for (pidx = 0; pidx < m->param_count; ++pidx) {
                     if (strlen(m->params[pidx]) == (ident_end - ident_start) &&
                         strncmp(m->body + ident_start, m->params[pidx], ident_end - ident_start) == 0) {
-                        char *quoted = stringify_macro_arg(pidx < arg_count && args[pidx] != NULL ? args[pidx] : "");
+                        char *quoted =
+                            stringify_macro_arg(pidx < arg_count && raw_args[pidx] != NULL ? raw_args[pidx] : "");
                         if (quoted == NULL || sb_append(&out, quoted) != 0) {
                             free(quoted);
-                            free(va_args);
+                            free(va_args_exp);
+                            free(va_args_raw);
                             sb_free(&out);
                             return NULL;
                         }
@@ -3661,10 +3647,11 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, 
                 }
                 if (m->is_variadic && (ident_end - ident_start) == strlen("__VA_ARGS__") &&
                     is_va_args_token(m->body + ident_start, ident_end - ident_start)) {
-                    char *quoted = stringify_macro_arg(va_args);
+                    char *quoted = stringify_macro_arg(va_args_raw);
                     if (quoted == NULL || sb_append(&out, quoted) != 0) {
                         free(quoted);
-                        free(va_args);
+                        free(va_args_exp);
+                        free(va_args_raw);
                         sb_free(&out);
                         return NULL;
                     }
@@ -3683,15 +3670,36 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, 
             for (k = 0; k < m->param_count; ++k) {
                 if (strlen(m->params[k]) == (j - i) && strncmp(m->body + i, m->params[k], j - i) == 0) {
                     if (k < arg_count) {
-                        const char *aval = args[k] != NULL ? args[k] : "";
+                        size_t l = i;
+                        size_t r = j;
+                        int paste_left = 0;
+                        int paste_right = 0;
+                        const char *aval;
+                        while (l > 0 && (m->body[l - 1] == ' ' || m->body[l - 1] == '\t')) {
+                            l--;
+                        }
+                        if (l >= 2 && m->body[l - 2] == '#' && m->body[l - 1] == '#') {
+                            paste_left = 1;
+                        }
+                        while (m->body[r] == ' ' || m->body[r] == '\t') {
+                            r++;
+                        }
+                        if (m->body[r] == '#' && m->body[r + 1] == '#') {
+                            paste_right = 1;
+                        }
+                        aval =
+                            (paste_left || paste_right) ? (raw_args[k] != NULL ? raw_args[k] : "")
+                                                        : (exp_args[k] != NULL ? exp_args[k] : "");
                         if (aval[0] == '\0') {
                             if (sb_append_c(&out, PP_EMPTY_ARG_MARKER) != 0) {
-                                free(va_args);
+                                free(va_args_exp);
+                                free(va_args_raw);
                                 sb_free(&out);
                                 return NULL;
                             }
                         } else if (sb_append(&out, aval) != 0) {
-                            free(va_args);
+                            free(va_args_exp);
+                            free(va_args_raw);
                             sb_free(&out);
                             return NULL;
                         }
@@ -3701,20 +3709,41 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, 
             }
             if (k == m->param_count && m->is_variadic && (j - i) == strlen("__VA_ARGS__") &&
                 is_va_args_token(m->body + i, j - i)) {
-                if (va_args[0] == '\0') {
+                size_t l = i;
+                size_t r = j;
+                int paste_left = 0;
+                int paste_right = 0;
+                const char *va_val;
+                while (l > 0 && (m->body[l - 1] == ' ' || m->body[l - 1] == '\t')) {
+                    l--;
+                }
+                if (l >= 2 && m->body[l - 2] == '#' && m->body[l - 1] == '#') {
+                    paste_left = 1;
+                }
+                while (m->body[r] == ' ' || m->body[r] == '\t') {
+                    r++;
+                }
+                if (m->body[r] == '#' && m->body[r + 1] == '#') {
+                    paste_right = 1;
+                }
+                va_val = (paste_left || paste_right) ? va_args_raw : va_args_exp;
+                if (va_val[0] == '\0') {
                     if (sb_append_c(&out, PP_EMPTY_ARG_MARKER) != 0) {
-                        free(va_args);
+                        free(va_args_exp);
+                        free(va_args_raw);
                         sb_free(&out);
                         return NULL;
                     }
-                } else if (sb_append(&out, va_args) != 0) {
-                    free(va_args);
+                } else if (sb_append(&out, va_val) != 0) {
+                    free(va_args_exp);
+                    free(va_args_raw);
                     sb_free(&out);
                     return NULL;
                 }
             } else if (k == m->param_count) {
                 if (sb_append_n(&out, m->body + i, j - i) != 0) {
-                    free(va_args);
+                    free(va_args_exp);
+                    free(va_args_raw);
                     sb_free(&out);
                     return NULL;
                 }
@@ -3723,7 +3752,8 @@ static char *replace_params(const pp_macro_t *m, char **args, size_t arg_count, 
             continue;
         }
         if (sb_append_c(&out, m->body[i]) != 0) {
-            free(va_args);
+            free(va_args_exp);
+            free(va_args_raw);
             sb_free(&out);
             return NULL;
         }
@@ -3732,7 +3762,8 @@ next_iter:
         ;
     }
     if (out.buf == NULL) {
-        free(va_args);
+        free(va_args_exp);
+        free(va_args_raw);
         return xstrdup("");
     }
 
@@ -3767,7 +3798,8 @@ next_iter:
             }
             if ((left_empty || right_empty) && pasted.len > 0 && out.buf[i] != '\0') {
                 if (sb_append_c(&pasted, ' ') != 0) {
-                    free(va_args);
+                    free(va_args_exp);
+                    free(va_args_raw);
                     sb_free(&out);
                     sb_free(&pasted);
                     return NULL;
@@ -3776,14 +3808,16 @@ next_iter:
             continue;
         }
         if (sb_append_c(&pasted, out.buf[i]) != 0) {
-            free(va_args);
+            free(va_args_exp);
+            free(va_args_raw);
             sb_free(&out);
             sb_free(&pasted);
             return NULL;
         }
         i++;
     }
-    free(va_args);
+    free(va_args_exp);
+    free(va_args_raw);
     sb_free(&out);
     if (pasted.buf == NULL) {
         return xstrdup("");
@@ -4203,7 +4237,6 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                     char **args = NULL;
                     size_t arg_count = 0;
                     char **exp_args = NULL;
-                    int disable_arg_prescan = 0;
                     size_t ai;
                     char *subst = NULL;
                     char *exp_subst = NULL;
@@ -4264,13 +4297,8 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         sb_free(&out);
                         return NULL;
                     }
-                    disable_arg_prescan = macro_body_uses_hash_ops(m->body);
                     for (ai = 0; ai < arg_count; ++ai) {
-                        if (disable_arg_prescan) {
-                            exp_args[ai] = xstrdup(args[ai] != NULL ? args[ai] : "");
-                        } else {
-                            exp_args[ai] = expand_text(st, args[ai], file, line, depth + 1, disabled, diag);
-                        }
+                        exp_args[ai] = expand_text(st, args[ai], file, line, depth + 1, disabled, diag);
                         if (exp_args[ai] == NULL) {
                             if (diag != NULL && diag->message[0] == '\0') {
                                 char msg[160];
@@ -4304,7 +4332,8 @@ static char *expand_once(pp_state_t *st, const char *src, const char *file, int 
                         sb_free(&out);
                         return NULL;
                     }
-                    subst = replace_params(m, exp_args, arg_count, st->std_is_c23 || st->std_is_gnu, st->std_is_gnu);
+                    subst = replace_params(m, args, exp_args, arg_count, st->std_is_c23 || st->std_is_gnu,
+                                           st->std_is_gnu);
                     if (subst == NULL) {
                         if (diag != NULL && diag->message[0] == '\0') {
                             char msg[160];

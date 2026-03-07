@@ -12,6 +12,23 @@ typedef struct {
     size_t errbuf_sz;
 } sym_ctx_t;
 
+static int ascii_eq_ci(const char *a, const char *b) {
+    unsigned char ca;
+    unsigned char cb;
+
+    if (a == NULL || b == NULL) {
+        return 0;
+    }
+    while (*a != '\0' && *b != '\0') {
+        ca = (unsigned char)*a++;
+        cb = (unsigned char)*b++;
+        if (tolower(ca) != tolower(cb)) {
+            return 0;
+        }
+    }
+    return (*a == '\0' && *b == '\0') ? 1 : 0;
+}
+
 static void set_err(sym_ctx_t *ctx, const char *fmt, ...) {
     va_list ap;
 
@@ -77,9 +94,9 @@ static void strip_reloc_modifier(char *name) {
     if (at == NULL || at[1] == '\0') {
         return;
     }
-    if (strcasecmp(at + 1, "PLT") == 0 ||
-        strcasecmp(at + 1, "GOTPCREL") == 0 ||
-        strcasecmp(at + 1, "GOTTPOFF") == 0) {
+    if (ascii_eq_ci(at + 1, "PLT") ||
+        ascii_eq_ci(at + 1, "GOTPCREL") ||
+        ascii_eq_ci(at + 1, "GOTTPOFF")) {
         *at = '\0';
     }
 }
@@ -103,6 +120,7 @@ void as_symtab_free(as_symtab_t *tab) {
         as_symbol_t *s = &tab->items[i];
         free(s->name);
         free(s->def_file);
+        free(s->alias_target);
         free(s->version);
     }
     free(tab->items);
@@ -187,6 +205,133 @@ static int parse_u64_arg(const char *s, unsigned long long *out) {
 
     free(tmp);
     *out = v;
+    return 0;
+}
+
+static int parse_i64_arg(const char *s, long long *out) {
+    char *tmp;
+    char *end;
+    long long v;
+
+    tmp = trim_copy(s);
+    if (tmp == NULL) {
+        return -1;
+    }
+    if (tmp[0] == '\0') {
+        free(tmp);
+        return -1;
+    }
+    end = NULL;
+    v = strtoll(tmp, &end, 0);
+    if (end == tmp || *end != '\0') {
+        free(tmp);
+        return -1;
+    }
+    free(tmp);
+    *out = v;
+    return 0;
+}
+
+static int parse_set_rhs_symbol(const char *expr, char **out_name, long long *out_addend) {
+    char *tmp;
+    char *op = NULL;
+    char sign = '+';
+    size_t i;
+    char *name;
+    long long addend = 0;
+
+    if (expr == NULL || out_name == NULL || out_addend == NULL) {
+        return -1;
+    }
+
+    tmp = trim_copy(expr);
+    if (tmp == NULL) {
+        return -1;
+    }
+    if (tmp[0] == '\0') {
+        free(tmp);
+        return -1;
+    }
+
+    for (i = 1; tmp[i] != '\0'; ++i) {
+        if (tmp[i] == '+' || tmp[i] == '-') {
+            op = tmp + i;
+            sign = tmp[i];
+            break;
+        }
+    }
+
+    if (op != NULL) {
+        *op = '\0';
+        if (parse_i64_arg(op + 1, &addend) != 0) {
+            free(tmp);
+            return -1;
+        }
+        if (sign == '-') {
+            addend = -addend;
+        }
+    }
+
+    name = trim_copy(tmp);
+    free(tmp);
+    if (name == NULL) {
+        return -1;
+    }
+    strip_reloc_modifier(name);
+    if (name[0] == '\0') {
+        free(name);
+        return -1;
+    }
+
+    *out_name = name;
+    *out_addend = addend;
+    return 0;
+}
+
+static int parse_set_rhs_dot_minus_symbol(const char *expr, char **out_name) {
+    char *tmp;
+    char *s;
+    char *name;
+
+    if (expr == NULL || out_name == NULL) {
+        return -1;
+    }
+    tmp = trim_copy(expr);
+    if (tmp == NULL) {
+        return -1;
+    }
+    s = tmp;
+    if (*s != '.') {
+        free(tmp);
+        return -1;
+    }
+    s++;
+    while (*s != '\0' && isspace((unsigned char)*s)) {
+        s++;
+    }
+    if (*s != '-') {
+        free(tmp);
+        return -1;
+    }
+    s++;
+    while (*s != '\0' && isspace((unsigned char)*s)) {
+        s++;
+    }
+    if (*s == '\0') {
+        free(tmp);
+        return -1;
+    }
+    name = trim_copy(s);
+    free(tmp);
+    if (name == NULL) {
+        return -1;
+    }
+    strip_reloc_modifier(name);
+    if (name[0] == '\0' || strcmp(name, ".") == 0) {
+        free(name);
+        return -1;
+    }
+    *out_name = name;
     return 0;
 }
 
@@ -439,6 +584,68 @@ static int handle_directive(sym_ctx_t *ctx, const as_stmt_t *st) {
         }
         free(name);
         sym->size = nsize;
+        return 0;
+    }
+
+    if (strcmp(d->name, ".set") == 0 || strcmp(d->name, ".equ") == 0) {
+        char *name;
+        as_symbol_t *sym;
+        unsigned long long abs_value = 0;
+        char *target = NULL;
+        long long addend = 0;
+        int rc;
+
+        if (d->arg_count < 2) {
+            return -1;
+        }
+        name = trim_copy(d->args[0]);
+        if (name == NULL) {
+            return -1;
+        }
+        sym = get_or_create_symbol(ctx, name);
+        free(name);
+        if (sym == NULL) {
+            return -1;
+        }
+
+        free(sym->alias_target);
+        sym->alias_target = NULL;
+        sym->alias_from_dot = 0;
+        sym->alias_addend = 0;
+        sym->is_absolute = 0;
+        sym->absolute_value = 0;
+        sym->is_common = 0;
+        rc = symbol_set_definition(sym, st->file, st->line);
+        if (rc < 0) {
+            return -1;
+        }
+        if (rc > 0) {
+            free(sym->def_file);
+            sym->def_file = xstrdup(st->file);
+            if (sym->def_file == NULL) {
+                return -1;
+            }
+            sym->def_line = st->line;
+            sym->defined = 1;
+        }
+
+        if (parse_u64_arg(d->args[1], &abs_value) == 0) {
+            sym->is_absolute = 1;
+            sym->absolute_value = abs_value;
+            return 0;
+        }
+        if (parse_set_rhs_dot_minus_symbol(d->args[1], &target) == 0) {
+            sym->alias_target = target;
+            sym->alias_from_dot = 1;
+            sym->alias_addend = 0;
+            return 0;
+        }
+
+        if (parse_set_rhs_symbol(d->args[1], &target, &addend) != 0) {
+            return -1;
+        }
+        sym->alias_target = target;
+        sym->alias_addend = addend;
         return 0;
     }
 

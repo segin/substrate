@@ -275,6 +275,8 @@ static int push_label(as_stmt_t *st, const char *name, const char *file, unsigne
 }
 
 static int is_x86_register_text(const char *s) {
+    const char *p;
+
     if (s == NULL || s[0] == '\0') {
         return 0;
     }
@@ -282,13 +284,31 @@ static int is_x86_register_text(const char *s) {
         s++;
     }
     if (strncmp(s, "xmm", 3) == 0 || strncmp(s, "ymm", 3) == 0 || strncmp(s, "zmm", 3) == 0) {
-        return isdigit((unsigned char)s[3]);
+        if (!isdigit((unsigned char)s[3])) {
+            return 0;
+        }
+        p = s + 3;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        return *p == '\0';
     }
     if (s[0] == 'k' && isdigit((unsigned char)s[1])) {
-        return 1;
+        p = s + 1;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        return *p == '\0';
     }
     if (s[0] == 'r' && isdigit((unsigned char)s[1])) {
-        return 1;
+        p = s + 1;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        if (*p == 'b' || *p == 'w' || *p == 'd') {
+            ++p;
+        }
+        return *p == '\0';
     }
     if (streq_ci(s, "rax") || streq_ci(s, "rbx") || streq_ci(s, "rcx") || streq_ci(s, "rdx") ||
         streq_ci(s, "rsi") || streq_ci(s, "rdi") || streq_ci(s, "rsp") || streq_ci(s, "rbp") ||
@@ -344,6 +364,8 @@ static int intel_mem_size_bits(const char *s) {
 }
 
 static int is_arm_register_text(const char *s) {
+    const char *p;
+
     if (s == NULL || s[0] == '\0') {
         return 0;
     }
@@ -353,7 +375,11 @@ static int is_arm_register_text(const char *s) {
     }
     if ((s[0] == 'r' || s[0] == 'x' || s[0] == 'w' || s[0] == 'q' || s[0] == 'd' || s[0] == 's' || s[0] == 'v') &&
         isdigit((unsigned char)s[1])) {
-        return 1;
+        p = s + 1;
+        while (isdigit((unsigned char)*p)) {
+            ++p;
+        }
+        return *p == '\0';
     }
     return 0;
 }
@@ -1255,6 +1281,7 @@ static int parse_shift_suffix(parse_ctx_t *ctx, as_operand_t *prev, const as_tok
 static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t n, as_operand_t *op) {
     int has_lparen;
     int has_lbr;
+    int explicit_immediate;
     as_expr_t *e;
     int star_separate;
     int star_attached;
@@ -1421,7 +1448,8 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
         }
     }
 
-    if (tokv[0].text[0] == '$' || tokv[0].text[0] == '#') {
+    explicit_immediate = (tokv[0].text[0] == '$' || tokv[0].text[0] == '#');
+    if (explicit_immediate) {
         as_token_t *tmp = (as_token_t *)malloc(n * sizeof(*tmp));
         if (tmp == NULL) {
             return -1;
@@ -1437,7 +1465,9 @@ static int parse_operand_slice(parse_ctx_t *ctx, const as_token_t *tokv, size_t 
         return -1;
     }
 
-    if (expr_is_symbolic_leaf(e)) {
+    if (explicit_immediate) {
+        op->kind = AS_OPERAND_IMMEDIATE;
+    } else if (expr_is_symbolic_leaf(e)) {
         op->kind = AS_OPERAND_LABEL_REF;
     } else {
         op->kind = AS_OPERAND_IMMEDIATE;
@@ -1684,6 +1714,36 @@ static int parse_line_tokens(parse_ctx_t *ctx, const as_token_t *tokv, size_t n,
 
     if (i == n) {
         st->kind = AS_STMT_LABEL_ONLY;
+        return 0;
+    }
+
+    /*
+     * GAS-compatible assignment shorthand:
+     *   sym = expr
+     * Normalize to:
+     *   .set sym, expr
+     */
+    if ((tokv[i].kind == AS_TOK_IDENTIFIER || tokv[i].kind == AS_TOK_MNEMONIC) && i + 1 < n &&
+        strcmp(tokv[i + 1].text, "=") == 0) {
+        char *rhs;
+
+        if (i + 2 >= n) {
+            set_err(ctx, "%s:%u: missing right-hand side in symbol assignment",
+                    tokv[i].file != NULL ? tokv[i].file : "<input>", tokv[i].line);
+            return -1;
+        }
+        rhs = join_tokens(tokv + i + 2, n - (i + 2), 0);
+        if (rhs == NULL) {
+            return -1;
+        }
+        st->kind = AS_STMT_DIRECTIVE;
+        st->u.directive.name = xstrdup(".set");
+        if (st->u.directive.name == NULL || add_directive_arg(&st->u.directive, tokv[i].text) != 0 ||
+            add_directive_arg(&st->u.directive, rhs) != 0) {
+            free(rhs);
+            return -1;
+        }
+        free(rhs);
         return 0;
     }
 
