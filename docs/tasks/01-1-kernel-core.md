@@ -653,6 +653,47 @@
         - [ ] `sys_brk(addr)` / `sys_sbrk(incr)`: adjust data segment. (REQ: REQ-01-0574)
         - [ ] `sys_msync(addr, len, flags)`: sync dirty pages to backing store. (REQ: REQ-01-0575)
 
+    - [ ] **Kernel Pseudo-filesystems (`procfs`):** (REQ: REQ-01-0996)
+
+        > **Files:** `sys/fs/procfs.c`, `sys/vfs/`, mount table plumbing.
+
+        - [ ] **Mount Table Exposure:** (REQ: REQ-01-0997)
+            - [ ] Expose `/proc/mounts` as a live view of the current kernel mount table. (REQ: REQ-01-0998)
+            - [ ] Keep `/proc/mounts` synchronized with mount, unmount, and remount operations. (REQ: REQ-01-0999)
+            - [ ] Format `/proc/mounts` compatibly enough for shell tools and BusyBox-style consumers. (REQ: REQ-01-1000)
+        - [ ] **Testing:** (REQ: REQ-01-0051, REQ: REQ-01-1001)
+            - [ ] Integration: mount/unmount activity is reflected immediately in `/proc/mounts`. (REQ: REQ-01-1002)
+        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ: REQ-01-1003)
+            - [ ] Internal doc: `/proc/mounts` data model and formatting contract. (REQ: REQ-01-1004)
+
+    - [ ] **Executable Image Identity & Caching:** (REQ: REQ-01-0976)
+
+        > **Files:** `sys/exec/`, `sys/vfs/`, filesystem inode/stat paths.
+        >
+        > **Architecture:** Executable identity shall be based on backing object identity
+        > (`st_dev`, `st_ino` / vnode identity), not merely pathname text, so
+        > multi-call binaries and hard-linked images can share cached loader state.
+
+        - [ ] **Inode Identity:** (REQ: REQ-01-0977)
+            - [ ] Preserve stable inode numbers through filesystem lookup, VFS, `stat`, and `exec` paths. (REQ: REQ-01-0978)
+            - [ ] Treat backing device + inode as the canonical executable identity, not the pathname string. (REQ: REQ-01-0979)
+            - [ ] Support hard links and BusyBox-style multi-call binaries by recognizing shared executable identity across path aliases. (REQ: REQ-01-0980)
+        - [ ] **Executable Cache:** (REQ: REQ-01-0981)
+            - [ ] Add executable image cache keyed by backing device + inode, with invalidation on content or metadata change. (REQ: REQ-01-0982)
+            - [ ] Cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant `execve()` work. (REQ: REQ-01-0983)
+            - [ ] Reuse cached executable state on hot re-exec without breaking `argv[0]` or personality selection semantics. (REQ: REQ-01-0984)
+        - [ ] **Performance:** (REQ: REQ-01-0985)
+            - [ ] Measure and reduce `execve()` latency for repeated launches of the same image. (REQ: REQ-01-0986)
+            - [ ] Avoid path-based cache misses for identical images reached through different directory entries. (REQ: REQ-01-0987)
+        - [ ] **Testing:** (REQ: REQ-01-0051, REQ: REQ-01-0988)
+            - [ ] Unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat on the same object. (REQ: REQ-01-0989)
+            - [ ] Unit: exec cache keys identical hard-linked binaries as one image identity. (REQ: REQ-01-0990)
+            - [ ] Integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly. (REQ: REQ-01-0991)
+            - [ ] Integration: hot-cache `execve()` benchmark shows lower latency than cold-cache launch. (REQ: REQ-01-0992)
+        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ: REQ-01-0993)
+            - [ ] Internal doc: executable identity model (device/inode vs pathname). (REQ: REQ-01-0994)
+            - [ ] Internal doc: executable cache lifecycle, invalidation rules, and BusyBox/multi-call behavior. (REQ: REQ-01-0995)
+
     - [ ] **SMP & Interrupts:** (REQ: REQ-01-0576)
 
         > **Files:** `sys/arch/i386/apic.c`, `sys/arch/i386/ioapic.c`,
@@ -689,6 +730,7 @@
             - [ ] Copy 16-bit real mode entry code to trampoline. (REQ: REQ-01-0605)
             - [ ] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence. (REQ: REQ-01-0606)
             - [ ] AP enters protected mode, enables paging, jumps to C entry. (REQ: REQ-01-0607)
+            - [ ] Emit a final SMP bring-up summary log in the form `SMP: Brought up N CPU(s)!` after AP startup completes. (REQ: REQ-01-1005)
         - [ ] **Per-CPU Data:** (REQ: REQ-01-0608)
             - [ ] GS-base (or FS-base) for CPU-local variable access. (REQ: REQ-01-0609)
             - [ ] Per-CPU GDTs and TSSs. (REQ: REQ-01-0610)
@@ -2078,6 +2120,36 @@
 - **US-01-0973**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: process exit 9-phase teardown so that this capability is implemented with clear verification evidence.
 - **US-01-0974**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: wait4 search semantics and blocking so that this capability is implemented with clear verification evidence.
 - **US-01-0975**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: session/pgrp lifecycle and CTTY ownership so that this capability is implemented with clear verification evidence.
+- **US-01-0976**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to executable Image Identity & Caching: so that this capability is implemented with clear verification evidence.
+- **US-01-0977**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to inode Identity: so that this capability is implemented with clear verification evidence.
+- **US-01-0978**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to preserve stable inode numbers through filesystem lookup, VFS, stat, and exec paths so that this capability is implemented with clear verification evidence.
+- **US-01-0979**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to treat backing device + inode as the canonical executable identity, not the pathname string so that this capability is implemented with clear verification evidence.
+- **US-01-0980**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to support hard links and BusyBox-style multi-call binaries by recognizing shared executable identity across path aliases so that this capability is implemented with clear verification evidence.
+- **US-01-0981**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to executable Cache: so that this capability is implemented with clear verification evidence.
+- **US-01-0982**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to add executable image cache keyed by backing device + inode, with invalidation on content or metadata change so that this capability is implemented with clear verification evidence.
+- **US-01-0983**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant execve() work so that this capability is implemented with clear verification evidence.
+- **US-01-0984**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reuse cached executable state on hot re-exec without breaking argv[0] or personality selection semantics so that this capability is implemented with clear verification evidence.
+- **US-01-0985**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to performance: so that this capability is implemented with clear verification evidence.
+- **US-01-0986**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to measure and reduce execve() latency for repeated launches of the same image so that this capability is implemented with clear verification evidence.
+- **US-01-0987**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to avoid path-based cache misses for identical images reached through different directory entries so that this capability is implemented with clear verification evidence.
+- **US-01-0988**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-0989**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat on the same object so that this capability is implemented with clear verification evidence.
+- **US-01-0990**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: exec cache keys identical hard-linked binaries as one image identity so that this capability is implemented with clear verification evidence.
+- **US-01-0991**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly so that this capability is implemented with clear verification evidence.
+- **US-01-0992**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: hot-cache execve() benchmark shows lower latency than cold-cache launch so that this capability is implemented with clear verification evidence.
+- **US-01-0993**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-0994**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: executable identity model (device/inode vs pathname) so that this capability is implemented with clear verification evidence.
+- **US-01-0995**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: executable cache lifecycle, invalidation rules, and BusyBox/multi-call behavior so that this capability is implemented with clear verification evidence.
+- **US-01-0996**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Pseudo-filesystems (procfs): so that this capability is implemented with clear verification evidence.
+- **US-01-0997**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to mount Table Exposure: so that this capability is implemented with clear verification evidence.
+- **US-01-0998**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to expose /proc/mounts as a live view of the current kernel mount table so that this capability is implemented with clear verification evidence.
+- **US-01-0999**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to keep /proc/mounts synchronized with mount, unmount, and remount operations so that this capability is implemented with clear verification evidence.
+- **US-01-1000**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to format /proc/mounts compatibly enough for shell tools and BusyBox-style consumers so that this capability is implemented with clear verification evidence.
+- **US-01-1001**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
+- **US-01-1002**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: mount/unmount activity is reflected immediately in /proc/mounts so that this capability is implemented with clear verification evidence.
+- **US-01-1003**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
+- **US-01-1004**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: /proc/mounts data model and formatting contract so that this capability is implemented with clear verification evidence.
+- **US-01-1005**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to emit a final SMP bring-up summary log in the form SMP: Brought up N CPU(s)! after AP startup completes so that this capability is implemented with clear verification evidence.
 
 ## INCOSE/EARS Requirements
 
@@ -5004,5 +5076,95 @@
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0975** (EARS/Ubiquitous): The Substrate system shall internal doc: session/pgrp lifecycle and CTTY ownership.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0976** (EARS/Ubiquitous): The Substrate system shall executable Image Identity & Caching:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0977** (EARS/Ubiquitous): The Substrate system shall inode Identity:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0978** (EARS/Ubiquitous): The Substrate system shall preserve stable inode numbers through filesystem lookup, VFS, stat, and exec paths.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0979** (EARS/Ubiquitous): The Substrate system shall treat backing device + inode as the canonical executable identity, not the pathname string.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0980** (EARS/Ubiquitous): The Substrate system shall support hard links and BusyBox-style multi-call binaries by recognizing shared executable identity across path aliases.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0981** (EARS/Ubiquitous): The Substrate system shall executable Cache:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0982** (EARS/Ubiquitous): The Substrate system shall add executable image cache keyed by backing device + inode, with invalidation on content or metadata change.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0983** (EARS/Ubiquitous): The Substrate system shall cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant execve() work.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0984** (EARS/Ubiquitous): The Substrate system shall reuse cached executable state on hot re-exec without breaking argv[0] or personality selection semantics.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0985** (EARS/Ubiquitous): The Substrate system shall performance:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0986** (EARS/Ubiquitous): The Substrate system shall measure and reduce execve() latency for repeated launches of the same image.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0987** (EARS/Ubiquitous): The Substrate system shall avoid path-based cache misses for identical images reached through different directory entries.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0988** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0989** (EARS/Ubiquitous): The Substrate system shall unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat on the same object.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0990** (EARS/Ubiquitous): The Substrate system shall unit: exec cache keys identical hard-linked binaries as one image identity.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0991** (EARS/Ubiquitous): The Substrate system shall integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0992** (EARS/Ubiquitous): The Substrate system shall integration: hot-cache execve() benchmark shows lower latency than cold-cache launch.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0993** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0994** (EARS/Ubiquitous): The Substrate system shall internal doc: executable identity model (device/inode vs pathname).
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0995** (EARS/Ubiquitous): The Substrate system shall internal doc: executable cache lifecycle, invalidation rules, and BusyBox/multi-call behavior.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0996** (EARS/Ubiquitous): The Substrate system shall kernel Pseudo-filesystems (procfs):.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0997** (EARS/Ubiquitous): The Substrate system shall mount Table Exposure:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0998** (EARS/Ubiquitous): The Substrate system shall expose /proc/mounts as a live view of the current kernel mount table.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-0999** (EARS/Ubiquitous): The Substrate system shall keep /proc/mounts synchronized with mount, unmount, and remount operations.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-1000** (EARS/Ubiquitous): The Substrate system shall format /proc/mounts compatibly enough for shell tools and BusyBox-style consumers.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-1001** (EARS/Ubiquitous): The Substrate system shall testing:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-1002** (EARS/Ubiquitous): The Substrate system shall integration: mount/unmount activity is reflected immediately in /proc/mounts.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-1003** (EARS/Ubiquitous): The Substrate system shall documentation:.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-1004** (EARS/Ubiquitous): The Substrate system shall internal doc: /proc/mounts data model and formatting contract.
+  - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
+  - Verification: design review + implementation evidence + test/doc update.
+- **REQ-01-1005** (EARS/Ubiquitous): The Substrate system shall emit a final SMP bring-up summary log in the form SMP: Brought up N CPU(s)! after AP startup completes.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
