@@ -14,6 +14,25 @@ ProcFS is a virtual filesystem that provides an interface to kernel process stru
     - `/proc/cpuinfo`: CPU identification and capabilities.
     - `/proc/meminfo`: Global memory usage statistics.
     - `/proc/uptime`: System uptime in seconds.
+    - `/proc/mounts`: Live view of the current kernel mount table.
+
+## `/proc/mounts` Contract
+- Data source: generated directly from the in-kernel `mountlist` at read time.
+- Freshness: reflects mount, unmount, and remount activity immediately; it is not a cached snapshot.
+- Record format: one line per mounted filesystem using the conventional six-field layout:
+  - source
+  - target
+  - filesystem type
+  - mount options
+  - dump frequency
+  - fsck pass number
+- Current emitted options/defaults: Substrate currently emits `rw 0 0` for compatibility-oriented consumers.
+- Field selection:
+  - source prefers `f_mntfromname`; if empty, falls back to the filesystem type name.
+  - target prefers `f_mntonname`; if empty, falls back to the internal mount path.
+  - type prefers `f_fstypename`; if empty, falls back to `unknown`.
+- Escaping: spaces, tabs, newlines, and backslashes inside emitted fields are escaped so shell tools and BusyBox-style parsers can consume the file safely.
+- Scope: this interface is compatibility-oriented and intentionally text-based; typed mount control and enumeration remain the long-term stable ABI surface.
 
 ## Personality Awareness
 ProcFS detects the personality of the calling process and adjusts the format of certain files accordingly. For example, `/proc/<pid>/status` returns a format compatible with the Linux kernel when accessed by a process running under the Linux personality.

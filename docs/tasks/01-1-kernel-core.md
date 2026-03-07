@@ -663,8 +663,8 @@
             - [x] Format `/proc/mounts` compatibly enough for shell tools and BusyBox-style consumers. (REQ: REQ-01-1000)
         - [x] **Testing:** (REQ: REQ-01-0051, REQ: REQ-01-1001)
             - [x] Integration: mount/unmount activity is reflected immediately in `/proc/mounts`. (REQ: REQ-01-1002)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ: REQ-01-1003)
-            - [ ] Internal doc: `/proc/mounts` data model and formatting contract. (REQ: REQ-01-1004)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ: REQ-01-1003)
+            - [x] Internal doc: `/proc/mounts` data model and formatting contract. (REQ: REQ-01-1004)
 
     - [ ] **Executable Image Identity & Caching:** (REQ: REQ-01-0976)
 
