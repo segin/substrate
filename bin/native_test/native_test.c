@@ -17,6 +17,8 @@
 #include <sys/utsname.h>
 #include <errno.h>
 
+#define major(dev) ((unsigned int)(((dev) >> 8) & 0xffu))
+#define minor(dev) ((unsigned int)((dev) & 0xffu))
 
 /* Format mode bits as ls-style string */
 static void format_mode(mode_t mode, char *buf) {
@@ -24,7 +26,11 @@ static void format_mode(mode_t mode, char *buf) {
     switch (mode & S_IFMT) {
         case S_IFDIR:  buf[0] = 'd'; break;
         case S_IFLNK:  buf[0] = 'l'; break;
+        case S_IFCHR:  buf[0] = 'c'; break;
+        case S_IFBLK:  buf[0] = 'b'; break;
         case S_IFREG:  buf[0] = '-'; break;
+        case S_IFIFO:  buf[0] = 'p'; break;
+        case S_IFSOCK: buf[0] = 's'; break;
         default:       buf[0] = '?'; break;
     }
     buf[1] = (mode & 0400) ? 'r' : '-';
@@ -76,6 +82,12 @@ static void list_dir(const char *path) {
                     printf("  %s %8lu  %s -> [error]\n", mode_str,
                            (unsigned long)st.st_size, entry->d_name);
                 }
+            } else if (S_ISCHR(st.st_mode) || S_ISBLK(st.st_mode)) {
+                printf("  %s %3u,%3u  %s\n",
+                       mode_str,
+                       major(st.st_rdev),
+                       minor(st.st_rdev),
+                       entry->d_name);
             } else {
                 printf("  %s %8lu  %s\n", mode_str, 
                        (unsigned long)st.st_size, entry->d_name);
@@ -86,6 +98,65 @@ static void list_dir(const char *path) {
     }
     
     closedir(dir);
+}
+
+static void read_text_file(const char *path) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        printf("  %s: [open failed: %s]\n", path, strerror(errno));
+        return;
+    }
+
+    printf("  %s:\n", path);
+    char buf[256];
+    ssize_t n;
+    while ((n = read(fd, buf, sizeof(buf))) > 0) {
+        for (ssize_t i = 0; i < n; i++) {
+            if (buf[i] == '\0') buf[i] = ' ';
+        }
+        (void)write(1, buf, (size_t)n);
+    }
+    if (n < 0) {
+        printf("    [read failed: %s]\n", strerror(errno));
+    }
+    printf("\n");
+    close(fd);
+}
+
+static void inspect_procfs(void) {
+    DIR *dir = opendir("/proc");
+    if (!dir) {
+        printf("Cannot open /proc: %s\n", strerror(errno));
+        return;
+    }
+
+    printf("Reading regular files in /proc:\n");
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+        char fullpath[512];
+        struct stat st;
+
+        snprintf(fullpath, sizeof(fullpath), "/proc/%s", entry->d_name);
+        if (lstat(fullpath, &st) != 0) continue;
+
+        if (S_ISREG(st.st_mode)) {
+            read_text_file(fullpath);
+        } else if (strcmp(entry->d_name, "self") == 0 && S_ISLNK(st.st_mode)) {
+            char target[128];
+            ssize_t len = readlink(fullpath, target, sizeof(target) - 1);
+            if (len > 0) {
+                target[len] = '\0';
+                printf("  /proc/self -> %s\n", target);
+            } else {
+                printf("  /proc/self -> [readlink failed]\n");
+            }
+        }
+    }
+    closedir(dir);
+
+    printf("\nContents of /proc/1:\n");
+    list_dir("/proc/1");
+    printf("\n");
 }
 
 int main(int argc, char **argv) {
@@ -128,6 +199,8 @@ int main(int argc, char **argv) {
     printf("Contents of /proc:\n");
     list_dir("/proc");
     printf("\n");
+
+    inspect_procfs();
     
     /* Fork Test */
     printf("Testing fork() and getpid():\n");

@@ -10,7 +10,7 @@ else
 
 CC = gcc
 CFLAGS = -m32 -nostdlib -fno-pie -no-pie -fno-stack-protector -ffreestanding
-CFLAGS_LIBC = $(CFLAGS) -I../../include
+CFLAGS_LIBC = $(CFLAGS) -I../../include -I../../sys
 LDFLAGS = -m32 -nostdlib -fno-pie -no-pie -static
 
 LIBC = ../../lib/c/libc.a

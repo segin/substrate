@@ -38,6 +38,10 @@ typedef int32_t ssize_t;
 #define S_IFLNK  0120000  /* Symbolic link */
 #define S_IFDIR  0040000  /* Directory */
 #define S_IFREG  0100000  /* Regular file */
+#define S_IFCHR  0020000  /* Character device */
+#define S_IFBLK  0060000  /* Block device */
+#define S_IFIFO  0010000  /* FIFO */
+#define S_IFSOCK 0140000  /* Socket */
 
 /* stat structure (simplified, matching kernel) */
 struct stat {
@@ -148,6 +152,10 @@ static int sys_write(int fd, const char *buf, int len) {
     return syscall3(SYS_WRITE, fd, (uint32_t)buf, len);
 }
 
+static int sys_read(int fd, void *buf, int len) {
+    return syscall3(SYS_READ, fd, (uint32_t)buf, len);
+}
+
 static int sys_open(const char *path, int flags, int mode) {
     return syscall3(SYS_OPEN, (uint32_t)path, flags, mode);
 }
@@ -238,13 +246,33 @@ static char *strcpy(char *dst, const char *src) {
     return dst;
 }
 
+static int strcmp(const char *a, const char *b) {
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return (unsigned char)*a - (unsigned char)*b;
+}
+
+static unsigned int dev_major(uint32_t dev) {
+    return (unsigned int)((dev >> 8) & 0xffu);
+}
+
+static unsigned int dev_minor(uint32_t dev) {
+    return (unsigned int)(dev & 0xffu);
+}
+
 /* Format mode bits as ls-style string */
 static void format_mode(uint16_t mode, char *buf) {
     /* Determine file type using S_IFMT mask */
     switch (mode & S_IFMT) {
         case S_IFDIR:  buf[0] = 'd'; break;
         case S_IFLNK:  buf[0] = 'l'; break;
+        case S_IFCHR:  buf[0] = 'c'; break;
+        case S_IFBLK:  buf[0] = 'b'; break;
         case S_IFREG:  buf[0] = '-'; break;
+        case S_IFIFO:  buf[0] = 'p'; break;
+        case S_IFSOCK: buf[0] = 's'; break;
         default:       buf[0] = '?'; break;
     }
     buf[1] = (mode & 0400) ? 'r' : '-';
@@ -297,7 +325,13 @@ static void list_dir(const char *path) {
                 format_mode(st.st_mode, mode_str);
                 print(mode_str);
                 print(" ");
-                print_num_pad((unsigned long)st.st_size, 8);
+                if ((st.st_mode & S_IFMT) == S_IFCHR || (st.st_mode & S_IFMT) == S_IFBLK) {
+                    print_num_pad(dev_major(st.st_rdev), 3);
+                    print(",");
+                    print_num_pad(dev_minor(st.st_rdev), 3);
+                } else {
+                    print_num_pad((unsigned long)st.st_size, 8);
+                }
                 print("  ");
                 print(d->d_name);
                 
@@ -325,6 +359,89 @@ static void list_dir(const char *path) {
     }
     
     sys_close(fd);
+}
+
+static void read_text_file(const char *path) {
+    int fd = sys_open(path, O_RDONLY, 0);
+    if (fd < 0) {
+        print("  [open failed] ");
+        print(path);
+        print("\n");
+        return;
+    }
+
+    print("  ");
+    print(path);
+    print(":\n");
+
+    char buf[256];
+    int nread;
+    while ((nread = sys_read(fd, buf, sizeof(buf))) > 0) {
+        for (int i = 0; i < nread; i++) {
+            if (buf[i] == '\0') buf[i] = ' ';
+        }
+        sys_write(1, buf, nread);
+    }
+    print("\n");
+    sys_close(fd);
+}
+
+static void inspect_procfs(void) {
+    int fd = sys_open("/proc", O_RDONLY, 0);
+    if (fd < 0) {
+        print("Cannot open /proc\n");
+        return;
+    }
+
+    print("Reading regular files in /proc:\n");
+    char buf[512];
+    int nread;
+    while ((nread = sys_getdents(fd, buf, sizeof(buf))) > 0) {
+        struct dirent *d = (struct dirent *)buf;
+        while ((char *)d < buf + nread) {
+            if (d->d_reclen == 0) break;
+
+            if (d->d_name[0] == '.' &&
+                (d->d_name[1] == '\0' || (d->d_name[1] == '.' && d->d_name[2] == '\0'))) {
+                d = (struct dirent *)((char *)d + d->d_reclen);
+                continue;
+            }
+
+            char fullpath[256];
+            char *p = fullpath;
+            const char *s = "/proc/";
+            while (*s) *p++ = *s++;
+            s = d->d_name;
+            while (*s) *p++ = *s++;
+            *p = '\0';
+
+            struct stat st;
+            if (sys_lstat(fullpath, &st) == 0) {
+                uint16_t type = st.st_mode & S_IFMT;
+                if (type == S_IFREG) {
+                    read_text_file(fullpath);
+                } else if (type == S_IFLNK && strcmp(d->d_name, "self") == 0) {
+                    char target[128];
+                    ssize_t len = sys_readlink(fullpath, target, sizeof(target) - 1);
+                    print("  /proc/self -> ");
+                    if (len > 0) {
+                        target[len] = '\0';
+                        print(target);
+                    } else {
+                        print("[readlink failed]");
+                    }
+                    print("\n");
+                }
+            }
+
+            d = (struct dirent *)((char *)d + d->d_reclen);
+        }
+    }
+    sys_close(fd);
+
+    print("\nContents of /proc/1:\n");
+    list_dir("/proc/1");
+    print("\n");
 }
 
 /* Entry point */
@@ -355,6 +472,13 @@ void _start(void) {
     print("Contents of /bin:\n");
     list_dir("/bin");
     print("\n");
+
+    /* List /proc */
+    print("Contents of /proc:\n");
+    list_dir("/proc");
+    print("\n");
+    
+    inspect_procfs();
     
     /* Fork Test */
     print("Testing fork() and getpid():\n");
