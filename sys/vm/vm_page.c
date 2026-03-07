@@ -9,6 +9,7 @@
 #include <kern/time.h>
 #include <kern/sched.h>
 #include <stddef.h>
+#include <string.h>
 #include <vm/phys_mem.h>
 
 // System Page Queues
@@ -343,14 +344,10 @@ static int vm_page_free_min = 16;      // Panic below this
 static int vm_page_free_target = 64;   // Daemon sleeps above this
 static int __attribute__((unused)) vm_page_free_reserved = 8;  // Reserved for kernel emergencies
 
-// Statistics (some not yet used - will be exposed via /proc/vmstat)
-static int vm_stat_free_count = 0;
-static int __attribute__((unused)) vm_stat_active_count = 0;
-static int vm_stat_inactive_count = 0;
-static int __attribute__((unused)) vm_stat_wire_count = 0;
-static int vm_stat_pageouts = 0;
-static int __attribute__((unused)) vm_stat_pageins = 0;
-static int __attribute__((unused)) vm_stat_faults = 0;
+// Statistics exported via /proc/vmstat
+static uint32_t vm_stat_pageouts = 0;
+static uint32_t vm_stat_pageins = 0;
+static uint32_t vm_stat_reactivations = 0;
 
 // Wakeup flag for daemon
 static volatile int vm_pages_needed = 0;
@@ -371,7 +368,6 @@ int vm_page_try_to_free(vm_page_t *m) {
 
 	// Free the page back to PMM
 	vm_page_free(m);
-	vm_stat_free_count++;
 	return(1);
 }
 
@@ -383,7 +379,6 @@ void vm_page_launder(vm_page_t *m) {
 	if(m->flags & PG_INACTIVE) {
 		dequeue(&inactive_queue, m);
 		m->flags &= ~PG_INACTIVE;
-		vm_stat_inactive_count--;
 	}
 
 	// Add to laundry queue
@@ -411,7 +406,6 @@ void vm_page_launder(vm_page_t *m) {
 		// Move to inactive queue (now clean, so next scan can free it)
 		enqueue(&inactive_queue, m);
 		m->flags |= PG_INACTIVE;
-		vm_stat_inactive_count++;
 	} else {
 		// Failed to swap out (no swap space?)
 		// Reactivate it to avoid tight loop of failing laundry
@@ -423,13 +417,15 @@ void vm_page_launder(vm_page_t *m) {
 // Main pageout daemon loop
 // Called periodically or when vm_pages_needed is set
 void vm_pageout(void) {
+	size_t free_count = vm_phys_get_free();
+
 	// Check if we need to free pages
-	if(vm_stat_free_count >= vm_page_free_target && !vm_pages_needed) {
+	if(free_count >= (size_t)vm_page_free_target && !vm_pages_needed) {
 		return;  // Plenty of free memory
 	}
 
 	int freed = 0;
-	int target = vm_page_free_target - vm_stat_free_count;
+	int target = vm_page_free_target - (int)free_count;
 	if(target < 0) target = 0;
 
 	// Phase 0: Reclaim kernel memory (UMA, etc.)
@@ -446,7 +442,6 @@ void vm_pageout(void) {
 		if(!(m->flags & PG_DIRTY) && !(m->flags & PG_BUSY) && m->wire_count == 0) {
 			dequeue(&inactive_queue, m);
 			m->flags &= ~PG_INACTIVE;
-			vm_stat_inactive_count--;
 
 			if(vm_page_try_to_free(m)) {
 				freed++;
@@ -478,7 +473,7 @@ void vm_pageout(void) {
 	vm_pages_needed = 0;
 
 	// Panic if critically low
-	if(vm_stat_free_count < vm_page_free_min) {
+	if(vm_phys_get_free() < (size_t)vm_page_free_min) {
 		kprint("PANIC: Out of memory!\n");
 		// OOM killer would go here
 	}
@@ -595,6 +590,7 @@ void vm_page_age_scan(void) {
 			enqueue(&active_queue, m);
 			m->flags |= PG_ACTIVE;
 			m->age = VM_PAGE_AGE_INITIAL;  // Give a second chance
+			vm_stat_reactivations++;
 			pmap_page_clear_reference(m);
 		}
 
@@ -656,6 +652,38 @@ void vm_page_get_stats(vm_page_stats_t *stats) {
 
 	// Read true free page count from Buddy Allocator
 	stats->free_count = vm_phys_get_free();
+}
+
+void vm_page_get_vmstat(vm_vmstat_t *stats) {
+	struct pmap_stats pstats;
+
+	if(!stats) return;
+
+	memset(stats, 0, sizeof(*stats));
+
+	for(vm_page_t *m = active_queue; m; m = m->next) {
+		stats->active_count++;
+	}
+	for(vm_page_t *m = inactive_queue; m; m = m->next) {
+		stats->inactive_count++;
+	}
+	for(vm_page_t *m = wired_queue; m; m = m->next) {
+		stats->wire_count++;
+	}
+	for(vm_page_t *m = laundry_queue; m; m = m->next) {
+		stats->laundry_count++;
+	}
+
+	stats->free_count = (uint32_t)vm_phys_get_free();
+	stats->pageins = vm_stat_pageins;
+	stats->pageouts = vm_stat_pageouts;
+	stats->reactivations = vm_stat_reactivations;
+
+	if(sys_pmap_stats(&pstats) == 0) {
+		stats->faults = pstats.faults;
+		stats->cow_faults = pstats.cow_faults;
+		stats->zero_fill_pages = pstats.zero_fills;
+	}
 }
 
 // Estimate working set size (pages actively used)

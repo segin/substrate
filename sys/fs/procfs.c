@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <vm/vm_kmem.h>
+#include <vm/vm_page.h>
 #include <sys/lock.h>
 
 /* External declarations */
@@ -118,6 +119,36 @@ static uint32_t gen_loadavg(char *buf, size_t size, void *opaque) {
         runnable, total, last_pid);
 }
 
+static uint32_t gen_vmstat(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+    vm_vmstat_t stats;
+
+    vm_page_get_vmstat(&stats);
+    return snprintf(buf, size,
+        "free_count %u\n"
+        "active_count %u\n"
+        "inactive_count %u\n"
+        "wire_count %u\n"
+        "laundry_count %u\n"
+        "pageins %u\n"
+        "pageouts %u\n"
+        "faults %u\n"
+        "cow_faults %u\n"
+        "reactivations %u\n"
+        "zero_fill_pages %u\n",
+        stats.free_count,
+        stats.active_count,
+        stats.inactive_count,
+        stats.wire_count,
+        stats.laundry_count,
+        stats.pageins,
+        stats.pageouts,
+        stats.faults,
+        stats.cow_faults,
+        stats.reactivations,
+        stats.zero_fill_pages);
+}
+
 static uint32_t proc_pmap_stats_read(char *buf, size_t size, void *opaque) {
     (void)opaque;
     struct pmap_stats stats;
@@ -208,6 +239,7 @@ static struct procfs_runtime_entry procfs_entries[] = {
     { "meminfo",     gen_meminfo,       NULL },
     { "uptime",      gen_uptime,        NULL },
     { "cmdline",     gen_cmdline,       NULL },
+    { "vmstat",      gen_vmstat,        NULL },
     { "version",     gen_version,       NULL },
     { "loadavg",     gen_loadavg,       NULL },
     { "cow_stats",   gen_cow_stats,     NULL },

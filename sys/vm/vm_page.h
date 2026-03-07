@@ -131,7 +131,22 @@ typedef struct vm_page_stats {
     int free_count;         // Available free pages
 } vm_page_stats_t;
 
+typedef struct vm_vmstat {
+    uint32_t free_count;
+    uint32_t active_count;
+    uint32_t inactive_count;
+    uint32_t wire_count;
+    uint32_t laundry_count;
+    uint32_t pageins;
+    uint32_t pageouts;
+    uint32_t faults;
+    uint32_t cow_faults;
+    uint32_t reactivations;
+    uint32_t zero_fill_pages;
+} vm_vmstat_t;
+
 void vm_page_get_stats(vm_page_stats_t *stats);
+void vm_page_get_vmstat(vm_vmstat_t *stats);
 int vm_page_estimate_working_set(void);   // Estimate working set size
 int vm_page_should_pageout(void);          // Hint for swapper/pageout daemon
 
