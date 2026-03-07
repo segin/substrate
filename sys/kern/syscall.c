@@ -791,6 +791,7 @@ int kern_stat(const char *path, struct stat *buf) {
     fs_node_t *node = vfs_lookup(root, path);
     if (!node) return -1;
     fill_stat(buf, node);
+    close_fs(node);
     return 0;
 }
 
@@ -811,6 +812,7 @@ int kern_lstat(const char *path, struct stat *buf) {
     fs_node_t *node = vfs_lookup_lstat(root, path);
     if (!node) return -1;
     fill_stat(buf, node);
+    close_fs(node);
     return 0;
 }
 
