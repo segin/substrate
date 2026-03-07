@@ -117,6 +117,21 @@ typedef enum {
 #define SHT_REL 9
 #define SHT_DYNSYM 11
 #endif
+#ifndef SHT_INIT_ARRAY
+#define SHT_INIT_ARRAY 14
+#endif
+#ifndef SHT_FINI_ARRAY
+#define SHT_FINI_ARRAY 15
+#endif
+#ifndef SHT_PREINIT_ARRAY
+#define SHT_PREINIT_ARRAY 16
+#endif
+#ifndef SHT_GROUP
+#define SHT_GROUP 17
+#endif
+#ifndef SHT_SYMTAB_SHNDX
+#define SHT_SYMTAB_SHNDX 18
+#endif
 
 #ifndef SHT_GNU_verdef
 #define SHT_GNU_HASH 0x6ffffff6
@@ -139,6 +154,9 @@ typedef enum {
 #define SHF_STRINGS 0x20
 #define SHF_GROUP 0x200
 #define SHF_TLS 0x400
+#endif
+#ifndef SHF_GNU_RETAIN
+#define SHF_GNU_RETAIN 0x200000
 #endif
 #ifndef SHF_COMPRESSED
 #define SHF_COMPRESSED 0x800
@@ -195,11 +213,28 @@ typedef enum {
 #define DT_DEBUG 21
 #define DT_TEXTREL 22
 #define DT_JMPREL 23
+#define DT_BIND_NOW 24
+#define DT_INIT_ARRAY 25
+#define DT_FINI_ARRAY 26
+#define DT_INIT_ARRAYSZ 27
+#define DT_FINI_ARRAYSZ 28
+#define DT_RUNPATH 29
+#define DT_FLAGS 30
+#define DT_PREINIT_ARRAY 32
+#define DT_PREINIT_ARRAYSZ 33
+#define DT_GNU_HASH 0x6ffffef5
 #define DT_VERSYM 0x6ffffff0
 #define DT_VERDEF 0x6ffffffc
 #define DT_VERDEFNUM 0x6ffffffd
 #define DT_VERNEED 0x6ffffffe
 #define DT_VERNEEDNUM 0x6fffffff
+#endif
+
+#ifndef STV_DEFAULT
+#define STV_DEFAULT 0
+#define STV_INTERNAL 1
+#define STV_HIDDEN 2
+#define STV_PROTECTED 3
 #endif
 
 #ifndef STB_LOCAL
