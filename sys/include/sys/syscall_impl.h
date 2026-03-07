@@ -83,6 +83,7 @@ extern int sys_sync(void);
 extern int sys_mount(const char*, const char*, const char*, unsigned long, void*);
 extern int sys_umount(const char*);
 extern int sys_getdents(unsigned int, void*, unsigned int);
+extern int sys_getdents64(unsigned int, void*, unsigned int);
 extern int sys_getcwd(char*, size_t);
 
 /* Memory management */

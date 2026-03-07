@@ -9,6 +9,7 @@
 #include <kern/sched.h>
 #include <sys/poll.h>
 #include <sys/errno.h>
+#include <sys/param.h>
 #include <intr.h>
 
 #define TTY_MAGIC 0x5401
@@ -722,6 +723,7 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     struct winsize k_winsize;
     int k_int;
     uintptr_t karg = 0;
+    int kernel_arg = ((uintptr_t)arg >= KERN_BASE);
 
     /*
      * Copy-in phase (unlocked)
@@ -731,25 +733,37 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
         case TCSETS:
         case TCSETSW:
         case TCSETSF:
-            if (copyin((void*)arg, &k_termios, sizeof(struct termios)) != 0) return -EFAULT;
-            karg = (uintptr_t)&k_termios;
+            if (kernel_arg) {
+                karg = (uintptr_t)arg;
+            } else {
+                if (copyin((void*)arg, &k_termios, sizeof(struct termios)) != 0) return -EFAULT;
+                karg = (uintptr_t)&k_termios;
+            }
             break;
         case TIOCSWINSZ:
-            if (copyin((void*)arg, &k_winsize, sizeof(struct winsize)) != 0) return -EFAULT;
-            karg = (uintptr_t)&k_winsize;
+            if (kernel_arg) {
+                karg = (uintptr_t)arg;
+            } else {
+                if (copyin((void*)arg, &k_winsize, sizeof(struct winsize)) != 0) return -EFAULT;
+                karg = (uintptr_t)&k_winsize;
+            }
             break;
         case TIOCSPGRP:
-            if (copyin((void*)arg, &k_int, sizeof(int)) != 0) return -EFAULT;
-            karg = (uintptr_t)&k_int;
+            if (kernel_arg) {
+                karg = (uintptr_t)arg;
+            } else {
+                if (copyin((void*)arg, &k_int, sizeof(int)) != 0) return -EFAULT;
+                karg = (uintptr_t)&k_int;
+            }
             break;
         case TCGETS:
-            karg = (uintptr_t)&k_termios;
+            karg = kernel_arg ? (uintptr_t)arg : (uintptr_t)&k_termios;
             break;
         case TIOCGWINSZ:
-            karg = (uintptr_t)&k_winsize;
+            karg = kernel_arg ? (uintptr_t)arg : (uintptr_t)&k_winsize;
             break;
         case TIOCGPGRP:
-            karg = (uintptr_t)&k_int;
+            karg = kernel_arg ? (uintptr_t)arg : (uintptr_t)&k_int;
             break;
         case TIOCSCTTY:
             karg = (uintptr_t)arg; // Value passed directly
@@ -765,7 +779,7 @@ int tty_ioctl(struct tty *tty, uint32_t cmd, unsigned long arg) {
     int ret = tty_ioctl_kern(tty, cmd, karg);
 
     /* Copy-out phase (unlocked) */
-    if (ret == 0) {
+    if (ret == 0 && !kernel_arg) {
         switch (cmd) {
             case TCGETS:
                 if (copyout(&k_termios, (void*)arg, sizeof(struct termios)) != 0) return -EFAULT;

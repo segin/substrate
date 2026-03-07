@@ -39,6 +39,7 @@
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <stddef.h>
 
 #include <sys/kern_syscalls.h>
 #include <sys/utsname.h>
@@ -384,11 +385,35 @@ struct linux_dirent {
     char           d_name[];
 };
 
+// Linux dirent64 structure for getdents64
+struct linux_dirent64 {
+    uint64_t       d_ino;
+    int64_t        d_off;
+    unsigned short d_reclen;
+    unsigned char  d_type;
+    char           d_name[];
+};
+
 int sys_getdents(unsigned int fd, void *dirp, unsigned int count) {
     if (count > 65536) count = 65536;
     void *kdirp = kmalloc(count);
     if (!kdirp) return -12;
     int ret = kern_getdents(fd, kdirp, count);
+    if (ret > 0) {
+        if (copyout(kdirp, dirp, ret) != 0) {
+            kfree(kdirp, count);
+            return -14;
+        }
+    }
+    kfree(kdirp, count);
+    return ret;
+}
+
+int sys_getdents64(unsigned int fd, void *dirp, unsigned int count) {
+    if (count > 65536) count = 65536;
+    void *kdirp = kmalloc(count);
+    if (!kdirp) return -12;
+    int ret = kern_getdents64(fd, kdirp, count);
     if (ret > 0) {
         if (copyout(kdirp, dirp, ret) != 0) {
             kfree(kdirp, count);
@@ -445,6 +470,51 @@ int kern_getdents(unsigned int fd, void *dirp, unsigned int count) {
     }
     
     return bpos;
+}
+
+int kern_getdents64(unsigned int fd, void *dirp, unsigned int count) {
+    if (fd >= MAX_FD) return -1;
+    file_t *f = current_process->fds[fd];
+    if (!f) return -1;
+
+    unsigned int bpos = 0;
+    char temp_buf[512];
+    struct linux_dirent64 *kld = (struct linux_dirent64 *)temp_buf;
+
+    while (bpos < count) {
+        struct dirent *d = readdir_fs((fs_node_t *)f->f_data, f->f_offset);
+        if (!d) {
+            if (bpos == 0) return 0;
+            break;
+        }
+
+        int name_len = 0;
+        while (d->d_name[name_len]) name_len++;
+
+        int reclen = offsetof(struct linux_dirent64, d_name) + name_len + 1;
+        reclen = (reclen + (int)sizeof(uint64_t) - 1) & ~((int)sizeof(uint64_t) - 1);
+
+        if (bpos + (unsigned int)reclen > count) {
+            if (bpos == 0) return -22;
+            break;
+        }
+
+        if (reclen > (int)sizeof(temp_buf)) return -22;
+
+        kld->d_ino = d->d_ino;
+        kld->d_off = (int64_t)(f->f_offset + 1);
+        kld->d_reclen = (unsigned short)reclen;
+        kld->d_type = d->d_type;
+        for (int i = 0; i < name_len; i++) kld->d_name[i] = d->d_name[i];
+        kld->d_name[name_len] = 0;
+
+        memcpy((char *)dirp + bpos, kld, (size_t)reclen);
+
+        bpos += (unsigned int)reclen;
+        f->f_offset++;
+    }
+
+    return (int)bpos;
 }
 
 /* UTSNAME is now in sys/utsname.h */

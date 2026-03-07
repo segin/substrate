@@ -545,13 +545,37 @@ static size_t proc_pid_cmdline_read(fs_node_t *node, off_t offset, size_t size, 
     int pid = node->inode;
     process_t *p = proc_find(pid);
     if (!p) return 0;
-    
-    /* Return process command name (comm) as cmdline */
-    uint32_t len = strlen(p->comm);
-    if (offset >= len) return 0;
-    if (offset + size > len) size = len - offset;
-    memcpy(buffer, p->comm + offset, size);
-    return size;
+
+    /*
+     * /proc/<pid>/cmdline is NUL-separated argv with trailing NUL.
+     * We currently only expose argv[0] from comm, but must still include
+     * the terminator so userland parsers do not read stale bytes.
+     */
+    size_t comm_len = strnlen(p->comm, AC_COMM_LEN);
+    size_t total_len = comm_len + 1; /* include trailing '\0' */
+
+    if ((size_t)offset >= total_len) return 0;
+
+    size_t read_len = size;
+    if ((size_t)offset + read_len > total_len) {
+        read_len = total_len - (size_t)offset;
+    }
+
+    size_t copied = 0;
+    if ((size_t)offset < comm_len) {
+        size_t part = read_len;
+        if ((size_t)offset + part > comm_len) {
+            part = comm_len - (size_t)offset;
+        }
+        memcpy(buffer, p->comm + (size_t)offset, part);
+        copied = part;
+    }
+
+    if (copied < read_len) {
+        memset(buffer + copied, 0, read_len - copied);
+    }
+
+    return read_len;
 }
 
 static struct dirent *proc_pid_readdir(fs_node_t *node, uint64_t index) {

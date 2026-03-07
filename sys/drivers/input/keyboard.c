@@ -167,12 +167,6 @@ process_key:
             }
 
             if (c) {
-                // DEBUG: Confirm interrupt (gated)
-                extern int syscall_trace_enabled;
-                if (syscall_trace_enabled) {
-                    kprint("KBD_IRQ\n");
-                }
-                
                 kbd_push(c);
                 
                 // Push to Active VT's TTY

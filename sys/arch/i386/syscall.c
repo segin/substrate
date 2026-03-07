@@ -20,6 +20,8 @@
 #include <include/sys/sysinfo.h>
 
 #include <sys/types.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
 #include <string.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -29,7 +31,6 @@
 
 extern thread_t *current_thread;
 extern process_t *current_process;
-extern int syscall_trace_enabled;
 extern void signal_handle_pending(registers_t *regs);
 
 
@@ -89,10 +90,6 @@ int sys_set_thread_area(struct user_desc *u_info) {
     return 0;
 }
 
-// Global flag from main.c
-extern int syscall_trace_enabled;
-
-// Global flag from main.c
 extern int syscall_trace_enabled;
 
 void syscall_handler(registers_t *regs) {
@@ -112,6 +109,7 @@ void syscall_handler(registers_t *regs) {
         return;
     }
     uint32_t syscall_num = regs->eax;
+    uint32_t saved_edx = regs->edx;
 
     // Track syscall for SA_RESTART support
     if (current_thread) {
@@ -178,14 +176,68 @@ void syscall_handler(registers_t *regs) {
                         break;
                     }
                     case ARG_STR: 
-                        // Safe(ish) string print
-                        if (args[i] && args[i] > 0x1000) { 
+                        /*
+                         * Never dereference user pointers directly from trace path.
+                         * For write(fd, buf, len), print up to write length bytes.
+                         * For generic strings, use bounded copyinstr.
+                         */
+                        if (args[i] && args[i] > 0x1000) {
                             char quote[64];
-                            char *usr = (char*)args[i];
-                            int q = 0;
-                            for(; q < 60 && usr[q]; q++) quote[q] = usr[q];
-                            quote[q] = 0;
-                            len += sprintf(buf + len, "\"%s%s\"", quote, q >= 60 ? "..." : "");
+                            size_t copied = 0, show = 0;
+                            int ok = 0;
+                            int trunc = 0;
+                            memset(quote, 0, sizeof(quote));
+
+                            if (name && strcmp(name, "write") == 0 && i == 1 && fmt->nargs >= 3) {
+                                int wlen = (int)args[2];
+                                if (wlen < 0) wlen = 0;
+                                size_t to_copy = (size_t)wlen;
+                                if (to_copy > sizeof(quote) - 1) {
+                                    to_copy = sizeof(quote) - 1;
+                                    trunc = 1;
+                                }
+                                if (to_copy > 0 && copyin((const void *)(uintptr_t)args[i], quote, to_copy) == 0) {
+                                    copied = to_copy;
+                                    show = copied;
+                                    ok = 1;
+                                } else {
+                                    copied = 0;
+                                    show = 0;
+                                    ok = (to_copy == 0);
+                                }
+                            } else {
+                                int ci = copyinstr((const void *)(uintptr_t)args[i], quote, sizeof(quote), &copied);
+                                if (ci == 0) {
+                                    show = copied;
+                                    if (show > 0 && quote[show - 1] == '\0') {
+                                        show--;
+                                    }
+                                    ok = 1;
+                                } else if (ci == ENAMETOOLONG) {
+                                    trunc = 1;
+                                    show = sizeof(quote) - 1;
+                                    quote[sizeof(quote) - 1] = '\0';
+                                    if (show > 0 && quote[show - 1] == '\0') {
+                                        show--;
+                                    }
+                                    ok = 1;
+                                } else {
+                                    copied = 0;
+                                    show = 0;
+                                    ok = 0;
+                                }
+                            }
+
+                            if (ok) {
+                                for (size_t q = 0; q < show; q++) {
+                                    unsigned char c = (unsigned char)quote[q];
+                                    if (c < 32 || c > 126) quote[q] = '.';
+                                }
+                                quote[show] = '\0';
+                                len += sprintf(buf + len, "\"%s%s\"", quote, trunc ? "..." : "");
+                            } else {
+                                len += sprintf(buf + len, "*%08x", (unsigned int)args[i]);
+                            }
                         } else {
                             len += sprintf(buf + len, "NULL");
                         }
@@ -226,7 +278,17 @@ void syscall_handler(registers_t *regs) {
     // Dispatch
     int64_t ret = func(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7]);
     regs->eax = (uint32_t)(ret & 0xFFFFFFFF);
-    regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
+    /*
+     * Linux i386 int 0x80 stubs may rely on EDX being preserved across
+     * 32-bit syscalls (for xchg-based EBX save/restore sequences).
+     * Clobbering EDX on plain 32-bit returns can corrupt callee-saved EBX
+     * in userspace and crash shells after clone/setpgid.
+     */
+    if (p->id == PERS_LINUX) {
+        regs->edx = saved_edx;
+    } else {
+        regs->edx = (uint32_t)((ret >> 32) & 0xFFFFFFFF);
+    }
 
     if (syscall_trace_enabled) {
         char buf[64];

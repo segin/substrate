@@ -33,6 +33,7 @@ int kern_lseek(int fd, off_t offset, int whence);
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact);
 int kern_sigaltstack(const stack_t *ss, stack_t *oss);
 int kern_getdents(unsigned int fd, void *dirp, unsigned int count);
+int kern_getdents64(unsigned int fd, void *dirp, unsigned int count);
 int kern_uname(struct utsname *buf);
 int kern_thr_new(struct thr_param *param, int param_size);
 int kern_chroot(const char *path);

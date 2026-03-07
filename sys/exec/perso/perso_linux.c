@@ -6,6 +6,8 @@
 #include <sys/kern_syscalls.h>
 #include <sys/ioctl.h>
 #include <sys/termios.h>
+#include <sys/copy.h>
+#include <sys/errno.h>
 #include "compat.h"
 #include "linux/linux_syscalls.h"
 #include "linux_user.h"
@@ -146,27 +148,33 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
     /* Handle TIOCGWINSZ / TIOCSWINSZ explicitly */
     if (request == 0x5413) { // TIOCGWINSZ
         struct winsize native;
-        int ret = sys_ioctl(fd, request, &native);
+        int ret = kern_ioctl(fd, request, &native);
         if (ret == 0 && arg) {
+            struct linux_winsize lw;
             /* Copy to Linux layout (compatible) */
-            struct linux_winsize *lw = (struct linux_winsize *)arg;
-            lw->ws_row = native.ws_row;
-            lw->ws_col = native.ws_col;
-            lw->ws_xpixel = native.ws_xpixel;
-            lw->ws_ypixel = native.ws_ypixel;
+            lw.ws_row = native.ws_row;
+            lw.ws_col = native.ws_col;
+            lw.ws_xpixel = native.ws_xpixel;
+            lw.ws_ypixel = native.ws_ypixel;
+            if (copyout(&lw, arg, sizeof(lw)) != 0) {
+                return -EFAULT;
+            }
         }
         return ret;
     }
     
     if (request == 0x5414) { // TIOCSWINSZ
-        if (!arg) return -1;
-        struct linux_winsize *lw = (struct linux_winsize *)arg;
+        if (!arg) return -EFAULT;
+        struct linux_winsize lw;
         struct winsize native;
-        native.ws_row = lw->ws_row;
-        native.ws_col = lw->ws_col;
-        native.ws_xpixel = lw->ws_xpixel;
-        native.ws_ypixel = lw->ws_ypixel;
-        return sys_ioctl(fd, request, &native);
+        if (copyin(arg, &lw, sizeof(lw)) != 0) {
+            return -EFAULT;
+        }
+        native.ws_row = lw.ws_row;
+        native.ws_col = lw.ws_col;
+        native.ws_xpixel = lw.ws_xpixel;
+        native.ws_ypixel = lw.ws_ypixel;
+        return kern_ioctl(fd, request, &native);
     }
 
     /* Termios Translation */
@@ -179,15 +187,19 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
             
             int ret = kern_ioctl(fd, request, &native);
             if (ret == 0 && arg) {
-                struct linux_termios *lt = (struct linux_termios *)arg;
-                lt->c_iflag = native.c_iflag;
-                lt->c_oflag = native.c_oflag;
-                lt->c_cflag = native.c_cflag;
-                lt->c_lflag = native.c_lflag;
-                lt->c_line = native.c_line;
+                struct linux_termios lt;
+                memset(&lt, 0, sizeof(lt));
+                lt.c_iflag = native.c_iflag;
+                lt.c_oflag = native.c_oflag;
+                lt.c_cflag = native.c_cflag;
+                lt.c_lflag = native.c_lflag;
+                lt.c_line = native.c_line;
                 /* Copy only LINUX_NCCS control chars */
                 for (int i = 0; i < LINUX_NCCS; i++) {
-                    lt->c_cc[i] = native.c_cc[i];
+                    lt.c_cc[i] = native.c_cc[i];
+                }
+                if (copyout(&lt, arg, sizeof(lt)) != 0) {
+                    return -EFAULT;
                 }
             }
             return ret;
@@ -196,19 +208,22 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
         case LINUX_TCSETSW:
         case LINUX_TCSETSF: {
             /* Translate Linux termios to native, then set */
-            if (!arg) return -1;
-            struct linux_termios *lt = (struct linux_termios *)arg;
+            if (!arg) return -EFAULT;
+            struct linux_termios lt;
             struct termios native;
             extern void *memset(void*, int, size_t);
             memset(&native, 0, sizeof(native));
+            if (copyin(arg, &lt, sizeof(lt)) != 0) {
+                return -EFAULT;
+            }
             
-            native.c_iflag = lt->c_iflag;
-            native.c_oflag = lt->c_oflag;
-            native.c_cflag = lt->c_cflag;
-            native.c_lflag = lt->c_lflag;
-            native.c_line = lt->c_line;
+            native.c_iflag = lt.c_iflag;
+            native.c_oflag = lt.c_oflag;
+            native.c_cflag = lt.c_cflag;
+            native.c_lflag = lt.c_lflag;
+            native.c_line = lt.c_line;
             for (int i = 0; i < LINUX_NCCS; i++) {
-                native.c_cc[i] = lt->c_cc[i];
+                native.c_cc[i] = lt.c_cc[i];
             }
             native.c_ispeed = 0;
             native.c_ospeed = 0;
@@ -390,7 +405,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_geteuid32]      = &sys_geteuid,
     [LINUX_SYS_getegid32]      = &sys_getegid,
     [LINUX_SYS_setgid32]       = &sys_setgid,
-    [LINUX_SYS_getdents64]     = &sys_getdents,
+    [LINUX_SYS_getdents64]     = &sys_getdents64,
     [LINUX_SYS_fcntl64]        = &sys_fcntl,
     [LINUX_SYS_futex]          = &sys_futex,
     [LINUX_SYS_set_thread_area] = &sys_set_thread_area,
