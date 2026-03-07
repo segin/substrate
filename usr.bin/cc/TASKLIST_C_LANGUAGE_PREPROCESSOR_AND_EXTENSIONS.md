@@ -401,7 +401,7 @@ Note: treat this as exhaustive tracking inventory for GCC extension surface. No 
 ## 8) Real-World Software Readiness Gates
 
 ### 8.1 Linux-Kernel readiness
-- [ ] `-std=gnu11` compatibility baseline complete.
+- [x] `-std=gnu11` compatibility baseline complete.
 - [ ] Preprocessor handles kernel headers/macros without fallback toolchain.
 - [ ] Attribute set used by kernel headers implemented (no stubs/no-ops for semantic attrs).
 - [ ] Inline asm patterns used by kernel compile and pass constraints.

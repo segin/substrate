@@ -669,6 +669,11 @@ test:
 	sh run_pp_clang_feature_probe.sh
 	sh run_pp_clang_pragma.sh
 	sh run_pp_cmd_injection_test.sh
+	printf '' > /tmp/cc_pp_std_probe.c
+	$(TOP)/usr.bin/cc/cc -E -dM -std=c11 /tmp/cc_pp_std_probe.c -o /tmp/cc_pp_strict_c11.i
+	grep -q "^#define __STRICT_ANSI__ 1$$" /tmp/cc_pp_strict_c11.i
+	$(TOP)/usr.bin/cc/cc -E -dM -std=gnu11 /tmp/cc_pp_std_probe.c -o /tmp/cc_pp_strict_gnu11.i
+	! grep -q "^#define __STRICT_ANSI__" /tmp/cc_pp_strict_gnu11.i
 	sh run_simd_intrinsics.sh
 	! $(TOP)/usr.bin/cc/cc -c native_bad.c -o /tmp/cc_native_bad.o
 	! $(TOP)/usr.bin/cc/cc -c native_bad_assign.c -o /tmp/cc_native_bad_assign.o
@@ -826,6 +831,7 @@ clean:
 	rm -f /tmp/cc_pp_s3.i /tmp/cc_pp_s3_p.i /tmp/cc_pp_s3_dM.i /tmp/cc_pp_s3_m.d /tmp/cc_pp_s3_mm.d /tmp/cc_pp_s3_md.d \
 	      /tmp/cc_pp_s3_md.i /tmp/cc_pp_s3_v.i /tmp/cc_pp_s3_v.log /tmp/cc_pp_s3_depth.i /tmp/cc_pp_s3_macro.i /tmp/cc_pp_s3_macro_limit.i /tmp/cc_pp_s3_token_limit.i /tmp/cc_pp_s3_output_limit.i \
 	      /tmp/cc_pp_s6_probe_gnu11.i /tmp/cc_pp_s6_probe_c99.i /tmp/cc_pp_s63_clang_pragma.i /tmp/cc_pp_s63_bad_clang_pragma.i /tmp/cc_pp_s63_bad_clang_section.i /tmp/cc_pp_s63_bad_clang_fp.i /tmp/cc_pp_s63_bad_clang_attribute.i /tmp/cc_pp_s63_bad_clang_loop.i \
+	      /tmp/cc_pp_std_probe.c /tmp/cc_pp_strict_c11.i /tmp/cc_pp_strict_gnu11.i \
 	      /tmp/cc_pp_s63_bad_clang_pragma.log /tmp/cc_pp_s63_bad_clang_section.log /tmp/cc_pp_s63_bad_clang_fp.log /tmp/cc_pp_s63_bad_clang_attribute.log /tmp/cc_pp_s63_bad_clang_loop.log \
 	      /tmp/cc_pp_cpp_mode.i /tmp/cc_pp_cpp_mode_h.i /tmp/cc_pp_cpp_mode_input.h /tmp/cpp /tmp/cc_pp_fuzz_out.i /tmp/cc_pp_fuzz_seed.c /tmp/cc_pp_fuzz_seed.i \
 	      /tmp/cc_pp_fuzz_0.c /tmp/cc_pp_fuzz_1.c /tmp/cc_pp_fuzz_2.c /tmp/cc_pp_fuzz_3.c /tmp/cc_pp_fuzz_4.c \

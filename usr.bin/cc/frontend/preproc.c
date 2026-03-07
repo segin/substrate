@@ -1361,6 +1361,11 @@ static int add_builtin_macros(pp_state_t *st) {
     if (macro_set(&st->macros, "__STDC__", 0, 0, NULL, 0, "1") != 0) {
         return -1;
     }
+    if (!st->std_is_gnu) {
+        if (macro_set(&st->macros, "__STRICT_ANSI__", 0, 0, NULL, 0, "1") != 0) {
+            return -1;
+        }
+    }
     snprintf(stdc_ver, sizeof(stdc_ver), "%dL", st->std_version);
     if (macro_set(&st->macros, "__STDC_VERSION__", 0, 0, NULL, 0, stdc_ver) != 0) {
         return -1;
