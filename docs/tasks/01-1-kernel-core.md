@@ -343,8 +343,8 @@
                 - [ ] Physical addresses up to 36 bits (64 GB). (REQ: REQ-01-0301)
                 - [ ] PDPT must be in first 4 GB and 32‑byte aligned. (REQ: REQ-01-0302)
 
-            - [ ] **PMAP Statistics and Debugging:** (REQ: REQ-01-0303, REQ-01-0407)
-                - [ ] Per-pmap counters: resident, wired, mapped, faults, cow_faults. (REQ: REQ-01-0304)
+            - [x] **PMAP Statistics and Debugging:** (REQ: REQ-01-0303, REQ-01-0407)
+                - [x] Per-pmap counters: resident, wired, mapped, faults, cow_faults. (REQ: REQ-01-0304)
                 - [x] Global counters: total_pmaps, active_pmaps. (REQ: REQ-01-0305)
                 - [x] `pmap_dump(pmap)`: debug dump of pmap contents (PDEs + PTEs). (REQ: REQ-01-0306)
                 - [x] `pmap_check(pmap)`: consistency verification (detect leaked pages, orphan PTs). (REQ: REQ-01-0307)

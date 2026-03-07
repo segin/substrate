@@ -8,7 +8,7 @@ The `pmap` layer is the machine-dependent part of the virtual memory system. It 
 - **Recursive Paging:** PTs are accessed via a self-referential entry in the top-level directory (index 1023 for i386, 511 for x86_64).
 - **Invalidation:** Hardware TLB is flushed via `invlpg` or CR3 reloads.
 - **Kernel PDE propagation:** i386 pmaps copy kernel PDEs at creation time and `pmap_growkernel()` propagates newly allocated kernel PDEs into already-existing pmaps when kernel mappings expand into a previously unused PDE.
-- **Per-pmap accounting:** i386 pmaps track resident pages, mapped pages, and fault/COW statistics alongside the underlying page-directory state.
+- **Per-pmap accounting:** i386 pmaps track resident, wired, and mapped page counts plus fault/COW statistics alongside the underlying page-directory state.
 
 ## API
 ### `void pmap_bootstrap(void)` (i386) / `void pmap_init(void)` (x86_64)

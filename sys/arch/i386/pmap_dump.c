@@ -24,7 +24,16 @@ void pmap_dump(pmap_t pmap) {
     }
     
     char buf[128];
-    int mapped_count = 0;
+    int mapped_pdes = 0;
+
+    sprintf(buf,
+        "pmap stats: resident=%u wired=%u mapped=%u faults=%u cow_faults=%u\n",
+        pmap->resident_count,
+        pmap->wired_count,
+        pmap->mapped_count,
+        pmap->stats.faults,
+        pmap->stats.cow_faults);
+    kprint(buf);
     
     kprint("Page Directory Entries:\n");
     
@@ -51,11 +60,11 @@ void pmap_dump(pmap_t pmap) {
                     (pd[pde_idx] & 4) ? "U" : "K",
                     (pd[pde_idx] & 0x100) ? "G" : "");
                 kprint(buf);
-                mapped_count++;
+                mapped_pdes++;
             }
         }
     }
     
-    sprintf(buf, "Total: %d mapped page directories\n", mapped_count);
+    sprintf(buf, "Total: %d mapped page directories\n", mapped_pdes);
     kprint(buf);
 }

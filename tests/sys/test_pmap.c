@@ -249,6 +249,9 @@ void test_pmap_mapping_counters(void) {
     pmap_activate(pmap);
     TEST_ASSERT(pmap_enter(pmap, va, pa, VM_PROT_READ | VM_PROT_WRITE | VM_PROT_USER, 0) == 0,
                 "mapping created");
+    TEST_ASSERT(pmap->wired_count == 0, "wired_count remains zero without wired mappings");
+    TEST_ASSERT(pmap->stats.faults == 0, "fault count starts at zero for direct map");
+    TEST_ASSERT(pmap->stats.cow_faults == 0, "cow fault count starts at zero");
     TEST_ASSERT(pmap->resident_count == 1, "resident_count increments");
     TEST_ASSERT(pmap->mapped_count == 1, "mapped_count increments");
 
