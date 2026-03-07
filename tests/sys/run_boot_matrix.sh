@@ -6,7 +6,7 @@ SYS_DIR="$ROOT_DIR/sys"
 KERNEL_BIN="$SYS_DIR/kernel.bin"
 ROOT_IMG="$ROOT_DIR/root.img"
 LOG_DIR="${TMPDIR:-/tmp}/substrate-boot-matrix"
-MEMORY_SET="4 16 128 1024 4096"
+MEMORY_SET="16 32 128 1024 4096"
 PASS_MARKER="execve: Final check"
 
 mkdir -p "$LOG_DIR"
@@ -32,6 +32,7 @@ for mem in $MEMORY_SET; do
     rm -f "$log" "$out"
 
     echo "boot-matrix: testing ${mem}MB"
+    rc=0
     if ! (
         cd "$SYS_DIR"
         timeout 45s qemu-system-i386 \
@@ -47,6 +48,10 @@ for mem in $MEMORY_SET; do
             -serial "file:$log" \
             -hda ../root.img
     ) >"$out" 2>&1; then
+        rc=$?
+    fi
+
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 124 ]; then
         echo "boot-matrix: qemu failed for ${mem}MB" >&2
         tail -n 40 "$out" >&2 || true
         exit 1

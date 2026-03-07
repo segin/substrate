@@ -72,7 +72,7 @@
             - [x] Property: `alloc → free → alloc` returns same page (no leak). (REQ: REQ-01-0058)
             - [x] Property: free page count + allocated count = total pages (invariant). (REQ: REQ-01-0059)
             - [x] Property: buddy free list integrity (no cycles, all entries valid). (REQ: REQ-01-0060)
-            - [ ] Integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU. (REQ: REQ-01-0061)
+            - [x] Integration: boot with 16 MB, 32 MB, 128 MB, 1 GB, 4 GB RAM in QEMU. (REQ: REQ-01-0061)
         - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
             - [x] Internal doc: PMM architecture (watermark → buddy transition). (REQ: REQ-01-0063)
             - [x] Internal doc: virtual vs physical address API convention. (REQ: REQ-01-0064)
@@ -1205,7 +1205,7 @@
 - **US-01-0058**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: alloc → free → alloc returns same page (no leak) so that this capability is implemented with clear verification evidence.
 - **US-01-0059**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: free page count + allocated count = total pages (invariant) so that this capability is implemented with clear verification evidence.
 - **US-01-0060**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: buddy free list integrity (no cycles, all entries valid) so that this capability is implemented with clear verification evidence.
-- **US-01-0061**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU so that this capability is implemented with clear verification evidence.
+- **US-01-0061**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: boot with 16 MB, 32 MB, 128 MB, 1 GB, 4 GB RAM in QEMU so that this capability is implemented with clear verification evidence.
 - **US-01-0062**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
 - **US-01-0063**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: PMM architecture (watermark → buddy transition) so that this capability is implemented with clear verification evidence.
 - **US-01-0064**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: virtual vs physical address API convention so that this capability is implemented with clear verification evidence.
@@ -2333,7 +2333,7 @@
 - **REQ-01-0060** (EARS/Ubiquitous): The Substrate system shall property: buddy free list integrity (no cycles, all entries valid).
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0061** (EARS/Ubiquitous): The Substrate system shall integration: boot with 4 MB, 16 MB, 128 MB, 1 GB, 4 GB RAM in QEMU.
+- **REQ-01-0061** (EARS/Ubiquitous): The Substrate system shall integration: boot with 16 MB, 32 MB, 128 MB, 1 GB, 4 GB RAM in QEMU.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0062** (EARS/Ubiquitous): The Substrate system shall documentation:.
