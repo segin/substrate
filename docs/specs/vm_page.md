@@ -48,9 +48,9 @@ The `pagedaemon` kernel process is started by `vm_page_late_init()`. It sleeps o
 
 `vm_pageout()` currently runs in phases:
 1. reclaim UMA-backed kernel allocations
-2. scan the active queue and move cold pages to the inactive queue
-3. free clean inactive pages
-4. launder dirty inactive pages and retry freeing them
+2. free clean inactive pages already available for reclaim
+3. launder dirty inactive pages and retry freeing them
+4. only if still short, scan the active queue and move cold pages to inactive before repeating reclaim
 
 The wakeup path is:
 - PMM allocation paths call `vm_page_wakeup_daemon()` once free memory dips near reserved levels.
@@ -66,4 +66,4 @@ Thresholds start from conservative defaults and are raised proportionally to tot
 
 ## Constraints
 - OOM handling is still a stub; the kernel reports critical low-memory instead of selecting a victim process.
-- Pageout phase ordering is implemented as active-scan then inactive reclamation then laundering; the checklist item requiring an explicit inactive-to-laundry-to-active priority policy remains separate from this spec.
+- OOM handling is still a stub; there is no victim-selection policy yet.

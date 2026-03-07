@@ -7,6 +7,7 @@
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
 #include <kern/console.h>
+#include <vm/phys_mem.h>
 
 static int tests_passed = 0;
 static int tests_failed = 0;
@@ -23,6 +24,14 @@ static int tests_failed = 0;
 // Helper to manually set up page state
 extern void vm_page_activate(vm_page_t *m);
 extern void vm_page_deactivate(vm_page_t *m);
+
+static void free_phys_page_list(vm_page_t *list) {
+    while (list) {
+        vm_page_t *next = list->next;
+        vm_phys_free_page(list);
+        list = next;
+    }
+}
 
 void test_vm_policy_lru(void) {
     kprint("Test: vm_policy_lru (Clock Algorithm)\n");
@@ -98,9 +107,100 @@ void test_vm_policy_writeback(void) {
     kprint("  PASS\n");
 }
 
+void test_vm_pageout_prefers_inactive_then_active(void) {
+    vm_page_thresholds_t thresholds;
+    vm_page_t *pressure = NULL;
+    vm_page_t *active;
+    vm_page_t *inactive;
+
+    kprint("Test: vm_pageout_prefers_inactive_then_active\n");
+
+    vm_page_get_thresholds(&thresholds);
+
+    active = vm_page_alloc(NULL, 0, 0);
+    inactive = vm_page_alloc(NULL, 0, 0);
+    TEST_ASSERT(active != NULL && inactive != NULL, "inactive_first: alloc failed");
+
+    active->flags &= ~PG_BUSY;
+    inactive->flags &= ~PG_BUSY;
+    vm_page_activate(active);
+    vm_page_deactivate(inactive);
+
+    while (vm_phys_get_free() > thresholds.free_target - 1) {
+        vm_page_t *page = vm_phys_alloc_page();
+        TEST_ASSERT(page != NULL, "inactive_first: pressure alloc failed");
+        page->next = pressure;
+        pressure = page;
+    }
+
+    vm_pageout();
+
+    TEST_ASSERT(vm_phys_get_free() >= thresholds.free_target,
+                "inactive_first: pageout did not recover target");
+    TEST_ASSERT(active->flags & PG_ACTIVE,
+                "inactive_first: active page was disturbed");
+
+    vm_page_free(active);
+    free_phys_page_list(pressure);
+    TEST_ASSERT(vm_phys_get_free() >= thresholds.free_target,
+                "inactive_first: cleanup leaked free pages");
+
+    kprint("  PASS\n");
+}
+
+void test_vm_pageout_launders_before_scanning_active(void) {
+    vm_page_thresholds_t thresholds;
+    vm_page_t *pressure = NULL;
+    vm_page_t *active;
+    vm_object_t *obj;
+    vm_page_t *dirty;
+
+    kprint("Test: vm_pageout_launders_before_scanning_active\n");
+
+    vm_page_get_thresholds(&thresholds);
+
+    active = vm_page_alloc(NULL, 0, 0);
+    obj = vm_object_allocate(VM_OBJ_TYPE_SWAP, 0x1000);
+    dirty = vm_page_alloc(obj, 0, 0);
+    TEST_ASSERT(active != NULL && obj != NULL && dirty != NULL,
+                "laundry_first: alloc failed");
+
+    active->flags &= ~PG_BUSY;
+    dirty->flags &= ~PG_BUSY;
+    active->flags &= ~PG_DIRTY;
+    vm_page_activate(active);
+
+    dirty->flags |= PG_DIRTY;
+    vm_page_deactivate(dirty);
+
+    while (vm_phys_get_free() > thresholds.free_target - 1) {
+        vm_page_t *page = vm_phys_alloc_page();
+        TEST_ASSERT(page != NULL, "laundry_first: pressure alloc failed");
+        page->next = pressure;
+        pressure = page;
+    }
+
+    vm_pageout();
+
+    TEST_ASSERT(vm_phys_get_free() >= thresholds.free_target,
+                "laundry_first: pageout did not recover target");
+    TEST_ASSERT(active->flags & PG_ACTIVE,
+                "laundry_first: active page was disturbed");
+
+    vm_page_free(active);
+    vm_object_deallocate(obj);
+    free_phys_page_list(pressure);
+    TEST_ASSERT(vm_phys_get_free() >= thresholds.free_target,
+                "laundry_first: cleanup leaked free pages");
+
+    kprint("  PASS\n");
+}
+
 void run_vm_policy_tests(void) {
     kprint("\n=== VM Policy Tests ===\n");
     test_vm_policy_lru();
     test_vm_policy_writeback();
+    test_vm_pageout_prefers_inactive_then_active();
+    test_vm_pageout_launders_before_scanning_active();
     kprint("\nVM Policy Tests Complete\n");
 }

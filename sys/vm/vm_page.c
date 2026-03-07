@@ -513,6 +513,48 @@ int vm_page_try_to_free(vm_page_t *m) {
 	return(1);
 }
 
+static int vm_page_reclaim_inactive_clean(int target) {
+	int freed = 0;
+	vm_page_t *m = inactive_queue;
+
+	while(m && freed < target) {
+		vm_page_t *next = m->next;
+
+		if(!(m->flags & PG_DIRTY) && !(m->flags & PG_BUSY) && m->wire_count == 0) {
+			dequeue(&inactive_queue, m);
+			m->flags &= ~PG_INACTIVE;
+
+			if(vm_page_try_to_free(m)) {
+				freed++;
+			}
+		}
+
+		m = next;
+	}
+
+	return(freed);
+}
+
+static int vm_page_launder_inactive_dirty(int target) {
+	int freed = 0;
+	vm_page_t *m = inactive_queue;
+
+	while(m && freed < target) {
+		vm_page_t *next = m->next;
+
+		if((m->flags & PG_DIRTY) && !(m->flags & PG_BUSY)) {
+			vm_page_launder(m);
+			if(vm_page_try_to_free(m)) {
+				freed++;
+			}
+		}
+
+		m = next;
+	}
+
+	return(freed);
+}
+
 // Move dirty page to laundry queue for writeback
 void vm_page_launder(vm_page_t *m) {
 	if(!m || !(m->flags & PG_DIRTY)) return;
@@ -574,47 +616,30 @@ void vm_pageout(void) {
 	// Phase 0: Reclaim kernel memory (UMA, etc.)
 	uma_reclaim();
 
-	// Phase 1: Scan active queue, move cold pages to inactive until we have headroom.
-	int scan_target = target * 2;
-	if (inactive_count < (uint32_t)vm_page_inactive_target) {
-		scan_target += (int)(vm_page_inactive_target - inactive_count);
-	}
-	if (scan_target < 1) scan_target = 1;
-	vm_pageout_scan(scan_target);
+	// Phase 1: reclaim already-inactive clean pages first.
+	freed += vm_page_reclaim_inactive_clean(target - freed);
 
-	// Phase 2: Try to free clean inactive pages
-	vm_page_t *m = inactive_queue;
-	while(m && freed < target) {
-		vm_page_t *next = m->next;
-
-		if(!(m->flags & PG_DIRTY) && !(m->flags & PG_BUSY) && m->wire_count == 0) {
-			dequeue(&inactive_queue, m);
-			m->flags &= ~PG_INACTIVE;
-
-			if(vm_page_try_to_free(m)) {
-				freed++;
-			}
-		}
-
-		m = next;
-	}
-
-	// Phase 3: Launder dirty pages if still short
+	// Phase 2: launder dirty inactive pages before disturbing active pages.
 	if(freed < target) {
-		m = inactive_queue;
-		while(m && freed < target) {
-			vm_page_t *next = m->next;
+		freed += vm_page_launder_inactive_dirty(target - freed);
+	}
 
-			if((m->flags & PG_DIRTY) && !(m->flags & PG_BUSY)) {
-				vm_page_launder(m);
-				// Try to free now that it's clean
-				if(vm_page_try_to_free(m)) {
-					freed++;
-				}
-			}
-
-			m = next;
+	// Phase 3: if we still need headroom, age active pages into inactive.
+	if(freed < target || inactive_count < (uint32_t)vm_page_inactive_target) {
+		int scan_target = (target - freed) * 2;
+		if (inactive_count < (uint32_t)vm_page_inactive_target) {
+			scan_target += (int)(vm_page_inactive_target - inactive_count);
 		}
+		if (scan_target < 1) scan_target = 1;
+		vm_pageout_scan(scan_target);
+	}
+
+	// Phase 4: retry reclaim on the pages moved in phase 3.
+	if(freed < target) {
+		freed += vm_page_reclaim_inactive_clean(target - freed);
+	}
+	if(freed < target) {
+		freed += vm_page_launder_inactive_dirty(target - freed);
 	}
 
 	// Clear request
