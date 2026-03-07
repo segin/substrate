@@ -236,6 +236,83 @@ static void test_age_scan_deactivates_cold_page(void) {
     TEST_PASS("age_scan_deactivates_cold_page");
 }
 
+/* Property: no page appears on two queues simultaneously */
+static void test_queue_integrity_checker(void) {
+    vm_page_t *active = vm_page_alloc(NULL, 0, 0);
+    vm_page_t *inactive = vm_page_alloc(NULL, 0, 0);
+    vm_page_t *wired = vm_page_alloc(NULL, 0, 0);
+
+    TEST_ASSERT(active != NULL && inactive != NULL && wired != NULL,
+                "queue_check: alloc failed");
+
+    active->flags &= ~PG_BUSY;
+    inactive->flags &= ~PG_BUSY;
+    wired->flags &= ~PG_BUSY;
+
+    vm_page_activate(active);
+    vm_page_deactivate(inactive);
+    vm_page_wire(wired);
+
+    TEST_ASSERT(vm_page_check_queues(), "queue_check: integrity failed with mixed queues");
+
+    vm_page_unwire(wired);
+    vm_page_free(active);
+    vm_page_free(inactive);
+    vm_page_free(wired);
+
+    TEST_ASSERT(vm_page_check_queues(), "queue_check: integrity failed after cleanup");
+    TEST_PASS("queue_integrity_checker");
+}
+
+/* Property: free_count + all queue counts stays invariant under queue moves */
+static void test_queue_accounting_invariant(void) {
+    vm_vmstat_t before, during, after;
+    vm_page_t *active = vm_page_alloc(NULL, 0, 0);
+    vm_page_t *inactive = vm_page_alloc(NULL, 0, 0);
+    vm_page_t *wired = vm_page_alloc(NULL, 0, 0);
+    uint32_t accounted_before;
+    uint32_t accounted_during;
+    uint32_t accounted_after;
+
+    TEST_ASSERT(active != NULL && inactive != NULL && wired != NULL,
+                "queue_accounting: alloc failed");
+
+    vm_page_get_vmstat(&before);
+    accounted_before = before.free_count + before.active_count +
+                       before.inactive_count + before.wire_count +
+                       before.laundry_count;
+
+    active->flags &= ~PG_BUSY;
+    inactive->flags &= ~PG_BUSY;
+    wired->flags &= ~PG_BUSY;
+
+    vm_page_activate(active);
+    vm_page_deactivate(inactive);
+    vm_page_wire(wired);
+
+    vm_page_get_vmstat(&during);
+    accounted_during = during.free_count + during.active_count +
+                       during.inactive_count + during.wire_count +
+                       during.laundry_count;
+
+    TEST_ASSERT(accounted_during == accounted_before,
+                "queue_accounting: invariant broke after queue placement");
+
+    vm_page_unwire(wired);
+    vm_page_free(active);
+    vm_page_free(inactive);
+    vm_page_free(wired);
+
+    vm_page_get_vmstat(&after);
+    accounted_after = after.free_count + after.active_count +
+                      after.inactive_count + after.wire_count +
+                      after.laundry_count;
+
+    TEST_ASSERT(accounted_after == accounted_before,
+                "queue_accounting: invariant broke after cleanup");
+    TEST_PASS("queue_accounting_invariant");
+}
+
 /* Test: vm_page_insert/remove maintains vm_object linkage */
 static void test_vm_page_object_linkage(void) {
     vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x4000);
@@ -307,6 +384,8 @@ void test_vm_page_queue(void) {
     test_inactive_age0_evictable();
     test_get_stats();
     test_age_scan_deactivates_cold_page();
+    test_queue_integrity_checker();
+    test_queue_accounting_invariant();
     test_vm_page_object_linkage();
     test_pv_entry_list_manipulation();
     

@@ -93,7 +93,6 @@ static void sched_context_switch(thread_t *prev, thread_t *next) {
         arch_switch_to(prev, next);
     }
 }
-
 void sched_yield(void) {
     if (!current_thread) return;
 
@@ -237,4 +236,3 @@ void sched_iterate_threads(void (*callback)(thread_t *t, void *arg), void *arg) 
         }
     }
 }
-

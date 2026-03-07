@@ -106,6 +106,7 @@ void vm_page_unhold(vm_page_t *m);
 
 // LRU scanning
 int vm_pageout_scan(int max_scan);
+int vm_page_check_queues(void);
 
 // Page Daemon
 void vm_pageout(void);

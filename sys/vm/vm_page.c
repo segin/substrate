@@ -52,6 +52,71 @@ static uint32_t count_queue(vm_page_t *head) {
 	return count;
 }
 
+static int queue_has_cycle(vm_page_t *head) {
+	vm_page_t *slow = head;
+	vm_page_t *fast = head;
+
+	while (fast && fast->next) {
+		slow = slow->next;
+		fast = fast->next->next;
+		if (slow == fast) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+
+static int queue_contains(vm_page_t *head, vm_page_t *target) {
+	for (vm_page_t *m = head; m; m = m->next) {
+		if (m == target) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int vm_page_check_queues(void) {
+	if (queue_has_cycle(active_queue) || queue_has_cycle(inactive_queue) ||
+	    queue_has_cycle(wired_queue) || queue_has_cycle(laundry_queue)) {
+		return 0;
+	}
+
+	for (vm_page_t *m = active_queue; m; m = m->next) {
+		if (!(m->flags & PG_ACTIVE) || (m->flags & PG_INACTIVE)) return 0;
+		if (m->prev && m->prev->next != m) return 0;
+		if (m->next && m->next->prev != m) return 0;
+		if (queue_contains(inactive_queue, m) || queue_contains(wired_queue, m) ||
+		    queue_contains(laundry_queue, m)) return 0;
+	}
+
+	for (vm_page_t *m = inactive_queue; m; m = m->next) {
+		if (!(m->flags & PG_INACTIVE) || (m->flags & PG_ACTIVE)) return 0;
+		if (m->prev && m->prev->next != m) return 0;
+		if (m->next && m->next->prev != m) return 0;
+		if (queue_contains(active_queue, m) || queue_contains(wired_queue, m) ||
+		    queue_contains(laundry_queue, m)) return 0;
+	}
+
+	for (vm_page_t *m = wired_queue; m; m = m->next) {
+		if (m->wire_count == 0) return 0;
+		if (m->flags & (PG_ACTIVE | PG_INACTIVE)) return 0;
+		if (m->prev && m->prev->next != m) return 0;
+		if (m->next && m->next->prev != m) return 0;
+		if (queue_contains(active_queue, m) || queue_contains(inactive_queue, m) ||
+		    queue_contains(laundry_queue, m)) return 0;
+	}
+
+	for (vm_page_t *m = laundry_queue; m; m = m->next) {
+		if (m->prev && m->prev->next != m) return 0;
+		if (m->next && m->next->prev != m) return 0;
+		if (queue_contains(active_queue, m) || queue_contains(inactive_queue, m) ||
+		    queue_contains(wired_queue, m)) return 0;
+	}
+
+	return 1;
+}
+
 static void vm_page_tune_thresholds(void) {
 	size_t total_pages = vm_phys_get_free() + vm_phys_get_used();
 

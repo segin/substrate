@@ -1348,6 +1348,7 @@ extern void vm_object_shadow(void);
 extern void vm_page_activate(void);
 extern void vm_page_age_scan(void);
 extern void vm_page_alloc(void);
+extern void vm_page_check_queues(void);
 extern void vm_page_deactivate(void);
 extern void vm_page_estimate_working_set(void);
 extern void vm_page_free(void);
@@ -1380,6 +1381,7 @@ extern void vm_pager_put_pages(void);
 extern void vm_phys_add_range(void);
 extern void vm_phys_alloc_contiguous(void);
 extern void vm_phys_alloc_page(void);
+extern void vm_phys_check_integrity(void);
 extern void vm_phys_early_init(void);
 extern void vm_phys_free_contiguous(void);
 extern void vm_phys_free_page(void);
@@ -2515,6 +2517,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&openbsd_sendsig, "openbsd_sendsig" },
     { (uint32_t)(uintptr_t)&openbsd_sys_sigreturn, "openbsd_sys_sigreturn" },
     { (uint32_t)(uintptr_t)&vm_page_init, "vm_page_init" },
+    { (uint32_t)(uintptr_t)&vm_page_check_queues, "vm_page_check_queues" },
     { (uint32_t)(uintptr_t)&vm_page_late_init, "vm_page_late_init" },
     { (uint32_t)(uintptr_t)&pv_insert, "pv_insert" },
     { (uint32_t)(uintptr_t)&pv_remove, "pv_remove" },
@@ -2611,6 +2614,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vm_phys_get_free, "vm_phys_get_free" },
     { (uint32_t)(uintptr_t)&vm_phys_get_used, "vm_phys_get_used" },
     { (uint32_t)(uintptr_t)&vm_phys_mark_used, "vm_phys_mark_used" },
+    { (uint32_t)(uintptr_t)&vm_phys_check_integrity, "vm_phys_check_integrity" },
     { (uint32_t)(uintptr_t)&run_kernel_tests, "run_kernel_tests" },
     { (uint32_t)(uintptr_t)&vm_area_create, "vm_area_create" },
     { (uint32_t)(uintptr_t)&vm_area_destroy, "vm_area_destroy" },
@@ -2883,4 +2887,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1436;
+int ksym_count = 1438;
