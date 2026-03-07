@@ -309,7 +309,7 @@
                     - [ ] `pmap_shootdown_range(va, len)`: invalidate range. (REQ: REQ-01-0271)
                     - [ ] `pmap_shootdown_all()`: full TLB flush on all CPUs. (REQ: REQ-01-0272)
                     - [ ] Deferred shootdown for batch operations. (REQ: REQ-01-0273)
-                    - [ ] Shootdown completion barrier (wait for all CPUs to acknowledge). (REQ: REQ-01-0274)
+                    - [x] Shootdown completion barrier (wait for all CPUs to acknowledge). (REQ: REQ-01-0274)
                 - [ ] **INVPCID (future x86_64):** (REQ: REQ-01-0275)
                     - [ ] Detect INVPCID support via CPUID. (REQ: REQ-01-0276)
                     - [ ] Invalidate by PCID+VA, PCID only, or all-except-global. (REQ: REQ-01-0277)

@@ -5,6 +5,7 @@
 #include <vm/phys_mem.h>
 #include <kern/panic.h>
 #include <kern/console.h>
+#include <sys/smp.h>
 #include <sys/copy.h>
 #include <sys/errno.h>
 #include <sys/param.h>
@@ -1084,6 +1085,12 @@ static volatile int shootdown_all = 0;
 static volatile int shootdown_pending = 0;
 static volatile int shootdown_ack_count = 0;
 
+static int pmap_shootdown_expected_acks(void) {
+    int cpus = smp_get_cpu_count();
+    if (cpus <= 1) return 0;
+    return cpus - 1;
+}
+
 // Called by other CPUs on TLB shootdown IPI
 void pmap_shootdown_handler(void) {
     if (shootdown_all) {
@@ -1114,6 +1121,7 @@ void pmap_shootdown_page(uint32_t va) {
     
     // Send IPI to all other CPUs
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
+    pmap_shootdown_wait(pmap_shootdown_expected_acks());
     shootdown_pending = 0;
 }
 
@@ -1133,6 +1141,7 @@ void pmap_shootdown_range(uint32_t va, uint32_t len) {
     __sync_synchronize();
     
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
+    pmap_shootdown_wait(pmap_shootdown_expected_acks());
     shootdown_pending = 0;
 }
 
@@ -1148,6 +1157,7 @@ void pmap_shootdown_all(void) {
     __sync_synchronize();
     
     lapic_send_ipi_all_excl_self(TLB_SHOOTDOWN_VECTOR);
+    pmap_shootdown_wait(pmap_shootdown_expected_acks());
     shootdown_pending = 0;
 }
 

@@ -94,7 +94,6 @@ extern char vfs_cache_count[];
 extern char vfs_cache_limit[];
 extern char vnode_pager_ops[];
 extern char vnstats[];
-extern char zimage_start[];
 extern void __ashldi3(void);
 extern void __ashrdi3(void);
 extern void __divdi3(void);
@@ -126,6 +125,8 @@ extern void bga_scroll(void);
 extern void blkdev_get(void);
 extern void blkdev_read_bytes(void);
 extern void blkdev_register(void);
+extern void blkdev_register_disk(void);
+extern void blkdev_scan_partitions(void);
 extern void blkdev_write_bytes(void);
 extern void bus_compatible_match(void);
 extern void bus_id_match(void);
@@ -425,6 +426,7 @@ extern void kern_fchdir(void);
 extern void kern_fstat(void);
 extern void kern_getcwd(void);
 extern void kern_getdents(void);
+extern void kern_getdents64(void);
 extern void kern_gettimeofday(void);
 extern void kern_hostname(void);
 extern void kern_ioctl(void);
@@ -593,6 +595,7 @@ extern void pm_init(void);
 extern void pmap_activate(void);
 extern void pmap_bootstrap(void);
 extern void pmap_check(void);
+extern void pmap_clear_modify(void);
 extern void pmap_clear_reference(void);
 extern void pmap_copy(void);
 extern void pmap_copy_page(void);
@@ -608,6 +611,7 @@ extern void pmap_flush_global_pages(void);
 extern void pmap_fork(void);
 extern void pmap_invalidate_all(void);
 extern void pmap_invalidate_page(void);
+extern void pmap_is_modified(void);
 extern void pmap_is_modified_range(void);
 extern void pmap_is_referenced(void);
 extern void pmap_is_referenced_range(void);
@@ -617,7 +621,9 @@ extern void pmap_kremove(void);
 extern void pmap_map_trampoline(void);
 extern void pmap_null_allow(void);
 extern void pmap_null_protect(void);
+extern void pmap_page_clear_reference(void);
 extern void pmap_page_is_cow(void);
+extern void pmap_page_is_referenced(void);
 extern void pmap_protect(void);
 extern void pmap_reference(void);
 extern void pmap_release(void);
@@ -971,6 +977,7 @@ extern void sys_futex(void);
 extern void sys_get_robust_list(void);
 extern void sys_getcwd(void);
 extern void sys_getdents(void);
+extern void sys_getdents64(void);
 extern void sys_getegid(void);
 extern void sys_geteuid(void);
 extern void sys_getgid(void);
@@ -1341,6 +1348,7 @@ extern void vm_page_deactivate(void);
 extern void vm_page_estimate_working_set(void);
 extern void vm_page_free(void);
 extern void vm_page_get_stats(void);
+extern void vm_page_get_vmstat(void);
 extern void vm_page_hold(void);
 extern void vm_page_init(void);
 extern void vm_page_insert(void);
@@ -1576,11 +1584,15 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&pmap_shootdown_commit, "pmap_shootdown_commit" },
     { (uint32_t)(uintptr_t)&pmap_shootdown_wait, "pmap_shootdown_wait" },
     { (uint32_t)(uintptr_t)&pmap_is_referenced, "pmap_is_referenced" },
+    { (uint32_t)(uintptr_t)&pmap_is_modified, "pmap_is_modified" },
     { (uint32_t)(uintptr_t)&pmap_clear_reference, "pmap_clear_reference" },
+    { (uint32_t)(uintptr_t)&pmap_clear_modify, "pmap_clear_modify" },
+    { (uint32_t)(uintptr_t)&pmap_page_is_referenced, "pmap_page_is_referenced" },
+    { (uint32_t)(uintptr_t)&pmap_page_clear_reference, "pmap_page_clear_reference" },
     { (uint32_t)(uintptr_t)&pmap_is_referenced_range, "pmap_is_referenced_range" },
-    { (uint32_t)(uintptr_t)&pmap_test_and_clear_ref, "pmap_test_and_clear_ref" },
     { (uint32_t)(uintptr_t)&pmap_track_access, "pmap_track_access" },
     { (uint32_t)(uintptr_t)&pmap_is_modified_range, "pmap_is_modified_range" },
+    { (uint32_t)(uintptr_t)&pmap_test_and_clear_ref, "pmap_test_and_clear_ref" },
     { (uint32_t)(uintptr_t)&pmap_test_and_clear_modify, "pmap_test_and_clear_modify" },
     { (uint32_t)(uintptr_t)&pmap_track_modify, "pmap_track_modify" },
     { (uint32_t)(uintptr_t)&pmap_fault, "pmap_fault" },
@@ -1878,7 +1890,9 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sys_truncate, "sys_truncate" },
     { (uint32_t)(uintptr_t)&sys_ftruncate, "sys_ftruncate" },
     { (uint32_t)(uintptr_t)&sys_getdents, "sys_getdents" },
+    { (uint32_t)(uintptr_t)&sys_getdents64, "sys_getdents64" },
     { (uint32_t)(uintptr_t)&kern_getdents, "kern_getdents" },
+    { (uint32_t)(uintptr_t)&kern_getdents64, "kern_getdents64" },
     { (uint32_t)(uintptr_t)&sys_uname, "sys_uname" },
     { (uint32_t)(uintptr_t)&kern_uname, "kern_uname" },
     { (uint32_t)(uintptr_t)&sys_exit, "sys_exit" },
@@ -2188,6 +2202,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&uart_putc, "uart_putc" },
     { (uint32_t)(uintptr_t)&uart_write, "uart_write" },
     { (uint32_t)(uintptr_t)&blkdev_register, "blkdev_register" },
+    { (uint32_t)(uintptr_t)&blkdev_scan_partitions, "blkdev_scan_partitions" },
+    { (uint32_t)(uintptr_t)&blkdev_register_disk, "blkdev_register_disk" },
     { (uint32_t)(uintptr_t)&blkdev_get, "blkdev_get" },
     { (uint32_t)(uintptr_t)&blkdev_read_bytes, "blkdev_read_bytes" },
     { (uint32_t)(uintptr_t)&blkdev_write_bytes, "blkdev_write_bytes" },
@@ -2519,6 +2535,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vm_page_age_scan, "vm_page_age_scan" },
     { (uint32_t)(uintptr_t)&vm_page_is_evict_candidate, "vm_page_is_evict_candidate" },
     { (uint32_t)(uintptr_t)&vm_page_get_stats, "vm_page_get_stats" },
+    { (uint32_t)(uintptr_t)&vm_page_get_vmstat, "vm_page_get_vmstat" },
     { (uint32_t)(uintptr_t)&vm_page_estimate_working_set, "vm_page_estimate_working_set" },
     { (uint32_t)(uintptr_t)&vm_page_should_pageout, "vm_page_should_pageout" },
     { (uint32_t)(uintptr_t)&vm_map_init, "vm_map_init" },
@@ -2766,7 +2783,6 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&sigprop, "sigprop" },
     { (uint32_t)(uintptr_t)&font_8x16, "font_8x16" },
     { (uint32_t)(uintptr_t)&font_8x8, "font_8x8" },
-    { (uint32_t)(uintptr_t)&zimage_start, "zimage_start" },
     { (uint32_t)(uintptr_t)&sig_trampoline_code, "sig_trampoline_code" },
     { (uint32_t)(uintptr_t)&sig_trampoline_size, "sig_trampoline_size" },
     { (uint32_t)(uintptr_t)&kernel_hostname, "kernel_hostname" },
@@ -2855,4 +2871,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1422;
+int ksym_count = 1430;
