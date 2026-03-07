@@ -294,9 +294,9 @@
                     - [ ] Map new page R/W at faulting VA. (REQ: REQ-01-0257)
                     - [ ] Decrement original page refcount. (REQ: REQ-01-0258, REQ-01-0472)
                     - [ ] If refcount == 1, optionally remap original R/W in remaining owner. (REQ: REQ-01-0254)
-                - [ ] `pmap_page_is_cow(page)`: check if page is COW-shared. (REQ: REQ-01-0260)
-                - [ ] COW statistics: faults, pages saved, duplications. (REQ: REQ-01-0261)
-                - [ ] `SYS_GET_COW_STATS` (241) syscall and `/proc/cow_stats` procfs entry. (REQ: REQ-01-0262)
+                - [x] `pmap_page_is_cow(page)`: check if page is COW-shared. (REQ: REQ-01-0260)
+                - [x] COW statistics: faults, pages saved, duplications. (REQ: REQ-01-0261)
+                - [x] `SYS_GET_COW_STATS` (241) syscall and `/proc/cow_stats` procfs entry. (REQ: REQ-01-0262)
 
             - [ ] **TLB Management:** (REQ: REQ-01-0263, REQ-01-0369)
                 - [ ] **Single CPU:** (REQ: REQ-01-0264)
