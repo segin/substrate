@@ -482,7 +482,15 @@ void proc_exit(int code) {
         current_process->tty = NULL;
     }
     
-    // 5. Notify Parent
+    // 5. Calculate final rusage (user + system time)
+    extern void rusage_finalize(process_t *p);
+    rusage_finalize(current_process);
+    
+    // 6. Record exit status and set state
+    current_process->exit_code = code;
+    current_process->state = SZOMB;
+
+    // 7. Notify Parent (after transition to SZOMB to avoid missed wait wakeups)
     if (current_process->p_parent) {
         // Check SA_NOCLDWAIT
         int nocldwait = 0;
@@ -501,28 +509,20 @@ void proc_exit(int code) {
                  proc_remove_child(current_process->p_parent, current_process);
                  proc_add_child(init, current_process);
              }
+             // If anyone is waiting on PID 1's child list, wake them.
+             sched_wakeup(&init->p_children);
         } else {
              extern void psignal(process_t *p, int sig);
              psignal(current_process->p_parent, SIGCHLD);
-             // Wakeup parent
+             // Wake up waiters after child is fully waitable.
              sched_wakeup(&current_process->p_parent->p_children);
         }
     } else {
         // No parent? (swapper/init special case)
-        // If PID > 1, should have parent.
-        // Fallback: Wakeup swapper?
         sched_wakeup(&processes[1].p_children); // Wake init just in case
     }
     
-    // 5. Calculate final rusage (user + system time)
-    extern void rusage_finalize(process_t *p);
-    rusage_finalize(current_process);
-    
-    // 6. Record exit status and set state
-    current_process->exit_code = code;
-    current_process->state = SZOMB;
-    
-    // 7. Prevent further scheduling of ALL process threads and wake joiners
+    // 8. Prevent further scheduling of ALL process threads and wake joiners
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 && threads[i].proc == current_process) {
             threads[i].state = THREAD_ZOMBIE;
