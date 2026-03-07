@@ -2496,7 +2496,17 @@ static int parse_declspec(parser_t *p, cc_type_t *out_type, int *out_struct_id,
                             decl_attrs_clear(&mdecl_attrs);
                             return -1;
                         }
-                        bit_signed = parser_is_signed_int_type(mtype) ? 1 : 0;
+                        /*
+                         * Enum bit-field signedness is implementation-defined.
+                         * Keep enum bit-fields zero-extending by default so
+                         * positive-only enumerators with the top value bit set
+                         * are not sign-extended on load.
+                         */
+                        if (mtype == CC_TYPE_ENUM) {
+                            bit_signed = 0;
+                        } else {
+                            bit_signed = parser_is_signed_int_type(mtype) ? 1 : 0;
+                        }
                         msize = bit_storage_size;
 
                         if (is_union) {
@@ -8590,7 +8600,15 @@ static int parse_decl_stmt_list(parser_t *p, cc_stmt_t **arr, size_t *count, int
         if (s.array_ndim > 0 && s.array_dims[0] == 0 && s.expr != NULL) {
             long inferred = 0;
             if (s.expr->kind == CC_EXPR_INIT_LIST) {
-                inferred = (long)s.expr->arg_count;
+                cc_type_t elem_type = ptr_deref_type(s.type);
+                /*
+                 * Defer array-of-aggregate bound inference to sema, which has
+                 * full aggregate shape information and can handle brace-elided
+                 * struct/union element initializers.
+                 */
+                if (!(elem_type == CC_TYPE_VOID && s.type_struct_id >= 0)) {
+                    inferred = (long)s.expr->arg_count;
+                }
             } else if (s.expr->kind == CC_EXPR_STR) {
                 const char *lit = s.expr->ident;
                 if (lit != NULL) {

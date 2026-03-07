@@ -3971,13 +3971,36 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
     }
     sd = &tu->structs[struct_id];
     (void)sd;
+    if (sd->is_union && init->arg_count > 1 && sd->member_count > 0) {
+        const cc_struct_member_t *um = &sd->members[0];
+        cc_expr_t *first = init->args[0];
+        int first_is_designator =
+            (first != NULL && first->kind == CC_EXPR_MEMBER && first->lhs == NULL && first->rhs != NULL && first->ident != NULL);
+        if (!first_is_designator) {
+            if (is_array_object_type(um->type, um->array_len, um->array_ndim)) {
+                if (check_array_initializer(tu, name, um->type, um->type_struct_id, um->array_len, um->array_ndim,
+                                            um->array_dims, init, vars, var_count, depth, NULL, diag) != 0) {
+                    return -1;
+                }
+                return 0;
+            }
+            if (um->type == CC_TYPE_VOID && um->type_struct_id >= 0) {
+                if (check_struct_initializer(tu, name, um->type_struct_id, init, vars, var_count, depth, diag) != 0) {
+                    return -1;
+                }
+                return 0;
+            }
+        }
+    }
     for (i = 0; i < init->arg_count; ++i) {
         cc_expr_t *raw = init->args[i];
         cc_expr_t *item = raw;
         const cc_struct_member_t *m;
         size_t member_idx = next_member;
+        int raw_is_designator =
+            (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL);
 
-        if (sd->is_union && i > 0) {
+        if (sd->is_union && i > 0 && !raw_is_designator) {
             if (diag != NULL && diag->message[0] == '\0') {
                 snprintf(diag->message, sizeof(diag->message), "too many initializers for union %s",
                          name != NULL ? name : "<anon>");
@@ -3985,7 +4008,7 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             return -1;
         }
 
-        if (raw != NULL && raw->kind == CC_EXPR_MEMBER && raw->lhs == NULL && raw->rhs != NULL && raw->ident != NULL) {
+        if (raw_is_designator) {
             int didx = find_struct_member_index(tu, struct_id, raw->ident);
             if (didx < 0) {
                 if (raw->rhs != NULL &&
@@ -4029,12 +4052,36 @@ static int check_struct_initializer(const cc_translation_unit_t *tu, const char 
             next_member = struct_next_init_member(sd, member_idx);
         }
         if (sd->has_flexible_array && member_idx + 1 == sd->member_count) {
-            if (diag != NULL && diag->message[0] == '\0') {
-                snprintf(diag->message, sizeof(diag->message),
-                         "flexible array member cannot be initialized: %s",
-                         name != NULL ? name : "<anon>");
+            cc_type_t flex_type = m->type;
+            int flex_struct_id = m->type_struct_id;
+            int flex_ndim = m->array_ndim > 0 ? m->array_ndim : 1;
+            long flex_dims[CC_MAX_ARRAY_DIMS];
+            memset(flex_dims, 0, sizeof(flex_dims));
+            if (m->array_ndim > 0) {
+                memcpy(flex_dims, m->array_dims, sizeof(flex_dims));
             }
-            return -1;
+            if (item->kind == CC_EXPR_INIT_LIST) {
+                flex_dims[0] = (long)(item->arg_count > 0 ? item->arg_count : 1);
+                if (check_array_initializer(tu, name, flex_type, flex_struct_id, flex_dims[0], flex_ndim, flex_dims,
+                                            item, vars, var_count, depth, NULL, diag) != 0) {
+                    return -1;
+                }
+                continue;
+            }
+            if (check_expr(tu, item, vars, var_count, depth, diag) != 0) {
+                return -1;
+            }
+            if (!can_convert(ptr_base_type(flex_type), item->value_type) &&
+                !(is_pointer_type(ptr_base_type(flex_type)) && is_integral_type(item->value_type) &&
+                  is_null_ptr_constant(item))) {
+                if (diag != NULL && diag->message[0] == '\0') {
+                    snprintf(diag->message, sizeof(diag->message),
+                             "cannot convert flexible-array initializer for %s",
+                             name != NULL ? name : "<anon>");
+                }
+                return -1;
+            }
+            continue;
         }
         if (is_array_object_type(m->type, m->array_len, m->array_ndim)) {
             cc_type_t elem_type = ptr_base_type(m->type);
