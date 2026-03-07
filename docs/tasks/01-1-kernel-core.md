@@ -638,8 +638,8 @@
             - [ ] Property: total allocated + free = zone capacity. (REQ: REQ-01-0560)
             - [ ] Stress: 10000 alloc/free cycles across multiple zones. (REQ: REQ-01-0561)
         - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
-            - [ ] Internal doc: UMA architecture (zone → slab → magazine → per-CPU cache). (REQ: REQ-01-0563)
-            - [ ] Internal doc: `kmalloc` power-of-two zone selection. (REQ: REQ-01-0564)
+            - [x] Internal doc: UMA architecture (zone → slab → magazine → per-CPU cache). (REQ: REQ-01-0563)
+            - [x] Internal doc: `kmalloc` power-of-two zone selection. (REQ: REQ-01-0564)
 
     - [ ] **User Memory Syscalls:** (REQ: REQ-01-0565)
         - [ ] `sys_mmap(addr, len, prot, flags, fd, offset)`: map memory. (REQ: REQ-01-0566)

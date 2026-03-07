@@ -1,27 +1,108 @@
 # Zone Allocator (UMA) Specification
 
 ## Overview
-The Zone Allocator (inspired by BSD's Universal Memory Allocator) provides fixed-size object caching. It aims to reduce allocation overhead and fragmentation by managing "zones" of identical objects.
+Substrate uses a BSD-inspired Universal Memory Allocator (UMA) as the kernel's
+fixed-size object allocator. UMA is the layer beneath `kmalloc()` for small
+allocations and is also used directly by subsystems that want dedicated object
+caches with constructors, destructors, or debugging policy.
 
-## Design
-- **Unit of Allocation:** Fixed-size items.
-- **Growth:** Zones grow by requesting raw pages from the Physical Memory Manager (PMM).
-- **Free List:** Each zone maintains a singly-linked list of free items within its pages.
-- **Efficiency:** O(1) allocation and deallocation from the free list.
+The active architecture is:
+- zone
+- slab
+- bucket
+- per-CPU cache
 
-## API
-### `vm_zone_t *vm_zone_create(const char *name, size_t size, size_t align)`
-Creates a new zone for objects of `size`.
-- `name`: Human-readable identifier for debugging.
-- `align`: Requested alignment (must be a power of two).
+## Core Data Model
 
-### `void *vm_zone_alloc(vm_zone_t *zone)`
-Allocates an item from the zone.
-- Triggers `zone_grow` if the free list is empty.
+### Zone
+A zone represents one object class.
 
-### `void vm_zone_free(vm_zone_t *zone, void *item)`
-Returns an item to the zone's free list.
+Each `uma_zone_t` records:
+- object size (`uz_size`)
+- real per-object size after alignment/redzones (`uz_rsize`)
+- items per slab (`uz_ipers`)
+- callback hooks (`ctor`, `dtor`, `init`, `fini`)
+- flags such as `UMA_ZONE_MALLOC`, `UMA_ZONE_OFFPAGE`, `UMA_ZONE_REDZONE`
+- three slab lists:
+  - full
+  - partial
+  - completely free
+- one per-CPU cache array sized from the detected CPU count
+
+Zones are created from:
+- a static bootstrap pool before `kmem_init()`
+- `kzalloc()` after `uma_enable_dynamic_alloc()`
+
+### Slab
+A slab is the backing storage for a zone.
+
+Current slab behavior:
+- backing memory comes from PMM pages
+- small/medium objects prefer on-page slab metadata
+- large objects use `UMA_ZONE_OFFPAGE`, with slab headers allocated separately
+- free objects are tracked by an index freelist (`us_freelist`) rather than
+  embedding next-pointers in client memory
+- slabs are hashed by backing page address for reverse lookup during free
+
+### Bucket / Magazine Layer
+Substrate's fast path uses small per-CPU buckets:
+- `uc_allocbucket`
+- `uc_freebucket`
+
+These buckets act as magazines for low-contention allocation/free traffic.
+When a bucket is empty or full, the allocator falls back to slab lists.
+
+### Per-CPU Cache
+Each zone owns a per-CPU `uma_cache_t` array.
+
+The intent is:
+- reduce lock contention on hot allocation paths
+- preserve locality for repeatedly allocated small objects
+- keep the slow path isolated in slab management
+
+## Allocation Flow
+1. `uma_zalloc()` checks the current CPU's bucket cache.
+2. If the fast-path bucket has an item, allocation completes immediately.
+3. Otherwise UMA allocates from a partial slab, then a free slab, then a new slab.
+4. `uma_slab_alloc_item()` removes one object index from the slab freelist.
+5. Optional redzone/poison logic is applied according to zone flags.
+
+Free flow is the inverse:
+1. `uma_zfree()` tries to return the item through the current CPU cache.
+2. Slow-path frees resolve the owning slab through the page hash.
+3. The object index is returned to the slab freelist.
+4. Fully free slabs are either cached on the zone free list or returned to PMM,
+   depending on zone policy.
+
+## Bootstrap and Dynamic Transition
+UMA startup occurs before `kmem_init()`, so it cannot initially depend on
+`kmalloc()`.
+
+Current transition:
+- `uma_startup()` initializes global allocator state and bootstrap pools
+- early zones come from the static bootstrap zone array
+- `kmem_init()` creates the `kmem-*` malloc zones
+- `uma_enable_dynamic_alloc()` then allows later zone metadata to be allocated
+  dynamically through `kzalloc()`
+
+This avoids recursive allocator bring-up while still letting UMA scale after the
+general kernel allocator is online.
+
+## Debugging / Safety Features
+Supported policy flags include:
+- redzones
+- poison/trash filling
+- leak tracking
+- off-page slab headers
+- malloc-zone tagging
+
+The implementation also keeps a global slab hash so frees can validate that an
+object belongs to the expected zone before returning it.
 
 ## Constraints
-- Maximum number of bootstrap zones is currently 16.
-- Does not currently support reclaiming empty pages (garbage collection).
+- bootstrap zone metadata is finite until dynamic allocation is enabled
+- bucket arrays are statically bounded by `MAX_CPUS`
+- off-page slab headers still recurse through `kzalloc()`, so the bootstrap
+  transition order matters
+- reclamation exists for fully free slabs, but this is not yet a full
+  general-purpose memory-pressure policy interface
