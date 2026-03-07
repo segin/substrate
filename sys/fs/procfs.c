@@ -14,6 +14,7 @@
 #include <exec/perso/personality.h>
 #include <arch/i386/pmap.h>
 #include <sys/session.h>
+#include <sys/mount.h>
 #include <sys/tty.h>
 #include <string.h>
 #include <stdio.h>
@@ -27,6 +28,7 @@ extern uint32_t get_time(void);
 extern uint32_t pmm_get_total_memory(void);    /* from PMM */
 extern uint32_t pmm_get_free_memory(void);     /* from PMM */
 extern filesystem_t *vfs_get_filesystems(void); /* from VFS */
+extern struct mountlist mountlist;
 
 /* Forward declarations */
 static size_t procfs_generic_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer);
@@ -233,6 +235,65 @@ static uint32_t gen_filesystems(char *buf, size_t size, void *opaque) {
     return off;
 }
 
+static size_t procfs_append_mount_field(char *buf, size_t size, size_t off, const char *field) {
+    const char *src = (field && field[0]) ? field : "none";
+
+    while (*src) {
+        const char *emit = NULL;
+        char ch[2] = { 0, 0 };
+
+        switch (*src) {
+            case ' ': emit = "\\040"; break;
+            case '\t': emit = "\\011"; break;
+            case '\n': emit = "\\012"; break;
+            case '\\': emit = "\\\\"; break;
+            default:
+                ch[0] = *src;
+                emit = ch;
+                break;
+        }
+
+        if (off < size) {
+            int ret = snprintf(buf + off, size - off, "%s", emit);
+            if (ret > 0) {
+                off += (size_t)ret;
+            }
+        } else {
+            off += strlen(emit);
+        }
+        src++;
+    }
+
+    return off;
+}
+
+static uint32_t gen_mounts(char *buf, size_t size, void *opaque) {
+    (void)opaque;
+
+    size_t off = 0;
+    struct mount *mp;
+
+    TAILQ_FOREACH(mp, &mountlist, mnt_list) {
+        const char *from = mp->mnt_stat.f_mntfromname[0] ? mp->mnt_stat.f_mntfromname : mp->mnt_stat.f_fstypename;
+        const char *to = mp->mnt_stat.f_mntonname[0] ? mp->mnt_stat.f_mntonname : mp->mnt_stat_path;
+        const char *type = mp->mnt_stat.f_fstypename[0] ? mp->mnt_stat.f_fstypename : "unknown";
+
+        off = procfs_append_mount_field(buf, size, off, from);
+        if (off < size) off += (size_t)snprintf(buf + off, size - off, " ");
+        else off += 1;
+
+        off = procfs_append_mount_field(buf, size, off, to);
+        if (off < size) off += (size_t)snprintf(buf + off, size - off, " ");
+        else off += 1;
+
+        off = procfs_append_mount_field(buf, size, off, type);
+        if (off < size) off += (size_t)snprintf(buf + off, size - off, " rw 0 0\n");
+        else off += strlen(" rw 0 0\n");
+    }
+
+    return (uint32_t)off;
+}
+
 /*
  * Entry table - Static /proc entries
  * Add new entries here for automatic registration.
@@ -247,6 +308,7 @@ static struct procfs_runtime_entry procfs_entries[] = {
     { "cow_stats",   gen_cow_stats,     NULL },
     { "pmap_stats",  proc_pmap_stats_read, NULL },
     { "filesystems", gen_filesystems,   NULL },
+    { "mounts",      gen_mounts,        NULL },
     { NULL, NULL, NULL }  /* Sentinel */
 };
 
@@ -326,6 +388,9 @@ static fs_node_t *procfs_get_driver_node(struct procfs_runtime_entry *entry) {
 
     for (size_t i = 0; i < procfs_driver_entry_count; i++) {
         if (&procfs_driver_entries[i].runtime == entry) {
+            strncpy(procfs_driver_nodes[i].name, entry->name, sizeof(procfs_driver_nodes[i].name) - 1);
+            procfs_driver_nodes[i].name[sizeof(procfs_driver_nodes[i].name) - 1] = '\0';
+            procfs_driver_nodes[i].inode = PROCFS_DRIVER_INO_BASE + i;
             procfs_driver_nodes[i].impl = (uintptr_t)entry;
             return &procfs_driver_nodes[i];
         }

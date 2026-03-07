@@ -16,13 +16,16 @@
 #include <exec/perso/personality.h>
 #include <arch/i386/pmap.h>
 #include <vm/vm_kmem.h>
+#include <vm/vm_page.h>
 #include <sys/lock.h>
+#include <sys/mount.h>
 
 /* Mocks for externals used in procfs.c */
 
 process_t processes[MAX_PROCS];
 process_t *current_process;
 mutex_t proctree_lock;
+struct mountlist mountlist;
 int kmalloc_should_fail = 0;
 
 void *kmalloc(size_t size) {
@@ -54,12 +57,16 @@ uint32_t pmm_get_free_memory(void) { return 512 * 1024 * 1024; }
 filesystem_t *vfs_get_filesystems(void) { return NULL; }
 void vfs_register_filesystem(filesystem_t *fs) { (void)fs; }
 
-void sched_get_loadavg(unsigned long loads[3]) {
+void sched_get_loadavg(unsigned long *loads) {
     loads[0] = 0; loads[1] = 0; loads[2] = 0;
 }
 uint32_t sched_count_runnable(void) { return 1; }
 uint32_t sched_count_threads(void) { return 10; }
 int proc_get_last_pid(void) { return 100; }
+
+void vm_page_get_vmstat(vm_vmstat_t *stats) {
+    memset(stats, 0, sizeof(*stats));
+}
 
 int sys_pmap_stats(struct pmap_stats *stats) {
     memset(stats, 0, sizeof(*stats));
@@ -108,6 +115,32 @@ void setup_processes() {
     processes[1].gid = 1000;
 
     current_process = &processes[0];
+}
+
+void setup_mounts(void) {
+    static struct mount root_mount;
+    static struct mount proc_mount;
+    static struct mount weird_mount;
+
+    TAILQ_INIT(&mountlist);
+
+    memset(&root_mount, 0, sizeof(root_mount));
+    snprintf(root_mount.mnt_stat.f_mntfromname, sizeof(root_mount.mnt_stat.f_mntfromname), "/dev/storage/ide0p1");
+    snprintf(root_mount.mnt_stat.f_mntonname, sizeof(root_mount.mnt_stat.f_mntonname), "/");
+    snprintf(root_mount.mnt_stat.f_fstypename, sizeof(root_mount.mnt_stat.f_fstypename), "ext2");
+    TAILQ_INSERT_TAIL(&mountlist, &root_mount, mnt_list);
+
+    memset(&proc_mount, 0, sizeof(proc_mount));
+    snprintf(proc_mount.mnt_stat.f_mntfromname, sizeof(proc_mount.mnt_stat.f_mntfromname), "procfs");
+    snprintf(proc_mount.mnt_stat.f_mntonname, sizeof(proc_mount.mnt_stat.f_mntonname), "/proc");
+    snprintf(proc_mount.mnt_stat.f_fstypename, sizeof(proc_mount.mnt_stat.f_fstypename), "procfs");
+    TAILQ_INSERT_TAIL(&mountlist, &proc_mount, mnt_list);
+
+    memset(&weird_mount, 0, sizeof(weird_mount));
+    snprintf(weird_mount.mnt_stat.f_mntfromname, sizeof(weird_mount.mnt_stat.f_mntfromname), "/dev/storage/USB Stick");
+    snprintf(weird_mount.mnt_stat.f_mntonname, sizeof(weird_mount.mnt_stat.f_mntonname), "/media/USB Stick");
+    snprintf(weird_mount.mnt_stat.f_fstypename, sizeof(weird_mount.mnt_stat.f_fstypename), "fat");
+    TAILQ_INSERT_TAIL(&mountlist, &weird_mount, mnt_list);
 }
 
 /* Tests */
@@ -242,17 +275,13 @@ void test_procfs_kmalloc_fail(void) {
     printf("Test: procfs_finddir with kmalloc failure...\n");
     kmalloc_should_fail = 1;
 
-    // Attempt to find existing PID, should fail gracefully (return NULL)
-    // Note: If procfs.c doesn't check for NULL, this will crash.
+    /* procfs uses static nodes for core entries; lookup should still work. */
     fs_node_t *node = procfs_finddir(NULL, "1");
-
-    if (node != NULL) {
-        printf("FAIL: procfs_finddir returned node despite kmalloc failure\n");
-    } else {
-        printf("PASS: procfs_finddir returned NULL on kmalloc failure\n");
-    }
+    assert(node != NULL);
+    assert(node->inode == 1);
 
     kmalloc_should_fail = 0;
+    printf("PASS\n");
 }
 
 void test_proc_status_injection(void) {
@@ -314,10 +343,29 @@ void test_procfs_cmdline_read(void) {
     printf("PASS\n");
 }
 
+void test_procfs_mounts_read(void) {
+    printf("Test: procfs mounts read...\n");
+
+    fs_node_t *node = procfs_finddir(NULL, "mounts");
+    assert(node != NULL);
+    assert(node->read != NULL);
+
+    char buffer[1024];
+    memset(buffer, 0, sizeof(buffer));
+    size_t n = node->read(node, 0, sizeof(buffer) - 1, (uint8_t *)buffer);
+    assert(n > 0);
+    assert(strstr(buffer, "/dev/storage/ide0p1 / ext2 rw 0 0\n") != NULL);
+    assert(strstr(buffer, "procfs /proc procfs rw 0 0\n") != NULL);
+    assert(strstr(buffer, "/dev/storage/USB\\040Stick /media/USB\\040Stick fat rw 0 0\n") != NULL);
+
+    printf("PASS\n");
+}
+
 int main() {
     procfs_init();
     assert(procfs_register_entry("cpuinfo", mock_cpuinfo_gen, NULL) == 0);
     setup_processes();
+    setup_mounts();
 
     test_procfs_finddir_static();
     test_procfs_finddir_pid();
@@ -327,7 +375,7 @@ int main() {
     test_procfs_self_dynamic_target();
     test_procfs_cow_stats_read();
     test_procfs_cmdline_read();
-    // Uncomment to test crash
+    test_procfs_mounts_read();
     test_procfs_kmalloc_fail();
 
     printf("All tests passed!\n");
