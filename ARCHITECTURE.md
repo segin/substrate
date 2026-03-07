@@ -77,6 +77,12 @@ Major kernel layers:
 - `sys/drivers/`: device drivers
 - `sys/exec/`: executable loading and personality execution paths
 
+Device namespace policy in `devfs`:
+- Root pseudo devices remain at `/dev/*` (for example `/dev/null`, `/dev/zero`).
+- Storage block devices are exposed under `/dev/storage/*`.
+- Communication character devices self-register under `/dev/comm/*` (for example `/dev/comm/serial0`, `/dev/comm/parallel0`).
+- Nested device paths are accepted only under predeclared subsystem directories (namespace hardening against arbitrary roots like `/dev/notreal/*`).
+
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
 
 Planned x86 Unix personality targets:
