@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <kern/console.h>
+#include <arch/i386/pmm.h>
 #include <vm/phys_mem.h>
 #include <vm/vm_page.h>
 
@@ -233,6 +234,29 @@ static void test_paddr_to_page(void) {
     TEST_PASS("paddr_to_page");
 }
 
+/* Test: pmm_get_page wrapper resolves the same vm_page_t as phys_mem */
+static void test_pmm_get_page_wrapper(void) {
+    vm_page_t *page = vm_phys_alloc_page();
+    TEST_ASSERT(page != NULL, "pmm_get_page: alloc failed");
+
+    vm_page_t *lookup = pmm_get_page(page->phys_addr);
+    TEST_ASSERT(lookup == page, "pmm_get_page: wrapper mismatch");
+
+    vm_phys_free_page(page);
+    TEST_PASS("pmm_get_page_wrapper");
+}
+
+/* Test: vm_page_to_phys returns the tracked physical address */
+static void test_vm_page_to_phys_accessor(void) {
+    vm_page_t *page = vm_phys_alloc_page();
+    TEST_ASSERT(page != NULL, "vm_page_to_phys: alloc failed");
+    TEST_ASSERT(vm_page_to_phys(page) == page->phys_addr,
+                "vm_page_to_phys: accessor mismatch");
+
+    vm_phys_free_page(page);
+    TEST_PASS("vm_page_to_phys_accessor");
+}
+
 /* Test: Zero count contiguous allocation returns NULL */
 static void test_contiguous_zero_count(void) {
     vm_page_t *page = vm_phys_alloc_contiguous(0);
@@ -344,6 +368,8 @@ void test_vm_phys(void) {
     test_buddy_coalescing();
     test_buddy_splitting_from_order1();
     test_paddr_to_page();
+    test_pmm_get_page_wrapper();
+    test_vm_page_to_phys_accessor();
     test_contiguous_zero_count();
     test_free_count_tracking();
     test_mark_used_single_page_reservation();
