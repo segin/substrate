@@ -6,11 +6,11 @@
 #include <stdlib.h>
 #include <stdarg.h>
 
-/* Mock panic to record the failure without aborting the host test. */
 static int panic_called = 0;
+
 void panic(const char *msg) {
     printf("PANIC CALLED: %s\n", msg);
-    panic_called = 1;
+    panic_called++;
 }
 
 void kprint(const char *msg) {
@@ -60,32 +60,49 @@ void kfree(void *p, size_t size) {
 #include "../../sys/vm/uma_core.c"
 #include "../../sys/vm/uma_debug.c"
 
-int main() {
+int main(void) {
     uma_startup();
     uma_enable_dynamic_alloc();
 
-    uma_zone_t *zone = uma_zcreate("test_zone", 32, NULL, NULL, NULL, NULL, 0, UMA_ZONE_REDZONE);
+    uma_zone_t *zone = uma_zcreate("test_poison", 24, NULL, NULL, NULL, NULL, 0,
+                                   UMA_ZONE_TRASH);
     if (!zone) {
-        fprintf(stderr, "FAIL: could not create redzone zone\n");
+        fprintf(stderr, "FAIL: could not create poison zone\n");
         return 1;
     }
 
     void *item = uma_zalloc(zone, 0);
     if (!item) {
-        fprintf(stderr, "FAIL: could not allocate redzone object\n");
+        fprintf(stderr, "FAIL: could not allocate poison object\n");
         return 1;
     }
 
-    /* Corrupt the post-redzone and verify the real checker trips panic. */
-    uint8_t *post = (uint8_t *)item + zone->uz_size;
-    *post = 0x00;
+    memset(item, 0x5A, zone->uz_size);
     uma_zfree(zone, item);
 
-    if (!panic_called) {
-        fprintf(stderr, "FAIL: redzone corruption did not trigger panic\n");
+    item = uma_zalloc(zone, 0);
+    if (!item) {
+        fprintf(stderr, "FAIL: could not reallocate poison object\n");
+        return 1;
+    }
+    if (panic_called != 0) {
+        fprintf(stderr, "FAIL: intact poison pattern falsely triggered panic\n");
         return 1;
     }
 
-    printf("PASS: redzone corruption triggered panic path\n");
+    uma_zfree(zone, item);
+
+    ((uint8_t *)item)[0] ^= 0xFF;
+    item = uma_zalloc(zone, 0);
+    if (!item) {
+        fprintf(stderr, "FAIL: poisoned realloc returned NULL\n");
+        return 1;
+    }
+    if (panic_called == 0) {
+        fprintf(stderr, "FAIL: poison corruption did not trigger panic\n");
+        return 1;
+    }
+
+    printf("PASS: poison corruption triggered panic path\n");
     return 0;
 }

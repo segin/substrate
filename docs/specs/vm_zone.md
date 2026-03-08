@@ -91,7 +91,8 @@ general kernel allocator is online.
 ## Debugging / Safety Features
 Supported policy flags include:
 - redzones
-- poison/trash filling
+- poison/trash filling, with free-pattern validation on reallocation to catch
+  use-after-free scribbles
 - leak tracking
 - off-page slab headers
 - malloc-zone tagging

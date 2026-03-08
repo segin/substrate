@@ -370,8 +370,8 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
         slab->us_freelist[i] = (i + 1 < zone->uz_ipers) ? (i + 1) : 0xFF;
     }
     
-    /* Call init callback on each object and initialize redzones */
-    if (zone->uz_init || (zone->uz_flags & UMA_ZONE_REDZONE)) {
+    /* Call init callback and initialize debug patterns on each object. */
+    if (zone->uz_init || (zone->uz_flags & (UMA_ZONE_REDZONE | UMA_ZONE_TRASH))) {
         for (uint32_t i = 0; i < zone->uz_ipers; i++) {
             void *obj = (void *)((uintptr_t)page + i * zone->uz_rsize);
             void *item = obj;
@@ -384,6 +384,10 @@ static uma_slab_t *uma_slab_alloc(uma_zone_t *zone) {
             
             if (zone->uz_init) {
                 zone->uz_init(item, zone->uz_size, 0);
+            }
+
+            if (zone->uz_flags & UMA_ZONE_TRASH) {
+                uma_debug_poison_free(zone, item);
             }
         }
     }
