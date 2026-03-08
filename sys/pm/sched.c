@@ -14,6 +14,7 @@ thread_t *current_thread = NULL;
 
 
 #include <kern/arch.h>
+#include <arch/i386/percpu.h>
 
 
 
@@ -79,6 +80,7 @@ static void sched_context_switch(thread_t *prev, thread_t *next) {
 
     next->state = THREAD_RUNNING;
 
+    THIS_CPU()->current = next;
     current_thread = next;
     current_process = current_thread->proc;
 

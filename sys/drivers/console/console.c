@@ -174,10 +174,13 @@ int kprintf(const char *fmt, ...) {
 
 void console_attach_std_fds(struct process *proc) {
     if (!proc) return;
-    
-    // Only init (PID 1) gets console attached by default.
-    // Others inherit from parent or open explicitly.
-    if (proc->pid != 1) return;
+
+    /*
+     * This helper is called explicitly from kinit_task() for the init
+     * process. Do not hard-code a numeric PID here; background kernel
+     * workers may be spawned before init during bring-up.
+     */
+    if (proc->is_kernel_task) return;
 
     fs_node_t *node = console_get_node();
     if (!node) {

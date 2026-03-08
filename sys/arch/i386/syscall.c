@@ -26,6 +26,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <sys/exec.h>
+#include <arch/i386/percpu.h>
 
 
 /* Arch-independent syscalls are now in kern/syscall.c */
@@ -94,6 +95,10 @@ int sys_set_thread_area(struct user_desc *u_info) {
 extern int syscall_trace_enabled;
 
 void syscall_handler(registers_t *regs) {
+    thread_t *cpu_thread = CURRENT_THREAD();
+    current_thread = cpu_thread;
+    current_process = cpu_thread ? cpu_thread->proc : NULL;
+
     if (!current_process) {
         regs->eax = -38; // ENOSYS
         return;

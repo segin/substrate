@@ -24,6 +24,7 @@ idt_ptr_t   idt_ptr;
 #include <arch/i386/vm86.h>
 #include <arch/i386/pmap.h>
 #include <sys/exec.h>
+#include <arch/i386/percpu.h>
 // isr externs are in idt.h now
 
 
@@ -123,6 +124,10 @@ void idt_set_gate(uint8_t num, uint32_t base, uint16_t sel, uint8_t flags) {
 #include <sys/random.h>
 
 void isr_handler(registers_t *regs) {
+    thread_t *cpu_thread = CURRENT_THREAD();
+    current_thread = cpu_thread;
+    current_process = cpu_thread ? cpu_thread->proc : NULL;
+
     /* Harvest entropy from interrupt timing (TSC) */
     uint64_t tsc;
     __asm__ volatile("rdtsc" : "=A"(tsc));

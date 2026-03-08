@@ -510,9 +510,6 @@ void kmain(unsigned long magic, unsigned long addr) {
         sched_smp_init(smp_get_cpu_count());
     }
 
-    // Start VM background workers now that kernel threads can run.
-    vm_page_late_init();
-
     // Initialize Sysctl Subsystem
     extern void sysctl_init(void);
     sysctl_init();
@@ -561,6 +558,9 @@ void kmain(unsigned long magic, unsigned long addr) {
     // Create Init Task
     // We pass cmdline to it
     sched_spawn_kernel_process(init_task, cmdline);
+
+    // Start VM background workers after init is created so PID 1 remains init.
+    vm_page_late_init();
 
     // Reclaim early boot code
     pmm_reclaim_setup();
