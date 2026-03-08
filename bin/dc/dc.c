@@ -2,203 +2,450 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <stdarg.h>
 #include "../../usr.lib/bc/num.h"
 
-#define STACK_SIZE 1024
-bc_num *stack[STACK_SIZE];
-int sp = 0;
+typedef enum { VAL_NUM, VAL_STR } val_type_t;
 
-void push(bc_num *v) {
-    if (sp < STACK_SIZE) stack[sp++] = v;
-    else printf("dc: stack overflow\n");
-}
+typedef struct {
+    val_type_t type;
+    union {
+        bc_num *num;
+        char *str;
+    } v;
+} dc_val_t;
 
-bc_num *pop() {
-    if (sp > 0) return stack[--sp];
-    printf("dc: stack empty\n");
-    return bc_from_long(0);
-}
-
-bc_num *peek() {
-    if (sp > 0) return stack[sp-1];
-    return bc_from_long(0);
-}
-
-// Dynamic buffer for input parsing
-struct {
-    char *data;
-    int len;
+typedef struct dc_stack {
+    dc_val_t **data;
+    int sp;
     int cap;
-} input_buf;
+} dc_stack_t;
 
-void buf_init() {
-    input_buf.cap = 1024;
-    input_buf.len = 0;
-    input_buf.data = malloc(input_buf.cap);
-    if (!input_buf.data) {
-        perror("dc: malloc");
-        exit(1);
-    }
+typedef struct {
+    dc_stack_t stack;
+    bc_num **array;
+    int array_len;
+} dc_reg_t;
+
+dc_stack_t main_stack;
+dc_reg_t regs[256];
+int quit_levels = 0;
+
+void stack_init(dc_stack_t *s) {
+    s->cap = 64;
+    s->sp = 0;
+    s->data = malloc(s->cap * sizeof(dc_val_t*));
 }
 
-void buf_append(char c) {
-    if (input_buf.len + 1 >= input_buf.cap) {
-        input_buf.cap *= 2;
-        input_buf.data = realloc(input_buf.data, input_buf.cap);
-        if (!input_buf.data) {
-            perror("dc: realloc");
-            exit(1);
-        }
-    }
-    input_buf.data[input_buf.len++] = c;
+void val_free(dc_val_t *v) {
+    if (!v) return;
+    if (v->type == VAL_NUM) bc_free(v->v.num);
+    else free(v->v.str);
+    free(v);
 }
 
-void buf_reset() {
-    input_buf.len = 0;
+dc_val_t *val_new_num(bc_num *n) {
+    dc_val_t *v = malloc(sizeof(dc_val_t));
+    v->type = VAL_NUM;
+    v->v.num = n;
+    return v;
 }
 
-// Flush current number in buffer to stack
-void flush_num(int *in_num, int *sign, int *dot_seen) {
-    if (*in_num) {
-        // Null terminate
-        if (input_buf.len + 1 > input_buf.cap) {
-             buf_append(0);
-        } else {
-             input_buf.data[input_buf.len] = 0;
-        }
-
-        bc_num *n = bc_from_string(input_buf.data);
-        if (*sign < 0 && !bc_is_zero(n)) n->sign = -1;
-        push(n);
-
-        buf_reset();
-        *in_num = 0;
-        *sign = 1;
-        *dot_seen = 0;
-    }
+dc_val_t *val_new_str(const char *s) {
+    dc_val_t *v = malloc(sizeof(dc_val_t));
+    v->type = VAL_STR;
+    v->v.str = strdup(s);
+    return v;
 }
 
-int main(int argc, char *argv[]) {
-    FILE *in = stdin;
-    if (argc > 1) {
-        in = fopen(argv[1], "r");
-        if (!in) { perror("dc"); return 1; }
+dc_val_t *val_dup(dc_val_t *v) {
+    if (!v) return NULL;
+    if (v->type == VAL_NUM) return val_new_num(bc_dup(v->v.num));
+    return val_new_str(v->v.str);
+}
+
+void push(dc_stack_t *s, dc_val_t *v) {
+    if (s->sp >= s->cap) {
+        s->cap *= 2;
+        s->data = realloc(s->data, s->cap * sizeof(dc_val_t*));
+    }
+    s->data[s->sp++] = v;
+}
+
+dc_val_t *pop(dc_stack_t *s) {
+    if (s->sp <= 0) {
+        fprintf(stderr, "dc: stack empty\n");
+        return val_new_num(bc_from_long(0));
+    }
+    return s->data[--s->sp];
+}
+
+dc_val_t *peek(dc_stack_t *s) {
+    if (s->sp <= 0) {
+        fprintf(stderr, "dc: stack empty\n");
+        return val_new_num(bc_from_long(0));
+    }
+    return s->data[s->sp - 1];
+}
+
+typedef struct {
+    const char *p;
+    FILE *f;
+} input_t;
+
+int get_char(input_t *in) {
+    if (in->p) {
+        if (*in->p) return (unsigned char)*in->p++;
+        return EOF;
+    }
+    return fgetc(in->f);
+}
+
+void unget_char(input_t *in, int c) {
+    if (in->p) {
+        if (c != EOF) in->p--;
+        return;
+    }
+    ungetc(c, in->f);
+}
+
+void execute(input_t *in);
+
+void execute_str(const char *s) {
+    input_t in = { .p = s, .f = NULL };
+    execute(&in);
+    if (quit_levels > 0) quit_levels--;
+}
+
+void do_cond(input_t *in, int op, int negate) {
+    int next = get_char(in);
+    int r = next;
+    int has_equal = 0;
+    if (next == '=') {
+        has_equal = 1;
+        r = get_char(in);
+    }
+    if (r == EOF) return;
+
+    dc_val_t *bv = pop(&main_stack);
+    dc_val_t *av = pop(&main_stack);
+    if (av->type != VAL_NUM || bv->type != VAL_NUM) {
+        fprintf(stderr, "dc: non-numeric comparison\n");
+        push(&main_stack, av); push(&main_stack, bv);
+        return;
     }
 
-    buf_init();
+    int cmp = bc_compare(av->v.num, bv->v.num);
+    int ok = 0;
+    if (op == '<') {
+        if (has_equal) ok = (cmp <= 0);
+        else ok = (cmp < 0);
+    } else if (op == '>') {
+        if (has_equal) ok = (cmp >= 0);
+        else ok = (cmp > 0);
+    } else if (op == '=') {
+        ok = (cmp == 0);
+    }
 
+    if (negate) ok = !ok;
+
+    if (ok && regs[r].stack.sp > 0) {
+        dc_val_t *v = peek(&regs[r].stack);
+        if (v->type == VAL_STR) execute_str(v->v.str);
+    }
+    val_free(av); val_free(bv);
+}
+
+void execute(input_t *in) {
     int c;
-    int in_num = 0;
-    int sign = 1;
-    int dot_seen = 0;
-
-    while ((c = fgetc(in)) != EOF) {
-        if (isspace(c)) {
-            flush_num(&in_num, &sign, &dot_seen);
-            continue;
-        }
+    while ((c = get_char(in)) != EOF) {
+        if (quit_levels > 0) return;
+        if (isspace(c)) continue;
         
-        // Number chars (digits or dot)
-        if (isdigit(c) || c == '.') {
-            if (c == '.' && dot_seen) {
-                flush_num(&in_num, &sign, &dot_seen);
-                // Start new number with this dot
-                in_num = 1;
-                buf_append(c);
-                dot_seen = 1;
-                continue;
+        if (isdigit(c) || c == '_' || c == '.' || (bc_ibase > 10 && c >= 'A' && c <= 'F')) {
+            char buf[1024]; int i = 0;
+            int sign = 1;
+            if (c == '_') { sign = -1; c = get_char(in); }
+            while (c != EOF && (isdigit(c) || c == '.' || (bc_ibase > 10 && c >= 'A' && c <= 'F'))) {
+                if (i < 1023) buf[i++] = c;
+                c = get_char(in);
             }
-            if (c == '.') dot_seen = 1;
-            in_num = 1;
-            buf_append(c);
+            buf[i] = 0;
+            if (c != EOF) unget_char(in, c);
+            if (buf[0]) {
+                bc_num *n = bc_from_string(buf, bc_ibase);
+                if (sign < 0) n->sign = -n->sign;
+                push(&main_stack, val_new_num(n));
+            }
             continue;
         }
-        
+
         if (c == '#') {
-            while ((c = fgetc(in)) != '\n' && c != EOF);
+            while ((c = get_char(in)) != EOF && c != '\n');
             continue;
         }
 
-        if (c == '_') {
-            flush_num(&in_num, &sign, &dot_seen);
-            sign = -1;
-            in_num = 1;
+        if (c == '[') {
+            char *s = malloc(1024); int i = 0, cap = 1024;
+            int depth = 1;
+            while ((c = get_char(in)) != EOF) {
+                if (c == '[') depth++;
+                else if (c == ']') {
+                    if (--depth == 0) break;
+                }
+                if (i + 1 >= cap) {
+                    cap *= 2;
+                    s = realloc(s, cap);
+                }
+                s[i++] = c;
+            }
+            s[i] = 0;
+            push(&main_stack, val_new_str(s));
+            free(s);
             continue;
         }
 
-        // Other char => command. Flush number first.
-        flush_num(&in_num, &sign, &dot_seen);
-
-        bc_num *a, *b, *res;
         switch (c) {
-            case 'p':
-                if (sp > 0) {
-                    bc_print(peek());
-                    printf("\n");
-                } else printf("dc: stack empty\n");
+            case 'p': {
+                dc_val_t *v = peek(&main_stack);
+                if (v->type == VAL_NUM) { bc_print_base(v->v.num, bc_obase); printf("\n"); }
+                else printf("%s\n", v->v.str);
                 break;
-            case 'n':
-                if (sp > 0) {
-                    bc_print(pop());
-                } else printf("dc: stack empty\n");
+            }
+            case 'n': {
+                dc_val_t *v = pop(&main_stack);
+                if (v->type == VAL_NUM) bc_print_base(v->v.num, bc_obase);
+                else printf("%s", v->v.str);
+                val_free(v);
                 break;
+            }
             case 'f':
-                for (int i = sp - 1; i >= 0; i--) {
-                    bc_print(stack[i]);
+                for (int i = main_stack.sp - 1; i >= 0; i--) {
+                    dc_val_t *v = main_stack.data[i];
+                    if (v->type == VAL_NUM) bc_print_base(v->v.num, bc_obase);
+                    else printf("%s", v->v.str);
                     printf("\n");
                 }
                 break;
             case 'c':
-                while (sp > 0) bc_free(pop());
-                sp = 0;
+                while (main_stack.sp > 0) val_free(pop(&main_stack));
                 break;
-            case 'd': // Duplicate
-                if (sp > 0) push(bc_dup(peek()));
-                else printf("dc: stack empty\n");
+            case 'd':
+                push(&main_stack, val_dup(peek(&main_stack)));
                 break;
-            case '+':
-                b = pop(); a = pop();
-                res = bc_add(a, b);
-                push(res);
-                bc_free(a); bc_free(b);
+            case 'r': {
+                dc_val_t *a = pop(&main_stack);
+                dc_val_t *b = pop(&main_stack);
+                push(&main_stack, a);
+                push(&main_stack, b);
                 break;
-            case '-':
-                b = pop(); a = pop();
-                res = bc_sub(a, b);
-                push(res);
-                bc_free(a); bc_free(b);
+            }
+            case 'z':
+                push(&main_stack, val_new_num(bc_from_long(main_stack.sp)));
                 break;
-            case '*':
-                b = pop(); a = pop();
-                res = bc_mul(a, b);
-                push(res);
-                bc_free(a); bc_free(b);
+            case '+': case '-': case '*': case '/': case '%': case '^': {
+                dc_val_t *bv = pop(&main_stack);
+                dc_val_t *av = pop(&main_stack);
+                if (av->type != VAL_NUM || bv->type != VAL_NUM) {
+                    fprintf(stderr, "dc: non-numeric value\n");
+                    push(&main_stack, av); push(&main_stack, bv);
+                    break;
+                }
+                bc_num *res = NULL;
+                if (c == '+') res = bc_add(av->v.num, bv->v.num);
+                else if (c == '-') res = bc_sub(av->v.num, bv->v.num);
+                else if (c == '*') res = bc_mul(av->v.num, bv->v.num);
+                else if (c == '/') res = bc_div(av->v.num, bv->v.num);
+                else if (c == '%') res = bc_mod(av->v.num, bv->v.num);
+                else if (c == '^') res = bc_pow(av->v.num, bv->v.num);
+                push(&main_stack, val_new_num(res));
+                val_free(av); val_free(bv);
                 break;
-            case '/':
-                b = pop(); a = pop();
-                res = bc_div(a, b);
-                push(res);
-                bc_free(a); bc_free(b);
+            }
+            case 'v': {
+                dc_val_t *v = pop(&main_stack);
+                if (v->type == VAL_NUM) push(&main_stack, val_new_num(bc_sqrt(v->v.num)));
+                else fprintf(stderr, "dc: non-numeric value\n");
+                val_free(v);
                 break;
-            case '%':
-                b = pop(); a = pop();
-                res = bc_mod(a, b);
-                push(res);
-                bc_free(a); bc_free(b);
+            }
+            case 'i': {
+                dc_val_t *v = pop(&main_stack);
+                if (v->type == VAL_NUM) bc_ibase = (int)bc_num_to_long(v->v.num);
+                val_free(v);
                 break;
-            case '^':
-                b = pop(); a = pop();
-                res = bc_pow(a, b);
-                push(res);
-                bc_free(a); bc_free(b);
+            }
+            case 'o': {
+                dc_val_t *v = pop(&main_stack);
+                if (v->type == VAL_NUM) bc_obase = (int)bc_num_to_long(v->v.num);
+                val_free(v);
                 break;
-            case 'q':
-                if (input_buf.data) free(input_buf.data);
-                return 0;
-            default:
+            }
+            case 'k': {
+                dc_val_t *v = pop(&main_stack);
+                if (v->type == VAL_NUM) bc_scale = (int)bc_num_to_long(v->v.num);
+                val_free(v);
+                break;
+            }
+            case 'I': push(&main_stack, val_new_num(bc_from_long(bc_ibase))); break;
+            case 'O': push(&main_stack, val_new_num(bc_from_long(bc_obase))); break;
+            case 'K': push(&main_stack, val_new_num(bc_from_long(bc_scale))); break;
+            case '?': {
+                char line[1024];
+                if (fgets(line, sizeof(line), stdin)) execute_str(line);
+                break;
+            }
+            case 'a': {
+                dc_val_t *v = pop(&main_stack);
+                if (v->type == VAL_NUM) {
+                    char buf[2] = { (char)bc_num_to_long(v->v.num), 0 };
+                    push(&main_stack, val_new_str(buf));
+                } else if (v->v.str[0]) {
+                    char buf[2] = { v->v.str[0], 0 };
+                    push(&main_stack, val_new_str(buf));
+                }
+                val_free(v);
+                break;
+            }
+            case 'x': {
+                dc_val_t *v = pop(&main_stack);
+                if (v->type == VAL_STR) execute_str(v->v.str);
+                else { 
+                    // GNU dc executes number by pushing it back? No, it just pops.
+                    // But if it's a number, it can't be 'x'd.
+                }
+                val_free(v);
+                break;
+            }
+            case 's': {
+                int r = get_char(in);
+                if (r == EOF) break;
+                dc_val_t *v = pop(&main_stack);
+                if (regs[r].stack.sp > 0) val_free(pop(&regs[r].stack));
+                else if (!regs[r].stack.data) stack_init(&regs[r].stack);
+                push(&regs[r].stack, v);
+                break;
+            }
+            case 'l': {
+                int r = get_char(in);
+                if (r == EOF) break;
+                if (regs[r].stack.sp > 0) push(&main_stack, val_dup(peek(&regs[r].stack)));
+                else push(&main_stack, val_new_num(bc_from_long(0)));
+                break;
+            }
+            case 'S': {
+                int r = get_char(in);
+                if (r == EOF) break;
+                if (!regs[r].stack.data) stack_init(&regs[r].stack);
+                push(&regs[r].stack, pop(&main_stack));
+                break;
+            }
+            case 'L': {
+                int r = get_char(in);
+                if (r == EOF) break;
+                if (regs[r].stack.sp > 0) push(&main_stack, pop(&regs[r].stack));
+                else push(&main_stack, val_new_num(bc_from_long(0)));
+                break;
+            }
+            case 'Z': {
+                dc_val_t *v = pop(&main_stack);
+                int l = 0;
+                if (v->type == VAL_NUM) l = v->v.num->len; // Rough estimate or full digit count?
+                else l = strlen(v->v.str);
+                push(&main_stack, val_new_num(bc_from_long(l)));
+                val_free(v);
+                break;
+            }
+            case 'X': {
+                dc_val_t *v = pop(&main_stack);
+                int s = 0;
+                if (v->type == VAL_NUM) s = v->v.num->scale;
+                push(&main_stack, val_new_num(bc_from_long(s)));
+                val_free(v);
+                break;
+            }
+            case ':': {
+                int r = get_char(in);
+                if (r == EOF) break;
+                dc_val_t *idxv = pop(&main_stack);
+                dc_val_t *valv = pop(&main_stack);
+                if (idxv->type != VAL_NUM || valv->type != VAL_NUM) {
+                    fprintf(stderr, "dc: non-numeric array access\n");
+                } else {
+                    int idx = (int)bc_num_to_long(idxv->v.num);
+                    if (idx < 0) fprintf(stderr, "dc: array index out of bounds\n");
+                    else {
+                        if (!regs[r].array) {
+                            regs[r].array_len = idx + 1;
+                            regs[r].array = calloc(regs[r].array_len, sizeof(bc_num*));
+                        }
+                        if (idx >= regs[r].array_len) {
+                            int old = regs[r].array_len;
+                            regs[r].array_len = idx + 1;
+                            regs[r].array = realloc(regs[r].array, regs[r].array_len * sizeof(bc_num*));
+                            memset(regs[r].array + old, 0, (regs[r].array_len - old) * sizeof(bc_num*));
+                        }
+                        if (regs[r].array[idx]) bc_free(regs[r].array[idx]);
+                        regs[r].array[idx] = bc_dup(valv->v.num);
+                    }
+                }
+                val_free(idxv); val_free(valv);
+                break;
+            }
+            case ';': {
+                int r = get_char(in);
+                if (r == EOF) break;
+                dc_val_t *idxv = pop(&main_stack);
+                if (idxv->type != VAL_NUM) {
+                    fprintf(stderr, "dc: non-numeric array access\n");
+                } else {
+                    int idx = (int)bc_num_to_long(idxv->v.num);
+                    if (idx < 0 || !regs[r].array || idx >= regs[r].array_len) {
+                        push(&main_stack, val_new_num(bc_from_long(0)));
+                    } else {
+                        if (regs[r].array[idx]) push(&main_stack, val_new_num(bc_dup(regs[r].array[idx])));
+                        else push(&main_stack, val_new_num(bc_from_long(0)));
+                    }
+                }
+                val_free(idxv);
+                break;
+            }
+            case 'q': quit_levels = 2; return;
+            case 'Q': {
+                dc_val_t *v = pop(&main_stack);
+                quit_levels = (int)bc_num_to_long(v->v.num);
+                val_free(v);
+                return;
+            }
+            case '!': {
+                int next = get_char(in);
+                if (next == '<' || next == '>' || next == '=') {
+                    do_cond(in, next, 1);
+                } else {
+                    char line[1024]; int i = 0;
+                    while (next != EOF && next != '\n') {
+                        if (i < 1023) line[i++] = next;
+                        next = get_char(in);
+                    }
+                    line[i] = 0;
+                    if (line[0]) system(line);
+                }
+                break;
+            }
+            case '<': case '>': case '=':
+                do_cond(in, c, 0);
                 break;
         }
     }
-    if (input_buf.data) free(input_buf.data);
+}
+
+int main(int argc, char *argv[]) {
+    stack_init(&main_stack);
+    input_t in = { .p = NULL, .f = stdin };
+    if (argc > 1) {
+        in.f = fopen(argv[argc-1], "r");
+        if (!in.f) { perror("dc"); return 1; }
+    }
+    execute(&in);
     return 0;
 }

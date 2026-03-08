@@ -105,17 +105,19 @@ bc_num *bc_from_long(long long v) {
 long long bc_num_to_long(bc_num *n) {
     if (!n || n->len == 0) return 0;
     long long res = 0;
+    int s = n->scale;
+    int start = s / 2;
     long long p = 1;
-    // This only works for the integer part, which is what bc_scale/ibase need.
-    // Integer part starts at base-100 digit 'n->scale / 2'
-    int start = (n->scale + 1) / 2;
+    
     for (int i = start; i < n->len; i++) {
-        res += (long long)n->digits[i] * p;
-        p *= 100;
+        int val = n->digits[i];
+        if (i == start && (s % 2) != 0) {
+            val /= 10;
+        }
+        res += (long long)val * p;
+        if (i == start && (s % 2) != 0) p = 10;
+        else p *= 100;
     }
-    // Handle the half-digit if scale is odd? No, scale is decimal digits.
-    // If scale=1, "1.2" -> [20, 1]. val=12. Integer is 1.
-    // digits[0]=20. digits[1]=1. start = 1. res = 1.
     return n->sign < 0 ? -res : res;
 }
 
@@ -128,11 +130,10 @@ static int char_val(int c) {
 // Parse string honoring ibase. Support for ibase 2-36.
 // Note: single-digit decimal fraction parsing uses ibase.
 bc_num *bc_from_string_base(const char *s, int ibase) {
-    bc_num *n = bc_new();
-    if (!s) return n;
+    if (!s) return bc_new();
 
     while (isspace(*s)) s++;
-    if (*s == '\0') return n;
+    if (*s == '\0') return bc_new();
 
     int sign = 1;
     if (*s == '-') {
@@ -142,8 +143,6 @@ bc_num *bc_from_string_base(const char *s, int ibase) {
         s++;
     }
 
-    // A parsed number is mathematically: sum(d_i * ibase^i) * ibase^-frac_len
-    // We will build it via multiplication: val = val * ibase + digit
     bc_num *ibase_num = bc_from_long(ibase);
     bc_num *val = bc_from_long(0);
     
@@ -160,15 +159,8 @@ bc_num *bc_from_string_base(const char *s, int ibase) {
         
         int d = char_val(*s);
         if (d < 0 || d >= ibase) {
-            // For ibase <= 16, single character A-F. 
-            // What if char is invalid? Stop.
-            
-            // Wait, bc manual: digits greater than or equal to ibase are set to ibase-1
-            if (d >= ibase && d <= 35) {
-                d = ibase - 1;
-            } else {
-                break; // Not a recognized digit at all
-            }
+            if (d >= ibase && d <= 35) d = ibase - 1;
+            else break;
         }
         
         if (seen_dot) frac_len++;
@@ -187,23 +179,13 @@ bc_num *bc_from_string_base(const char *s, int ibase) {
     
     bc_free(ibase_num);
     
-    // Now val holds the integer representing all digits.
-    // It is conceptually val / (ibase ^ frac_len).
-    // Let's keep it simple for now if ibase == 10.
     if (ibase == 10) {
-        // Just set scale.
-        // Wait, val is currently a base-100 representation of the integer value.
-        // We need to shift it to align scale properly.
-        // If frac_len is say 3, "1.234" -> val=1234, scale=3. 
-        // 1234 is base-100: [34, 12]
         val->scale = frac_len;
         val->sign = bc_is_zero(val) ? 0 : sign;
-        bc_free(n);
+        bc_trim(val);
         return val;
     }
     
-    // Non-10 ibase handles fractions via division:
-    // val_num = int_val / (ibase^frac_len)
     if (frac_len > 0) {
         bc_num *ib = bc_from_long(ibase);
         bc_num *pow_f = bc_from_long(frac_len);
@@ -211,22 +193,19 @@ bc_num *bc_from_string_base(const char *s, int ibase) {
         bc_free(ib);
         bc_free(pow_f);
         
-        // Wait, bc POSIX: "fractional part of the constant is scale 
-        // determined by number of digits". 
-        // Division uses max(scale, obj->scale). Let's temporarily bump bc_scale.
-        
-        // This is tricky because bc_div uses bc_scale.
-        // In reality, constants are converted using floating point division.
+        int old_scale = bc_scale;
+        bc_scale = frac_len; 
         bc_num *res = bc_div(val, denom);
+        bc_scale = old_scale;
+        
         res->sign = bc_is_zero(res) ? 0 : sign;
         bc_free(val);
         bc_free(denom);
-        bc_free(n);
         return res;
     }
     
     val->sign = bc_is_zero(val) ? 0 : sign;
-    bc_free(n);
+    bc_trim(val);
     return val;
 }
 
