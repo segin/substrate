@@ -1575,11 +1575,15 @@ static const char *dynamic_tag_name(uint64_t tag) {
 
 static void decode_df_flags(uint64_t value, char *buf, size_t buflen) {
     int first = 1;
+    size_t len = 0;
     buf[0] = '\0';
 #define APPEND_FLAG(cond, name) \
     do { \
         if (cond) { \
-            snprintf(buf + strlen(buf), buflen - strlen(buf), "%s%s", first ? "" : ",", name); \
+            int n_ = snprintf(buf + len, buflen > len ? buflen - len : 0, "%s%s", first ? "" : ",", name); \
+            if (n_ > 0 && len + (size_t)n_ < buflen) { \
+                len += (size_t)n_; \
+            } \
             first = 0; \
         } \
     } while (0)
@@ -1596,11 +1600,15 @@ static void decode_df_flags(uint64_t value, char *buf, size_t buflen) {
 
 static void decode_df1_flags(uint64_t value, char *buf, size_t buflen) {
     int first = 1;
+    size_t len = 0;
     buf[0] = '\0';
 #define APPEND_FLAG(cond, name) \
     do { \
         if (cond) { \
-            snprintf(buf + strlen(buf), buflen - strlen(buf), "%s%s", first ? "" : ",", name); \
+            int n_ = snprintf(buf + len, buflen > len ? buflen - len : 0, "%s%s", first ? "" : ",", name); \
+            if (n_ > 0 && len + (size_t)n_ < buflen) { \
+                len += (size_t)n_; \
+            } \
             first = 0; \
         } \
     } while (0)
