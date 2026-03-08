@@ -86,11 +86,90 @@ int docom(struct shblock *q) {
     return dosys(cmd, 0);
 }
 
+void parse_cmd(char *cmd, char **argv, int max_args) {
+    int argc = 0;
+    char *p = cmd;
+
+    while (*p && argc < max_args - 1) {
+        while (*p && isspace((unsigned char)*p)) p++;
+        if (!*p) break;
+
+        char quote = 0;
+        char *token_start = p;
+        char *dst = p;
+
+        while (*p) {
+            if (*p == '\\' && *(p+1)) {
+                p++;
+                *dst++ = *p++;
+            } else if ((*p == '\'' || *p == '"')) {
+                if (!quote) {
+                    quote = *p;
+                    p++;
+                } else if (quote == *p) {
+                    quote = 0;
+                    p++;
+                } else {
+                    *dst++ = *p++;
+                }
+            } else if (isspace((unsigned char)*p) && !quote) {
+                p++;
+                break;
+            } else {
+                *dst++ = *p++;
+            }
+        }
+        *dst = '\0';
+        argv[argc++] = token_start;
+    }
+    argv[argc] = NULL;
+}
+
 int dosys(char *comstring, int nohalt) {
     if (silflag == 0) printf("%s\n", comstring);
     if (noexflag) return 0;
     
-    int ret = system(comstring);
+    int pid;
+    int status;
+
+    char *cmd_copy = strdup(comstring);
+    if (!cmd_copy) {
+        fatal("strdup failed");
+    }
+
+    char *argv[128];
+    parse_cmd(cmd_copy, argv, 128);
+
+    if (argv[0] == NULL) {
+        free(cmd_copy);
+        return 0;
+    }
+
+    if ((pid = fork()) == 0) {
+        execvp(argv[0], argv);
+        _exit(127);
+    } else if (pid < 0) {
+        free(cmd_copy);
+        if (!ignerr && !nohalt) {
+            fatal("fork failed");
+        }
+        return -1;
+    }
+
+    free(cmd_copy);
+
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) {
+            status = -1;
+            break;
+        }
+    }
+
+    int ret = -1;
+    if (WIFEXITED(status)) {
+        ret = WEXITSTATUS(status);
+    }
+
     if (ret != 0 && !ignerr && !nohalt) {
         fatal("Command failed");
     }

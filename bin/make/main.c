@@ -30,6 +30,8 @@ char **linesptr;
 FILE *fin;
 
 int main(int argc, char *argv[]) {
+    (void)argc;
+    (void)argv;
     // Stub
     printf("make: stub implementation\n");
     return 0;

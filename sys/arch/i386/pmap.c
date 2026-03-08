@@ -1,4 +1,5 @@
 #include <arch/i386/pmap.h>
+#include <arch/i386/pmap_hal.h>
 #include <arch/i386/pmm.h>
 #include <arch/x86-common/lapic.h>
 #include <vm/vm_page.h>
@@ -575,7 +576,7 @@ void pmap_activate(pmap_t pmap) {
 
 
 
-int pmap_enter(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
+int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;
     // Must be active address space to use recursive mapping
     uint32_t cr3;
@@ -753,7 +754,7 @@ void pmap_map_trampoline(void) {
 // Map a 4MB page (Single PDE, no Page Table)
 // Requires PSE to be enabled
 // Implements Page Table Eviction: If a PT exists at this PDE, it is freed.
-int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint32_t flags) {
+int pmap_enter_large(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) {
     (void)flags;
     uint32_t removed = 0;
     
@@ -835,7 +836,7 @@ int pmap_enter_large(pmap_t pmap, uint32_t va, uint32_t pa, uint32_t prot, uint3
     return 0;
 }
 
-void pmap_remove(pmap_t pmap, uint32_t va) {
+void pmap_remove(pmap_t pmap, uintptr_t va) {
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return;
@@ -870,7 +871,7 @@ void pmap_remove(pmap_t pmap, uint32_t va) {
 
 // Kernel-only fast path: no pmap/locking overhead
 // Assumes kernel is always active and va is in kernel space
-void pmap_kenter(uint32_t va, uint32_t pa) {
+void pmap_kenter(uintptr_t va, uintptr_t pa) {
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
     int new_kernel_pt = 0;
@@ -907,7 +908,7 @@ void pmap_kenter(uint32_t va, uint32_t pa) {
 }
 
 // Kernel-only fast removal
-void pmap_kremove(uint32_t va) {
+void pmap_kremove(uintptr_t va) {
     uint32_t pdi = PD_INDEX(va);
     uint32_t pti = PT_INDEX(va);
     if (!(V_PD[pdi] & PTE_P)) return;
@@ -916,7 +917,7 @@ void pmap_kremove(uint32_t va) {
     pmap_invalidate_page(va);
 }
 
-uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
+uintptr_t pmap_extract(pmap_t pmap, uintptr_t va) {
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return 0;
@@ -939,7 +940,7 @@ uint32_t pmap_extract(pmap_t pmap, uint32_t va) {
 
 // Change page protections for a virtual address range
 // Returns 0 on success, -1 on error
-int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
+int pmap_protect(pmap_t pmap, uintptr_t sva, uintptr_t eva, uint32_t prot) {
     // Must be active address space
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
@@ -1026,7 +1027,7 @@ int pmap_protect(pmap_t pmap, uint32_t sva, uint32_t eva, uint32_t prot) {
 
 // Copy mappings from src_pmap to dst_pmap for fork()
 // If cow is set, mark pages read-only for copy-on-write
-int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int cow) {
+int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uintptr_t sva, uintptr_t eva, int cow) {
     // Must be able to access both pmaps - this is complex
     // For simplicity, we require src_pmap to be active
     uint32_t cr3;
@@ -1121,7 +1122,7 @@ int pmap_copy(pmap_t dst_pmap, pmap_t src_pmap, uint32_t sva, uint32_t eva, int 
 
 // Check if a page is marked for copy-on-write
 // (page is present but not writable, with ref_count > 1)
-int pmap_page_is_cow(pmap_t pmap, uint32_t va) {
+int pmap_page_is_cow(pmap_t pmap, uintptr_t va) {
     uint32_t cr3;
     __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
     if (pmap->pdir_phys != cr3) return 0;
@@ -1143,36 +1144,33 @@ int pmap_page_is_cow(pmap_t pmap, uint32_t va) {
     return page->ref_count > 1;
 }
 
-void pmap_invalidate_page(uint32_t va) {
-    __asm__ volatile("invlpg (%0)" :: "r"(va) : "memory");
+void pmap_invalidate_page(uintptr_t va) {
+    pmap_hal_invlpg(va);
     __sync_fetch_and_add(&global_pmap_stats.tlb_invlpg_count, 1);
 }
 
 // Flush entire TLB by reloading CR3 (expensive)
 void pmap_invalidate_all(void) {
-    uint32_t cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-    __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
+    uint32_t cr3 = pmap_hal_read_cr3();
+    pmap_hal_write_cr3(cr3);
     __sync_fetch_and_add(&global_pmap_stats.tlb_full_flush_count, 1);
 }
 
 // Flush entire TLB including global pages
 // Uses CR4.PGE toggle method (disable PGE, reload CR3, re-enable PGE)
 void pmap_flush_global_pages(void) {
-    uint32_t cr4;
-    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    uint32_t cr4 = pmap_hal_read_cr4();
     
     if (cr4 & 0x80) {  // PGE is enabled
         // Disable PGE
-        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4 & ~0x80));
+        pmap_hal_write_cr4(cr4 & ~0x80);
         
         // Reload CR3 to flush TLB (now includes global pages since PGE is off)
-        uint32_t cr3;
-        __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
-        __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
+        uint32_t cr3 = pmap_hal_read_cr3();
+        pmap_hal_write_cr3(cr3);
         
         // Re-enable PGE
-        __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
+        pmap_hal_write_cr4(cr4);
     } else {
         // PGE not enabled, just do normal flush
         pmap_invalidate_all();
@@ -1212,7 +1210,7 @@ void pmap_shootdown_handler(void) {
 }
 
 // Invalidate single page on all CPUs
-void pmap_shootdown_page(uint32_t va) {
+void pmap_shootdown_page(uintptr_t va) {
     // Local invalidation first
     pmap_invalidate_page(va);
     
@@ -1231,7 +1229,7 @@ void pmap_shootdown_page(uint32_t va) {
 }
 
 // Invalidate range on all CPUs
-void pmap_shootdown_range(uint32_t va, uint32_t len) {
+void pmap_shootdown_range(uintptr_t va, uint32_t len) {
     // Local invalidation first
     for (uint32_t addr = va; addr < va + len; addr += 0x1000) {
         pmap_invalidate_page(addr);
@@ -1270,7 +1268,7 @@ void pmap_shootdown_all(void) {
 static uint32_t deferred_pages[16];
 static int deferred_count = 0;
 
-void pmap_shootdown_defer(uint32_t va) {
+void pmap_shootdown_defer(uintptr_t va) {
     if (deferred_count < 16) {
         deferred_pages[deferred_count++] = va;
     } else {
@@ -1314,8 +1312,7 @@ static int pmap_lookup_active_pte(pmap_t pmap, uint32_t va, uint32_t **pt_out, u
         return 0;
     }
 
-    uint32_t cr3;
-    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    uint32_t cr3 = pmap_hal_read_cr3();
     if (pmap->pdir_phys != cr3) {
         return 0;
     }
@@ -1401,7 +1398,7 @@ static uint32_t pmap_count_active(void) {
     return seen_count;
 }
 
-int pmap_is_referenced(pmap_t pmap, uint32_t va) {
+int pmap_is_referenced(pmap_t pmap, uintptr_t va) {
     uint32_t *pt;
     uint32_t pti;
     if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
@@ -1410,7 +1407,7 @@ int pmap_is_referenced(pmap_t pmap, uint32_t va) {
     return (pt[pti] & PTE_A) ? 1 : 0;
 }
 
-int pmap_is_modified(pmap_t pmap, uint32_t va) {
+int pmap_is_modified(pmap_t pmap, uintptr_t va) {
     uint32_t *pt;
     uint32_t pti;
     if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
@@ -1419,7 +1416,7 @@ int pmap_is_modified(pmap_t pmap, uint32_t va) {
     return (pt[pti] & PTE_D) ? 1 : 0;
 }
 
-void pmap_clear_reference(pmap_t pmap, uint32_t va) {
+void pmap_clear_reference(pmap_t pmap, uintptr_t va) {
     uint32_t *pt;
     uint32_t pti;
     if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
@@ -1431,7 +1428,7 @@ void pmap_clear_reference(pmap_t pmap, uint32_t va) {
     }
 }
 
-void pmap_clear_modify(pmap_t pmap, uint32_t va) {
+void pmap_clear_modify(pmap_t pmap, uintptr_t va) {
     uint32_t *pt;
     uint32_t pti;
     if (!pmap_lookup_active_pte(pmap, va, &pt, &pti)) {
@@ -1469,7 +1466,7 @@ void pmap_page_clear_reference(vm_page_t *m) {
 
 // Batch query: check if any page in range was accessed
 // Returns count of referenced pages in range
-int pmap_is_referenced_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
+int pmap_is_referenced_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) {
     if (!pmap) return 0;
 
     int ref_count = 0;
@@ -1527,7 +1524,7 @@ void pmap_track_access(vm_page_t *m) {
 
 // Batch query: check if any page in range was modified (D bit set)
 // Returns count of modified pages in range
-int pmap_is_modified_range(pmap_t pmap, uint32_t sva, uint32_t eva) {
+int pmap_is_modified_range(pmap_t pmap, uintptr_t sva, uintptr_t eva) {
     if (!pmap) return 0;
 
     int mod_count = 0;
