@@ -40,4 +40,59 @@ struct netbsd_sigframe {
 void netbsd_sendsig(void *handler, int sig, uint32_t mask, uint32_t flags, void *regs);
 int  netbsd_sys_sigreturn(void *regs);
 
-#endif
+
+/* NetBSD older stat structure (stat43) */
+struct netbsd_stat43 {
+    uint16_t st_dev;
+    uint32_t st_ino;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint16_t st_uid;
+    uint16_t st_gid;
+    uint16_t st_rdev;
+    int32_t  st_size;
+    int32_t  st_atime;
+    int32_t  st_spare1;
+    int32_t  st_mtime;
+    int32_t  st_spare2;
+    int32_t  st_ctime;
+    int32_t  st_spare3;
+    int32_t  st_blksize;
+    int32_t  st_blocks;
+    uint32_t st_flags;
+    uint32_t st_gen;
+};
+
+/* NetBSD standard stat structure */
+struct netbsd_stat {
+    uint32_t st_dev;
+    uint32_t st_ino;
+    uint16_t st_mode;
+    uint16_t st_nlink;
+    uint32_t st_uid;
+    uint32_t st_gid;
+    uint32_t st_rdev;
+    int32_t  st_atime;
+    int32_t  st_atimensec;
+    int32_t  st_mtime;
+    int32_t  st_mtimensec;
+    int32_t  st_ctime;
+    int32_t  st_ctimensec;
+    int64_t  st_size;
+    int64_t  st_blocks;
+    uint32_t st_blksize;
+    uint32_t st_flags;
+    uint32_t st_gen;
+    int64_t  st_qspare[2];
+};
+
+/* Translation functions for NetBSD standard stat */
+int netbsd_sys_stat(const char *path, struct netbsd_stat *buf);
+int netbsd_sys_lstat(const char *path, struct netbsd_stat *buf);
+int netbsd_sys_fstat(int fd, struct netbsd_stat *buf);
+
+/* Translation functions for NetBSD compat stat (stat43) */
+int netbsd_sys_compat_stat(const char *path, struct netbsd_stat43 *buf);
+int netbsd_sys_compat_lstat(const char *path, struct netbsd_stat43 *buf);
+int netbsd_sys_compat_fstat(int fd, struct netbsd_stat43 *buf);
+#endif /* _NETBSD_USER_H */

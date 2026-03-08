@@ -11,6 +11,7 @@
 #include <sys/syscall_impl.h>
 #include <exec/perso/compat.h>
 #include <exec/perso/sunos/sunos_syscalls.h>
+#include <exec/perso/sunos/sunos_user.h>
 
 /* SunOS Sun386i syscall table */
 static void *sunos_syscalls[MAX_SYSCALLS] = {
@@ -32,7 +33,7 @@ static void *sunos_syscalls[MAX_SYSCALLS] = {
     [SUNOS_SYS_chmod]      = &sys_chmod,
     [SUNOS_SYS_chown]      = NULL,            /* chown - not implemented */
     [SUNOS_SYS_break]      = NULL,            /* break */
-    [SUNOS_SYS_stat]       = &sys_stat,
+    [SUNOS_SYS_stat]       = (void *)&sunos_sys_stat,
     [SUNOS_SYS_lseek]      = &sys_lseek,
     [SUNOS_SYS_getpid]     = &sys_getpid,
     [SUNOS_SYS_mount]      = &sys_mount,
@@ -42,7 +43,7 @@ static void *sunos_syscalls[MAX_SYSCALLS] = {
     [SUNOS_SYS_stime]      = NULL,            /* stime */
     [SUNOS_SYS_ptrace]     = NULL,            /* ptrace - not implemented */
     [SUNOS_SYS_alarm]      = NULL,            /* alarm */
-    [SUNOS_SYS_fstat]      = &sys_fstat,
+    [SUNOS_SYS_fstat]      = (void *)&sunos_sys_fstat,
     [SUNOS_SYS_pause]      = NULL,            /* pause */
     [SUNOS_SYS_utime]      = NULL,            /* utime */
     [SUNOS_SYS_stty]       = NULL,            /* stty */
@@ -54,6 +55,7 @@ static void *sunos_syscalls[MAX_SYSCALLS] = {
     [SUNOS_SYS_kill]       = &sys_kill,
     [SUNOS_SYS_mkdir]      = &sys_mkdir,
     [SUNOS_SYS_rmdir]      = &sys_rmdir,
+    [SUNOS_SYS_lstat]      = (void *)&sunos_sys_lstat,
     [SUNOS_SYS_dup]        = &sys_dup,
     [SUNOS_SYS_pipe]       = &sys_pipe,
     [SUNOS_SYS_times]      = &sys_times,
@@ -120,6 +122,7 @@ static const char *sunos_names[MAX_SYSCALLS] = {
     [SUNOS_SYS_kill]       = "kill",
     [SUNOS_SYS_mkdir]      = "mkdir",
     [SUNOS_SYS_rmdir]      = "rmdir",
+    [SUNOS_SYS_lstat]      = "lstat",
     [SUNOS_SYS_dup]        = "dup",
     [SUNOS_SYS_pipe]       = "pipe",
     [SUNOS_SYS_times]      = "times",
@@ -170,6 +173,7 @@ static struct syscall_fmt sunos_fmts[MAX_SYSCALLS] = {
     [SUNOS_SYS_kill]       = { 2, { ARG_INT, ARG_INT } },
     [SUNOS_SYS_mkdir]      = { 2, { ARG_STR, ARG_HEX } },
     [SUNOS_SYS_rmdir]      = { 1, { ARG_STR } },
+    [SUNOS_SYS_lstat]      = { 2, { ARG_STR, ARG_PTR } },
     [SUNOS_SYS_dup]        = { 1, { ARG_INT } },
     [SUNOS_SYS_pipe]       = { 1, { ARG_PTR } },
     [SUNOS_SYS_setgid]     = { 1, { ARG_INT } },
