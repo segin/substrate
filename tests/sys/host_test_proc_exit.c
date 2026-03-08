@@ -28,6 +28,7 @@ static int rusage_finalize_calls;
 static int tty_hangup_calls;
 static int vm_map_destroy_calls;
 static int pmap_activate_calls;
+static int pgrp_remove_calls;
 static process_t *last_psignal_proc;
 static int last_psignal_sig;
 static void *last_sched_wakeup_chan;
@@ -67,7 +68,7 @@ void sched_yield(void) { yielded = 1; longjmp(exit_jmp, 1); }
 void kprint(const char *msg) { (void)msg; }
 void tty_hangup(struct tty *tty) { (void)tty; tty_hangup_calls++; }
 void psignal(process_t *p, int sig) { last_psignal_proc = p; last_psignal_sig = sig; }
-void pgrp_remove_proc(struct process *proc) { if (proc) proc->p_pgrp = NULL; }
+void pgrp_remove_proc(struct process *proc) { if (proc) { proc->p_pgrp = NULL; pgrp_remove_calls++; } }
 void sched_reap_process_threads(process_t *proc) {
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 && threads[i].proc == proc) {
@@ -97,6 +98,7 @@ static void reset_env(void) {
     tty_hangup_calls = 0;
     vm_map_destroy_calls = 0;
     pmap_activate_calls = 0;
+    pgrp_remove_calls = 0;
     last_psignal_proc = NULL;
     last_psignal_sig = 0;
     last_sched_wakeup_chan = NULL;
@@ -189,6 +191,7 @@ static void test_proc_exit_basic_path(void) {
     assert(pmap_release_calls == 0);
     assert(pmap_activate_calls == 1);
     assert(tty_hangup_calls == 1);
+    assert(sess.s_leader == NULL);
     assert(proc->tty == NULL);
     assert(proc->cwd_node == NULL);
     assert(proc->root_node == NULL);
@@ -265,6 +268,7 @@ static void test_proc_exit_autoreap_path(void) {
     proc_reap_autoreap_zombies();
 
     assert(vm_map_destroy_calls == 1);
+    assert(pgrp_remove_calls == 0);
     assert(proc->pid == -1);
     assert(threads[0].tid == -1);
 }

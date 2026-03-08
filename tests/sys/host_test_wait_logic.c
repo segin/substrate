@@ -28,6 +28,7 @@ static int sched_sleep_calls;
 static int sched_sleep_mode;
 static int vm_map_destroy_calls;
 static int pmap_release_calls;
+static int pgrp_remove_calls;
 
 void mutex_init(mutex_t *m, const char *name) { (void)m; (void)name; }
 void mutex_lock(mutex_t *m) { (void)m; }
@@ -47,7 +48,10 @@ void proc_remove_child(process_t *parent, process_t *child) {
 }
 
 void pgrp_remove_proc(struct process *proc) {
-    (void)proc;
+    if (proc) {
+        proc->p_pgrp = NULL;
+        pgrp_remove_calls++;
+    }
 }
 
 void sched_reap_process_threads(process_t *proc) {
@@ -132,6 +136,7 @@ static void setup_mocks(void) {
     sched_sleep_mode = 0;
     vm_map_destroy_calls = 0;
     pmap_release_calls = 0;
+    pgrp_remove_calls = 0;
 
     mock_child1.vm_map = (vm_map_t *)0x11110000;
     mock_child1.pmap = (pmap_t)0x11112000;
@@ -149,6 +154,7 @@ static void test_wait_search_and_reap(void) {
     assert(WEXITSTATUS(status) == 10);
     assert(mock_parent.p_children == &mock_child2);
     assert(vm_map_destroy_calls == 1);
+    assert(pgrp_remove_calls == 1);
     assert(mock_child1.vm_map == NULL);
     assert(mock_child1.pmap == pmap_kernel());
 

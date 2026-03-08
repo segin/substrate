@@ -531,6 +531,7 @@ void proc_exit(int code) {
         }
         
         if (is_session_leader) {
+            current_process->p_pgrp->pg_session->s_leader = NULL;
             tty_hangup(current_process->tty);
         }
         

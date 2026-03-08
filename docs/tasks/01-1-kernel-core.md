@@ -1067,10 +1067,10 @@
                 - [x] For each child: set `p_parent = init`, move to init's children list. (REQ: REQ-01-0903)
                 - [x] Wake init if child is zombie. (REQ: REQ-01-0904)
                 - [x] If init dying: reparent to swapper (PID 0) or panic. (REQ: REQ-01-0900)
-            - [ ] **Phase 6 — Process Group / Session Cleanup:** (REQ: REQ-01-0906)
-                - [ ] Remove from process group; free `struct pgrp` if last member. (REQ: REQ-01-0907)
-                - [ ] If session leader: SIGHUP to foreground, revoke TTY, mark no leader. (REQ: REQ-01-0906)
-                - [ ] Check for orphaned process groups → SIGHUP + SIGCONT. (REQ: REQ-01-0909)
+            - [x] **Phase 6 — Process Group / Session Cleanup:** (REQ: REQ-01-0906)
+                - [x] Remove from process group; free `struct pgrp` if last member at the final reap point, preserving zombie pgrp identity until `wait4()` or auto-reap completes. (REQ: REQ-01-0907)
+                - [x] If session leader: SIGHUP to foreground, revoke TTY, mark no leader. (REQ: REQ-01-0906)
+                - [x] Check for orphaned process groups → SIGHUP + SIGCONT when process-group membership is dropped at the final reap point. (REQ: REQ-01-0909)
             - [ ] **Phase 7 — Parent Notification:** (REQ: REQ-01-0910)
                 - [x] `psignal(parent, SIGCHLD)`. (REQ: REQ-01-0911)
                 - [x] If SA_NOCLDWAIT: detach from the parent's waitable child list and auto-reap asynchronously once the final thread context is retired. (REQ: REQ-01-0910)
@@ -2051,9 +2051,9 @@
 - **US-01-0904**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wake init if child is zombie so that this capability is implemented with clear verification evidence.
 - **US-01-0905**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if init dying: reparent to swapper (PID 0) or panic so that this capability is implemented with clear verification evidence.
 - **US-01-0906**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 6 - Process Group / Session Cleanup: so that this capability is implemented with clear verification evidence.
-- **US-01-0907**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to remove from process group; free struct pgrp if last member so that this capability is implemented with clear verification evidence.
+- **US-01-0907**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want exited processes removed from their process group and the empty `struct pgrp` freed at the final reap point so that zombie pgrp identity is preserved until `wait4()` or auto-reap completes.
 - **US-01-0908**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if session leader: SIGHUP to foreground, revoke TTY, mark no leader so that this capability is implemented with clear verification evidence.
-- **US-01-0909**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to check for orphaned process groups → SIGHUP + SIGCONT so that this capability is implemented with clear verification evidence.
+- **US-01-0909**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want orphaned process groups checked when membership is dropped at the final reap point so that stopped jobs receive `SIGHUP` and `SIGCONT` consistently.
 - **US-01-0910**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 7 - Parent Notification: so that this capability is implemented with clear verification evidence.
 - **US-01-0911**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to psignal(parent, SIGCHLD) so that this capability is implemented with clear verification evidence.
 - **US-01-0912**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want `SA_NOCLDWAIT` children detached from the waitable child list and auto-reaped asynchronously once their final thread context is retired so that parents do not accumulate zombies they cannot wait on.
@@ -4871,13 +4871,13 @@
 - **REQ-01-0906** (EARS/Ubiquitous): The Substrate system shall phase 6 - Process Group / Session Cleanup:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0907** (EARS/Ubiquitous): The Substrate system shall remove from process group; free struct pgrp if last member.
+- **REQ-01-0907** (EARS/Ubiquitous): The Substrate system shall remove exited processes from their process group and free the `struct pgrp` if it becomes empty at the final reap point.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0908** (EARS/Ubiquitous): When session leader: SIGHUP to foreground, revoke TTY, mark no leader, the Substrate system shall satisfy the specified behavior.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0909** (EARS/Ubiquitous): The Substrate system shall check for orphaned process groups → SIGHUP + SIGCONT.
+- **REQ-01-0909** (EARS/Ubiquitous): The Substrate system shall check for orphaned process groups and deliver `SIGHUP` plus `SIGCONT` when process-group membership is dropped at the final reap point.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0910** (EARS/Ubiquitous): The Substrate system shall phase 7 - Parent Notification:.
