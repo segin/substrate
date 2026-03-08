@@ -82,6 +82,12 @@ Kernel worker model:
 - `swapper` owns one CPU-bound idle thread per online CPU.
 - VM pressure is handled by a dedicated `pagedaemon` kernel process that sleeps on a wakeup channel and runs pageout work asynchronously.
 
+Boot/init sequencing highlights:
+- `kmain()` parses the kernel command line before runtime console registration so `console=console0|serial0..serial3` can steer bring-up output policy.
+- boot-time Multiboot modules are registered as RAM block devices before root mount, allowing `initrd`-style root selection via `/dev/storage/ram*`.
+- after root mount, the kernel ensures `/dev`, `/proc`, and `/sys` mountpoints exist and mounts `devfs`, `procfs`, and `sysfs` automatically.
+- init is spawned before VM background workers so `PID 1` remains the first userspace process.
+
 ### 5.1 i386 PMAP Model
 
 The i386 PMAP implementation is a two-level paging design:
@@ -129,6 +135,11 @@ Device namespace policy in `devfs`:
 - BSD disklabels additionally expose lettered slice nodes, with `c` reserved as the whole-container alias only when a BSD disklabel is present.
 - Communication character devices self-register under `/dev/comm/*` (for example `/dev/comm/serial0`, `/dev/comm/parallel0`).
 - Nested device paths are accepted only under predeclared subsystem directories (namespace hardening against arbitrary roots like `/dev/notreal/*`).
+
+Console policy:
+- the default screen console remains `console0`
+- `console=serial0..serial3` selects COM1..COM4 respectively for runtime console routing
+- `serial_debug` or `console=serialN` registers the UART backend with the kernel console framework for mirrored output
 
 Execution personalities support native behavior plus Linux/FreeBSD compatibility paths where implemented.
 

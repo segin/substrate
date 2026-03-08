@@ -1026,10 +1026,10 @@
         - [ ] Audit `mutex.c` and `semaphore.c` for race conditions. (REQ: REQ-01-0868)
         - [x] Fix `sched_smp.c` CPU ID assumption. (REQ: REQ-01-0869)
 
-    - [ ] **Update Kernel Documentation:** (REQ: REQ-01-0870)
-        - [ ] Document Console/UART subsystem changes. (REQ: REQ-01-0871)
-        - [ ] Document kmain initialization flow. (REQ: REQ-01-0872)
-        - [ ] Update ARCHITECTURE.md. (REQ: REQ-01-0873)
+    - [x] **Update Kernel Documentation:** (REQ: REQ-01-0870)
+        - [x] Document Console/UART subsystem changes. (REQ: REQ-01-0871)
+        - [x] Document kmain initialization flow. (REQ: REQ-01-0872)
+        - [x] Update ARCHITECTURE.md. (REQ: REQ-01-0873)
 
     - [ ] **Process Lifecycle & Job Control:** (REQ: REQ-01-0874)
 
@@ -1108,7 +1108,7 @@
                 - [x] Report stopped children (SSTOP). (REQ: REQ-01-0942)
                 - [x] Report continued children (P_CONTINUED flag). (REQ: REQ-01-0943)
 
-        - [ ] **Process Groups & Sessions:** (REQ: REQ-01-0944)
+        - [x] **Process Groups & Sessions:** (REQ: REQ-01-0944)
             - [x] **Core Structures:** (REQ: REQ-01-0945)
                 - [x] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr). (REQ: REQ-01-0946)
                 - [x] `struct session`: `s_sid`, `s_leader`, `s_ttyvp`, `s_login`. (REQ: REQ-01-0947)
@@ -1119,7 +1119,7 @@
             - [x] **Group Management:** (REQ: REQ-01-0952)
                 - [x] `sys_setpgid(pid, pgid)`: join/create group; must be same session. (REQ: REQ-01-0953)
                 - [x] `sys_getpgid(pid)`: return group ID. (REQ: REQ-01-0954)
-            - [ ] **Controlling Terminal (CTTY):** (REQ: REQ-01-0955)
+            - [x] **Controlling Terminal (CTTY):** (REQ: REQ-01-0955)
                 - [x] `TIOCSCTTY`: assign CTTY (session leader, no existing CTTY, TTY unowned). (REQ: REQ-01-0956)
                 - [x] `TIOCNOTTY`: release CTTY, SIGHUP to foreground group. (REQ: REQ-01-0957)
                 - [x] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check). (REQ: REQ-01-0958)
@@ -1137,7 +1137,7 @@
             - [ ] Property: no zombie leaks (all zombies eventually reaped or auto-reaped). (REQ: REQ-01-0969)
             - [ ] Integration: fork → exec → exit → waitpid cycle. (REQ: REQ-01-0970)
             - [ ] Integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED. (REQ: REQ-01-0971)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
             - [x] Internal doc: process exit 9-phase teardown. (REQ: REQ-01-0973)
             - [x] Internal doc: wait4 search semantics and blocking. (REQ: REQ-01-0974)
             - [x] Internal doc: session/pgrp lifecycle and CTTY ownership. (REQ: REQ-01-0975)
