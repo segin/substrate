@@ -14,6 +14,7 @@
 
 static int tests_passed = 0;
 static int tests_failed = 0;
+static int fake_file_read_calls = 0;
 
 #define TEST_ASSERT(cond, msg) do { \
     if (!(cond)) { \
@@ -26,6 +27,7 @@ static int tests_failed = 0;
 
 static size_t fake_file_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
     uint8_t *file_data = (uint8_t *)(uintptr_t)node->impl;
+    fake_file_read_calls++;
 
     for (size_t i = 0; i < size; i++) {
         buffer[i] = file_data[offset + i];
@@ -118,6 +120,7 @@ void test_vm_fault_file_backed(void) {
     for (int i = 0; i < 4096; i++) {
         file_page[i] = (uint8_t)(i & 0xFF);
     }
+    fake_file_read_calls = 0;
 
     fake_file.impl = (uintptr_t)file_page;
     fake_file.read = fake_file_read;
@@ -133,6 +136,7 @@ void test_vm_fault_file_backed(void) {
     vm_page_t *page = vm_object_lookup_page(obj, 0);
     TEST_ASSERT(page != NULL, "file-backed page present");
     TEST_ASSERT(page->flags & PG_VALID, "file-backed page valid");
+    TEST_ASSERT(fake_file_read_calls > 0, "vnode pager used VFS read path");
     TEST_ASSERT(*(volatile uint8_t *)0x14000 == file_page[0], "mapped data byte 0 matches");
     TEST_ASSERT(*(volatile uint8_t *)(0x14000 + 255) == file_page[255], "mapped data byte 255 matches");
 
