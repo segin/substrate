@@ -1,5 +1,6 @@
 #include <vm/uma.h>
 #include <kern/console.h>
+#include <string.h>
 #include "tests.h"
 
 static int tests_passed = 0;
@@ -15,6 +16,28 @@ static int tests_failed = 0;
         tests_passed++; \
     } \
 } while(0)
+
+static uint32_t slab_list_count(uma_slab_t *slab) {
+    uint32_t count = 0;
+
+    while (slab) {
+        count++;
+        slab = slab->us_next;
+    }
+
+    return count;
+}
+
+static uint32_t slab_list_freecount(uma_slab_t *slab) {
+    uint32_t freecount = 0;
+
+    while (slab) {
+        freecount += slab->us_freecount;
+        slab = slab->us_next;
+    }
+
+    return freecount;
+}
 
 static void test_uma_large_alloc(void) {
     /* Create a zone with large items (3000 bytes) */
@@ -366,6 +389,59 @@ void test_uma_slab_freelist_integrity(void) {
     kprint("  PASS\n");
 }
 
+void test_uma_capacity_accounting(void) {
+    kprint("Test: total allocated + free = zone capacity\n");
+
+    uma_zone_t *zone = uma_zcreate("test-capacity", 48, NULL, NULL, NULL, NULL, 0,
+                                   UMA_ZONE_NOBUCKET | UMA_ZONE_NOFREE);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    uint32_t ipers = zone->uz_ipers;
+    void *objs[96];
+    uint32_t alloc_count = ipers + 3;
+    TEST_ASSERT(alloc_count < 96, "allocation count fits local array");
+
+    for (uint32_t i = 0; i < alloc_count; i++) {
+        objs[i] = uma_zalloc(zone, M_NOWAIT);
+        TEST_ASSERT(objs[i] != NULL, "alloc succeeded");
+    }
+
+    for (uint32_t i = 0; i < alloc_count; i += 2) {
+        uma_zfree(zone, objs[i]);
+        objs[i] = NULL;
+    }
+
+    uint32_t slab_count = slab_list_count(zone->uz_full_slabs) +
+                          slab_list_count(zone->uz_part_slabs) +
+                          slab_list_count(zone->uz_free_slabs);
+    uint32_t free_count = slab_list_freecount(zone->uz_full_slabs) +
+                          slab_list_freecount(zone->uz_part_slabs) +
+                          slab_list_freecount(zone->uz_free_slabs);
+
+    TEST_ASSERT(slab_count >= 2, "multiple slabs allocated");
+    TEST_ASSERT(zone->uz_count + free_count == slab_count * ipers,
+                "allocated plus free objects matches total slab capacity");
+
+    for (uint32_t i = 0; i < alloc_count; i++) {
+        if (objs[i] != NULL) {
+            uma_zfree(zone, objs[i]);
+        }
+    }
+
+    slab_count = slab_list_count(zone->uz_full_slabs) +
+                 slab_list_count(zone->uz_part_slabs) +
+                 slab_list_count(zone->uz_free_slabs);
+    free_count = slab_list_freecount(zone->uz_full_slabs) +
+                 slab_list_freecount(zone->uz_part_slabs) +
+                 slab_list_freecount(zone->uz_free_slabs);
+
+    TEST_ASSERT(zone->uz_count == 0, "zone count drained to zero");
+    TEST_ASSERT(free_count == slab_count * ipers, "all slab objects returned to free lists");
+
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
 /* Test slab growth */
 void test_uma_many_allocs(void) {
     kprint("Test: many allocations\n");
@@ -473,6 +549,34 @@ void test_uma_dynamic_stress(void) {
     kprint("  PASS\n");
 }
 
+void test_uma_multi_zone_stress(void) {
+    kprint("Test: 10000 alloc/free cycles across multiple zones\n");
+
+    static const size_t sizes[] = { 16, 32, 64, 128, 256 };
+    enum { zone_count = (int)(sizeof(sizes) / sizeof(sizes[0])) };
+    uma_zone_t *zones[zone_count];
+
+    for (int i = 0; i < zone_count; i++) {
+        zones[i] = uma_zcreate("test-stress", sizes[i], NULL, NULL, NULL, NULL, 0, 0);
+        TEST_ASSERT(zones[i] != NULL, "stress zone created");
+    }
+
+    for (int i = 0; i < 10000; i++) {
+        int zone_idx = i % zone_count;
+        void *obj = uma_zalloc(zones[zone_idx], M_NOWAIT);
+        TEST_ASSERT(obj != NULL, "stress alloc succeeded");
+        memset(obj, 0xA5, sizes[zone_idx]);
+        uma_zfree(zones[zone_idx], obj);
+    }
+
+    for (int i = 0; i < zone_count; i++) {
+        TEST_ASSERT(zones[i]->uz_count == 0, "stress zone count returned to zero");
+        uma_zdestroy(zones[i]);
+    }
+
+    kprint("  PASS\n");
+}
+
 /* Test zone limits */
 void test_uma_limits(void) {
     kprint("Test: zone limits\n");
@@ -522,7 +626,9 @@ void run_uma_tests(void) {
     test_uma_leak_tracking();
     test_uma_percpu_cache_paths();
     test_uma_slab_freelist_integrity();
+    test_uma_capacity_accounting();
     test_uma_many_allocs();
+    test_uma_multi_zone_stress();
     test_uma_limits();
     // test_uma_redzone(); // Causes panic, disabled for now
     kprint("\nUMA Tests Complete\n");
