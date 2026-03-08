@@ -547,19 +547,19 @@
                 - [x] Shadow chain collapse: when shadow has all pages, absorb parent. (REQ: REQ-01-0473)
             - [ ] **Swap Subsystem:** (REQ: REQ-01-0474)
                 - [ ] **Swap Pager (`vm_pager`):** (REQ: REQ-01-0475)
-                    - [ ] Generic pager interface: `pager_get(obj, pindex)`, `pager_put(obj, pindex)`. (REQ: REQ-01-0476)
-                    - [ ] Swap pager: move pages to/from swap device. (REQ: REQ-01-0477)
-                    - [ ] Vnode pager: read/write file-backed pages via VFS. (REQ: REQ-01-0478)
+                    - [x] Generic pager interface: `vm_pager_allocate/get_pages/put_pages/has_page`. (REQ: REQ-01-0476)
+                    - [x] Swap pager: move pages to/from swap backing store. (REQ: REQ-01-0477)
+                    - [x] Vnode pager: read/write file-backed pages via VFS. (REQ: REQ-01-0478)
                     - [ ] Device pager: direct mapping of device memory (framebuffer, MMIO). (REQ: REQ-01-0479)
-                    - [ ] Default pager: zero-fill for anonymous memory. (REQ: REQ-01-0480)
-                - [ ] **Backing Store (`vm_swap`):** (REQ: REQ-01-0481)
-                    - [ ] Support swap partitions and swap files. (REQ: REQ-01-0482)
-                    - [ ] Swap space allocation bitmap. (REQ: REQ-01-0483)
-                    - [ ] `swapon(path)` / `swapoff(path)` syscalls. (REQ: REQ-01-0484)
-                    - [ ] Per-page swap block tracking. (REQ: REQ-01-0485)
-                - [ ] **Page Replacement Policy:** (REQ: REQ-01-0486)
-                    - [ ] Clock/LRU algorithm using A/D bits. (REQ: REQ-01-0487)
-                    - [ ] Integration with page daemon and page queues. (REQ: REQ-01-0488)
+                    - [x] Anonymous default-object faults zero-fill pages on demand. (REQ: REQ-01-0480)
+                - [x] **Backing Store (`vm_swap`):** (REQ: REQ-01-0481)
+                    - [x] Support swap files and raw block-device swap backends. (REQ: REQ-01-0482)
+                    - [x] Swap space allocation bitmap. (REQ: REQ-01-0483)
+                    - [x] Kernel `vm_swapon()` / `vm_swapoff()` control path. (REQ: REQ-01-0484)
+                    - [x] Per-page swap block tracking. (REQ: REQ-01-0485)
+                - [x] **Page Replacement Policy:** (REQ: REQ-01-0486)
+                    - [x] Clock/LRU algorithm using hardware A/D bits. (REQ: REQ-01-0487)
+                    - [x] Integration with page daemon and page queues. (REQ: REQ-01-0488)
             - [ ] **Advanced Features:** (REQ: REQ-01-0489, REQ-01-0671)
                 - [ ] **File-backed mmap (`MAP_FILE`):** (REQ: REQ-01-0490)
                     - [ ] Vnode pager triggers VFS `read` on page fault. (REQ: REQ-01-0491)
@@ -1620,18 +1620,18 @@
 - **US-01-0473**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to shadow chain collapse: when shadow has all pages, absorb parent so that this capability is implemented with clear verification evidence.
 - **US-01-0474**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swap Subsystem: so that this capability is implemented with clear verification evidence.
 - **US-01-0475**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swap Pager (vm_pager): so that this capability is implemented with clear verification evidence.
-- **US-01-0476**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to generic pager interface: pager_get(obj, pindex), pager_put(obj, pindex) so that this capability is implemented with clear verification evidence.
-- **US-01-0477**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swap pager: move pages to/from swap device so that this capability is implemented with clear verification evidence.
+- **US-01-0476**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want a generic pager interface through `vm_pager_allocate/get_pages/put_pages/has_page` so that this capability is implemented with clear verification evidence.
+- **US-01-0477**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the swap pager to move pages to and from swap backing store so that this capability is implemented with clear verification evidence.
 - **US-01-0478**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vnode pager: read/write file-backed pages via VFS so that this capability is implemented with clear verification evidence.
 - **US-01-0479**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to device pager: direct mapping of device memory (framebuffer, MMIO) so that this capability is implemented with clear verification evidence.
-- **US-01-0480**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to default pager: zero-fill for anonymous memory so that this capability is implemented with clear verification evidence.
+- **US-01-0480**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want anonymous default-object faults to zero-fill pages on demand so that this capability is implemented with clear verification evidence.
 - **US-01-0481**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to backing Store (vm_swap): so that this capability is implemented with clear verification evidence.
-- **US-01-0482**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to support swap partitions and swap files so that this capability is implemented with clear verification evidence.
+- **US-01-0482**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to support swap files and raw block-device swap backends so that this capability is implemented with clear verification evidence.
 - **US-01-0483**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swap space allocation bitmap so that this capability is implemented with clear verification evidence.
-- **US-01-0484**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to swapon(path) / swapoff(path) syscalls so that this capability is implemented with clear verification evidence.
+- **US-01-0484**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want a kernel `vm_swapon()` / `vm_swapoff()` control path so that this capability is implemented with clear verification evidence.
 - **US-01-0485**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to per-page swap block tracking so that this capability is implemented with clear verification evidence.
 - **US-01-0486**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to page Replacement Policy: so that this capability is implemented with clear verification evidence.
-- **US-01-0487**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to clock/LRU algorithm using A/D bits so that this capability is implemented with clear verification evidence.
+- **US-01-0487**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want a clock/LRU algorithm using hardware A/D bits so that this capability is implemented with clear verification evidence.
 - **US-01-0488**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration with page daemon and page queues so that this capability is implemented with clear verification evidence.
 - **US-01-0489**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to advanced Features: so that this capability is implemented with clear verification evidence.
 - **US-01-0490**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to file-backed mmap (MAP_FILE): so that this capability is implemented with clear verification evidence.
@@ -3578,10 +3578,10 @@
 - **REQ-01-0475** (EARS/Ubiquitous): The Substrate system shall swap Pager (vm_pager):.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0476** (EARS/Ubiquitous): The Substrate system shall generic pager interface: pager_get(obj, pindex), pager_put(obj, pindex).
+- **REQ-01-0476** (EARS/Ubiquitous): The Substrate system shall provide a generic pager interface through `vm_pager_allocate()`, `vm_pager_get_pages()`, `vm_pager_put_pages()`, and `vm_pager_has_page()`.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0477** (EARS/Ubiquitous): The Substrate system shall swap pager: move pages to/from swap device.
+- **REQ-01-0477** (EARS/Ubiquitous): The Substrate system shall move swapped pages to and from configured swap backing store through the swap pager.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0478** (EARS/Ubiquitous): The Substrate system shall vnode pager: read/write file-backed pages via VFS.
@@ -3590,19 +3590,19 @@
 - **REQ-01-0479** (EARS/Ubiquitous): The Substrate system shall device pager: direct mapping of device memory (framebuffer, MMIO).
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0480** (EARS/Ubiquitous): The Substrate system shall default pager: zero-fill for anonymous memory.
+- **REQ-01-0480** (EARS/Ubiquitous): The Substrate system shall zero-fill anonymous default-object pages on demand when no pager-backed contents exist.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0481** (EARS/Ubiquitous): The Substrate system shall backing Store (vm_swap):.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0482** (EARS/Ubiquitous): The Substrate system shall support swap partitions and swap files.
+- **REQ-01-0482** (EARS/Ubiquitous): The Substrate system shall support swap files and raw block-device swap backends.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0483** (EARS/Ubiquitous): The Substrate system shall swap space allocation bitmap.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0484** (EARS/Ubiquitous): The Substrate system shall swapon(path) / swapoff(path) syscalls.
+- **REQ-01-0484** (EARS/Ubiquitous): The Substrate system shall provide a kernel control path to enable and disable the active swap backend through `vm_swapon()` and `vm_swapoff()`.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0485** (EARS/Ubiquitous): The Substrate system shall per-page swap block tracking.
@@ -3611,7 +3611,7 @@
 - **REQ-01-0486** (EARS/Ubiquitous): The Substrate system shall page Replacement Policy:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0487** (EARS/Ubiquitous): The Substrate system shall clock/LRU algorithm using A/D bits.
+- **REQ-01-0487** (EARS/Ubiquitous): The Substrate system shall implement its clock/LRU replacement policy using hardware accessed/dirty bits.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0488** (EARS/Ubiquitous): The Substrate system shall integration with page daemon and page queues.

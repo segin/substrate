@@ -108,6 +108,20 @@ Implemented pager families:
 - swap pager
 - vnode pager
 - device pager
+- anonymous default-object zero-fill handled directly in `vm_fault()` rather than by a standalone default pager instance
+
+Current swap pager / backing-store contract:
+
+- `vm_swapon(node)` accepts a writable `fs_node_t` that is either `FS_FILE` or `FS_BLOCKDEVICE`
+- swap capacity is derived from `node->length / PAGE_SIZE`
+- swap space allocation is tracked by a global bitmap
+- each swap pager keeps a per-`pindex` swap-block table
+- `vm_swapoff()` disables the active backend only when no swap blocks remain allocated
+
+Current device pager note:
+
+- `VM_OBJ_TYPE_DEVICE` is recognized by the generic pager allocator
+- the current device pager implementation remains a placeholder and does not yet provide real MMIO/framebuffer fault service
 
 Current vnode pager contract:
 

@@ -146,6 +146,7 @@ void test_vm_swapon() {
     fs_node_t node;
     memset(&node, 0, sizeof(node));
     node.flags = FS_FILE;
+    node.read = (read_type_t)1; // Swap backend must be readable and writable
     node.write = (write_type_t)1; // Just needs to be non-null
     node.length = 4096 * 10; // 10 pages
 
@@ -167,6 +168,26 @@ void test_vm_swapon() {
     printf("Passed.\n");
 }
 
+void test_vm_swapon_block_device() {
+    printf("Running test_vm_swapon_block_device...\n");
+    reset_swap_state();
+
+    fs_node_t node;
+    memset(&node, 0, sizeof(node));
+    node.flags = FS_BLOCKDEVICE;
+    node.read = (read_type_t)1;
+    node.write = (write_type_t)1;
+    node.length = 4096 * 4;
+
+    int res = vm_swapon(&node);
+    assert(res == 0);
+    assert(swap_num_pages == 4);
+    assert(swap_node == &node);
+    assert(vm_swapoff() == 0);
+
+    printf("Passed.\n");
+}
+
 void test_swap_pager() {
     printf("Running test_swap_pager...\n");
     reset_swap_state();
@@ -175,6 +196,7 @@ void test_swap_pager() {
     fs_node_t node;
     memset(&node, 0, sizeof(node));
     node.flags = FS_FILE;
+    node.read = (read_type_t)1;
     node.write = (write_type_t)1;
     node.length = 4096 * 100;
     mock_disk_size = node.length;
@@ -261,12 +283,39 @@ void test_stats() {
     printf("Passed.\n");
 }
 
+void test_vm_swapoff() {
+    printf("Running test_vm_swapoff...\n");
+    reset_swap_state();
+
+    fs_node_t node;
+    memset(&node, 0, sizeof(node));
+    node.flags = FS_FILE;
+    node.read = (read_type_t)1;
+    node.write = (write_type_t)1;
+    node.length = 4096 * 8;
+
+    assert(vm_swapon(&node) == 0);
+    assert(vm_swapoff() == 0);
+    assert(swap_node == NULL);
+    assert(swap_num_pages == 0);
+
+    assert(vm_swapon(&node) == 0);
+    swap_num_pages = 8;
+    swap_bitmap[0] = 1;
+    assert(vm_swapoff() == -1);
+
+    reset_swap_state();
+    printf("Passed.\n");
+}
+
 int main() {
     test_spinlock_initialization();
     test_alloc_free_swap_block();
     test_vm_swapon();
+    test_vm_swapon_block_device();
     test_swap_pager();
     test_stats();
+    test_vm_swapoff();
     printf("All tests passed!\n");
     return 0;
 }

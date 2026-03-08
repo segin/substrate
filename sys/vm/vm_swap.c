@@ -164,6 +164,15 @@ void vm_swap_get_stats(uint64_t *total_pages, uint64_t *free_pages) {
     spinlock_release(&swap_lock);
 }
 
+static bool swap_blocks_in_use(void) {
+    for (uint32_t i = 0; i < swap_num_pages; i++) {
+        if (swap_bitmap[i / 32] & (1U << (i % 32))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static bool swap_pager_haspage(struct vm_pager *p, uint64_t pindex) {
     swap_pager_t *pager = (swap_pager_t *)p;
     if (pindex >= pager->max_pages) return false;
@@ -185,6 +194,7 @@ int vm_swapon(void *node) {
     if (!node) return -1;
 
     fs_node_t *fs_node = (fs_node_t *)node;
+    uint32_t ftype = fs_node->flags & 0x07;
 
     spinlock_acquire(&swap_lock);
     if (swap_node) {
@@ -193,13 +203,13 @@ int vm_swapon(void *node) {
         return -1;
     }
 
-    // Validate node is a regular file and writable
-    if ((fs_node->flags & 0x07) != FS_FILE) {
+    // Swap can be backed either by a regular file or a raw block device.
+    if (ftype != FS_FILE && ftype != FS_BLOCKDEVICE) {
         spinlock_release(&swap_lock);
         return -1;
     }
 
-    if (!fs_node->write) {
+    if (!fs_node->read || !fs_node->write) {
         spinlock_release(&swap_lock);
         return -1;
     }
@@ -220,5 +230,26 @@ int vm_swapon(void *node) {
     extern void kprint(const char *);
     kprint("Swap enabled.\n");
 
+    return 0;
+}
+
+int vm_swapoff(void) {
+    spinlock_acquire(&swap_lock);
+
+    if (!swap_node) {
+        spinlock_release(&swap_lock);
+        return -1;
+    }
+
+    if (swap_blocks_in_use()) {
+        spinlock_release(&swap_lock);
+        return -1;
+    }
+
+    swap_node = NULL;
+    swap_num_pages = 0;
+    memset(swap_bitmap, 0, sizeof(swap_bitmap));
+
+    spinlock_release(&swap_lock);
     return 0;
 }
