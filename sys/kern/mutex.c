@@ -2,18 +2,46 @@
 #include <sys/proc.h>
 #include <kern/sched.h>
 #include <kern/sleepq.h>
+#include <kern/panic.h>
 #include <stddef.h>
+
+static void mutex_track_owner(mutex_t *m, thread_t *owner) {
+    if (!m || !owner) {
+        return;
+    }
+    m->owned_next = owner->held_mutexes;
+    owner->held_mutexes = m;
+}
+
+static void mutex_untrack_owner(mutex_t *m, thread_t *owner) {
+    mutex_t **pp;
+
+    if (!m || !owner) {
+        return;
+    }
+
+    pp = &owner->held_mutexes;
+    while (*pp && *pp != m) {
+        pp = &(*pp)->owned_next;
+    }
+    if (*pp == m) {
+        *pp = m->owned_next;
+    }
+    m->owned_next = NULL;
+}
 
 void mutex_init(mutex_t *m, const char *name) {
     m->locked = 0;
     m->owner = NULL;
     m->name = name;
+    m->owned_next = NULL;
     spinlock_init(&m->guard, "mutex_guard");
 }
 
 bool mutex_trylock(mutex_t *m) {
     if (__sync_bool_compare_and_swap(&m->locked, 0, 1)) {
         m->owner = current_thread;
+        mutex_track_owner(m, current_thread);
         return true;
     }
     return false;
@@ -21,6 +49,10 @@ bool mutex_trylock(mutex_t *m) {
 
 void mutex_lock(mutex_t *m) {
     thread_t *me = current_thread;
+
+    if (m->locked && m->owner == me) {
+        panic("Deadlock: recursive mutex_lock attempted");
+    }
 
     // Fast path: Uncontended optimization
     // Try to grab lock without heavy spinlock first
@@ -77,13 +109,26 @@ void mutex_lock(mutex_t *m) {
     }
     
     m->owner = me;
+    mutex_track_owner(m, me);
     spinlock_release(&m->guard);
 }
 
 void mutex_unlock(mutex_t *m) {
+    thread_t *owner;
+
     spinlock_acquire(&m->guard);
-    
-    // Assert m->owner == current_thread
+
+    if (!m->locked) {
+        spinlock_release(&m->guard);
+        panic("Error: unlocking unlocked mutex");
+    }
+    if (m->owner != current_thread) {
+        spinlock_release(&m->guard);
+        panic("Error: mutex unlock by non-owner");
+    }
+
+    owner = (thread_t *)m->owner;
+    mutex_untrack_owner(m, owner);
     m->owner = NULL;
     __sync_lock_release(&m->locked);
     
@@ -97,4 +142,28 @@ void mutex_unlock(mutex_t *m) {
 
 bool mutex_is_held(mutex_t *m) {
     return m->locked && m->owner == current_thread;
+}
+
+int mutex_release_owned_by_thread(thread_t *owner) {
+    int released = 0;
+
+    while (owner && owner->held_mutexes) {
+        mutex_t *m = owner->held_mutexes;
+
+        spinlock_acquire(&m->guard);
+        if (m->locked && m->owner == owner) {
+            mutex_untrack_owner(m, owner);
+            m->owner = NULL;
+            __sync_lock_release(&m->locked);
+            if (sleepq_wake_one(m)) {
+                /* Waiter was made runnable. */
+            }
+            released++;
+        } else {
+            mutex_untrack_owner(m, owner);
+        }
+        spinlock_release(&m->guard);
+    }
+
+    return released;
 }

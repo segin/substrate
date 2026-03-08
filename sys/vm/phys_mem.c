@@ -301,6 +301,25 @@ size_t vm_phys_get_order_free_count(int order) {
     return count;
 }
 
+uintptr_t vm_phys_get_order_head_phys(int order) {
+    uintptr_t phys = 0;
+
+    if (order < 0 || order >= PMM_MAX_ORDER) {
+        return 0;
+    }
+
+    uint32_t flags = intr_disable();
+    spinlock_acquire(&vm_phys_lock);
+
+    if (vm_phys_free_lists[order]) {
+        phys = vm_phys_free_lists[order]->phys_addr;
+    }
+
+    spinlock_release(&vm_phys_lock);
+    intr_restore(flags);
+    return phys;
+}
+
 void vm_phys_mark_used(uintptr_t pa) {
     uintptr_t target_pa = pa & ~(PMM_BLOCK_SIZE - 1);
     vm_page_t *target = vm_phys_paddr_to_page(target_pa);

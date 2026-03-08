@@ -234,6 +234,45 @@ jump_to_userspace:
     # Jump to user mode
     iret
 
+# void jump_to_elks(uint32_t entry_point, uint32_t user_stack, uint32_t cs, uint32_t ds)
+.global jump_to_elks
+jump_to_elks:
+    # [esp+4] = entry_point
+    # [esp+8] = user_stack
+    # [esp+12] = cs_selector
+    # [esp+16] = ds_selector
+    
+    mov 4(%esp), %ecx   # entry_point
+    mov 8(%esp), %edx   # user_stack
+    mov 12(%esp), %eax  # cs_selector
+    mov 16(%esp), %ebx  # ds_selector
+    
+    cli
+    
+    # Set data segments
+    mov %bx, %ds
+    mov %bx, %es
+    mov %bx, %fs
+    mov %bx, %gs
+    
+    # Build IRET frame
+    push %ebx           # User SS (same as DS)
+    push %edx           # User ESP
+    pushf
+    pop %edx
+    or $0x200, %edx     # Enable interrupts
+    push %edx           # EFLAGS
+    push %eax           # User CS
+    push %ecx           # User EIP
+    
+    # Clear registers for ELKS entry convention?
+    xor %eax, %eax
+    xor %ebx, %ebx
+    xor %ecx, %ecx
+    xor %edx, %edx
+    
+    iret
+
 # fork_child_return - called when child process is scheduled
 # Child's stack already has: GS, FS, ES, DS, pusha regs, int_no, err_code, IRET frame
 # This restores registers and returns to userspace via IRET

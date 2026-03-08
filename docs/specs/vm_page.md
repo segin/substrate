@@ -74,13 +74,17 @@ Queue invariants:
 - Accounting for `free_count + active + inactive + wired + laundry` must remain stable across queue moves when the set of resident pages is unchanged.
 
 ## Page Daemon
-The `pagedaemon` kernel process is started by `vm_page_late_init()`. It sleeps on the `vm_pages_needed` wakeup channel with a one-second timeout, runs `vm_page_age_scan()` opportunistically, and then calls `vm_pageout()` whenever explicit pressure or threshold-based pressure exists.
+The `pagedaemon` kernel process is started by `vm_page_late_init()`. It sleeps on the `vm_pages_needed` wakeup channel with a one-second timeout and then calls `vm_pageout()` whenever explicit pressure or threshold-based pressure exists. When the selected page-aging policy is `VM_PAGE_POLICY_LRU_APPROX`, the daemon also runs `vm_page_age_scan()` on wakeups to keep age counters current.
 
 `vm_pageout()` currently runs in phases:
 1. reclaim UMA-backed kernel allocations
 2. free clean inactive pages already available for reclaim
 3. launder dirty inactive pages and retry freeing them
 4. only if still short, scan the active queue and move cold pages to inactive before repeating reclaim
+
+Active-page scanning is policy-driven:
+- `VM_PAGE_POLICY_CLOCK`: unreferenced active pages move inactive immediately on the next scan.
+- `VM_PAGE_POLICY_LRU_APPROX`: unreferenced active pages age down in place and only move inactive when their age reaches zero.
 
 The wakeup path is:
 - PMM allocation paths call `vm_page_wakeup_daemon()` once free memory dips near reserved levels.
@@ -95,5 +99,5 @@ The wakeup path is:
 Thresholds start from conservative defaults and are raised proportionally to total RAM during `vm_page_late_init()`.
 
 ## Constraints
-- OOM handling is still a stub; the kernel reports critical low-memory instead of selecting a victim process.
-- OOM handling is still a stub; there is no victim-selection policy yet.
+- OOM handling now selects a non-kernel, non-init process victim and delivers `SIGKILL`, but reclaim still completes asynchronously when that victim exits.
+- Page-aging policy selection is currently an internal kernel knob rather than a sysctl or tunable exported to userspace.

@@ -14,7 +14,10 @@ extern mutex_t proctree_lock;
 void pm_init(void);
 process_t *proc_create(int perso_id);
 int proc_fork(process_t *parent, void *stack);
+int proc_vfork(process_t *parent, void *stack);
 void proc_remove_child(process_t *parent, process_t *child);
+int proc_begin_vfork(process_t *child);
+void proc_vfork_done(process_t *child);
 
 void proc_set_bitness(process_t *p, uint8_t bitness);
 uint8_t proc_get_bitness(process_t *p);
@@ -31,5 +34,6 @@ uint8_t proc_get_bitness(process_t *p);
 process_t *proc_find(int pid);
 
 int proc_get_last_pid(void);
+void proc_reap_autoreap_zombies(void);
 
 #endif

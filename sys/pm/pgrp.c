@@ -82,12 +82,12 @@ struct pgrp *pgrp_alloc(struct process *leader, struct session *sess) {
     
     /* Add to session's pgrp list */
     mutex_lock(&proctree_lock);
-    pgrp->pg_next = sess->s_pgrps;
+    pgrp->pg_sess_next = sess->s_pgrps;
     sess->s_pgrps = pgrp;
     
     /* Add to hash table */
     int hash = pgrp_hashval(pgrp->pg_id);
-    pgrp->pg_next = pgrp_hash[hash];
+    pgrp->pg_hash_next = pgrp_hash[hash];
     pgrp_hash[hash] = pgrp;
     mutex_unlock(&proctree_lock);
     
@@ -101,23 +101,29 @@ void pgrp_free(struct pgrp *pgrp) {
     if (!pgrp) return;
     if (pgrp->pg_members != NULL) return; /* Still has members */
     
+    int free_sess = 0;
+    struct session *sess = pgrp->pg_session;
+
     mutex_lock(&proctree_lock);
     /* Remove from hash table */
     int hash = pgrp_hashval(pgrp->pg_id);
     struct pgrp **pp = &pgrp_hash[hash];
-    while (*pp && *pp != pgrp) pp = &(*pp)->pg_next;
-    if (*pp) *pp = pgrp->pg_next;
+    while (*pp && *pp != pgrp) pp = &(*pp)->pg_hash_next;
+    if (*pp) *pp = pgrp->pg_hash_next;
     
     /* Remove from session's pgrp list */
-    struct session *sess = pgrp->pg_session;
     if (sess) {
         struct pgrp **sp = &sess->s_pgrps;
-        while (*sp && *sp != pgrp) sp = &(*sp)->pg_next;
-        if (*sp) *sp = pgrp->pg_next;
+        while (*sp && *sp != pgrp) sp = &(*sp)->pg_sess_next;
+        if (*sp) *sp = pgrp->pg_sess_next;
+        free_sess = (sess->s_pgrps == NULL);
     }
     mutex_unlock(&proctree_lock);
     
     kfree(pgrp, sizeof(struct pgrp));
+    if (free_sess) {
+        session_free(sess);
+    }
 }
 
 /*
@@ -132,7 +138,7 @@ struct pgrp *pgrp_find(int pgid) {
             mutex_unlock(&proctree_lock);
             return pgrp;
         }
-        pgrp = pgrp->pg_next;
+        pgrp = pgrp->pg_hash_next;
     }
     mutex_unlock(&proctree_lock);
     return NULL;
@@ -189,9 +195,23 @@ static void __pgrp_remove_proc(struct process *proc) {
 }
 
 void pgrp_remove_proc(struct process *proc) {
+    struct pgrp *old_pgrp;
+
+    if (!proc) return;
+
+    old_pgrp = proc->p_pgrp;
     mutex_lock(&proctree_lock);
     __pgrp_remove_proc(proc);
     mutex_unlock(&proctree_lock);
+
+    if (!old_pgrp) {
+        return;
+    }
+    if (old_pgrp->pg_members) {
+        pgrp_check_orphan(old_pgrp);
+    } else {
+        pgrp_free(old_pgrp);
+    }
 }
 
 /*
@@ -397,7 +417,7 @@ struct session *session_find(int sid) {
             if (pg->pg_session && pg->pg_session->s_sid == sid) {
                 return pg->pg_session;
             }
-            pg = pg->pg_next;
+            pg = pg->pg_hash_next;
         }
     }
     return NULL;
@@ -454,4 +474,16 @@ void pgrp_check_orphan(struct pgrp *pgrp) {
         pgrp_signal(pgrp, 1);  /* SIGHUP */
         pgrp_signal(pgrp, 18); /* SIGCONT */
     }
+}
+
+void proc_leave_pgrp(struct process *proc) {
+    pgrp_remove_proc(proc);
+}
+
+int proc_join_pgrp(struct process *proc, struct pgrp *pgrp) {
+    if (!proc || !pgrp) {
+        return -1;
+    }
+    pgrp_add_proc(pgrp, proc);
+    return 0;
 }

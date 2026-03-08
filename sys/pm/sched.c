@@ -17,6 +17,36 @@ thread_t *current_thread = NULL;
 #include <kern/arch.h>
 #include <arch/i386/percpu.h>
 
+static void sched_release_thread_storage(thread_t *t) {
+    extern void kfree(void *ptr, size_t size);
+    extern void pmm_free_block(void *p);
+    extern void pmm_free_contiguous(void *p, size_t count);
+
+    if (!t || !t->kstack_owned || t->kstack_base == 0) {
+        return;
+    }
+
+    switch ((thread_kstack_type_t)t->kstack_type) {
+    case THREAD_KSTACK_PMM_BLOCK:
+        pmm_free_block((void *)(uintptr_t)t->kstack_base);
+        break;
+    case THREAD_KSTACK_PMM_CONTIG:
+        pmm_free_contiguous((void *)(uintptr_t)t->kstack_base, t->kstack_units);
+        break;
+    case THREAD_KSTACK_KMALLOC:
+        kfree((void *)(uintptr_t)t->kstack_base, t->kstack_units);
+        break;
+    case THREAD_KSTACK_NONE:
+    default:
+        break;
+    }
+
+    t->kstack_base = 0;
+    t->kstack_units = 0;
+    t->kstack_type = THREAD_KSTACK_NONE;
+    t->kstack_owned = 0;
+}
+
 
 
 void sched_init_generic(void) {
@@ -54,6 +84,10 @@ thread_t *sched_alloc_thread(process_t *proc) {
     threads[i].priority = current_thread ? current_thread->priority : 20;
     threads[i].base_priority = current_thread ? current_thread->base_priority : 20;
     threads[i].sched_class = current_thread ? current_thread->sched_class : SCHED_TIMESHARE;
+    threads[i].kstack_base = 0;
+    threads[i].kstack_units = 0;
+    threads[i].kstack_type = THREAD_KSTACK_NONE;
+    threads[i].kstack_owned = 0;
     threads[i].bound_cpu = -1;
     threads[i].exec_saved_bound_cpu = -1;
     threads[i].exec_pin_active = 0;
@@ -102,6 +136,8 @@ static void sched_context_switch(thread_t *prev, thread_t *next) {
 }
 void sched_yield(void) {
     if (!current_thread) return;
+
+    proc_reap_autoreap_zombies();
 
     extern void kprint(const char *);
     extern int percpu_get_cpu_id(void);
@@ -261,6 +297,7 @@ void sched_reap_process_threads(process_t *proc) {
          * The process is already waitable and no thread in this group should
          * remain schedulable or visible after the parent reaps it.
          */
+        sched_release_thread_storage(&threads[i]);
         memset(&threads[i], 0, sizeof(thread_t));
         threads[i].tid = -1;
         threads[i].state = THREAD_ZOMBIE;

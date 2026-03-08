@@ -10,6 +10,7 @@ extern struct personality personality_svr3;
 extern struct personality personality_svr4;
 
 extern struct personality personality_sunos;
+extern struct personality personality_elks;
 
 static struct personality *personalities[PERS_MAX] = {
     [PERS_NATIVE]  = &personality_native,
@@ -21,6 +22,7 @@ static struct personality *personalities[PERS_MAX] = {
     [PERS_NETBSD]  = &personality_netbsd,
     [PERS_OPENBSD] = &personality_openbsd,
     [PERS_SUNOS]   = &personality_sunos,
+    [PERS_ELKS]    = &personality_elks,
 };
 
 struct personality *perso_lookup(int id) {

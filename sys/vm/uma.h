@@ -79,6 +79,8 @@ typedef void (*uma_reclaim_t)(void);
 struct uma_bucket {
     void    *ub_bucket[UMA_CACHE_BUCKET_SIZE];
     int     ub_cnt;         /* Number of items in bucket */
+    struct uma_bucket *ub_next; /* Next bucket in depot list */
+    uma_zone_t *ub_zone;    /* Owning zone when bucket is full in depot */
 };
 
 struct uma_cache {
@@ -96,6 +98,7 @@ struct uma_slab {
     struct uma_slab     *us_hnext;      /* Next slab in hash chain */
     uma_zone_t          *us_zone;       /* Owner zone (for safety) */
     void                *us_data;       /* Base of object memory */
+    uint32_t            us_offset;      /* Coloring offset from slab base */
     uint32_t            us_freecount;   /* Free objects in slab */
     uint32_t            us_firstfree;   /* Index of first free object */
     uint8_t             *us_freelist;   /* Bitmap or free indices */
@@ -112,12 +115,15 @@ struct uma_zone {
     size_t              uz_align;       /* Object alignment */
     size_t              uz_rsize;       /* Real size (with redzone) */
     size_t              uz_ipers;       /* Items per slab */
+    size_t              uz_color_max;   /* Maximum slab coloring offset */
+    size_t              uz_next_color;  /* Next coloring offset to use */
     
     /* Callbacks */
     uma_ctor            uz_ctor;        /* Constructor */
     uma_dtor            uz_dtor;        /* Destructor */
     uma_init            uz_init;        /* One-time init per object */
     uma_fini            uz_fini;        /* One-time fini per object */
+    uma_reclaim_t       uz_reclaim;     /* Optional shrinker callback */
     void                *uz_arg;        /* Argument to ctor/dtor */
     
     /* Flags */
@@ -177,6 +183,9 @@ void uma_zfree(uma_zone_t *zone, void *item);
 /* Reclaim memory from all zones */
 void uma_reclaim(void);
 
+/* Install or replace the optional zone shrinker callback. */
+void uma_zone_set_reclaim(uma_zone_t *zone, uma_reclaim_t reclaim);
+
 /* Set zone maximum (0 = unlimited) */
 void uma_zone_set_max(uma_zone_t *zone, int max);
 
@@ -188,6 +197,9 @@ int uma_zone_reserve(uma_zone_t *zone, int count);
 
 /* Zone statistics */
 void uma_zone_stat(uma_zone_t *zone, uint64_t *allocs, uint64_t *frees, int *cur);
+
+/* Recover the user-visible allocation size for a UMA-managed item. */
+size_t uma_item_size(void *item);
 
 /* Leak detection: report zones with outstanding allocations */
 void uma_leak_report(void);

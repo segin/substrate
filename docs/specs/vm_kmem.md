@@ -66,6 +66,14 @@ The returned pointer is immediately after that header.
 
 This means the size argument is part of the allocator contract.
 
+## Reallocation
+`krealloc(ptr, size)` provides a size-recovering resize path for kernel callers:
+- `krealloc(NULL, size)` behaves like `kmalloc(size)`
+- `krealloc(ptr, 0)` frees the original allocation and returns `NULL`
+- small allocations recover their original size from the owning UMA slab/zone
+- large allocations recover their original size from `kmem_large_header_t`
+- resize is implemented as allocate-copy-free, preserving `min(old, new)` bytes
+
 ## Initialization Order
 Current bring-up sequence:
 1. `uma_startup()`
@@ -82,3 +90,15 @@ That order matters because:
 - API currently requires sized free
 - small allocations are `M_NOWAIT` only in the active implementation
 - large allocations are page-granular and may over-allocate up to almost one page
+
+## Statistics
+The allocator maintains global accounting plus per-class breakdowns:
+- total alloc/free calls
+- total requested bytes and currently outstanding requested bytes
+- per-bucket counters for each UMA size class (`16..4096`)
+- large-allocation counters and outstanding requested bytes for the PMM path
+
+The current design does not use BSD-style `malloc_type` subsystem tagging. The
+authoritative accounting split is allocator class:
+- size bucket for UMA-backed small allocations
+- large contiguous PMM allocations for requests above `4096`

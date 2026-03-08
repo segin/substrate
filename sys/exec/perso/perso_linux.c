@@ -12,6 +12,8 @@
 #include "linux/linux_syscalls.h"
 #include "linux_user.h"
 #include <sys/signal.h>
+#include <sys/proc.h>
+#include <string.h>
 
 /* Signal Translation Tables */
 #define LINUX_SIGHUP        1
@@ -57,31 +59,31 @@ static int native_to_linux_sigtbl[LINUX_SIGTBLSZ + 1] = {
     LINUX_SIGILL,    /* SIGILL */
     LINUX_SIGTRAP,   /* SIGTRAP */
     LINUX_SIGABRT,   /* SIGABRT */
-    0,               /* SIGEMT */
+    LINUX_SIGBUS,    /* SIGBUS */
     LINUX_SIGFPE,    /* SIGFPE */
     LINUX_SIGKILL,   /* SIGKILL */
-    LINUX_SIGBUS,    /* SIGBUS */
+    LINUX_SIGUSR1,   /* SIGUSR1 */
     LINUX_SIGSEGV,   /* SIGSEGV */
-    LINUX_SIGSYS,    /* SIGSYS */
+    LINUX_SIGUSR2,   /* SIGUSR2 */
     LINUX_SIGPIPE,   /* SIGPIPE */
     LINUX_SIGALRM,   /* SIGALRM */
     LINUX_SIGTERM,   /* SIGTERM */
-    LINUX_SIGURG,    /* SIGURG */
+    0,               /* 16 unused in native ABI */
+    LINUX_SIGCHLD,   /* SIGCHLD */
+    LINUX_SIGCONT,   /* SIGCONT */
     LINUX_SIGSTOP,   /* SIGSTOP */
     LINUX_SIGTSTP,   /* SIGTSTP */
-    LINUX_SIGCONT,   /* SIGCONT */
-    LINUX_SIGCHLD,   /* SIGCHLD */
     LINUX_SIGTTIN,   /* SIGTTIN */
     LINUX_SIGTTOU,   /* SIGTTOU */
-    LINUX_SIGIO,     /* SIGIO */
-    LINUX_SIGXCPU,   /* SIGXCPU */
-    LINUX_SIGXFSZ,   /* SIGXFSZ */
-    LINUX_SIGVTALRM, /* SIGVTALRM */
-    LINUX_SIGPROF,   /* SIGPROF */
+    0,               /* 23 unused */
+    0,               /* 24 unused */
+    0,               /* 25 unused */
+    0,               /* 26 unused */
+    0,               /* 27 unused */
     LINUX_SIGWINCH,  /* SIGWINCH */
-    0,               /* SIGINFO */
-    LINUX_SIGUSR1,   /* SIGUSR1 */
-    LINUX_SIGUSR2    /* SIGUSR2 */
+    0,               /* 29 reserved for mapped RT signal */
+    0,               /* 30 unused */
+    0                /* 31 unused */
 };
 
 static int linux_to_native_sigtbl[LINUX_SIGTBLSZ + 1] = {
@@ -101,7 +103,7 @@ static int linux_to_native_sigtbl[LINUX_SIGTBLSZ + 1] = {
     SIGPIPE,   /* LINUX_SIGPIPE */
     SIGALRM,   /* LINUX_SIGALRM */
     SIGTERM,   /* LINUX_SIGTERM */
-    SIGBUS,    /* LINUX_SIGSTKFLT */
+    0,         /* LINUX_SIGSTKFLT */
     SIGCHLD,   /* LINUX_SIGCHLD */
     SIGCONT,   /* LINUX_SIGCONT */
     SIGSTOP,   /* LINUX_SIGSTOP */
@@ -139,6 +141,215 @@ int native_to_linux_signal(int sig) {
     if (sig > 0 && sig <= LINUX_SIGTBLSZ)
         return native_to_linux_sigtbl[sig];
     return 0; // Invalid or RT signal
+}
+
+static uint32_t linux_sigset_to_native_mask(const linux_sigset_t *set) {
+    uint32_t native = 0;
+
+    if (!set) {
+        return 0;
+    }
+
+    for (int lsig = 1; lsig <= LINUX_SIGRTMAX; lsig++) {
+        uint32_t bit = 1U << ((lsig - 1) & 31);
+        if ((set->sig[(lsig - 1) / 32] & bit) == 0) {
+            continue;
+        }
+
+        int nsig = linux_to_native_signal(lsig);
+        if (nsig > 0 && nsig <= NSIG) {
+            native |= sigmask(nsig);
+        }
+    }
+
+    return native;
+}
+
+static void native_mask_to_linux_sigset(uint32_t native_mask, linux_sigset_t *set) {
+    if (!set) {
+        return;
+    }
+
+    memset(set, 0, sizeof(*set));
+
+    for (int nsig = 1; nsig <= NSIG; nsig++) {
+        if ((native_mask & sigmask(nsig)) == 0) {
+            continue;
+        }
+
+        int lsig = native_to_linux_signal(nsig);
+        if (lsig > 0 && lsig <= LINUX_SIGRTMAX) {
+            set->sig[(lsig - 1) / 32] |= 1U << ((lsig - 1) & 31);
+        }
+    }
+}
+
+static int linux_sa_flags_to_native(uint32_t flags) {
+    return (int)(flags & (SA_NOCLDSTOP |
+                          SA_NOCLDWAIT |
+                          SA_SIGINFO |
+                          SA_ONSTACK |
+                          SA_RESTART |
+                          SA_NODEFER |
+                          SA_RESETHAND));
+}
+
+static uint32_t native_sa_flags_to_linux(int flags, void *restorer) {
+    uint32_t linux_flags;
+
+    linux_flags = (uint32_t)(flags & (SA_NOCLDSTOP |
+                                      SA_NOCLDWAIT |
+                                      SA_SIGINFO |
+                                      SA_ONSTACK |
+                                      SA_RESTART |
+                                      SA_NODEFER |
+                                      SA_RESETHAND));
+
+    if (restorer) {
+        linux_flags |= LINUX_SA_RESTORER;
+    }
+
+    return linux_flags;
+}
+
+int linux_sys_signal(int sig, void *handler) {
+    struct sigaction act;
+    struct sigaction old_act;
+    int native_sig = linux_to_native_signal(sig);
+    int ret;
+
+    if (native_sig <= 0 || native_sig > NSIG) {
+        return -EINVAL;
+    }
+
+    memset(&act, 0, sizeof(act));
+    act.sa_handler = (sig_t)handler;
+
+    ret = kern_sigaction(native_sig, &act, &old_act);
+    if (ret < 0) {
+        return ret;
+    }
+
+    if (current_process) {
+        current_process->linux_sig_restorer[native_sig - 1] = NULL;
+    }
+
+    return (int)(uintptr_t)old_act.sa_handler;
+}
+
+int linux_sys_kill(int pid, int sig) {
+    int native_sig;
+
+    if (sig == 0) {
+        return sys_kill(pid, 0);
+    }
+
+    native_sig = linux_to_native_signal(sig);
+    if (native_sig <= 0 || native_sig > NSIG) {
+        return -EINVAL;
+    }
+
+    return sys_kill(pid, native_sig);
+}
+
+int linux_sys_rt_sigaction(int sig, const struct linux_sigaction *act,
+                           struct linux_sigaction *oact, size_t sigsetsize) {
+    struct linux_sigaction kact;
+    struct linux_sigaction koact;
+    struct sigaction native_act;
+    struct sigaction old_act;
+    int native_sig;
+    int ret;
+
+    if (sigsetsize != sizeof(linux_sigset_t)) {
+        return -EINVAL;
+    }
+
+    native_sig = linux_to_native_signal(sig);
+    if (native_sig <= 0 || native_sig > NSIG) {
+        return -EINVAL;
+    }
+
+    if (oact) {
+        memset(&koact, 0, sizeof(koact));
+        old_act = current_process->sig_actions[native_sig - 1];
+        koact.sa_handler = (uint32_t)(uintptr_t)old_act.sa_handler;
+        koact.sa_restorer = (uint32_t)(uintptr_t)current_process->linux_sig_restorer[native_sig - 1];
+        koact.sa_flags = native_sa_flags_to_linux(old_act.sa_flags,
+                                                  current_process->linux_sig_restorer[native_sig - 1]);
+        native_mask_to_linux_sigset(old_act.sa_mask, &koact.sa_mask);
+    }
+
+    if (act) {
+        if (copyin(act, &kact, sizeof(kact)) != 0) {
+            return -EFAULT;
+        }
+
+        memset(&native_act, 0, sizeof(native_act));
+        native_act.sa_handler = (sig_t)(uintptr_t)kact.sa_handler;
+        native_act.sa_flags = linux_sa_flags_to_native(kact.sa_flags);
+        native_act.sa_mask = linux_sigset_to_native_mask(&kact.sa_mask);
+
+        ret = kern_sigaction(native_sig, &native_act, NULL);
+        if (ret < 0) {
+            return ret;
+        }
+
+        if (current_process) {
+            if (kact.sa_flags & LINUX_SA_RESTORER) {
+                current_process->linux_sig_restorer[native_sig - 1] =
+                    (void *)(uintptr_t)kact.sa_restorer;
+            } else {
+                current_process->linux_sig_restorer[native_sig - 1] = NULL;
+            }
+        }
+    }
+
+    if (oact) {
+        if (copyout(&koact, oact, sizeof(koact)) != 0) {
+            return -EFAULT;
+        }
+    }
+
+    return 0;
+}
+
+int linux_sys_rt_sigprocmask(int how, const linux_sigset_t *set,
+                             linux_sigset_t *oset, size_t sigsetsize) {
+    linux_sigset_t kset;
+    linux_sigset_t koset;
+    uint32_t native_set = 0;
+    uint32_t native_oset = 0;
+    int ret;
+
+    if (sigsetsize != sizeof(linux_sigset_t)) {
+        return -EINVAL;
+    }
+
+    if (how != 1 && how != 2 && how != 3) {
+        return -EINVAL;
+    }
+
+    if (set) {
+        if (copyin(set, &kset, sizeof(kset)) != 0) {
+            return -EFAULT;
+        }
+        native_set = linux_sigset_to_native_mask(&kset);
+    }
+
+    ret = kern_sigprocmask(how, set ? &native_set : NULL, oset ? &native_oset : NULL);
+    if (ret < 0) {
+        return ret;
+    }
+
+    if (oset) {
+        native_mask_to_linux_sigset(native_oset, &koset);
+        if (copyout(&koset, oset, sizeof(koset)) != 0) {
+            return -EFAULT;
+        }
+    }
+
+    return 0;
 }
 
 #ifndef HOST_TEST
@@ -182,7 +393,6 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
         case LINUX_TCGETS: {
             /* Get native termios, translate to Linux format */
             struct termios native;
-            extern void *memset(void*, int, size_t);
             memset(&native, 0, sizeof(native));
             
             int ret = kern_ioctl(fd, request, &native);
@@ -211,7 +421,6 @@ static int linux_ioctl_tty(int fd, uint32_t request, void *arg) {
             if (!arg) return -EFAULT;
             struct linux_termios lt;
             struct termios native;
-            extern void *memset(void*, int, size_t);
             memset(&native, 0, sizeof(native));
             if (copyin(arg, &lt, sizeof(lt)) != 0) {
                 return -EFAULT;
@@ -358,7 +567,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_fstat]          = (void*)linux_sys_fstat,
     [LINUX_SYS_access]         = &sys_access,
     [LINUX_SYS_sync]           = &sys_sync,
-    [LINUX_SYS_kill]           = &sys_kill,
+    [LINUX_SYS_kill]           = &linux_sys_kill,
     [LINUX_SYS_mkdir]          = &sys_mkdir,
     [LINUX_SYS_rmdir]          = &sys_rmdir,
     [LINUX_SYS_pipe]           = &sys_pipe,
@@ -366,7 +575,7 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_brk]            = &sys_brk,
     [LINUX_SYS_setgid]         = &sys_setgid,
     [LINUX_SYS_getgid]         = &sys_getgid,
-    [LINUX_SYS_signal]         = &sys_signal,
+    [LINUX_SYS_signal]         = &linux_sys_signal,
     [LINUX_SYS_geteuid]        = &sys_geteuid,
     [LINUX_SYS_getegid]        = &sys_getegid,
     [LINUX_SYS_acct]           = &sys_acct,
@@ -392,8 +601,8 @@ static void *linux_syscalls[MAX_SYSCALLS] = {
     [LINUX_SYS_getdents]       = &sys_getdents,
     [LINUX_SYS_nanosleep]      = &sys_nanosleep,
     [LINUX_SYS_poll]           = &sys_poll,
-    [LINUX_SYS_rt_sigaction]   = &sys_sigaction,
-    [LINUX_SYS_rt_sigprocmask] = &sys_sigprocmask,
+    [LINUX_SYS_rt_sigaction]   = &linux_sys_rt_sigaction,
+    [LINUX_SYS_rt_sigprocmask] = &linux_sys_rt_sigprocmask,
     [LINUX_SYS_getcwd]         = &sys_getcwd,
     [LINUX_SYS_vfork]          = &sys_vfork,
     [LINUX_SYS_mmap2]          = &linux_sys_mmap2,

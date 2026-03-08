@@ -19,6 +19,7 @@
 #define P_CONTINUED  0x0001  // Process has been continued (for WCONTINUED)
 #define P_TRACED     0x0002  // Being traced (ptrace)
 #define P_WAITED     0x0004  // Stopped state already reported
+#define P_AUTOREAP   0x0008  // Zombie should be reaped asynchronously
 
 
 typedef uint8_t process_state_t;
@@ -29,11 +30,13 @@ struct fs_node;
 typedef struct fs_node fs_node_t;
 struct runqueue;
 struct file;
+struct thread;
 typedef struct file file_t;
 struct pmap;
 struct pgrp;
 struct session;
 struct registers;
+struct mutex;
 
 #define MAX_FD 32
 
@@ -59,6 +62,7 @@ typedef struct process {
     
     // Signals
     struct sigaction sig_actions[NSIG];
+    void *linux_sig_restorer[NSIG];
     uint32_t sig_catch;   // Bitmask: signals with custom handlers (not SIG_DFL/SIG_IGN)
     uint32_t sig_ignore;  // Bitmask: signals set to SIG_IGN
     
@@ -70,6 +74,7 @@ typedef struct process {
     struct process *p_parent;     // Parent process
     struct process *p_children;   // Head of children list
     struct process *p_sibling;    // Next sibling (in parent's children list)
+    struct thread *vfork_waiter;  // Parent thread blocked in vfork()
     
     // Accounting & Credentials
     char comm[AC_COMM_LEN];
@@ -120,6 +125,13 @@ typedef enum {
     THREAD_STOPPED
 } thread_state_t;
 
+typedef enum {
+    THREAD_KSTACK_NONE = 0,
+    THREAD_KSTACK_PMM_BLOCK,
+    THREAD_KSTACK_PMM_CONTIG,
+    THREAD_KSTACK_KMALLOC
+} thread_kstack_type_t;
+
 // Scheduling Classes
 typedef enum {
     SCHED_REALTIME,
@@ -137,7 +149,11 @@ typedef struct thread {
     // CPU Context (Abstracted)
     uintptr_t kstack_ptr; // Kernel Stack Pointer (ESP/RSP)
     uintptr_t kstack_top; // Top of Kernel Stack (for TSS esp0)
+    uintptr_t kstack_base; // Base of owned kernel stack allocation
     uintptr_t instr_ptr;  // Instruction Pointer (EIP/RIP) - for context switching
+    uint32_t  kstack_units; // Pages for PMM stacks, bytes for kmalloc stacks
+    uint8_t   kstack_type; // thread_kstack_type_t
+    uint8_t   kstack_owned; // Nonzero if the scheduler owns the kernel stack
     
     // Scheduling - Basic
     int           priority;
@@ -151,6 +167,7 @@ typedef struct thread {
     uint16_t      time_slice;     // Remaining time slice (ticks)
     uint16_t      time_slice_max; // Full time slice for this priority
     uint32_t      flags;          // Thread flags
+    struct mutex *held_mutexes;   // Sleep mutexes currently owned by this thread
     
 #define THREAD_F_INTERRUPTIBLE 0x0001 // Sleep is interruptible by signals
 #define THREAD_F_NO_PREEMPT    0x0002 // Suppress timer-driven reschedule
@@ -188,6 +205,7 @@ typedef struct thread {
     // Trap signal info (for SA_SIGINFO from trapsignal)
     int           trap_signo;     // Signal number from trap
     int           trap_code;      // Trap-specific code (si_code)
+    uintptr_t     trap_addr;      // Fault address for siginfo_t.si_addr when applicable
     
     // Robust futex list (for owner death cleanup)
     struct robust_list_head *robust_list;

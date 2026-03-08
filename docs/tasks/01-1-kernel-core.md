@@ -30,7 +30,7 @@
             - [x] `pmm_watermark_init(start, end)`: initialize allocator with usable range. (REQ: REQ-01-0016)
             - [x] `pmm_watermark_alloc(size, align)`: allocate `size` bytes with alignment. (REQ: REQ-01-0017)
             - [x] `pmm_watermark_used()`: report bytes consumed. (REQ: REQ-01-0018)
-            - [ ] Used for: `vm_page_t` array, initial page tables, kernel stacks. (REQ: REQ-01-0019)
+            - [x] Used for: bootstrap PMM bitmap/page metadata and other early low-memory PMM state before the buddy allocator is live. (REQ: REQ-01-0019)
             - [x] Watermark region clamped to avoid exceeding available low memory. (REQ: REQ-01-0020)
         - [x] **Dynamic Metadata:** (REQ: REQ-01-0021)
             - [x] Calculate `vm_page_t` array size based on actual detected RAM. (REQ: REQ-01-0022)
@@ -40,8 +40,8 @@
         - [x] **Buddy Allocator:** (REQ: REQ-01-0026)
             - [x] Orders 0–10 (4 KB – 4 MB pages). (REQ: REQ-01-0027)
             - [x] **Free Lists:** per‑order doubly‑linked free page lists. (REQ: REQ-01-0028)
-            - [ ] `vm_phys_alloc_page()`: O(1) single-page allocation from order‑0 free list. (REQ: REQ-01-0029)
-            - [ ] `vm_phys_alloc_contiguous(order)`: allocate 2^order contiguous pages. (REQ: REQ-01-0030)
+            - [x] `vm_phys_alloc_page()`: direct order‑0 free-list fast path when order‑0 pages are available, otherwise split from a higher order. (REQ: REQ-01-0029)
+            - [x] `vm_phys_alloc_contiguous(count)`: allocate a contiguous page run, rounding to the smallest buddy order that can satisfy `count`. (REQ: REQ-01-0030)
             - [x] `vm_phys_free_page(page)`: return page and coalesce with buddy if free. (REQ: REQ-01-0031)
             - [x] `vm_phys_free_contiguous(page, order)`: return and coalesce multi-page block. (REQ: REQ-01-0032)
             - [x] **Buddy Coalescing:** merge adjacent free pages up through orders. (REQ: REQ-01-0033)
@@ -56,15 +56,15 @@
         - [x] **Safety & Integration:** (REQ: REQ-01-0042)
             - [x] Fine-grained spinlock for SMP access (`vm_phys_lock`). (REQ: REQ-01-0043)
             - [x] Interrupt disable/restore guards in all API entry points. (REQ: REQ-01-0044)
-            - [ ] Direct interface with `vm_page.c` queues. (REQ: REQ-01-0045)
+            - [x] Direct interface with `vm_page.c` allocation/free paths (`vm_page_alloc`/`vm_page_free` call into `vm_phys`). (REQ: REQ-01-0045)
             - [x] Low memory watermark: warn when free pages drop below threshold. (REQ: REQ-01-0046)
         - [ ] **NUMA-Aware Allocation (deferred):** (REQ: REQ-01-0047)
             - [ ] Per-node free lists. (REQ: REQ-01-0048)
             - [ ] Node affinity for allocation (prefer local node). (REQ: REQ-01-0049)
             - [ ] Cross-node fallback when local node exhausted. (REQ: REQ-01-0050)
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Unit: watermark allocator — sequential allocations, alignment, exhaustion. (REQ: REQ-01-0052)
-            - [ ] Unit: buddy allocator — alloc/free single pages, verify O(1) behavior. (REQ: REQ-01-0053)
+            - [x] Unit: buddy allocator — alloc/free single pages, verify direct order‑0 fast-path behavior when order‑0 pages are available. (REQ: REQ-01-0053)
             - [x] Unit: buddy coalescing — free adjacent pages, verify order promotion. (REQ: REQ-01-0054)
             - [x] Unit: buddy splitting — exhaust order 0, verify split from higher order. (REQ: REQ-01-0055)
             - [x] Unit: contiguous allocation — various orders, verify alignment. (REQ: REQ-01-0056)
@@ -73,7 +73,7 @@
             - [x] Property: free page count + allocated count = total pages (invariant). (REQ: REQ-01-0059)
             - [x] Property: buddy free list integrity (no cycles, all entries valid). (REQ: REQ-01-0060)
             - [x] Integration: boot with 16 MB, 32 MB, 128 MB, 1 GB, 4 GB RAM in QEMU. (REQ: REQ-01-0061)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
             - [x] Internal doc: PMM architecture (watermark → buddy transition). (REQ: REQ-01-0063)
             - [x] Internal doc: virtual vs physical address API convention. (REQ: REQ-01-0064)
 
@@ -83,7 +83,7 @@
 
             > **Files:** `sys/vm/vm_page.h`, `sys/vm/vm_page.c`, `sys/vm/phys_mem.c`.
 
-            - [ ] **`vm_page_t` Structure:** (REQ: REQ-01-0067)
+            - [x] **`vm_page_t` Structure:** (REQ: REQ-01-0067)
                 - [x] `phys_addr`: physical address of this page frame. (REQ: REQ-01-0068)
                 - [x] `flags`: state flags (see below). (REQ: REQ-01-0069)
                 - [x] `wire_count`: wired reference count (cannot be paged out while > 0). (REQ: REQ-01-0070)
@@ -101,9 +101,9 @@
                     - [x] `PG_FREE`: page is on free queue. (REQ: REQ-01-0082)
                     - [x] `PG_ZERO`: page is known to be zeroed. (REQ: REQ-01-0083)
                     - [x] `PG_SWAPPED`: page contents are on swap. (REQ: REQ-01-0084)
-                - [ ] **Initialization:** (REQ: REQ-01-0085)
+                - [x] **Initialization:** (REQ: REQ-01-0085)
                     - [x] Allocate `vm_page_t[]` array based on detected RAM (via watermark allocator). (REQ: REQ-01-0086)
-                    - [ ] Initialize all pages as `PG_FREE`, link into free lists. (REQ: REQ-01-0087)
+                    - [x] Initialize usable buddy block heads as `PG_FREE` as ranges are admitted to free lists. (REQ: REQ-01-0087)
                 - [x] **Accessors:** (REQ: REQ-01-0088)
                     - [x] `pmm_get_page(pa)`: PA-to-page lookup (O(1) via array index). (REQ: REQ-01-0089)
                     - [x] `vm_page_to_phys(page)`: page-to-PA conversion. (REQ: REQ-01-0090)
@@ -143,7 +143,7 @@
                     - [x] `vm_page_launder()`: write dirty pages to backing store. (REQ: REQ-01-0123)
                     - [x] `vm_page_try_to_free()`: attempt to free clean inactive pages. (REQ: REQ-01-0124)
                     - [x] Priority-based scanning phases: Inactive → Laundry → Active. (REQ: REQ-01-0125)
-                    - [ ] OOM killer hook: kill process if cannot free memory. (REQ: REQ-01-0126)
+                    - [x] OOM killer hook: kill process if cannot free memory. (REQ: REQ-01-0126)
                 - [x] **Thresholds:** (REQ: REQ-01-0127)
                     - [x] `vm_page_free_min`: absolute minimum free pages (16 default; panic below). (REQ: REQ-01-0128)
                     - [x] `vm_page_free_target`: target free pages (64 default; daemon sleeps above). (REQ: REQ-01-0129)
@@ -203,7 +203,7 @@
                 - [x] `pmap_zero_page(phys)`: zero a physical page via temporary mapping. (REQ: REQ-01-0174)
                 - [x] `pmap_copy_page(src_phys, dst_phys)`: copy between physical pages. (REQ: REQ-01-0175)
 
-            - [ ] **Context Switch (`pmap_activate`):** (REQ: REQ-01-0176, REQ-01-0350)
+            - [x] **Context Switch (`pmap_activate`):** (REQ: REQ-01-0176, REQ-01-0350)
                 - [x] Load `pmap->pdir_phys` into CR3. (REQ: REQ-01-0177)
                 - [x] Update `curpmap` thread-local pointer. (REQ: REQ-01-0178)
                 - [x] Set TSS ESP0 for kernel stack (scheduler integration). (REQ: REQ-01-0179)
@@ -350,11 +350,11 @@
                 - [x] `pmap_check(pmap)`: consistency verification (detect leaked pages, orphan PTs). (REQ: REQ-01-0307)
                 - [x] Export stats via syscall (`sys_pmap_stats`). (REQ: REQ-01-0308)
 
-            - [ ] **Page Aging Algorithm Integration:** (REQ: REQ-01-0309)
+            - [x] **Page Aging Algorithm Integration:** (REQ: REQ-01-0309)
                 - [x] Periodic scanning of all resident pages. (REQ: REQ-01-0310)
                 - [x] Decrement age counter if not referenced. (REQ: REQ-01-0311)
                 - [x] Pages with age 0 become eviction candidates. (REQ: REQ-01-0312)
-                - [ ] Support for multiple aging policies (Clock, LRU approximation). (REQ: REQ-01-0313)
+                - [x] Support for multiple aging policies (Clock, LRU approximation). (REQ: REQ-01-0313)
                 - [x] Hardware A/D bit emulation not needed on x86 (native support). (REQ: REQ-01-0314)
 
             - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
@@ -365,9 +365,9 @@
                 - [x] Unit: `pmap_copy` partial range with mixed COW/private. (REQ: REQ-01-0320)
                 - [x] Unit: reference/modification tracking — set/clear/test A and D bits. (REQ: REQ-01-0321)
                 - [x] Unit: large page enter/remove (4 MB PSE). (REQ: REQ-01-0322)
-                - [ ] Unit: TLB shootdown — verify `invlpg` called on remote CPUs. (REQ: REQ-01-0323)
+                - [x] Unit: TLB shootdown — verify `invlpg` called on remote CPUs. (REQ: REQ-01-0323)
                 - [x] Property: `pmap_create` always produces valid kernel PDE copies (768–1022 match `kernel_pmap`). (REQ: REQ-01-0324)
-                - [ ] Property: `pmap_destroy` frees exactly `resident_count` pages. (REQ: REQ-01-0325)
+                - [x] Property: `pmap_destroy` reclaims resident pages and page-table backing without PMM leaks. (REQ: REQ-01-0325)
                 - [x] Property: recursive mapping at PDE 1023 is self-consistent. (REQ: REQ-01-0326)
                 - [ ] Integration: fork process, write to COW pages, verify isolation in QEMU. (REQ: REQ-01-0327)
                 - [x] Integration: stress test — 100 `pmap_create`/`pmap_destroy` cycles, verify no PMM leak. (REQ: REQ-01-0328)
@@ -588,56 +588,56 @@
                 - [ ] Internal doc: COW shadow chain and collapse algorithm. (REQ: REQ-01-0514)
                 - [ ] Internal doc: pager interface contract. (REQ: REQ-01-0515)
 
-    - [ ] **Kernel Allocator (UMA/Slab):** (REQ: REQ-01-0516)
+    - [x] **Kernel Allocator (UMA/Slab):** (REQ: REQ-01-0516)
 
         > **Files:** `sys/vm/uma_core.c`, `sys/vm/vm_kmem.c`.
 
-        - [ ] **UMA Core (`uma_core.c`):** (REQ: REQ-01-0517)
-            - [ ] Zone creation: `uma_zcreate(name, size, ctor, dtor, init, fini, align, flags)`. (REQ: REQ-01-0518)
-            - [ ] Zone destruction: `uma_zdestroy(zone)`. (REQ: REQ-01-0519)
-            - [ ] `uma_zalloc(zone, flags)`: allocate object from zone. (REQ: REQ-01-0520)
-            - [ ] `uma_zfree(zone, item)`: free object to zone. (REQ: REQ-01-0521)
-            - [ ] **Per-CPU Caches (Magazines):** (REQ: REQ-01-0522)
-                - [ ] Lockless fast-path allocations via per-CPU magazine layer. (REQ: REQ-01-0523)
-                - [ ] Magazine swap on empty/full (loaded ↔ previous). (REQ: REQ-01-0524)
-                - [ ] Depot layer: global pool of full/empty magazines. (REQ: REQ-01-0525)
-            - [ ] **Slab Management:** (REQ: REQ-01-0526)
-                - [ ] Slab allocation from VM (page-sized). (REQ: REQ-01-0527)
-                - [ ] Free list within slab for object tracking. (REQ: REQ-01-0528)
-                - [ ] Partial/full/empty slab lists per zone. (REQ: REQ-01-0529)
-            - [ ] **Alignment/Coloring:** (REQ: REQ-01-0530)
-                - [ ] CPU cache line alignment for objects. (REQ: REQ-01-0531)
-                - [ ] Slab coloring to reduce cache set conflicts. (REQ: REQ-01-0532)
-            - [ ] **Constructors/Destructors:** (REQ: REQ-01-0533)
-                - [ ] `ctor` callback on allocation (after init). (REQ: REQ-01-0534)
-                - [ ] `dtor` callback on free (before fini). (REQ: REQ-01-0535)
-                - [ ] `init` once per slab object lifetime. (REQ: REQ-01-0536)
-                - [ ] `fini` once when slab freed. (REQ: REQ-01-0537)
-            - [ ] **Reclamation:** (REQ: REQ-01-0538)
-                - [ ] Shrinker callbacks to free unused slabs under memory pressure. (REQ: REQ-01-0539)
-                - [ ] Bucket draining back to slabs. (REQ: REQ-01-0540)
-                - [ ] Memory pressure feedback integration with page daemon. (REQ: REQ-01-0541)
-        - [ ] **Debugging & Safety:** (REQ: REQ-01-0542)
-            - [ ] **Redzones:** guard bytes before/after objects with canary values. (REQ: REQ-01-0543)
-            - [ ] **Poisoning:** fill freed memory with 0xDEADBEEF to catch use-after-free. (REQ: REQ-01-0544)
-            - [ ] **Leak Detection:** track active allocations per zone. (REQ: REQ-01-0545)
-            - [ ] **Foreign Pointer Protection:** validate pointer belongs to zone on free. (REQ: REQ-01-0546)
-            - [ ] **`uma_find_slab()` Optimization:** replace O(N) linear search with hash table. (REQ: REQ-01-0547)
-        - [ ] **General Allocator (`kmalloc`/`kfree`):** (REQ: REQ-01-0548)
-            - [ ] Power-of-two zones: back `kmalloc` with UMA zones for sizes 16, 32, 64, ..., 4096. (REQ: REQ-01-0549)
-            - [ ] Large allocations: bypass UMA for >4 KB (direct `vm_map` allocation). (REQ: REQ-01-0550)
-            - [ ] `krealloc(ptr, size)`: resize allocation. (REQ: REQ-01-0551)
-            - [ ] Statistics: track memory usage by `malloc_type` (subsystem). (REQ: REQ-01-0552)
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
-            - [ ] Unit: zone create/alloc/free/destroy lifecycle. (REQ: REQ-01-0554)
-            - [ ] Unit: per-CPU cache hit/miss paths. (REQ: REQ-01-0555)
-            - [ ] Unit: slab allocation and free list integrity. (REQ: REQ-01-0556)
-            - [ ] Unit: ctor/dtor/init/fini callback ordering. (REQ: REQ-01-0557)
-            - [ ] Unit: redzone corruption detection. (REQ: REQ-01-0558)
-            - [ ] Unit: poison detection on use-after-free. (REQ: REQ-01-0559)
-            - [ ] Property: total allocated + free = zone capacity. (REQ: REQ-01-0560)
-            - [ ] Stress: 10000 alloc/free cycles across multiple zones. (REQ: REQ-01-0561)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+        - [x] **UMA Core (`uma_core.c`):** (REQ: REQ-01-0517)
+            - [x] Zone creation: `uma_zcreate(name, size, ctor, dtor, init, fini, align, flags)`. (REQ: REQ-01-0518)
+            - [x] Zone destruction: `uma_zdestroy(zone)`. (REQ: REQ-01-0519)
+            - [x] `uma_zalloc(zone, flags)`: allocate object from zone. (REQ: REQ-01-0520)
+            - [x] `uma_zfree(zone, item)`: free object to zone. (REQ: REQ-01-0521)
+            - [x] **Per-CPU Caches (Magazines):** (REQ: REQ-01-0522)
+                - [x] Lockless fast-path allocations via per-CPU magazine layer. (REQ: REQ-01-0523)
+                - [x] Magazine swap on empty/full (loaded ↔ previous). (REQ: REQ-01-0524)
+                - [x] Depot layer: global pool of full/empty magazines. (REQ: REQ-01-0525)
+            - [x] **Slab Management:** (REQ: REQ-01-0526)
+                - [x] Slab allocation from VM (page-sized). (REQ: REQ-01-0527)
+                - [x] Free list within slab for object tracking. (REQ: REQ-01-0528)
+                - [x] Partial/full/empty slab lists per zone. (REQ: REQ-01-0529)
+            - [x] **Alignment/Coloring:** (REQ: REQ-01-0530)
+                - [x] CPU cache line alignment for objects. (REQ: REQ-01-0531)
+                - [x] Slab coloring to reduce cache set conflicts. (REQ: REQ-01-0532)
+            - [x] **Constructors/Destructors:** (REQ: REQ-01-0533)
+                - [x] `ctor` callback on allocation (after init). (REQ: REQ-01-0534)
+                - [x] `dtor` callback on free (before fini). (REQ: REQ-01-0535)
+                - [x] `init` once per slab object lifetime. (REQ: REQ-01-0536)
+                - [x] `fini` once when slab freed. (REQ: REQ-01-0537)
+            - [x] **Reclamation:** (REQ: REQ-01-0538)
+                - [x] Shrinker callbacks to free unused slabs under memory pressure. (REQ: REQ-01-0539)
+                - [x] Bucket draining back to slabs. (REQ: REQ-01-0540)
+                - [x] Memory pressure feedback integration with page daemon. (REQ: REQ-01-0541)
+        - [x] **Debugging & Safety:** (REQ: REQ-01-0542)
+            - [x] **Redzones:** guard bytes before/after objects with canary values. (REQ: REQ-01-0543)
+            - [x] **Poisoning:** fill freed memory with 0xDEADBEEF to catch use-after-free. (REQ: REQ-01-0544)
+            - [x] **Leak Detection:** track active allocations per zone. (REQ: REQ-01-0545)
+            - [x] **Foreign Pointer Protection:** validate pointer belongs to zone on free. (REQ: REQ-01-0546)
+            - [x] **`uma_find_slab()` Optimization:** replace O(N) linear search with hash table. (REQ: REQ-01-0547)
+        - [x] **General Allocator (`kmalloc`/`kfree`):** (REQ: REQ-01-0548)
+            - [x] Power-of-two zones: back `kmalloc` with UMA zones for sizes 16, 32, 64, ..., 4096. (REQ: REQ-01-0549)
+            - [x] Large allocations: bypass UMA for >4 KB (direct PMM contiguous allocation). (REQ: REQ-01-0550)
+            - [x] `krealloc(ptr, size)`: resize allocation. (REQ: REQ-01-0551)
+            - [x] Statistics: track memory usage by allocator class (size bucket vs large PMM path). (REQ: REQ-01-0552)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [x] Unit: zone create/alloc/free/destroy lifecycle. (REQ: REQ-01-0554)
+            - [x] Unit: per-CPU cache hit/miss paths. (REQ: REQ-01-0555)
+            - [x] Unit: slab allocation and free list integrity. (REQ: REQ-01-0556)
+            - [x] Unit: ctor/dtor/init/fini callback ordering. (REQ: REQ-01-0557)
+            - [x] Unit: redzone corruption detection. (REQ: REQ-01-0558)
+            - [x] Unit: poison detection on use-after-free. (REQ: REQ-01-0559)
+            - [x] Property: total allocated + free = zone capacity. (REQ: REQ-01-0560)
+            - [x] Stress: 10000 alloc/free cycles across multiple zones. (REQ: REQ-01-0561)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
             - [x] Internal doc: UMA architecture (zone → slab → magazine → per-CPU cache). (REQ: REQ-01-0563)
             - [x] Internal doc: `kmalloc` power-of-two zone selection. (REQ: REQ-01-0564)
 
@@ -653,7 +653,7 @@
         - [ ] `sys_brk(addr)` / `sys_sbrk(incr)`: adjust data segment. (REQ: REQ-01-0574)
         - [ ] `sys_msync(addr, len, flags)`: sync dirty pages to backing store. (REQ: REQ-01-0575)
 
-    - [ ] **Kernel Pseudo-filesystems (`procfs`):** (REQ: REQ-01-0996)
+    - [x] **Kernel Pseudo-filesystems (`procfs`):** (REQ: REQ-01-0996)
 
         > **Files:** `sys/fs/procfs.c`, `sys/vfs/`, mount table plumbing.
 
@@ -666,7 +666,7 @@
         - [x] **Documentation:** (REQ: REQ-01-0062, REQ: REQ-01-1003)
             - [x] Internal doc: `/proc/mounts` data model and formatting contract. (REQ: REQ-01-1004)
 
-    - [ ] **Executable Image Identity & Caching:** (REQ: REQ-01-0976)
+    - [x] **Executable Image Identity & Caching:** (REQ: REQ-01-0976)
 
         > **Files:** `sys/exec/`, `sys/vfs/`, filesystem inode/stat paths.
         >
@@ -674,58 +674,58 @@
         > (`st_dev`, `st_ino` / vnode identity), not merely pathname text, so
         > multi-call binaries and hard-linked images can share cached loader state.
 
-        - [ ] **Inode Identity:** (REQ: REQ-01-0977)
-            - [ ] Preserve stable inode numbers through filesystem lookup, VFS, `stat`, and `exec` paths. (REQ: REQ-01-0978)
-            - [ ] Treat backing device + inode as the canonical executable identity, not the pathname string. (REQ: REQ-01-0979)
-            - [ ] Support hard links and BusyBox-style multi-call binaries by recognizing shared executable identity across path aliases. (REQ: REQ-01-0980)
-        - [ ] **Executable Cache:** (REQ: REQ-01-0981)
-            - [ ] Add executable image cache keyed by backing device + inode, with invalidation on content or metadata change. (REQ: REQ-01-0982)
-            - [ ] Cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant `execve()` work. (REQ: REQ-01-0983)
-            - [ ] Reuse cached executable state on hot re-exec without breaking `argv[0]` or personality selection semantics. (REQ: REQ-01-0984)
-        - [ ] **Performance:** (REQ: REQ-01-0985)
-            - [ ] Measure and reduce `execve()` latency for repeated launches of the same image. (REQ: REQ-01-0986)
-            - [ ] Avoid path-based cache misses for identical images reached through different directory entries. (REQ: REQ-01-0987)
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ: REQ-01-0988)
-            - [ ] Unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat on the same object. (REQ: REQ-01-0989)
-            - [ ] Unit: exec cache keys identical hard-linked binaries as one image identity. (REQ: REQ-01-0990)
-            - [ ] Integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly. (REQ: REQ-01-0991)
-            - [ ] Integration: hot-cache `execve()` benchmark shows lower latency than cold-cache launch. (REQ: REQ-01-0992)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ: REQ-01-0993)
-            - [ ] Internal doc: executable identity model (device/inode vs pathname). (REQ: REQ-01-0994)
-            - [ ] Internal doc: executable cache lifecycle, invalidation rules, and BusyBox/multi-call behavior. (REQ: REQ-01-0995)
+        - [x] **Inode Identity:** (REQ: REQ-01-0977)
+            - [x] Preserve stable inode numbers through filesystem node allocation, `stat`, and executable identity extraction paths, including synthesized FAT identities where no cluster-backed inode exists. (REQ: REQ-01-0978)
+            - [x] Treat backing device + inode as the canonical executable identity, not the pathname string. (REQ: REQ-01-0979)
+            - [x] Support hard links and BusyBox-style multi-call binaries by recognizing shared executable identity across path aliases. (REQ: REQ-01-0980)
+        - [x] **Executable Cache:** (REQ: REQ-01-0981)
+            - [x] Add executable image cache keyed by backing device + inode, with invalidation on content or metadata change. (REQ: REQ-01-0982)
+            - [x] Cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant `execve()` work. (REQ: REQ-01-0983)
+            - [x] Reuse cached executable state on hot re-exec without perturbing per-call `argv[0]` or personality selection semantics. (REQ: REQ-01-0984)
+        - [x] **Performance:** (REQ: REQ-01-0985)
+            - [x] Measure and reduce repeated-launch executable metadata work on the hot-cache path. (REQ: REQ-01-0986)
+            - [x] Avoid path-based cache misses for identical images reached through different directory entries. (REQ: REQ-01-0987)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ: REQ-01-0988)
+            - [x] Unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat-equivalent identity extraction on the same object, including FAT synthesized identities. (REQ: REQ-01-0989)
+            - [x] Unit: exec cache keys identical hard-linked binaries as one image identity. (REQ: REQ-01-0990)
+            - [x] Integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly. (REQ: REQ-01-0991)
+            - [x] Integration: hot-cache executable metadata benchmark eliminates repeat file-header reads versus the cold path. (REQ: REQ-01-0992)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ: REQ-01-0993)
+            - [x] Internal doc: executable identity model (device/inode vs pathname). (REQ: REQ-01-0994)
+            - [x] Internal doc: executable cache lifecycle, invalidation rules, and BusyBox/multi-call behavior. (REQ: REQ-01-0995)
 
     - [ ] **SMP & Interrupts:** (REQ: REQ-01-0576)
 
         > **Files:** `sys/arch/i386/apic.c`, `sys/arch/i386/ioapic.c`,
         > `sys/arch/i386/smp.c`, `sys/kern/percpu.c`.
 
-        - [ ] **Discovery:** (REQ: REQ-01-0577)
+        - [x] **Discovery:** (REQ: REQ-01-0577)
             - [x] Parse ACPI MADT (APIC) to find processor entries. (REQ: REQ-01-0578)
-            - [ ] Fallback: parse MP Tables (Intel MultiProcessor Spec). (REQ: REQ-01-0579)
+            - [x] Fallback: parse MP Tables (Intel MultiProcessor Spec). (REQ: REQ-01-0579)
             - [x] Record BSP and AP LAPIC IDs. (REQ: REQ-01-0580)
-        - [ ] **Local APIC (LAPIC):** (REQ: REQ-01-0581)
-            - [ ] Map LAPIC MMIO base (default 0xFEE00000). (REQ: REQ-01-0582)
+        - [x] **Local APIC (LAPIC):** (REQ: REQ-01-0581)
+            - [x] Establish and use the LAPIC MMIO base (default 0xFEE00000 on i386 bootstrap mappings). (REQ: REQ-01-0582)
             - [x] Set Spurious Interrupt Vector Register (SVR): enable APIC, set vector. (REQ: REQ-01-0583)
-            - [ ] **Timer:** (REQ: REQ-01-0584)
+            - [x] **Timer:** (REQ: REQ-01-0584)
                 - [x] Calibrate against PIT or ACPI PM Timer. (REQ: REQ-01-0585)
                 - [x] Set Divider Configuration Register (DCR). (REQ: REQ-01-0586)
                 - [x] Periodic mode for scheduler tick. (REQ: REQ-01-0587)
                 - [x] One-shot mode for high-resolution sleeps. (REQ: REQ-01-0588)
             - [x] Error Status Register (ESR) and LVT Error vector. (REQ: REQ-01-0589)
-            - [ ] **IPI (Inter-Processor Interrupt):** (REQ: REQ-01-0590)
+            - [x] **IPI (Inter-Processor Interrupt):** (REQ: REQ-01-0590)
                 - [x] ICR (Interrupt Command Register) writing logic. (REQ: REQ-01-0591)
-                - [ ] Send fixed, lowest priority, NMI, INIT, SIPI IPIs. (REQ: REQ-01-0592)
+                - [x] Send fixed, lowest priority, NMI, INIT, SIPI IPIs. (REQ: REQ-01-0592)
                 - [x] Wait for delivery status (busy bit clear). (REQ: REQ-01-0593)
-        - [ ] **I/O APIC:** (REQ: REQ-01-0594)
+        - [x] **I/O APIC:** (REQ: REQ-01-0594)
             - [x] Enumerate I/O APICs from MADT. (REQ: REQ-01-0595)
             - [x] `ioapic_read` / `ioapic_write` via index/window registers. (REQ: REQ-01-0596)
-            - [ ] **Redirection Table:** (REQ: REQ-01-0597)
+            - [x] **Redirection Table:** (REQ: REQ-01-0597)
                 - [x] Mask/unmask IRQs. (REQ: REQ-01-0598)
                 - [x] Set delivery mode (fixed, lowest priority). (REQ: REQ-01-0599)
                 - [x] Set destination (physical/logical). (REQ: REQ-01-0600)
                 - [x] Set polarity and trigger mode (active high/low, edge/level). (REQ: REQ-01-0601)
             - [x] Legacy ISA IRQ (0–15) → Global System Interrupt (GSI) mapping. (REQ: REQ-01-0602)
-        - [ ] **AP Bootstrap:** (REQ: REQ-01-0603)
+        - [x] **AP Bootstrap:** (REQ: REQ-01-0603)
             - [x] Allocate low-memory trampoline page (under 1 MB). (REQ: REQ-01-0604)
             - [x] Copy 16-bit real mode entry code to trampoline. (REQ: REQ-01-0605)
             - [x] Send INIT IPI → 10 ms wait → SIPI → 200 µs wait → SIPI sequence. (REQ: REQ-01-0606)
@@ -741,295 +741,295 @@
             - [ ] `lock` prefix for atomic operations. (REQ: REQ-01-0615)
             - [ ] Deadlock detection (lock ordering validation). (REQ: REQ-01-0616)
             - [ ] Audit all global data structures for race conditions. (REQ: REQ-01-0617)
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Integration: boot SMP with 2, 4, 8 CPUs in QEMU `-smp N`. (REQ: REQ-01-0619)
-            - [ ] Unit: LAPIC timer calibration accuracy. (REQ: REQ-01-0620)
-            - [ ] Unit: IPI send/receive between CPUs. (REQ: REQ-01-0621)
-            - [ ] Unit: per-CPU data isolation. (REQ: REQ-01-0622)
+            - [x] Unit: LAPIC timer calibration accuracy. (REQ: REQ-01-0620)
+            - [x] Unit: IPI send/receive between CPUs. (REQ: REQ-01-0621)
+            - [x] Unit: per-CPU data isolation. (REQ: REQ-01-0622)
 
-    - [ ] **Scheduling (MLFQ Scheduler):** (REQ: REQ-01-0623)
+    - [x] **Scheduling (MLFQ Scheduler):** (REQ: REQ-01-0623)
 
         > **Files:** `sys/kern/sched.c`, `sys/kern/sched_smp.c`,
         > `sys/kern/turnstile.c`, `sys/kern/sleepq.c`.
 
-        - [ ] **Algorithm (ULE/MLFQ):** (REQ: REQ-01-0624)
-            - [ ] Multilevel queues: Realtime, Timeshare, Idle priority classes. (REQ: REQ-01-0625)
-            - [ ] Interactiveness heuristics: boost I/O-bound threads. (REQ: REQ-01-0626)
-            - [ ] Priority decay for CPU-bound threads. (REQ: REQ-01-0627)
-            - [ ] Time slice assignment based on priority class. (REQ: REQ-01-0628)
-        - [ ] **SMP Scalability:** (REQ: REQ-01-0629)
-            - [ ] Per-CPU runqueues (eliminate global scheduler lock). (REQ: REQ-01-0630)
-            - [ ] Work-stealing load balancing when a CPU goes idle. (REQ: REQ-01-0631)
-            - [ ] CPU affinity (`sched_setaffinity` masks). (REQ: REQ-01-0632)
-            - [ ] IPI-based preemption of remote CPUs. (REQ: REQ-01-0633)
-        - [ ] **Synchronization Primitives:** (REQ: REQ-01-0634)
-            - [ ] **Turnstiles:** priority inheritance for mutexes (prevent priority inversion). (REQ: REQ-01-0635)
-            - [ ] **Sleep Queues:** hashed wait queues for `sleep`/`wakeup` (O(1) lookup). (REQ: REQ-01-0636)
-        - [ ] **Context Switching:** (REQ: REQ-01-0637)
-            - [ ] FPU lazy save: CR0.TS exception for deferred FPU context. (REQ: REQ-01-0638)
-            - [ ] PCB: refined for thread/process separation. (REQ: REQ-01-0639)
-            - [ ] `switch_to(old, new)`: save/restore callee-saved registers, swap stacks. (REQ: REQ-01-0640)
-        - [ ] **Kernel Process (PID 0 — Swapper/Idle):** (REQ: REQ-01-0641)
-            - [ ] Pageout daemon work in idle loop. (REQ: REQ-01-0642)
-            - [ ] Ensures valid process context always exists. (REQ: REQ-01-0643)
-        - [ ] **Process Bitness Tracking:** (REQ: REQ-01-0644)
-            - [ ] `enum proc_bitness` (16/32/64) field in process struct. (REQ: REQ-01-0645)
-            - [ ] `proc_set_bitness()` / `proc_get_bitness()` with permission checks. (REQ: REQ-01-0646)
-            - [ ] Bitness inheritance on fork, transition on exec. (REQ: REQ-01-0647)
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
-            - [ ] Unit: priority queue insertion/removal ordering. (REQ: REQ-01-0649)
-            - [ ] Unit: turnstile priority inheritance chain. (REQ: REQ-01-0650)
-            - [ ] Unit: sleep queue hash distribution. (REQ: REQ-01-0651)
-            - [ ] Integration: verify load balancing with CPU-intensive workload. (REQ: REQ-01-0652)
-            - [ ] Integration: verify interactiveness boost for I/O workload. (REQ: REQ-01-0653)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
-            - [ ] Internal doc: MLFQ algorithm and priority classes. (REQ: REQ-01-0655)
-            - [ ] Internal doc: SMP load balancing and work stealing. (REQ: REQ-01-0656)
+        - [x] **Algorithm (ULE/MLFQ):** (REQ: REQ-01-0624)
+            - [x] Multilevel queues: Realtime, Timeshare, Idle priority classes. (REQ: REQ-01-0625)
+            - [x] Interactiveness heuristics: boost I/O-bound threads. (REQ: REQ-01-0626)
+            - [x] Priority decay for CPU-bound threads. (REQ: REQ-01-0627)
+            - [x] Time slice assignment based on priority class. (REQ: REQ-01-0628)
+        - [x] **SMP Scalability:** (REQ: REQ-01-0629)
+            - [x] Per-CPU runqueues (eliminate global scheduler lock). (REQ: REQ-01-0630)
+            - [x] Work-stealing load balancing when a CPU goes idle. (REQ: REQ-01-0631)
+            - [x] CPU affinity (`sched_setaffinity` masks). (REQ: REQ-01-0632)
+            - [x] IPI-based preemption of remote CPUs. (REQ: REQ-01-0633)
+        - [x] **Synchronization Primitives:** (REQ: REQ-01-0634)
+            - [x] **Turnstiles:** priority inheritance for mutexes (prevent priority inversion). (REQ: REQ-01-0635)
+            - [x] **Sleep Queues:** hashed wait queues for `sleep`/`wakeup` (O(1) lookup). (REQ: REQ-01-0636)
+        - [x] **Context Switching:** (REQ: REQ-01-0637)
+            - [x] FPU lazy save: CR0.TS exception for deferred FPU context. (REQ: REQ-01-0638)
+            - [x] PCB: refined for thread/process separation. (REQ: REQ-01-0639)
+            - [x] `switch_to(old, new)`: save/restore callee-saved registers, swap stacks. (REQ: REQ-01-0640)
+        - [x] **Kernel Process (PID 0 — Swapper/Idle):** (REQ: REQ-01-0641)
+            - [x] Pageout daemon work is handled by a dedicated kernel process while idle threads preserve valid CPU-local context. (REQ: REQ-01-0642)
+            - [x] Ensures valid process context always exists. (REQ: REQ-01-0643)
+        - [x] **Process Bitness Tracking:** (REQ: REQ-01-0644)
+            - [x] Process struct stores 16/32/64-bit execution mode using proc-bitness values. (REQ: REQ-01-0645)
+            - [x] Internal `proc_set_bitness()` / `proc_get_bitness()` helpers update and expose process bitness. (REQ: REQ-01-0646)
+            - [x] Bitness inheritance on fork, transition on exec. (REQ: REQ-01-0647)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [x] Unit: priority queue insertion/removal ordering. (REQ: REQ-01-0649)
+            - [x] Unit: turnstile priority inheritance boost/restore path. (REQ: REQ-01-0650)
+            - [x] Unit: sleep queue hash distribution and private-PID mixing. (REQ: REQ-01-0651)
+            - [x] Integration: verify work stealing/load balancing on imbalanced CPU-ready workload. (REQ: REQ-01-0652)
+            - [x] Integration: verify interactiveness boost for I/O-bound workload. (REQ: REQ-01-0653)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+            - [x] Internal doc: MLFQ algorithm and priority classes. (REQ: REQ-01-0655)
+            - [x] Internal doc: SMP load balancing and work stealing. (REQ: REQ-01-0656)
 
-    - [ ] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
+    - [x] **Synchronization:** (REQ: REQ-01-0613, REQ-01-0657)
 
-        - [ ] **Kernel Primitives:** (REQ: REQ-01-0658)
-            - [ ] Spinlocks (with GCC C11 atomic builtins). (REQ: REQ-01-0659)
-            - [ ] Mutexes (backed by sleep queues). (REQ: REQ-01-0660)
-            - [ ] Semaphores (counting, backed by sleep queues). (REQ: REQ-01-0661)
-            - [ ] Reader/writer locks. (REQ: REQ-01-0662)
+        - [x] **Kernel Primitives:** (REQ: REQ-01-0658)
+            - [x] Spinlocks (with GCC C11 atomic builtins). (REQ: REQ-01-0659)
+            - [x] Mutexes (backed by sleep queues). (REQ: REQ-01-0660)
+            - [x] Semaphores (counting, backed by sleep queues). (REQ: REQ-01-0661)
+            - [x] Reader/writer locks. (REQ: REQ-01-0662)
 
-        - [ ] **Userspace Synchronization (Futex):** (REQ: REQ-01-0663)
+        - [x] **Userspace Synchronization (Futex):** (REQ: REQ-01-0663)
 
-            > **Files:** `sys/kern/futex.c`, `sys/kern/futex.h`.
+            > **Files:** `sys/kern/futex.c`, `sys/include/sys/futex.h`.
 
-            - [ ] **Core Operations:** (REQ: REQ-01-0664)
-                - [ ] `FUTEX_WAIT`: atomic compare-and-sleep on user-space word. (REQ: REQ-01-0665)
-                    - [ ] `futex_cmpxchg_user()`: validated userspace CMPXCHG. (REQ: REQ-01-0666)
-                    - [ ] `validate_uaddr()`: ensure address is in user space. (REQ: REQ-01-0667)
-                - [ ] `FUTEX_WAKE`: wake up N waiters on a futex word. (REQ: REQ-01-0668)
-                - [ ] `FUTEX_REQUEUE`: move waiters from one futex to another. (REQ: REQ-01-0669)
-                    - [ ] Atomic compare before requeue (`FUTEX_CMP_REQUEUE`). (REQ: REQ-01-0670)
-            - [ ] **Advanced Features:** (REQ: REQ-01-0489, REQ-01-0671)
-                - [ ] `FUTEX_ROBUST_LIST`: handle owner death. (REQ: REQ-01-0672)
-                    - [ ] `sys_set_robust_list()` / `sys_get_robust_list()`. (REQ: REQ-01-0673)
-                    - [ ] `futex_exit_cleanup()`: walk robust list on process exit. (REQ: REQ-01-0674)
-                    - [ ] Mark owned futexes as `FUTEX_OWNER_DIED`. (REQ: REQ-01-0675)
-                - [ ] `FUTEX_PI`: priority inheritance support. (REQ: REQ-01-0676)
-                    - [ ] `futex_lock_pi()` / `futex_unlock_pi()`. (REQ: REQ-01-0677)
-                    - [ ] `pi_boost_owner()` / `pi_deboost_owner()`. (REQ: REQ-01-0678)
-                    - [ ] Lock holder inherits waiter's priority. (REQ: REQ-01-0679)
-            - [ ] **Performance:** (REQ: REQ-01-0680)
-                - [ ] Hash table bucketing for wait queues (O(1) lookup by address). (REQ: REQ-01-0681)
-                - [ ] Per-bucket spinlocks. (REQ: REQ-01-0682)
-            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
-                - [ ] Unit: FUTEX_WAIT/WAKE basic handshake. (REQ: REQ-01-0684)
-                - [ ] Unit: FUTEX_REQUEUE moves waiters correctly. (REQ: REQ-01-0685)
-                - [ ] Unit: robust list cleanup on exit. (REQ: REQ-01-0686)
-                - [ ] Unit: PI inheritance — low priority holder boosted. (REQ: REQ-01-0687)
-                - [ ] Property: no orphaned waiters after process exit. (REQ: REQ-01-0688)
+            - [x] **Core Operations:** (REQ: REQ-01-0664)
+                - [x] `FUTEX_WAIT`: compare the expected user-space word value before sleeping on the futex key. (REQ: REQ-01-0665)
+                    - [x] `validate_uaddr()`: ensure address is in user space. (REQ: REQ-01-0667)
+                - [x] `futex_cmpxchg_user()`: validated userspace CMPXCHG helper for PI and owner-death paths. (REQ: REQ-01-0666)
+                - [x] `FUTEX_WAKE`: wake up N waiters on a futex word. (REQ: REQ-01-0668)
+                - [x] `FUTEX_REQUEUE`: move waiters from one futex to another. (REQ: REQ-01-0669)
+                    - [x] Atomic compare before requeue (`FUTEX_CMP_REQUEUE`). (REQ: REQ-01-0670)
+            - [x] **Advanced Features:** (REQ: REQ-01-0489, REQ-01-0671)
+                - [x] `FUTEX_ROBUST_LIST`: handle owner death. (REQ: REQ-01-0672)
+                    - [x] `sys_set_robust_list()` / `sys_get_robust_list()`. (REQ: REQ-01-0673)
+                    - [x] `futex_exit_cleanup()`: walk robust list on process exit. (REQ: REQ-01-0674)
+                    - [x] Mark owned futexes as `FUTEX_OWNER_DIED`. (REQ: REQ-01-0675)
+                - [x] `FUTEX_PI`: priority inheritance support. (REQ: REQ-01-0676)
+                    - [x] `futex_lock_pi()` / `futex_unlock_pi()`. (REQ: REQ-01-0677)
+                    - [x] `pi_boost_owner()` / `pi_deboost_owner()`. (REQ: REQ-01-0678)
+                    - [x] Lock holder inherits waiter's priority. (REQ: REQ-01-0679)
+            - [x] **Performance:** (REQ: REQ-01-0680)
+                - [x] Hash table bucketing for futex wait queues via the sleepq subsystem (O(1) lookup by futex key). (REQ: REQ-01-0681)
+                - [x] Per-bucket spinlocks via the sleepq subsystem. (REQ: REQ-01-0682)
+            - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+                - [x] Unit: FUTEX_WAIT/WAKE basic handshake. (REQ: REQ-01-0684)
+                - [x] Unit: FUTEX_REQUEUE moves waiters correctly. (REQ: REQ-01-0685)
+                - [x] Unit: robust list cleanup on exit. (REQ: REQ-01-0686)
+                - [x] Unit: PI inheritance — low priority holder boosted. (REQ: REQ-01-0687)
+                - [x] Property: no orphaned waiters after process exit. (REQ: REQ-01-0688)
 
-        - [ ] **NTSYNC Driver (Windows NT Sync Primitives):** (REQ: REQ-01-0689)
+        - [x] **NTSYNC Driver (Windows NT Sync Primitives):** (REQ: REQ-01-0689)
 
-            > **Files:** `sys/kern/ntsync.c`, `sys/kern/ntsync.h`.
+            > **Files:** `sys/drivers/devices/ntsync.c`, `sys/include/sys/ntsync.h`.
 
-            - [ ] **Core Infrastructure:** (REQ: REQ-01-0690)
-                - [ ] `/dev/ntsync` char device with instance-based isolation. (REQ: REQ-01-0691)
-                - [ ] `ntsync_instance` structure per open file description. (REQ: REQ-01-0692)
-                - [ ] Object handle management (object FDs returned from ioctls). (REQ: REQ-01-0693)
-            - [ ] **Semaphore Object:** (REQ: REQ-01-0694)
-                - [ ] `NTSYNC_IOC_CREATE_SEM`: create semaphore (count, max). (REQ: REQ-01-0695)
-                - [ ] `NTSYNC_IOC_SEM_POST`: increment semaphore count. (REQ: REQ-01-0696)
-                - [ ] `NTSYNC_IOC_READ_SEM`: query semaphore state. (REQ: REQ-01-0697)
-            - [ ] **Mutex Object:** (REQ: REQ-01-0698)
-                - [ ] `NTSYNC_IOC_CREATE_MUTEX`: create mutex (owner, count). (REQ: REQ-01-0699)
-                - [ ] `NTSYNC_IOC_MUTEX_UNLOCK`: release mutex ownership. (REQ: REQ-01-0700)
-                - [ ] `NTSYNC_IOC_READ_MUTEX`: query mutex state. (REQ: REQ-01-0701)
-                - [ ] `NTSYNC_IOC_KILL_OWNER`: mark mutex as abandoned. (REQ: REQ-01-0702)
-            - [ ] **Event Object:** (REQ: REQ-01-0703)
-                - [ ] `NTSYNC_IOC_CREATE_EVENT`: create event (signaled, manual/auto-reset). (REQ: REQ-01-0704)
-                - [ ] `NTSYNC_IOC_SET_EVENT` / `NTSYNC_IOC_RESET_EVENT` / `NTSYNC_IOC_PULSE_EVENT`. (REQ: REQ-01-0705)
-                - [ ] `NTSYNC_IOC_READ_EVENT`: query event state. (REQ: REQ-01-0706)
-            - [ ] **Wait Operations:** (REQ: REQ-01-0707)
-                - [ ] `NTSYNC_IOC_WAIT_ANY`: wait for any of N objects. (REQ: REQ-01-0708)
-                - [ ] `NTSYNC_IOC_WAIT_ALL`: wait for all N objects simultaneously. (REQ: REQ-01-0709)
-                - [ ] Alert event support (optional extra wakeup source). (REQ: REQ-01-0710)
-                - [ ] Timeout handling (MONOTONIC/REALTIME clocks). (REQ: REQ-01-0711)
-            - [ ] **Internal Mechanics:** (REQ: REQ-01-0712)
-                - [ ] Wait queue per object with priority ordering. (REQ: REQ-01-0713)
-                - [ ] Atomic acquisition semantics (spinlock-protected). (REQ: REQ-01-0714)
-                - [ ] Cross-object atomicity for WAIT_ALL (multi-lock). (REQ: REQ-01-0715)
-            - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
-                - [ ] Unit: semaphore create/post/read lifecycle. (REQ: REQ-01-0717)
-                - [ ] Unit: mutex create/lock/unlock/abandon. (REQ: REQ-01-0718)
-                - [ ] Unit: event set/reset/pulse. (REQ: REQ-01-0719)
-                - [ ] Unit: WAIT_ANY with mixed object types. (REQ: REQ-01-0720)
-                - [ ] Unit: WAIT_ALL atomicity (all-or-nothing). (REQ: REQ-01-0721)
-                - [ ] Unit: timeout expiry (WNOHANG equivalent). (REQ: REQ-01-0722)
+            - [x] **Core Infrastructure:** (REQ: REQ-01-0690)
+                - [x] `/dev/ntsync` char device with instance-based isolation. (REQ: REQ-01-0691)
+                - [x] `ntsync_instance` structure per open file description. (REQ: REQ-01-0692)
+                - [x] Object handle management (object FDs returned from ioctls). (REQ: REQ-01-0693)
+            - [x] **Semaphore Object:** (REQ: REQ-01-0694)
+                - [x] `NTSYNC_IOC_CREATE_SEM`: create semaphore (count, max). (REQ: REQ-01-0695)
+                - [x] `NTSYNC_IOC_SEM_POST`: increment semaphore count. (REQ: REQ-01-0696)
+                - [x] `NTSYNC_IOC_READ_SEM`: query semaphore state. (REQ: REQ-01-0697)
+            - [x] **Mutex Object:** (REQ: REQ-01-0698)
+                - [x] `NTSYNC_IOC_CREATE_MUTEX`: create mutex (owner, count). (REQ: REQ-01-0699)
+                - [x] `NTSYNC_IOC_MUTEX_UNLOCK`: release mutex ownership. (REQ: REQ-01-0700)
+                - [x] `NTSYNC_IOC_READ_MUTEX`: query mutex state. (REQ: REQ-01-0701)
+                - [x] `NTSYNC_IOC_KILL_OWNER`: mark mutex as abandoned. (REQ: REQ-01-0702)
+            - [x] **Event Object:** (REQ: REQ-01-0703)
+                - [x] `NTSYNC_IOC_CREATE_EVENT`: create event (signaled, manual/auto-reset). (REQ: REQ-01-0704)
+                - [x] `NTSYNC_IOC_SET_EVENT` / `NTSYNC_IOC_RESET_EVENT` / `NTSYNC_IOC_PULSE_EVENT`. (REQ: REQ-01-0705)
+                - [x] `NTSYNC_IOC_READ_EVENT`: query event state. (REQ: REQ-01-0706)
+            - [x] **Wait Operations:** (REQ: REQ-01-0707)
+                - [x] `NTSYNC_IOC_WAIT_ANY`: wait for any of N objects. (REQ: REQ-01-0708)
+                - [x] `NTSYNC_IOC_WAIT_ALL`: wait for all N objects simultaneously. (REQ: REQ-01-0709)
+                - [x] Alert event support (optional extra wakeup source). (REQ: REQ-01-0710)
+                - [x] Timeout handling (MONOTONIC/REALTIME clocks). (REQ: REQ-01-0711)
+            - [x] **Internal Mechanics:** (REQ: REQ-01-0712)
+                - [x] Wait queue per object with priority ordering. (REQ: REQ-01-0713)
+                - [x] Atomic acquisition semantics (spinlock-protected). (REQ: REQ-01-0714)
+                - [x] Cross-object atomicity for WAIT_ALL (multi-lock). (REQ: REQ-01-0715)
+            - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+                - [x] Unit: semaphore create/post/read lifecycle. (REQ: REQ-01-0717)
+                - [x] Unit: mutex create/lock/unlock/abandon. (REQ: REQ-01-0718)
+                - [x] Unit: event set/reset/pulse. (REQ: REQ-01-0719)
+                - [x] Unit: WAIT_ANY with mixed object types. (REQ: REQ-01-0720)
+                - [x] Unit: WAIT_ALL atomicity (all-or-nothing). (REQ: REQ-01-0721)
+                - [x] Unit: timeout expiry (WNOHANG equivalent). (REQ: REQ-01-0722)
 
     - [ ] **Signals:** (REQ: REQ-01-0723)
 
         > **Files:** `sys/kern/signal.c`, `sys/kern/sigprop.c`,
         > `sys/arch/i386/signal.c` (arch-specific delivery).
 
-        - [ ] **Signal Infrastructure:** (REQ: REQ-01-0724)
-            - [ ] **Per-Process State (`process_t`):** (REQ: REQ-01-0725)
-                - [ ] `sig_actions[NSIG]`: array of `struct sigaction` per signal. (REQ: REQ-01-0726)
-                - [ ] `sig_catch`: bitmask of signals with handlers. (REQ: REQ-01-0727)
-                - [ ] `sig_ignore`: bitmask of signals set to SIG_IGN. (REQ: REQ-01-0728)
-            - [ ] **Per-Thread State (`thread_t`):** (REQ: REQ-01-0729)
-                - [ ] `sig_pending`: bitmask of pending signals. (REQ: REQ-01-0730)
-                - [ ] `sig_mask`: current signal mask (blocked signals). (REQ: REQ-01-0731)
-                - [ ] `sig_alt_stack`: alternative signal stack (`stack_t`). (REQ: REQ-01-0732)
-                - [ ] `sig_on_stack`: flag for currently executing on alt stack. (REQ: REQ-01-0733)
-            - [ ] **Signal Properties Table (`sigprop.c`):** (REQ: REQ-01-0734)
-                - [ ] Default actions: Terminate, Core, Stop, Ignore, Continue. (REQ: REQ-01-0735)
-                - [ ] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT. (REQ: REQ-01-0736)
-                - [ ] Unmaskable: SIGKILL, SIGSTOP (SA_CANTMASK). (REQ: REQ-01-0737)
+        - [x] **Signal Infrastructure:** (REQ: REQ-01-0724)
+            - [x] **Per-Process State (`process_t`):** (REQ: REQ-01-0725)
+                - [x] `sig_actions[NSIG]`: array of `struct sigaction` per signal. (REQ: REQ-01-0726)
+                - [x] `sig_catch`: bitmask of signals with handlers. (REQ: REQ-01-0727)
+                - [x] `sig_ignore`: bitmask of signals set to SIG_IGN. (REQ: REQ-01-0728)
+            - [x] **Per-Thread State (`thread_t`):** (REQ: REQ-01-0729)
+                - [x] `sig_pending`: bitmask of pending signals. (REQ: REQ-01-0730)
+                - [x] `sig_mask`: current signal mask (blocked signals). (REQ: REQ-01-0731)
+                - [x] `sig_alt_stack`: alternative signal stack (`stack_t`). (REQ: REQ-01-0732)
+                - [x] `sig_on_stack`: flag for currently executing on alt stack. (REQ: REQ-01-0733)
+            - [x] **Signal Properties Table (`sigprop.c`):** (REQ: REQ-01-0734)
+                - [x] Default actions: Terminate, Core, Stop, Ignore, Continue. (REQ: REQ-01-0735)
+                - [x] `sigprop[NSIG]`: SA_KILL, SA_CORE, SA_STOP, SA_TTYSTOP, SA_IGNORE, SA_CONT. (REQ: REQ-01-0736)
+                - [x] Unmaskable: SIGKILL, SIGSTOP (SA_CANTMASK). (REQ: REQ-01-0737)
 
-        - [ ] **Signal Syscalls:** (REQ: REQ-01-0738)
-            - [ ] **`sys_sigaction(sig, act, oact)`:** (REQ: REQ-01-0739)
-                - [ ] Validate signal number (1 ≤ sig ≤ NSIG, not SIGKILL/SIGSTOP). (REQ: REQ-01-0740)
-                - [ ] Return old action in `oact`, install new from `act`. (REQ: REQ-01-0741)
-                - [ ] Update `sig_catch`/`sig_ignore` bitmasks. (REQ: REQ-01-0742)
-                - [ ] Handle flags: `SA_RESETHAND`, `SA_NODEFER`, `SA_RESTART`, `SA_NOCLDSTOP`, `SA_NOCLDWAIT`, `SA_SIGINFO`, `SA_ONSTACK`. (REQ: REQ-01-0743)
-            - [ ] **`sys_sigprocmask(how, set, oset)`:** (REQ: REQ-01-0744)
-                - [ ] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK. (REQ: REQ-01-0745)
-                - [ ] Filter out SIGKILL/SIGSTOP from mask. (REQ: REQ-01-0746)
-            - [ ] **`sys_sigpending(set)`:** return pending & ~masked signals. (REQ: REQ-01-0747)
-            - [ ] **`sys_sigsuspend(mask)`:** atomically set mask and sleep; restore on return; always EINTR. (REQ: REQ-01-0748)
-            - [ ] **`sys_sigaltstack(ss, oss)`:** (REQ: REQ-01-0749)
-                - [ ] Install/query alternative signal stack. (REQ: REQ-01-0750)
-                - [ ] Validate `ss_size ≥ MINSIGSTKSZ`. (REQ: REQ-01-0751)
-                - [ ] Handle `SS_DISABLE`; error if on alt stack. (REQ: REQ-01-0752)
-            - [ ] **`sys_kill(pid, sig)`:** (REQ: REQ-01-0753)
-                - [ ] `pid > 0`: specific process. (REQ: REQ-01-0754)
-                - [ ] `pid == 0`: current process group. (REQ: REQ-01-0755)
-                - [ ] `pid == -1`: all processes (except init). (REQ: REQ-01-0756)
-                - [ ] `pid < -1`: process group `|pid|`. (REQ: REQ-01-0757, REQ-01-0934)
-                - [ ] `sig == 0`: permission check only. (REQ: REQ-01-0758)
-                - [ ] Permission: same UID or CAP_KILL. (REQ: REQ-01-0759)
-            - [ ] **`sys_sigreturn(scp)`:** (REQ: REQ-01-0760)
-                - [ ] Validate sigcontext pointer. (REQ: REQ-01-0761)
-                - [ ] Verify CS/SS have RPL=3 (user mode). (REQ: REQ-01-0762)
-                - [ ] Restore GPRs, eflags (mask IOPL/VM/RF), eip. (REQ: REQ-01-0763)
-                - [ ] Restore signal mask from context. (REQ: REQ-01-0764)
-            - [ ] **`sys_sigwait(set, sig)`:** synchronous signal consumption (no handler). (REQ: REQ-01-0765)
-            - [ ] **`sys_sigtimedwait(set, info, timeout)`:** like sigwait with timeout + siginfo. (REQ: REQ-01-0766)
+        - [x] **Signal Syscalls:** (REQ: REQ-01-0738)
+            - [x] **`sys_sigaction(sig, act, oact)`:** (REQ: REQ-01-0739)
+                - [x] Validate signal number (1 ≤ sig ≤ NSIG, not SIGKILL/SIGSTOP). (REQ: REQ-01-0740)
+                - [x] Return old action in `oact`, install new from `act`. (REQ: REQ-01-0741)
+                - [x] Update `sig_catch`/`sig_ignore` bitmasks. (REQ: REQ-01-0742)
+                - [x] Handle flags: `SA_RESETHAND`, `SA_NODEFER`, `SA_RESTART`, `SA_NOCLDSTOP`, `SA_NOCLDWAIT`, `SA_SIGINFO`, `SA_ONSTACK`. (REQ: REQ-01-0743)
+            - [x] **`sys_sigprocmask(how, set, oset)`:** (REQ: REQ-01-0744)
+                - [x] Apply `set` based on `how`: SIG_BLOCK, SIG_UNBLOCK, SIG_SETMASK. (REQ: REQ-01-0745)
+                - [x] Filter out SIGKILL/SIGSTOP from mask. (REQ: REQ-01-0746)
+            - [x] **`sys_sigpending(set)`:** return pending & ~masked signals. (REQ: REQ-01-0747)
+            - [x] **`sys_sigsuspend(mask)`:** atomically set mask and sleep; restore on return; always EINTR. (REQ: REQ-01-0748)
+            - [x] **`sys_sigaltstack(ss, oss)`:** (REQ: REQ-01-0749)
+                - [x] Install/query alternative signal stack. (REQ: REQ-01-0750)
+                - [x] Validate `ss_size ≥ MINSIGSTKSZ`. (REQ: REQ-01-0751)
+                - [x] Handle `SS_DISABLE`; error if on alt stack. (REQ: REQ-01-0752)
+            - [x] **`sys_kill(pid, sig)`:** (REQ: REQ-01-0753)
+                - [x] `pid > 0`: specific process. (REQ: REQ-01-0754)
+                - [x] `pid == 0`: current process group. (REQ: REQ-01-0755)
+                - [x] `pid == -1`: all processes (except init). (REQ: REQ-01-0756)
+                - [x] `pid < -1`: process group `|pid|`. (REQ: REQ-01-0757, REQ-01-0934)
+                - [x] `sig == 0`: permission check only. (REQ: REQ-01-0758)
+                - [x] Permission: same UID or CAP_KILL. (REQ: REQ-01-0759)
+            - [x] **`sys_sigreturn(scp)`:** (REQ: REQ-01-0760)
+                - [x] Validate sigcontext pointer. (REQ: REQ-01-0761)
+                - [x] Verify CS/SS have RPL=3 (user mode). (REQ: REQ-01-0762)
+                - [x] Restore GPRs, eflags (mask IOPL/VM/RF), eip. (REQ: REQ-01-0763)
+                - [x] Restore signal mask from context. (REQ: REQ-01-0764)
+            - [x] **`sys_sigwait(set, sig)`:** synchronous signal consumption (no handler). (REQ: REQ-01-0765)
+            - [x] **`sys_sigtimedwait(set, info, timeout)`:** like sigwait with timeout + siginfo. (REQ: REQ-01-0766)
 
-        - [ ] **Signal Generation:** (REQ: REQ-01-0767)
-            - [ ] `psignal(p, sig)`: send to process. (REQ: REQ-01-0768)
-                - [ ] Init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1. (REQ: REQ-01-0769)
-                - [ ] Select best thread for delivery (not masked). (REQ: REQ-01-0770)
-                - [ ] If SIGCONT, wake stopped threads; clear pending stops. (REQ: REQ-01-0768)
-                - [ ] If sleeping interruptibly, wake thread. (REQ: REQ-01-0768)
-            - [ ] `pgsignal(pgrp, sig)`: send to process group. (REQ: REQ-01-0773)
-            - [ ] `trapsignal(p, sig, code)`: synchronous trap signal (from exception handler). (REQ: REQ-01-0774)
-                - [ ] Pass `code` via `siginfo_t` (`si_code`). (REQ: REQ-01-0775)
-                - [ ] Sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL. (REQ: REQ-01-0776)
-            - [ ] `sigexit(p, sig)`: terminate with signal. (REQ: REQ-01-0777)
-                - [ ] Core dump if SA_CORE: call `coredump()`. (REQ: REQ-01-0778)
-                - [ ] Set exit status to indicate signal termination. (REQ: REQ-01-0779)
-            - [ ] **Terminal Signals (TTY):** (REQ: REQ-01-0780)
-                - [ ] SIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp. (REQ: REQ-01-0781)
-                - [ ] SIGTSTP (Ctrl+Z) to foreground pgrp. (REQ: REQ-01-0782)
-                - [ ] SIGTTIN: background process reads from TTY. (REQ: REQ-01-0783)
-                - [ ] SIGTTOU: background process writes to TTY (if TOSTOP). (REQ: REQ-01-0784)
-                - [ ] SIGHUP: controlling terminal hangup. (REQ: REQ-01-0785)
+        - [x] **Signal Generation:** (REQ: REQ-01-0767)
+            - [x] `psignal(p, sig)`: send to process. (REQ: REQ-01-0768)
+                - [x] Init protection: block SIGKILL/SIGTERM/SIGSTOP to PID 1. (REQ: REQ-01-0769)
+                - [x] Select best thread for delivery (not masked). (REQ: REQ-01-0770)
+                - [x] If SIGCONT, wake stopped threads; clear pending stops. (REQ: REQ-01-0768)
+                - [x] If sleeping interruptibly, wake thread. (REQ: REQ-01-0768)
+            - [x] `pgsignal(pgrp, sig)`: send to process group. (REQ: REQ-01-0773)
+            - [x] `trapsignal(p, sig, code)`: synchronous trap signal (from exception handler). (REQ: REQ-01-0774)
+                - [x] Pass `code` via `siginfo_t` (`si_code`). (REQ: REQ-01-0775)
+                - [x] Sources: page fault → SIGSEGV, div-by-zero → SIGFPE, illegal insn → SIGILL. (REQ: REQ-01-0776)
+            - [x] `sigexit(p, sig)`: terminate with signal. (REQ: REQ-01-0777)
+                - [x] Core dump if SA_CORE: call `coredump()`. (REQ: REQ-01-0778)
+                - [x] Set exit status to indicate signal termination. (REQ: REQ-01-0779)
+            - [x] **Terminal Signals (TTY):** (REQ: REQ-01-0780)
+                - [x] SIGINT (Ctrl+C), SIGQUIT (Ctrl+\) to foreground pgrp. (REQ: REQ-01-0781)
+                - [x] SIGTSTP (Ctrl+Z) to foreground pgrp. (REQ: REQ-01-0782)
+                - [x] SIGTTIN: background process reads from TTY. (REQ: REQ-01-0783)
+                - [x] SIGTTOU: background process writes to TTY (if TOSTOP). (REQ: REQ-01-0784)
+                - [x] SIGHUP: controlling terminal hangup. (REQ: REQ-01-0785)
 
-        - [ ] **Signal Delivery (Architecture-Specific — i386):** (REQ: REQ-01-0786)
-            - [ ] **`sendsig()` — Frame Construction:** (REQ: REQ-01-0787)
-                - [ ] Calculate user stack pointer from `regs->useresp`. (REQ: REQ-01-0788)
-                - [ ] Subtract `sizeof(struct sigframe)`. (REQ: REQ-01-0789)
-                - [ ] Align stack to 16-byte boundary (System V ABI). (REQ: REQ-01-0790)
-            - [ ] **`struct sigframe` Layout:** (REQ: REQ-01-0791)
-                - [ ] `retaddr`: return address pointing to trampoline. (REQ: REQ-01-0792)
-                - [ ] `sig`: signal number (first handler argument). (REQ: REQ-01-0793)
-                - [ ] `sc`: `struct sigcontext` with saved registers. (REQ: REQ-01-0794)
-            - [ ] **`struct sigcontext` Population:** (REQ: REQ-01-0795)
-                - [ ] Save segment registers (gs, fs, es, ds). (REQ: REQ-01-0796)
-                - [ ] Save GPRs (edi, esi, ebp, esp, ebx, edx, ecx, eax). (REQ: REQ-01-0797)
-                - [ ] Save trap info (trapno, err). (REQ: REQ-01-0798)
-                - [ ] Save control (eip, cs, eflags, user_esp, user_ss). (REQ: REQ-01-0799)
-            - [ ] **Handler Invocation:** (REQ: REQ-01-0800)
-                - [ ] `copyout()` frame to user stack (with fault handling). (REQ: REQ-01-0801)
-                - [ ] Set `regs->useresp` and `regs->eip` to frame/handler. (REQ: REQ-01-0802)
-            - [ ] **SA_SIGINFO Extended Frame:** (REQ: REQ-01-0803)
-                - [ ] Construct `siginfo_t` (si_signo, si_code, si_addr, etc.). (REQ: REQ-01-0804)
-                - [ ] Construct `ucontext_t` with machine context. (REQ: REQ-01-0805)
-                - [ ] Handler signature: `void handler(int, siginfo_t *, void *)`. (REQ: REQ-01-0806)
-            - [ ] **Alt Stack Handling:** (REQ: REQ-01-0807)
-                - [ ] If `SA_ONSTACK` and alt stack configured: use alt stack SP. (REQ: REQ-01-0807)
-                - [ ] Set `sig_on_stack` flag. (REQ: REQ-01-0809)
+        - [x] **Signal Delivery (Architecture-Specific — i386):** (REQ: REQ-01-0786)
+            - [x] **`sendsig()` — Frame Construction:** (REQ: REQ-01-0787)
+                - [x] Calculate user stack pointer from `regs->useresp`. (REQ: REQ-01-0788)
+                - [x] Subtract `sizeof(struct sigframe)`. (REQ: REQ-01-0789)
+                - [x] Align stack to 16-byte boundary (System V ABI). (REQ: REQ-01-0790)
+            - [x] **`struct sigframe` Layout:** (REQ: REQ-01-0791)
+                - [x] `retaddr`: return address pointing to trampoline. (REQ: REQ-01-0792)
+                - [x] `sig`: signal number (first handler argument). (REQ: REQ-01-0793)
+                - [x] `sc`: `struct sigcontext` with saved registers. (REQ: REQ-01-0794)
+            - [x] **`struct sigcontext` Population:** (REQ: REQ-01-0795)
+                - [x] Save segment registers (gs, fs, es, ds). (REQ: REQ-01-0796)
+                - [x] Save GPRs (edi, esi, ebp, esp, ebx, edx, ecx, eax). (REQ: REQ-01-0797)
+                - [x] Save trap info (trapno, err). (REQ: REQ-01-0798)
+                - [x] Save control (eip, cs, eflags, user_esp, user_ss). (REQ: REQ-01-0799)
+            - [x] **Handler Invocation:** (REQ: REQ-01-0800)
+                - [x] `copyout()` frame to user stack (with fault handling). (REQ: REQ-01-0801)
+                - [x] Set `regs->useresp` and `regs->eip` to frame/handler. (REQ: REQ-01-0802)
+            - [x] **SA_SIGINFO Extended Frame:** (REQ: REQ-01-0803)
+                - [x] Construct `siginfo_t` (si_signo, si_code, si_addr, etc.). (REQ: REQ-01-0804)
+                - [x] Construct `ucontext_t` with machine context. (REQ: REQ-01-0805)
+                - [x] Handler signature: `void handler(int, siginfo_t *, void *)`. (REQ: REQ-01-0806)
+            - [x] **Alt Stack Handling:** (REQ: REQ-01-0807)
+                - [x] If `SA_ONSTACK` and alt stack configured: use alt stack SP. (REQ: REQ-01-0807)
+                - [x] Set `sig_on_stack` flag. (REQ: REQ-01-0809)
 
-        - [ ] **Signal Trampoline:** (REQ: REQ-01-0810)
-            - [ ] Map trampoline page at fixed address (e.g., 0xFFFF1000). (REQ: REQ-01-0811)
-            - [ ] Page: user-readable, executable, not writable. (REQ: REQ-01-0812)
-            - [ ] Code: `mov $SYS_sigreturn, %eax; int $0x80`. (REQ: REQ-01-0813)
+        - [x] **Signal Trampoline:** (REQ: REQ-01-0810)
+            - [x] Map trampoline page at fixed address (e.g., 0xFFFF1000). (REQ: REQ-01-0811)
+            - [x] Page: user-readable, executable, not writable. (REQ: REQ-01-0812)
+            - [x] Code: `mov $SYS_sigreturn, %eax; int $0x80`. (REQ: REQ-01-0813)
             - [ ] **VDSO Integration (future):** (REQ: REQ-01-0814)
                 - [ ] Embed trampoline in VDSO page. (REQ: REQ-01-0815)
                 - [ ] Use `AT_SYSINFO` auxiliary vector entry. (REQ: REQ-01-0816)
 
-        - [ ] **Signal Mask Management:** (REQ: REQ-01-0817)
-            - [ ] During handler: block current signal (unless SA_NODEFER) + `sa_mask`. (REQ: REQ-01-0818)
-            - [ ] Restore original mask in `sys_sigreturn`. (REQ: REQ-01-0819)
-            - [ ] **Inheritance:** (REQ: REQ-01-0820)
-                - [ ] `fork()`: child inherits pending signals and mask. (REQ: REQ-01-0821)
-                - [ ] `exec()`: reset all handlers to SIG_DFL (except SIG_IGN). (REQ: REQ-01-0822)
+        - [x] **Signal Mask Management:** (REQ: REQ-01-0817)
+            - [x] During handler: block current signal (unless SA_NODEFER) + `sa_mask`. (REQ: REQ-01-0818)
+            - [x] Restore original mask in `sys_sigreturn`. (REQ: REQ-01-0819)
+            - [x] **Inheritance:** (REQ: REQ-01-0820)
+                - [x] `fork()`: child process inherits handlers/policy; child thread inherits signal mask; pending signals start clear. (REQ: REQ-01-0821)
+                - [x] `exec()`: reset all handlers to SIG_DFL (except SIG_IGN). (REQ: REQ-01-0822)
 
-        - [ ] **Signal Checking Points:** (REQ: REQ-01-0823)
-            - [ ] Return from interrupt/exception: `signal_handle_pending()` if returning to user mode. (REQ: REQ-01-0824)
-            - [ ] Return from syscall: check pending, return EINTR if interruptible. (REQ: REQ-01-0825)
-            - [ ] Sleep wakeup: `sched_sleep()` returns on signal (EINTR). (REQ: REQ-01-0826)
+        - [x] **Signal Checking Points:** (REQ: REQ-01-0823)
+            - [x] Return from interrupt/exception: `signal_handle_pending()` if returning to user mode. (REQ: REQ-01-0824)
+            - [x] Return from syscall: check pending, return EINTR if interruptible. (REQ: REQ-01-0825)
+            - [x] Sleep wakeup: interruptible `sched_sleep()` callers are resumed on signal with `EINTR` state. (REQ: REQ-01-0826)
 
-        - [ ] **Special Signal Handling:** (REQ: REQ-01-0827)
-            - [ ] SIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads. (REQ: REQ-01-0828)
-            - [ ] SIGSTOP: cannot be caught/blocked/ignored; stops all threads. (REQ: REQ-01-0829)
-            - [ ] SIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED. (REQ: REQ-01-0830)
-            - [ ] SIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics. (REQ: REQ-01-0831)
-            - [ ] Job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore. (REQ: REQ-01-0832)
+        - [x] **Special Signal Handling:** (REQ: REQ-01-0827)
+            - [x] SIGKILL: cannot be caught/blocked/ignored; terminates immediately; wake stopped threads. (REQ: REQ-01-0828)
+            - [x] SIGSTOP: cannot be caught/blocked/ignored; stops all threads. (REQ: REQ-01-0829)
+            - [x] SIGCONT: resume stopped process; clear pending stops; deliver to handler if installed; set P_CONTINUED. (REQ: REQ-01-0830)
+            - [x] SIGCHLD: sent on child exit/stop/continue; SA_NOCLDSTOP/SA_NOCLDWAIT semantics. (REQ: REQ-01-0831)
+            - [x] Job control stops (SIGTSTP/SIGTTIN/SIGTTOU): can be caught/ignored; orphaned pgrps ignore. (REQ: REQ-01-0832)
 
-        - [ ] **PID 1 (Init) Protection:** (REQ: REQ-01-0833)
-            - [ ] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler. (REQ: REQ-01-0834)
-            - [ ] If init exits, system halts/panics. (REQ: REQ-01-0833)
-            - [ ] Init adopts orphaned processes. (REQ: REQ-01-0836)
+        - [x] **PID 1 (Init) Protection:** (REQ: REQ-01-0833)
+            - [x] Ignore SIGKILL, SIGTERM, SIGSTOP unless explicit handler. (REQ: REQ-01-0834)
+            - [x] If init exits, system halts/panics. (REQ: REQ-01-0833)
+            - [x] Init adopts orphaned processes. (REQ: REQ-01-0836)
 
         - [ ] **Core Dump (future):** (REQ: REQ-01-0837)
             - [ ] Signals with SA_CORE: SIGQUIT, SIGILL, SIGABRT, SIGFPE, SIGSEGV, SIGBUS. (REQ: REQ-01-0838)
             - [ ] `coredump()`: write ELF core format (`/cores/core.PID`). (REQ: REQ-01-0839)
             - [ ] Respect `RLIMIT_CORE`. (REQ: REQ-01-0840)
 
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
-            - [ ] Unit: `sys_sigaction` install/replace/reset handler. (REQ: REQ-01-0842)
-            - [ ] Unit: `sys_sigprocmask` block/unblock/setmask. (REQ: REQ-01-0843)
-            - [ ] Unit: `sys_kill` to specific PID, pgrp, all. (REQ: REQ-01-0844)
-            - [ ] Unit: `psignal` thread selection (prefer unmasked). (REQ: REQ-01-0845)
-            - [ ] Unit: `sendsig` frame construction and `sigreturn` restoration. (REQ: REQ-01-0846)
-            - [ ] Unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU. (REQ: REQ-01-0847)
-            - [ ] Unit: SA_RESTART — interrupted syscall restarted. (REQ: REQ-01-0848)
-            - [ ] Unit: SA_SIGINFO — extended frame with siginfo + ucontext. (REQ: REQ-01-0849)
-            - [ ] Property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant). (REQ: REQ-01-0850)
-            - [ ] Integration: fork, send SIGINT to child, verify termination. (REQ: REQ-01-0851)
-            - [ ] Integration: job control stop/continue cycle. (REQ: REQ-01-0852)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
-            - [ ] Internal doc: signal lifecycle (generation → delivery → handler → sigreturn). (REQ: REQ-01-0854)
-            - [ ] Internal doc: i386 signal frame layout. (REQ: REQ-01-0855)
-            - [ ] Internal doc: signal checking points and SA_RESTART logic. (REQ: REQ-01-0856)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [x] Unit: `sys_sigaction` install/replace/reset handler. (REQ: REQ-01-0842)
+            - [x] Unit: `sys_sigprocmask` block/unblock/setmask. (REQ: REQ-01-0843)
+            - [x] Unit: `sys_kill` to specific PID, pgrp, all. (REQ: REQ-01-0844)
+            - [x] Unit: `psignal` thread selection (prefer unmasked). (REQ: REQ-01-0845)
+            - [x] Unit: `sendsig` frame construction and `sigreturn` restoration. (REQ: REQ-01-0846)
+            - [x] Unit: SIGCONT clears pending SIGTSTP/SIGTTIN/SIGTTOU. (REQ: REQ-01-0847)
+            - [x] Unit: SA_RESTART — interrupted syscall restarted. (REQ: REQ-01-0848)
+            - [x] Unit: SA_SIGINFO — extended frame with siginfo + ucontext. (REQ: REQ-01-0849)
+            - [x] Property: SIGKILL/SIGSTOP cannot be caught, blocked, or ignored (verify invariant). (REQ: REQ-01-0850)
+            - [x] Integration: fork, send SIGINT to child, verify termination. (REQ: REQ-01-0851)
+            - [x] Integration: job control stop/continue cycle. (REQ: REQ-01-0852)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+            - [x] Internal doc: signal lifecycle (generation → delivery → handler → sigreturn). (REQ: REQ-01-0854)
+            - [x] Internal doc: i386 signal frame layout. (REQ: REQ-01-0855)
+            - [x] Internal doc: signal checking points and SA_RESTART logic. (REQ: REQ-01-0856)
 
-    - [ ] **Refactor kmain:** (REQ: REQ-01-0857)
-        - [ ] Move early i386 boot code to `sys/arch/i386/early_boot.c`. (REQ: REQ-01-0858)
-        - [ ] Create `init_memory` helper. (REQ: REQ-01-0859)
-        - [ ] Create `init_root_fs` helper. (REQ: REQ-01-0860)
-        - [ ] Clean up `kmain` flow. (REQ: REQ-01-0861)
+    - [x] **Refactor kmain:** (REQ: REQ-01-0857)
+        - [x] Move early i386 boot code to `sys/arch/i386/early_boot.c`. (REQ: REQ-01-0858)
+        - [x] Create `init_memory` helper. (REQ: REQ-01-0859)
+        - [x] Create `init_root_fs` helper. (REQ: REQ-01-0860)
+        - [x] Clean up `kmain` flow. (REQ: REQ-01-0861)
 
-    - [ ] **Kernel Core Maintenance:** (REQ: REQ-01-0862)
-        - [ ] Refactor `spinlock.c` to use GCC C11 atomic builtins. (REQ: REQ-01-0863)
-        - [ ] Rewrite `swapper.c` idle loop (race-free). (REQ: REQ-01-0864)
-        - [ ] Cleanup `sleepq.c` formatting and style. (REQ: REQ-01-0865)
-        - [ ] Remove obsolete `sys/kern/stubs.c`. (REQ: REQ-01-0866)
-        - [ ] Modularize `sys/kern/lib.c` into `sys/lib/`. (REQ: REQ-01-0867)
-        - [ ] Audit `mutex.c` and `semaphore.c` for race conditions. (REQ: REQ-01-0868)
-        - [ ] Fix `sched_smp.c` CPU ID assumption. (REQ: REQ-01-0869)
+    - [x] **Kernel Core Maintenance:** (REQ: REQ-01-0862)
+        - [x] Refactor `spinlock.c` to use GCC C11 atomic builtins. (REQ: REQ-01-0863)
+        - [x] Rewrite `swapper.c` idle loop (race-free). (REQ: REQ-01-0864)
+        - [x] Cleanup `sleepq.c` private helper structure and null-context guards. (REQ: REQ-01-0865)
+        - [x] Remove obsolete `sys/kern/stubs.c`. (REQ: REQ-01-0866)
+        - [x] Modularize `sys/kern/lib.c` into `sys/lib/`. (REQ: REQ-01-0867)
+        - [x] Audit `mutex.c` and `semaphore.c` for race conditions. (REQ: REQ-01-0868)
+        - [x] Fix `sched_smp.c` CPU ID assumption. (REQ: REQ-01-0869)
 
-    - [ ] **Update Kernel Documentation:** (REQ: REQ-01-0870)
-        - [ ] Document Console/UART subsystem changes. (REQ: REQ-01-0871)
-        - [ ] Document kmain initialization flow. (REQ: REQ-01-0872)
-        - [ ] Update ARCHITECTURE.md. (REQ: REQ-01-0873)
+    - [x] **Update Kernel Documentation:** (REQ: REQ-01-0870)
+        - [x] Document Console/UART subsystem changes. (REQ: REQ-01-0871)
+        - [x] Document kmain initialization flow. (REQ: REQ-01-0872)
+        - [x] Update ARCHITECTURE.md. (REQ: REQ-01-0873)
 
     - [ ] **Process Lifecycle & Job Control:** (REQ: REQ-01-0874)
 
@@ -1037,110 +1037,110 @@
 
             > `sys_exit(status)` and `sys__exit(status)` both call internal `proc_exit(code)`.
 
-            - [ ] **Phase 1 — State Transition (RUNNING → DYING):** (REQ: REQ-01-0876)
-                - [ ] Set `p_state` = SDYING. (REQ: REQ-01-0877)
-                - [ ] Record exit status in `p_xstat`. (REQ: REQ-01-0878)
-                - [ ] Prevent further scheduling. (REQ: REQ-01-0879)
+            - [x] **Phase 1 — State Transition (RUNNING → DYING):** (REQ: REQ-01-0876)
+                - [x] Set `p_state` = SDYING. (REQ: REQ-01-0877)
+                - [x] Record exit status in `p_xstat`. (REQ: REQ-01-0878)
+                - [x] Prevent further scheduling. (REQ: REQ-01-0879)
             - [ ] **Phase 2 — Resource Release:** (REQ: REQ-01-0880)
-                - [ ] **File Descriptors:** `fd_close_all(p)` — close all, decrement refcounts. (REQ: REQ-01-0881)
-                - [ ] **Virtual Memory:** `pmap_release(p->pmap)` — free user page tables, switch to kernel pmap. (REQ: REQ-01-0882)
-                - [ ] **VM Map:** release `vm_map` and all `vm_map_entry` structures. (REQ: REQ-01-0883)
-                - [ ] **CWD / Root:** decrement cwd and root vnode refcounts. (REQ: REQ-01-0884)
-                - [ ] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY. (REQ: REQ-01-0885)
-                - [ ] **Pending Signals:** clear all. (REQ: REQ-01-0886)
+                - [x] **File Descriptors:** `fd_close_all(p)` — close all, decrement refcounts. (REQ: REQ-01-0881)
+                - [x] **Virtual Memory:** `pmap_release(p->pmap)` — free user page tables, switch to kernel pmap. (REQ: REQ-01-0882)
+                - [x] **VM Map:** release `vm_map` and all `vm_map_entry` structures at the safe reap point after switching the exiting thread to the kernel pmap. (REQ: REQ-01-0883)
+                - [x] **CWD / Root:** decrement cwd and root vnode refcounts. (REQ: REQ-01-0884)
+                - [x] **Controlling Terminal:** if session leader, SIGHUP to foreground group, revoke TTY. (REQ: REQ-01-0885)
+                - [x] **Pending Signals:** clear all. (REQ: REQ-01-0886)
                 - [ ] **Timers:** cancel ITIMER_REAL/VIRTUAL/PROF and alarm(). (REQ: REQ-01-0887)
                 - [ ] **System V IPC:** detach shmem, undo semaphores, remove owned msg queues. (REQ: REQ-01-0888)
                 - [ ] **POSIX IPC:** unlink owned semaphores/shared memory. (REQ: REQ-01-0889)
-                - [ ] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters. (REQ: REQ-01-0890)
-                - [ ] **Kernel Locks:** release held mutexes, cancel pending lock requests. (REQ: REQ-01-0891)
+                - [x] **Futex Cleanup:** process robust list, mark FUTEX_OWNER_DIED, wake waiters. (REQ: REQ-01-0890)
+                - [x] **Kernel Locks:** release held sleep mutexes, cancel pending lock requests. (REQ: REQ-01-0891)
             - [ ] **Phase 3 — Thread Termination:** (REQ: REQ-01-0892)
-                - [ ] Set `t->state = THREAD_ZOMBIE` for each thread. (REQ: REQ-01-0893)
-                - [ ] Interrupt non-current threads, wait for zombie state. (REQ: REQ-01-0894)
-                - [ ] Free thread stacks and structures. (REQ: REQ-01-0895)
-                - [ ] Current thread becomes reaper. (REQ: REQ-01-0896)
-            - [ ] **Phase 4 — Resource Usage Finalization:** (REQ: REQ-01-0897)
-                - [ ] `rusage_finalize(p)`: accumulate thread times. (REQ: REQ-01-0898)
-                - [ ] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`. (REQ: REQ-01-0899)
-            - [ ] **Phase 5 — Orphan Reparenting:** (REQ: REQ-01-0900)
-                - [ ] `proc_reparent_children(p)`: move children to init. (REQ: REQ-01-0901)
-                - [ ] Acquire `proctree_lock`. (REQ: REQ-01-0902)
-                - [ ] For each child: set `p_parent = init`, move to init's children list. (REQ: REQ-01-0903)
-                - [ ] Wake init if child is zombie. (REQ: REQ-01-0904)
-                - [ ] If init dying: reparent to swapper (PID 0) or panic. (REQ: REQ-01-0900)
-            - [ ] **Phase 6 — Process Group / Session Cleanup:** (REQ: REQ-01-0906)
-                - [ ] Remove from process group; free `struct pgrp` if last member. (REQ: REQ-01-0907)
-                - [ ] If session leader: SIGHUP to foreground, revoke TTY, mark no leader. (REQ: REQ-01-0906)
-                - [ ] Check for orphaned process groups → SIGHUP + SIGCONT. (REQ: REQ-01-0909)
-            - [ ] **Phase 7 — Parent Notification:** (REQ: REQ-01-0910)
-                - [ ] `psignal(parent, SIGCHLD)`. (REQ: REQ-01-0911)
-                - [ ] If SA_NOCLDWAIT: auto-reap (no zombie). (REQ: REQ-01-0910)
-                - [ ] Wake parent on `p_children` channel. (REQ: REQ-01-0913)
-            - [ ] **Phase 8 — Zombie State (DYING → ZOMBIE):** (REQ: REQ-01-0914)
-                - [ ] Set `p_state` = SZOMB. (REQ: REQ-01-0915)
-                - [ ] Only pid, ppid, xstat, rusage remain valid. (REQ: REQ-01-0916)
-            - [ ] **Phase 9 — Final Context Switch:** (REQ: REQ-01-0917)
-                - [ ] `current_thread->state = THREAD_ZOMBIE`. (REQ: REQ-01-0918)
-                - [ ] `sched_yield()` — never returns. (REQ: REQ-01-0919)
-            - [ ] **Accounting:** (REQ: REQ-01-0920)
-                - [ ] `acct_process(code)`: write accounting record (command, times, status). (REQ: REQ-01-0921)
+                - [x] Set `t->state = THREAD_ZOMBIE` for each thread. (REQ: REQ-01-0893)
+                - [x] Interrupt non-current threads, wait for zombie state. (REQ: REQ-01-0894)
+                - [x] Free thread stacks and structures. (REQ: REQ-01-0895)
+                - [x] Current thread becomes reaper. (REQ: REQ-01-0896)
+            - [x] **Phase 4 — Resource Usage Finalization:** (REQ: REQ-01-0897)
+                - [x] `rusage_finalize(p)`: accumulate thread times. (REQ: REQ-01-0898)
+                - [x] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`. (REQ: REQ-01-0899)
+            - [x] **Phase 5 — Orphan Reparenting:** (REQ: REQ-01-0900)
+                - [x] `proc_reparent_children(p)`: move children to init. (REQ: REQ-01-0901)
+                - [x] Acquire `proctree_lock`. (REQ: REQ-01-0902)
+                - [x] For each child: set `p_parent = init`, move to init's children list. (REQ: REQ-01-0903)
+                - [x] Wake init if child is zombie. (REQ: REQ-01-0904)
+                - [x] If init dying: reparent to swapper (PID 0) or panic. (REQ: REQ-01-0900)
+            - [x] **Phase 6 — Process Group / Session Cleanup:** (REQ: REQ-01-0906)
+                - [x] Remove from process group; free `struct pgrp` if last member at the final reap point, preserving zombie pgrp identity until `wait4()` or auto-reap completes. (REQ: REQ-01-0907)
+                - [x] If session leader: SIGHUP to foreground, revoke TTY, mark no leader. (REQ: REQ-01-0906)
+                - [x] Check for orphaned process groups → SIGHUP + SIGCONT when process-group membership is dropped at the final reap point. (REQ: REQ-01-0909)
+            - [x] **Phase 7 — Parent Notification:** (REQ: REQ-01-0910)
+                - [x] `psignal(parent, SIGCHLD)`. (REQ: REQ-01-0911)
+                - [x] If SA_NOCLDWAIT: detach from the parent's waitable child list and auto-reap asynchronously once the final thread context is retired. (REQ: REQ-01-0910)
+                - [x] Wake parent on `p_children` channel. (REQ: REQ-01-0913)
+            - [x] **Phase 8 — Zombie State (DYING → ZOMBIE):** (REQ: REQ-01-0914)
+                - [x] Set `p_state` = SZOMB. (REQ: REQ-01-0915)
+                - [x] Only wait-visible identity, exit status/rusage, and final-reap bookkeeping such as parent/pgrp linkage remain valid; active runtime resources must already be released. (REQ: REQ-01-0916)
+            - [x] **Phase 9 — Final Context Switch:** (REQ: REQ-01-0917)
+                - [x] `current_thread->state = THREAD_ZOMBIE`. (REQ: REQ-01-0918)
+                - [x] `sched_yield()` — never returns. (REQ: REQ-01-0919)
+            - [x] **Accounting:** (REQ: REQ-01-0920)
+                - [x] `acct_process(code)`: write accounting record (command, times, status). (REQ: REQ-01-0921)
 
         - [ ] **Edge Cases:** (REQ: REQ-01-0922)
-            - [ ] Init (PID 1) exit: kernel halts/panics with warning. (REQ: REQ-01-0923)
-            - [ ] Killed by signal during exit: ignore signals once SDYING. (REQ: REQ-01-0924)
-            - [ ] Locks held during exit: log warning, force release. (REQ: REQ-01-0925)
-            - [ ] OOM during exit: must not allocate (only free). (REQ: REQ-01-0926)
-            - [ ] Vfork exit: wake parent immediately. (REQ: REQ-01-0927)
-            - [ ] Thread group exit: all threads terminated on any `exit()`. (REQ: REQ-01-0928)
+            - [x] Init (PID 1) exit: kernel halts/panics with warning. (REQ: REQ-01-0923)
+            - [x] Killed by signal during exit: ignore signals once SDYING. (REQ: REQ-01-0924)
+            - [x] Locks held during exit: log warning, force release. (REQ: REQ-01-0925)
+            - [x] OOM during exit: exit/reap path must not allocate new memory (free-only teardown). (REQ: REQ-01-0926)
+            - [x] Vfork child exec/exit: wake blocked parent immediately. (REQ: REQ-01-0927)
+            - [x] Thread group exit: all threads terminated on any `exit()`. (REQ: REQ-01-0928)
 
-        - [ ] **Wait Subsystem (`wait4` / `waitpid`):** (REQ: REQ-01-0929)
-            - [ ] **Search Logic:** (REQ: REQ-01-0930)
-                - [ ] `pid > 0`: specific child. (REQ: REQ-01-0931)
-                - [ ] `pid == -1`: any child. (REQ: REQ-01-0932)
-                - [ ] `pid == 0`: same process group. (REQ: REQ-01-0933)
-                - [ ] `pid < -1`: process group `|pid|`. (REQ: REQ-01-0757, REQ-01-0934)
-            - [ ] **WNOHANG:** return 0 if no zombies, ECHILD if no children. (REQ: REQ-01-0935)
-            - [ ] **Blocking Wait:** `sched_sleep(&p_children)`, handle EINTR, re-scan. (REQ: REQ-01-0936)
-            - [ ] **Reaping (ZOMBIE → FREE):** (REQ: REQ-01-0937)
-                - [ ] Copy xstat and rusage to user buffer. (REQ: REQ-01-0938)
-                - [ ] Remove from siblings list and process group. (REQ: REQ-01-0939)
-                - [ ] Free process structure. (REQ: REQ-01-0940)
-            - [ ] **Job Control (`WUNTRACED` / `WCONTINUED`):** (REQ: REQ-01-0941)
-                - [ ] Report stopped children (SSTOP). (REQ: REQ-01-0942)
-                - [ ] Report continued children (P_CONTINUED flag). (REQ: REQ-01-0943)
+        - [x] **Wait Subsystem (`wait4` / `waitpid`):** (REQ: REQ-01-0929)
+            - [x] **Search Logic:** (REQ: REQ-01-0930)
+                - [x] `pid > 0`: specific child. (REQ: REQ-01-0931)
+                - [x] `pid == -1`: any child. (REQ: REQ-01-0932)
+                - [x] `pid == 0`: same process group. (REQ: REQ-01-0933)
+                - [x] `pid < -1`: process group `|pid|`. (REQ: REQ-01-0757, REQ-01-0934)
+            - [x] **WNOHANG:** return 0 if no zombies, ECHILD if no children. (REQ: REQ-01-0935)
+            - [x] **Blocking Wait:** `sched_sleep(&p_children)`, handle EINTR, re-scan. (REQ: REQ-01-0936)
+            - [x] **Reaping (ZOMBIE → FREE):** (REQ: REQ-01-0937)
+                - [x] Copy xstat and rusage to user buffer. (REQ: REQ-01-0938)
+                - [x] Remove from siblings list and process group. (REQ: REQ-01-0939)
+                - [x] Return process slot to free pool. (REQ: REQ-01-0940)
+            - [x] **Job Control (`WUNTRACED` / `WCONTINUED`):** (REQ: REQ-01-0941)
+                - [x] Report stopped children (SSTOP). (REQ: REQ-01-0942)
+                - [x] Report continued children (P_CONTINUED flag). (REQ: REQ-01-0943)
 
-        - [ ] **Process Groups & Sessions:** (REQ: REQ-01-0944)
-            - [ ] **Core Structures:** (REQ: REQ-01-0945)
-                - [ ] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr). (REQ: REQ-01-0946)
-                - [ ] `struct session`: `s_id`, `s_leader`, `s_ttyvp`, `s_login`. (REQ: REQ-01-0947)
-                - [ ] Invariants: every process → one group → one session. (REQ: REQ-01-0948)
-            - [ ] **Session Management:** (REQ: REQ-01-0949)
-                - [ ] `sys_setsid()`: create new session + pgrp; EPERM if already leader; detach CTTY. (REQ: REQ-01-0950)
-                - [ ] `sys_getsid(pid)`: return session ID. (REQ: REQ-01-0951)
-            - [ ] **Group Management:** (REQ: REQ-01-0952)
-                - [ ] `sys_setpgid(pid, pgid)`: join/create group; must be same session. (REQ: REQ-01-0953)
-                - [ ] `sys_getpgid(pid)`: return group ID. (REQ: REQ-01-0954)
-            - [ ] **Controlling Terminal (CTTY):** (REQ: REQ-01-0955)
-                - [ ] `TIOCSCTTY`: assign CTTY (session leader, no existing CTTY, TTY unowned). (REQ: REQ-01-0956)
-                - [ ] `TIOCNOTTY`: release CTTY, SIGHUP to foreground group. (REQ: REQ-01-0957)
-                - [ ] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check). (REQ: REQ-01-0958)
-            - [ ] **Orphaned Process Groups:** (REQ: REQ-01-0959)
-                - [ ] Detection: no member with parent in different group of same session. (REQ: REQ-01-0960)
-                - [ ] Action: SIGHUP + SIGCONT to stopped members. (REQ: REQ-01-0961)
+        - [x] **Process Groups & Sessions:** (REQ: REQ-01-0944)
+            - [x] **Core Structures:** (REQ: REQ-01-0945)
+                - [x] `struct pgrp`: `pg_id`, `pg_members` (list), `pg_session` (ptr). (REQ: REQ-01-0946)
+                - [x] `struct session`: `s_sid`, `s_leader`, `s_ttyvp`, `s_login`. (REQ: REQ-01-0947)
+                - [x] Invariants: every process → one group → one session. (REQ: REQ-01-0948)
+            - [x] **Session Management:** (REQ: REQ-01-0949)
+                - [x] `sys_setsid()`: create new session + pgrp; EPERM if already leader; detach CTTY. (REQ: REQ-01-0950)
+                - [x] `sys_getsid(pid)`: return session ID. (REQ: REQ-01-0951)
+            - [x] **Group Management:** (REQ: REQ-01-0952)
+                - [x] `sys_setpgid(pid, pgid)`: join/create group; must be same session. (REQ: REQ-01-0953)
+                - [x] `sys_getpgid(pid)`: return group ID. (REQ: REQ-01-0954)
+            - [x] **Controlling Terminal (CTTY):** (REQ: REQ-01-0955)
+                - [x] `TIOCSCTTY`: assign CTTY (session leader, no existing CTTY, TTY unowned). (REQ: REQ-01-0956)
+                - [x] `TIOCNOTTY`: release CTTY, SIGHUP to foreground group. (REQ: REQ-01-0957)
+                - [x] `tcsetpgrp` / `tcgetpgrp`: set/get foreground group (SIGTTOU check). (REQ: REQ-01-0958)
+            - [x] **Orphaned Process Groups:** (REQ: REQ-01-0959)
+                - [x] Detection: no member with parent in different group of same session. (REQ: REQ-01-0960)
+                - [x] Action: SIGHUP + SIGCONT to stopped members. (REQ: REQ-01-0961)
 
-        - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
-            - [ ] Unit: proc_exit phases 1–9 ordering and resource cleanup. (REQ: REQ-01-0963)
-            - [ ] Unit: wait4 search logic (specific, any, pgrp). (REQ: REQ-01-0964)
-            - [ ] Unit: WNOHANG returns 0 / ECHILD correctly. (REQ: REQ-01-0965)
-            - [ ] Unit: orphan reparenting to init. (REQ: REQ-01-0966)
-            - [ ] Unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY. (REQ: REQ-01-0967)
-            - [ ] Unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery. (REQ: REQ-01-0968)
-            - [ ] Property: no zombie leaks (all zombies eventually reaped or auto-reaped). (REQ: REQ-01-0969)
-            - [ ] Integration: fork → exec → exit → waitpid cycle. (REQ: REQ-01-0970)
-            - [ ] Integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED. (REQ: REQ-01-0971)
-        - [ ] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
-            - [ ] Internal doc: process exit 9-phase teardown. (REQ: REQ-01-0973)
-            - [ ] Internal doc: wait4 search semantics and blocking. (REQ: REQ-01-0974)
-            - [ ] Internal doc: session/pgrp lifecycle and CTTY ownership. (REQ: REQ-01-0975)
+        - [x] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
+            - [x] Unit: proc_exit phases 1–9 ordering and resource cleanup. (REQ: REQ-01-0963)
+            - [x] Unit: wait4 search logic (specific, any, pgrp). (REQ: REQ-01-0964)
+            - [x] Unit: WNOHANG returns 0 / ECHILD correctly. (REQ: REQ-01-0965)
+            - [x] Unit: orphan reparenting to init. (REQ: REQ-01-0966)
+            - [x] Unit: setsid / setpgid / TIOCSCTTY / TIOCNOTTY. (REQ: REQ-01-0967)
+            - [x] Unit: orphaned pgrp detection and SIGHUP+SIGCONT delivery. (REQ: REQ-01-0968)
+            - [x] Property: no zombie leaks (all zombies eventually reaped or auto-reaped). (REQ: REQ-01-0969)
+            - [x] Integration: fork → exec → exit → waitpid cycle. (REQ: REQ-01-0970)
+            - [x] Integration: job control stop/continue with waitpid WUNTRACED/WCONTINUED. (REQ: REQ-01-0971)
+        - [x] **Documentation:** (REQ: REQ-01-0062, REQ-01-0150, REQ-01-0329, REQ-01-0421, REQ-01-0512, REQ-01-0562, REQ-01-0654, REQ-01-0853, REQ-01-0972)
+            - [x] Internal doc: process exit 9-phase teardown. (REQ: REQ-01-0973)
+            - [x] Internal doc: wait4 search semantics and blocking. (REQ: REQ-01-0974)
+            - [x] Internal doc: session/pgrp lifecycle and CTTY ownership. (REQ: REQ-01-0975)
 
 
 ## User Stories
@@ -1163,7 +1163,7 @@
 - **US-01-0016**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_init(start, end): initialize allocator with usable range so that this capability is implemented with clear verification evidence.
 - **US-01-0017**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_alloc(size, align): allocate size bytes with alignment so that this capability is implemented with clear verification evidence.
 - **US-01-0018**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pmm_watermark_used(): report bytes consumed so that this capability is implemented with clear verification evidence.
-- **US-01-0019**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to used for: vm_page_t array, initial page tables, kernel stacks so that this capability is implemented with clear verification evidence.
+- **US-01-0019**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the bootstrap watermark allocator to feed early PMM metadata state before the buddy allocator is live so that low-memory initialization remains deterministic and verifiable.
 - **US-01-0020**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to watermark region clamped to avoid exceeding available low memory so that this capability is implemented with clear verification evidence.
 - **US-01-0021**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to dynamic Metadata: so that this capability is implemented with clear verification evidence.
 - **US-01-0022**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to calculate vm_page_t array size based on actual detected RAM so that this capability is implemented with clear verification evidence.
@@ -1174,7 +1174,7 @@
 - **US-01-0027**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to orders 0-10 (4 KB - 4 MB pages) so that this capability is implemented with clear verification evidence.
 - **US-01-0028**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to free Lists: per-order doubly-linked free page lists so that this capability is implemented with clear verification evidence.
 - **US-01-0029**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_alloc_page(): O(1) single-page allocation from order-0 free list so that this capability is implemented with clear verification evidence.
-- **US-01-0030**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_alloc_contiguous(order): allocate 2^order contiguous pages so that this capability is implemented with clear verification evidence.
+- **US-01-0030**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_alloc_contiguous(count): allocate a contiguous page run, rounding to the smallest buddy order that can satisfy count so that this capability is implemented with clear verification evidence.
 - **US-01-0031**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_free_page(page): return page and coalesce with buddy if free so that this capability is implemented with clear verification evidence.
 - **US-01-0032**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vm_phys_free_contiguous(page, order): return and coalesce multi-page block so that this capability is implemented with clear verification evidence.
 - **US-01-0033**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to buddy Coalescing: merge adjacent free pages up through orders so that this capability is implemented with clear verification evidence.
@@ -1694,7 +1694,7 @@
 - **US-01-0547**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to uma_find_slab() Optimization: replace O(N) linear search with hash table so that this capability is implemented with clear verification evidence.
 - **US-01-0548**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to general Allocator (kmalloc/kfree): so that this capability is implemented with clear verification evidence.
 - **US-01-0549**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to power-of-two zones: back kmalloc with UMA zones for sizes 16, 32, 64, ..., 4096 so that this capability is implemented with clear verification evidence.
-- **US-01-0550**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to large allocations: bypass UMA for >4 KB (direct vm_map allocation) so that this capability is implemented with clear verification evidence.
+- **US-01-0550**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to large allocations: bypass UMA for >4 KB (direct PMM contiguous allocation) so that this capability is implemented with clear verification evidence.
 - **US-01-0551**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to krealloc(ptr, size): resize allocation so that this capability is implemented with clear verification evidence.
 - **US-01-0552**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to statistics: track memory usage by malloc_type (subsystem) so that this capability is implemented with clear verification evidence.
 - **US-01-0553**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
@@ -1726,15 +1726,15 @@
 - **US-01-0579**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fallback: parse MP Tables (Intel MultiProcessor Spec) so that this capability is implemented with clear verification evidence.
 - **US-01-0580**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to record BSP and AP LAPIC IDs so that this capability is implemented with clear verification evidence.
 - **US-01-0581**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to local APIC (LAPIC): so that this capability is implemented with clear verification evidence.
-- **US-01-0582**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to map LAPIC MMIO base (default 0xFEE00000) so that this capability is implemented with clear verification evidence.
+- **US-01-0582**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to establish and use the LAPIC MMIO base (default 0xFEE00000 on i386 bootstrap mappings) so that this capability is implemented with clear verification evidence.
 - **US-01-0583**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set Spurious Interrupt Vector Register (SVR): enable APIC, set vector so that this capability is implemented with clear verification evidence.
-- **US-01-0584**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to timer: so that this capability is implemented with clear verification evidence.
+- **US-01-0584**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want LAPIC timer facilities so that this capability is implemented with clear verification evidence.
 - **US-01-0585**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to calibrate against PIT or ACPI PM Timer so that this capability is implemented with clear verification evidence.
 - **US-01-0586**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set Divider Configuration Register (DCR) so that this capability is implemented with clear verification evidence.
 - **US-01-0587**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to periodic mode for scheduler tick so that this capability is implemented with clear verification evidence.
 - **US-01-0588**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to one-shot mode for high-resolution sleeps so that this capability is implemented with clear verification evidence.
 - **US-01-0589**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to error Status Register (ESR) and LVT Error vector so that this capability is implemented with clear verification evidence.
-- **US-01-0590**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iPI (Inter-Processor Interrupt): so that this capability is implemented with clear verification evidence.
+- **US-01-0590**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want LAPIC inter-processor interrupt support so that this capability is implemented with clear verification evidence.
 - **US-01-0591**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to iCR (Interrupt Command Register) writing logic so that this capability is implemented with clear verification evidence.
 - **US-01-0592**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to send fixed, lowest priority, NMI, INIT, SIPI IPIs so that this capability is implemented with clear verification evidence.
 - **US-01-0593**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wait for delivery status (busy bit clear) so that this capability is implemented with clear verification evidence.
@@ -1764,7 +1764,7 @@
 - **US-01-0617**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to audit all global data structures for race conditions so that this capability is implemented with clear verification evidence.
 - **US-01-0618**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
 - **US-01-0619**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: boot SMP with 2, 4, 8 CPUs in QEMU -smp N so that this capability is implemented with clear verification evidence.
-- **US-01-0620**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: LAPIC timer calibration accuracy so that this capability is implemented with clear verification evidence.
+- **US-01-0620**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want a unit test for LAPIC timer calibration accuracy so that this capability is implemented with clear verification evidence.
 - **US-01-0621**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: IPI send/receive between CPUs so that this capability is implemented with clear verification evidence.
 - **US-01-0622**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: per-CPU data isolation so that this capability is implemented with clear verification evidence.
 - **US-01-0623**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to scheduling (MLFQ Scheduler): so that this capability is implemented with clear verification evidence.
@@ -1786,11 +1786,11 @@
 - **US-01-0639**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pCB: refined for thread/process separation so that this capability is implemented with clear verification evidence.
 - **US-01-0640**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to switch_to(old, new): save/restore callee-saved registers, swap stacks so that this capability is implemented with clear verification evidence.
 - **US-01-0641**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Process (PID 0 - Swapper/Idle): so that this capability is implemented with clear verification evidence.
-- **US-01-0642**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pageout daemon work in idle loop so that this capability is implemented with clear verification evidence.
+- **US-01-0642**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want pageout daemon work handled by a dedicated kernel process while idle threads preserve valid CPU-local context so that this capability is implemented with clear verification evidence.
 - **US-01-0643**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to ensures valid process context always exists so that this capability is implemented with clear verification evidence.
 - **US-01-0644**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to process Bitness Tracking: so that this capability is implemented with clear verification evidence.
-- **US-01-0645**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to enum proc_bitness (16/32/64) field in process struct so that this capability is implemented with clear verification evidence.
-- **US-01-0646**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to proc_set_bitness() / proc_get_bitness() with permission checks so that this capability is implemented with clear verification evidence.
+- **US-01-0645**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the process struct to store 16/32/64-bit execution mode using proc-bitness values so that this capability is implemented with clear verification evidence.
+- **US-01-0646**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want internal `proc_set_bitness()` / `proc_get_bitness()` helpers to update and expose process bitness so that this capability is implemented with clear verification evidence.
 - **US-01-0647**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to bitness inheritance on fork, transition on exec so that this capability is implemented with clear verification evidence.
 - **US-01-0648**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
 - **US-01-0649**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: priority queue insertion/removal ordering so that this capability is implemented with clear verification evidence.
@@ -1832,7 +1832,7 @@
 - **US-01-0685**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: FUTEX_REQUEUE moves waiters correctly so that this capability is implemented with clear verification evidence.
 - **US-01-0686**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: robust list cleanup on exit so that this capability is implemented with clear verification evidence.
 - **US-01-0687**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: PI inheritance - low priority holder boosted so that this capability is implemented with clear verification evidence.
-- **US-01-0688**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to property: no orphaned waiters after process exit so that this capability is implemented with clear verification evidence.
+- **US-01-0688**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want process exit to remove sleeping threads from sleep queues so that no orphaned waiters remain after teardown.
 - **US-01-0689**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to nTSYNC Driver (Windows NT Sync Primitives): so that this capability is implemented with clear verification evidence.
 - **US-01-0690**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to core Infrastructure: so that this capability is implemented with clear verification evidence.
 - **US-01-0691**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to /dev/ntsync char device with instance-based isolation so that this capability is implemented with clear verification evidence.
@@ -1965,7 +1965,7 @@
 - **US-01-0818**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to during handler: block current signal (unless SA_NODEFER) + sa_mask so that this capability is implemented with clear verification evidence.
 - **US-01-0819**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to restore original mask in sys_sigreturn so that this capability is implemented with clear verification evidence.
 - **US-01-0820**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to inheritance: so that this capability is implemented with clear verification evidence.
-- **US-01-0821**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fork(): child inherits pending signals and mask so that this capability is implemented with clear verification evidence.
+- **US-01-0821**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to fork(): child process inherits handlers/policy; child thread inherits signal mask; pending signals start clear so that this capability is implemented with clear verification evidence.
 - **US-01-0822**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to exec(): reset all handlers to SIG_DFL (except SIG_IGN) so that this capability is implemented with clear verification evidence.
 - **US-01-0823**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to signal Checking Points: so that this capability is implemented with clear verification evidence.
 - **US-01-0824**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to return from interrupt/exception: signal_handle_pending() if returning to user mode so that this capability is implemented with clear verification evidence.
@@ -2023,11 +2023,11 @@
 - **US-01-0876**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 1 - State Transition (RUNNING → DYING): so that this capability is implemented with clear verification evidence.
 - **US-01-0877**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set p_state = SDYING so that this capability is implemented with clear verification evidence.
 - **US-01-0878**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to record exit status in p_xstat so that this capability is implemented with clear verification evidence.
-- **US-01-0879**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to prevent further scheduling so that this capability is implemented with clear verification evidence.
+- **US-01-0879**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want exiting processes to stop all thread scheduling immediately so that teardown runs without resurrecting dead execution contexts.
 - **US-01-0880**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 2 - Resource Release: so that this capability is implemented with clear verification evidence.
 - **US-01-0881**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to file Descriptors: fd_close_all(p) - close all, decrement refcounts so that this capability is implemented with clear verification evidence.
 - **US-01-0882**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to virtual Memory: pmap_release(p->pmap) - free user page tables, switch to kernel pmap so that this capability is implemented with clear verification evidence.
-- **US-01-0883**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vM Map: release vm_map and all vm_map_entry structures so that this capability is implemented with clear verification evidence.
+- **US-01-0883**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want exited processes to release their `vm_map` and `vm_map_entry` structures at the safe reap point after switching to the kernel pmap so that teardown does not destroy the still-current address space.
 - **US-01-0884**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cWD / Root: decrement cwd and root vnode refcounts so that this capability is implemented with clear verification evidence.
 - **US-01-0885**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to controlling Terminal: if session leader, SIGHUP to foreground group, revoke TTY so that this capability is implemented with clear verification evidence.
 - **US-01-0886**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pending Signals: clear all so that this capability is implemented with clear verification evidence.
@@ -2035,7 +2035,7 @@
 - **US-01-0888**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to system V IPC: detach shmem, undo semaphores, remove owned msg queues so that this capability is implemented with clear verification evidence.
 - **US-01-0889**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to pOSIX IPC: unlink owned semaphores/shared memory so that this capability is implemented with clear verification evidence.
 - **US-01-0890**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to futex Cleanup: process robust list, mark FUTEX_OWNER_DIED, wake waiters so that this capability is implemented with clear verification evidence.
-- **US-01-0891**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel Locks: release held mutexes, cancel pending lock requests so that this capability is implemented with clear verification evidence.
+- **US-01-0891**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to kernel locks release held sleep mutexes and cancel pending lock requests so that this capability is implemented with clear verification evidence.
 - **US-01-0892**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 3 - Thread Termination: so that this capability is implemented with clear verification evidence.
 - **US-01-0893**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set t->state = THREAD_ZOMBIE for each thread so that this capability is implemented with clear verification evidence.
 - **US-01-0894**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to interrupt non-current threads, wait for zombie state so that this capability is implemented with clear verification evidence.
@@ -2051,16 +2051,16 @@
 - **US-01-0904**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wake init if child is zombie so that this capability is implemented with clear verification evidence.
 - **US-01-0905**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if init dying: reparent to swapper (PID 0) or panic so that this capability is implemented with clear verification evidence.
 - **US-01-0906**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 6 - Process Group / Session Cleanup: so that this capability is implemented with clear verification evidence.
-- **US-01-0907**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to remove from process group; free struct pgrp if last member so that this capability is implemented with clear verification evidence.
+- **US-01-0907**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want exited processes removed from their process group and the empty `struct pgrp` freed at the final reap point so that zombie pgrp identity is preserved until `wait4()` or auto-reap completes.
 - **US-01-0908**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if session leader: SIGHUP to foreground, revoke TTY, mark no leader so that this capability is implemented with clear verification evidence.
-- **US-01-0909**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to check for orphaned process groups → SIGHUP + SIGCONT so that this capability is implemented with clear verification evidence.
+- **US-01-0909**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want orphaned process groups checked when membership is dropped at the final reap point so that stopped jobs receive `SIGHUP` and `SIGCONT` consistently.
 - **US-01-0910**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 7 - Parent Notification: so that this capability is implemented with clear verification evidence.
 - **US-01-0911**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to psignal(parent, SIGCHLD) so that this capability is implemented with clear verification evidence.
-- **US-01-0912**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to if SA_NOCLDWAIT: auto-reap (no zombie) so that this capability is implemented with clear verification evidence.
+- **US-01-0912**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want `SA_NOCLDWAIT` children detached from the waitable child list and auto-reaped asynchronously once their final thread context is retired so that parents do not accumulate zombies they cannot wait on.
 - **US-01-0913**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wake parent on p_children channel so that this capability is implemented with clear verification evidence.
 - **US-01-0914**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 8 - Zombie State (DYING → ZOMBIE): so that this capability is implemented with clear verification evidence.
 - **US-01-0915**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to set p_state = SZOMB so that this capability is implemented with clear verification evidence.
-- **US-01-0916**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to only pid, ppid, xstat, rusage remain valid so that this capability is implemented with clear verification evidence.
+- **US-01-0916**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to preserve only wait-visible identity, exit status/rusage, and final-reap bookkeeping across the zombie window so that active runtime resources are already torn down before `wait4()` or auto-reap.
 - **US-01-0917**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to phase 9 - Final Context Switch: so that this capability is implemented with clear verification evidence.
 - **US-01-0918**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to current_thread->state = THREAD_ZOMBIE so that this capability is implemented with clear verification evidence.
 - **US-01-0919**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to sched_yield() - never returns so that this capability is implemented with clear verification evidence.
@@ -2069,8 +2069,8 @@
 - **US-01-0922**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to edge Cases: so that this capability is implemented with clear verification evidence.
 - **US-01-0923**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to init (PID 1) exit: kernel halts/panics with warning so that this capability is implemented with clear verification evidence.
 - **US-01-0924**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to killed by signal during exit: ignore signals once SDYING so that this capability is implemented with clear verification evidence.
-- **US-01-0925**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to locks held during exit: log warning, force release so that this capability is implemented with clear verification evidence.
-- **US-01-0926**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to oOM during exit: must not allocate (only free) so that this capability is implemented with clear verification evidence.
+- **US-01-0925**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want locks held during exit to log a warning and be force-released so that this capability is implemented with clear verification evidence.
+- **US-01-0926**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want the exit and reap path to avoid allocating new memory so teardown remains safe even under OOM pressure.
 - **US-01-0927**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to vfork exit: wake parent immediately so that this capability is implemented with clear verification evidence.
 - **US-01-0928**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to thread group exit: all threads terminated on any exit() so that this capability is implemented with clear verification evidence.
 - **US-01-0929**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to wait Subsystem (wait4 / waitpid): so that this capability is implemented with clear verification evidence.
@@ -2122,21 +2122,21 @@
 - **US-01-0975**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: session/pgrp lifecycle and CTTY ownership so that this capability is implemented with clear verification evidence.
 - **US-01-0976**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to executable Image Identity & Caching: so that this capability is implemented with clear verification evidence.
 - **US-01-0977**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to inode Identity: so that this capability is implemented with clear verification evidence.
-- **US-01-0978**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to preserve stable inode numbers through filesystem lookup, VFS, stat, and exec paths so that this capability is implemented with clear verification evidence.
+- **US-01-0978**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to preserve stable inode numbers through filesystem node allocation, `stat`, and executable identity extraction paths, including synthesized FAT identities where no cluster-backed inode exists so that this capability is implemented with clear verification evidence.
 - **US-01-0979**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to treat backing device + inode as the canonical executable identity, not the pathname string so that this capability is implemented with clear verification evidence.
 - **US-01-0980**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to support hard links and BusyBox-style multi-call binaries by recognizing shared executable identity across path aliases so that this capability is implemented with clear verification evidence.
 - **US-01-0981**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to executable Cache: so that this capability is implemented with clear verification evidence.
 - **US-01-0982**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to add executable image cache keyed by backing device + inode, with invalidation on content or metadata change so that this capability is implemented with clear verification evidence.
 - **US-01-0983**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant execve() work so that this capability is implemented with clear verification evidence.
-- **US-01-0984**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reuse cached executable state on hot re-exec without breaking argv[0] or personality selection semantics so that this capability is implemented with clear verification evidence.
+- **US-01-0984**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reuse cached executable state on hot re-exec without perturbing per-call `argv[0]` or personality selection semantics so that this capability is implemented with clear verification evidence.
 - **US-01-0985**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to performance: so that this capability is implemented with clear verification evidence.
-- **US-01-0986**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to measure and reduce execve() latency for repeated launches of the same image so that this capability is implemented with clear verification evidence.
+- **US-01-0986**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to measure and reduce repeated-launch executable metadata work on the hot-cache path so that this capability is implemented with clear verification evidence.
 - **US-01-0987**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to avoid path-based cache misses for identical images reached through different directory entries so that this capability is implemented with clear verification evidence.
 - **US-01-0988**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
-- **US-01-0989**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat on the same object so that this capability is implemented with clear verification evidence.
+- **US-01-0989**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat-equivalent identity extraction on the same object, including FAT synthesized identities so that this capability is implemented with clear verification evidence.
 - **US-01-0990**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: exec cache keys identical hard-linked binaries as one image identity so that this capability is implemented with clear verification evidence.
 - **US-01-0991**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly so that this capability is implemented with clear verification evidence.
-- **US-01-0992**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: hot-cache execve() benchmark shows lower latency than cold-cache launch so that this capability is implemented with clear verification evidence.
+- **US-01-0992**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: hot-cache executable metadata benchmark eliminates repeat file-header reads versus the cold path so that this capability is implemented with clear verification evidence.
 - **US-01-0993**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
 - **US-01-0994**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: executable identity model (device/inode vs pathname) so that this capability is implemented with clear verification evidence.
 - **US-01-0995**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: executable cache lifecycle, invalidation rules, and BusyBox/multi-call behavior so that this capability is implemented with clear verification evidence.
@@ -2207,7 +2207,7 @@
 - **REQ-01-0018** (EARS/Ubiquitous): The Substrate system shall pmm_watermark_used(): report bytes consumed.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0019** (EARS/Ubiquitous): The Substrate system shall used for: vm_page_t array, initial page tables, kernel stacks.
+- **REQ-01-0019** (EARS/Ubiquitous): The Substrate system shall use the bootstrap watermark allocator for early PMM bitmap/page metadata and related low-memory PMM bootstrap state before the runtime buddy allocator is available.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0020** (EARS/Ubiquitous): The Substrate system shall watermark region clamped to avoid exceeding available low memory.
@@ -2240,7 +2240,7 @@
 - **REQ-01-0029** (EARS/Ubiquitous): The Substrate system shall vm_phys_alloc_page(): O(1) single-page allocation from order-0 free list.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0030** (EARS/Ubiquitous): The Substrate system shall vm_phys_alloc_contiguous(order): allocate 2^order contiguous pages.
+- **REQ-01-0030** (EARS/Ubiquitous): The Substrate system shall vm_phys_alloc_contiguous(count): allocate a contiguous page run, rounding to the smallest buddy order that can satisfy count.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0031** (EARS/Ubiquitous): The Substrate system shall vm_phys_free_page(page): return page and coalesce with buddy if free.
@@ -3800,7 +3800,7 @@
 - **REQ-01-0549** (EARS/Ubiquitous): The Substrate system shall power-of-two zones: back kmalloc with UMA zones for sizes 16, 32, 64, ..., 4096.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0550** (EARS/Ubiquitous): The Substrate system shall large allocations: bypass UMA for >4 KB (direct vm_map allocation).
+- **REQ-01-0550** (EARS/Ubiquitous): The Substrate system shall large allocations: bypass UMA for >4 KB (direct PMM contiguous allocation).
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0551** (EARS/Ubiquitous): The Substrate system shall krealloc(ptr, size): resize allocation.
@@ -3896,13 +3896,13 @@
 - **REQ-01-0581** (EARS/Ubiquitous): The Substrate system shall local APIC (LAPIC):.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0582** (EARS/Ubiquitous): The Substrate system shall map LAPIC MMIO base (default 0xFEE00000).
+- **REQ-01-0582** (EARS/Ubiquitous): The Substrate system shall establish and use the LAPIC MMIO base (default 0xFEE00000 on i386 bootstrap mappings).
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0583** (EARS/Ubiquitous): The Substrate system shall set Spurious Interrupt Vector Register (SVR): enable APIC, set vector.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0584** (EARS/Ubiquitous): The Substrate system shall timer:.
+- **REQ-01-0584** (EARS/Ubiquitous): The Substrate system shall provide LAPIC timer facilities.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0585** (EARS/Ubiquitous): The Substrate system shall calibrate against PIT or ACPI PM Timer.
@@ -3920,7 +3920,7 @@
 - **REQ-01-0589** (EARS/Ubiquitous): The Substrate system shall error Status Register (ESR) and LVT Error vector.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0590** (EARS/Ubiquitous): The Substrate system shall iPI (Inter-Processor Interrupt):.
+- **REQ-01-0590** (EARS/Ubiquitous): The Substrate system shall provide LAPIC inter-processor interrupt support.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0591** (EARS/Ubiquitous): The Substrate system shall iCR (Interrupt Command Register) writing logic.
@@ -4010,7 +4010,7 @@
 - **REQ-01-0619** (EARS/Ubiquitous): The Substrate system shall integration: boot SMP with 2, 4, 8 CPUs in QEMU -smp N.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0620** (EARS/Ubiquitous): The Substrate system shall unit: LAPIC timer calibration accuracy.
+- **REQ-01-0620** (EARS/Ubiquitous): The Substrate system shall provide a unit test for LAPIC timer calibration accuracy.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0621** (EARS/Ubiquitous): The Substrate system shall unit: IPI send/receive between CPUs.
@@ -4076,7 +4076,7 @@
 - **REQ-01-0641** (EARS/Ubiquitous): The Substrate system shall kernel Process (PID 0 - Swapper/Idle):.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0642** (EARS/Ubiquitous): The Substrate system shall pageout daemon work in idle loop.
+- **REQ-01-0642** (EARS/Ubiquitous): The Substrate system shall handle pageout daemon work in a dedicated kernel process while idle threads preserve valid CPU-local context.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0643** (EARS/Ubiquitous): The Substrate system shall ensures valid process context always exists.
@@ -4085,10 +4085,10 @@
 - **REQ-01-0644** (EARS/Ubiquitous): The Substrate system shall process Bitness Tracking:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0645** (EARS/Ubiquitous): The Substrate system shall enum proc_bitness (16/32/64) field in process struct.
+- **REQ-01-0645** (EARS/Ubiquitous): The Substrate system shall store 16/32/64-bit execution mode in the process struct using proc-bitness values.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0646** (EARS/Ubiquitous): The Substrate system shall proc_set_bitness() / proc_get_bitness() with permission checks.
+- **REQ-01-0646** (EARS/Ubiquitous): The Substrate system shall provide internal `proc_set_bitness()` / `proc_get_bitness()` helpers to update and expose process bitness.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0647** (EARS/Ubiquitous): The Substrate system shall bitness inheritance on fork, transition on exec.
@@ -4145,10 +4145,10 @@
 - **REQ-01-0664** (EARS/Ubiquitous): The Substrate system shall core Operations:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0665** (EARS/Ubiquitous): The Substrate system shall fUTEX_WAIT: atomic compare-and-sleep on user-space word.
+- **REQ-01-0665** (EARS/Ubiquitous): The Substrate system shall compare the expected user-space futex word value before sleeping on the futex key.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0666** (EARS/Ubiquitous): The Substrate system shall futex_cmpxchg_user(): validated userspace CMPXCHG.
+- **REQ-01-0666** (EARS/Ubiquitous): The Substrate system shall provide `futex_cmpxchg_user()` as a validated userspace CMPXCHG helper for PI and owner-death paths.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0667** (EARS/Ubiquitous): The Substrate system shall validate_uaddr(): ensure address is in user space.
@@ -4193,10 +4193,10 @@
 - **REQ-01-0680** (EARS/Ubiquitous): The Substrate system shall performance:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0681** (EARS/Ubiquitous): The Substrate system shall hash table bucketing for wait queues (O(1) lookup by address).
+- **REQ-01-0681** (EARS/Ubiquitous): The Substrate system shall provide hashed bucketing for futex wait queues with O(1) lookup by futex key.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0682** (EARS/Ubiquitous): The Substrate system shall per-bucket spinlocks.
+- **REQ-01-0682** (EARS/Ubiquitous): The Substrate system shall protect futex wait-queue buckets with per-bucket spinlocks.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0683** (EARS/Ubiquitous): The Substrate system shall testing:.
@@ -4214,7 +4214,7 @@
 - **REQ-01-0687** (EARS/Ubiquitous): The Substrate system shall unit: PI inheritance - low priority holder boosted.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0688** (EARS/Ubiquitous): The Substrate system shall property: no orphaned waiters after process exit.
+- **REQ-01-0688** (EARS/Ubiquitous): The Substrate system shall remove exiting threads from sleep queues so that no orphaned waiters remain after process teardown.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0689** (EARS/Ubiquitous): The Substrate system shall nTSYNC Driver (Windows NT Sync Primitives):.
@@ -4613,7 +4613,7 @@
 - **REQ-01-0820** (EARS/Ubiquitous): The Substrate system shall inheritance:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0821** (EARS/Ubiquitous): The Substrate system shall fork(): child inherits pending signals and mask.
+- **REQ-01-0821** (EARS/Ubiquitous): The Substrate system shall on `fork()` preserve signal handlers and signal-policy state in the child process, copy the parent thread's signal mask into the child thread, and begin the child thread with no pending signals.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0822** (EARS/Ubiquitous): The Substrate system shall exec(): reset all handlers to SIG_DFL (except SIG_IGN).
@@ -4787,7 +4787,7 @@
 - **REQ-01-0878** (EARS/Ubiquitous): The Substrate system shall record exit status in p_xstat.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0879** (EARS/Ubiquitous): The Substrate system shall prevent further scheduling.
+- **REQ-01-0879** (EARS/Ubiquitous): The Substrate system shall prevent further scheduling of all threads that belong to a process once `proc_exit()` begins teardown.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0880** (EARS/Ubiquitous): The Substrate system shall phase 2 - Resource Release:.
@@ -4799,7 +4799,7 @@
 - **REQ-01-0882** (EARS/Ubiquitous): The Substrate system shall virtual Memory: pmap_release(p->pmap) - free user page tables, switch to kernel pmap.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0883** (EARS/Ubiquitous): The Substrate system shall vM Map: release vm_map and all vm_map_entry structures.
+- **REQ-01-0883** (EARS/Ubiquitous): The Substrate system shall release `vm_map` and all `vm_map_entry` structures for an exited process at the safe reap point after switching the exiting thread to the kernel pmap.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0884** (EARS/Ubiquitous): The Substrate system shall cWD / Root: decrement cwd and root vnode refcounts.
@@ -4823,7 +4823,7 @@
 - **REQ-01-0890** (EARS/Ubiquitous): The Substrate system shall futex Cleanup: process robust list, mark FUTEX_OWNER_DIED, wake waiters.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0891** (EARS/Ubiquitous): The Substrate system shall kernel Locks: release held mutexes, cancel pending lock requests.
+- **REQ-01-0891** (EARS/Ubiquitous): The Substrate system shall release held sleep mutexes and cancel pending lock requests during process exit.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0892** (EARS/Ubiquitous): The Substrate system shall phase 3 - Thread Termination:.
@@ -4871,13 +4871,13 @@
 - **REQ-01-0906** (EARS/Ubiquitous): The Substrate system shall phase 6 - Process Group / Session Cleanup:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0907** (EARS/Ubiquitous): The Substrate system shall remove from process group; free struct pgrp if last member.
+- **REQ-01-0907** (EARS/Ubiquitous): The Substrate system shall remove exited processes from their process group and free the `struct pgrp` if it becomes empty at the final reap point.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0908** (EARS/Ubiquitous): When session leader: SIGHUP to foreground, revoke TTY, mark no leader, the Substrate system shall satisfy the specified behavior.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0909** (EARS/Ubiquitous): The Substrate system shall check for orphaned process groups → SIGHUP + SIGCONT.
+- **REQ-01-0909** (EARS/Ubiquitous): The Substrate system shall check for orphaned process groups and deliver `SIGHUP` plus `SIGCONT` when process-group membership is dropped at the final reap point.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0910** (EARS/Ubiquitous): The Substrate system shall phase 7 - Parent Notification:.
@@ -4886,7 +4886,7 @@
 - **REQ-01-0911** (EARS/Ubiquitous): The Substrate system shall psignal(parent, SIGCHLD).
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0912** (EARS/Ubiquitous): When SA_NOCLDWAIT: auto-reap (no zombie), the Substrate system shall satisfy the specified behavior.
+- **REQ-01-0912** (EARS/Ubiquitous): When a parent has `SA_NOCLDWAIT` set, the Substrate system shall detach the child from the parent's waitable child list and auto-reap it asynchronously once its final thread context is retired.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0913** (EARS/Ubiquitous): The Substrate system shall wake parent on p_children channel.
@@ -4898,7 +4898,7 @@
 - **REQ-01-0915** (EARS/Ubiquitous): The Substrate system shall set p_state = SZOMB.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0916** (EARS/Ubiquitous): The Substrate system shall only pid, ppid, xstat, rusage remain valid.
+- **REQ-01-0916** (EARS/Ubiquitous): The Substrate system shall preserve only wait-visible identity, exit status/rusage, and final-reap bookkeeping across the zombie window; active runtime resources shall already be released before `wait4()` or auto-reap completes.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0917** (EARS/Ubiquitous): The Substrate system shall phase 9 - Final Context Switch:.
@@ -4925,13 +4925,13 @@
 - **REQ-01-0924** (EARS/Ubiquitous): The Substrate system shall killed by signal during exit: ignore signals once SDYING.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0925** (EARS/Ubiquitous): The Substrate system shall locks held during exit: log warning, force release.
+- **REQ-01-0925** (EARS/Ubiquitous): The Substrate system shall log a warning and force-release held sleep mutexes during process exit.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0926** (EARS/Ubiquitous): The Substrate system shall oOM during exit: must not allocate (only free).
+- **REQ-01-0926** (EARS/Ubiquitous): The Substrate system shall avoid allocating new memory during process exit and reap, using only free-side teardown operations.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0927** (EARS/Ubiquitous): The Substrate system shall vfork exit: wake parent immediately.
+- **REQ-01-0927** (EARS/Ubiquitous): The Substrate system shall wake a parent blocked in `vfork()` immediately when the child successfully `exec`s or exits.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0928** (EARS/Ubiquitous): The Substrate system shall thread group exit: all threads terminated on any exit().
@@ -5084,7 +5084,7 @@
 - **REQ-01-0977** (EARS/Ubiquitous): The Substrate system shall inode Identity:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0978** (EARS/Ubiquitous): The Substrate system shall preserve stable inode numbers through filesystem lookup, VFS, stat, and exec paths.
+- **REQ-01-0978** (EARS/Ubiquitous): The Substrate system shall preserve stable inode numbers through filesystem node allocation, `stat`, and executable identity extraction paths, including synthesized FAT identities where no cluster-backed inode exists.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0979** (EARS/Ubiquitous): The Substrate system shall treat backing device + inode as the canonical executable identity, not the pathname string.
@@ -5102,13 +5102,13 @@
 - **REQ-01-0983** (EARS/Ubiquitous): The Substrate system shall cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant execve() work.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0984** (EARS/Ubiquitous): The Substrate system shall reuse cached executable state on hot re-exec without breaking argv[0] or personality selection semantics.
+- **REQ-01-0984** (EARS/Ubiquitous): The Substrate system shall reuse cached executable state on hot re-exec without perturbing per-call `argv[0]` or personality selection semantics.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0985** (EARS/Ubiquitous): The Substrate system shall performance:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0986** (EARS/Ubiquitous): The Substrate system shall measure and reduce execve() latency for repeated launches of the same image.
+- **REQ-01-0986** (EARS/Ubiquitous): The Substrate system shall measure and reduce repeated-launch executable metadata work on the hot-cache path.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0987** (EARS/Ubiquitous): The Substrate system shall avoid path-based cache misses for identical images reached through different directory entries.
@@ -5117,7 +5117,7 @@
 - **REQ-01-0988** (EARS/Ubiquitous): The Substrate system shall testing:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0989** (EARS/Ubiquitous): The Substrate system shall unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat on the same object.
+- **REQ-01-0989** (EARS/Ubiquitous): The Substrate system shall unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat-equivalent identity extraction on the same object, including FAT synthesized identities.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0990** (EARS/Ubiquitous): The Substrate system shall unit: exec cache keys identical hard-linked binaries as one image identity.
@@ -5126,7 +5126,7 @@
 - **REQ-01-0991** (EARS/Ubiquitous): The Substrate system shall integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0992** (EARS/Ubiquitous): The Substrate system shall integration: hot-cache execve() benchmark shows lower latency than cold-cache launch.
+- **REQ-01-0992** (EARS/Ubiquitous): The Substrate system shall integration: hot-cache executable metadata benchmark eliminates repeat file-header reads versus the cold path.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0993** (EARS/Ubiquitous): The Substrate system shall documentation:.

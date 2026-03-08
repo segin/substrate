@@ -112,6 +112,7 @@ void cc_ssa_function_free(cc_ssa_function_t *f) {
     free(f->param_types);
     free(f->param_abi);
     free(f->value_types);
+    free(f->value_is_unsigned);
 
     for (i = 0; i < f->instr_count; ++i) {
         cc_ssa_instr_free(&f->instrs[i]);

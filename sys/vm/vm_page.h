@@ -154,9 +154,16 @@ typedef struct vm_page_thresholds {
     uint32_t inactive_target;
 } vm_page_thresholds_t;
 
+typedef enum vm_page_policy {
+    VM_PAGE_POLICY_CLOCK = 0,
+    VM_PAGE_POLICY_LRU_APPROX = 1
+} vm_page_policy_t;
+
 void vm_page_get_stats(vm_page_stats_t *stats);
 void vm_page_get_vmstat(vm_vmstat_t *stats);
 void vm_page_get_thresholds(vm_page_thresholds_t *thresholds);
+void vm_page_set_policy(vm_page_policy_t policy);
+vm_page_policy_t vm_page_get_policy(void);
 void vm_page_record_pagein(uint32_t count);
 int vm_page_estimate_working_set(void);   // Estimate working set size
 int vm_page_should_pageout(void);          // Hint for swapper/pageout daemon

@@ -235,6 +235,23 @@ void isr_handler(registers_t *regs) {
         }
         
         if (is_usermode) {
+            int sig = 0;
+            int code = 0;
+            uintptr_t addr = 0;
+
+            if (current_process &&
+                i386_trap_to_signal(regs, cr2, &sig, &code, &addr)) {
+                if (current_thread && current_thread->proc == current_process) {
+                    current_thread->trap_addr = addr;
+                }
+                trapsignal(current_process, sig, code);
+                if (current_thread && current_thread->proc == current_process) {
+                    current_thread->trap_addr = addr;
+                }
+                signal_handle_pending(regs);
+                return;
+            }
+
             // User-mode crash - kill the process
             kprint("Killing user process.\n\n");
             if (current_process && current_process->pid == 1) {

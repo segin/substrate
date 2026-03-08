@@ -11,6 +11,8 @@ SMP Discovery is the process by which the kernel identifies the number and ident
 - **Legacy MP Table Discovery:**
     1. Search for the MP Floating Pointer Structure ('_MP_').
     2. Parse the MP Configuration Table to identify processors.
+    3. Prefer EBDA and base-memory search windows during early bootstrap while low BIOS memory remains mapped.
+    4. Cache the validated MP Configuration Table physical address so later discovery passes can re-parse it after page 0 is unmapped.
 - **Priority:** ACPI is preferred over legacy MP tables if both are present.
 - **Result:** Populate a kernel-internal CPU map (`cpu_info` array).
 

@@ -13,6 +13,7 @@
 #include <kern/panic.h>
 #include <kern/console.h>
 #include <exec/perso/personality.h>
+#include <pm/pm.h>
 #include <vm/vm_kmem.h>
 #include <vm/uma.h>
 #include <include/sys/thr.h>
@@ -46,11 +47,6 @@
 #include <sys/utsname.h>
 #include <sys/time.h>
 #include <kern/time.h>
-
-extern thread_t *current_thread; 
-extern process_t *current_process;
-extern process_t processes[64];
-extern thread_t threads[MAX_THREADS];
 
 // File structure allocator
 static uma_zone_t *file_zone = NULL;
@@ -261,7 +257,7 @@ int sys_open(const char *path, int flags, int mode) {
 
 int kern_open(const char *path, int flags, int mode) {
     (void)mode;
-    if (!path) return -1;
+    if (!path) return -EFAULT;
     
     // Find free FD using hint
     int fd = proc_alloc_fd(current_process);
@@ -280,20 +276,20 @@ int kern_open(const char *path, int flags, int mode) {
 
     if (!node) {
         proc_clear_fd(current_process, fd);
-        return -1;
+        return -ENOENT;
     }
 
     file_t *f = file_alloc();
     if (!f) {
         proc_clear_fd(current_process, fd);
-        return -1;
+        return -ENOMEM;
     }
 
     fs_node_t *open_node = vfs_prepare_open_node(node, &f);
     if (!open_node) {
         file_free(f);
         proc_clear_fd(current_process, fd);
-        return -1;
+        return -ENOMEM;
     }
 
     f->f_data = open_node;
@@ -787,10 +783,10 @@ int sys_stat(const char *path, struct stat *buf) {
 }
 
 int kern_stat(const char *path, struct stat *buf) {
-    if (!path || !buf) return -1;
+    if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *node = vfs_lookup(root, path);
-    if (!node) return -1;
+    if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
     return 0;
@@ -808,10 +804,10 @@ int sys_lstat(const char *path, struct stat *buf) {
 }
 
 int kern_lstat(const char *path, struct stat *buf) {
-    if (!path || !buf) return -1;
+    if (!path || !buf) return -EFAULT;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
     fs_node_t *node = vfs_lookup_lstat(root, path);
-    if (!node) return -1;
+    if (!node) return -ENOENT;
     fill_stat(buf, node);
     close_fs(node);
     return 0;
@@ -1067,7 +1063,7 @@ int sys_access(const char *path, int mode) {
 }
 
 int kern_access(const char *path, int mode) {
-    if (!path) return -1;
+    if (!path) return -EFAULT;
 
     fs_node_t *node = 0;
     fs_node_t *root = current_process->root_node ? current_process->root_node : fs_root;
@@ -1079,7 +1075,7 @@ int kern_access(const char *path, int mode) {
         node = vfs_lookup(cwd, path);
     }
 
-    if (!node) return -1;
+    if (!node) return -ENOENT;
 
     // F_OK check
     if (mode == F_OK) return 0;
@@ -1263,6 +1259,9 @@ int sys_execve(const char *f, char *const a[], char *const e[]) {
 int kern_execve(const char *f, char *const a[], char *const e[]) {
     exec_pin_current_thread();
     int ret = exec_dispatch(f, a, e);
+    if (ret == 0) {
+        proc_vfork_done(current_process);
+    }
     exec_unpin_current_thread();
     return ret;
 }

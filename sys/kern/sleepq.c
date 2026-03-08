@@ -48,6 +48,13 @@ static inline int sleepq_hash_func(void *chan, int type, int pid) {
     return ((uintptr_t)chan >> 3) & SLEEPQ_HASH_MASK;
 }
 
+static inline int sleepq_current_private_pid(void) {
+    if (!current_process) {
+        return -1;
+    }
+    return current_process->pid;
+}
+
 // Lock a hash bucket
 static inline void sq_lock(int hash) {
     while (__sync_lock_test_and_set(&sleepq_locks[hash], 1)) {
@@ -89,6 +96,57 @@ static sleepq_t *sleepq_lookup(void *chan, int type, int pid, int hash) {
         sq = sq->sq_next;
     }
     return NULL;
+}
+
+static void sleepq_remove(sleepq_t *sq, int hash);
+
+static int sleepq_remove_thread_internal(thread_t *t, int type, int pid) {
+    void *chan;
+    int hash;
+    sleepq_t *sq;
+    thread_t *prev;
+
+    if (!t || !t->wait_chan) {
+        return 0;
+    }
+
+    chan = t->wait_chan;
+    hash = sleepq_hash_func(chan, type, pid);
+    sq_lock(hash);
+
+    sq = sleepq_lookup(chan, type, pid, hash);
+    if (!sq) {
+        sq_unlock(hash);
+        return 0;
+    }
+
+    prev = NULL;
+    thread_t *cur = sq->sq_head;
+    while (cur) {
+        if (cur == t) {
+            if (prev) {
+                prev->next = cur->next;
+            } else {
+                sq->sq_head = cur->next;
+            }
+            if (sq->sq_tail == cur) {
+                sq->sq_tail = prev;
+            }
+            sq->sq_count--;
+            cur->next = NULL;
+            cur->wait_chan = NULL;
+            if (sq->sq_count == 0) {
+                sleepq_remove(sq, hash);
+            }
+            sq_unlock(hash);
+            return 1;
+        }
+        prev = cur;
+        cur = cur->next;
+    }
+
+    sq_unlock(hash);
+    return 0;
 }
 
 // Insert sleep queue into hash table
@@ -163,8 +221,9 @@ void sleepq_add(void *chan, thread_t *t) {
 
 // Add a thread to private sleep queue
 void sleepq_add_private(void *chan, thread_t *t) {
-    if (!current_process) return;
-    sleepq_add_internal(chan, t, SLEEPQ_TYPE_PRIVATE, current_process->pid);
+    int pid = sleepq_current_private_pid();
+    if (pid < 0) return;
+    sleepq_add_internal(chan, t, SLEEPQ_TYPE_PRIVATE, pid);
 }
 
 // Wake thread(s) internal helper
@@ -205,7 +264,9 @@ thread_t *sleepq_wake_one(void *chan) {
 }
 
 thread_t *sleepq_wake_one_private(void *chan) {
-    return sleepq_wake_one_internal(chan, SLEEPQ_TYPE_PRIVATE, current_process->pid);
+    int pid = sleepq_current_private_pid();
+    if (pid < 0) return NULL;
+    return sleepq_wake_one_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
 }
 
 static int sleepq_wake_all_internal(void *chan, int type, int pid) {
@@ -244,7 +305,9 @@ int sleepq_wake_all(void *chan) {
 }
 
 int sleepq_wake_all_private(void *chan) {
-    return sleepq_wake_all_internal(chan, SLEEPQ_TYPE_PRIVATE, current_process->pid);
+    int pid = sleepq_current_private_pid();
+    if (pid < 0) return 0;
+    return sleepq_wake_all_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
 }
 
 static int sleepq_wake_n_internal(void *chan, int n, int type, int pid) {
@@ -289,8 +352,9 @@ int sleepq_wake_n(void *chan, int n) {
 }
 
 int sleepq_wake_n_private(void *chan, int n) {
-    if (!current_process) return 0;
-    return sleepq_wake_n_internal(chan, n, SLEEPQ_TYPE_PRIVATE, current_process->pid);
+    int pid = sleepq_current_private_pid();
+    if (pid < 0) return 0;
+    return sleepq_wake_n_internal(chan, n, SLEEPQ_TYPE_PRIVATE, pid);
 }
 
 static int sleepq_has_waiters_internal(void *chan, int type, int pid) {
@@ -312,8 +376,9 @@ int sleepq_has_waiters(void *chan) {
 }
 
 int sleepq_has_waiters_private(void *chan) {
-    if (!current_process) return 0;
-    return sleepq_has_waiters_internal(chan, SLEEPQ_TYPE_PRIVATE, current_process->pid);
+    int pid = sleepq_current_private_pid();
+    if (pid < 0) return 0;
+    return sleepq_has_waiters_internal(chan, SLEEPQ_TYPE_PRIVATE, pid);
 }
 
 static int sleepq_requeue_internal(void *src_chan, void *dst_chan, int wake_n, int requeue_n, int type, int pid) {
@@ -414,6 +479,26 @@ int sleepq_requeue(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
 }
 
 int sleepq_requeue_private(void *src_chan, void *dst_chan, int wake_n, int requeue_n) {
-    if (!current_process) return 0;
-    return sleepq_requeue_internal(src_chan, dst_chan, wake_n, requeue_n, SLEEPQ_TYPE_PRIVATE, current_process->pid);
+    int pid = sleepq_current_private_pid();
+    if (pid < 0) return 0;
+    return sleepq_requeue_internal(src_chan, dst_chan, wake_n, requeue_n, SLEEPQ_TYPE_PRIVATE, pid);
+}
+
+int sleepq_remove_thread(thread_t *t) {
+    int pid;
+
+    if (!t || !t->wait_chan) {
+        return 0;
+    }
+
+    if (sleepq_remove_thread_internal(t, SLEEPQ_TYPE_SHARED, 0)) {
+        return 1;
+    }
+
+    pid = (t->proc) ? t->proc->pid : -1;
+    if (pid < 0) {
+        return 0;
+    }
+
+    return sleepq_remove_thread_internal(t, SLEEPQ_TYPE_PRIVATE, pid);
 }

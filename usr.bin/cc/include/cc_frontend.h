@@ -363,6 +363,7 @@ struct cc_stmt {
     int is_synthetic_block;
     char *decl_name;
     char *label_name;
+    cc_expr_t *array_bound_expr;
     cc_expr_t *expr;
     cc_stmt_t *init_stmt;
     cc_expr_t *init_expr;
@@ -418,6 +419,7 @@ typedef struct {
     int depth;
     cc_struct_member_t *members;
     size_t member_count;
+    size_t member_cap;
     long size;
     long align;
     int attr_flags;

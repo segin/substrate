@@ -9,6 +9,8 @@
 #include <stddef.h>
 #include <string.h>
 #include <arch/i386/pmap.h>
+#include <arch/i386/intr.h>
+#include <vm/vm_map.h>
 #include <exec/perso/personality.h>
 
 process_t processes[MAX_PROCS];
@@ -34,9 +36,21 @@ extern uint32_t get_time(void);
 extern fs_node_t *fs_root;
 extern struct personality personality_native;
 
+static void proc_idle_wait(void) {
+#ifdef HOST_TEST
+    extern void host_wait_for_interrupt(void);
+    host_wait_for_interrupt();
+#else
+    wait_for_interrupt();
+#endif
+}
+
 /* Forward declarations */
 void proc_add_child(process_t *parent, process_t *child);
 void proc_remove_child(process_t *parent, process_t *child);
+static int proc_threads_all_zombie(process_t *proc, thread_t *skip_thread);
+static void proc_release_zombie_resources(process_t *proc);
+static int proc_fork_common(process_t *parent, void *stack, int is_vfork);
 
 void pm_init(void) {
     next_pid = 1;
@@ -90,8 +104,10 @@ process_t *proc_create(int perso_id) {
         return NULL;
     }
     
-    processes[i].pid = next_pid++;
+    int pid = next_pid++;
     spinlock_release(&pid_lock);
+    memset(&processes[i], 0, sizeof(processes[i]));
+    processes[i].pid = pid;
     processes[i].ppid = current_process ? current_process->pid : 0;
     processes[i].perso_id = perso_id;
     processes[i].root_node = current_process ? current_process->root_node : fs_root;
@@ -117,7 +133,7 @@ process_t *proc_create(int perso_id) {
     return &processes[i];
 }
 
-int proc_fork(process_t *parent, void *stack) {
+static int proc_fork_common(process_t *parent, void *stack, int is_vfork) {
     process_t *child_proc = proc_create(parent->perso_id);
     if (!child_proc) return -1;
     
@@ -143,6 +159,7 @@ int proc_fork(process_t *parent, void *stack) {
     // Copy parent resources (FDs)
     child_proc->tty = parent->tty;
     child_proc->bitness = parent->bitness;
+    child_proc->vfork_waiter = is_vfork ? current_thread : NULL;
 
     child_proc->fd_bitmap = parent->fd_bitmap;
     for(int j=0; j<MAX_FD; j++) {
@@ -203,6 +220,14 @@ int proc_fork(process_t *parent, void *stack) {
     return sched_fork_thread(child_proc, stack);
 }
 
+int proc_fork(process_t *parent, void *stack) {
+    return proc_fork_common(parent, stack, 0);
+}
+
+int proc_vfork(process_t *parent, void *stack) {
+    return proc_fork_common(parent, stack, 1);
+}
+
 void proc_add_child(process_t *parent, process_t *child) {
     mutex_lock(&proctree_lock);
     child->p_parent = parent;
@@ -231,6 +256,24 @@ int sched_fork_process(process_t *parent, void *stack) {
     return proc_fork(parent, stack);
 }
 
+int proc_begin_vfork(process_t *child) {
+    if (!child || child->vfork_waiter != current_thread) {
+        return 0;
+    }
+
+    sched_sleep(child);
+    return 0;
+}
+
+void proc_vfork_done(process_t *child) {
+    if (!child || !child->vfork_waiter) {
+        return;
+    }
+
+    child->vfork_waiter = NULL;
+    sched_wakeup(child);
+}
+
 int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     extern void *pmm_alloc_block(void);
     extern thread_t *sched_create_thread(process_t *proc, void (*entry_point)(void*), void *stack, void *arg);
@@ -252,8 +295,18 @@ int sched_spawn_kernel_process(void (*entry)(void*), void *arg) {
     
     // 4. Create Thread
     thread_t *t = sched_create_thread(child, entry, stack_top, arg);
-    
-    return t ? t->tid : -1;
+    if (!t) {
+        extern void pmm_free_block(void *p);
+        pmm_free_block(stack);
+        return -1;
+    }
+
+    t->kstack_base = (uintptr_t)stack;
+    t->kstack_units = 1;
+    t->kstack_type = THREAD_KSTACK_PMM_BLOCK;
+    t->kstack_owned = 1;
+
+    return t->tid;
 }
 
 // Close all FDs for a process
@@ -365,11 +418,74 @@ void proc_reparent_children(process_t *p) {
     sched_wakeup(&init->p_children);
 }
 
+static int proc_threads_all_zombie(process_t *proc, thread_t *skip_thread) {
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == -1 || threads[i].proc != proc || &threads[i] == skip_thread) {
+            continue;
+        }
+        if (threads[i].state != THREAD_ZOMBIE) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void proc_release_zombie_resources(process_t *proc) {
+    if (!proc) {
+        return;
+    }
+
+    if (proc->vm_map) {
+        vm_map_destroy(proc->vm_map);
+        proc->vm_map = NULL;
+    } else if (proc->pmap && proc->pmap != pmap_kernel()) {
+        pmap_release(proc->pmap);
+    }
+
+    if (proc->p_pgrp) {
+        extern void pgrp_remove_proc(struct process *proc);
+        pgrp_remove_proc(proc);
+    }
+
+    proc->pmap = pmap_kernel();
+}
+
+void proc_reap_autoreap_zombies(void) {
+    for (int i = 0; i < MAX_PROCS; i++) {
+        process_t *proc = &processes[i];
+
+        if (proc->pid <= 0 || proc->state != SZOMB || !(proc->p_flag & P_AUTOREAP)) {
+            continue;
+        }
+        if (current_thread && current_thread->proc == proc) {
+            continue;
+        }
+        if (!proc_threads_all_zombie(proc, NULL)) {
+            continue;
+        }
+
+        proc_release_zombie_resources(proc);
+        sched_reap_process_threads(proc);
+
+        proc->pid = -1;
+        proc->ppid = 0;
+        proc->state = 0;
+        proc->p_flag = 0;
+        proc->p_parent = NULL;
+        proc->p_children = NULL;
+        proc->p_sibling = NULL;
+    }
+}
+
 void proc_exit(int code) {
     if (current_process->pid == 1) {
         kprint("Warning: Init process exited. System Halted (idle).\n");
-        while(1) { __asm__ volatile("hlt"); }
+        for (;;) {
+            proc_idle_wait();
+        }
     }
+
+    proc_vfork_done(current_process);
     
     // 1. Set State
     current_process->state = SDYING;
@@ -377,10 +493,19 @@ void proc_exit(int code) {
     
     // 1b. Thread Cleanup (Robust Futexes & Pending Signals)
     extern void futex_thread_exit(thread_t *t);
+    extern int mutex_release_owned_by_thread(thread_t *owner);
+    extern void kprint(const char *msg);
     for (int i = 0; i < MAX_THREADS; i++) {
         if (threads[i].tid != -1 && threads[i].proc == current_process) {
             /* Cleanup robust futexes for this thread */
             futex_thread_exit(&threads[i]);
+
+            if (mutex_release_owned_by_thread(&threads[i]) > 0) {
+                kprint("proc_exit: force-releasing mutexes held by exiting thread.\n");
+            }
+
+            /* Remove sleepers from sleep queues before they become zombies. */
+            sleepq_remove_thread(&threads[i]);
             
             /* Clear pending signals - process is dying */
             threads[i].sig_pending = 0;
@@ -411,19 +536,9 @@ void proc_exit(int code) {
         current_process->root_node = NULL;
     }
 
-    if (current_process->vm_map) {
-        extern void vm_map_destroy(struct vm_map *map);
-        // vm_map_destroy(current_process->vm_map);
-        current_process->vm_map = NULL;
-    }
-    
     if (current_process->pmap && current_process->pmap != pmap_kernel()) {
-        pmap_release(current_process->pmap);
-        current_process->pmap = pmap_kernel(); // Switch to kernel map safe fallback?
-        // Actually cr3 switch happens on context switch.
-        // We shouldn't free pmap if we are running on it?
-        // Traditionally, we switch to swapper's pmap or kernel pmap before freeing.
-        // But for now, just decrement ref.
+        pmap_activate(pmap_kernel());
+        current_process->pmap = pmap_kernel();
     }
     
     // 3. Reparent Children
@@ -440,10 +555,6 @@ void proc_exit(int code) {
     
     // 6. Phase 2: POSIX IPC (Placeholders)
     // Unlink any POSIX semaphores/shared memory owned
-    
-    // 7. Phase 2: Locks Held
-    // Release any kernel mutexes held by threads (tracked in thread_t later)
-    // Cancel pending lock requests
     
     // 8. Phase 3: Thread Termination
     // Current thread becomes the "reaper thread"
@@ -476,6 +587,7 @@ void proc_exit(int code) {
         }
         
         if (is_session_leader) {
+            current_process->p_pgrp->pg_session->s_leader = NULL;
             tty_hangup(current_process->tty);
         }
         
@@ -503,14 +615,9 @@ void proc_exit(int code) {
              extern void psignal(process_t *p, int sig);
              psignal(current_process->p_parent, SIGCHLD);
              
-             // Reparent to Init for automatic reaping
-             process_t *init = &processes[1]; // PID 1
-             if (init != current_process) { // Don't reparent init to itself
-                 proc_remove_child(current_process->p_parent, current_process);
-                 proc_add_child(init, current_process);
-             }
-             // If anyone is waiting on PID 1's child list, wake them.
-             sched_wakeup(&init->p_children);
+             current_process->p_flag |= P_AUTOREAP;
+             proc_remove_child(current_process->p_parent, current_process);
+             current_process->p_parent = NULL;
         } else {
              extern void psignal(process_t *p, int sig);
              psignal(current_process->p_parent, SIGCHLD);

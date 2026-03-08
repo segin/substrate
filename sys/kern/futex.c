@@ -659,26 +659,6 @@ static void pi_boost_owner(pi_state_t *ps) {
 }
 
 /*
- * Restore owner's original priority
- */
-static void pi_deboost_owner(pi_state_t *ps) {
-    if (!ps->owner) return;
-    if (ps->boosted_prio == 0) return;
-    
-    /* Check if still need boost from remaining waiters */
-    int top_prio = pi_top_waiter_prio(ps);
-    if (top_prio > 0 && top_prio > ps->owner_prio) {
-        /* Still need some boost */
-        ps->boosted_prio = top_prio;
-        sched_set_priority(ps->owner->tid, ps->owner->sched_class, top_prio);
-    } else {
-        /* Restore original */
-        sched_set_priority(ps->owner->tid, ps->owner->sched_class, ps->owner_prio);
-        ps->boosted_prio = 0;
-    }
-}
-
-/*
  * Priority Inheritance futex lock
  *
  * 1. Try atomic acquire (CAS 0 -> TID)
@@ -878,9 +858,16 @@ int futex_unlock_pi(int *uaddr, int private) {
     
     pi_state_t *ps = pi_lookup(key, private, pid);
     
-    /* Deboost before releasing */
+    /*
+     * Once the owner drops the PI futex, any inherited priority for that
+     * ownership instance must be removed immediately. Remaining waiters will
+     * be considered against the next owner after wakeup/acquisition.
+     */
     if (ps) {
-        pi_deboost_owner(ps);
+        if (ps->boosted_prio != 0) {
+            sched_set_priority(ps->owner->tid, ps->owner->sched_class, ps->owner_prio);
+            ps->boosted_prio = 0;
+        }
         ps->owner = NULL;
     }
     

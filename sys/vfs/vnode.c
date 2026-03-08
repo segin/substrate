@@ -341,9 +341,8 @@ int vn_lock(struct vnode *vp, int flags)
     if (flags & LK_SHARED) {
         /* Try to acquire shared lock */
         while (1) {
-            /* If locked exclusively or someone wants exclusive (and we are not owner), wait */
-            if ((vp->v_flag & VXLOCK) || (vp->v_flag & VXWANT)) {
-                if ((vp->v_flag & VXLOCK) && (vp->v_lockowner == current_thread)) {
+            if (vp->v_flag & VXLOCK) {
+                if (vp->v_lockowner == current_thread) {
                     /* Recursive lock by exclusive owner -> downgrade or error?
                      * For now, error/no-op recursive logic.
                      * BSD allows recursive shared.
@@ -352,17 +351,14 @@ int vn_lock(struct vnode *vp, int flags)
                     spinlock_release(&vp->v_interlock);
                     return -EDEADLK;
                 }
-                /* Not owner, wait for exclusive lock or waiting writers (writer preference) */
-            } else {
+                /* Not owner, wait for exclusive lock (writer preference) */
+            } else if (vp->v_flag & VXWANT) {
                 /* Not exclusively locked.
-                 * If there are writers waiting (VXWANT), we might want to wait (writer preference)
-                 * OR we can just grab it if we are implementing reader preference or weak writer preference.
-                 * Let's stick to simple logic: Block only if VXLOCK is held.
-                 * TODO: Check VXWANT to prevent writer starvation.
+                 * Wait if there are writers waiting (VXWANT) to prevent writer starvation.
                  */
-                 if (!((vp->v_flag & VXWANT) && vp->v_lockstate > 0)) {
-                     break;
-                 }
+            } else {
+                /* Neither locked exclusively nor any waiting writers */
+                break;
             }
 
             if (flags & LK_NOWAIT) {

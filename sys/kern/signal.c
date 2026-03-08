@@ -4,6 +4,7 @@
 #include <sys/session.h>
 #include <sys/errno.h>
 #include <kern/sched.h>
+#include <kern/sleepq.h>
 #include <arch/i386/idt.h>
 #include <kern/console.h>
 #include <kern/panic.h>
@@ -15,6 +16,70 @@
 #include <sys/kern_syscalls.h>
 
 extern thread_t threads[MAX_THREADS];
+
+int coredump(process_t *p);
+
+#ifndef HOST_TEST_EXTERNAL_COREDUMP
+__attribute__((weak)) int coredump(process_t *p) {
+    (void)p;
+    return -1;
+}
+#endif
+
+static void signal_interrupt_thread(thread_t *t) {
+    if (!t) {
+        return;
+    }
+
+    sleepq_remove_thread(t);
+    t->sleep_status = -EINTR;
+    t->wait_chan = NULL;
+    t->state = THREAD_READY;
+}
+
+static void signal_stop_process_threads(process_t *p, const char *reason) {
+    if (!p) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == -1 || threads[i].proc != p) {
+            continue;
+        }
+        threads[i].state = THREAD_STOPPED;
+        threads[i].wait_reason = reason;
+    }
+    p->state = SSTOP;
+}
+
+static void signal_resume_process_threads(process_t *p) {
+    if (!p) {
+        return;
+    }
+
+    for (int i = 0; i < MAX_THREADS; i++) {
+        if (threads[i].tid == -1 || threads[i].proc != p) {
+            continue;
+        }
+        if (threads[i].state == THREAD_STOPPED) {
+            threads[i].state = THREAD_READY;
+            threads[i].wait_reason = NULL;
+        }
+    }
+    if (p->state == SSTOP) {
+        p->state = SRUN;
+    }
+}
+
+static void signal_clear_trap_context(thread_t *t, int sig) {
+    if (!t || t->trap_signo != sig) {
+        return;
+    }
+
+    t->trap_signo = 0;
+    t->trap_code = 0;
+    t->trap_addr = 0;
+}
 
 // Signal System Calls
 int kern_sigaction(int sig, const struct sigaction *act, struct sigaction *oact) {
@@ -84,7 +149,7 @@ int sys_sigprocmask(int how, const void *set, void *oset) {
 }
 
 int kern_sigpending(uint32_t *set) {
-    if (set) *set = current_thread->sig_pending & current_thread->sig_mask;
+    if (set) *set = current_thread->sig_pending & ~current_thread->sig_mask;
     return 0;
 }
 
@@ -100,9 +165,7 @@ int sys_sigpending(void *set) {
 int kern_sigsuspend(const uint32_t *mask) {
     uint32_t old_mask = current_thread->sig_mask;
     if (mask) {
-        uint32_t kmask;
-        if (copyin(mask, &kmask, sizeof(uint32_t)) != 0) return -14;
-        current_thread->sig_mask = kmask;
+        current_thread->sig_mask = *mask;
     }
     
     // Sleep until a signal arrives
@@ -115,15 +178,25 @@ int kern_sigsuspend(const uint32_t *mask) {
 }
 
 int kern_sigaltstack(const stack_t *ss, stack_t *oss) {
-    if (oss) *oss = current_thread->sig_alt_stack;
+    if (oss) {
+        *oss = current_thread->sig_alt_stack;
+        if (current_thread->sig_on_stack) {
+            oss->ss_flags |= SS_ONSTACK;
+        } else {
+            oss->ss_flags &= ~SS_ONSTACK;
+        }
+    }
     
     if (ss) {
-        if (current_thread->sig_alt_stack.ss_flags & SS_ONSTACK) return -1; // EPERM/EINVAL
+        if (current_thread->sig_on_stack) return -1; // EPERM/EINVAL
         if (ss->ss_flags & SS_DISABLE) {
+             current_thread->sig_alt_stack.ss_sp = NULL;
+             current_thread->sig_alt_stack.ss_size = 0;
              current_thread->sig_alt_stack.ss_flags = SS_DISABLE;
         } else {
              if (ss->ss_size < MINSIGSTKSZ) return -1; // ENOMEM/EINVAL
              current_thread->sig_alt_stack = *ss;
+             current_thread->sig_alt_stack.ss_flags &= ~(SS_DISABLE | SS_ONSTACK);
         }
     }
     return 0;
@@ -365,14 +438,11 @@ void psignal(process_t *p, int sig) {
         for (int i = 0; i < MAX_THREADS; i++) {
             if (threads[i].tid != -1 && threads[i].proc == p) {
                 threads[i].sig_pending &= ~stop_mask;
-                if (threads[i].state == THREAD_STOPPED) {
-                    threads[i].state = THREAD_READY;
-                }
             }
         }
 
         if (p->state == SSTOP) {
-            p->state = SRUN;
+            signal_resume_process_threads(p);
             p->p_flag |= P_CONTINUED;
             /* Notify parent if not SA_NOCLDSTOP */
             if (p->p_parent && 
@@ -424,7 +494,8 @@ void psignal(process_t *p, int sig) {
         if (unmasked) {
             if (t->state == THREAD_RUNNING || t->state == THREAD_READY) {
                 priority = 3;
-            } else if (t->state == THREAD_BLOCKED) {
+            } else if (t->state == THREAD_BLOCKED &&
+                       (t->flags & THREAD_F_INTERRUPTIBLE)) {
                 priority = 2;
             } else {
                 priority = 1;
@@ -437,15 +508,17 @@ void psignal(process_t *p, int sig) {
         }
         
         /* Wake interruptibly-sleeping threads */
-        if (t->state == THREAD_BLOCKED && unmasked) {
-            sched_wakeup(&t->sig_pending);
+        if (t->state == THREAD_BLOCKED && unmasked &&
+            (t->flags & THREAD_F_INTERRUPTIBLE)) {
+            signal_interrupt_thread(t);
         }
     }
     
     /* If we found a best thread and it's blocked, wake it */
     if (best_thread && best_thread->state == THREAD_BLOCKED && 
-        best_priority > 0) {
-        sched_wakeup(&best_thread->sig_pending);
+        best_priority > 0 &&
+        (best_thread->flags & THREAD_F_INTERRUPTIBLE)) {
+        signal_interrupt_thread(best_thread);
     }
 }
 
@@ -488,6 +561,7 @@ void trapsignal(process_t *p, int sig, int code) {
         /* Store trap info in thread's pending siginfo for later delivery */
         current_thread->trap_signo = sig;
         current_thread->trap_code = code;
+        current_thread->trap_addr = 0;
         
         /* Set signal pending on this specific thread */
         current_thread->sig_pending |= sigmask(sig);
@@ -520,10 +594,7 @@ void sigexit(process_t *p, int sig) {
     int do_core = (sigprop[sig] & SA_CORE) != 0;
     
     if (do_core) {
-        /* Call coredump routine if available */
-        extern int coredump(process_t *p); // May not be implemented yet
-        // coredump(p); // Stub - uncomment when coredump is implemented
-        (void)do_core; // Suppress unused warning for now
+        coredump(p);
     }
     
     /* Set exit status to indicate signal termination:
@@ -541,6 +612,47 @@ void sigexit(process_t *p, int sig) {
     proc_exit(exit_status);
 }
 
+static int signal_can_send(process_t *caller, process_t *target) {
+    if (!target) {
+        return 0;
+    }
+    if (!caller) {
+        return 1;
+    }
+
+    if (caller->uid == 0 || caller->euid == 0) {
+        return 1;
+    }
+
+    return caller->uid == target->uid ||
+           caller->uid == target->euid ||
+           caller->euid == target->uid ||
+           caller->euid == target->euid;
+}
+
+static void signal_record_match(process_t *target, int *matched, int *permitted,
+                                int sig) {
+    if (!target || target->pid <= 0) {
+        return;
+    }
+
+    if (matched) {
+        (*matched)++;
+    }
+
+    if (!signal_can_send(current_process, target)) {
+        return;
+    }
+
+    if (permitted) {
+        (*permitted)++;
+    }
+
+    if (sig != 0) {
+        psignal(target, sig);
+    }
+}
+
 int sys_kill(int pid, int sig) {
     if (sig < 0 || sig > NSIG) return -EINVAL;
 
@@ -556,34 +668,58 @@ int sys_kill(int pid, int sig) {
         }
 
         if (!target) return -ESRCH;
-        if (sig == 0) return 0; // Existence check
-
-        // Permission check
-        if (current_process->uid != 0 && current_process->uid != target->uid) {
+        if (!signal_can_send(current_process, target)) {
             return -EPERM;
         }
 
-        psignal(target, sig);
+        if (sig != 0) {
+            psignal(target, sig);
+        }
         return 0;
     }
     else if (pid == 0) {
         // Send to current process group
         if (!current_process || !current_process->p_pgrp) return -ESRCH;
-        pgsignal(current_process->p_pgrp->pg_id, sig);
+        int permitted = 0;
+        int matched = 0;
+        process_t *member = current_process->p_pgrp->pg_members;
+        while (member) {
+            signal_record_match(member, &matched, &permitted, sig);
+            member = member->p_pgrp_link;
+        }
+        if (matched == 0) return -ESRCH;
+        if (permitted == 0) return -EPERM;
         return 0;
     }
     else if (pid == -1) {
         // Send to all processes (except Init)
+        int permitted = 0;
+        int matched = 0;
         for (int i = 0; i < MAX_PROCS; i++) {
             if (processes[i].pid > 1) {
-                 psignal(&processes[i], sig);
+                 signal_record_match(&processes[i], &matched, &permitted, sig);
             }
         }
+        if (matched == 0) return -ESRCH;
+        if (permitted == 0) return -EPERM;
         return 0;
     }
     else {
         // pid < -1: Send to process group -pid
-        pgsignal(-pid, sig);
+        extern struct pgrp *pgrp_find(int pgid);
+        struct pgrp *pgrp = pgrp_find(-pid);
+        int permitted = 0;
+        int matched = 0;
+
+        if (!pgrp) return -ESRCH;
+
+        process_t *member = pgrp->pg_members;
+        while (member) {
+            signal_record_match(member, &matched, &permitted, sig);
+            member = member->p_pgrp_link;
+        }
+        if (matched == 0) return -ESRCH;
+        if (permitted == 0) return -EPERM;
         return 0;
     }
 }
@@ -620,13 +756,7 @@ void signal_handle_pending(registers_t *regs) {
 
     // Special Handling: SIGKILL always terminates immediately
     if (sig == SIGKILL) {
-        // Wake all stopped threads before terminating (if any were stopped)
-        extern void psignal(process_t *p, int sig);
-        // Resending SIGCONT would wake them, but sigexit handles cleanup.
-        // POSIX requires SIGKILL to work on stopped processes.
-        if (current_process->state == SSTOP) {
-            current_process->state = SRUN;
-        }
+        signal_resume_process_threads(current_process);
         sigexit(current_process, SIGKILL);
         return; // Should not reach
     }
@@ -634,11 +764,13 @@ void signal_handle_pending(registers_t *regs) {
     struct sigaction *act = &current_process->sig_actions[sig - 1];
 
     if (act->sa_handler == SIG_IGN) {
+        signal_clear_trap_context(current_thread, sig);
         return;
     } else if (act->sa_handler == SIG_DFL) {
         // Default actions
         if (sig == SIGINT || sig == SIGTERM || sig == SIGSEGV || sig == SIGILL || sig == SIGFPE) {
             // Init Protection: PID 1 ignores fatal signals with default action
+            signal_clear_trap_context(current_thread, sig);
             if (current_process->pid == 1) return;
             sigexit(current_process, sig);
             return;
@@ -652,23 +784,20 @@ void signal_handle_pending(registers_t *regs) {
                  return;
              }
 
-             // Stop the thread and process
-             // kprint("Process stopped by signal\n");
-             current_thread->state = THREAD_STOPPED;
-             current_process->state = SSTOP;
-             current_thread->wait_reason = "Signal";
+             signal_stop_process_threads(current_process, "Signal");
              
              // Notify parent if not SA_NOCLDSTOP
              if (current_process->p_parent && 
                  !(current_process->p_parent->sig_actions[SIGCHLD-1].sa_flags & SA_NOCLDSTOP)) {
                  psignal(current_process->p_parent, SIGCHLD);
              }
-             
+             signal_clear_trap_context(current_thread, sig);
              sched_yield();
              return;
         }
         
         // Ignore others by default (like SIGCHLD, SIGCONT if not stopped)
+        signal_clear_trap_context(current_thread, sig);
         return;
     }
 
@@ -712,8 +841,8 @@ void signal_handle_pending(registers_t *regs) {
         extern void sendsig(sig_t handler, int sig, uint32_t mask, uint32_t flags, registers_t *regs);
         sendsig(handler, sig, old_mask, flags, regs);
     }
+    signal_clear_trap_context(current_thread, sig);
 
     // Set P_CONTINUED was already done in psignal for SIGCONT, 
     // but if we delivered it to a handler, the app is "officially" continued.
 }
-
