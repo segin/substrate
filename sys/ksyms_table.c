@@ -417,6 +417,7 @@ extern void isr7(void);
 extern void isr8(void);
 extern void isr9(void);
 extern void isr_handler(void);
+extern void jump_to_elks(void);
 extern void jump_to_userspace(void);
 extern void kasprintf(void);
 extern void kbd_push(void);
@@ -472,6 +473,7 @@ extern void kinit_task(void);
 extern void kmain(void);
 extern void kmalloc(void);
 extern void kmem_dev_init(void);
+extern void kmem_get_snapshot(void);
 extern void kmem_get_stats(void);
 extern void kmem_init(void);
 extern void kmem_test_init(void);
@@ -480,6 +482,7 @@ extern void kobject_init(void);
 extern void kobject_put(void);
 extern void kprint(void);
 extern void kprintf(void);
+extern void krealloc(void);
 extern void kset_init(void);
 extern void ksym_init(void);
 extern void ksym_lookup(void);
@@ -1189,12 +1192,18 @@ extern void test_tty_canonical(void);
 extern void test_tty_ixoff(void);
 extern void test_tty_termios(void);
 extern void test_uma_alloc_free(void);
+extern void test_uma_callback_ordering(void);
+extern void test_uma_capacity_accounting(void);
 extern void test_uma_ctor_dtor(void);
 extern void test_uma_dynamic_stress(void);
 extern void test_uma_large_objects(void);
+extern void test_uma_leak_tracking(void);
 extern void test_uma_limits(void);
 extern void test_uma_many_allocs(void);
+extern void test_uma_multi_zone_stress(void);
+extern void test_uma_percpu_cache_paths(void);
 extern void test_uma_redzone(void);
+extern void test_uma_slab_freelist_integrity(void);
 extern void test_uma_zero_fill(void);
 extern void test_vm_fault_cow(void);
 extern void test_vm_fault_simple(void);
@@ -1212,6 +1221,7 @@ extern void test_vm_object_pages(void);
 extern void test_vm_object_shadow(void);
 extern void test_vm_page_queue(void);
 extern void test_vm_pageout_launders_before_scanning_active(void);
+extern void test_vm_pageout_oom_kills_largest_user_process(void);
 extern void test_vm_pageout_prefers_inactive_then_active(void);
 extern void test_vm_pager_io(void);
 extern void test_vm_pager_lifecycle(void);
@@ -1284,6 +1294,7 @@ extern void uma_debug_fill_redzone(void);
 extern void uma_debug_poison_alloc_impl(void);
 extern void uma_debug_poison_free_impl(void);
 extern void uma_enable_dynamic_alloc(void);
+extern void uma_item_size(void);
 extern void uma_leak_report(void);
 extern void uma_reclaim(void);
 extern void uma_startup(void);
@@ -1372,6 +1383,7 @@ extern void vm_page_check_queues(void);
 extern void vm_page_deactivate(void);
 extern void vm_page_estimate_working_set(void);
 extern void vm_page_free(void);
+extern void vm_page_get_policy(void);
 extern void vm_page_get_stats(void);
 extern void vm_page_get_thresholds(void);
 extern void vm_page_get_vmstat(void);
@@ -1385,6 +1397,7 @@ extern void vm_page_mark_for_writeback(void);
 extern void vm_page_needs_writeback(void);
 extern void vm_page_record_pagein(void);
 extern void vm_page_remove(void);
+extern void vm_page_set_policy(void);
 extern void vm_page_should_pageout(void);
 extern void vm_page_try_to_free(void);
 extern void vm_page_unhold(void);
@@ -1408,6 +1421,7 @@ extern void vm_phys_free_contiguous(void);
 extern void vm_phys_free_page(void);
 extern void vm_phys_get_free(void);
 extern void vm_phys_get_order_free_count(void);
+extern void vm_phys_get_order_head_phys(void);
 extern void vm_phys_get_used(void);
 extern void vm_phys_mark_used(void);
 extern void vm_phys_paddr_to_page(void);
@@ -1548,6 +1562,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&isr47, "isr47" },
     { (uint32_t)(uintptr_t)&isr128, "isr128" },
     { (uint32_t)(uintptr_t)&jump_to_userspace, "jump_to_userspace" },
+    { (uint32_t)(uintptr_t)&jump_to_elks, "jump_to_elks" },
     { (uint32_t)(uintptr_t)&fork_child_return, "fork_child_return" },
     { (uint32_t)(uintptr_t)&pmm_record_boot_info, "pmm_record_boot_info" },
     { (uint32_t)(uintptr_t)&pmm_watermark_init, "pmm_watermark_init" },
@@ -2556,6 +2571,8 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&openbsd_sys_sigreturn, "openbsd_sys_sigreturn" },
     { (uint32_t)(uintptr_t)&vm_page_init, "vm_page_init" },
     { (uint32_t)(uintptr_t)&vm_page_check_queues, "vm_page_check_queues" },
+    { (uint32_t)(uintptr_t)&vm_page_set_policy, "vm_page_set_policy" },
+    { (uint32_t)(uintptr_t)&vm_page_get_policy, "vm_page_get_policy" },
     { (uint32_t)(uintptr_t)&vm_page_late_init, "vm_page_late_init" },
     { (uint32_t)(uintptr_t)&pv_insert, "pv_insert" },
     { (uint32_t)(uintptr_t)&pv_remove, "pv_remove" },
@@ -2614,7 +2631,9 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&kmalloc, "kmalloc" },
     { (uint32_t)(uintptr_t)&kfree, "kfree" },
     { (uint32_t)(uintptr_t)&kzalloc, "kzalloc" },
+    { (uint32_t)(uintptr_t)&krealloc, "krealloc" },
     { (uint32_t)(uintptr_t)&kmem_get_stats, "kmem_get_stats" },
+    { (uint32_t)(uintptr_t)&kmem_get_snapshot, "kmem_get_snapshot" },
     { (uint32_t)(uintptr_t)&sys_mmap, "sys_mmap" },
     { (uint32_t)(uintptr_t)&sys_munmap, "sys_munmap" },
     { (uint32_t)(uintptr_t)&sys_brk, "sys_brk" },
@@ -2630,6 +2649,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&uma_enable_dynamic_alloc, "uma_enable_dynamic_alloc" },
     { (uint32_t)(uintptr_t)&uma_zcreate, "uma_zcreate" },
     { (uint32_t)(uintptr_t)&uma_zdestroy, "uma_zdestroy" },
+    { (uint32_t)(uintptr_t)&uma_item_size, "uma_item_size" },
     { (uint32_t)(uintptr_t)&uma_zalloc, "uma_zalloc" },
     { (uint32_t)(uintptr_t)&uma_zfree, "uma_zfree" },
     { (uint32_t)(uintptr_t)&uma_reclaim, "uma_reclaim" },
@@ -2653,6 +2673,7 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&vm_phys_get_free, "vm_phys_get_free" },
     { (uint32_t)(uintptr_t)&vm_phys_get_used, "vm_phys_get_used" },
     { (uint32_t)(uintptr_t)&vm_phys_get_order_free_count, "vm_phys_get_order_free_count" },
+    { (uint32_t)(uintptr_t)&vm_phys_get_order_head_phys, "vm_phys_get_order_head_phys" },
     { (uint32_t)(uintptr_t)&vm_phys_mark_used, "vm_phys_mark_used" },
     { (uint32_t)(uintptr_t)&vm_phys_check_integrity, "vm_phys_check_integrity" },
     { (uint32_t)(uintptr_t)&run_kernel_tests, "run_kernel_tests" },
@@ -2730,14 +2751,21 @@ struct ksym ksym_table[] = {
     { (uint32_t)(uintptr_t)&test_vm_policy_writeback, "test_vm_policy_writeback" },
     { (uint32_t)(uintptr_t)&test_vm_pageout_prefers_inactive_then_active, "test_vm_pageout_prefers_inactive_then_active" },
     { (uint32_t)(uintptr_t)&test_vm_pageout_launders_before_scanning_active, "test_vm_pageout_launders_before_scanning_active" },
+    { (uint32_t)(uintptr_t)&test_vm_pageout_oom_kills_largest_user_process, "test_vm_pageout_oom_kills_largest_user_process" },
     { (uint32_t)(uintptr_t)&run_vm_policy_tests, "run_vm_policy_tests" },
     { (uint32_t)(uintptr_t)&test_uma_large_objects, "test_uma_large_objects" },
     { (uint32_t)(uintptr_t)&test_uma_alloc_free, "test_uma_alloc_free" },
     { (uint32_t)(uintptr_t)&test_uma_zero_fill, "test_uma_zero_fill" },
     { (uint32_t)(uintptr_t)&test_uma_ctor_dtor, "test_uma_ctor_dtor" },
+    { (uint32_t)(uintptr_t)&test_uma_callback_ordering, "test_uma_callback_ordering" },
+    { (uint32_t)(uintptr_t)&test_uma_leak_tracking, "test_uma_leak_tracking" },
+    { (uint32_t)(uintptr_t)&test_uma_percpu_cache_paths, "test_uma_percpu_cache_paths" },
+    { (uint32_t)(uintptr_t)&test_uma_slab_freelist_integrity, "test_uma_slab_freelist_integrity" },
+    { (uint32_t)(uintptr_t)&test_uma_capacity_accounting, "test_uma_capacity_accounting" },
     { (uint32_t)(uintptr_t)&test_uma_many_allocs, "test_uma_many_allocs" },
     { (uint32_t)(uintptr_t)&test_uma_redzone, "test_uma_redzone" },
     { (uint32_t)(uintptr_t)&test_uma_dynamic_stress, "test_uma_dynamic_stress" },
+    { (uint32_t)(uintptr_t)&test_uma_multi_zone_stress, "test_uma_multi_zone_stress" },
     { (uint32_t)(uintptr_t)&test_uma_limits, "test_uma_limits" },
     { (uint32_t)(uintptr_t)&run_uma_tests, "run_uma_tests" },
     { (uint32_t)(uintptr_t)&test_futex_run_all, "test_futex_run_all" },
@@ -2931,4 +2959,4 @@ struct ksym ksym_table[] = {
     { 0xFFFFFFFF, "" }
 };
 
-int ksym_count = 1460;
+int ksym_count = 1474;

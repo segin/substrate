@@ -117,6 +117,7 @@ TLB management on i386 follows a tiered strategy:
 
 i386 SMP execution model:
 - the kernel currently supports up to `96` CPUs
+- CPU discovery prefers ACPI MADT and falls back to Intel MP tables; validated MP configuration table addresses are cached so later discovery passes do not depend on BIOS page-zero mappings after NULL protection is enabled
 - AP bootstrap uses a copied low-memory trampoline that enters protected mode, loads the live BSP CR4/CR3/CR0 state, enables paging, and jumps into the higher-half C entry point
 - MADT parsing now registers I/O APICs and ISA IRQ-to-GSI overrides before the scheduler starts userspace
 - `execve()` temporarily binds the calling thread to its current CPU and suppresses timer-driven rescheduling until the final userspace handoff, then restores floating scheduling state

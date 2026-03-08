@@ -13,6 +13,7 @@
 #include <stdio.h>
 
 // Externs for Scheduler and IDT
+#ifndef HOST_TEST
 extern process_t processes[];
 extern thread_t *sched_alloc_thread(process_t *proc);
 
@@ -29,6 +30,7 @@ extern void tss_flush(void);
 
 // GDT Flush (defined in gdt.c/isr.S)
 extern void gdt_flush(uint32_t);
+#endif
 
 /*
  * Early boot page tables in boot.S map only the first 16MB into the higher
@@ -40,6 +42,7 @@ extern void gdt_flush(uint32_t);
 
 cpu_info_t cpus[MAX_CPUS];
 int cpu_count = 0;
+static uint32_t smp_mp_config_phys = 0;
 
 static void smp_emit_u32(void (*emit)(const char *), uint32_t value) {
     char buf[16];
@@ -76,6 +79,265 @@ struct acpi_header {
     uint32_t creator_revision;
 } __attribute__((packed));
 
+struct mp_floating_ptr {
+    char signature[4];
+    uint32_t config_table;
+    uint8_t length;
+    uint8_t spec_rev;
+    uint8_t checksum;
+    uint8_t feature1;
+    uint8_t feature2;
+    uint8_t feature3;
+    uint8_t feature4;
+    uint8_t feature5;
+} __attribute__((packed));
+
+struct mp_config_table {
+    char signature[4];
+    uint16_t base_length;
+    uint8_t spec_rev;
+    uint8_t checksum;
+    char oem_id[8];
+    char product_id[12];
+    uint32_t oem_table_ptr;
+    uint16_t oem_table_size;
+    uint16_t entry_count;
+    uint32_t lapic_addr;
+    uint16_t ext_table_length;
+    uint8_t ext_table_checksum;
+    uint8_t reserved;
+} __attribute__((packed));
+
+struct mp_processor_entry {
+    uint8_t type;
+    uint8_t local_apic_id;
+    uint8_t local_apic_version;
+    uint8_t cpu_flags;
+    uint32_t cpu_signature;
+    uint32_t feature_flags;
+    uint32_t reserved[2];
+} __attribute__((packed));
+
+struct mp_ioapic_entry {
+    uint8_t type;
+    uint8_t ioapic_id;
+    uint8_t ioapic_version;
+    uint8_t ioapic_flags;
+    uint32_t ioapic_addr;
+} __attribute__((packed));
+
+#define MP_PROCESSOR_ENABLED 0x01
+#define MP_PROCESSOR_BSP     0x02
+#define MP_IOAPIC_ENABLED    0x01
+
+typedef void *(*smp_phys_map_fn_t)(uint32_t phys, uint32_t map_limit);
+
+static void *smp_map_phys_default(uint32_t phys, uint32_t map_limit) {
+    if (phys >= map_limit) {
+        return NULL;
+    }
+    return P2V(phys);
+}
+
+static int smp_checksum_ok(const void *base, size_t len) {
+    const uint8_t *bytes = (const uint8_t *)base;
+    uint8_t sum = 0;
+
+    for (size_t i = 0; i < len; i++) {
+        sum = (uint8_t)(sum + bytes[i]);
+    }
+
+    return sum == 0;
+}
+
+static int smp_mpfp_valid(const struct mp_floating_ptr *mpfp) {
+    if (!mpfp || memcmp(mpfp->signature, "_MP_", 4) != 0) {
+        return 0;
+    }
+    if (mpfp->length != 1) {
+        return 0;
+    }
+    if (mpfp->spec_rev != 1 && mpfp->spec_rev != 4) {
+        return 0;
+    }
+    return smp_checksum_ok(mpfp, 16);
+}
+
+static int smp_parse_mp_config(const struct mp_config_table *mpc, uint32_t bsp_id,
+                               uint32_t map_limit) {
+    const uint8_t *entry;
+    int found = 0;
+    int saw_bsp = 0;
+    int saw_cpu = 0;
+
+    if (!mpc || memcmp(mpc->signature, "PCMP", 4) != 0) {
+        return 0;
+    }
+    if (mpc->base_length < sizeof(*mpc) || !smp_checksum_ok(mpc, mpc->base_length)) {
+        return 0;
+    }
+
+    lapic_set_base(mpc->lapic_addr);
+
+    entry = (const uint8_t *)mpc + sizeof(*mpc);
+    for (uint16_t i = 0; i < mpc->entry_count && entry < (const uint8_t *)mpc + mpc->base_length; i++) {
+        switch (entry[0]) {
+        case 0: {
+            const struct mp_processor_entry *cpu = (const struct mp_processor_entry *)entry;
+            entry += sizeof(*cpu);
+
+            if ((cpu->cpu_flags & MP_PROCESSOR_ENABLED) == 0) {
+                break;
+            }
+            saw_cpu = 1;
+
+            if ((cpu->cpu_flags & MP_PROCESSOR_BSP) != 0 || cpu->local_apic_id == bsp_id) {
+                cpus[0].lapic_id = cpu->local_apic_id;
+                cpus[0].processor_id = cpu->local_apic_id;
+                cpus[0].flags = cpu->cpu_flags;
+                saw_bsp = 1;
+                found = 1;
+            } else if (cpu_count < MAX_CPUS) {
+                cpus[cpu_count].lapic_id = cpu->local_apic_id;
+                cpus[cpu_count].processor_id = cpu->local_apic_id;
+                cpus[cpu_count].flags = cpu->cpu_flags;
+                cpu_count++;
+                found = 1;
+            }
+            break;
+        }
+        case 1: /* bus entry */
+            entry += 8;
+            break;
+        case 2: {
+            const struct mp_ioapic_entry *ioapic = (const struct mp_ioapic_entry *)entry;
+
+            if ((ioapic->ioapic_flags & MP_IOAPIC_ENABLED) != 0 &&
+                map_limit == FULL_DIRECTMAP_LIMIT) {
+                ioapic_register(ioapic->ioapic_addr, ioapic->ioapic_id, 0);
+            }
+            entry += sizeof(*ioapic);
+            break;
+        }
+        case 3: /* IO interrupt assignment */
+        case 4: /* local interrupt assignment */
+            entry += 8;
+            break;
+        default:
+            return found;
+        }
+    }
+
+    if (saw_cpu && !saw_bsp) {
+        cpus[0].lapic_id = bsp_id;
+        cpus[0].processor_id = bsp_id;
+        cpus[0].flags = MP_PROCESSOR_ENABLED | MP_PROCESSOR_BSP;
+    }
+
+    return found;
+}
+
+static int smp_try_mp_config_phys(uint32_t config_phys, uint32_t bsp_id,
+                                  uint32_t map_limit, smp_phys_map_fn_t mapper) {
+    const struct mp_config_table *mpc;
+
+    if (config_phys == 0) {
+        return 0;
+    }
+
+    mpc = (const struct mp_config_table *)mapper(config_phys, map_limit);
+    if (!mpc) {
+        return 0;
+    }
+
+    if (!smp_parse_mp_config(mpc, bsp_id, map_limit)) {
+        return 0;
+    }
+
+    smp_mp_config_phys = config_phys;
+    return 1;
+}
+
+static int smp_try_mp_search_range(uint32_t start, uint32_t end, uint32_t stride,
+                                   uint32_t bsp_id, uint32_t map_limit,
+                                   smp_phys_map_fn_t mapper) {
+    for (uint32_t addr = start;
+         addr + sizeof(struct mp_floating_ptr) <= end;
+         addr += stride) {
+        const struct mp_floating_ptr *mpfp =
+            (const struct mp_floating_ptr *)mapper(addr, map_limit);
+
+        if (!smp_mpfp_valid(mpfp)) {
+            continue;
+        }
+        if (smp_try_mp_config_phys(mpfp->config_table, bsp_id, map_limit, mapper)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int smp_try_mp_tables(uint32_t bsp_id, uint32_t map_limit, smp_phys_map_fn_t mapper) {
+    static const struct {
+        uint32_t start;
+        uint32_t end;
+        uint32_t stride;
+    } fixed_searches[] = {
+        { 0xF0000u, 0x100000u, 16u },
+        { 0xE0000u, 0x100000u, 16u },
+    };
+    uint16_t *ebda_seg_ptr;
+    uint16_t *base_mem_kb_ptr;
+    uint32_t ebda_start = 0;
+    uint32_t base_mem_top = 0;
+
+    if (!mapper) {
+        mapper = smp_map_phys_default;
+    }
+
+    if (smp_mp_config_phys != 0 &&
+        smp_try_mp_config_phys(smp_mp_config_phys, bsp_id, map_limit, mapper)) {
+        return 1;
+    }
+
+    if (map_limit == EARLY_DIRECTMAP_LIMIT) {
+        ebda_seg_ptr = (uint16_t *)mapper(0x40Eu, map_limit);
+        if (ebda_seg_ptr != NULL) {
+            ebda_start = (uint32_t)(*ebda_seg_ptr) << 4;
+        }
+
+        if (ebda_start >= 0x400 && ebda_start < 0xA0000) {
+            if (smp_try_mp_search_range(ebda_start, ebda_start + 1024u, 16u,
+                                        bsp_id, map_limit, mapper)) {
+                return 1;
+            }
+        }
+
+        base_mem_kb_ptr = (uint16_t *)mapper(0x413u, map_limit);
+        if (base_mem_kb_ptr != NULL) {
+            base_mem_top = (uint32_t)(*base_mem_kb_ptr) * 1024u;
+        }
+        if (base_mem_top >= 1024u && base_mem_top <= 0xA0000u) {
+            uint32_t start = base_mem_top - 1024u;
+            if (smp_try_mp_search_range(start, base_mem_top, 16u,
+                                        bsp_id, map_limit, mapper)) {
+                return 1;
+            }
+        }
+    }
+
+    for (size_t i = 0; i < sizeof(fixed_searches) / sizeof(fixed_searches[0]); i++) {
+        if (smp_try_mp_search_range(fixed_searches[i].start, fixed_searches[i].end,
+                                    fixed_searches[i].stride, bsp_id,
+                                    map_limit, mapper)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
 void smp_discover_cores(void) {
     early_uart_print("SMP: Discovering cores...\n");
     uint32_t map_limit = smp_discovery_map_limit();
@@ -111,6 +373,13 @@ void smp_discover_cores(void) {
     }
 
     if (!rsdp) {
+        if (smp_try_mp_tables(bsp_id, map_limit, smp_map_phys_default)) {
+            early_uart_print("SMP: MP Tables found.\n");
+            early_uart_print("SMP: Detected CPU count: ");
+            smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
+            early_uart_print("\n");
+            return;
+        }
         early_uart_print("SMP: ACPI RSDP not found, falling back to UP.\n");
         return;
     }
@@ -118,6 +387,13 @@ void smp_discover_cores(void) {
     // 2. Locate MADT
     // rsdp->rsdt_addr is physical, convert to virtual
     if (rsdp->rsdt_addr >= map_limit) {
+        if (smp_try_mp_tables(bsp_id, map_limit, smp_map_phys_default)) {
+            early_uart_print("SMP: MP Tables found.\n");
+            early_uart_print("SMP: Detected CPU count: ");
+            smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
+            early_uart_print("\n");
+            return;
+        }
         early_uart_print("SMP: RSDT above early map, falling back to UP.\n");
         return;
     }
@@ -125,6 +401,13 @@ void smp_discover_cores(void) {
 
     // Validate RSDT signature
     if (memcmp(rsdt->signature, "RSDT", 4) != 0) {
+        if (smp_try_mp_tables(bsp_id, map_limit, smp_map_phys_default)) {
+            early_uart_print("SMP: MP Tables found.\n");
+            early_uart_print("SMP: Detected CPU count: ");
+            smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
+            early_uart_print("\n");
+            return;
+        }
         early_uart_print("SMP: RSDT Invalid signature!\n");
         return;
     }
@@ -145,6 +428,13 @@ void smp_discover_cores(void) {
     }
 
     if (!madt) {
+        if (smp_try_mp_tables(bsp_id, map_limit, smp_map_phys_default)) {
+            early_uart_print("SMP: MP Tables found.\n");
+            early_uart_print("SMP: Detected CPU count: ");
+            smp_emit_u32(early_uart_print, (uint32_t)cpu_count);
+            early_uart_print("\n");
+            return;
+        }
         early_uart_print("SMP: MADT not found.\n");
         return;
     }
@@ -203,6 +493,7 @@ void smp_discover_cores(void) {
     early_uart_print("\n");
 }
 
+#ifndef HOST_TEST
 extern void trampoline_start(void);
 extern void trampoline_end(void);
 extern void trampoline_cr3(void);
@@ -412,3 +703,4 @@ int smp_get_cpu_count(void) {
 int smp_get_cpu_id(void) {
     return percpu_get_cpu_id();
 }
+#endif

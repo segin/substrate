@@ -699,9 +699,9 @@
         > **Files:** `sys/arch/i386/apic.c`, `sys/arch/i386/ioapic.c`,
         > `sys/arch/i386/smp.c`, `sys/kern/percpu.c`.
 
-        - [ ] **Discovery:** (REQ: REQ-01-0577)
+        - [x] **Discovery:** (REQ: REQ-01-0577)
             - [x] Parse ACPI MADT (APIC) to find processor entries. (REQ: REQ-01-0578)
-            - [ ] Fallback: parse MP Tables (Intel MultiProcessor Spec). (REQ: REQ-01-0579)
+            - [x] Fallback: parse MP Tables (Intel MultiProcessor Spec). (REQ: REQ-01-0579)
             - [x] Record BSP and AP LAPIC IDs. (REQ: REQ-01-0580)
         - [ ] **Local APIC (LAPIC):** (REQ: REQ-01-0581)
             - [ ] Map LAPIC MMIO base (default 0xFEE00000). (REQ: REQ-01-0582)
