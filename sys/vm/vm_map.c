@@ -867,6 +867,27 @@ int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot) 
     return 0;
 }
 
+int vm_map_inherit(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t inheritance) {
+    vm_map_entry_t *header = map->header;
+
+    if (inheritance > VM_INHERIT_ZERO) {
+        return -1;
+    }
+
+    for (vm_map_entry_t *cur = header->next; cur != header; cur = cur->next) {
+        if (cur->start >= end) {
+            break;
+        }
+        if (cur->end <= start) {
+            continue;
+        }
+
+        cur->inheritance = inheritance;
+    }
+
+    return 0;
+}
+
 // Wire pages in a range (make unpageable)
 int vm_map_wire(vm_map_t *map, uintptr_t start, uintptr_t end) {
     vm_map_entry_t *header = map->header;

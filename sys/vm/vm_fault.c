@@ -24,8 +24,13 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     if (!entry) return VM_FAULT_ERROR;
 
     // 2. Check protection
-    if ((entry->protection & prot) != prot)
+    if ((entry->max_protection & prot) != prot)
         return VM_FAULT_ERROR;
+    if ((entry->protection & prot) != prot) {
+        if ((prot & VM_PROT_WRITE) == 0 || entry->inheritance == VM_INHERIT_SHARE) {
+            return VM_FAULT_ERROR;
+        }
+    }
 
     // 3. Resolve page against the object chain
     vm_object_t *first_obj = entry->object;
@@ -141,6 +146,10 @@ int vm_fault(vm_map_t *map, uintptr_t va, uint8_t prot) {
     // If it's a COW mapping (read-only view of shared page), reduce permissions
     // If it's a COW mapping (read-only view of shared page), reduce permissions
     uint8_t enter_prot = entry->protection;
+    if ((prot & VM_PROT_WRITE) && (entry->max_protection & VM_PROT_WRITE) &&
+        (entry->inheritance != VM_INHERIT_SHARE)) {
+        enter_prot |= VM_PROT_WRITE;
+    }
     if ((prot & VM_PROT_WRITE) == 0 && (obj->ref_count > 1) && (entry->inheritance != VM_INHERIT_SHARE)) {
        enter_prot &= ~VM_PROT_WRITE; // Force Read-Only for COW
     }

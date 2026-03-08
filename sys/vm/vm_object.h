@@ -51,6 +51,7 @@ vm_object_t *vm_object_allocate(vm_object_type_t type, size_t size);
 void vm_object_reference(vm_object_t *object);
 void vm_object_deallocate(vm_object_t *object);
 vm_object_t *vm_object_shadow(vm_object_t *source);
+int vm_object_collapse(vm_object_t *object);
 
 // Page management
 void vm_object_add_page(vm_object_t *object, vm_page_t *page);

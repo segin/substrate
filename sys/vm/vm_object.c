@@ -1,5 +1,6 @@
 #include <vm/vm_object.h>
 #include <vm/vm_kmem.h>
+#include <vm/vm_pager.h>
 #include <stddef.h>
 
 // Static pool for bootstrap objects (until kmalloc is ready)
@@ -53,6 +54,12 @@ void vm_object_deallocate(vm_object_t *object) {
 
     object->ref_count--;
     if (object->ref_count == 0) {
+        vm_object_t *shadow = object->shadow;
+        struct vm_pager *pager = object->pager;
+
+        object->shadow = NULL;
+        object->pager = NULL;
+
         // Free all pages
         vm_page_t *p = object->pages;
         while (p) {
@@ -60,6 +67,14 @@ void vm_object_deallocate(vm_object_t *object) {
             vm_page_free(p);
             p = next;
         }
+
+        if (shadow) {
+            vm_object_deallocate(shadow);
+        }
+        if (pager) {
+            vm_pager_deallocate(pager);
+        }
+
         // Free object if dynamic, otherwise mark as dead
         if (object >= bootstrap_objects &&
             object < bootstrap_objects + MAX_BOOTSTRAP_OBJECTS) {
@@ -122,4 +137,32 @@ vm_object_t *vm_object_shadow(vm_object_t *source) {
     source->flags |= VM_OBJ_COPY;
     
     return shadow;
+}
+
+int vm_object_collapse(vm_object_t *object) {
+    uint64_t required_pages;
+    vm_object_t *shadow;
+
+    if (!object || !object->shadow) {
+        return -1;
+    }
+
+    shadow = object->shadow;
+    if (object->shadow_offset != 0) {
+        return -1;
+    }
+
+    if (shadow->ref_count != 1) {
+        return -1;
+    }
+
+    required_pages = (object->size + 4095) / 4096;
+    if (required_pages != 0 && object->page_count < required_pages) {
+        return -1;
+    }
+
+    object->shadow = NULL;
+    object->shadow_offset = 0;
+    vm_object_deallocate(shadow);
+    return 0;
 }

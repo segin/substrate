@@ -159,6 +159,33 @@ void test_vm_map_wire(void) {
     kprint("  PASS\n");
 }
 
+void test_vm_map_protect_inherit(void) {
+    kprint("Test: vm_map protect/inherit\n");
+
+    pmap_t pmap = pmap_create();
+    vm_map_t *map = vm_map_create(pmap, 0x1000, 0x100000);
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x2000);
+
+    TEST_ASSERT(vm_map_insert(map, obj, 0, 0x30000, 0x32000,
+                              VM_PROT_READ | VM_PROT_WRITE,
+                              VM_PROT_ALL,
+                              VM_INHERIT_COPY) == 0,
+                "insert succeeded");
+
+    TEST_ASSERT(vm_map_protect(map, 0x30000, 0x32000, VM_PROT_READ) == 0,
+                "protect succeeded");
+    vm_map_entry_t *entry = vm_map_lookup(map, 0x30000);
+    TEST_ASSERT(entry != NULL, "entry found");
+    TEST_ASSERT(entry->protection == VM_PROT_READ, "protection updated");
+
+    TEST_ASSERT(vm_map_inherit(map, 0x30000, 0x32000, VM_INHERIT_SHARE) == 0,
+                "inherit succeeded");
+    TEST_ASSERT(entry->inheritance == VM_INHERIT_SHARE, "inheritance updated");
+
+    vm_map_destroy(map);
+    kprint("  PASS\n");
+}
+
 void test_vm_map_benchmark(void) {
     kprint("Test: vm_map benchmark (Linear Lookup)\n");
 
@@ -212,6 +239,7 @@ void run_vm_map_tests(void) {
     test_vm_map_remove();
     test_vm_map_entry_flags();
     test_vm_map_wire();
+    test_vm_map_protect_inherit();
     test_vm_map_benchmark();
     
     kprint("\nVM Map Tests Complete\n");

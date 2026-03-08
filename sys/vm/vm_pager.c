@@ -29,6 +29,7 @@ vm_pager_t *vm_pager_allocate(vm_object_type_t type, void *handle, size_t size, 
             kfree(pager, sizeof(vm_pager_t));
             return NULL;
         }
+        new_pager->ops = pager->ops;
         kfree(pager, sizeof(vm_pager_t)); // Replace generic struct with specific one
         return new_pager;
     }

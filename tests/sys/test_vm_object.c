@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <vm/vm_object.h>
 #include <vm/vm_kmem.h>
+#include <vm/vm_page.h>
 #include <kern/console.h>
 
 static int tests_passed = 0;
@@ -123,11 +124,37 @@ void test_vm_object_dynamic_free(void) {
     kprint("  PASS\n");
 }
 
+void test_vm_object_collapse(void) {
+    kprint("Test: vm_object collapse\n");
+
+    vm_object_t *source = vm_object_allocate(VM_OBJ_TYPE_DEFAULT, 0x2000);
+    vm_object_t *shadow = vm_object_shadow(source);
+    TEST_ASSERT(source != NULL, "source allocated");
+    TEST_ASSERT(shadow != NULL, "shadow allocated");
+
+    vm_page_t *p0 = vm_page_alloc(shadow, 0, 0);
+    vm_page_t *p1 = vm_page_alloc(shadow, 1, 0);
+    TEST_ASSERT(p0 != NULL, "shadow page 0 allocated");
+    TEST_ASSERT(p1 != NULL, "shadow page 1 allocated");
+    vm_page_insert(p0, shadow, 0);
+    vm_page_insert(p1, shadow, 1);
+
+    vm_object_deallocate(source);
+    source = NULL;
+
+    TEST_ASSERT(vm_object_collapse(shadow) == 0, "collapse succeeded");
+    TEST_ASSERT(shadow->shadow == NULL, "shadow chain removed");
+
+    vm_object_deallocate(shadow);
+    kprint("  PASS\n");
+}
+
 void run_vm_object_tests(void) {
     kprint("\n=== VM Object Unit Tests ===\n");
     test_vm_object_lifecycle();
     test_vm_object_shadow();
     test_vm_object_pages();
     test_vm_object_dynamic_free();
+    test_vm_object_collapse();
     kprint("\nVM Object Tests Complete\n");
 }

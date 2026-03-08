@@ -69,6 +69,7 @@ int vm_map_find_space(vm_map_t *map, uintptr_t *addr, size_t length);
 vm_map_entry_t *vm_map_lookup(vm_map_t *map, uintptr_t va);
 void vm_map_destroy(vm_map_t *map);
 int vm_map_protect(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t prot);
+int vm_map_inherit(vm_map_t *map, uintptr_t start, uintptr_t end, uint8_t inheritance);
 int vm_map_wire(vm_map_t *map, uintptr_t start, uintptr_t end);
 int vm_map_unwire(vm_map_t *map, uintptr_t start, uintptr_t end);
 vm_map_t *vm_map_fork(vm_map_t *src_map, pmap_t dst_pmap);
