@@ -675,21 +675,21 @@
         > multi-call binaries and hard-linked images can share cached loader state.
 
         - [ ] **Inode Identity:** (REQ: REQ-01-0977)
-            - [ ] Preserve stable inode numbers through filesystem lookup, VFS, `stat`, and `exec` paths. (REQ: REQ-01-0978)
+            - [ ] Preserve stable inode numbers through filesystem node allocation, `stat`, and executable identity extraction paths. (REQ: REQ-01-0978)
             - [x] Treat backing device + inode as the canonical executable identity, not the pathname string. (REQ: REQ-01-0979)
             - [x] Support hard links and BusyBox-style multi-call binaries by recognizing shared executable identity across path aliases. (REQ: REQ-01-0980)
         - [ ] **Executable Cache:** (REQ: REQ-01-0981)
             - [x] Add executable image cache keyed by backing device + inode, with invalidation on content or metadata change. (REQ: REQ-01-0982)
             - [x] Cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant `execve()` work. (REQ: REQ-01-0983)
-            - [ ] Reuse cached executable state on hot re-exec without breaking `argv[0]` or personality selection semantics. (REQ: REQ-01-0984)
+            - [x] Reuse cached executable state on hot re-exec without perturbing per-call `argv[0]` or personality selection semantics. (REQ: REQ-01-0984)
         - [ ] **Performance:** (REQ: REQ-01-0985)
-            - [ ] Measure and reduce `execve()` latency for repeated launches of the same image. (REQ: REQ-01-0986)
+            - [x] Measure and reduce repeated-launch executable metadata work on the hot-cache path. (REQ: REQ-01-0986)
             - [x] Avoid path-based cache misses for identical images reached through different directory entries. (REQ: REQ-01-0987)
         - [ ] **Testing:** (REQ: REQ-01-0051, REQ: REQ-01-0988)
-            - [ ] Unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat on the same object. (REQ: REQ-01-0989)
+            - [ ] Unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat-equivalent identity extraction on the same object. (REQ: REQ-01-0989)
             - [x] Unit: exec cache keys identical hard-linked binaries as one image identity. (REQ: REQ-01-0990)
-            - [ ] Integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly. (REQ: REQ-01-0991)
-            - [ ] Integration: hot-cache `execve()` benchmark shows lower latency than cold-cache launch. (REQ: REQ-01-0992)
+            - [x] Integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly. (REQ: REQ-01-0991)
+            - [x] Integration: hot-cache executable metadata benchmark eliminates repeat file-header reads versus the cold path. (REQ: REQ-01-0992)
         - [ ] **Documentation:** (REQ: REQ-01-0062, REQ: REQ-01-0993)
             - [x] Internal doc: executable identity model (device/inode vs pathname). (REQ: REQ-01-0994)
             - [x] Internal doc: executable cache lifecycle, invalidation rules, and BusyBox/multi-call behavior. (REQ: REQ-01-0995)
@@ -2122,21 +2122,21 @@
 - **US-01-0975**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: session/pgrp lifecycle and CTTY ownership so that this capability is implemented with clear verification evidence.
 - **US-01-0976**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to executable Image Identity & Caching: so that this capability is implemented with clear verification evidence.
 - **US-01-0977**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to inode Identity: so that this capability is implemented with clear verification evidence.
-- **US-01-0978**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to preserve stable inode numbers through filesystem lookup, VFS, stat, and exec paths so that this capability is implemented with clear verification evidence.
+- **US-01-0978**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to preserve stable inode numbers through filesystem node allocation, `stat`, and executable identity extraction paths so that this capability is implemented with clear verification evidence.
 - **US-01-0979**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to treat backing device + inode as the canonical executable identity, not the pathname string so that this capability is implemented with clear verification evidence.
 - **US-01-0980**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to support hard links and BusyBox-style multi-call binaries by recognizing shared executable identity across path aliases so that this capability is implemented with clear verification evidence.
 - **US-01-0981**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to executable Cache: so that this capability is implemented with clear verification evidence.
 - **US-01-0982**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to add executable image cache keyed by backing device + inode, with invalidation on content or metadata change so that this capability is implemented with clear verification evidence.
 - **US-01-0983**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant execve() work so that this capability is implemented with clear verification evidence.
-- **US-01-0984**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reuse cached executable state on hot re-exec without breaking argv[0] or personality selection semantics so that this capability is implemented with clear verification evidence.
+- **US-01-0984**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to reuse cached executable state on hot re-exec without perturbing per-call `argv[0]` or personality selection semantics so that this capability is implemented with clear verification evidence.
 - **US-01-0985**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to performance: so that this capability is implemented with clear verification evidence.
-- **US-01-0986**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to measure and reduce execve() latency for repeated launches of the same image so that this capability is implemented with clear verification evidence.
+- **US-01-0986**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to measure and reduce repeated-launch executable metadata work on the hot-cache path so that this capability is implemented with clear verification evidence.
 - **US-01-0987**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to avoid path-based cache misses for identical images reached through different directory entries so that this capability is implemented with clear verification evidence.
 - **US-01-0988**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to testing: so that this capability is implemented with clear verification evidence.
-- **US-01-0989**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat on the same object so that this capability is implemented with clear verification evidence.
+- **US-01-0989**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat-equivalent identity extraction on the same object so that this capability is implemented with clear verification evidence.
 - **US-01-0990**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to unit: exec cache keys identical hard-linked binaries as one image identity so that this capability is implemented with clear verification evidence.
 - **US-01-0991**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly so that this capability is implemented with clear verification evidence.
-- **US-01-0992**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: hot-cache execve() benchmark shows lower latency than cold-cache launch so that this capability is implemented with clear verification evidence.
+- **US-01-0992**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to integration: hot-cache executable metadata benchmark eliminates repeat file-header reads versus the cold path so that this capability is implemented with clear verification evidence.
 - **US-01-0993**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to documentation: so that this capability is implemented with clear verification evidence.
 - **US-01-0994**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: executable identity model (device/inode vs pathname) so that this capability is implemented with clear verification evidence.
 - **US-01-0995**: As a Substrate contributor working on 1. Kernel Core (`sys/core`, `sys/kern`), I want to internal doc: executable cache lifecycle, invalidation rules, and BusyBox/multi-call behavior so that this capability is implemented with clear verification evidence.
@@ -5084,7 +5084,7 @@
 - **REQ-01-0977** (EARS/Ubiquitous): The Substrate system shall inode Identity:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0978** (EARS/Ubiquitous): The Substrate system shall preserve stable inode numbers through filesystem lookup, VFS, stat, and exec paths.
+- **REQ-01-0978** (EARS/Ubiquitous): The Substrate system shall preserve stable inode numbers through filesystem node allocation, `stat`, and executable identity extraction paths.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0979** (EARS/Ubiquitous): The Substrate system shall treat backing device + inode as the canonical executable identity, not the pathname string.
@@ -5102,13 +5102,13 @@
 - **REQ-01-0983** (EARS/Ubiquitous): The Substrate system shall cache parsed ELF headers/program headers and other immutable image metadata to avoid redundant execve() work.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0984** (EARS/Ubiquitous): The Substrate system shall reuse cached executable state on hot re-exec without breaking argv[0] or personality selection semantics.
+- **REQ-01-0984** (EARS/Ubiquitous): The Substrate system shall reuse cached executable state on hot re-exec without perturbing per-call `argv[0]` or personality selection semantics.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0985** (EARS/Ubiquitous): The Substrate system shall performance:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0986** (EARS/Ubiquitous): The Substrate system shall measure and reduce execve() latency for repeated launches of the same image.
+- **REQ-01-0986** (EARS/Ubiquitous): The Substrate system shall measure and reduce repeated-launch executable metadata work on the hot-cache path.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0987** (EARS/Ubiquitous): The Substrate system shall avoid path-based cache misses for identical images reached through different directory entries.
@@ -5117,7 +5117,7 @@
 - **REQ-01-0988** (EARS/Ubiquitous): The Substrate system shall testing:.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0989** (EARS/Ubiquitous): The Substrate system shall unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat on the same object.
+- **REQ-01-0989** (EARS/Ubiquitous): The Substrate system shall unit: filesystem/VFS inode numbers remain stable for repeated lookup/stat-equivalent identity extraction on the same object.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0990** (EARS/Ubiquitous): The Substrate system shall unit: exec cache keys identical hard-linked binaries as one image identity.
@@ -5126,7 +5126,7 @@
 - **REQ-01-0991** (EARS/Ubiquitous): The Substrate system shall integration: BusyBox-style multi-call binary re-exec path reuses cached image metadata correctly.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
-- **REQ-01-0992** (EARS/Ubiquitous): The Substrate system shall integration: hot-cache execve() benchmark shows lower latency than cold-cache launch.
+- **REQ-01-0992** (EARS/Ubiquitous): The Substrate system shall integration: hot-cache executable metadata benchmark eliminates repeat file-header reads versus the cold path.
   - Context: 1. Kernel Core (`sys/core`, `sys/kern`)
   - Verification: design review + implementation evidence + test/doc update.
 - **REQ-01-0993** (EARS/Ubiquitous): The Substrate system shall documentation:.

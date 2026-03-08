@@ -9,6 +9,7 @@
 #include <assert.h>
 #include <errno.h>
 #include <sys/mman.h> // for mmap
+#include <time.h>
 
 // Mock kernel constants/types if not provided by headers
 #define __kernel_size_t size_t
@@ -77,6 +78,17 @@ static int copyinstr_call_count = 0;
 static int use_toctou_attack = 0;
 static int mock_header_reads = 0;
 static int mock_phdr_reads = 0;
+static uint8_t mock_osabi = 0;
+
+#define MAX_HOST_MAPPINGS 1024
+typedef struct {
+    uint32_t va;
+    uint8_t *page;
+} host_mapping_t;
+
+static host_mapping_t host_mappings[MAX_HOST_MAPPINGS];
+static size_t host_mapping_count = 0;
+static uintptr_t mock_pmm_next = 0xC1000000u;
 
 int copyinstr(const void *src, void *dst, size_t maxlen, size_t *len) {
     const char *s = (const char *)src;
@@ -158,6 +170,19 @@ process_t *current_process = &mock_process;
 thread_t mock_thread;
 thread_t *current_thread = &mock_thread;
 
+static void reset_env(void) {
+    memset(&mock_process, 0, sizeof(mock_process));
+    memset(&mock_thread, 0, sizeof(mock_thread));
+    current_process = &mock_process;
+    current_thread = &mock_thread;
+    current_process->pid = 42;
+    current_process->uid = 1000;
+    current_process->gid = 100;
+    current_process->euid = 1000;
+    current_process->egid = 100;
+    current_thread->kstack_top = 0xCAFED000u;
+}
+
 // Mock file read for elf_load
 // Signature must match fs_node_t read function pointer type
 // On host (64-bit), off_t is 64-bit, size_t is 64-bit.
@@ -174,6 +199,7 @@ static size_t mock_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buf
         hdr->e_ident[EI_CLASS] = ELFCLASS32;
         hdr->e_ident[EI_DATA] = ELFDATA2LSB;
         hdr->e_ident[EI_VERSION] = EV_CURRENT;
+        hdr->e_ident[EI_OSABI] = mock_osabi;
         hdr->e_type = ET_EXEC;
         hdr->e_machine = EM_386;
         hdr->e_version = EV_CURRENT;
@@ -213,8 +239,24 @@ fs_node_t *vfs_lookup(fs_node_t *root, const char *path) {
 // Stub pmap functions
 pmap_t pmap_create(void) { return (pmap_t)0xDEADBEEF; }
 void pmap_activate(pmap_t pmap) {}
-int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) { return 0; }
-void *pmm_alloc_block(void) { return malloc(4096); }
+int pmap_enter(pmap_t pmap, uintptr_t va, uintptr_t pa, uint32_t prot, uint32_t flags) {
+    (void)pmap;
+    (void)prot;
+    (void)flags;
+    assert(host_mapping_count < MAX_HOST_MAPPINGS);
+    host_mappings[host_mapping_count].va = (uint32_t)va & ~0xFFFu;
+    host_mappings[host_mapping_count].page = (uint8_t *)(uintptr_t)(pa + 0xC0000000u);
+    host_mapping_count++;
+    return 0;
+}
+void *pmm_alloc_block(void) {
+    void *addr = (void *)mock_pmm_next;
+    void *mapped = mmap(addr, 4096, PROT_READ | PROT_WRITE,
+                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0);
+    assert(mapped == addr);
+    mock_pmm_next += 0x1000u;
+    return mapped;
+}
 // Mock pmap_kernel
 pmap_t pmap_kernel(void) { return (pmap_t)0xCAFEBABE; }
 
@@ -253,6 +295,76 @@ void set_kernel_stack(uint32_t stack) {}
 
 // Include elf.c
 #include "../../sys/exec/formats/elf.c"
+
+static void reset_elf_cache_state(void) {
+    memset(elf_image_cache, 0, sizeof(elf_image_cache));
+    elf_image_cache_hand = 0;
+    mock_header_reads = 0;
+    mock_phdr_reads = 0;
+    mock_osabi = ELFOSABI_SUBSTRATE;
+}
+
+static void reset_host_mappings(void) {
+    host_mapping_count = 0;
+    mock_pmm_next = 0xC1000000u;
+}
+
+static uint8_t *host_user_ptr(uint32_t va) {
+    uint32_t page_va = va & ~0xFFFu;
+    uint32_t offset = va & 0xFFFu;
+    for (size_t i = 0; i < host_mapping_count; i++) {
+        if (host_mappings[i].va == page_va) {
+            return host_mappings[i].page + offset;
+        }
+    }
+    return NULL;
+}
+
+static uint32_t host_user_read32(uint32_t va) {
+    uint8_t *ptr = host_user_ptr(va);
+    uint32_t val = 0;
+    assert(ptr != NULL);
+    memcpy(&val, ptr, sizeof(val));
+    return val;
+}
+
+static void host_user_read_cstr(uint32_t va, char *out, size_t out_size) {
+    size_t i;
+    for (i = 0; i + 1 < out_size; i++) {
+        uint8_t *ptr = host_user_ptr(va + (uint32_t)i);
+        assert(ptr != NULL);
+        out[i] = (char)*ptr;
+        if (out[i] == '\0') {
+            break;
+        }
+    }
+    out[(i + 1 < out_size) ? i : (out_size - 1)] = '\0';
+}
+
+static uint32_t host_find_auxv_value(uint32_t sp, uint32_t key) {
+    uint32_t argc = host_user_read32(sp);
+    uint32_t cursor = sp + 4;
+
+    cursor += (argc + 1) * 4; /* argv pointers + NULL */
+    while (host_user_read32(cursor) != 0) {
+        cursor += 4;
+    }
+    cursor += 4; /* envp NULL */
+
+    for (;;) {
+        uint32_t type = host_user_read32(cursor);
+        uint32_t value = host_user_read32(cursor + 4);
+        if (type == AT_NULL) {
+            break;
+        }
+        if (type == key) {
+            return value;
+        }
+        cursor += 8;
+    }
+
+    return 0;
+}
 
 static void test_exec_reset_signals(void) {
     memset(&mock_process, 0, sizeof(mock_process));
@@ -295,8 +407,7 @@ static void test_elf_cache_uses_mount_inode_identity(void) {
     strcpy(file_a.name, "busybox");
     strcpy(file_b.name, "sh");
 
-    mock_header_reads = 0;
-    mock_phdr_reads = 0;
+    reset_elf_cache_state();
 
     assert(elf_get_image_info(&file_a, &image) == 0);
     assert(mock_header_reads == 1);
@@ -320,8 +431,7 @@ static void test_elf_cache_invalidates_on_metadata_change(void) {
     file.mtime = 30;
     file.ctime = 40;
 
-    mock_header_reads = 0;
-    mock_phdr_reads = 0;
+    reset_elf_cache_state();
 
     assert(elf_get_image_info(&file, &image) == 0);
     assert(mock_header_reads == 1);
@@ -333,11 +443,121 @@ static void test_elf_cache_invalidates_on_metadata_change(void) {
     assert(mock_phdr_reads == 2);
 }
 
+static void test_hot_cache_preserves_personality_detection(void) {
+    elf_image_info_t image;
+    fs_node_t file;
+
+    reset_elf_cache_state();
+    memset(&file, 0, sizeof(file));
+
+    file.flags = FS_FILE;
+    file.read = mock_read;
+    file.inode = 5678;
+    file.mp = (struct mount *)0x33330000;
+    file.length = 16384;
+    file.mtime = 90;
+    file.ctime = 91;
+
+    mock_osabi = ELFOSABI_LINUX;
+    assert(elf_get_image_info(&file, &image) == 0);
+    assert(image.detected_os == ELFOSABI_LINUX);
+    assert(mock_header_reads == 1);
+    assert(mock_phdr_reads == 1);
+
+    memset(&image, 0, sizeof(image));
+    assert(elf_get_image_info(&file, &image) == 0);
+    assert(image.detected_os == ELFOSABI_LINUX);
+    assert(mock_header_reads == 1);
+    assert(mock_phdr_reads == 1);
+}
+
+static void test_exec_setup_stack_uses_call_specific_execfn(void) {
+    elf_image_info_t image;
+    char arg0_a[] = "busybox";
+    char arg0_b[] = "sh";
+    char *argv_a[] = { arg0_a, NULL };
+    char *argv_b[] = { arg0_b, NULL };
+    char execfn[32];
+    uint32_t sp;
+    uint32_t execfn_ptr;
+
+    reset_env();
+    memset(&image, 0, sizeof(image));
+    image.ehdr.e_phnum = 1;
+    image.ehdr.e_phentsize = sizeof(Elf32_Phdr);
+    image.at_phdr = 0x08048034u;
+    current_process->uid = 1000;
+    current_process->gid = 100;
+    current_process->euid = 1000;
+    current_process->egid = 100;
+
+    reset_host_mappings();
+    assert(exec_setup_stack((pmap_t)0xDEADBEEF, &sp, argv_a, 1, NULL, 0,
+                            0x08048000u, 0, &image) == 0);
+    execfn_ptr = host_find_auxv_value(sp, AT_EXECFN);
+    assert(execfn_ptr != 0);
+    host_user_read_cstr(execfn_ptr, execfn, sizeof(execfn));
+    assert(strcmp(execfn, "busybox") == 0);
+
+    reset_host_mappings();
+    assert(exec_setup_stack((pmap_t)0xDEADBEEF, &sp, argv_b, 1, NULL, 0,
+                            0x08048000u, 0, &image) == 0);
+    execfn_ptr = host_find_auxv_value(sp, AT_EXECFN);
+    assert(execfn_ptr != 0);
+    host_user_read_cstr(execfn_ptr, execfn, sizeof(execfn));
+    assert(strcmp(execfn, "sh") == 0);
+}
+
+static void test_hot_cache_removes_repeat_metadata_reads(void) {
+    elf_image_info_t image;
+    fs_node_t file;
+    struct timespec cold_start, cold_end, hot_start, hot_end;
+    long cold_ns;
+    long hot_ns;
+
+    memset(&file, 0, sizeof(file));
+    file.flags = FS_FILE;
+    file.read = mock_read;
+    file.inode = 9012;
+    file.mp = (struct mount *)0x44440000;
+    file.length = 4096;
+    file.mtime = 12;
+    file.ctime = 34;
+
+    reset_elf_cache_state();
+
+    clock_gettime(CLOCK_MONOTONIC, &cold_start);
+    assert(elf_get_image_info(&file, &image) == 0);
+    clock_gettime(CLOCK_MONOTONIC, &cold_end);
+
+    assert(mock_header_reads == 1);
+    assert(mock_phdr_reads == 1);
+
+    clock_gettime(CLOCK_MONOTONIC, &hot_start);
+    for (int i = 0; i < 1000; i++) {
+        assert(elf_get_image_info(&file, &image) == 0);
+    }
+    clock_gettime(CLOCK_MONOTONIC, &hot_end);
+
+    assert(mock_header_reads == 1);
+    assert(mock_phdr_reads == 1);
+
+    cold_ns = (cold_end.tv_sec - cold_start.tv_sec) * 1000000000L +
+              (cold_end.tv_nsec - cold_start.tv_nsec);
+    hot_ns = (hot_end.tv_sec - hot_start.tv_sec) * 1000000000L +
+             (hot_end.tv_nsec - hot_start.tv_nsec);
+    assert(cold_ns >= 0);
+    assert(hot_ns >= 0);
+}
+
 int main() {
     printf("Running elf_execve TOCTOU test...\n");
     test_exec_reset_signals();
     test_elf_cache_uses_mount_inode_identity();
     test_elf_cache_invalidates_on_metadata_change();
+    test_hot_cache_preserves_personality_detection();
+    test_exec_setup_stack_uses_call_specific_execfn();
+    test_hot_cache_removes_repeat_metadata_reads();
 
 #if !defined(__i386__)
     printf("Skipping execve TOCTOU path on non-i386 host build; exec_reset_signals verified.\n");

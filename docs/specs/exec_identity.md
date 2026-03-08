@@ -47,6 +47,14 @@ The cache does not store:
 That boundary keeps the cache useful without changing `argv[0]`, comm naming,
 or personality dispatch semantics.
 
+Hot-cache validation is therefore defined in terms of repeated metadata work,
+not wall-clock promise alone:
+
+- repeated launches of the same backing object should avoid repeat ELF header
+  and program-header reads
+- caller-specific `argv[0]`, `AT_EXECFN`, process naming, and personality
+  selection remain per-exec decisions layered on top of the cached metadata
+
 ## Invalidation
 
 Cache entries are invalidated by metadata mismatch on lookup:

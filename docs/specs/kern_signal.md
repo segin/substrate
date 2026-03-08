@@ -11,6 +11,26 @@ personality is responsible for exposing Linux signal numbers, frame layouts,
 and sigreturn ABI entry points without redefining the native Substrate signal
 model.
 
+## Native ABI Contract
+
+The native Substrate ABI is the kernel's source-of-truth contract for signal
+semantics.
+
+That native contract currently means:
+
+- BSD-shaped default actions and job-control behavior
+- native signal-numbering and `sigprop[]` policy
+- native `si_code` meanings for synchronous faults
+- native handler-mask and stop/continue semantics in the process core
+
+Compatibility personalities do not replace that contract. They translate at
+the ABI edge:
+
+- Linux personality remaps signal numbers, sigsets, frame layouts, and
+  optional `sa_restorer` callbacks
+- FreeBSD personality may use its own user-visible frame ABI while still
+  relying on the native kernel stop/continue/exit policy
+
 The signal path is split into four phases:
 
 1. Generation
