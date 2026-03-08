@@ -347,11 +347,14 @@ static int vars_push(var_entry_t **vars, size_t *count, const char *name, cc_typ
     }
     *vars = next;
 
-    dup = (char *)malloc(strlen(name) + 1);
-    if (dup == NULL) {
-        return -1;
+    {
+        size_t len = strlen(name);
+        dup = (char *)malloc(len + 1);
+        if (dup == NULL) {
+            return -1;
+        }
+        snprintf(dup, len + 1, "%s", name);
     }
-    strcpy(dup, name);
     (*vars)[*count].name = dup;
     (*vars)[*count].type = type;
     (*vars)[*count].struct_id = struct_id;
@@ -715,16 +718,19 @@ static int vars_clone(var_entry_t **out, const var_entry_t *src, size_t count) {
         dst[i] = src[i];
         dst[i].name = NULL;
         if (src[i].name != NULL) {
-            dst[i].name = (char *)malloc(strlen(src[i].name) + 1);
-            if (dst[i].name == NULL) {
-                size_t j;
-                for (j = 0; j < i; ++j) {
-                    free(dst[j].name);
+            {
+                size_t len = strlen(src[i].name);
+                dst[i].name = (char *)malloc(len + 1);
+                if (dst[i].name == NULL) {
+                    size_t j;
+                    for (j = 0; j < i; ++j) {
+                        free(dst[j].name);
+                    }
+                    free(dst);
+                    return -1;
                 }
-                free(dst);
-                return -1;
+                snprintf(dst[i].name, len + 1, "%s", src[i].name);
             }
-            strcpy(dst[i].name, src[i].name);
         }
     }
     *out = dst;
@@ -763,11 +769,14 @@ static int name_list_push(name_list_t *l, const char *name) {
         return -1;
     }
     l->items = next;
-    dup = (char *)malloc(strlen(name) + 1);
-    if (dup == NULL) {
-        return -1;
+    {
+        size_t len = strlen(name);
+        dup = (char *)malloc(len + 1);
+        if (dup == NULL) {
+            return -1;
+        }
+        snprintf(dup, len + 1, "%s", name);
     }
-    strcpy(dup, name);
     l->items[l->count++] = dup;
     return 0;
 }
