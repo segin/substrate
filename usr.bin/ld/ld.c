@@ -3218,7 +3218,7 @@ static int run_cmd_first_line(char *const argv[], char *out, size_t out_sz) {
         }
 
         execvp(argv[0], argv);
-        exit(127);
+        _exit(127);
     }
 
     close(pipefd[1]);
@@ -3242,11 +3242,12 @@ static int run_cmd_first_line(char *const argv[], char *out, size_t out_sz) {
     close(pipefd[0]);
     while (waitpid(pid, &status, 0) == -1) {
         if (errno != EINTR) {
-            break;
+            out[0] = '\0';
+            return -1;
         }
     }
 
-    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         out[0] = '\0';
         return -1;
     }
@@ -3335,12 +3336,13 @@ static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
 
         char *args[] = {(char *)ctx->plugin_path, "--version", NULL};
         execv(ctx->plugin_path, args);
-        exit(127);
+        _exit(127);
     }
 
     while (waitpid(pid, &status, 0) == -1) {
         if (errno != EINTR) {
-            break;
+            fprintf(stderr, "ld: waitpid failed for plugin handshake\n");
+            return -1;
         }
     }
     rc = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
@@ -3354,7 +3356,8 @@ static int plugin_discover_and_handshake(ld_ctx_t *ctx) {
 }
 
 static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, char *out_path, size_t out_path_sz) {
-    char *argv[1024];
+    char *argv[3 + 32 + 1];
+    char *plugin_opt_args[32];
     size_t i, argc;
     int pipefd[2];
     pid_t pid;
@@ -3370,6 +3373,7 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
         return 0;
     }
 
+    memset(plugin_opt_args, 0, sizeof(plugin_opt_args));
     argc = 0;
     argv[argc++] = (char *)ctx->plugin_path;
     argv[argc++] = "--materialize";
@@ -3377,25 +3381,27 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
 
     for (i = 0; i < ctx->plugin_opt_count; ++i) {
         if (argc + 1 >= sizeof(argv) / sizeof(argv[0])) {
-            return -1;
+            goto fail;
         }
-        char opt_buf[256];
-        if (snprintf(opt_buf, sizeof(opt_buf), "--plugin-opt=%s", ctx->plugin_opts[i]) >= (int)sizeof(opt_buf)) {
-            return -1;
+        size_t len = strlen("--plugin-opt=") + strlen(ctx->plugin_opts[i]) + 1;
+        plugin_opt_args[i] = (char *)malloc(len);
+        if (plugin_opt_args[i] == NULL) {
+            goto fail;
         }
-        argv[argc++] = strdup(opt_buf);
+        snprintf(plugin_opt_args[i], len, "--plugin-opt=%s", ctx->plugin_opts[i]);
+        argv[argc++] = plugin_opt_args[i];
     }
     argv[argc] = NULL;
 
     if (pipe(pipefd) == -1) {
-        return -1;
+        goto fail;
     }
 
     pid = fork();
     if (pid == -1) {
         close(pipefd[0]);
         close(pipefd[1]);
-        return -1;
+        goto fail;
     }
 
     if (pid == 0) {
@@ -3414,7 +3420,7 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
         }
 
         execv(ctx->plugin_path, argv);
-        exit(127);
+        _exit(127);
     }
 
     close(pipefd[1]);
@@ -3436,21 +3442,28 @@ static int plugin_materialize_object(const ld_ctx_t *ctx, const char *in_path, c
     close(pipefd[0]);
     while (waitpid(pid, &status, 0) == -1) {
         if (errno != EINTR) {
-            break;
+            out_path[0] = '\0';
+            goto fail;
         }
     }
 
-    /* Free dynamically allocated strings for --plugin-opt */
-    for (i = 3; i < argc; ++i) {
-        free(argv[i]);
+    for (i = 0; i < ctx->plugin_opt_count; ++i) {
+        free(plugin_opt_args[i]);
     }
 
-    if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         out_path[0] = '\0';
-        return 0;
+        return -1;
     }
 
     return out_path[0] != '\0' ? 1 : 0;
+
+fail:
+    for (i = 0; i < ctx->plugin_opt_count; ++i) {
+        free(plugin_opt_args[i]);
+    }
+    out_path[0] = '\0';
+    return -1;
 }
 
 static void trim_trailing(char *s) {
