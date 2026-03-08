@@ -630,7 +630,7 @@
             - [ ] Statistics: track memory usage by `malloc_type` (subsystem). (REQ: REQ-01-0552)
         - [ ] **Testing:** (REQ: REQ-01-0051, REQ-01-0142, REQ-01-0315, REQ-01-0411, REQ-01-0503, REQ-01-0553, REQ-01-0618, REQ-01-0648, REQ-01-0683, REQ-01-0716, REQ-01-0841, REQ-01-0962)
             - [x] Unit: zone create/alloc/free/destroy lifecycle. (REQ: REQ-01-0554)
-            - [ ] Unit: per-CPU cache hit/miss paths. (REQ: REQ-01-0555)
+            - [x] Unit: per-CPU cache hit/miss paths. (REQ: REQ-01-0555)
             - [ ] Unit: slab allocation and free list integrity. (REQ: REQ-01-0556)
             - [x] Unit: ctor/dtor/init/fini callback ordering. (REQ: REQ-01-0557)
             - [ ] Unit: redzone corruption detection. (REQ: REQ-01-0558)

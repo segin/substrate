@@ -291,6 +291,36 @@ void test_uma_leak_tracking(void) {
     kprint("  PASS\n");
 }
 
+void test_uma_percpu_cache_paths(void) {
+    kprint("Test: per-CPU cache hit/miss paths\n");
+
+    uma_zone_t *zone = uma_zcreate("test-cache", 32, NULL, NULL, NULL, NULL, 0, 0);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    int cpu = smp_get_cpu_id();
+    uma_cache_t *cache = &zone->uz_cpu[cpu];
+    uint64_t alloc_hits_before = cache->uc_allocs;
+    uint64_t free_hits_before = cache->uc_frees;
+
+    void *obj1 = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj1 != NULL, "initial alloc succeeded");
+    TEST_ASSERT(cache->uc_allocs == alloc_hits_before,
+                "initial alloc should miss per-CPU cache");
+
+    uma_zfree(zone, obj1);
+    TEST_ASSERT(cache->uc_frees == free_hits_before + 1,
+                "free should populate per-CPU cache");
+
+    void *obj2 = uma_zalloc(zone, M_NOWAIT);
+    TEST_ASSERT(obj2 == obj1, "alloc reused cached object");
+    TEST_ASSERT(cache->uc_allocs == alloc_hits_before + 1,
+                "alloc should hit per-CPU cache");
+
+    uma_zfree(zone, obj2);
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
 /* Test slab growth */
 void test_uma_many_allocs(void) {
     kprint("Test: many allocations\n");
@@ -445,6 +475,7 @@ void run_uma_tests(void) {
     test_uma_ctor_dtor();
     test_uma_callback_ordering();
     test_uma_leak_tracking();
+    test_uma_percpu_cache_paths();
     test_uma_many_allocs();
     test_uma_limits();
     // test_uma_redzone(); // Causes panic, disabled for now
