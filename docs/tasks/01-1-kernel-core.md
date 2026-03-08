@@ -1060,7 +1060,7 @@
                 - [x] Current thread becomes reaper. (REQ: REQ-01-0896)
             - [ ] **Phase 4 — Resource Usage Finalization:** (REQ: REQ-01-0897)
                 - [x] `rusage_finalize(p)`: accumulate thread times. (REQ: REQ-01-0898)
-                - [ ] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`. (REQ: REQ-01-0899)
+                - [x] Record `ru_utime`, `ru_stime`, `ru_maxrss`, `ru_minflt`, `ru_majflt`, `ru_nvcsw`, `ru_nivcsw`. (REQ: REQ-01-0899)
             - [ ] **Phase 5 — Orphan Reparenting:** (REQ: REQ-01-0900)
                 - [x] `proc_reparent_children(p)`: move children to init. (REQ: REQ-01-0901)
                 - [x] Acquire `proctree_lock`. (REQ: REQ-01-0902)
