@@ -14,6 +14,8 @@
 #include <sys/wait.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/wait.h>
+#include <fcntl.h>
 
 #define LD_MAX_SCRIPT_INCLUDE_DEPTH 64
 #define LD_MAX_TRACKED_SYMBOLS 262144U
