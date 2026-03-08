@@ -167,5 +167,8 @@ vm_page_policy_t vm_page_get_policy(void);
 void vm_page_record_pagein(uint32_t count);
 int vm_page_estimate_working_set(void);   // Estimate working set size
 int vm_page_should_pageout(void);          // Hint for swapper/pageout daemon
+void vm_page_set_daemon_suspended(int suspended);
+struct process *vm_page_select_oom_victim(void);
+int vm_page_oom_kill(void);
 
 #endif

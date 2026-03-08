@@ -4,10 +4,12 @@
 
 #include <stdint.h>
 #include <string.h>
+#include <sys/types.h>
 #include <arch/i386/pmap.h>
 #include <vm/vm_page.h>
 #include <vm/vm_object.h>
 #include <vm/vm_pager.h>
+#include <vfs/vfs.h>
 #include <exec/perso/personality.h>
 #include <sys/proc.h>
 #include <kern/console.h>
@@ -30,6 +32,20 @@ static int tests_failed = 0;
 // Helper to manually set up page state
 extern void vm_page_activate(vm_page_t *m);
 extern void vm_page_deactivate(vm_page_t *m);
+
+static uint8_t fake_pager_store[4096];
+
+static size_t fake_policy_read(fs_node_t *node, off_t offset, size_t size, uint8_t *buffer) {
+    uint8_t *store = (uint8_t *)(uintptr_t)node->impl;
+    memcpy(buffer, store + offset, size);
+    return size;
+}
+
+static size_t fake_policy_write(fs_node_t *node, off_t offset, size_t size, const uint8_t *buffer) {
+    uint8_t *store = (uint8_t *)(uintptr_t)node->impl;
+    memcpy(store + offset, buffer, size);
+    return size;
+}
 
 static void free_phys_page_list(vm_page_t *list) {
     while (list) {
@@ -88,10 +104,16 @@ void test_vm_policy_lru(void) {
 
 void test_vm_policy_writeback(void) {
     kprint("Test: vm_policy_writeback\n");
-    
-    // Create swap-backed object
-    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_SWAP, 0x1000);
+    fs_node_t fake_file = {0};
+    vm_object_t *obj = vm_object_allocate(VM_OBJ_TYPE_VNODE, 0x1000);
     vm_page_t *p1 = vm_page_alloc(obj, 0, 0);
+
+    fake_file.impl = (uintptr_t)fake_pager_store;
+    fake_file.read = fake_policy_read;
+    fake_file.write = fake_policy_write;
+    memset(fake_pager_store, 0, sizeof(fake_pager_store));
+    obj->pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, &fake_file, 0x1000, VM_PROT_READ | VM_PROT_WRITE, 0);
+    TEST_ASSERT(obj->pager != NULL, "writeback pager allocated");
     
     // Mark dirty and inactive (candidate for laundering)
     p1->flags |= PG_DIRTY;
@@ -122,6 +144,7 @@ void test_vm_pageout_prefers_inactive_then_active(void) {
     kprint("Test: vm_pageout_prefers_inactive_then_active\n");
 
     vm_page_get_thresholds(&thresholds);
+    vm_page_set_daemon_suspended(1);
 
     active = vm_page_alloc(NULL, 0, 0);
     inactive = vm_page_alloc(NULL, 0, 0);
@@ -148,6 +171,7 @@ void test_vm_pageout_prefers_inactive_then_active(void) {
 
     vm_page_free(active);
     free_phys_page_list(pressure);
+    vm_page_set_daemon_suspended(0);
     TEST_ASSERT(vm_phys_get_free() >= thresholds.free_target,
                 "inactive_first: cleanup leaked free pages");
 
@@ -158,18 +182,28 @@ void test_vm_pageout_launders_before_scanning_active(void) {
     vm_page_thresholds_t thresholds;
     vm_page_t *pressure = NULL;
     vm_page_t *active;
+    fs_node_t fake_file = {0};
     vm_object_t *obj;
     vm_page_t *dirty;
 
     kprint("Test: vm_pageout_launders_before_scanning_active\n");
 
     vm_page_get_thresholds(&thresholds);
+    vm_page_set_daemon_suspended(1);
 
     active = vm_page_alloc(NULL, 0, 0);
-    obj = vm_object_allocate(VM_OBJ_TYPE_SWAP, 0x1000);
+    obj = vm_object_allocate(VM_OBJ_TYPE_VNODE, 0x1000);
     dirty = vm_page_alloc(obj, 0, 0);
     TEST_ASSERT(active != NULL && obj != NULL && dirty != NULL,
                 "laundry_first: alloc failed");
+
+    fake_file.impl = (uintptr_t)fake_pager_store;
+    fake_file.read = fake_policy_read;
+    fake_file.write = fake_policy_write;
+    memset(fake_pager_store, 0, sizeof(fake_pager_store));
+    obj->pager = vm_pager_allocate(VM_OBJ_TYPE_VNODE, &fake_file, 0x1000,
+                                   VM_PROT_READ | VM_PROT_WRITE, 0);
+    TEST_ASSERT(obj->pager != NULL, "laundry_first: pager alloc failed");
 
     active->flags &= ~PG_BUSY;
     dirty->flags &= ~PG_BUSY;
@@ -196,6 +230,7 @@ void test_vm_pageout_launders_before_scanning_active(void) {
     vm_page_free(active);
     vm_object_deallocate(obj);
     free_phys_page_list(pressure);
+    vm_page_set_daemon_suspended(0);
     TEST_ASSERT(vm_phys_get_free() >= thresholds.free_target,
                 "laundry_first: cleanup leaked free pages");
 
@@ -220,6 +255,7 @@ void test_vm_pageout_oom_kills_largest_user_process(void) {
     kprint("Test: vm_pageout_oom_kills_largest_user_process\n");
 
     vm_page_get_thresholds(&thresholds);
+    vm_page_set_daemon_suspended(1);
 
     small = proc_create(PERS_NATIVE);
     large = proc_create(PERS_NATIVE);
@@ -277,7 +313,10 @@ void test_vm_pageout_oom_kills_largest_user_process(void) {
         pressure = page;
     }
 
-    vm_pageout();
+    TEST_ASSERT(vm_page_select_oom_victim() == large,
+                "oom_kill: victim selection mismatch");
+    TEST_ASSERT(vm_page_oom_kill() == 1,
+                "oom_kill: no victim signalled");
 
     TEST_ASSERT(large_thread->sig_pending & sigmask(SIGKILL),
                 "oom_kill: largest user process not selected");
@@ -297,6 +336,7 @@ void test_vm_pageout_oom_kills_largest_user_process(void) {
     large->pid = -1;
     kproc->pid = -1;
     free_phys_page_list(pressure);
+    vm_page_set_daemon_suspended(0);
 
     kprint("  PASS\n");
 }

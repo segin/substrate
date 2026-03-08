@@ -38,6 +38,7 @@ static uint32_t vm_stat_reactivations = 0;
 // Wakeup flag for daemon
 static volatile int vm_pages_needed = 0;
 static vm_page_policy_t vm_page_policy = VM_PAGE_POLICY_CLOCK;
+static int vm_page_daemon_suspended = 0;
 
 void vm_page_init(void) {
 	// Initialize queues
@@ -45,15 +46,6 @@ void vm_page_init(void) {
 	inactive_queue = NULL;
 	wired_queue = NULL;
 	laundry_queue = NULL;
-}
-
-static uint32_t count_queue(vm_page_t *head) {
-	uint32_t count = 0;
-	while (head) {
-		count++;
-		head = head->next;
-	}
-	return count;
 }
 
 static int queue_has_cycle(vm_page_t *head) {
@@ -127,7 +119,7 @@ static uint32_t vm_page_oom_score(process_t *proc) {
 	return score;
 }
 
-static process_t *vm_page_select_oom_victim(void) {
+process_t *vm_page_select_oom_victim(void) {
 	process_t *victim = NULL;
 	uint32_t best_score = 0;
 
@@ -159,7 +151,7 @@ static process_t *vm_page_select_oom_victim(void) {
 	return victim;
 }
 
-static int vm_page_oom_kill(void) {
+int vm_page_oom_kill(void) {
 	process_t *victim = vm_page_select_oom_victim();
 	uint32_t score;
 
@@ -270,6 +262,10 @@ static void vm_pagedaemon(void *arg) {
 	for (;;) {
 		uint64_t deadline = get_ticks() + get_hz();
 		sched_sleep_until((void *)&vm_pages_needed, deadline);
+		if (vm_page_daemon_suspended) {
+			sched_yield();
+			continue;
+		}
 		if (vm_page_policy == VM_PAGE_POLICY_LRU_APPROX) {
 			vm_page_age_scan();
 		}
@@ -759,7 +755,6 @@ void vm_page_launder(vm_page_t *m) {
 // Called periodically or when vm_pages_needed is set
 void vm_pageout(void) {
 	size_t free_count = vm_phys_get_free();
-	uint32_t inactive_count = count_queue(inactive_queue);
 
 	// Check if we need to free pages
 	if(free_count >= (size_t)vm_page_free_target && !vm_pages_needed) {
@@ -782,11 +777,8 @@ void vm_pageout(void) {
 	}
 
 	// Phase 3: if we still need headroom, age active pages into inactive.
-	if(freed < target || inactive_count < (uint32_t)vm_page_inactive_target) {
+	if(freed < target) {
 		int scan_target = (target - freed) * 2;
-		if (inactive_count < (uint32_t)vm_page_inactive_target) {
-			scan_target += (int)(vm_page_inactive_target - inactive_count);
-		}
 		if (scan_target < 1) scan_target = 1;
 		vm_pageout_scan(scan_target);
 	}
@@ -814,11 +806,21 @@ void vm_pageout(void) {
 
 // Signal that pages are needed
 void vm_page_wakeup_daemon(void) {
+	if (vm_page_daemon_suspended) {
+		return;
+	}
 	vm_pages_needed = 1;
 	if (vm_pagedaemon_started) {
 		sched_wakeup((void *)&vm_pages_needed);
 	} else {
 		swapper_request_work();
+	}
+}
+
+void vm_page_set_daemon_suspended(int suspended) {
+	vm_page_daemon_suspended = suspended ? 1 : 0;
+	if (vm_page_daemon_suspended) {
+		vm_pages_needed = 0;
 	}
 }
 
