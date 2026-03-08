@@ -321,6 +321,51 @@ void test_uma_percpu_cache_paths(void) {
     kprint("  PASS\n");
 }
 
+void test_uma_slab_freelist_integrity(void) {
+    kprint("Test: slab allocation and free list integrity\n");
+
+    uma_zone_t *zone = uma_zcreate("test-slab", 32, NULL, NULL, NULL, NULL, 0,
+                                   UMA_ZONE_NOBUCKET | UMA_ZONE_NOFREE);
+    TEST_ASSERT(zone != NULL, "zone created");
+
+    uint32_t ipers = zone->uz_ipers;
+    void *objs[128];
+    TEST_ASSERT(ipers > 0 && ipers <= 128, "reasonable items per slab");
+
+    for (uint32_t i = 0; i < ipers; i++) {
+        objs[i] = uma_zalloc(zone, M_NOWAIT);
+        TEST_ASSERT(objs[i] != NULL, "slab alloc succeeded");
+        for (uint32_t j = 0; j < i; j++) {
+            TEST_ASSERT(objs[i] != objs[j], "slab alloc returned duplicate object");
+        }
+    }
+
+    TEST_ASSERT(zone->uz_full_slabs != NULL, "slab moved to full list");
+
+    for (uint32_t i = 0; i < ipers; i++) {
+        uma_zfree(zone, objs[i]);
+    }
+
+    TEST_ASSERT(zone->uz_free_slabs != NULL, "slab moved to free list");
+    TEST_ASSERT(zone->uz_free_slabs->us_freecount == ipers,
+                "free slab reports all items available");
+
+    uint8_t seen[128] = {0};
+    uint32_t idx = zone->uz_free_slabs->us_firstfree;
+    uint32_t count = 0;
+    while (idx != 0xFF) {
+        TEST_ASSERT(idx < ipers, "freelist index in range");
+        TEST_ASSERT(seen[idx] == 0, "freelist index unique");
+        seen[idx] = 1;
+        idx = zone->uz_free_slabs->us_freelist[idx];
+        count++;
+    }
+    TEST_ASSERT(count == ipers, "freelist covers every object");
+
+    uma_zdestroy(zone);
+    kprint("  PASS\n");
+}
+
 /* Test slab growth */
 void test_uma_many_allocs(void) {
     kprint("Test: many allocations\n");
@@ -476,6 +521,7 @@ void run_uma_tests(void) {
     test_uma_callback_ordering();
     test_uma_leak_tracking();
     test_uma_percpu_cache_paths();
+    test_uma_slab_freelist_integrity();
     test_uma_many_allocs();
     test_uma_limits();
     // test_uma_redzone(); // Causes panic, disabled for now
